@@ -1,0 +1,109 @@
+use anyhow::{Context, Result};
+use libsql::Connection;
+
+const SCHEMA_VERSION: i64 = 1;
+
+const PRAGMAS: &[&str] = &[
+    "PRAGMA journal_mode=WAL",
+    "PRAGMA synchronous=NORMAL",
+    "PRAGMA busy_timeout=5000",
+    "PRAGMA foreign_keys=ON",
+    "PRAGMA cache_size=-65536",
+];
+
+const CREATE_SCHEMA_VERSION: &str = "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)";
+const CREATE_SESSIONS: &str = "\
+CREATE TABLE IF NOT EXISTS sessions (
+  id           TEXT PRIMARY KEY,
+  title        TEXT,
+  agent        TEXT,
+  model        TEXT,
+  workdir_hash TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  summary      TEXT,
+  summary_seq  INTEGER
+)";
+const CREATE_MESSAGES: &str = "\
+CREATE TABLE IF NOT EXISTS messages (
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  id          TEXT NOT NULL,
+  session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  role        TEXT NOT NULL,
+  agent       TEXT,
+  model       TEXT,
+  blocks_json TEXT NOT NULL,
+  usage_json  TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  synthetic   INTEGER NOT NULL DEFAULT 0,
+  mode        TEXT,
+  summary     INTEGER NOT NULL DEFAULT 0
+)";
+const CREATE_INPUTS: &str = "\
+CREATE TABLE IF NOT EXISTS session_inputs (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           TEXT NOT NULL,
+  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  delivery     TEXT NOT NULL,
+  prompt       TEXT NOT NULL,
+  admitted_seq INTEGER NOT NULL,
+  promoted_seq INTEGER
+)";
+const CREATE_EVENTS: &str = "\
+CREATE TABLE IF NOT EXISTS session_events (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  type         TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  ts           INTEGER NOT NULL
+)";
+const CREATE_INDEX_MSG: &str = "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)";
+const CREATE_INDEX_IN: &str = "CREATE INDEX IF NOT EXISTS idx_inputs_pending ON session_inputs(session_id, promoted_seq, delivery, admitted_seq)";
+const CREATE_INDEX_EV: &str = "CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id, seq)";
+
+/// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
+///
+/// Uses `query` (not `execute`) because some pragmas (e.g. `journal_mode=WAL`)
+/// return a row, which libsql's `execute` treats as an error. Draining the
+/// rows works for both row-returning and empty pragmas.
+pub async fn apply_connection_pragmas(conn: &Connection) -> Result<()> {
+    for p in PRAGMAS {
+        let stmt = conn.prepare(p).await.with_context(|| format!("prepare pragma: {p}"))?;
+        let mut rows = stmt.query(()).await.with_context(|| format!("pragma: {p}"))?;
+        while rows.next().await?.is_some() {
+            // drain
+        }
+    }
+    Ok(())
+}
+
+/// Create all tables if absent and record schema version. Idempotent.
+pub async fn bootstrap(conn: &Connection) -> Result<()> {
+    conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
+    conn.execute(CREATE_SESSIONS, ()).await?;
+    conn.execute(CREATE_MESSAGES, ()).await?;
+    conn.execute(CREATE_INPUTS, ()).await?;
+    conn.execute(CREATE_EVENTS, ()).await?;
+    conn.execute(CREATE_INDEX_MSG, ()).await?;
+    conn.execute(CREATE_INDEX_IN, ()).await?;
+    conn.execute(CREATE_INDEX_EV, ()).await?;
+    set_version(conn, SCHEMA_VERSION).await?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
+    let stmt = conn.prepare("SELECT version FROM schema_version LIMIT 1").await?;
+    let mut rows = stmt.query(()).await?;
+    if let Some(row) = rows.next().await? {
+        Ok(Some(row.get::<i64>(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+async fn set_version(conn: &Connection, version: i64) -> Result<()> {
+    conn.execute("DELETE FROM schema_version", ()).await?;
+    conn.execute("INSERT INTO schema_version(version) VALUES (?1)", libsql::params![version]).await?;
+    Ok(())
+}

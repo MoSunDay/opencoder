@@ -1,0 +1,152 @@
+//! P1 functional tests for compaction + model selection behavior.
+//! All driven by MockChatClient — zero network, fully deterministic.
+
+use std::sync::Arc;
+
+use opencode_core::{resolve_agent, Config, Message};
+use opencode_llm::{CompletedToolCall, ChatStream, LlmEvent, MockChatClient, Usage};
+use opencode_session::{compaction::should_compact, run, SessionState};
+
+fn client_with_default_done(text: &str) -> Arc<MockChatClient> {
+    Arc::new(MockChatClient::new().with_default(vec![done_event(text)]))
+}
+
+fn done_event(text: &str) -> LlmEvent {
+    LlmEvent::Completed {
+        text: text.to_string(),
+        tool_calls: Vec::<CompletedToolCall>::new(),
+        usage: Some(Usage { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),
+    }
+}
+
+fn base_config() -> Config {
+    Config { model: "main/glm-5.2".into(), ..Config::default() }
+}
+
+async fn session_with(
+    config: Config,
+    client: Arc<dyn ChatStream>,
+) -> (tempfile::TempDir, SessionState) {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let s = SessionState::new(
+        "test-session",
+        agent,
+        config,
+        client,
+        dir.path().to_path_buf(),
+    );
+    (dir, s)
+}
+
+fn big_user_message(id: &str, chars: usize) -> Message {
+    let text: String = "a".repeat(chars);
+    Message::user(id, text)
+}
+
+#[tokio::test]
+async fn compaction_triggers_by_token_estimate_without_any_reported_usage() {
+    // Small window so a single large message trips the estimate-based trigger
+    // on round 1, even though last_usage is zero (no provider call yet).
+    let mut config = base_config();
+    config.context_limit = Some(2_000);
+    config.compaction.reserved = 200;
+    config.compaction.context_threshold = 10_000; // larger than usable, so usable binds
+    let (_dir, mut s) = session_with(config, client_with_default_done("ok")).await;
+    // 8000 chars ≈ 2000 tokens + overhead → exceeds usable(1800)
+    s.messages.push(big_user_message("u1", 8_000));
+
+    assert!(s.last_usage.total_tokens == 0, "precondition: no usage reported yet");
+    assert!(should_compact(&s), "estimate alone must trigger compaction");
+}
+
+#[tokio::test]
+async fn reserved_budget_actually_shrinks_usable_window() {
+    fn mk(reserved: u64) -> bool {
+        let mut config = base_config();
+        config.context_limit = Some(2_000);
+        config.compaction.context_threshold = 10_000; // usable binds
+        config.compaction.reserved = reserved;
+        // build synchronously: should_compact is sync
+        let dir = tempfile::tempdir().unwrap();
+        let agent = resolve_agent("act").unwrap();
+        let client: Arc<dyn ChatStream> = client_with_default_done("ok");
+        let mut s = SessionState::new("x", agent, config, client, dir.path().to_path_buf());
+        // ~1400 estimated tokens
+        s.messages.push(big_user_message("u1", 5_500));
+        should_compact(&s)
+    }
+    // reserved=200 → usable=1800 → 1400 < 1800 → no compact
+    assert!(!mk(200), "with small reserved, 1400 tokens should NOT trip");
+    // reserved=1100 → usable=900 → 1400 >= 900 → compact
+    assert!(mk(1_100), "with large reserved, 1400 tokens MUST trip");
+}
+
+#[tokio::test]
+async fn small_model_is_used_for_compaction_summary_call() {
+    let mut config = base_config();
+    config.small_model = Some("cheap/mini".into());
+    // Force compaction to fire & have room to summarize.
+    config.context_limit = Some(2_000);
+    config.compaction.reserved = 100;
+    config.compaction.context_threshold = 10_000;
+    config.compaction.tail_turns = 1; // need >tail user msgs to actually split
+
+    let mock = Arc::new(
+        MockChatClient::new()
+            // first call = main turn (returns a tool-less done so the loop exits after),
+            // but compaction runs BEFORE the turn. Provide a summary script first.
+            .push_script(vec![LlmEvent::Completed {
+                text: "SUMMARY".into(),
+                tool_calls: Vec::<CompletedToolCall>::new(),
+                usage: None,
+            }])
+            .push_script(vec![done_event("done")]),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir, mut s) = session_with(config, client).await;
+    s.messages.push(big_user_message("u1", 8_000));
+    s.messages.push(Message::user("u2", "keep me tail"));
+
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    let reqs = mock.requests();
+    assert!(!reqs.is_empty(), "at least the compaction call must happen");
+    assert_eq!(
+        reqs[0].model, "mini",
+        "compaction summarize must use small_model id, got {}", reqs[0].model
+    );
+}
+
+#[tokio::test]
+async fn model_switch_takes_effect_on_next_request_body() {
+    let mock = Arc::new(MockChatClient::new().with_default(vec![done_event("ok")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir, mut s) = session_with(base_config(), client).await;
+    assert_eq!(s.model, "glm-5.2");
+
+    // first turn with the initial model
+    run(&mut s, "first".into(), |_| {}).await.unwrap();
+
+    // switch the session model mid-session
+    s.model = "switched/claude".into();
+
+    // next turn must carry the new model in the request body
+    run(&mut s, "second".into(), |_| {}).await.unwrap();
+
+    let reqs = mock.requests();
+    assert!(reqs.len() >= 2, "need >=2 calls");
+    let last = reqs.last().unwrap();
+    assert_eq!(last.model, "switched/claude", "switched model must reach the provider");
+}
+
+#[tokio::test]
+async fn compaction_disabled_does_not_trigger() {
+    let mut config = base_config();
+    config.compaction.auto = false;
+    config.context_limit = Some(100);
+    config.compaction.reserved = 0;
+    let (_dir, mut s) = session_with(config, client_with_default_done("ok")).await;
+    s.messages.push(big_user_message("u1", 100_000));
+    assert!(!should_compact(&s), "auto=false disables compaction entirely");
+}

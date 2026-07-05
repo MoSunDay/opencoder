@@ -1,0 +1,129 @@
+pub mod compaction;
+pub mod prompt;
+pub mod resume;
+pub mod runner;
+pub mod tools;
+
+pub use resume::{resume, generate_title};
+pub use runner::{run, run_once, SessionEvent};
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Result;
+use opencode_core::{message::now_ms, Agent, Config, Message, Role};
+use opencode_llm::ChatStream;
+use opencode_store::{SessionMeta, Store};
+use tokio_util::sync::CancellationToken;
+
+pub struct SessionState {
+    pub id: String,
+    pub messages: Vec<Message>,
+    pub agent: Agent,
+    pub model: String,
+    pub working_dir: PathBuf,
+    pub config: Config,
+    pub client: Arc<dyn ChatStream>,
+    pub step: u32,
+    pub last_usage: opencode_llm::Usage,
+    /// Optional durable store. When set, `record` persists each new message.
+    pub store: Option<Arc<dyn Store>>,
+    /// Active skill instructions, injected into the system prompt each turn.
+    /// `None` means no skill is active. Set from the TUI `$` picker.
+    pub skill_prompt: Option<String>,
+    /// Number of messages already persisted to `store` (loaded on resume).
+    persisted_count: usize,
+    /// Whether the session row has been created in the store.
+    session_created: bool,
+    /// Optional cancellation token. The run loop checks it at each turn
+    /// boundary and stops cleanly when cancelled (web interrupt support).
+    pub cancel: Option<CancellationToken>,
+}
+
+impl SessionState {
+    pub fn new(
+        id: impl Into<String>,
+        agent: Agent,
+        config: Config,
+        client: Arc<dyn ChatStream>,
+        working_dir: PathBuf,
+    ) -> Self {
+        let model = config.model_id().to_string();
+        SessionState {
+            id: id.into(),
+            messages: Vec::new(),
+            agent,
+            model,
+            working_dir,
+            config,
+            client,
+            step: 0,
+            last_usage: opencode_llm::Usage::default(),
+            store: None,
+            skill_prompt: None,
+            persisted_count: 0,
+            session_created: false,
+            cancel: None,
+        }
+    }
+
+    /// Attach a durable store so subsequent `record` calls persist messages.
+    pub fn with_store(mut self, store: Arc<dyn Store>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// Attach a cancellation token so the run loop stops at the next turn boundary.
+    pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
+        self.cancel = Some(cancel);
+        self
+    }
+
+    /// Set the active skill instructions, injected into the system prompt.
+    pub fn with_skill(mut self, skill_prompt: String) -> Self {
+        self.skill_prompt = Some(skill_prompt);
+        self
+    }
+
+    /// Push a message to the in-memory transcript AND persist it if a store is
+    /// attached. Best-effort: persistence errors are logged, not fatal, so a
+    /// store hiccup never kills an agent run.
+    pub async fn record(&mut self, msg: Message) {
+        self.messages.push(msg.clone());
+        if let Err(e) = self.persist(&msg).await {
+            tracing::warn!(session_id = %self.id, error = %e, "persist message failed");
+        }
+    }
+
+    async fn persist(&mut self, msg: &Message) -> Result<()> {
+        let store = match self.store.clone() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+        if !self.session_created {
+            let now = now_ms();
+            let meta = SessionMeta {
+                id: self.id.clone(),
+                title: first_user_text(self.messages.as_slice()),
+                agent: Some(self.agent.name.clone()),
+                model: Some(self.config.model.clone()),
+                workdir_hash: None,
+                created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
+                updated_at: now,
+                summary: None,
+                summary_seq: None,
+            };
+            store.create_session(&meta).await?;
+            self.session_created = true;
+        }
+        store.append_message(&self.id, msg).await?;
+        self.persisted_count = self.messages.len();
+        Ok(())
+    }
+}
+
+fn first_user_text(msgs: &[Message]) -> Option<String> {
+    msgs.iter()
+        .find(|m| m.role == Role::User && !m.synthetic)
+        .map(|m| m.text().chars().take(80).collect())
+}

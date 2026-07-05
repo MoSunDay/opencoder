@@ -1,0 +1,71 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/llm",
+    "crates/store",
+    "crates/session",
+    "crates/tui",
+    "crates/web",
+    "crates/cli",
+]
+
+[package]
+name = "opencoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opencoder"
+path = "src/main.rs"
+
+[dependencies]
+opencode-cli.workspace = true
+opencode-tui.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["opencoder"]
+license = "MIT"
+
+[workspace.dependencies]
+opencode-core   = { path = "crates/core" }
+opencode-llm    = { path = "crates/llm" }
+opencode-store  = { path = "crates/store" }
+opencode-session = { path = "crates/session" }
+opencode-tui    = { path = "crates/tui" }
+opencode-web    = { path = "crates/web" }
+opencode-cli    = { path = "crates/cli" }
+
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+libsql = { version = "0.9.30", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+ulid = { version = "1", features = ["serde"] }
+dirs = "5"
+glob = "0.3"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

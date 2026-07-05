@@ -8,7 +8,7 @@ OpenCoder 是 opencode（TypeScript）的高性能 Rust 重实现。单二进制
 
 - [agents/store](agents/store/index.md) — 持久化抽象层。`Store` trait + libsql 实现（WAL，本地嵌入）。所有 session/message/input/event 持久化的唯一出口。未来可切其它 Rust SQLite 实现。
 - [agents/llm](agents/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` trait + `MockChatClient` + token 估算器。
-- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册、压缩、resume、title 生成、cancel。
+- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册、subagent 调度（explore/build + libsql 追踪）、plan 模式 bash 写拦截（bash_guard）、压缩、resume、title 生成、cancel。
 - [agents/core](agents/core/index.md) — 共享类型与 Config（模型/压缩/上下文窗口/small_model 全配置化）。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理（prompt admit + 事件流 + 运行时切换 + interrupt）。
 - agents/cli — clap 前端（run/tui/serve/config/models/session 子命令，--continue/--session/--fork/--small-model）。
@@ -16,9 +16,9 @@ OpenCoder 是 opencode（TypeScript）的高性能 Rust 重实现。单二进制
 
 ## 关键抽象
 
-- `Store` trait（`crates/store/src/store.rs`）：sessions/messages/session_inputs/session_events 的统一 CRUD 口子，是切换 SQLite 实现的唯一接缝。
+- `Store` trait（`crates/store/src/store.rs`）：sessions/messages/session_inputs/session_events/subagent_tasks 的统一 CRUD 口子，是切换 SQLite 实现的唯一接缝。
 - `ChatStream` trait（`crates/llm/src/stream.rs`）：`ChatClient`（真）与 `MockChatClient`（测试）共同实现，使 session 运行时可零 token 确定性测试。
-- drain 语义（`crates/session/src/runner.rs::run_loop`）：每个 turn 边界提升 steer 并重置 step；idle 时消费恰好一条 queue。
+- drain 语义（`crates/session/src/runner.rs::run_loop`）：每个 turn 边界提升 steer；idle 时消费恰好一条 queue。doom-loop 守卫（`DOOM_THRESHOLD=3`）打破连续空 turn 循环。
 
 业务能力见 [features/index.md](features/index.md)。
 

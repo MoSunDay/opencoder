@@ -3,7 +3,7 @@ Commit: (working-tree, pre-initial-commit)
 # store 模块
 
 ## 职责
-会话历史的唯一持久化层。封装 sessions / messages / session_inputs / session_events 四类数据的 CRUD，对外暴露 `Store` trait，对内提供 libsql（本地嵌入 + WAL）实现。
+会话历史的唯一持久化层。封装 sessions / messages / session_inputs / session_events / subagent_tasks 五类数据的 CRUD，对外暴露 `Store` trait，对内提供 libsql（本地嵌入 + WAL）实现。
 
 ## 边界与非目标
 - 不做任何 LLM / agent 逻辑（纯存储）。
@@ -13,8 +13,8 @@ Commit: (working-tree, pre-initial-commit)
 ## 关键抽象
 - `Store` trait（`src/store.rs`）：async_trait，dyn 兼容。这是「切换其它 Rust SQLite 实现」的唯一接缝——换后端只需新实现 trait，上层零改动。
 - `LibsqlStore`（`src/libsql_store/mod.rs`）：持有**单个** Connection（`db.connect()` 一次），每个 op clone。libsql 的 `:memory:` 每次 connect 返回独立空库，故必须缓存连接共享——这是正确性关键。
-- schema（`src/libsql_store/schema.rs`）：5 表 + 3 索引 + `schema_version`。bootstrap 幂等；`PRAGMA journal_mode=WAL` 等 per-connection 应用（注意该 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"）。
-- 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`/`EventKind`。
+- schema（`src/libsql_store/schema.rs`）：6 表 + 5 索引 + `schema_version`。bootstrap 幂等；`PRAGMA journal_mode=WAL` 等 per-connection 应用（注意该 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"）。`subagent_tasks` 表记录父子 agent 关系（task_id/parent/child session_id/prompt/result/status）。
+- 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`/`EventKind`/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。
 
 ## 主流程
 - 写消息：`append_message` / `append_messages`（事务，all-or-nothing）。

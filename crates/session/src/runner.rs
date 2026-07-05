@@ -2,17 +2,20 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use opencode_core::{message::now_ms, resolve_agent, ContentBlock, Message, MessageUsage, Role, ToolArc, ToolContext, ToolOutput};
+use opencode_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc, ToolContext, ToolOutput};
 use opencode_llm::tool_call::CompletedToolCall;
 use opencode_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
+use opencode_store::{EventKind, SessionEventRecord, SubagentStatus, SubagentTaskRecord};
 use serde_json::Value;
 
 use crate::compaction;
-use crate::prompt::{build_system, plan_to_act_note};
+use crate::prompt::build_system;
 use crate::tools::{registry as build_registry, schema_for};
 use crate::SessionState;
 
-#[derive(Debug, Clone)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
 pub enum SessionEvent {
     TextDelta(String),
     ReasoningDelta(String),
@@ -77,7 +80,6 @@ async fn run_loop(
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send),
 ) -> Result<()> {
-    let max_steps = session.agent.max_steps.max(1);
     let mut doom: VecDeque<String> = VecDeque::new();
 
     loop {
@@ -90,8 +92,7 @@ async fn run_loop(
             }
         }
         // Safe Provider-Turn Boundary: promote any steers admitted since the
-        // last turn. A steer is absorbed into history HERE and resets the
-        // agent's step allowance to 1 (fresh continuation budget).
+        // last turn. A steer is absorbed into history HERE.
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
             for p in &steer_prompts {
@@ -99,15 +100,9 @@ async fn run_loop(
                 m.synthetic = true;
                 session.record(m).await;
             }
-            session.step = 0; // incremented to 1 below → reset allowance
             on_event(SessionEvent::Status(format!("steer promoted ({} new input(s))", steer_prompts.len())));
         }
 
-        session.step += 1;
-        if session.step > max_steps {
-            on_event(SessionEvent::Status(format!("reached max steps ({max_steps}), stopping")));
-            break;
-        }
         if compaction::should_compact(session) {
             match compaction::compact(session, registry).await {
                 Ok(summary) => on_event(SessionEvent::Compaction(summary)),
@@ -148,8 +143,7 @@ async fn run_loop(
 
         if tool_calls.is_empty() {
             // Idle boundary: consume exactly ONE queued follow-up, if any. A
-            // queued input does NOT reset the step counter and only fires when
-            // the session would otherwise go idle.
+            // queued input only fires when the session would otherwise go idle.
             if let Some(q) = claim_one_queued(session).await {
                 let mut m = Message::user(new_id(), q);
                 m.synthetic = true;
@@ -171,7 +165,6 @@ async fn run_loop(
             created_at: now_ms(),
             synthetic: false,
         };
-        let mut switched_to_act = false;
         for tc in tool_calls {
             let sig = format!("{}:{}", tc.name, tc.input);
             doom.push_back(sig.clone());
@@ -197,9 +190,6 @@ async fn run_loop(
             if cancelled(session) {
                 break;
             }
-            if tc.name == "plan_exit" {
-                switched_to_act = true;
-            }
             tool_msg.blocks.push(ContentBlock::ToolResult {
                 tool_use_id: tc.id.clone(),
                 content: out.content,
@@ -207,16 +197,6 @@ async fn run_loop(
             });
         }
         session.record(tool_msg).await;
-
-        if switched_to_act {
-            if let Some(act) = resolve_agent("act") {
-                session.agent = act;
-                on_event(SessionEvent::AgentSwitch("act".into()));
-            }
-            let mut note = Message::user(new_id(), plan_to_act_note());
-            note.synthetic = true;
-            session.record(note).await;
-        }
     }
     Ok(())
 }
@@ -245,6 +225,7 @@ async fn run_one_llm_call(
         tool_choice: if allowed.is_empty() { None } else { Some("auto".into()) },
         temperature: None,
         max_tokens: session.config.max_tokens,
+        reasoning_effort: session.config.reasoning_effort.clone(),
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
@@ -282,6 +263,18 @@ async fn execute_call(
     if tc.name == "task" {
         return run_subagent(tc.input.clone(), tc.id.clone(), session, registry, on_event).await;
     }
+    // Plan-mode bash write guard: classify the command and block mutating
+    // operations, returning a descriptive error to the model so it can adapt.
+    if tc.name == "bash" && session.agent.kind == AgentKind::Plan {
+        let cmd = tc.input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        if let crate::bash_guard::BashVerdict::WriteBlocked(reason) = crate::bash_guard::classify(cmd) {
+            return ToolOutput::err(format!(
+                "Blocked in plan mode: this bash command modifies state ({reason}). \
+                 Plan mode is read-only. To make changes, switch to act mode \
+                 (Alt+Tab) or delegate to a 'build' subagent via the task tool."
+            ));
+        }
+    }
     let ctx = ToolContext {
         session_id: session.id.clone(),
         message_id: tc.id.clone(),
@@ -314,16 +307,25 @@ async fn run_subagent(
     if prompt.is_empty() {
         return ToolOutput::err("task requires a prompt");
     }
-    let kind = input.get("subagent_type").and_then(|v| v.as_str()).unwrap_or("subagent").to_string();
-    let agent = match resolve_agent(&kind).or_else(|| resolve_agent("subagent")) {
+    let kind = input.get("subagent_type").and_then(|v| v.as_str()).unwrap_or("explore").to_string();
+    let agent = match resolve_agent(&kind) {
         Some(a) => a,
-        None => return ToolOutput::err("no subagent available"),
+        None => {
+            return ToolOutput::err(format!(
+                "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only) or 'build' (full tools)."
+            ));
+        }
     };
+    let child_session_id = format!("sub-{}", new_id());
     let preview: String = prompt.chars().take(80).collect();
-    on_event(SessionEvent::SubagentStart { id: call_id.clone(), kind: kind.clone(), prompt: preview });
+    on_event(SessionEvent::SubagentStart {
+        id: call_id.clone(),
+        kind: kind.clone(),
+        prompt: preview,
+    });
 
     let mut child = SessionState::new(
-        format!("sub-{}", new_id()),
+        child_session_id.clone(),
         agent,
         parent.config.clone(),
         parent.client.clone(),
@@ -332,11 +334,55 @@ async fn run_subagent(
     // Propagate the parent's cancellation token so a double-Esc also stops a
     // running subagent at its next turn boundary.
     child.cancel = parent.cancel.clone();
-    // Forward child events to the parent sink so the UI can show subagent work.
-    // Tool calls are surfaced verbatim; text/reasoning are folded into the
-    // SubagentEnd summary to avoid flooding the parent transcript.
+
+    // Attach the parent's store so the child's messages persist to libsql
+    // under its own session id. Also record the parent-child relationship.
+    if let Some(store) = &parent.store {
+        child = child.with_store(store.clone());
+        // Seed the child session row so the FK on subagent_tasks resolves.
+        let _ = store
+            .create_session(&opencode_store::SessionMeta {
+                id: child_session_id.clone(),
+                title: Some(prompt.chars().take(60).collect()),
+                agent: Some(kind.clone()),
+                model: Some(parent.config.model_id().to_string()),
+                workdir_hash: None,
+                created_at: now_ms(),
+                updated_at: now_ms(),
+                summary: None,
+                summary_seq: None,
+            })
+            .await;
+        // Mark the child session as already created so persist() doesn't
+        // auto-create a duplicate row with conflicting metadata.
+        child = child.mark_session_created();
+        let parent_msg_id = parent
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant)
+            .map(|m| m.id.clone());
+        let rec = SubagentTaskRecord {
+            task_id: call_id.clone(),
+            parent_session_id: parent.id.clone(),
+            child_session_id: child_session_id.clone(),
+            parent_message_id: parent_msg_id,
+            agent: kind.clone(),
+            prompt: prompt.clone(),
+            result: None,
+            status: SubagentStatus::Running,
+            ok: None,
+            started_at: now_ms(),
+            completed_at: None,
+        };
+        let _ = store.create_subagent_task(&rec).await;
+    }
+
+    // Forward child events to the parent sink and persist them for replay.
     let mut child_chars = String::new();
     let mut child_tools: u32 = 0;
+    let child_store = parent.store.clone();
+    let child_id_for_cb = child_session_id.clone();
     let summary_chars = &mut child_chars;
     let tool_count = &mut child_tools;
     let res = Box::pin(run_with_registry(
@@ -344,6 +390,30 @@ async fn run_subagent(
         prompt.clone(),
         registry,
         |cev| {
+            // Persist child events to session_events for replay/JSONL export.
+            if let Some(ref store) = child_store {
+                let kind_str = match &cev {
+                    SessionEvent::TextDelta(_) => "text_delta",
+                    SessionEvent::ReasoningDelta(_) => "reasoning_delta",
+                    SessionEvent::ToolStart { .. } => "tool_start",
+                    SessionEvent::ToolEnd { .. } => "tool_end",
+                    SessionEvent::Done => "done",
+                    SessionEvent::Error(_) => "error",
+                    _ => "other",
+                };
+                let payload = serde_json::to_string(&cev).unwrap_or_default();
+                let rec = SessionEventRecord {
+                    session_id: child_id_for_cb.clone(),
+                    kind: event_kind_from_str(kind_str),
+                    payload: serde_json::Value::String(payload),
+                    ts: now_ms(),
+                    seq: None,
+                };
+                let store_clone = store.clone();
+                tokio::spawn(async move {
+                    let _ = store_clone.append_event(&rec).await;
+                });
+            }
             match cev {
                 SessionEvent::ToolStart { id, name, input } => {
                     *tool_count += 1;
@@ -374,6 +444,12 @@ async fn run_subagent(
         .find(|m| m.role == Role::Assistant)
         .map(|m| m.text())
         .unwrap_or_default();
+
+    // Record completion: prompt + result in libsql.
+    if let Some(store) = &parent.store {
+        let _ = store.complete_subagent_task(&call_id, &text, ok).await;
+    }
+
     let summary_preview: String = if child_chars.is_empty() {
         text.chars().take(120).collect()
     } else {
@@ -388,6 +464,18 @@ async fn run_subagent(
         ToolOutput::ok(text)
     } else {
         ToolOutput::err("subagent failed")
+    }
+}
+
+fn event_kind_from_str(s: &str) -> EventKind {
+    match s {
+        "text_delta" => EventKind::TextDelta,
+        "reasoning_delta" => EventKind::TextDelta,
+        "tool_start" => EventKind::ToolStart,
+        "tool_end" => EventKind::ToolEnd,
+        "done" => EventKind::Done,
+        "error" => EventKind::Error,
+        _ => EventKind::Step,
     }
 }
 

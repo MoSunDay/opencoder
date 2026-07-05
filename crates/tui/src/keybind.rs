@@ -1,16 +1,15 @@
 pub const HELP: &str = "\
 Keybindings:
-  Enter            submit prompt (or queue follow-up while running)
-  Shift/Alt+Enter  insert newline (multi-line input)
-  $                select skill (dropdown; loads ~/.opencode/skills)
-  /                task picker — switch/create/resume sessions
+  Shift+Tab        switch mode act <--> plan  (Alt+Tab / Ctrl+T fallback)
+  Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
+  Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
+  Shift+Enter      insert newline (multi-line input)
+  $                select skill (dropdown; fuzzy match)
+  /                slash command picker: /task (sessions), /model (config)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
   Ctrl+C / Ctrl+D  quit
-  Ctrl+T           switch agent plan <-> act (toggles by current mode)
   Ctrl+H           toggle this help
-  Ctrl+O           admit steer (redirect mid-run)
-  Ctrl+J           admit follow-up to queue
   Ctrl+N / Ctrl+P  next / previous history
   Up / Down        cursor vertical (multi-line) / history (single-line)
   Left / Right     move cursor

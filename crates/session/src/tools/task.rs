@@ -9,13 +9,13 @@ pub struct TaskTool;
 impl Tool for TaskTool {
     fn name(&self) -> &str { "task" }
     fn description(&self) -> &str {
-        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and read/write/bash tools, and returns a final summary. Use for exploration or focused sub-tasks. Specify subagent_type (e.g. \"subagent\")."
+        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), or \"build\" for implementation work (read/write/edit/bash/glob/grep/ls)."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
         props.insert("description".into(), json::prop_str("Short (3-5 word) description of the task."));
         props.insert("prompt".into(), json::prop_str("Full instructions for the subagent."));
-        props.insert("subagent_type".into(), json::prop_str("Agent type to use (default \"subagent\")."));
+        props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only) or \"build\" (full tools). Defaults to \"explore\"."));
         json::object_schema(Value::Object(props), &["description", "prompt"])
     }
 

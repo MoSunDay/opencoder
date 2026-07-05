@@ -47,7 +47,6 @@ pub async fn resume(
         working_dir,
         config,
         client,
-        step: 0,
         last_usage: opencode_llm::Usage::default(),
         store: Some(store),
         skill_prompt: None,
@@ -81,6 +80,7 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
         tool_choice: None,
         temperature: Some(0.3),
         max_tokens: Some(64),
+        reasoning_effort: None,
     };
     let mut rx = session.client.chat_stream(req).context("title llm call")?;
     let mut text = String::new();

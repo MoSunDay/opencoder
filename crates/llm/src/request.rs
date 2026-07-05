@@ -10,6 +10,10 @@ pub struct ChatRequest {
     pub tool_choice: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
+    /// OpenAI-style reasoning effort (`low|medium|high`). Forwarded verbatim
+    /// as a top-level `reasoning_effort` field on the request body. `None`
+    /// omits the field so providers that don't support it stay unaffected.
+    pub reasoning_effort: Option<String>,
 }
 
 impl ChatRequest {
@@ -31,6 +35,12 @@ impl ChatRequest {
         }
         if let Some(m) = self.max_tokens {
             body["max_tokens"] = json!(m);
+        }
+        if let Some(e) = &self.reasoning_effort {
+            let trimmed = e.trim();
+            if !trimmed.is_empty() {
+                body["reasoning_effort"] = json!(trimmed);
+            }
         }
         body
     }

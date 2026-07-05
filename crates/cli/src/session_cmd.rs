@@ -28,20 +28,34 @@ pub async fn models_dispatch(cli: &Cli) -> Result<()> {
     let workdir = current_workdir(cli)?;
     let mut cfg = Config::load(&workdir)?;
     apply_cli_overrides(cli, &mut cfg);
-
-    println!("primary      : {}  (provider: {}, id: {})", cfg.model, cfg.provider_id(), cfg.model_id());
-    match &cfg.small_model {
-        Some(m) => println!("small_model  : {m}"),
-        None => println!("small_model  : <unset, falls back to primary>"),
-    }
-    println!("context_limit: {}", cfg.context_limit());
-    println!("compaction   : auto={} threshold={} reserved={} tail_turns={} prune={}",
-             cfg.compaction.auto,
-             cfg.compaction.context_threshold,
-             cfg.compaction.reserved,
-             cfg.compaction.tail_turns,
-             cfg.compaction.prune);
+    print!("{}", models_summary(&cfg));
     Ok(())
+}
+
+/// Render the `opencode models` summary as a string. Extracted from
+/// `models_dispatch` so the reasoning_effort display path is unit-testable
+/// without spawning the binary or a live model.
+pub(crate) fn models_summary(cfg: &Config) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("primary      : {}  (provider: {}, id: {})\n", cfg.model, cfg.provider_id(), cfg.model_id()));
+    match &cfg.small_model {
+        Some(m) => s.push_str(&format!("small_model  : {m}\n")),
+        None => s.push_str("small_model  : <unset, falls back to primary>\n"),
+    }
+    match &cfg.reasoning_effort {
+        Some(e) => s.push_str(&format!("thinking     : {e}  (reasoning_effort)\n")),
+        None => s.push_str("thinking     : <unset, provider default>\n"),
+    }
+    s.push_str(&format!("context_limit: {}\n", cfg.context_limit()));
+    s.push_str(&format!(
+        "compaction   : auto={} threshold={} reserved={} tail_turns={} prune={}\n",
+        cfg.compaction.auto,
+        cfg.compaction.context_threshold,
+        cfg.compaction.reserved,
+        cfg.compaction.tail_turns,
+        cfg.compaction.prune,
+    ));
+    s
 }
 
 pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
@@ -105,4 +119,30 @@ fn data_dir_for(workdir: &PathBuf) -> PathBuf {
     base.push("opencode");
     base.push(format!("{digest:x}"));
     base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::models_summary;
+    use opencode_core::Config;
+
+    #[test]
+    fn models_summary_shows_reasoning_effort_when_set() {
+        let cfg = Config { reasoning_effort: Some("medium".into()), ..Default::default() };
+        let s = models_summary(&cfg);
+        assert!(
+            s.contains("thinking     : medium  (reasoning_effort)"),
+            "reasoning_effort line must appear, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn models_summary_shows_unset_when_absent() {
+        let cfg = Config::default();
+        let s = models_summary(&cfg);
+        assert!(
+            s.contains("thinking     : <unset, provider default>"),
+            "absent reasoning_effort must render unset marker, got:\n{s}"
+        );
+    }
 }

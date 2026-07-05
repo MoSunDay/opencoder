@@ -1,11 +1,14 @@
 pub mod app;
 pub mod chat;
+pub mod command;
 pub mod composer;
 pub mod fmt;
 pub mod keybind;
 pub mod markdown;
 pub mod menu;
+pub mod model_menu;
 pub mod render;
+pub mod session_ui;
 pub mod task;
 
 use std::path::PathBuf;

@@ -1,3 +1,4 @@
+pub mod bash_guard;
 pub mod compaction;
 pub mod prompt;
 pub mod resume;
@@ -24,7 +25,6 @@ pub struct SessionState {
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
-    pub step: u32,
     pub last_usage: opencode_llm::Usage,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
@@ -57,7 +57,6 @@ impl SessionState {
             working_dir,
             config,
             client,
-            step: 0,
             last_usage: opencode_llm::Usage::default(),
             store: None,
             skill_prompt: None,
@@ -73,6 +72,14 @@ impl SessionState {
         self
     }
 
+    /// Mark that the session row already exists in the store (e.g. created
+    /// externally before the run loop starts). Prevents `persist()` from
+    /// auto-creating a duplicate row with conflicting metadata.
+    pub fn mark_session_created(mut self) -> Self {
+        self.session_created = true;
+        self
+    }
+
     /// Attach a cancellation token so the run loop stops at the next turn boundary.
     pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
         self.cancel = Some(cancel);
@@ -83,6 +90,16 @@ impl SessionState {
     pub fn with_skill(mut self, skill_prompt: String) -> Self {
         self.skill_prompt = Some(skill_prompt);
         self
+    }
+
+    /// Apply a hot-reloaded config: swap the client, model, and config in
+    /// place. The caller builds `new_client` (e.g. from the new base_url/key)
+    /// so this module stays decoupled from the concrete `ChatClient`. Used by
+    /// the TUI `/model` menu via `UiCmd::ReloadConfig` at the turn boundary.
+    pub fn apply_config_reload(&mut self, new_cfg: Config, new_client: Arc<dyn ChatStream>) {
+        self.client = new_client;
+        self.model = new_cfg.model_id().to_string();
+        self.config = new_cfg;
     }
 
     /// Push a message to the in-memory transcript AND persist it if a store is

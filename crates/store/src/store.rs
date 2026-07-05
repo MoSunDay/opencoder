@@ -5,7 +5,7 @@ use opencode_core::Message;
 
 use crate::types::{
     ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch,
+    SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -42,6 +42,15 @@ pub trait Store: Send + Sync {
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64>;
     async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>>;
+
+    /// Record a new subagent task (parent-child agent relationship) when a
+    /// subagent is spawned. The task starts in `Running` status.
+    async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()>;
+    /// Mark a subagent task as completed with its final result text and
+    /// success/failure flag.
+    async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()>;
+    /// List all subagent tasks for a given parent session.
+    async fn list_subagent_tasks(&self, parent_session_id: &str) -> Result<Vec<SubagentTaskRecord>>;
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         let seqs = self.append_messages(session_id, msgs).await?;

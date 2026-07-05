@@ -10,6 +10,7 @@ fn req_with(model: &str) -> ChatRequest {
         tool_choice: None,
         temperature: None,
         max_tokens: None,
+        reasoning_effort: None,
     }
 }
 

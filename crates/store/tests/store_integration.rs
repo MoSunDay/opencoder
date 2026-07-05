@@ -448,3 +448,97 @@ async fn delivery_parse_and_as_str_roundtrip() {
     assert_eq!(Delivery::parse("STEER"), Some(Delivery::Steer));
     assert_eq!(Delivery::parse("Queue"), Some(Delivery::Queue));
 }
+
+#[tokio::test]
+async fn subagent_task_crud_roundtrip() {
+    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+
+    let (_dir, store) = fresh().await;
+    // Seed session rows so the FK constraints on parent/child resolve.
+    make_session(&store, "parent-sess", 0).await;
+    make_session(&store, "sub-sess-001", 0).await;
+
+    let rec = SubagentTaskRecord {
+        task_id: "task-001".into(),
+        parent_session_id: "parent-sess".into(),
+        child_session_id: "sub-sess-001".into(),
+        parent_message_id: Some("msg-42".into()),
+        agent: "explore".into(),
+        prompt: "find all TODO comments".into(),
+        result: None,
+        status: SubagentStatus::Running,
+        ok: None,
+        started_at: 1000,
+        completed_at: None,
+    };
+    store.create_subagent_task(&rec).await.unwrap();
+
+    // List as Running.
+    let rows = store.list_subagent_tasks("parent-sess").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].task_id, "task-001");
+    assert_eq!(rows[0].child_session_id, "sub-sess-001");
+    assert_eq!(rows[0].agent, "explore");
+    assert!(matches!(rows[0].status, SubagentStatus::Running));
+    assert!(rows[0].result.is_none());
+    assert!(rows[0].ok.is_none());
+
+    // Complete it.
+    store
+        .complete_subagent_task("task-001", "found 5 TODOs", true)
+        .await
+        .unwrap();
+
+    // List again — must reflect completion.
+    let rows = store.list_subagent_tasks("parent-sess").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(rows[0].status, SubagentStatus::Completed));
+    assert_eq!(rows[0].result.as_deref(), Some("found 5 TODOs"));
+    assert_eq!(rows[0].ok, Some(true));
+    assert!(rows[0].completed_at.is_some(), "completed_at must be set");
+}
+
+#[tokio::test]
+async fn subagent_task_list_filters_by_parent() {
+    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+
+    let (_dir, store) = fresh().await;
+
+    for (tid, parent) in [("t-a", "sess-a"), ("t-b", "sess-b"), ("t-c", "sess-a")] {
+        make_session(&store, parent, 0).await;
+        make_session(&store, &format!("child-{tid}"), 0).await;
+        let rec = SubagentTaskRecord {
+            task_id: tid.into(),
+            parent_session_id: parent.into(),
+            child_session_id: format!("child-{tid}"),
+            parent_message_id: None,
+            agent: "build".into(),
+            prompt: format!("prompt-{tid}"),
+            result: None,
+            status: SubagentStatus::Running,
+            ok: None,
+            started_at: 2000,
+            completed_at: None,
+        };
+        store.create_subagent_task(&rec).await.unwrap();
+    }
+
+    let a_rows = store.list_subagent_tasks("sess-a").await.unwrap();
+    assert_eq!(a_rows.len(), 2, "sess-a should have 2 tasks");
+    let b_rows = store.list_subagent_tasks("sess-b").await.unwrap();
+    assert_eq!(b_rows.len(), 1, "sess-b should have 1 task");
+    let none_rows = store.list_subagent_tasks("sess-c").await.unwrap();
+    assert!(none_rows.is_empty(), "sess-c should have 0 tasks");
+}
+
+#[tokio::test]
+async fn subagent_status_parse_and_as_str() {
+    use opencode_store::SubagentStatus;
+    assert_eq!(SubagentStatus::parse("running"), SubagentStatus::Running);
+    assert_eq!(SubagentStatus::parse("completed"), SubagentStatus::Completed);
+    assert_eq!(SubagentStatus::parse("failed"), SubagentStatus::Failed);
+    assert_eq!(SubagentStatus::parse("bogus"), SubagentStatus::Running);
+    assert_eq!(SubagentStatus::Running.as_str(), "running");
+    assert_eq!(SubagentStatus::Completed.as_str(), "completed");
+    assert_eq!(SubagentStatus::Failed.as_str(), "failed");
+}

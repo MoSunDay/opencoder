@@ -14,8 +14,6 @@ pub struct Config {
     pub agent: AgentDefaults,
     #[serde(default)]
     pub compaction: CompactionConfig,
-    #[serde(default)]
-    pub max_steps: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_limit: Option<u64>,
     /// Max output tokens per generation. When unset the provider default is
@@ -23,6 +21,12 @@ pub struct Config {
     /// truncates large tool-call payloads mid-stream (`finish_reason=length`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
+    /// OpenAI-style reasoning effort sent as a top-level `reasoning_effort`
+    /// field on the chat request body. Accepted values: `low|medium|high`.
+    /// When `None` the field is omitted (provider default / no extended
+    /// thinking). Edited at runtime via the TUI `/model` menu.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 fn default_model() -> String {
@@ -97,9 +101,9 @@ impl Default for Config {
             small_model: None,
             agent: AgentDefaults::default(),
             compaction: CompactionConfig::default(),
-            max_steps: 50,
             context_limit: None,
             max_tokens: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -156,6 +160,119 @@ impl Config {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
     }
+
+    /// Pick the file to persist config edits to. Rule (project-first, global
+    /// fallback): the first existing candidate that already holds any of the
+    /// editable keys; if none, create the project-local `./opencode.json`.
+    pub fn save_target(working_dir: &Path) -> PathBuf {
+        let candidates = config_candidates(working_dir);
+        // candidates are ordered project-first (index 0) → global-last, which
+        // is exactly the priority we want for picking a save target.
+        for p in &candidates {
+            if p.exists() {
+                if let Ok(raw) = std::fs::read_to_string(p) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if has_editable_key(&v) {
+                            return p.clone();
+                        }
+                    }
+                }
+            }
+        }
+        // Nothing editable on disk yet → create the project-local opencode.json
+        // at the working-dir root (more idiomatic than .opencode/config.json).
+        working_dir.join("opencode.json")
+    }
+
+    /// Merge `patch` into the JSON at `save_target`, preserving unrelated keys
+    /// and pretty-printing. Creates the file (and parent `.opencode/` dir) if
+    /// missing. Returns the path written.
+    pub fn save(working_dir: &Path, patch: &serde_json::Value) -> Result<PathBuf> {
+        let target = Self::save_target(working_dir);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let mut root: serde_json::Value = if target.exists() {
+            std::fs::read_to_string(&target)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        merge_json(&mut root, patch);
+        let pretty = serde_json::to_string_pretty(&root)?;
+        std::fs::write(&target, pretty)?;
+        Ok(target)
+    }
+}
+
+/// `true` if `root` (a parsed config file) carries any of the editable
+/// top-level or nested keys the `/model` menu can write.
+fn has_editable_key(root: &serde_json::Value) -> bool {
+    let obj = match root.as_object() {
+        Some(o) => o,
+        None => return false,
+    };
+    if obj.contains_key("model")
+        || obj.contains_key("small_model")
+        || obj.contains_key("max_tokens")
+        || obj.contains_key("reasoning_effort")
+        || obj.contains_key("context_limit")
+    {
+        return true;
+    }
+    if obj.get("provider").and_then(|v| v.as_object()).is_some_and(|p| {
+        p.contains_key("base_url") || p.contains_key("api_key")
+    }) {
+        return true;
+    }
+    if obj.get("compaction").and_then(|v| v.as_object()).is_some_and(|c| {
+        c.contains_key("context_threshold") || c.contains_key("auto")
+    }) {
+        return true;
+    }
+    false
+}
+
+/// Recursive JSON object merge: `patch` wins; nested objects are merged
+/// key-by-key rather than replaced wholesale, so editing `compaction.context_threshold`
+/// preserves a sibling `tail_turns`.
+fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value) {
+    use serde_json::Value;
+    match (dst, patch) {
+        (Value::Object(d), Value::Object(p)) => {
+            for (k, pv) in p {
+                match (d.get_mut(k), pv) {
+                    (Some(Value::Object(_)), Value::Object(_)) => {
+                        if let Some(child) = d.get_mut(k) {
+                            merge_json(child, pv);
+                        }
+                    }
+                    (_, Value::Null) => {
+                        d.remove(k);
+                    }
+                    _ => {
+                        d.insert(k.clone(), pv.clone());
+                    }
+                }
+            }
+        }
+        (d, p) => {
+            *d = p.clone();
+        }
+    }
+}
+
+/// `true` when `s` looks like an environment-variable name (uppercase +
+/// underscores/digits). Used by the `/model` menu to decide whether to wrap an
+/// api-key value as `"{NAME}"` (preserving env-var indirection via
+/// `resolve_env`) or store it verbatim.
+pub fn looks_like_env_var(s: &str) -> bool {
+    let t = s.trim();
+    !t.is_empty()
+        && t.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && t.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
 fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
@@ -213,8 +330,13 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(mt) = obj.get("max_tokens").and_then(|v| v.as_u64()) {
             cfg.max_tokens = Some(mt);
         }
-        if let Some(steps) = obj.get("max_steps").and_then(|v| v.as_u64()) {
-            cfg.max_steps = steps as u32;
+        if let Some(re) = obj.get("reasoning_effort").and_then(|v| v.as_str()) {
+            let trimmed = re.trim();
+            if trimmed.is_empty() {
+                cfg.reasoning_effort = None;
+            } else {
+                cfg.reasoning_effort = Some(trimmed.to_string());
+            }
         }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {

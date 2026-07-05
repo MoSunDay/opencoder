@@ -15,9 +15,11 @@ use ratatui::Frame;
 use ratatui::Terminal;
 
 use crate::chat::ChatView;
+use crate::command::CommandMenu;
 use crate::composer;
 use crate::fmt as fmtmod;
 use crate::menu::SkillMenu;
+use crate::model_menu::ModelMenu;
 use crate::task::TaskPicker;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -58,14 +60,16 @@ pub(crate) fn render(
     model: &str,
     workdir: &Path,
     status: &str,
-    steer_count: u32,
-    queue_count: u32,
+    steer_items: &[String],
+    queue_items: &[String],
     scroll: &mut u16,
     follow: bool,
     anim_tick: u32,
     active_skill: Option<&str>,
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
+    command_menu: Option<&CommandMenu>,
+    model_menu: Option<&ModelMenu>,
     hits: &mut MouseHits,
 ) -> Result<()> {
     terminal.draw(|f| {
@@ -74,7 +78,8 @@ pub(crate) fn render(
         let composer_inner_w = area.width.saturating_sub(2 + prompt_w);
         let input_rows = composer::display_rows(input, composer_inner_w).max(2);
         let composer_h = (input_rows + 2).min(area.height / 3);
-        let queue_h = if steer_count > 0 || queue_count > 0 { 1 } else { 0 };
+        let pending = steer_items.len() + queue_items.len();
+        let queue_h = if pending > 0 { pending.min(3) as u16 } else { 0 };
         let skill_h = if skill_menu.is_some() { 8 } else { 0 };
 
         let chunks = Layout::default()
@@ -92,7 +97,7 @@ pub(crate) fn render(
         render_body(f, chunks[ci], chat, scroll, follow, &mut hits.body);
         ci += 1;
         if queue_h > 0 {
-            render_queue_panel(f, chunks[ci], steer_count, queue_count);
+            render_queue_panel(f, chunks[ci], steer_items, queue_items);
         }
         ci += 1;
         if skill_h > 0 {
@@ -105,7 +110,7 @@ pub(crate) fn render(
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
-            f, chunks[ci], running, status, steer_count, queue_count,
+            f, chunks[ci], running, status, steer_items.len() as u32, queue_items.len() as u32,
             model, agent, workdir, context_used + sys_tokens, context_limit,
             anim_tick, active_skill,
         );
@@ -115,6 +120,12 @@ pub(crate) fn render(
         }
         if let Some(tp) = task_picker {
             crate::task::render_task_picker(f, area, tp);
+        }
+        if let Some(cm) = command_menu {
+            crate::command::render_command_popup(f, area, cm);
+        }
+        if let Some(mm) = model_menu {
+            crate::model_menu::render_model_popup(f, area, mm);
         }
         place_cursor(f, composer_area, input, cursor_idx);
     })?;
@@ -264,23 +275,45 @@ fn render_status(
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_queue_panel(f: &mut Frame, area: Rect, steer_count: u32, queue_count: u32) {
-    let mut spans = Vec::new();
-    if steer_count > 0 {
-        spans.push(Span::styled(
-            format!(" \u{21b3}steer:{steer_count} "),
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-        ));
+fn render_queue_panel(f: &mut Frame, area: Rect, steer_items: &[String], queue_items: &[String]) {
+    let mut entries: Vec<(&str, &str, Color)> = Vec::new();
+    for s in steer_items {
+        entries.push(("\u{21b3} steer", s.as_str(), Color::Blue));
     }
-    if queue_count > 0 {
-        spans.push(Span::styled(
-            format!(" queue:{queue_count} "),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ));
+    for q in queue_items {
+        entries.push(("[queued]", q.as_str(), Color::Yellow));
     }
-    if !spans.is_empty() {
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let total = entries.len();
+    if total == 0 || area.height == 0 {
+        return;
     }
+
+    let max_lines = (area.height as usize).min(3);
+    let avail_w = area.width as usize;
+    let overflow = total > max_lines;
+    let item_capacity = if overflow { max_lines.saturating_sub(1) } else { max_lines };
+    let start = total.saturating_sub(item_capacity);
+    let visible = &entries[start..];
+
+    let mut lines: Vec<Line> = Vec::new();
+    if overflow {
+        lines.push(Line::from(Span::styled(
+            format!(" \u{2191}{} more ", start),
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    for (prefix, text, color) in visible {
+        let full = format!(" {prefix}: {text}");
+        let display = if full.chars().count() > avail_w {
+            let take = avail_w.saturating_sub(3);
+            format!(" {}\u{2026}", full.chars().take(take).collect::<String>())
+        } else {
+            full
+        };
+        lines.push(Line::from(Span::styled(display, Style::default().fg(*color))));
+    }
+
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 fn render_help_popup(f: &mut Frame, area: Rect) {

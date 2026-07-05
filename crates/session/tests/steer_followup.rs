@@ -1,10 +1,10 @@
 //! P2 functional tests for the steer/queue drain semantics.
 //!
 //! Contracts (mirroring opencode's two-tier delivery model):
-//! - steer_promotes_at_turn_boundary_and_resets_step: a steer admitted during a
-//!   run is appended to history at the next turn boundary and resets step to 1
-//! - multiple_steers_one_boundary_reset_once: N steers at one boundary still
-//!   reset the allowance a single time
+//! - steer_promotes_at_turn_boundary: a steer admitted during a run is
+//!   appended to history at the next turn boundary
+//! - multiple_steers_one_boundary_promoted_once: N steers at one boundary are
+//!   all promoted at that boundary
 //! - queue_only_promotes_at_idle_exactly_one: queued inputs never interrupt a
 //!   running turn; at idle exactly one is consumed per cycle
 //! - durable_pending_survives_to_next_drain: an admitted-but-unpromoted steer
@@ -28,7 +28,7 @@ async fn mem_store() -> Arc<dyn Store> {
 }
 
 fn config() -> Config {
-    Config { model: "m/g".into(), max_steps: 50, ..Config::default() }
+    Config { model: "m/g".into(), ..Config::default() }
 }
 
 /// A turn that calls `bash` (so the loop continues), carrying `n` in usage.
@@ -70,7 +70,7 @@ async fn seed_session(store: &Arc<dyn Store>) {
 }
 
 #[tokio::test]
-async fn steer_promotes_at_turn_boundary_and_resets_step() {
+async fn steer_promotes_at_turn_boundary() {
     let store = mem_store().await;
     // 3 bash turns then done. After turn 2 starts, we admit a steer that must
     // land before turn 3 — but since the loop is synchronous per turn, we admit
@@ -114,7 +114,7 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
 }
 
 #[tokio::test]
-async fn multiple_steers_at_one_boundary_reset_once() {
+async fn multiple_steers_at_one_boundary_promoted_once() {
     let store = mem_store().await;
     let mock = Arc::new(
         MockChatClient::new()

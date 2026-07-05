@@ -9,7 +9,6 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod ls;
-pub mod plan;
 pub mod read;
 pub mod task;
 pub mod write;
@@ -23,7 +22,6 @@ pub fn registry() -> HashMap<String, ToolArc> {
         Arc::new(glob::GlobTool) as ToolArc,
         Arc::new(grep::GrepTool) as ToolArc,
         Arc::new(ls::ListTool) as ToolArc,
-        Arc::new(plan::PlanExitTool) as ToolArc,
         Arc::new(task::TaskTool) as ToolArc,
     ];
     all.into_iter().map(|t| (t.name().to_string(), t)).collect()

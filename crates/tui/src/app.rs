@@ -26,8 +26,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
+use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::composer;
 use crate::menu::SkillMenu;
+use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
 use crate::render::{in_rect, render, MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::TuiOpts;
@@ -41,13 +43,86 @@ const ANIM_TICK_MS: u64 = 300;
 enum UiCmd {
     Prompt(String),
     SwitchAgent(String),
+    /// Switch agent then immediately start a turn without recording a new user
+    /// message. Used for the plan→act manual transition: the system prompt
+    /// changes to act and the model reads the plan from conversation history.
+    SwitchAndStart(String),
+    /// Manually trigger conversation compaction.
+    Compact,
     SetSkill(Option<String>),
+    /// Hot-reload config: replace `session.config`/`session.model`/`session.client`
+    /// at the next turn boundary. Sent by the `/model` menu after persisting.
+    ReloadConfig(Config),
     Quit,
 }
 
 enum UiEvent {
     Session(SessionEvent),
     TurnDone,
+}
+
+/// Process one UI command against a session. Shared by the main worker and
+/// the `/task`-spawned worker to avoid duplicate match arms. Returns `true`
+/// when the worker loop should break (Quit).
+async fn process_cmd(
+    cmd: UiCmd,
+    sess: &mut SessionState,
+    evt_tx: &mpsc::Sender<UiEvent>,
+) -> bool {
+    match cmd {
+        UiCmd::Prompt(prompt) => {
+            let tx = evt_tx.clone();
+            let res = run_session(sess, prompt, move |sev| {
+                let _ = tx.try_send(UiEvent::Session(sev));
+            }).await;
+            if let Err(e) = res {
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
+            }
+            let _ = evt_tx.try_send(UiEvent::TurnDone);
+        }
+        UiCmd::SwitchAgent(name) => {
+            if let Some(a) = resolve_agent(&name) {
+                sess.agent = a;
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
+            }
+        }
+        UiCmd::SwitchAndStart(name) => {
+            if let Some(a) = resolve_agent(&name) {
+                sess.agent = a;
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
+            }
+            let tx = evt_tx.clone();
+            let res = run_session(sess, String::new(), move |sev| {
+                let _ = tx.try_send(UiEvent::Session(sev));
+            }).await;
+            if let Err(e) = res {
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
+            }
+            let _ = evt_tx.try_send(UiEvent::TurnDone);
+        }
+        UiCmd::Compact => {
+            let registry = opencode_session::tools::registry();
+            match opencode_session::compaction::compact(sess, &registry).await {
+                Ok(summary) => {
+                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Compaction(summary)));
+                }
+                Err(e) => {
+                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(
+                        format!("compaction failed: {e:#}"))));
+                }
+            }
+            let _ = evt_tx.try_send(UiEvent::TurnDone);
+        }
+        UiCmd::SetSkill(body) => { sess.skill_prompt = body; }
+        UiCmd::ReloadConfig(new_cfg) => {
+            let api_key = new_cfg.api_key().unwrap_or_default();
+            if let Ok(new_client) = opencode_llm::ChatClient::new(&new_cfg.provider.base_url, &api_key) {
+                sess.apply_config_reload(new_cfg, Arc::new(new_client));
+            }
+        }
+        UiCmd::Quit => return true,
+    }
+    false
 }
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
@@ -109,11 +184,11 @@ async fn run_app(
     session: SessionState,
     store: Arc<dyn Store>,
     mut session_id: String,
-    context_limit: u64,
-    model_label: String,
+    mut context_limit: u64,
+    mut model_label: String,
     workdir: PathBuf,
-    config: Config,
-    client: Arc<dyn ChatStream>,
+    mut config: Config,
+    mut client: Arc<dyn ChatStream>,
 ) -> Result<()> {
     // Wire a cancellation token into the session so double-Esc can hard-abort
     // the running turn (mid-stream / mid-tool). The UI keeps a clone to signal.
@@ -132,13 +207,18 @@ async fn run_app(
     let mut follow = true;
     let mut context_used: u64 = 0;
     let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
-    let mut steer_count: u32 = 0;
-    let mut queue_count: u32 = 0;
+    let mut steer_items: Vec<String> = Vec::new();
+    let mut queue_items: Vec<String> = Vec::new();
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut model_menu: Option<ModelMenu> = None;
     let mut active_skill: Option<String> = None;
     let mut anim_tick: u32 = 0;
     let mut last_esc: Option<Instant> = None;
+    // Per-session UI state snapshots — saved on `/task` switch, restored on return.
+    let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
+        std::collections::HashMap::new();
 
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(512);
@@ -146,28 +226,7 @@ async fn run_app(
     let worker = tokio::spawn(async move {
         let mut sess = session;
         while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                UiCmd::Prompt(prompt) => {
-                    let tx = evt_tx.clone();
-                    let res = run_session(&mut sess, prompt, move |sev| {
-                        let _ = tx.try_send(UiEvent::Session(sev));
-                    }).await;
-                    if let Err(e) = res {
-                        let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
-                    }
-                    let _ = evt_tx.try_send(UiEvent::TurnDone);
-                }
-                UiCmd::SwitchAgent(name) => {
-                    if let Some(a) = resolve_agent(&name) {
-                        sess.agent = a;
-                        let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
-                    }
-                }
-                UiCmd::SetSkill(body) => {
-                    sess.skill_prompt = body;
-                }
-                UiCmd::Quit => break,
-            }
+            if process_cmd(cmd, &mut sess, &evt_tx).await { break; }
         }
     });
 
@@ -176,6 +235,12 @@ async fn run_app(
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
+        // Compose status-bar model label with reasoning-effort badge (e.g.
+        // "glm-5.2 \u{00b7}high") so the active thinking depth is visible.
+        let status_model = match &config.reasoning_effort {
+            Some(e) if !e.trim().is_empty() => format!("{model_label} \u{00b7}{e}"),
+            _ => model_label.clone(),
+        };
         let mut hits = MouseHits { jump_btn: None, body: None };
         render(
             terminal,
@@ -188,17 +253,19 @@ async fn run_app(
             context_used,
             sys_tokens,
             context_limit,
-            &model_label,
+            &status_model,
             &workdir,
             &status,
-            steer_count,
-            queue_count,
+            &steer_items,
+            &queue_items,
             &mut scroll,
             follow,
             anim_tick,
             active_skill.as_deref(),
             skill_menu.as_ref(),
             task_picker.as_ref(),
+            command_menu.as_ref(),
+            model_menu.as_ref(),
             &mut hits,
         )?;
 
@@ -248,70 +315,113 @@ async fn run_app(
                                         tokio::spawn(async move {
                                             let mut sess = session_for_worker;
                                             while let Some(cmd) = n_cmd_rx.recv().await {
-                                                match cmd {
-                                                    UiCmd::Prompt(prompt) => {
-                                                        let tx = ntx.clone();
-                                                        let res = run_session(&mut sess, prompt, move |sev| {
-                                                            let _ = tx.try_send(UiEvent::Session(sev));
-                                                        }).await;
-                                                        if let Err(e) = res {
-                                                            let _ = ntx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
-                                                        }
-                                                        let _ = ntx.try_send(UiEvent::TurnDone);
-                                                    }
-                                                    UiCmd::SwitchAgent(name) => {
-                                                        if let Some(a) = resolve_agent(&name) {
-                                                            sess.agent = a;
-                                                            let _ = ntx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
-                                                        }
-                                                    }
-                                                    UiCmd::SetSkill(body) => { sess.skill_prompt = body; }
-                                                    UiCmd::Quit => break,
-                                                }
+                                                if process_cmd(cmd, &mut sess, &ntx).await { break; }
                                             }
                                         });
-                                        // Reset per-session UI state
-                                        chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
-                                        if let crate::task::TaskPick::Resume(_) = pick {
-                                            for msg in &resumed_messages {
-                                                if msg.role == opencode_core::Role::User {
-                                                    let text: String = msg.blocks.iter()
-                                                        .filter_map(|b| match b {
-                                                            opencode_core::ContentBlock::Text { text } => Some(text.as_str()),
-                                                            _ => None,
-                                                        })
-                                                        .collect::<Vec<_>>().join("");
-                                                    if !text.is_empty() {
-                                                        chat.push_marker(Line::from(Span::styled(
-                                                            format!("user: {text}"),
-                                                            Style::default().add_modifier(Modifier::BOLD))));
-                                                        chat.push_marker(Line::from(""));
-                                                    }
-                                                } else if msg.role == opencode_core::Role::Assistant {
-                                                    let text: String = msg.blocks.iter()
-                                                        .filter_map(|b| match b {
-                                                            opencode_core::ContentBlock::Text { text } => Some(text.as_str()),
-                                                            _ => None,
-                                                        })
-                                                        .collect::<Vec<_>>().join("");
-                                                    if !text.is_empty() {
-                                                        chat.push_marker(Line::from(text));
-                                                    }
-                                                }
+                                        // Save current session's UI state before switching.
+                                        session_states.insert(session_id.clone(), crate::session_ui::SessionUiState::snapshot(
+                                            running, &chat, &history, scroll, follow, context_used, sys_tokens, &steer_items, &queue_items, &active_skill,
+                                        ));
+                                        // Restore or create the target session's UI state.
+                                        let restored = session_states.remove(&new_session_id);
+                                        if let Some(st) = restored {
+                                            chat = st.chat;
+                                            history = st.history;
+                                            scroll = st.scroll;
+                                            follow = st.follow;
+                                            context_used = st.context_used;
+                                            sys_tokens = st.sys_tokens;
+                                            steer_items = st.steer_items;
+                                            queue_items = st.queue_items;
+                                            active_skill = st.active_skill;
+                                            running = false; // worker was killed on switch
+                                        } else {
+                                            // Fresh state for a new or resumed session.
+                                            if let crate::task::TaskPick::Resume(_) = pick {
+                                                chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages);
+                                            } else {
+                                                chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
                                             }
+                                            scroll = 0; follow = true;
+                                            context_used = 0;
+                                            sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
+                                            steer_items.clear(); queue_items.clear();
+                                            active_skill = None; running = false;
                                         }
                                         input.clear(); cursor_idx = 0; hist_idx = None;
-                                        scroll = 0; follow = true;
-                                        context_used = 0;
-                                        sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
-                                        steer_count = 0; queue_count = 0;
-                                        active_skill = None; running = false;
                                         cmd_tx = n_cmd_tx;
                                         evt_rx = nrx;
                                         session_id = new_session_id;
                                     }
                                     TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                                     TaskOutcome::Idle => {}
+                                }
+                                continue;
+                            }
+                            // `/model` modal: intercept all keys while open.
+                            if model_menu.is_some() {
+                                match handle_model_key(&mut model_menu, k) {
+                                    ModelOutcome::Save(patch) => {
+                                        let json = patch.to_json();
+                                        match Config::save(&workdir, &json) {
+                                            Ok(path) => {
+                                                match Config::load(&workdir) {
+                                                    Ok(reloaded) => {
+                                                        model_label = reloaded.model_id().to_string();
+                                                        context_limit = reloaded.context_limit();
+                                                        // Rebuild the outer `client` too so subsequent
+                                                        // `/task` new sessions pick up the new endpoint
+                                                        // (the worker only swaps its own sess.client).
+                                                        let api_key = reloaded.api_key().unwrap_or_default();
+                                                        if let Ok(new_client) = opencode_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
+                                                            client = Arc::new(new_client);
+                                                        }
+                                                        config = reloaded.clone();
+                                                        let _ = cmd_tx.send(UiCmd::ReloadConfig(reloaded)).await;
+                                                        chat.push_marker(Line::from(Span::styled(
+                                                            format!("[/model] saved \u{2192} {}", path.display()),
+                                                            Style::default().fg(Color::Green))));
+                                                    }
+                                                    Err(e) => {
+                                                        chat.push_marker(Line::from(Span::styled(
+                                                            format!("[/model] reload failed: {e:#}"),
+                                                            Style::default().fg(Color::Red))));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                chat.push_marker(Line::from(Span::styled(
+                                                    format!("[/model] save failed: {e:#}"),
+                                                    Style::default().fg(Color::Red))));
+                                            }
+                                        }
+                                    }
+                                    ModelOutcome::Cancel | ModelOutcome::Idle => {}
+                                    ModelOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                                }
+                                continue;
+                            }
+                            // `/` command picker: intercept all keys while open.
+                            if command_menu.is_some() {
+                                let (outcome, quit) = handle_command_key(&mut command_menu, k);
+                                if quit { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                                match outcome {
+                                    CommandOutcome::Dispatch(SlashAction::Task) => {
+                                        let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
+                                            .await.unwrap_or_default();
+                                        task_picker = Some(TaskPicker::new(sessions));
+                                    }
+                                    CommandOutcome::Dispatch(SlashAction::Model) => {
+                                        model_menu = Some(ModelMenu::new(&config));
+                                    }
+                                    CommandOutcome::Dispatch(SlashAction::Compact) => {
+                                        if !running {
+                                            let _ = cmd_tx.send(UiCmd::Compact).await;
+                                            running = true;
+                                            follow = true;
+                                        }
+                                    }
+                                    CommandOutcome::Idle => {}
                                 }
                                 continue;
                             }
@@ -333,7 +443,7 @@ async fn run_app(
                                 KeyAction::Submit(text) => {
                                     if running {
                                         let _ = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await;
-                                        queue_count += 1;
+                                        queue_items.push(text.clone());
                                         chat.push_marker(Line::from(Span::styled(
                                             format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                     } else {
@@ -346,21 +456,28 @@ async fn run_app(
                                 }
                                 KeyAction::Steer(text) => {
                                     let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, &text)).await;
-                                    steer_count += 1;
+                                    steer_items.push(text.clone());
                                     chat.push_marker(Line::from(Span::styled(
                                         format!("\u{21b3} steer: {text}"), Style::default().fg(Color::Blue))));
                                     follow = true;
                                 }
                                 KeyAction::Queue(text) => {
                                     let _ = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await;
-                                    queue_count += 1;
+                                    queue_items.push(text.clone());
                                     chat.push_marker(Line::from(Span::styled(
                                         format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                     follow = true;
                                 }
                                 KeyAction::SwitchAgent(name) => {
+                                    let plan_to_act = chat.agent == "plan" && name == "act" && !running;
                                     sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
-                                    let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                                    if plan_to_act && !chat.blocks.is_empty() {
+                                        let _ = cmd_tx.send(UiCmd::SwitchAndStart(name)).await;
+                                        running = true;
+                                        follow = true;
+                                    } else {
+                                        let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                                    }
                                 }
                                 KeyAction::SetSkill(opt) => {
                                     match opt {
@@ -383,10 +500,8 @@ async fn run_app(
                                     running = false;
                                     follow = true;
                                 }
-                                KeyAction::OpenTask => {
-                                    let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
-                                        .await.unwrap_or_default();
-                                    task_picker = Some(TaskPicker::new(sessions));
+                                KeyAction::OpenCommand => {
+                                    command_menu = Some(CommandMenu::new());
                                 }
                                 KeyAction::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                                 KeyAction::None => {}
@@ -439,6 +554,8 @@ async fn run_app(
                         chat.apply(&sev);
                         if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                             running = false;
+                            steer_items.clear();
+                            queue_items.clear();
                         }
                     }
                     UiEvent::TurnDone => {
@@ -506,6 +623,7 @@ fn push_user(chat: &mut ChatView, history: &mut Vec<String>, hist_idx: &mut Opti
     chat.push_marker(Line::from(""));
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum KeyAction {
     None,
     Submit(String),
@@ -514,7 +632,7 @@ pub(crate) enum KeyAction {
     SwitchAgent(String),
     Cancel,
     SetSkill(Option<(String, String)>),
-    OpenTask,
+    OpenCommand,
     Quit,
 }
 
@@ -542,12 +660,16 @@ pub(crate) fn handle_key(
             crate::menu::MenuOutcome::Idle => KeyAction::None,
         };
     }
+    // Alt+Tab (and Ctrl+T fallback) switches act <-> plan mode.
+    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
+        let next = if agent == "plan" { "act" } else { "plan" };
+        return KeyAction::SwitchAgent(next.into());
+    }
+
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
             KeyCode::Char('c') | KeyCode::Char('d') => return KeyAction::Quit,
-            // Toggle by the CURRENT agent so plan<->act works both ways. The
-            // previous logic keyed off `running`, which could only ever land
-            // on "plan" while idle.
+            // Fallback mode switch for terminals that swallow Alt+Tab.
             KeyCode::Char('t') => {
                 let next = if agent == "plan" { "act" } else { "plan" };
                 return KeyAction::SwitchAgent(next.into());
@@ -555,30 +677,19 @@ pub(crate) fn handle_key(
             KeyCode::Char('h') => { *show_help = !*show_help; return KeyAction::None; }
             KeyCode::Char('n') => { move_hist(history, hist_idx, input, cursor_idx, 1); return KeyAction::None; }
             KeyCode::Char('p') => { move_hist(history, hist_idx, input, cursor_idx, -1); return KeyAction::None; }
-            KeyCode::Char('o') => {
-                if running && !input.trim().is_empty() {
-                    let t = input.trim().to_string();
-                    input.clear(); *cursor_idx = 0; *hist_idx = None;
-                    return KeyAction::Steer(t);
-                }
-                return KeyAction::None;
-            }
-            KeyCode::Char('j') => {
-                if running && !input.trim().is_empty() {
-                    let t = input.trim().to_string();
-                    input.clear(); *cursor_idx = 0; *hist_idx = None;
-                    return KeyAction::Queue(t);
-                }
-                return KeyAction::None;
-            }
             KeyCode::Char('u') => { *scroll = scroll.saturating_sub(10); *follow = false; return KeyAction::None; }
             _ => return KeyAction::None,
         }
     }
     match k.code {
+        KeyCode::BackTab => {
+            // Shift+Tab = primary mode switch (codex-cli style).
+            let next = if agent == "plan" { "act" } else { "plan" };
+            KeyAction::SwitchAgent(next.into())
+        }
         KeyCode::Enter => {
             // Shift+Enter or Alt+Enter inserts a newline (multi-line input).
-            if k.modifiers.contains(KeyModifiers::SHIFT) || k.modifiers.contains(KeyModifiers::ALT) {
+            if k.modifiers.contains(KeyModifiers::SHIFT) {
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s; *cursor_idx = i;
                 return KeyAction::None;
@@ -586,7 +697,16 @@ pub(crate) fn handle_key(
             if input.trim().is_empty() { return KeyAction::None; }
             let text = input.trim().to_string();
             input.clear(); *cursor_idx = 0; *hist_idx = None;
-            KeyAction::Submit(text)
+            // Enter = Steer when running (strong intervention, promoted at
+            // turn boundary); normal submit when idle.
+            if running { KeyAction::Steer(text) } else { KeyAction::Submit(text) }
+        }
+        KeyCode::Tab => {
+            // Tab = follow-up (queue) when running; normal submit when idle.
+            if input.trim().is_empty() { return KeyAction::None; }
+            let text = input.trim().to_string();
+            input.clear(); *cursor_idx = 0; *hist_idx = None;
+            if running { KeyAction::Queue(text) } else { KeyAction::Submit(text) }
         }
         KeyCode::Esc => {
             // 1) If help is open, Esc just closes it.
@@ -648,9 +768,10 @@ pub(crate) fn handle_key(
                 *skill_menu = Some(SkillMenu::new(discover_skills(), active_skill.is_some()));
                 return KeyAction::None;
             }
-            // `/task` on empty input (or just `/`) opens the task picker.
+            // `/` on empty input opens the slash-command picker. Bare `/` +
+            // Enter defaults to /task (first row) for muscle memory.
             if c == '/' && input.is_empty() && *cursor_idx == 0 {
-                return KeyAction::OpenTask;
+                return KeyAction::OpenCommand;
             }
             let (s, i) = composer::insert_char(input, *cursor_idx, c);
             *input = s; *cursor_idx = i;

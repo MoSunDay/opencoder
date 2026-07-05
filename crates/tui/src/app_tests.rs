@@ -72,11 +72,11 @@ fn enter_empty_input_is_noop() {
 }
 
 #[test]
-fn ctrl_o_while_running_admits_steer() {
+fn enter_while_running_admits_steer() {
     let mut input = String::from("stop and rethink");
     let mut idx = 15;
     let action = run_handle(
-        key(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        key(KeyCode::Enter, KeyModifiers::NONE),
         &mut input, &mut idx, true, "act",
     );
     assert!(matches!(action, KeyAction::Steer(ref t) if t == "stop and rethink"));
@@ -84,26 +84,55 @@ fn ctrl_o_while_running_admits_steer() {
 }
 
 #[test]
-fn ctrl_o_while_idle_is_noop() {
-    let mut input = String::from("hello");
-    let mut idx = 5;
-    let action = run_handle(
-        key(KeyCode::Char('o'), KeyModifiers::CONTROL),
-        &mut input, &mut idx, false, "act",
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert!(!input.is_empty(), "input should not be cleared when idle");
-}
-
-#[test]
-fn ctrl_j_while_running_admits_queue() {
+fn tab_while_running_admits_queue() {
     let mut input = String::from("next task");
     let mut idx = 9;
     let action = run_handle(
-        key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        key(KeyCode::Tab, KeyModifiers::NONE),
         &mut input, &mut idx, true, "act",
     );
     assert!(matches!(action, KeyAction::Queue(ref t) if t == "next task"));
+}
+
+#[test]
+fn tab_while_idle_submits() {
+    let mut input = String::from("hello");
+    let mut idx = 5;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::Submit(ref t) if t == "hello"));
+}
+
+#[test]
+fn shift_tab_toggles_plan_act() {
+    // BackTab = Shift+Tab, the primary mode-switch key (codex-cli style).
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::BackTab, KeyModifiers::SHIFT),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::SwitchAgent(ref a) if a == "plan"));
+
+    let action2 = run_handle(
+        key(KeyCode::BackTab, KeyModifiers::SHIFT),
+        &mut input, &mut idx, false, "plan",
+    );
+    assert!(matches!(action2, KeyAction::SwitchAgent(ref a) if a == "act"));
+}
+
+#[test]
+fn backtab_without_shift_also_toggles() {
+    // Some terminals report Shift+Tab as BackTab with no modifiers.
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::BackTab, KeyModifiers::NONE),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::SwitchAgent(ref a) if a == "plan"));
 }
 
 #[test]
@@ -121,6 +150,55 @@ fn ctrl_t_toggles_plan_act() {
         &mut input, &mut idx, false, "plan",
     );
     assert!(matches!(action2, KeyAction::SwitchAgent(ref a) if a == "act"));
+}
+
+#[test]
+fn alt_tab_toggles_plan_act() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::ALT),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::SwitchAgent(ref a) if a == "plan"));
+
+    let action2 = run_handle(
+        key(KeyCode::Tab, KeyModifiers::ALT),
+        &mut input, &mut idx, false, "plan",
+    );
+    assert!(matches!(action2, KeyAction::SwitchAgent(ref a) if a == "act"));
+}
+
+#[test]
+fn ctrl_o_is_not_steer() {
+    // Ctrl+O was removed as a steer trigger (replaced by Enter while running).
+    // Verify it does NOT produce a Steer action.
+    let mut input = String::from("msg");
+    let mut idx = 3;
+    let action = run_handle(
+        key(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        &mut input, &mut idx, true, "act",
+    );
+    assert!(
+        !matches!(action, KeyAction::Steer(_)),
+        "Ctrl+O must not steer; got {action:?}"
+    );
+}
+
+#[test]
+fn ctrl_j_is_not_queue() {
+    // Ctrl+J was removed as a queue trigger (replaced by Tab while running).
+    // Verify it does NOT produce a Queue action.
+    let mut input = String::from("msg");
+    let mut idx = 3;
+    let action = run_handle(
+        key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        &mut input, &mut idx, true, "act",
+    );
+    assert!(
+        !matches!(action, KeyAction::Queue(_)),
+        "Ctrl+J must not queue; got {action:?}"
+    );
 }
 
 #[test]

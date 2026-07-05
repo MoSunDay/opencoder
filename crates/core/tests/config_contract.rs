@@ -19,7 +19,6 @@ fn merge_project_file_overrides_defaults() {
             "model": "zhipuai-coding-plan/glm-5.2",
             "small_model": "cheap/mini",
             "context_limit": 60000,
-            "max_steps": 7,
             "compaction": { "auto": true, "context_threshold": 40000, "reserved": 8000, "tail_turns": 3, "prune": true }
         }"#,
     )
@@ -33,7 +32,6 @@ fn merge_project_file_overrides_defaults() {
     assert_eq!(cfg.small_model_id(), "mini");
     assert_eq!(cfg.small_model_or_primary(), "mini");
     assert_eq!(cfg.context_limit(), 60000);
-    assert_eq!(cfg.max_steps, 7);
     assert_eq!(cfg.compaction.context_threshold, 40000);
     assert_eq!(cfg.compaction.reserved, 8000);
     assert_eq!(cfg.compaction.tail_turns, 3);
@@ -140,4 +138,138 @@ fn home_opencoder_config_is_discovered() {
     assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2", "~/.opencoder/config.json must be discovered");
     assert_eq!(cfg.provider.base_url, "https://x.example/v4");
     assert_eq!(cfg.max_tokens, Some(4096));
+}
+
+#[test]
+fn reasoning_effort_is_parsed_and_default_none() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencode.json"),
+        r#"{"reasoning_effort":"high"}"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.reasoning_effort.as_deref(), Some("high"));
+}
+
+#[test]
+fn reasoning_effort_defaults_to_none() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert!(cfg.reasoning_effort.is_none(), "absent reasoning_effort must stay None");
+}
+
+#[test]
+fn save_persists_patch_and_roundtrips() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    let patch = serde_json::json!({
+        "model": "zhipuai-coding-plan/glm-5.2",
+        "provider": { "base_url": "https://open.bigmodel.cn/api/coding/paas/v4", "api_key": "sk-plaintext" },
+        "reasoning_effort": "high",
+        "compaction": { "context_threshold": 100000 }
+    });
+    let written = Config::save(dir.path(), &patch).unwrap();
+    assert!(written.ends_with("opencode.json"), "must save to project-local opencode.json");
+
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2");
+    assert_eq!(cfg.provider.base_url, "https://open.bigmodel.cn/api/coding/paas/v4");
+    assert_eq!(cfg.provider.api_key.as_deref(), Some("sk-plaintext"));
+    assert_eq!(cfg.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(cfg.compaction.context_threshold, 100_000);
+}
+
+#[test]
+fn save_preserves_unrelated_keys_on_merge() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    // Pre-existing file with a sibling compaction key we must NOT clobber.
+    fs::write(
+        dir.path().join("opencode.json"),
+        r#"{"compaction":{"tail_turns":5,"context_threshold":5000}}"#,
+    )
+    .unwrap();
+    let patch = serde_json::json!({
+        "compaction": { "context_threshold": 9000 }
+    });
+    Config::save(dir.path(), &patch).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.compaction.context_threshold, 9000, "patched key updates");
+    assert_eq!(cfg.compaction.tail_turns, 5, "sibling key preserved by deep merge");
+}
+
+#[test]
+fn save_wraps_env_var_name_in_braces() {
+    use opencode_core::looks_like_env_var;
+    assert!(looks_like_env_var("ZHIPU_API_KEY"));
+    assert!(!looks_like_env_var("sk-abcd"));
+    assert!(!looks_like_env_var(""));
+    assert!(looks_like_env_var("KEY_1"));
+}
+
+#[test]
+fn save_can_remove_reasoning_effort_via_null() {
+    // Setting reasoning_effort to null in the patch must REMOVE the field
+    // (merge_json treats null as delete) so it is omitted from request bodies.
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencode.json"),
+        r#"{"model":"m","reasoning_effort":"high"}"#,
+    )
+    .unwrap();
+    let patch = serde_json::json!({ "reasoning_effort": serde_json::Value::Null });
+    Config::save(dir.path(), &patch).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert!(cfg.reasoning_effort.is_none(), "null patch must delete reasoning_effort");
+}
+
+#[test]
+fn save_env_var_api_key_roundtrips_through_resolve() {
+    // {ENV} api_key written by the menu must survive save → load → resolve_env.
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    std::env::set_var("MY_TEST_KEY", "resolved-secret");
+    let patch = serde_json::json!({
+        "model": "m",
+        "provider": { "api_key": "{MY_TEST_KEY}" }
+    });
+    Config::save(dir.path(), &patch).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    std::env::remove_var("MY_TEST_KEY");
+    assert_eq!(cfg.api_key().unwrap(), "resolved-secret", "{{ENV}} api_key must resolve on reload");
+}
+
+/// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`
+/// does not pick up the developer's real global config. Returns the home guard
+/// (keep it alive for the test body) and a clean working-dir tempdir.
+fn isolated_home() -> (HomeGuard, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let prev_home = std::env::var_os("HOME");
+    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("HOME", home.path());
+    std::env::set_var("XDG_CONFIG_HOME", home.path());
+    let cwd = tempfile::tempdir().unwrap();
+    (HomeGuard { prev_home, prev_xdg }, cwd)
+}
+
+struct HomeGuard {
+    prev_home: Option<std::ffi::OsString>,
+    prev_xdg: Option<std::ffi::OsString>,
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        match &self.prev_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        match &self.prev_xdg {
+            Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
 }

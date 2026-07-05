@@ -90,6 +90,7 @@ async fn summarize(head: &[Message], session: &SessionState) -> Result<String> {
         tool_choice: None,
         temperature: Some(0.2),
         max_tokens: session.config.compaction.buffer,
+        reasoning_effort: None,
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut text = String::new();

@@ -8,6 +8,7 @@ const TOOL_OUTPUT_LINES: usize = 6;
 /// A single visual block in the transcript. Replaces the flat `Vec<Line>`
 /// model so we can have collapsible thinking blocks, streaming-vs-rendered
 /// assistant text, and tool blocks with structured output.
+#[derive(Clone, Debug, PartialEq)]
 pub enum ChatBlock {
     /// User prompt, queued/steer marker, system notice — plain styled lines.
     Marker(Vec<Line<'static>>),
@@ -31,7 +32,7 @@ pub enum ChatBlock {
     },
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
@@ -180,11 +181,22 @@ impl ChatView {
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
                 ChatBlock::Assistant { raw, rendered, done } => {
+                    // Visual header so assistant output has its own labelled region,
+                    // mirroring the `user:` marker on user prompts.
+                    out.push(Line::from(Span::styled(
+                        "say:",
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    )));
+                    let indent = Span::raw("    ");
                     if *done {
-                        out.extend(rendered.iter().cloned());
+                        for l in rendered.iter() {
+                            let mut spans = vec![indent.clone()];
+                            spans.extend(l.spans.iter().cloned());
+                            out.push(Line::from(spans));
+                        }
                     } else {
                         for l in raw.split('\n') {
-                            out.push(Line::from(l.to_string()));
+                            out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));
                         }
                     }
                 }
@@ -236,7 +248,7 @@ impl ChatView {
         if !matches!(self.blocks.last(), Some(ChatBlock::Thinking { .. })) {
             self.blocks.push(ChatBlock::Thinking {
                 text: String::new(),
-                collapsed: false,
+                collapsed: true,
             });
         }
     }
@@ -292,9 +304,14 @@ mod tests {
         let mut v = ChatView::default();
         v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
         let flat = v.flatten();
+        // Collapsed by default: header shows "Thinking"
         assert!(flat.iter().any(|l| {
             l.spans.iter().any(|s| s.content.contains("Thinking"))
         }));
+        // Content hidden when collapsed
+        assert!(!block_text(&v).contains("analyzing"));
+        // Expand and verify content
+        v.toggle_last_thinking();
         assert!(block_text(&v).contains("analyzing"));
     }
 
@@ -302,14 +319,17 @@ mod tests {
     fn thinking_block_collapses() {
         let mut v = ChatView::default();
         v.apply(&SessionEvent::ReasoningDelta("line1\nline2\nline3".into()));
-        // Expanded: should contain all 3 lines
-        assert!(block_text(&v).contains("line1"));
-        assert!(block_text(&v).contains("line3"));
-        v.toggle_last_thinking();
-        // Collapsed: summary line only
+        // Collapsed by default: summary line only, content hidden
         let text = block_text(&v);
         assert!(text.contains("3 lines"));
         assert!(!text.contains("line1"));
+        // Expand: should contain all 3 lines
+        v.toggle_last_thinking();
+        assert!(block_text(&v).contains("line1"));
+        assert!(block_text(&v).contains("line3"));
+        // Collapse again
+        v.toggle_last_thinking();
+        assert!(!block_text(&v).contains("line1"));
     }
 
     #[test]
@@ -363,8 +383,9 @@ mod tests {
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
             .collect();
-        assert!(texts.iter().any(|t| t == "line1"));
-        assert!(texts.iter().any(|t| t == "line2"));
+        // Assistant text is indented under the `say:` header
+        assert!(texts.iter().any(|t| t.contains("line1")), "got {:?}", texts);
+        assert!(texts.iter().any(|t| t.contains("line2")), "got {:?}", texts);
     }
 
     #[test]

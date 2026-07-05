@@ -166,15 +166,72 @@ impl SkillMenu {
         if has_active {
             rows.push(Row::Clear);
         }
-        for (i, s) in skills.iter().enumerate() {
-            let keep = q.is_empty()
-                || s.name.to_lowercase().contains(&q)
-                || s.description.to_lowercase().contains(&q);
-            if keep {
+        if q.is_empty() {
+            for (i, _s) in skills.iter().enumerate() {
                 rows.push(Row::Skill(i));
             }
+            return rows;
+        }
+        // Fuzzy subsequence match on name (primary) or description (fallback).
+        // Sort by match score (compact matches rank higher).
+        let mut scored: Vec<(usize, i32)> = skills
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let name_l = s.name.to_lowercase();
+                let desc_l = s.description.to_lowercase();
+                let score = fuzzy_score(&q, &name_l)
+                    .or_else(|| fuzzy_score(&q, &desc_l))?;
+                Some((i, score))
+            })
+            .collect();
+        scored.sort_by_key(|&(_, sc)| sc);
+        for (i, _) in scored {
+            rows.push(Row::Skill(i));
         }
         rows
+    }
+}
+
+/// Fuzzy subsequence match: returns `Some(score)` if `query` is a subsequence
+/// of `target` (both lowercased by caller). Score is lower = better: rewards
+/// compact, consecutive, and early matches. `None` = no match.
+pub fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let q_chars: Vec<char> = query.chars().collect();
+    let t_chars: Vec<char> = target.chars().collect();
+    if q_chars.len() > t_chars.len() {
+        return None;
+    }
+    let mut qi = 0usize;
+    let mut score: i32 = 0;
+    let mut prev_match: Option<usize> = None;
+    for (ti, &tc) in t_chars.iter().enumerate() {
+        if qi >= q_chars.len() {
+            break;
+        }
+        if tc == q_chars[qi] {
+            // Consecutive match bonus
+            if let Some(p) = prev_match {
+                if ti == p + 1 {
+                    score -= 10; // bonus for consecutive
+                }
+            }
+            // Early match bonus (first few chars of target)
+            if ti < 3 {
+                score -= 5;
+            }
+            score += ti as i32; // earlier = lower score = better
+            prev_match = Some(ti);
+            qi += 1;
+        }
+    }
+    if qi == q_chars.len() {
+        Some(score)
+    } else {
+        None
     }
 }
 
@@ -421,5 +478,36 @@ mod tests {
         // clear row always remains, skills filtered out
         assert_eq!(m.visible_count(), 1);
         assert!(m.is_clear_selected());
+    }
+
+    #[test]
+    fn fuzzy_score_subsequence_match() {
+        assert!(fuzzy_score("exp", "explore").is_some());
+        assert!(fuzzy_score("exp", "build").is_none());
+        assert!(fuzzy_score("", "anything").is_some());
+        assert!(fuzzy_score("abc", "axbxc").is_some());
+        assert!(fuzzy_score("abc", "acb").is_none(), "order must be preserved");
+    }
+
+    #[test]
+    fn fuzzy_score_ranks_compact_matches_higher() {
+        let s1 = fuzzy_score("exp", "explore").unwrap();
+        let s2 = fuzzy_score("exp", "e_x_p").unwrap();
+        assert!(s1 < s2, "compact match should score better (lower)");
+    }
+
+    #[test]
+    fn fuzzy_filter_matches_subsequence_not_substring() {
+        let mut m = menu_of(&["explore", "build"]);
+        for c in "epr".chars() {
+            m.on_char(c);
+        }
+        // "epr" is a subsequence of "explore" (e-x-p-l-o-r-e) but NOT of "build"
+        let names: Vec<&str> = m.rows.iter().filter_map(|r| match r {
+            Row::Skill(i) => Some(m.skills[*i].name.as_str()),
+            _ => None,
+        }).collect();
+        assert!(names.contains(&"explore"), "explore should match 'epr': {:?}", names);
+        assert!(!names.contains(&"build"), "build should NOT match 'epr'");
     }
 }

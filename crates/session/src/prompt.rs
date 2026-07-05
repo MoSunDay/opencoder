@@ -36,8 +36,4 @@ pub fn compaction_prompt() -> String {
     "You are a conversation summarizer. Summarize the conversation above concisely, preserving: the user's goal, decisions made, files created/edited (with paths), commands run and their outcomes, and the current next step. Output only the summary, no preamble.".to_string()
 }
 
-pub fn plan_to_act_note() -> String {
-    "Your operational mode has changed from plan to act. You are no longer in read-only mode. You may now edit files and run commands. Execute the approved plan.".to_string()
-}
-
 pub fn _ts() -> i64 { now_ms() }

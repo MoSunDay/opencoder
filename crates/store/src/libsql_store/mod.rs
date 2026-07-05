@@ -6,13 +6,14 @@ use libsql::{Builder, Connection};
 use tracing::debug;
 
 use crate::store::Store;
-use crate::types::{Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch};
+use crate::types::{Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord};
 
 mod events;
 mod inputs;
 mod messages;
 mod schema;
 mod sessions;
+mod subagent_tasks;
 
 /// Primary `Store` implementation backed by libsql (embedded local SQLite, WAL).
 ///
@@ -132,6 +133,19 @@ impl Store for LibsqlStore {
     async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>> {
         let conn = self.conn().await?;
         events::after(&conn, session_id, after_seq).await
+    }
+
+    async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()> {
+        let conn = self.conn().await?;
+        subagent_tasks::create(&conn, record).await
+    }
+    async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()> {
+        let conn = self.conn().await?;
+        subagent_tasks::complete(&conn, task_id, result, ok).await
+    }
+    async fn list_subagent_tasks(&self, parent_session_id: &str) -> Result<Vec<SubagentTaskRecord>> {
+        let conn = self.conn().await?;
+        subagent_tasks::list(&conn, parent_session_id).await
     }
 
     async fn import_messages(&self, session_id: &str, msgs: &[opencode_core::Message]) -> Result<ImportReport> {

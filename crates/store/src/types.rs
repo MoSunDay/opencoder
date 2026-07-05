@@ -137,6 +137,54 @@ pub struct ImportReport {
     pub skipped: u32,
 }
 
+/// Lifecycle status of a subagent task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentStatus {
+    Running,
+    Completed,
+    Failed,
+}
+
+impl SubagentStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SubagentStatus::Running => "running",
+            SubagentStatus::Completed => "completed",
+            SubagentStatus::Failed => "failed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "completed" => SubagentStatus::Completed,
+            "failed" => SubagentStatus::Failed,
+            _ => SubagentStatus::Running,
+        }
+    }
+}
+
+/// A parent-child agent relationship record stored in `subagent_tasks`.
+/// Captures the prompt submitted, the final result, and lifecycle metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentTaskRecord {
+    pub task_id: String,
+    pub parent_session_id: String,
+    pub child_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
+    pub agent: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    pub status: SubagentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    pub started_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<i64>,
+}
+
 pub fn message_preview(msgs: &[Message], max_chars: usize) -> String {
     let mut out = String::new();
     for m in msgs {

@@ -31,6 +31,28 @@ fn run_handle(
     )
 }
 
+/// Like `run_handle` but exposes the skill-menu state so `$`-trigger and modal
+/// behavior can be inspected.
+fn run_handle_menu(
+    k: KeyEvent,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    skill_menu: &mut Option<SkillMenu>,
+    active_skill: Option<&str>,
+) -> KeyAction {
+    let history: Vec<String> = vec![];
+    let mut hist_idx = None;
+    let mut show_help = false;
+    let mut scroll = 0u16;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    handle_key(
+        k, input, cursor_idx, &history, &mut hist_idx,
+        false, "act", &mut show_help, &mut scroll, &mut follow,
+        &mut last_esc, skill_menu, active_skill,
+    )
+}
+
 #[test]
 fn enter_submits_non_empty_input() {
     let mut input = String::from("hello world");
@@ -122,4 +144,169 @@ fn ctrl_c_quits() {
         &mut input, &mut idx, false, "act",
     );
     assert!(matches!(action, KeyAction::Quit));
+}
+
+#[test]
+fn ctrl_d_quits() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::Quit), "Ctrl+D must quit");
+}
+
+#[test]
+fn raw_eot_quits() {
+    // Some terminals/crossterm configs deliver Ctrl+D as a bare EOT control
+    // char (0x04) without the CONTROL modifier — that path must still quit.
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('\u{4}'), KeyModifiers::NONE),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::Quit), "raw EOT (Ctrl+D) must quit");
+}
+
+#[test]
+fn raw_etx_quits() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('\u{3}'), KeyModifiers::NONE),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::Quit), "raw ETX (Ctrl+C) must quit");
+}
+
+#[test]
+fn sys_tokens_counts_system_prompt() {
+    let dir = std::env::temp_dir();
+    let base = crate::app::sys_tokens_for("act", &dir, None);
+    assert!(base > 0, "the system prompt must register some tokens");
+    // deterministic
+    assert_eq!(crate::app::sys_tokens_for("act", &dir, None), base);
+    // a skill body adds tokens on top of the base system prompt
+    let with_skill = crate::app::sys_tokens_for("act", &dir, Some("extra skill guidance body text"));
+    assert!(with_skill > base, "activating a skill must increase the count");
+    // unknown agent -> 0 (no panic)
+    assert_eq!(crate::app::sys_tokens_for("does-not-exist", &dir, None), 0);
+}
+
+#[test]
+fn dollar_on_empty_input_opens_skill_menu() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let mut menu: Option<SkillMenu> = None;
+    let action = run_handle_menu(
+        key(KeyCode::Char('$'), KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, None,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(menu.is_some(), "`$` on empty input must open the skill menu");
+    assert!(input.is_empty(), "`$` must not be inserted into the composer");
+}
+
+#[test]
+fn dollar_on_non_empty_input_is_literal() {
+    let mut input = String::from("pay ");
+    let mut idx = 4;
+    let mut menu: Option<SkillMenu> = None;
+    let action = run_handle_menu(
+        key(KeyCode::Char('$'), KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, None,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(menu.is_none(), "menu must not open when input is non-empty");
+    assert_eq!(input, "pay $");
+}
+
+#[test]
+fn skill_menu_enter_picks_selected_skill() {
+    use opencode_core::Skill;
+    use std::path::PathBuf;
+    let skill = Skill {
+        name: "alpha".into(),
+        description: "d".into(),
+        body: "the body".into(),
+        source: PathBuf::from("/x.md"),
+    };
+    let mut menu = Some(SkillMenu::new(vec![skill], false));
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle_menu(
+        key(KeyCode::Enter, KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, None,
+    );
+    match action {
+        KeyAction::SetSkill(Some((name, body))) => {
+            assert_eq!(name, "alpha");
+            assert_eq!(body, "the body");
+        }
+        _ => panic!("expected KeyAction::SetSkill(Some)"),
+    }
+    assert!(menu.is_none(), "menu must close after a pick");
+}
+
+#[test]
+fn skill_menu_esc_closes_without_picking() {
+    let mut menu = Some(SkillMenu::new(vec![], false));
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle_menu(
+        key(KeyCode::Esc, KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, None,
+    );
+    assert!(matches!(action, KeyAction::None), "Esc must not pick anything");
+    assert!(menu.is_none(), "Esc must close the menu");
+}
+
+#[test]
+fn skill_menu_intercepts_typing_from_composer() {
+    use opencode_core::Skill;
+    use std::path::PathBuf;
+    let mut menu = Some(SkillMenu::new(
+        vec![Skill {
+            name: "alpha".into(),
+            description: "d".into(),
+            body: "b".into(),
+            source: PathBuf::from("/x.md"),
+        }],
+        false,
+    ));
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle_menu(
+        key(KeyCode::Char('z'), KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, None,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(input.is_empty(), "typed char must NOT reach the composer while the menu is open");
+    assert!(menu.is_some(), "menu stays open while filtering");
+}
+
+#[test]
+fn skill_menu_clear_row_unsets_skill() {
+    use opencode_core::Skill;
+    use std::path::PathBuf;
+    // has_active=true prepends the "✕ clear" row, selected by default.
+    let mut menu = Some(SkillMenu::new(
+        vec![Skill {
+            name: "alpha".into(),
+            description: "d".into(),
+            body: "b".into(),
+            source: PathBuf::from("/x.md"),
+        }],
+        true,
+    ));
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle_menu(
+        key(KeyCode::Enter, KeyModifiers::NONE),
+        &mut input, &mut idx, &mut menu, Some("old"),
+    );
+    assert!(matches!(action, KeyAction::SetSkill(None)), "clear row must yield SetSkill(None)");
+    assert!(menu.is_none());
 }

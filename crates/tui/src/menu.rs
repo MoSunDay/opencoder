@@ -255,6 +255,54 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     }
 }
 
+/// Render the skill menu into a pre-computed rect (dropdown style — anchored
+/// above the composer, not centered). Used by the new layout.
+pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
+    f.render_widget(Clear, rect);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Skills (\u{2191}/\u{2193} select, type to filter, Enter=confirm) ");
+
+    let skill_rows: Vec<ListItem> = menu
+        .rows
+        .iter()
+        .map(|row| match row {
+            Row::Clear => ListItem::new(Line::from(Span::styled(
+                "\u{2717} clear skill",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ))),
+            Row::Skill(i) => {
+                let s = &menu.skills[*i];
+                ListItem::new(Line::from(vec![
+                    Span::styled(s.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw(" \u{2014} "),
+                    Span::styled(s.description.clone(), Style::default().fg(Color::Gray)),
+                ]))
+            }
+        })
+        .collect();
+
+    let items = if skill_rows.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "  no skills \u{2014} add *.md under ~/.opencoder/skills",
+            Style::default().fg(Color::DarkGray),
+        )))]
+    } else {
+        skill_rows
+    };
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_symbol("\u{276f} ");
+
+    let mut state = ListState::default();
+    if menu.visible_count() > 0 {
+        state.select(Some(menu.selected));
+    }
+    f.render_stateful_widget(list, rect, &mut state);
+}
+
 /// Compute a centered popup rect sized to the menu content.
 fn centered_popup(area: Rect, visible: usize) -> Rect {
     let max_h = area.height.saturating_sub(2);

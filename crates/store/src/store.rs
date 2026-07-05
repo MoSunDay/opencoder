@@ -36,6 +36,9 @@ pub trait Store: Send + Sync {
     /// mark it promoted. Used by the runner drain at idle to consume exactly one
     /// queued follow-up per cycle.
     async fn claim_next_queue(&self, session_id: &str) -> Result<Option<SessionInput>>;
+    /// Delete a pending input by its row id. Used by the TUI queue panel
+    /// to let users remove a queued/steered prompt before it's consumed.
+    async fn delete_input(&self, input_id: i64) -> Result<()>;
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64>;
     async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>>;

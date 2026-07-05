@@ -69,6 +69,74 @@ pub fn backspace(text: &str, idx: usize) -> Option<(String, usize)> {
     Some((s, idx - 1))
 }
 
+/// Compute (row, col) display position from a char index in multi-line text.
+pub fn cursor_row_col(input: &str, char_idx: usize) -> (usize, usize) {
+    let mut row = 0usize;
+    let mut col = 0usize;
+    for (i, ch) in input.chars().enumerate() {
+        if i >= char_idx { break; }
+        if ch == '\n' { row += 1; col = 0; }
+        else { col += char_width(ch); }
+    }
+    (row, col)
+}
+
+/// Move cursor up/down by one visual row in multi-line text.
+/// Returns the original index if already at the top/bottom row.
+pub fn move_cursor_vertical(input: &str, char_idx: usize, direction: i32) -> usize {
+    if input.is_empty() { return char_idx; }
+    let mut line_starts: Vec<usize> = vec![0];
+    for (i, ch) in input.chars().enumerate() {
+        if ch == '\n' { line_starts.push(i + 1); }
+    }
+    let row = line_starts.iter().rev().position(|&s| s <= char_idx)
+        .map(|r| line_starts.len() - 1 - r).unwrap_or(0);
+    let line_start = line_starts[row];
+    let col: usize = input.chars().skip(line_start)
+        .take(char_idx.saturating_sub(line_start)).map(char_width).sum();
+    let target_row = row as i32 + direction;
+    if target_row < 0 || target_row as usize >= line_starts.len() {
+        return char_idx;
+    }
+    let target_row = target_row as usize;
+    let target_start = line_starts[target_row];
+    let target_end = if target_row + 1 < line_starts.len() {
+        line_starts[target_row + 1].saturating_sub(1)
+    } else {
+        input.chars().count()
+    };
+    let mut actual = 0usize;
+    let mut idx = target_start;
+    for (i, ch) in input.chars().enumerate().skip(target_start) {
+        if i >= target_end { break; }
+        if actual + char_width(ch) > col { break; }
+        actual += char_width(ch);
+        idx = i + 1;
+    }
+    idx
+}
+
+/// Count how many display rows the input occupies at the given width.
+pub fn display_rows(input: &str, width: u16) -> u16 {
+    let w = (width as usize).max(1);
+    let mut rows = 0usize;
+    for line in input.split('\n') {
+        let lw: usize = line.chars().map(char_width).sum();
+        rows += if lw == 0 { 1 } else { lw.div_ceil(w) };
+    }
+    (rows as u16).max(1)
+}
+
+/// Insert a newline at the cursor index.
+pub fn insert_newline(text: &str, idx: usize) -> (String, usize) {
+    let mut s = String::with_capacity(text.len() + 1);
+    let byte = byte_offset_for_char(text, idx);
+    s.push_str(&text[..byte]);
+    s.push('\n');
+    s.push_str(&text[byte..]);
+    (s, idx + 1)
+}
+
 fn byte_offset_for_char(text: &str, char_idx: usize) -> usize {
     text.char_indices()
         .nth(char_idx)
@@ -114,5 +182,55 @@ mod tests {
         assert_eq!(backspace("ab", 0), None);
         // wide char before cursor deletes one codepoint
         assert_eq!(backspace("你", 1), Some(("".into(), 0)));
+    }
+
+    #[test]
+    fn cursor_row_col_single_line() {
+        assert_eq!(cursor_row_col("hello", 0), (0, 0));
+        assert_eq!(cursor_row_col("hello", 3), (0, 3));
+        assert_eq!(cursor_row_col("hello", 5), (0, 5));
+    }
+
+    #[test]
+    fn cursor_row_col_multi_line() {
+        let input = "abc\ndef\nghi";
+        assert_eq!(cursor_row_col(input, 0), (0, 0));
+        assert_eq!(cursor_row_col(input, 3), (0, 3));  // before \n
+        assert_eq!(cursor_row_col(input, 4), (1, 0));  // start of line 2
+        assert_eq!(cursor_row_col(input, 7), (1, 3));  // before second \n
+        assert_eq!(cursor_row_col(input, 8), (2, 0));  // start of line 3
+    }
+
+    #[test]
+    fn move_cursor_up_down() {
+        let input = "aaaa\nbbbb\ncccc";
+        // Index 2 = row 0 col 2 (display). Move down → row 1 col 2 = index 7.
+        let idx = move_cursor_vertical(input, 2, 1);
+        assert_eq!(cursor_row_col(input, idx), (1, 2));
+        // Index 7 = row 1 col 2. Move up → row 0 col 2 = index 2.
+        let idx = move_cursor_vertical(input, 7, -1);
+        assert_eq!(cursor_row_col(input, idx), (0, 2));
+        // Can't move up from row 0
+        assert_eq!(move_cursor_vertical(input, 2, -1), 2);
+        // Can't move down from last row
+        assert_eq!(move_cursor_vertical(input, 10, 1), 10);
+    }
+
+    #[test]
+    fn insert_newline_at_cursor() {
+        let (s, i) = insert_newline("abcd", 2);
+        assert_eq!(s, "ab\ncd");
+        assert_eq!(i, 3);
+        let (s, i) = insert_newline("", 0);
+        assert_eq!(s, "\n");
+        assert_eq!(i, 1);
+    }
+
+    #[test]
+    fn display_rows_counts_wrapped() {
+        assert_eq!(display_rows("hello", 80), 1);
+        assert_eq!(display_rows("aaaa\nbbbb", 80), 2);
+        assert_eq!(display_rows("aaaaaaaaaaaa", 5), 3); // 12 / 5 = 3 rows
+        assert_eq!(display_rows("", 80), 1);
     }
 }

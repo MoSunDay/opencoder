@@ -123,6 +123,12 @@ pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Opt
     }
 }
 
+/// Delete a pending input by its row seq.
+pub async fn delete_input(conn: &Connection, seq: i64) -> Result<()> {
+    conn.execute("DELETE FROM session_inputs WHERE seq = ?", params![seq]).await?;
+    Ok(())
+}
+
 async fn next_admitted_seq(tx: &libsql::Transaction, session_id: &str) -> Result<i64> {
     let stmt = tx.prepare("SELECT COALESCE(MAX(admitted_seq), 0) FROM session_inputs WHERE session_id = ?").await?;
     let mut rows = stmt.query(params![session_id]).await?;

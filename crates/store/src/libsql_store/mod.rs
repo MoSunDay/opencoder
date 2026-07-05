@@ -120,6 +120,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::claim_next_queue(&conn, session_id).await
     }
+    async fn delete_input(&self, input_id: i64) -> Result<()> {
+        let conn = self.conn().await?;
+        inputs::delete_input(&conn, input_id).await
+    }
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
         let conn = self.conn().await?;

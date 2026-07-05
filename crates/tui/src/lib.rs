@@ -3,7 +3,10 @@ pub mod chat;
 pub mod composer;
 pub mod fmt;
 pub mod keybind;
+pub mod markdown;
 pub mod menu;
+pub mod render;
+pub mod task;
 
 use std::path::PathBuf;
 

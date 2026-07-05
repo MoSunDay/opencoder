@@ -1,0 +1,30 @@
+[package]
+name = "opencode-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+opencode-core.workspace = true
+opencode-llm.workspace = true
+opencode-session.workspace = true
+opencode-store.workspace = true
+tokio.workspace = true
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
+futures.workspace = true
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+dirs.workspace = true
+chrono.workspace = true
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+reqwest = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+uuid = { workspace = true }

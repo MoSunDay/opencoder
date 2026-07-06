@@ -35,7 +35,7 @@ No read-blocking observed under WAL.
 
 ## 4. Test suite cost
 
-Full workspace unit + integration suite (`cargo test --workspace`): **~2 s** for 227
+Full workspace unit + integration suite (`cargo test --workspace`): **~3 s** for 234
 deterministic tests (MockChatClient-driven, zero network). The glm5.2 e2e
 (`scripts/e2e-glm.sh`) is a separate ~3–5 min gate that hits the real provider.
 

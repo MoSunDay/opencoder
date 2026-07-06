@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
-use crate::worker::{process_cmd, UiCmd, UiEvent};
+use crate::worker::{process_cmd, rebind_session, gate_compact, CompactGate, UiCmd, UiEvent};
 use crate::composer;
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
@@ -108,7 +108,8 @@ async fn run_app(
 ) -> Result<()> {
     // Wire a cancellation token into the session so double-Esc can hard-abort
     // the running turn (mid-stream / mid-tool). The UI keeps a clone to signal.
-    let cancel = CancellationToken::new();
+    // `mut`: reassigned by `rebind_session` on every `/task` session switch.
+    let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
 
     let mut chat = crate::chat::ChatView { agent: session.agent.name.clone(), ..Default::default() };
@@ -265,9 +266,16 @@ async fn run_app(
                                             active_skill = None; running = false;
                                         }
                                         input.clear(); cursor_idx = 0; hist_idx = None;
-                                        cmd_tx = n_cmd_tx;
-                                        evt_rx = nrx;
-                                        session_id = new_session_id;
+                                        rebind_session(
+                                            &mut cmd_tx,
+                                            &mut evt_rx,
+                                            &mut session_id,
+                                            &mut cancel,
+                                            n_cmd_tx,
+                                            nrx,
+                                            new_session_id,
+                                            new_cancel,
+                                        );
                                     }
                                     TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                                     TaskOutcome::Idle => {}
@@ -331,10 +339,18 @@ async fn run_app(
                                         model_menu = Some(ModelMenu::new(&config));
                                     }
                                     CommandOutcome::Dispatch(SlashAction::Compact) => {
-                                        if !running {
-                                            let _ = cmd_tx.send(UiCmd::Compact).await;
-                                            running = true;
-                                            follow = true;
+                                        match gate_compact(running) {
+                                            CompactGate::Run => {
+                                                let _ = cmd_tx.send(UiCmd::Compact).await;
+                                                running = true;
+                                                follow = true;
+                                            }
+                                            CompactGate::SkipRunning => {
+                                                chat.push_marker(Line::from(Span::styled(
+                                                    "[compact] busy \u{2014} retry when idle",
+                                                    Style::default().fg(Color::Yellow),
+                                                )));
+                                            }
                                         }
                                     }
                                     CommandOutcome::Idle => {}
@@ -466,8 +482,13 @@ async fn run_app(
             Some(ev) = evt_rx.recv() => {
                 match ev {
                     UiEvent::Session(sev) => {
-                        track_context(&sev, &mut context_used);
-                        chat.apply(&sev);
+                        if let SessionEvent::TranscriptReset(msgs) = &sev {
+                            let agent = chat.agent.clone();
+                            chat = crate::session_ui::replay_into_chat(&agent, msgs);
+                        } else {
+                            track_context(&sev, &mut context_used);
+                            chat.apply(&sev);
+                        }
                         if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                             running = false;
                             steer_items.clear();

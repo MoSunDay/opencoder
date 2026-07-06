@@ -142,6 +142,7 @@ impl ChatView {
                     Style::default().fg(Color::Red),
                 ))]));
             }
+            SessionEvent::TranscriptReset(_) => {}
         }
     }
 

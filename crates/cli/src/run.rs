@@ -143,6 +143,7 @@ fn print_event(ev: &SessionEvent) {
             let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
             eprintln!("\x1b[34m  {mark} {summary}\x1b[0m");
         }
+        SessionEvent::TranscriptReset(_) => {}
     }
 }
 

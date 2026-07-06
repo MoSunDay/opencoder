@@ -28,6 +28,9 @@ pub enum SessionEvent {
     SubagentStart { id: String, kind: String, prompt: String },
     /// A subagent finished. `depth` is nesting level (1 = direct child).
     SubagentEnd { id: String, ok: bool, summary: String },
+    /// Emitted after compaction rewrites the transcript. Carries the new
+    /// message list so display surfaces can rebuild their view.
+    TranscriptReset(Vec<opencode_core::Message>),
     Done,
     Error(String),
 }
@@ -105,7 +108,10 @@ async fn run_loop(
 
         if compaction::should_compact(session) {
             match compaction::compact(session, registry).await {
-                Ok(summary) => on_event(SessionEvent::Compaction(summary)),
+                Ok(summary) => {
+                    on_event(SessionEvent::TranscriptReset(session.messages.clone()));
+                    on_event(SessionEvent::Compaction(summary));
+                }
                 Err(e) => on_event(SessionEvent::Error(format!("compaction failed: {e:#}"))),
             }
         }

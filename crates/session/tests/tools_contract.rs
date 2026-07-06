@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use opencode_core::{Tool, ToolContext};
-use opencode_session::tools::{edit::EditTool, glob::GlobTool, ls::ListTool, plan::PlanExitTool, write::WriteTool};
+use opencode_session::tools::{edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool};
 use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {
@@ -135,20 +135,4 @@ async fn ls_tool_lists_directory() {
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("file1.txt"));
     assert!(out.content.contains("subdir/"));
-}
-
-#[tokio::test]
-async fn plan_exit_writes_plan_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(dir.path());
-    let out = PlanExitTool
-        .execute(json!({"plan": "# My Plan\n- Step 1", "filename": "sprint-1"}), &c)
-        .await
-        .unwrap();
-    assert!(!out.is_error);
-    let plan_path = dir.path().join(".opencode/plans/sprint-1.md");
-    assert!(plan_path.exists());
-    let content = std::fs::read_to_string(&plan_path).unwrap();
-    assert!(content.contains("# My Plan"));
-    assert!(content.contains("Step 1"));
 }

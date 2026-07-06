@@ -5,7 +5,7 @@ Keybindings:
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
   Shift+Enter      insert newline (multi-line input)
   $                select skill (dropdown; fuzzy match)
-  /                slash command picker: /task (sessions), /model (config)
+  /                slash command picker: /task (sessions), /model (config), /compact (compress history)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
   Ctrl+C / Ctrl+D  quit

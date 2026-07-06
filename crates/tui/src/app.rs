@@ -16,7 +16,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use opencode_core::{discover_skills, resolve_agent, Config};
 use opencode_llm::{estimate, ChatClient, ChatStream};
-use opencode_session::{run as run_session, SessionEvent, SessionState};
+use opencode_session::{SessionEvent, SessionState};
 use opencode_store::{Delivery, LibsqlStore, SessionInput, Store};
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style};
@@ -27,6 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::composer;
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
@@ -39,91 +40,6 @@ const ESC_CANCEL_WINDOW_MS: u64 = 350;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
-
-enum UiCmd {
-    Prompt(String),
-    SwitchAgent(String),
-    /// Switch agent then immediately start a turn without recording a new user
-    /// message. Used for the plan→act manual transition: the system prompt
-    /// changes to act and the model reads the plan from conversation history.
-    SwitchAndStart(String),
-    /// Manually trigger conversation compaction.
-    Compact,
-    SetSkill(Option<String>),
-    /// Hot-reload config: replace `session.config`/`session.model`/`session.client`
-    /// at the next turn boundary. Sent by the `/model` menu after persisting.
-    ReloadConfig(Config),
-    Quit,
-}
-
-enum UiEvent {
-    Session(SessionEvent),
-    TurnDone,
-}
-
-/// Process one UI command against a session. Shared by the main worker and
-/// the `/task`-spawned worker to avoid duplicate match arms. Returns `true`
-/// when the worker loop should break (Quit).
-async fn process_cmd(
-    cmd: UiCmd,
-    sess: &mut SessionState,
-    evt_tx: &mpsc::Sender<UiEvent>,
-) -> bool {
-    match cmd {
-        UiCmd::Prompt(prompt) => {
-            let tx = evt_tx.clone();
-            let res = run_session(sess, prompt, move |sev| {
-                let _ = tx.try_send(UiEvent::Session(sev));
-            }).await;
-            if let Err(e) = res {
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
-            }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
-        }
-        UiCmd::SwitchAgent(name) => {
-            if let Some(a) = resolve_agent(&name) {
-                sess.agent = a;
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
-            }
-        }
-        UiCmd::SwitchAndStart(name) => {
-            if let Some(a) = resolve_agent(&name) {
-                sess.agent = a;
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
-            }
-            let tx = evt_tx.clone();
-            let res = run_session(sess, String::new(), move |sev| {
-                let _ = tx.try_send(UiEvent::Session(sev));
-            }).await;
-            if let Err(e) = res {
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
-            }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
-        }
-        UiCmd::Compact => {
-            let registry = opencode_session::tools::registry();
-            match opencode_session::compaction::compact(sess, &registry).await {
-                Ok(summary) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Compaction(summary)));
-                }
-                Err(e) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(
-                        format!("compaction failed: {e:#}"))));
-                }
-            }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
-        }
-        UiCmd::SetSkill(body) => { sess.skill_prompt = body; }
-        UiCmd::ReloadConfig(new_cfg) => {
-            let api_key = new_cfg.api_key().unwrap_or_default();
-            if let Ok(new_client) = opencode_llm::ChatClient::new(&new_cfg.provider.base_url, &api_key) {
-                sess.apply_config_reload(new_cfg, Arc::new(new_client));
-            }
-        }
-        UiCmd::Quit => return true,
-    }
-    false
-}
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts.workdir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());

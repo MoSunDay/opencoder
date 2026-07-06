@@ -2,7 +2,7 @@
 //! and compaction_prompt produce correct content.
 
 use opencode_core::resolve_agent;
-use opencode_session::prompt::{build_system, compaction_prompt, environment_block, plan_to_act_note};
+use opencode_session::prompt::{build_system, compaction_prompt, environment_block};
 
 #[test]
 fn build_system_includes_agent_prompt_and_environment() {
@@ -49,10 +49,4 @@ fn compaction_prompt_is_non_empty_and_mentions_summary() {
     let p = compaction_prompt();
     assert!(!p.is_empty());
     assert!(p.to_lowercase().contains("summar"));
-}
-
-#[test]
-fn plan_to_act_note_mentions_execution() {
-    let note = plan_to_act_note();
-    assert!(note.to_lowercase().contains("act") || note.to_lowercase().contains("execute"));
 }

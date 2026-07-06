@@ -10,6 +10,7 @@ pub mod model_menu;
 pub mod render;
 pub mod session_ui;
 pub mod task;
+pub mod worker;
 
 use std::path::PathBuf;
 

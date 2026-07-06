@@ -265,6 +265,8 @@ mod tests {
         assert_eq!(parse("/m"), Some(SlashAction::Model));
         assert_eq!(parse("/task"), Some(SlashAction::Task));
         assert_eq!(parse("/t"), Some(SlashAction::Task));
+        assert_eq!(parse("/compact"), Some(SlashAction::Compact));
+        assert_eq!(parse("/c"), Some(SlashAction::Compact));
         assert_eq!(parse("/"), Some(SlashAction::Task));
         assert_eq!(parse("/unknown"), None);
         assert_eq!(parse("hello"), None);
@@ -274,12 +276,22 @@ mod tests {
     #[test]
     fn menu_filters_by_query() {
         let mut m = CommandMenu::new();
-        assert!(m.visible_count() >= 2, "all commands visible with empty query");
+        assert!(m.visible_count() >= 3, "all commands visible with empty query");
         for c in "model".chars() {
             m.on_char(c);
         }
         assert_eq!(m.visible_count(), 1, "only /model matches 'model'");
         assert_eq!(m.selected_action(), Some(SlashAction::Model));
+    }
+
+    #[test]
+    fn menu_filters_compact() {
+        let mut m = CommandMenu::new();
+        for c in "compact".chars() {
+            m.on_char(c);
+        }
+        assert_eq!(m.visible_count(), 1, "only /compact matches 'compact'");
+        assert_eq!(m.selected_action(), Some(SlashAction::Compact));
     }
 
     #[test]

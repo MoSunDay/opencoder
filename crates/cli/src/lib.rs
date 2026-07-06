@@ -82,6 +82,18 @@ pub enum SessionSub {
     Show { id: String },
     /// Delete a session.
     Delete { id: String },
+    /// Export a session (with subagent tree) to an opencode binary file.
+    Export {
+        id: String,
+        /// Output path. Defaults to `<id>.opencode`.
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+    },
+    /// Import a session from an opencode binary file.
+    Import {
+        /// Path to the `.opencode` bundle file.
+        input: PathBuf,
+    },
 }
 
 pub fn init_logging(verbose: bool) {

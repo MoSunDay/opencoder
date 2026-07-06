@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use opencode_core::Config;
-use opencode_store::{LibsqlStore, SessionFilter, Store};
+use opencode_store::{
+    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter, Store,
+};
 
 use crate::{Cli, ConfigSub, SessionSub};
 
@@ -83,6 +85,26 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
         SessionSub::Delete { id } => {
             store.delete_session(id).await?;
             println!("deleted {id}");
+            Ok(())
+        }
+        SessionSub::Export { id, out } => {
+            let bundle = export_bundle(&store, id).await?;
+            let path = out.clone().unwrap_or_else(|| format!("{id}.opencode").into());
+            let mut file = std::fs::File::create(&path)
+                .with_context(|| format!("create {}", path.display()))?;
+            write_bundle(&bundle, &mut file)?;
+            let sub_count = bundle.subagents.len();
+            println!("exported {id} ({sub_count} subagents) → {}", path.display());
+            Ok(())
+        }
+        SessionSub::Import { input } => {
+            let mut file = std::fs::File::open(input)
+                .with_context(|| "open bundle file")?;
+            let bundle = read_bundle(&mut file)?;
+            let id = import_bundle(&store, &bundle, None).await?;
+            println!("imported session {id} ({} messages, {} subagents)",
+                bundle.messages.len(), bundle.subagents.len());
+            println!("continue with: opencoder --session {id}");
             Ok(())
         }
     }

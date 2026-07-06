@@ -21,6 +21,7 @@ Commit: (working-tree, pre-initial-commit)
 - 输入提升：`admit_input`（计算单调 admitted_seq）→ `pending_inputs` 查询 → `promote_inputs`（按 admitted_seq 截止批量标记）/ `claim_next_queue`（原子返回+标记单条 queue，供 drain idle 消费）。
 - 事件回放：`append_event` → `events_after(seq)` 供 SSE replay。
 - 迁移：`src/import.rs::import_jsonl_dir` 把旧 `<id>.jsonl` 一次性导入（幂等，已存在的 session 跳过）。
+- **二进制导出/导入**（`src/bundle.rs`）：`SessionBundle` 递归结构（meta + messages + events + inputs + subagents）。自定义 opencode 二进制格式（magic `OPENCODR` + 版本 + payload）。`export_bundle` 递归收集父子 session 树；`import_bundle` 幂等写入（已存在则跳过）。CLI：`opencode session export <id> -o <file>` / `opencode session import <file>`。不导出 Config（含 API key）。
 
 ## 依赖与接口
 - 依赖：libsql 0.9.30（锁定 0.9 系列）、opencode-core（Message 类型）、async-trait。

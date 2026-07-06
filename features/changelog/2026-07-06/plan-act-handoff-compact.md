@@ -34,3 +34,9 @@ Commit: (working-tree, pre-initial-commit)
 - 移除：`plan_exit_writes_plan_file`（tools_contract.rs）、`plan_to_act_note_mentions_execution`（prompt.rs）
 - 新增：`menu_filters_compact`（command.rs）、`/c` 和 `/compact` parse 测试
 - 全量：227 passed, 0 failed, clippy --all-targets -D warnings clean
+
+## 修复（review round 2）
+- **F1〔P1〕`/task` 切换会话后硬中止失效**：主循环的 `cancel`（`app.rs`）是不可变 `let` 且从未回绑，双击 Esc 取消的是首个会话的废弃 token，切换后的活跃会话无法中断（mid-tool 硬中止 + turn 边界 cancel 均失效）。修复：`let mut cancel`，并把回绑抽成纯函数 `worker::rebind_session`（命令通道 / 事件流 / session_id / cancel 四项一起移交给新会话），于 `/task` 切换处调用。
+- **`/compact` busy 反馈**：运行中触发 `/compact` 原先静默无效；现经纯函数 `worker::gate_compact(running) -> CompactGate{Run, SkipRunning}` 路由，`SkipRunning` 时推一条黄色 `[compact] busy — retry when idle` marker。
+- 测试（worker.rs 内联）：`gate_compact_runs_when_idle` / `gate_compact_rejects_when_running` / `rebind_session_swaps_the_active_cancel_token`（regression guard：回绑后 cancel 新会话 token、旧 token 或phaned 不受影响）。
+- 记忆口径：F1 属接线修复、不改语义模型（cancel 仍由调用方挂载），按 repo-local-memory Final Gate 不落 `agents/*`；仅本 changelog 记录。

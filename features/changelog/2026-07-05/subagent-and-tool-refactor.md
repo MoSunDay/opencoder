@@ -37,7 +37,7 @@
 #### say: 助手标识
 - Assistant 块渲染时增加 `say:` 绿色粗体头标行（对齐 user: 标识），后续行 4 空格缩进。流式和 Markdown 渲染后均有此标识。
 
-#### 快捷键重构（codex-cli 风格）
+#### 快捷键重构
 - **Enter**：空闲=提交 prompt，运行中=Steer（强干预，turn boundary 提交，reset step budget）
 - **Tab**：空闲=提交 prompt，运行中=Follow-up 队列（弱排队，任务完成后提交）
 - **Alt+Tab**：切换 act↔plan 模式（Ctrl+T 保留为不支持 Alt+Tab 的终端的 fallback）
@@ -93,7 +93,3 @@
 - **max_steps 清理**：`e2e-glm.sh` 移除 `"max_steps":25`；`steer_followup.rs` 测试名/docstring 去 `resets_step`。
 - **编译修复**：4 处 `ChatRequest` 缺 `reasoning_effort` 字段；3 处 clippy `map_or(false, ...)` → `is_some_and(...)`。
 - **记忆文档修复**：6 个文件（agents.md / agents/core / agents/session / agents/store / features/index / skill-picker changelog）——去除 max_steps/step 引用、更新 agent 数量/表数/快捷键/测试数。
-
-## 设计参考
-- opencode 原版 agent 模型：build/plan（primary）+ general/explore/scout（subagent），Tab 切换 primary。
-- codex-cli 交互：Alt+Tab 模式切换，Enter=steer，Tab=follow-up。

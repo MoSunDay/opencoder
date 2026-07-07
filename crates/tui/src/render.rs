@@ -20,6 +20,7 @@ use crate::composer;
 use crate::fmt as fmtmod;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
+use crate::queue_panel::{btn_x_offsets, QueueBtn, QueueBtnAction};
 use crate::task::TaskPicker;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -39,6 +40,7 @@ const SPINNER: [&str; 10] = [
 pub(crate) struct MouseHits {
     pub jump_btn: Option<Rect>,
     pub body: Option<Rect>,
+    pub queue_btns: Vec<QueueBtn>,
 }
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
@@ -61,7 +63,7 @@ pub(crate) fn render(
     workdir: &Path,
     status: &str,
     steer_items: &[String],
-    queue_items: &[String],
+    queue_items: &[(i64, String)],
     scroll: &mut u16,
     follow: bool,
     anim_tick: u32,
@@ -94,10 +96,11 @@ pub(crate) fn render(
             .split(area);
 
         let mut ci = 0;
+        hits.queue_btns.clear();
         render_body(f, chunks[ci], chat, scroll, follow, &mut hits.body);
         ci += 1;
         if queue_h > 0 {
-            render_queue_panel(f, chunks[ci], steer_items, queue_items);
+            render_queue_panel(f, chunks[ci], steer_items, queue_items, &mut hits.queue_btns);
         }
         ci += 1;
         if skill_h > 0 {
@@ -275,13 +278,25 @@ fn render_status(
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_queue_panel(f: &mut Frame, area: Rect, steer_items: &[String], queue_items: &[String]) {
-    let mut entries: Vec<(&str, &str, Color)> = Vec::new();
-    for s in steer_items {
-        entries.push(("\u{21b3} steer", s.as_str(), Color::Blue));
+fn render_queue_panel(
+    f: &mut Frame,
+    area: Rect,
+    steer_items: &[String],
+    queue_items: &[(i64, String)],
+    btns: &mut Vec<QueueBtn>,
+) {
+    struct E<'a> {
+        prefix: &'a str,
+        text: &'a str,
+        color: Color,
+        seq: Option<i64>,
     }
-    for q in queue_items {
-        entries.push(("[queued]", q.as_str(), Color::Yellow));
+    let mut entries: Vec<E> = Vec::new();
+    for s in steer_items {
+        entries.push(E { prefix: "\u{21b3} steer", text: s.as_str(), color: Color::Blue, seq: None });
+    }
+    for (seq, q) in queue_items {
+        entries.push(E { prefix: "[queued]", text: q.as_str(), color: Color::Yellow, seq: Some(*seq) });
     }
     let total = entries.len();
     if total == 0 || area.height == 0 {
@@ -302,15 +317,54 @@ fn render_queue_panel(f: &mut Frame, area: Rect, steer_items: &[String], queue_i
             Style::default().fg(Color::DarkGray),
         )));
     }
-    for (prefix, text, color) in visible {
-        let full = format!(" {prefix}: {text}");
-        let display = if full.chars().count() > avail_w {
-            let take = avail_w.saturating_sub(3);
-            format!(" {}\u{2026}", full.chars().take(take).collect::<String>())
+    // Clickable queue rows reserve a 6-column trailing control strip
+    // (" \u{25b2} \u{25bc} \u{2715}"); steer rows and very narrow terminals
+    // render without controls. Each control glyph gets a 1-cell hit rect.
+    let btn_w = 6usize;
+    for e in visible {
+        let clickable = e.seq.is_some() && avail_w > btn_w + 4;
+        let cap = if clickable { avail_w.saturating_sub(btn_w) } else { avail_w };
+        let head = format!(" {}: {}", e.prefix, e.text);
+        let head_display = if head.chars().count() > cap {
+            let take = cap.saturating_sub(1);
+            format!("{}\u{2026}", head.chars().take(take).collect::<String>())
         } else {
-            full
+            head
         };
-        lines.push(Line::from(Span::styled(display, Style::default().fg(*color))));
+        let head_len = head_display.chars().count();
+        let mut spans: Vec<Span> = vec![Span::styled(head_display, Style::default().fg(e.color))];
+        if clickable {
+            let seq = e.seq.unwrap();
+            let y = area.y + lines.len() as u16;
+            // Right-align the control strip: pad the head out to `cap` so the
+            // glyphs land at the right edge and stay aligned with the hit rects
+            // (which `btn_x_offsets` computes from the same right-edge layout).
+            let pad = cap.saturating_sub(head_len);
+            if pad > 0 {
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+            spans.push(Span::styled(
+                " \u{25b2} \u{25bc} \u{2715}".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+            let [up_x, down_x, del_x] = btn_x_offsets(area.width);
+            btns.push(QueueBtn {
+                seq,
+                action: QueueBtnAction::Up,
+                rect: Rect::new(area.x + up_x, y, 1, 1),
+            });
+            btns.push(QueueBtn {
+                seq,
+                action: QueueBtnAction::Down,
+                rect: Rect::new(area.x + down_x, y, 1, 1),
+            });
+            btns.push(QueueBtn {
+                seq,
+                action: QueueBtnAction::Delete,
+                rect: Rect::new(area.x + del_x, y, 1, 1),
+            });
+        }
+        lines.push(Line::from(spans));
     }
 
     f.render_widget(Paragraph::new(lines), area);

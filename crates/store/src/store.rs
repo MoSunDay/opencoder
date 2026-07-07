@@ -39,6 +39,10 @@ pub trait Store: Send + Sync {
     /// Delete a pending input by its row id. Used by the TUI queue panel
     /// to let users remove a queued/steered prompt before it's consumed.
     async fn delete_input(&self, input_id: i64) -> Result<()>;
+    /// Swap the drain order of two pending inputs by exchanging their
+    /// `admitted_seq`. Both rows must belong to `session_id` and be still
+    /// unpromoted. Used by the TUI queue panel to reorder follow-ups.
+    async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()>;
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64>;
     async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>>;

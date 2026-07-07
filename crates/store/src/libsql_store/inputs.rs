@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use libsql::{params, Connection};
 use tracing::warn;
 
@@ -126,6 +126,44 @@ pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Opt
 /// Delete a pending input by its row seq.
 pub async fn delete_input(conn: &Connection, seq: i64) -> Result<()> {
     conn.execute("DELETE FROM session_inputs WHERE seq = ?", params![seq]).await?;
+    Ok(())
+}
+
+/// Swap the drain order of two pending inputs by exchanging their
+/// `admitted_seq`. Both rows must belong to `session_id` and be still
+/// unpromoted. Used by the TUI queue panel to reorder follow-ups.
+pub async fn swap_input_order(conn: &Connection, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()> {
+    if seq_a == seq_b {
+        return Ok(());
+    }
+    let tx = conn.transaction().await?;
+    let stmt = tx
+        .prepare("SELECT admitted_seq FROM session_inputs WHERE seq = ? AND session_id = ? AND promoted_seq IS NULL")
+        .await?;
+    let mut rows = stmt.query(params![seq_a, session_id]).await?;
+    let a_val: i64 = match rows.next().await? {
+        Some(r) => r.get(0)?,
+        None => bail!("input seq {seq_a} not found, not in session, or already promoted"),
+    };
+    drop(stmt);
+    drop(rows);
+    let stmt = tx
+        .prepare("SELECT admitted_seq FROM session_inputs WHERE seq = ? AND session_id = ? AND promoted_seq IS NULL")
+        .await?;
+    let mut rows = stmt.query(params![seq_b, session_id]).await?;
+    let b_val: i64 = match rows.next().await? {
+        Some(r) => r.get(0)?,
+        None => bail!("input seq {seq_b} not found, not in session, or already promoted"),
+    };
+    drop(stmt);
+    drop(rows);
+    tx.execute(
+        "UPDATE session_inputs SET admitted_seq = CASE WHEN seq = ? THEN ? WHEN seq = ? THEN ? END WHERE seq IN (?, ?)",
+        params![seq_a, b_val, seq_b, a_val, seq_a, seq_b],
+    )
+    .await
+    .context("swap admitted_seq")?;
+    tx.commit().await?;
     Ok(())
 }
 

@@ -3,7 +3,7 @@ Keybindings:
   Shift+Tab        switch mode act <--> plan  (Alt+Tab / Ctrl+T fallback)
   Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
-  Shift+Enter      insert newline (multi-line input)
+  Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                select skill (dropdown; fuzzy match)
   /                slash command picker: /task (sessions), /model (config), /compact (compress history)
   Esc              close help (if open) / close popup / clear input

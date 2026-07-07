@@ -3,7 +3,7 @@ Commit: (working-tree, pre-initial-commit)
 # session 模块
 
 ## 职责
-agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → 持久化」的主循环，并实现 opencode 两段式 delivery（steer/queue）、上下文压缩、会话恢复、title 生成、可中断（turn 边界 + mid-tool 硬中止）。
+agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → 持久化」的主循环，并实现两段式 delivery（steer/queue）、上下文压缩、会话恢复、title 生成、可中断（turn 边界 + mid-tool 硬中止）。
 
 ## 边界与非目标
 - 不做 HTTP / 终端 IO（由 web/cli/tui 负责）。

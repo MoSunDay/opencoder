@@ -1,6 +1,6 @@
 # OpenCoder Performance Profile
 
-Measured on the Rust implementation vs the opencode TypeScript reference.
+Cold startup, store latency, and test-suite cost profile.
 Hardware: linux/x86_64 dev container. Release build (`lto="thin"`, `codegen-units=1`, `strip=true`).
 
 ## 1. Cold startup (`--help`)
@@ -8,9 +8,8 @@ Hardware: linux/x86_64 dev container. Release build (`lto="thin"`, `codegen-unit
 | Binary | median | range |
 |---|---|---|
 | **opencoder (Rust, release)** | **~6 ms** | 5–8 ms |
-| opencode (Bun, TS reference) | ~1489 ms | 1460–3610 ms |
 
-Rust is ~250× faster to first response. Target was < 50 ms — met with 8× headroom.
+Startup is ~6 ms, well under the 50 ms target (8× headroom).
 
 Binary size: **9.3 MB** (stripped, thin-LTO).
 

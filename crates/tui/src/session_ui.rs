@@ -21,7 +21,7 @@ pub struct SessionUiState {
     pub context_used: u64,
     pub sys_tokens: u64,
     pub steer_items: Vec<String>,
-    pub queue_items: Vec<String>,
+    pub queue_items: Vec<(i64, String)>,
     pub active_skill: Option<String>,
     pub agent_name: String,
 }
@@ -59,7 +59,7 @@ impl SessionUiState {
         context_used: u64,
         sys_tokens: u64,
         steer_items: &[String],
-        queue_items: &[String],
+        queue_items: &[(i64, String)],
         active_skill: &Option<String>,
     ) -> Self {
         SessionUiState {
@@ -155,7 +155,7 @@ mod tests {
         let history = vec!["msg1".into(), "msg2".into()];
         let skill = Some("code-review".into());
         let steers = vec!["fix bug".into(), "add tests".into(), "refactor".into()];
-        let queues = vec!["run lint".into()];
+        let queues = vec![(1_i64, "run lint".into())];
 
         let snap = SessionUiState::snapshot(
             true,
@@ -197,7 +197,7 @@ mod tests {
         // Simulate: snapshot → (logically "store") → compare against fresh values.
         let chat = sample_chat();
         let steers = vec!["s1".into()];
-        let queues = vec!["q1".into(), "q2".into()];
+        let queues = vec![(1_i64, "q1".into()), (2_i64, "q2".into())];
         let snap = SessionUiState::snapshot(
             true, &chat, &["h1".into()], 10, false, 100, 200, &steers, &queues, &Some("s".into()),
         );

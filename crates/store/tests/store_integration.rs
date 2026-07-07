@@ -390,6 +390,87 @@ async fn inputs_steer_and_queue_promotion_semantics() {
 }
 
 #[tokio::test]
+async fn swap_input_order_changes_drain_order() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
+        SessionInput {
+            id: format!("in-{seq}"),
+            session_id: "s".into(),
+            delivery,
+            prompt: prompt.into(),
+            admitted_seq: seq,
+            promoted_seq: None,
+        }
+    };
+
+    let seq_a = store.admit_input(&admit(1, Delivery::Queue, "A")).await.unwrap();
+    let _seq_b = store.admit_input(&admit(2, Delivery::Queue, "B")).await.unwrap();
+    let seq_c = store.admit_input(&admit(3, Delivery::Queue, "C")).await.unwrap();
+
+    let prompts: Vec<String> = store
+        .pending_inputs("s", Delivery::Queue)
+        .await
+        .unwrap()
+        .iter()
+        .map(|i| i.prompt.clone())
+        .collect();
+    assert_eq!(prompts, vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+
+    store.swap_input_order("s", seq_a, seq_c).await.unwrap();
+
+    let prompts: Vec<String> = store
+        .pending_inputs("s", Delivery::Queue)
+        .await
+        .unwrap()
+        .iter()
+        .map(|i| i.prompt.clone())
+        .collect();
+    assert_eq!(prompts, vec!["C".to_string(), "B".to_string(), "A".to_string()]);
+
+    // swapping against a non-existent seq must error
+    assert!(store.swap_input_order("s", seq_a, 999999).await.is_err());
+}
+
+#[tokio::test]
+async fn delete_input_removes_pending_and_preserves_order() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
+        SessionInput {
+            id: format!("in-{seq}"),
+            session_id: "s".into(),
+            delivery,
+            prompt: prompt.into(),
+            admitted_seq: seq,
+            promoted_seq: None,
+        }
+    };
+
+    let _seq_a = store.admit_input(&admit(1, Delivery::Queue, "A")).await.unwrap();
+    let seq_b = store.admit_input(&admit(2, Delivery::Queue, "B")).await.unwrap();
+    let _seq_c = store.admit_input(&admit(3, Delivery::Queue, "C")).await.unwrap();
+
+    // Delete the middle item; A and C remain in admitted_seq order.
+    store.delete_input(seq_b).await.unwrap();
+
+    let remaining: Vec<String> = store
+        .pending_inputs("s", Delivery::Queue)
+        .await
+        .unwrap()
+        .iter()
+        .map(|i| i.prompt.clone())
+        .collect();
+    assert_eq!(remaining, vec!["A".to_string(), "C".to_string()]);
+
+    // Idempotent: re-deleting matches 0 rows but is not an error.
+    store.delete_input(seq_b).await.unwrap();
+    assert_eq!(store.pending_inputs("s", Delivery::Queue).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn events_append_and_after_replay() {
     let (_dir, store) = fresh().await;
     make_session(&store, "s", 1).await;

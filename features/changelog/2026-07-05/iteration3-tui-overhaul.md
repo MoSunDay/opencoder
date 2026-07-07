@@ -3,7 +3,7 @@ Commit: (working-tree, pre-initial-commit)
 # 迭代三：TUI 大改（4-region 布局 / scrollback / 可见光标 / 上下文显示 / subagent / steer-followup TUI 接入）
 
 ## Context
-迭代二完成了存储 / 配置 / steer / web / 恢复 / 性能，但 TUI 仍是迭代一的简单三行布局：无 scrollback、光标不可见、不显示上下文用量、不渲染 subagent 事件、steer/followup 仅在 web 层可用。本迭代对齐 codex/opencode 的 TUI 布局参考，同时保持 Rust 原生高性能（ratatui + crossterm，不移植 Effect-TS/flexbox 实现）。
+迭代二完成了存储 / 配置 / steer / web / 恢复 / 性能，但 TUI 仍是迭代一的简单三行布局：无 scrollback、光标不可见、不显示上下文用量、不渲染 subagent 事件、steer/followup 仅在 web 层可用。本迭代把 TUI 重写为 Rust 原生实现（ratatui + crossterm），补齐 scrollback / 可见光标 / 上下文用量 / subagent 事件 / steer-followup。
 
 ## Change Summary
 - **4-region 布局**：`app.rs` 重写为 header(1) / body(Min) / composer(3) / status(1) 四区域 `Layout::vertical`；header 显示 model + agent + workdir + 上下文百分比；status 显示 running/idle + steer/queue 计数 + chat.status。
@@ -12,7 +12,7 @@ Commit: (working-tree, pre-initial-commit)
 - **Scrollback**：body 区 `Paragraph::scroll` + `PageUp/Down` + `Ctrl+U/D` 滚动；auto-follow 到底部（用户上滚时暂停跟随）。
 - **光标移动**：`Left/Right/Home/End` 移动字符光标；`Backspace` 删除前一个字符（unicode 安全）；`composer.rs` 提供 `insert_char` / `backspace` / `cursor_column` 纯函数。
 - **subagent 渲染**：`SessionEvent` 新增 `SubagentStart{id,kind,prompt}` / `SubagentEnd{id,ok,summary}`；`run_subagent` 转发子 agent 事件到父级 `on_event`；TUI / CLI / web 三处 `match` 均已覆盖。
-- **TUI steer / followup**：TUI 会话挂载 libsql Store（与 CLI/web 同路径）；`Ctrl+O` admit steer（运行中重定向）、`Ctrl+J` admit follow-up 到队列；worker 的 drain loop（迭代二）自动在 turn 边界 / idle 消费——TUI 现已具备 opencode 缺失的 steer 能力。
+- **TUI steer / followup**：TUI 会话挂载 libsql Store（与 CLI/web 同路径）；`Ctrl+O` admit steer（运行中重定向）、`Ctrl+J` admit follow-up 到队列；worker 的 drain loop（迭代二）自动在 turn 边界 / idle 消费——TUI 现已具备 steer 能力。
 - **keybind help**：更新为完整快捷键列表（含 steer/queue/scroll/cursor）。
 
 ## Impact Surface

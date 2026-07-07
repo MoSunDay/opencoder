@@ -7,6 +7,7 @@ pub mod keybind;
 pub mod markdown;
 pub mod menu;
 pub mod model_menu;
+pub mod queue_panel;
 pub mod render;
 pub mod session_ui;
 pub mod task;

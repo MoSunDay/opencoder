@@ -471,6 +471,41 @@ async fn delete_input_removes_pending_and_preserves_order() {
 }
 
 #[tokio::test]
+async fn delete_input_preserves_already_promoted_audit_row() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
+        SessionInput {
+            id: format!("in-{seq}"),
+            session_id: "s".into(),
+            delivery,
+            prompt: prompt.into(),
+            admitted_seq: seq,
+            promoted_seq: None,
+        }
+    };
+
+    let seq_a = store.admit_input(&admit(1, Delivery::Queue, "A")).await.unwrap();
+    // Drain A (promoted_seq now set); nothing pending.
+    assert!(store.promote_next_queued("s").await.unwrap().is_some());
+    assert!(store.pending_inputs("s", Delivery::Queue).await.unwrap().is_empty());
+
+    // Delete the already-promoted A — the `promoted_seq IS NULL` guard must
+    // skip it, preserving the audit row.
+    store.delete_input(seq_a).await.unwrap();
+
+    // Re-admit C; its admitted_seq reveals whether A's row survived:
+    //   guard present -> MAX(admitted_seq)=1 (A kept) -> C admitted_seq = 2
+    //   guard absent  -> A deleted                  -> C admitted_seq = 1
+    let _ = store.admit_input(&admit(2, Delivery::Queue, "C")).await.unwrap();
+    let pending = store.pending_inputs("s", Delivery::Queue).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].prompt, "C");
+    assert_eq!(pending[0].admitted_seq, 2, "promoted audit row must be preserved");
+}
+
+#[tokio::test]
 async fn events_append_and_after_replay() {
     let (_dir, store) = fresh().await;
     make_session(&store, "s", 1).await;

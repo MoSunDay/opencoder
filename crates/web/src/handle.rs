@@ -45,6 +45,7 @@ impl SseEvt {
             SessionEvent::SubagentStart { id, kind, prompt } => ("subagent_start".to_string(), serde_json::json!({ "id": id, "kind": kind, "prompt": prompt }), EventKind::Step),
             SessionEvent::SubagentEnd { id, ok, summary } => ("subagent_end".to_string(), serde_json::json!({ "id": id, "ok": ok, "summary": summary }), EventKind::Step),
             SessionEvent::TranscriptReset(_) => ("transcript_reset".to_string(), serde_json::json!({}), EventKind::Compaction),
+            SessionEvent::QueueConsumed { seq } => ("queue_consumed".to_string(), serde_json::json!({ "seq": seq }), EventKind::Step),
         };
         (SseEvt { kind, data, ts, seq: None }, event_kind)
     }

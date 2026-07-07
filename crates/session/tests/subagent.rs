@@ -30,6 +30,27 @@ fn task_turn(prompt: &str) -> LlmEvent {
     }
 }
 
+/// Parent turn emitting TWO `task` calls in a single response — the runner
+/// dispatches them concurrently (FuturesUnordered) rather than serially.
+fn two_task_turn() -> LlmEvent {
+    LlmEvent::Completed {
+        text: "delegating to two".into(),
+        tool_calls: vec![
+            CompletedToolCall {
+                id: "task-A".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job A", "subagent_type": "explore"}),
+            },
+            CompletedToolCall {
+                id: "task-B".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job B", "subagent_type": "explore"}),
+            },
+        ],
+        usage: Some(Usage { input_tokens: 10, output_tokens: 5, total_tokens: 15 }),
+    }
+}
+
 fn text_done(text: &str) -> LlmEvent {
     LlmEvent::Completed { text: text.into(), tool_calls: vec![], usage: None }
 }
@@ -67,6 +88,50 @@ async fn subagent_emits_start_and_end_events() {
         if summary.contains("found")
     ));
     assert!(has_end, "expected SubagentEnd(ok=true, summary contains 'found'), got {:?}", events.iter().map(format_ev).collect::<Vec<_>>());
+}
+
+#[tokio::test]
+async fn concurrent_subagent_dispatch_in_one_turn() {
+    // Parent emits TWO task calls in one turn. The runner fans them out
+    // concurrently (FuturesUnordered); both children run to completion and the
+    // parent collects both results. Each child emits SubagentStart (running)
+    // and SubagentEnd (finished), so the user sees both lifecycle signals.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![two_task_turn()])        // parent turn 1: two task calls
+            .push_script(vec![text_done("result A")])  // child 1 turn
+            .push_script(vec![text_done("result B")])  // child 2 turn
+            .push_script(vec![text_done("parent done")]), // parent turn 2: done
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session = SessionState::new("sub-concurrent", agent, config(), mock, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut session, "delegate two jobs".into(), |ev| events.push(ev)).await.unwrap();
+
+    let starts = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::SubagentStart { .. }))
+        .count();
+    assert_eq!(starts, 2, "expected 2 SubagentStart (running) events, got {:?}", events.iter().map(format_ev).collect::<Vec<_>>());
+
+    let ends: Vec<(bool, String)> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::SubagentEnd { ok, summary, .. } => Some((*ok, summary.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ends.len(), 2, "expected 2 SubagentEnd (finished) events");
+    assert!(ends.iter().all(|(ok, _)| *ok), "both subagents should succeed: {:?}", ends);
+
+    let joined = ends.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join(" || ");
+    assert!(
+        joined.contains("result A") && joined.contains("result B"),
+        "both child results should be forwarded to the parent: {joined}"
+    );
 }
 
 #[tokio::test]

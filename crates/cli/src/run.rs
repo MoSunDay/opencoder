@@ -144,6 +144,7 @@ fn print_event(ev: &SessionEvent) {
             eprintln!("\x1b[34m  {mark} {summary}\x1b[0m");
         }
         SessionEvent::TranscriptReset(_) => {}
+        SessionEvent::QueueConsumed { .. } => {}
     }
 }
 

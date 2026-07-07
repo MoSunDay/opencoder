@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
 use opencode_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc, ToolContext, ToolOutput};
 use opencode_llm::tool_call::CompletedToolCall;
 use opencode_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
@@ -31,6 +32,10 @@ pub enum SessionEvent {
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<opencode_core::Message>),
+    /// A queued follow-up was consumed (drained) at an idle boundary. Carries
+    /// the consumed input's row seq so the TUI can drop it from its pending
+    /// mirror instead of leaving a stale `[queued]` row until `Done`.
+    QueueConsumed { seq: i64 },
     Done,
     Error(String),
 }
@@ -38,9 +43,26 @@ pub enum SessionEvent {
 const MAX_OUTPUT: usize = 20_000;
 const DOOM_THRESHOLD: usize = 3;
 
-/// True if the session's cancellation token has been tripped (hard-abort).
+/// Resolves when the session is cancelled token has been tripped (hard-abort).
 fn cancelled(session: &SessionState) -> bool {
     session.cancel.as_ref().map(|c| c.is_cancelled()).unwrap_or(false)
+}
+
+/// Shared event sink for concurrent tool dispatch. Wraps the borrowed `FnMut`
+/// closure in a `Mutex` so multiple in-flight tool/subagent futures can emit
+/// events safely (emissions serialize; each is a fast push). The lifetime is
+/// bound to the caller's closure — no `'static` requirement, so test closures
+/// that borrow local state keep working unmodified.
+type Sink<'a> = Arc<Mutex<&'a mut (dyn FnMut(SessionEvent) + Send)>>;
+
+/// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
+/// possible on panic inside a closure) drops the event rather than propagating.
+fn emit(sink: &Sink<'_>, ev: SessionEvent) {
+    if let Ok(mut g) = sink.lock() {
+        // g: MutexGuard<&mut (dyn FnMut + Send)>; deref to the inner closure
+        // reference and call it.
+        (**g)(ev);
+    }
 }
 
 /// Resolves when the session is cancelled. If no token is attached, this never
@@ -81,7 +103,7 @@ pub async fn run_with_registry(
 async fn run_loop(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
-    on_event: &mut (impl FnMut(SessionEvent) + Send),
+    on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<()> {
     let mut doom: VecDeque<String> = VecDeque::new();
 
@@ -150,58 +172,87 @@ async fn run_loop(
         if tool_calls.is_empty() {
             // Idle boundary: consume exactly ONE queued follow-up, if any. A
             // queued input only fires when the session would otherwise go idle.
-            if let Some(q) = claim_one_queued(session).await {
+            if let Some((seq, q)) = claim_one_queued(session).await {
                 let mut m = Message::user(new_id(), q);
                 m.synthetic = true;
                 session.record(m).await;
-                on_event(SessionEvent::Status("queued follow-up promoted".into()));
+                on_event(SessionEvent::QueueConsumed { seq });
                 continue;
             }
             on_event(SessionEvent::Done);
             break;
         }
 
-        let mut tool_msg = Message {
+        // ---- Tool execution: independent tool calls run concurrently so that,
+        // e.g., multiple subagent (`task`) dispatches overlap instead of
+        // serializing. The shared `sink` wraps the borrowed FnMut in a Mutex so
+        // concurrent futures can emit events safely (each emit is a fast push).
+        // Results are re-sorted by original call index so the Tool message and
+        // event replay stay deterministic regardless of completion order.
+        let tool_blocks: Vec<ContentBlock> = {
+            let sink: Sink = Arc::new(Mutex::new(&mut *on_event));
+            // Doom-loop guard, evaluated over this turn's batch.
+            for tc in &tool_calls {
+                let sig = format!("{}:{}", tc.name, tc.input);
+                doom.push_back(sig.clone());
+                if doom.len() > DOOM_THRESHOLD {
+                    doom.pop_front();
+                }
+                if doom.len() == DOOM_THRESHOLD && doom.iter().all(|s| s == &sig) {
+                    emit(&sink, SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()));
+                    return Ok(());
+                }
+            }
+            // Announce every tool start up front, in call order.
+            for tc in &tool_calls {
+                emit(&sink, SessionEvent::ToolStart {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    input: tc.input.clone(),
+                });
+            }
+            let session_ref: &SessionState = session;
+            let mut futs = FuturesUnordered::new();
+            for (i, tc) in tool_calls.iter().enumerate() {
+                let sink = Arc::clone(&sink);
+                futs.push(async move {
+                    let out = execute_call(tc, session_ref, registry, &sink).await;
+                    (i, out)
+                });
+            }
+            let mut results: Vec<(usize, ToolOutput)> = Vec::with_capacity(tool_calls.len());
+            while let Some((i, out)) = futs.next().await {
+                emit(&sink, SessionEvent::ToolEnd {
+                    id: tool_calls[i].id.clone(),
+                    name: tool_calls[i].name.clone(),
+                    output: out.content.clone(),
+                    is_error: out.is_error,
+                });
+                results.push((i, out));
+                if cancelled(session_ref) {
+                    break;
+                }
+            }
+            results.sort_by_key(|(i, _)| *i);
+            results
+                .into_iter()
+                .map(|(i, out)| ContentBlock::ToolResult {
+                    tool_use_id: tool_calls[i].id.clone(),
+                    content: out.content,
+                    is_error: out.is_error,
+                })
+                .collect()
+        };
+        let tool_msg = Message {
             id: new_id(),
             role: Role::Tool,
-            blocks: Vec::new(),
+            blocks: tool_blocks,
             model: None,
             agent: None,
             usage: MessageUsage::default(),
             created_at: now_ms(),
             synthetic: false,
         };
-        for tc in tool_calls {
-            let sig = format!("{}:{}", tc.name, tc.input);
-            doom.push_back(sig.clone());
-            if doom.len() > DOOM_THRESHOLD {
-                doom.pop_front();
-            }
-            if doom.len() == DOOM_THRESHOLD && doom.iter().all(|s| s == &sig) {
-                on_event(SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()));
-                return Ok(());
-            }
-            on_event(SessionEvent::ToolStart {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                input: tc.input.clone(),
-            });
-            let out = execute_call(&tc, session, registry, &mut *on_event).await;
-            on_event(SessionEvent::ToolEnd {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                output: out.content.clone(),
-                is_error: out.is_error,
-            });
-            if cancelled(session) {
-                break;
-            }
-            tool_msg.blocks.push(ContentBlock::ToolResult {
-                tool_use_id: tc.id.clone(),
-                content: out.content,
-                is_error: out.is_error,
-            });
-        }
         session.record(tool_msg).await;
     }
     Ok(())
@@ -210,7 +261,7 @@ async fn run_loop(
 async fn run_one_llm_call(
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
-    on_event: &mut (impl FnMut(SessionEvent) + Send),
+    on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<(String, Vec<CompletedToolCall>, Option<Usage>)> {
     let system = build_system(&session.agent, &session.working_dir, session.skill_prompt.as_deref());
     let mut to_send = vec![system];
@@ -264,10 +315,10 @@ async fn execute_call(
     tc: &CompletedToolCall,
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
-    on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    sink: &Sink<'_>,
 ) -> ToolOutput {
     if tc.name == "task" {
-        return run_subagent(tc.input.clone(), tc.id.clone(), session, registry, on_event).await;
+        return run_subagent(tc.input.clone(), tc.id.clone(), session, registry, sink).await;
     }
     // Plan-mode bash write guard: classify the command and block mutating
     // operations, returning a descriptive error to the model so it can adapt.
@@ -307,7 +358,7 @@ async fn run_subagent(
     call_id: String,
     parent: &SessionState,
     registry: &HashMap<String, ToolArc>,
-    on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    sink: &Sink<'_>,
 ) -> ToolOutput {
     let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if prompt.is_empty() {
@@ -324,7 +375,7 @@ async fn run_subagent(
     };
     let child_session_id = format!("sub-{}", new_id());
     let preview: String = prompt.chars().take(80).collect();
-    on_event(SessionEvent::SubagentStart {
+    emit(sink, SessionEvent::SubagentStart {
         id: call_id.clone(),
         kind: kind.clone(),
         prompt: preview,
@@ -391,6 +442,7 @@ async fn run_subagent(
     let child_id_for_cb = child_session_id.clone();
     let summary_chars = &mut child_chars;
     let tool_count = &mut child_tools;
+    let parent_sink = Arc::clone(sink);
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
@@ -423,10 +475,10 @@ async fn run_subagent(
             match cev {
                 SessionEvent::ToolStart { id, name, input } => {
                     *tool_count += 1;
-                    on_event(SessionEvent::ToolStart { id, name, input });
+                    emit(&parent_sink, SessionEvent::ToolStart { id, name, input });
                 }
                 SessionEvent::ToolEnd { id, name, output, is_error } => {
-                    on_event(SessionEvent::ToolEnd { id, name, output, is_error });
+                    emit(&parent_sink, SessionEvent::ToolEnd { id, name, output, is_error });
                 }
                 SessionEvent::TextDelta(t) => {
                     if summary_chars.len() < 240 {
@@ -434,7 +486,7 @@ async fn run_subagent(
                     }
                 }
                 SessionEvent::Error(e) => {
-                    on_event(SessionEvent::Status(format!("subagent error: {e}")));
+                    emit(&parent_sink, SessionEvent::Status(format!("subagent error: {e}")));
                 }
                 _ => {}
             }
@@ -461,7 +513,7 @@ async fn run_subagent(
     } else {
         child_chars.chars().take(120).collect()
     };
-    on_event(SessionEvent::SubagentEnd {
+    emit(sink, SessionEvent::SubagentEnd {
         id: call_id.clone(),
         ok,
         summary: format!("({} tool calls) {}", child_tools, summary_preview),
@@ -521,11 +573,11 @@ async fn claim_steers(session: &mut SessionState) -> Vec<String> {
     pending.into_iter().map(|i| i.prompt).collect()
 }
 
-/// Claim exactly one queued input at idle. Returns its prompt, or None.
-async fn claim_one_queued(session: &mut SessionState) -> Option<String> {
+/// Claim exactly one queued input at idle. Returns its (row seq, prompt), or None.
+async fn claim_one_queued(session: &mut SessionState) -> Option<(i64, String)> {
     let store = session.store.clone()?;
     match store.claim_next_queue(&session.id).await {
-        Ok(Some(input)) => Some(input.prompt),
+        Ok(Some((seq, input))) => Some((seq, input.prompt)),
         Ok(None) => None,
         Err(e) => {
             tracing::warn!(error = %e, "claim_one_queued failed");

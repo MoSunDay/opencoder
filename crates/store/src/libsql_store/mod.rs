@@ -117,7 +117,7 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::promote_next_queued(&conn, session_id).await
     }
-    async fn claim_next_queue(&self, session_id: &str) -> Result<Option<SessionInput>> {
+    async fn claim_next_queue(&self, session_id: &str) -> Result<Option<(i64, SessionInput)>> {
         let conn = self.conn().await?;
         inputs::claim_next_queue(&conn, session_id).await
     }

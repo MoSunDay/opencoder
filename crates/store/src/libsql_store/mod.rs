@@ -125,6 +125,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::delete_input(&conn, input_id).await
     }
+    async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()> {
+        let conn = self.conn().await?;
+        inputs::swap_input_order(&conn, session_id, seq_a, seq_b).await
+    }
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
         let conn = self.conn().await?;

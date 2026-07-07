@@ -84,6 +84,43 @@ fn enter_while_running_admits_steer() {
 }
 
 #[test]
+fn enter_with_shift_inserts_newline() {
+    let mut input = String::from("hello");
+    let mut idx = 5;
+    let action = run_handle(
+        key(KeyCode::Enter, KeyModifiers::SHIFT),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hello\n");
+    assert_eq!(idx, 6);
+}
+
+#[test]
+fn enter_with_alt_inserts_newline() {
+    let mut input = String::from("hi");
+    let mut idx = 2;
+    let action = run_handle(
+        key(KeyCode::Enter, KeyModifiers::ALT),
+        &mut input, &mut idx, true, "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hi\n");
+}
+
+#[test]
+fn ctrl_j_inserts_newline() {
+    let mut input = String::from("ab");
+    let mut idx = 2;
+    let action = run_handle(
+        key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        &mut input, &mut idx, false, "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "ab\n");
+}
+
+#[test]
 fn tab_while_running_admits_queue() {
     let mut input = String::from("next task");
     let mut idx = 9;

@@ -2,7 +2,7 @@ Commit: (working-tree, pre-initial-commit)
 
 # OpenCoder 逻辑地图
 
-OpenCoder 是 opencode（TypeScript）的高性能 Rust 重实现。单二进制 `opencoder`，workspace 由 7 个 crate 组成。所有上层依赖 `Arc<dyn Store>` / `Arc<dyn ChatStream>` 两个抽象口子，存储与 LLM 后端均可替换。
+OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进制 `opencoder`，workspace 由 7 个 crate 组成。所有上层依赖 `Arc<dyn Store>` / `Arc<dyn ChatStream>` 两个抽象口子，存储与 LLM 后端均可替换。
 
 ## 模块索引
 

@@ -3,7 +3,7 @@ Commit: (working-tree, pre-initial-commit)
 # Skill 选择器（TUI `$`）：从 ~/.opencoder/skills 加载技能并注入系统提示
 
 ## Context
-OpenCoder 此前的 agent 身份（act/plan/subagent/command）为编译期硬编码（`crates/core/src/agent.rs::builtin_agents`），无运行时可加载的「技能」概念；`agents/session/index.md` 亦将 skills 列为非目标。用户希望像 opencode 那样把可复用的操作规程（一个 SKILL.md 一个主题）放进 `~/.opencoder/skills/`，并在 TUI 里随时挂到当前会话上指导 agent，而不必改 agent 注册表或配置。
+OpenCoder 此前的 agent 身份（act/plan/subagent/command）为编译期硬编码（`crates/core/src/agent.rs::builtin_agents`），无运行时可加载的「技能」概念；`agents/session/index.md` 亦将 skills 列为非目标。用户希望把可复用的操作规程（一个 SKILL.md 一个主题）放进 `~/.opencoder/skills/`，并在 TUI 里随时挂到当前会话上指导 agent，而不必改 agent 注册表或配置。
 
 ## Change Summary
 - **core：skill 模块**（`crates/core/src/skill.rs`，新增）：`Skill{name,description,body,source}`；`skills_dir()` 返回 `~/.opencoder/skills`（二进制自有配置主目录，与 config 同源）；`discover()` 扫描该目录，识别 `<name>.md` 与 `<name>/SKILL.md` 两种布局，解析可选 `---` YAML frontmatter（`name`/`description`，缺省回退文件名 stem / 首行非标题行），按 name 排序。目录缺失或无 `.md` 返回空 `Vec`（非错误）。从 `lib.rs` 导出 `Skill`/`discover_skills`/`skills_dir`。

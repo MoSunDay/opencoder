@@ -32,6 +32,7 @@ use crate::composer;
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
 use crate::render::{in_rect, render, MouseHits, Term};
+use crate::queue_panel;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::TuiOpts;
 
@@ -125,7 +126,7 @@ async fn run_app(
     let mut context_used: u64 = 0;
     let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
     let mut steer_items: Vec<String> = Vec::new();
-    let mut queue_items: Vec<String> = Vec::new();
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
@@ -158,7 +159,7 @@ async fn run_app(
             Some(e) if !e.trim().is_empty() => format!("{model_label} \u{00b7}{e}"),
             _ => model_label.clone(),
         };
-        let mut hits = MouseHits { jump_btn: None, body: None };
+        let mut hits = MouseHits::default();
         render(
             terminal,
             &chat,
@@ -374,8 +375,9 @@ async fn run_app(
                             ) {
                                 KeyAction::Submit(text) => {
                                     if running {
-                                        let _ = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await;
-                                        queue_items.push(text.clone());
+                                        if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
+                                            queue_items.push((seq, text.clone()));
+                                        }
                                         chat.push_marker(Line::from(Span::styled(
                                             format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                     } else {
@@ -394,8 +396,9 @@ async fn run_app(
                                     follow = true;
                                 }
                                 KeyAction::Queue(text) => {
-                                    let _ = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await;
-                                    queue_items.push(text.clone());
+                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
+                                        queue_items.push((seq, text.clone()));
+                                    }
                                     chat.push_marker(Line::from(Span::styled(
                                         format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                     follow = true;
@@ -446,6 +449,23 @@ async fn run_app(
                                         if in_rect(r, m.column, m.row) {
                                             follow = true;
                                         }
+                                    }
+                                    for btn in &hits.queue_btns {
+                                        if !in_rect(btn.rect, m.column, m.row) {
+                                            continue;
+                                        }
+                                        match queue_panel::plan(&queue_items, btn.seq, btn.action) {
+                                            queue_panel::QueueEffect::Delete(seq) => {
+                                                let _ = store.delete_input(seq).await;
+                                                queue_items.retain(|(s, _)| *s != seq);
+                                            }
+                                            queue_panel::QueueEffect::Swap(a, b) => {
+                                                let _ = store.swap_input_order(&session_id, a, b).await;
+                                                queue_panel::apply_swap(&mut queue_items, a, b);
+                                            }
+                                            queue_panel::QueueEffect::None => {}
+                                        }
+                                        break;
                                     }
                                 }
                                 MouseEventKind::ScrollUp => {
@@ -615,6 +635,11 @@ pub(crate) fn handle_key(
             KeyCode::Char('n') => { move_hist(history, hist_idx, input, cursor_idx, 1); return KeyAction::None; }
             KeyCode::Char('p') => { move_hist(history, hist_idx, input, cursor_idx, -1); return KeyAction::None; }
             KeyCode::Char('u') => { *scroll = scroll.saturating_sub(10); *follow = false; return KeyAction::None; }
+            KeyCode::Char('j') => {
+                let (s, i) = composer::insert_newline(input, *cursor_idx);
+                *input = s; *cursor_idx = i;
+                return KeyAction::None;
+            }
             _ => return KeyAction::None,
         }
     }
@@ -625,8 +650,8 @@ pub(crate) fn handle_key(
             KeyAction::SwitchAgent(next.into())
         }
         KeyCode::Enter => {
-            // Shift+Enter or Alt+Enter inserts a newline (multi-line input).
-            if k.modifiers.contains(KeyModifiers::SHIFT) {
+            // Shift+Enter / Alt+Enter insert a newline (multi-line input).
+            if k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s; *cursor_idx = i;
                 return KeyAction::None;

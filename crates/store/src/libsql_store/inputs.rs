@@ -97,7 +97,9 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
 
 /// Atomically return the oldest pending queued input WITH its prompt and mark it
 /// promoted. The runner drain uses this to consume one queued follow-up at idle.
-pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Option<SessionInput>> {
+/// Returns the row seq alongside the input so callers (e.g. the TUI mirror) can
+/// reconcile by identity.
+pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Option<(i64, SessionInput)>> {
     let tx = conn.transaction().await?;
     let stmt = tx
         .prepare("SELECT seq, id, session_id, delivery, prompt, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
@@ -117,15 +119,18 @@ pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Opt
         let promoted_seq = last_input_seq_in_tx(&tx).await? + 1;
         tx.execute("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?", params![promoted_seq, seq]).await?;
         tx.commit().await?;
-        Ok(Some(input))
+        Ok(Some((seq, input)))
     } else {
         Ok(None)
     }
 }
 
-/// Delete a pending input by its row seq.
+/// Delete a pending input by its row seq. Only deletes rows that are still
+/// unpromoted (`promoted_seq IS NULL`), so consuming-then-deleting cannot wipe
+/// an already-drained audit row. Deleting a missing or already-promoted row
+/// matches 0 rows and is not an error (idempotent).
 pub async fn delete_input(conn: &Connection, seq: i64) -> Result<()> {
-    conn.execute("DELETE FROM session_inputs WHERE seq = ?", params![seq]).await?;
+    conn.execute("DELETE FROM session_inputs WHERE seq = ? AND promoted_seq IS NULL", params![seq]).await?;
     Ok(())
 }
 

@@ -23,6 +23,8 @@
   button.send{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:0 16px;cursor:pointer}
   button.send:disabled{opacity:.5;cursor:default}
   .badge{display:inline-block;margin-left:6px;font-size:10px;padding:1px 5px;border-radius:4px;background:#30363d;color:var(--mut)}
+  .think>.th{color:var(--mut);cursor:pointer;font-style:italic;user-select:none;white-space:pre-wrap}
+  .think>.tb{color:var(--mut);font-style:italic;white-space:pre-wrap;word-wrap:break-word;padding-left:10px}
 </style></head><body>
 <aside id="side">
   <h1>sessions <button class="new" onclick="newSession()">+ new</button></h1>
@@ -51,7 +53,13 @@ function render(msgs){const log=$('#log');log.innerHTML='';if(!msgs.length){log.
       if(b.kind==='text'){e.className='b';e.textContent=b.text;}
       else if(b.kind==='tool_use'){e.className='tool';e.textContent='▸ '+b.name+'  '+JSON.stringify(b.input);}
       else if(b.kind==='tool_result'){e.className='tool';const o=document.createElement('div');o.className='o';o.textContent=(b.is_error?'[error] ':'')+b.content;e.appendChild(o);}
-      else if(b.kind==='reasoning'){e.className='b';e.style.color='var(--mut)';e.textContent='… '+b.text;}
+      else if(b.kind==='reasoning'){e.className='think';
+        const lines=(b.text||'').split('\n').length;
+        const th=document.createElement('div');th.className='th';
+        th.textContent='💭 Thinking ('+lines+' lines) [↓ expand]';
+        const tb=document.createElement('div');tb.className='tb';tb.textContent=b.text;tb.style.display='none';
+        th.onclick=()=>{const open=tb.style.display!=='none';tb.style.display=open?'block':'none';th.textContent=open?('💭 Thinking ('+lines+' lines) [↓ expand]'):'💭 Thinking [↑ collapse]';};
+        e.appendChild(th);e.appendChild(tb);}
       else{return;}div.appendChild(e);});
     log.appendChild(div);});log.scrollTop=log.scrollHeight;}
 async function send(){if(!cur){await newSession();}if(busy)return;const t=$('#msg').value.trim();if(!t)return;busy=true;$('#send').disabled=true;$('#msg').value='';

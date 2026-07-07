@@ -456,16 +456,26 @@ async fn run_app(
                                         }
                                         match queue_panel::plan(&queue_items, btn.seq, btn.action) {
                                             queue_panel::QueueEffect::Delete(seq) => {
-                                                let _ = store.delete_input(seq).await;
-                                                queue_items.retain(|(s, _)| *s != seq);
+                                                if store.delete_input(seq).await.is_ok() {
+                                                    queue_items.retain(|(s, _)| *s != seq);
+                                                }
                                             }
                                             queue_panel::QueueEffect::Swap(a, b) => {
-                                                let _ = store.swap_input_order(&session_id, a, b).await;
-                                                queue_panel::apply_swap(&mut queue_items, a, b);
+                                                if store.swap_input_order(&session_id, a, b).await.is_ok() {
+                                                    queue_panel::apply_swap(&mut queue_items, a, b);
+                                                }
                                             }
                                             queue_panel::QueueEffect::None => {}
                                         }
                                         break;
+                                    }
+                                    // Click on a Thinking-block header toggles its
+                                    // collapse state (default collapsed → expand).
+                                    for btn in &hits.thinking_btns {
+                                        if in_rect(btn.rect, m.column, m.row) {
+                                            chat.toggle_thinking_at(btn.block_idx);
+                                            break;
+                                        }
                                     }
                                 }
                                 MouseEventKind::ScrollUp => {
@@ -508,6 +518,9 @@ async fn run_app(
                         } else {
                             track_context(&sev, &mut context_used);
                             chat.apply(&sev);
+                        }
+                        if let SessionEvent::QueueConsumed { seq } = &sev {
+                            queue_items.retain(|(s, _)| s != seq);
                         }
                         if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                             running = false;

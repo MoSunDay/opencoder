@@ -41,6 +41,17 @@ pub(crate) struct MouseHits {
     pub jump_btn: Option<Rect>,
     pub body: Option<Rect>,
     pub queue_btns: Vec<QueueBtn>,
+    /// Clickable Thinking-block header rows; clicking toggles collapse.
+    /// One entry per Thinking block currently visible in the body viewport.
+    pub thinking_btns: Vec<ThinkingBtn>,
+}
+
+/// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
+/// `rect` is the on-screen row of the header line.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ThinkingBtn {
+    pub block_idx: usize,
+    pub rect: Rect,
 }
 
 pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
@@ -97,7 +108,8 @@ pub(crate) fn render(
 
         let mut ci = 0;
         hits.queue_btns.clear();
-        render_body(f, chunks[ci], chat, scroll, follow, &mut hits.body);
+        hits.thinking_btns.clear();
+        render_body(f, chunks[ci], chat, scroll, follow, &mut hits.body, &mut hits.thinking_btns);
         ci += 1;
         if queue_h > 0 {
             render_queue_panel(f, chunks[ci], steer_items, queue_items, &mut hits.queue_btns);
@@ -114,6 +126,7 @@ pub(crate) fn render(
         ci += 1;
         render_status(
             f, chunks[ci], running, status, steer_items.len() as u32, queue_items.len() as u32,
+            chat.subagents_running,
             model, agent, workdir, context_used + sys_tokens, context_limit,
             anim_tick, active_skill,
         );
@@ -142,6 +155,7 @@ fn render_body(
     scroll: &mut u16,
     follow: bool,
     body_out: &mut Option<Rect>,
+    thinking_btns: &mut Vec<ThinkingBtn>,
 ) {
     *body_out = Some(area);
     let block = Block::default()
@@ -151,7 +165,7 @@ fn render_body(
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
     let lines = chat.flatten();
-    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
     let total_rows = para.line_count(text_w);
     let max_rows = total_rows.saturating_sub(visible_h);
     if follow {
@@ -159,6 +173,23 @@ fn render_body(
     }
     *scroll = (*scroll as usize).min(max_rows) as u16;
     let scroll_y = *scroll;
+
+    // Record click hit-rects for Thinking-block header lines that fall inside
+    // the viewport. We only need the wrapped-row offset of each header line;
+    // compute it lazily and skip headers that are clearly off-screen. Since a
+    // wrapped line occupies >= 1 screen row, logical line index is a lower
+    // bound on screen row, so a header whose line index is beyond the viewport
+    // is guaranteed off-screen below and is skipped without any wrapping math.
+    record_thinking_hits(
+        chat,
+        &lines,
+        text_w,
+        scroll_y as usize,
+        visible_h,
+        inner.x,
+        inner.y,
+        thinking_btns,
+    );
 
     f.render_widget(block, area);
     let text_area = Rect { width: text_w, ..inner };
@@ -174,6 +205,66 @@ fn render_body(
             sb_area,
             &mut sb_state,
         );
+    }
+}
+
+/// Number of screen rows `line` occupies when word-wrapped at width `w`,
+/// matching ratatui's `Paragraph` wrapping exactly. An empty line is 1 row.
+fn wrapped_rows(line: &Line<'_>, w: u16) -> usize {
+    Paragraph::new(line.clone())
+        .wrap(Wrap { trim: false })
+        .line_count(w)
+}
+
+/// Populate `out` with one `ThinkingBtn` per Thinking-block header line that is
+/// currently visible inside the body viewport. Walks flattened lines in order,
+/// accumulating wrapped screen rows; stops as soon as headers pass below the
+/// viewport. When there are no Thinking blocks the cost is one empty
+/// `thinking_headers()` call and nothing more.
+#[allow(clippy::too_many_arguments)]
+fn record_thinking_hits(
+    chat: &ChatView,
+    lines: &[Line<'_>],
+    text_w: u16,
+    scroll_y: usize,
+    visible_h: usize,
+    x: u16,
+    y0: u16,
+    out: &mut Vec<ThinkingBtn>,
+) {
+    let headers = chat.thinking_headers();
+    if headers.is_empty() || visible_h == 0 || text_w == 0 {
+        return;
+    }
+    let viewport_bottom = scroll_y + visible_h;
+    let mut row: usize = 0; // screen row of the next line to consume
+    let mut li: usize = 0; // current logical line index
+    for h in headers {
+        let target = h.header_line_idx;
+        // Advance to the header's line, accumulating wrapped rows of the lines
+        // that precede it.
+        while li < target && li < lines.len() {
+            row += wrapped_rows(&lines[li], text_w);
+            li += 1;
+        }
+        if li >= lines.len() {
+            break;
+        }
+        let header_row = row;
+        if header_row >= viewport_bottom {
+            // This and all later headers are below the viewport.
+            break;
+        }
+        if header_row >= scroll_y {
+            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
+            out.push(ThinkingBtn {
+                block_idx: h.block_idx,
+                rect: Rect::new(x, screen_y, text_w, 1),
+            });
+        }
+        // Consume the header line and advance to the next header.
+        row += wrapped_rows(&lines[li], text_w);
+        li += 1;
     }
 }
 
@@ -224,6 +315,7 @@ fn render_status(
     status: &str,
     steer_count: u32,
     queue_count: u32,
+    subagents: u32,
     model: &str,
     agent: &str,
     workdir: &Path,
@@ -274,6 +366,12 @@ fn render_status(
     }
     if queue_count > 0 {
         spans.push(Span::styled(format!(" | queue:{queue_count}"), Style::default().fg(Color::Yellow)));
+    }
+    if subagents > 0 {
+        spans.push(Span::styled(
+            format!(" | \u{2937}sub:{subagents} running"),
+            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+        ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -390,4 +488,95 @@ fn place_cursor(f: &mut Frame, composer_area: Rect, input: &str, cursor_idx: usi
     let x = composer_area.x + border + prompt_w + col as u16;
     let y = composer_area.y + border + row as u16;
     f.set_cursor_position((x, y));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::ChatView;
+    use opencode_session::SessionEvent;
+
+    fn thinking_view() -> ChatView {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::ReasoningDelta("think-a-1\nthink-a-2".into()));
+        v.apply(&SessionEvent::TextDelta("answer".into()));
+        v.apply(&SessionEvent::Done);
+        v
+    }
+
+    /// A collapsed thinking header at the top is visible at scroll 0 and gets
+    /// a full-width hit rect on its header row.
+    #[test]
+    fn collapsed_header_visible_gets_hit_rect() {
+        let v = thinking_view();
+        let lines = v.flatten();
+        // Header is the first line (line index 0).
+        let headers = v.thinking_headers();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].header_line_idx, 0);
+
+        let mut hits = Vec::new();
+        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].block_idx, headers[0].block_idx);
+        // screen_y = y0 + (0 - 0) = 2; full text width.
+        assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
+    }
+
+    /// Expanding the thinking block grows its rendered lines but the header
+    /// stays at the same screen row (row 0 → screen y0).
+    #[test]
+    fn expanded_header_row_unchanged() {
+        let mut v = thinking_view();
+        v.toggle_thinking_at(v.thinking_headers()[0].block_idx);
+        let lines = v.flatten();
+        let mut hits = Vec::new();
+        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
+        // Content lines are now present in the flattened output.
+        assert!(lines.iter().any(|l| {
+            l.spans.iter().any(|s| s.content.contains("think-a-1"))
+        }));
+    }
+
+    /// Scrolling past the header removes its hit rect (header scrolled out of
+    /// view above).
+    #[test]
+    fn header_scrolled_above_is_not_hittable() {
+        let v = thinking_view();
+        let lines = v.flatten();
+        let mut hits = Vec::new();
+        // scroll_y = 1 pushes the row-0 header above the viewport.
+        record_thinking_hits(&v, &lines, 40, 1, 10, 1, 2, &mut hits);
+        assert!(hits.is_empty(), "header above viewport should not be hittable");
+    }
+
+    /// No thinking blocks ⇒ no work and no hits.
+    #[test]
+    fn no_thinking_blocks_means_no_hits() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta("just text".into()));
+        v.apply(&SessionEvent::Done);
+        let lines = v.flatten();
+        let mut hits = Vec::new();
+        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+        assert!(hits.is_empty());
+    }
+
+    /// in_rect matches a click on the header row and misses other rows.
+    #[test]
+    fn hit_rect_matches_click_on_header_row() {
+        let v = thinking_view();
+        let lines = v.flatten();
+        let mut hits = Vec::new();
+        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+        let rect = hits[0].rect;
+        // Click anywhere on the header row (y == 2) within x..x+width hits.
+        assert!(in_rect(rect, 5, 2));
+        assert!(in_rect(rect, 1, 2));
+        // Adjacent rows do not hit.
+        assert!(!in_rect(rect, 5, 1));
+        assert!(!in_rect(rect, 5, 3));
+    }
 }

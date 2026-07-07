@@ -37,6 +37,19 @@ pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
+    /// Number of subagents currently in flight (SubagentStart seen, no matching
+    /// SubagentEnd yet). Surfaced in the status bar as a live "running" badge so
+    /// concurrent dispatch is visible.
+    pub subagents_running: u32,
+}
+
+/// Locates a `Thinking` block's header line for mouse hit-testing.
+/// `header_line_idx` is the index within `ChatView::flatten()` of the block's
+/// header line; `block_idx` is its index in `ChatView::blocks`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThinkingHeader {
+    pub block_idx: usize,
+    pub header_line_idx: usize,
 }
 
 impl ChatView {
@@ -109,6 +122,7 @@ impl ChatView {
             }
             SessionEvent::Status(s) => self.status = s.clone(),
             SessionEvent::SubagentStart { kind, prompt, .. } => {
+                self.subagents_running = self.subagents_running.saturating_add(1);
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
                     Span::styled(
@@ -123,6 +137,7 @@ impl ChatView {
                 ])]));
             }
             SessionEvent::SubagentEnd { ok, summary, .. } => {
+                self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
                 let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
                 let color = if *ok { Color::Green } else { Color::Red };
@@ -132,10 +147,12 @@ impl ChatView {
                 ])]));
             }
             SessionEvent::Done => {
+                self.subagents_running = 0;
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
             SessionEvent::Error(e) => {
+                self.subagents_running = 0;
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from(Span::styled(
                     format!("error: {e}"),
@@ -143,6 +160,7 @@ impl ChatView {
                 ))]));
             }
             SessionEvent::TranscriptReset(_) => {}
+            SessionEvent::QueueConsumed { .. } => {}
         }
     }
 
@@ -163,14 +181,49 @@ impl ChatView {
         }
     }
 
-    /// Toggle collapse on the last thinking block (mouse click handler).
-    pub fn toggle_last_thinking(&mut self) {
-        for b in self.blocks.iter_mut().rev() {
-            if let ChatBlock::Thinking { collapsed, .. } = b {
-                *collapsed = !*collapsed;
-                return;
+    /// Toggle collapse on the thinking block at `block_idx` (mouse click
+    /// handler). No-op if the index is out of range or not a Thinking block.
+    pub fn toggle_thinking_at(&mut self, block_idx: usize) {
+        if let Some(ChatBlock::Thinking { collapsed, .. }) = self.blocks.get_mut(block_idx) {
+            *collapsed = !*collapsed;
+        }
+    }
+
+    /// Return each Thinking block's `(block_idx, header_line_idx)`, where
+    /// `header_line_idx` is the index in `flatten()` of its header line. Walks
+    /// the blocks with the same per-block line accounting `flatten()` uses, so
+    /// the indices stay in sync with what is rendered. Used by `render_body`
+    /// to build click hit-rects.
+    pub fn thinking_headers(&self) -> Vec<ThinkingHeader> {
+        let mut out = Vec::new();
+        let mut line_idx = 0usize;
+        for (block_idx, block) in self.blocks.iter().enumerate() {
+            match block {
+                ChatBlock::Marker(lines) => line_idx += lines.len(),
+                ChatBlock::Assistant { raw, rendered, done } => {
+                    // +1 for the "say:" header line emitted by flatten().
+                    line_idx += 1;
+                    line_idx += if *done {
+                        rendered.len()
+                    } else {
+                        raw.split('\n').count()
+                    };
+                }
+                ChatBlock::Thinking { text, collapsed } => {
+                    out.push(ThinkingHeader { block_idx, header_line_idx: line_idx });
+                    // Header line always emitted; content lines only when expanded.
+                    line_idx += 1;
+                    if !collapsed {
+                        line_idx += text.lines().count();
+                    }
+                }
+                ChatBlock::Tool { output, .. } => {
+                    // header line + output lines + trailing blank line.
+                    line_idx += 1 + output.len() + 1;
+                }
             }
         }
+        out
     }
 
     /// Flatten all blocks into a single `Vec<Line>` for rendering. This is
@@ -311,8 +364,8 @@ mod tests {
         }));
         // Content hidden when collapsed
         assert!(!block_text(&v).contains("analyzing"));
-        // Expand and verify content
-        v.toggle_last_thinking();
+        // Expand via block index and verify content
+        v.toggle_thinking_at(0);
         assert!(block_text(&v).contains("analyzing"));
     }
 
@@ -325,12 +378,73 @@ mod tests {
         assert!(text.contains("3 lines"));
         assert!(!text.contains("line1"));
         // Expand: should contain all 3 lines
-        v.toggle_last_thinking();
+        v.toggle_thinking_at(0);
         assert!(block_text(&v).contains("line1"));
         assert!(block_text(&v).contains("line3"));
         // Collapse again
-        v.toggle_last_thinking();
+        v.toggle_thinking_at(0);
         assert!(!block_text(&v).contains("line1"));
+    }
+
+    #[test]
+    fn thinking_headers_match_flatten_line_indices() {
+        let mut v = ChatView::default();
+        // Two thinking blocks separated by an assistant block.
+        v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
+        v.apply(&SessionEvent::TextDelta("hi".into()));
+        v.apply(&SessionEvent::Done);
+        v.apply(&SessionEvent::ReasoningDelta("think-b-1\nthink-b-2".into()));
+
+        let flat = v.flatten();
+        let headers = v.thinking_headers();
+        assert_eq!(headers.len(), 2, "expected two thinking headers");
+        // Each recorded header line must contain the "Thinking" header text.
+        for h in &headers {
+            let line = &flat[h.header_line_idx];
+            assert!(
+                line.spans.iter().any(|s| s.content.contains("Thinking")),
+                "header_line_idx {} is not a Thinking header: {:?}",
+                h.header_line_idx,
+                line,
+            );
+        }
+        // block_idx maps back to a Thinking block.
+        for h in &headers {
+            assert!(
+                matches!(v.blocks[h.block_idx], ChatBlock::Thinking { .. }),
+                "block_idx {} is not a Thinking block",
+                h.block_idx,
+            );
+        }
+        // Expanding the second block shifts nothing before it; first header
+        // line index is unchanged.
+        let first_before = headers[0].header_line_idx;
+        v.toggle_thinking_at(headers[1].block_idx);
+        let first_after = v.thinking_headers()[0].header_line_idx;
+        assert_eq!(first_before, first_after);
+    }
+
+    #[test]
+    fn toggle_thinking_at_toggles_specific_block() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::ReasoningDelta("first".into()));
+        v.apply(&SessionEvent::TextDelta("between".into()));
+        v.apply(&SessionEvent::Done);
+        v.apply(&SessionEvent::ReasoningDelta("second".into()));
+
+        let headers = v.thinking_headers();
+        assert_eq!(headers.len(), 2);
+        // Both collapsed initially.
+        assert!(!block_text(&v).contains("first"));
+        assert!(!block_text(&v).contains("second"));
+        // Toggle only the first: its content shows, second stays hidden.
+        v.toggle_thinking_at(headers[0].block_idx);
+        assert!(block_text(&v).contains("first"));
+        assert!(!block_text(&v).contains("second"));
+        // Out-of-range / non-thinking index is a no-op.
+        v.toggle_thinking_at(999);
+        v.toggle_thinking_at(headers[0].block_idx + 1); // assistant block index
+        assert!(block_text(&v).contains("first"));
     }
 
     #[test]

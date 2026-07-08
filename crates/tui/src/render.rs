@@ -8,9 +8,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
-};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
@@ -44,12 +42,22 @@ pub(crate) struct MouseHits {
     /// Clickable Thinking-block header rows; clicking toggles collapse.
     /// One entry per Thinking block currently visible in the body viewport.
     pub thinking_btns: Vec<ThinkingBtn>,
+    /// Clickable Subagent-block header rows; clicking toggles collapse.
+    pub subagent_btns: Vec<SubagentBtn>,
 }
 
 /// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
 /// `rect` is the on-screen row of the header line.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ThinkingBtn {
+    pub block_idx: usize,
+    pub rect: Rect,
+}
+
+/// A clickable Subagent-block header.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SubagentBtn {
     pub block_idx: usize,
     pub rect: Rect,
 }
@@ -109,7 +117,8 @@ pub(crate) fn render(
         let mut ci = 0;
         hits.queue_btns.clear();
         hits.thinking_btns.clear();
-        render_body(f, chunks[ci], chat, scroll, follow, &mut hits.body, &mut hits.thinking_btns);
+        hits.subagent_btns.clear();
+        render_body(f, chunks[ci], chat, agent, scroll, follow, &mut hits.body, &mut hits.thinking_btns, &mut hits.subagent_btns);
         ci += 1;
         if queue_h > 0 {
             render_queue_panel(f, chunks[ci], steer_items, queue_items, &mut hits.queue_btns);
@@ -126,7 +135,7 @@ pub(crate) fn render(
         ci += 1;
         render_status(
             f, chunks[ci], running, status, steer_items.len() as u32, queue_items.len() as u32,
-            chat.subagents_running,
+            chat.subagents_running, chat.subagents_total,
             model, agent, workdir, context_used + sys_tokens, context_limit,
             anim_tick, active_skill,
         );
@@ -148,19 +157,22 @@ pub(crate) fn render(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_body(
     f: &mut Frame,
     area: Rect,
     chat: &ChatView,
+    title: &str,
     scroll: &mut u16,
     follow: bool,
     body_out: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
+    subagent_btns: &mut Vec<SubagentBtn>,
 ) {
     *body_out = Some(area);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {} ", chat.agent));
+        .title(format!(" {} ", title));
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -190,21 +202,51 @@ fn render_body(
         inner.y,
         thinking_btns,
     );
+    record_subagent_hits(
+        chat,
+        &lines,
+        text_w,
+        scroll_y as usize,
+        visible_h,
+        inner.x,
+        inner.y,
+        subagent_btns,
+    );
 
     f.render_widget(block, area);
     let text_area = Rect { width: text_w, ..inner };
     f.render_widget(para.scroll((scroll_y, 0)), text_area);
 
     if total_rows > visible_h {
-        let sb_area = Rect::new(inner.right(), inner.y, 1, inner.height);
-        let mut sb_state = ScrollbarState::new(total_rows)
-            .viewport_content_length(visible_h)
-            .position(scroll_y as usize);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            sb_area,
-            &mut sb_state,
-        );
+        draw_scrollbar(f, inner, total_rows, visible_h, scroll_y as usize);
+    }
+}
+
+/// Manual scrollbar with correct thumb positioning even when content barely
+/// overflows the viewport. ratatui's `ScrollbarState` inflates the denominator
+/// by `viewport − 1`, which parks the thumb mid-track at the bottom when
+/// content ≈ viewport. This uses the simple ratio `scroll / max_scroll`.
+fn draw_scrollbar(f: &mut Frame, inner: Rect, total_rows: usize, visible_h: usize, scroll_y: usize) {
+    let max_scroll = total_rows.saturating_sub(visible_h);
+    let track_h = inner.height as u64;
+    let thumb_h = (visible_h as u64 * track_h / total_rows as u64).max(1) as u16;
+    let max_off = inner.height.saturating_sub(thumb_h);
+    let thumb_off = if max_scroll == 0 {
+        0u16
+    } else {
+        ((scroll_y as u64 * max_off as u64) / max_scroll as u64) as u16
+    };
+    let sb_x = inner.right().saturating_sub(1);
+    let buf = f.buffer_mut();
+    for y in 0..inner.height {
+        let cell = &mut buf[(sb_x, inner.y + y)];
+        if y >= thumb_off && y < thumb_off + thumb_h {
+            cell.set_char('\u{2592}');
+            cell.set_style(Style::default().fg(Color::Gray));
+        } else {
+            cell.set_char('\u{2502}');
+            cell.set_style(Style::default().fg(Color::DarkGray));
+        }
     }
 }
 
@@ -268,6 +310,51 @@ fn record_thinking_hits(
     }
 }
 
+/// Populate `out` with one `SubagentBtn` per Subagent-block header line that is
+/// currently visible inside the body viewport. Mirrors `record_thinking_hits`.
+#[allow(clippy::too_many_arguments)]
+fn record_subagent_hits(
+    chat: &ChatView,
+    lines: &[Line<'_>],
+    text_w: u16,
+    scroll_y: usize,
+    visible_h: usize,
+    x: u16,
+    y0: u16,
+    out: &mut Vec<SubagentBtn>,
+) {
+    let headers = chat.subagent_headers();
+    if headers.is_empty() || visible_h == 0 || text_w == 0 {
+        return;
+    }
+    let viewport_bottom = scroll_y + visible_h;
+    let mut row: usize = 0;
+    let mut li: usize = 0;
+    for h in headers {
+        let target = h.header_line_idx;
+        while li < target && li < lines.len() {
+            row += wrapped_rows(&lines[li], text_w);
+            li += 1;
+        }
+        if li >= lines.len() {
+            break;
+        }
+        let header_row = row;
+        if header_row >= viewport_bottom {
+            break;
+        }
+        if header_row >= scroll_y {
+            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
+            out.push(SubagentBtn {
+                block_idx: h.block_idx,
+                rect: Rect::new(x, screen_y, text_w, 1),
+            });
+        }
+        row += wrapped_rows(&lines[li], text_w);
+        li += 1;
+    }
+}
+
 fn render_composer(
     f: &mut Frame,
     area: Rect,
@@ -316,6 +403,7 @@ fn render_status(
     steer_count: u32,
     queue_count: u32,
     subagents: u32,
+    subagents_total: u32,
     model: &str,
     agent: &str,
     workdir: &Path,
@@ -367,9 +455,9 @@ fn render_status(
     if queue_count > 0 {
         spans.push(Span::styled(format!(" | queue:{queue_count}"), Style::default().fg(Color::Yellow)));
     }
-    if subagents > 0 {
+    if subagents_total > 0 {
         spans.push(Span::styled(
-            format!(" | \u{2937}sub:{subagents} running"),
+            format!(" | \u{2937}sub:{subagents}/{subagents_total}"),
             Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
         ));
     }
@@ -423,13 +511,8 @@ fn render_queue_panel(
         let clickable = e.seq.is_some() && avail_w > btn_w + 4;
         let cap = if clickable { avail_w.saturating_sub(btn_w) } else { avail_w };
         let head = format!(" {}: {}", e.prefix, e.text);
-        let head_display = if head.chars().count() > cap {
-            let take = cap.saturating_sub(1);
-            format!("{}\u{2026}", head.chars().take(take).collect::<String>())
-        } else {
-            head
-        };
-        let head_len = head_display.chars().count();
+        let head_display = composer::truncate_to_width(&head, cap);
+        let head_len = composer::str_width(&head_display);
         let mut spans: Vec<Span> = vec![Span::styled(head_display, Style::default().fg(e.color))];
         if clickable {
             let seq = e.seq.unwrap();

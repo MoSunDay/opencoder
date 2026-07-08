@@ -113,9 +113,20 @@ async fn concurrent_subagent_dispatch_in_one_turn() {
 
     let starts = events
         .iter()
-        .filter(|e| matches!(e, SessionEvent::SubagentStart { .. }))
-        .count();
-    assert_eq!(starts, 2, "expected 2 SubagentStart (running) events, got {:?}", events.iter().map(format_ev).collect::<Vec<_>>());
+        .enumerate()
+        .filter(|(_, e)| matches!(e, SessionEvent::SubagentStart { .. }))
+        .map(|(i, _)| i)
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 2, "expected 2 SubagentStart (running) events, got {:?}", events.iter().map(format_ev).collect::<Vec<_>>());
+
+    let first_end_idx = events
+        .iter()
+        .position(|e| matches!(e, SessionEvent::SubagentEnd { .. }))
+        .unwrap_or(usize::MAX);
+    assert!(
+        starts[1] < first_end_idx,
+        "second SubagentStart must precede first SubagentEnd (concurrent overlap): starts={starts:?} first_end={first_end_idx}"
+    );
 
     let ends: Vec<(bool, String)> = events
         .iter()
@@ -135,7 +146,7 @@ async fn concurrent_subagent_dispatch_in_one_turn() {
 }
 
 #[tokio::test]
-async fn subagent_forwards_child_tool_events_to_parent() {
+async fn subagent_wraps_child_events_in_subagent_child() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![task_turn("run a command")]) // parent: task call
@@ -160,12 +171,13 @@ async fn subagent_forwards_child_tool_events_to_parent() {
     let mut events = Vec::new();
     run(&mut session, "delegate".into(), |ev| events.push(ev)).await.unwrap();
 
-    // Child's bash ToolStart should be forwarded to parent
+    // Child's bash ToolStart should arrive wrapped in SubagentChild
     let has_child_tool = events.iter().any(|e| matches!(
         e,
-        SessionEvent::ToolStart { name, .. } if name == "bash"
+        SessionEvent::SubagentChild { ev, .. }
+            if matches!(ev.as_ref(), SessionEvent::ToolStart { name, .. } if name == "bash")
     ));
-    assert!(has_child_tool, "expected child bash ToolStart forwarded to parent");
+    assert!(has_child_tool, "expected child bash ToolStart wrapped in SubagentChild");
 
     let has_subagent_end = events.iter().any(|e| matches!(e, SessionEvent::SubagentEnd { .. }));
     assert!(has_subagent_end, "expected SubagentEnd");
@@ -340,6 +352,7 @@ fn format_ev(e: &SessionEvent) -> &'static str {
         SessionEvent::ToolEnd { .. } => "ToolEnd",
         SessionEvent::SubagentStart { .. } => "SubagentStart",
         SessionEvent::SubagentEnd { .. } => "SubagentEnd",
+        SessionEvent::SubagentChild { .. } => "SubagentChild",
         SessionEvent::Done => "Done",
         SessionEvent::Error(_) => "Error",
         _ => "Other",

@@ -19,6 +19,7 @@ Commit: (working-tree, pre-initial-commit)
 - **新模块 `crates/tui/src/queue_panel.rs`（122 行）**：纯函数 `plan()` / `apply_swap()` + `QueueBtn`/`QueueBtnAction`/`QueueEffect` 类型。把可测试的重排/删除决策从 `app.rs`（已逼近 800 行上限）抽出。
 - 显示上限 3 已存在（`render.rs` `max_lines = min(area.height, 3)`），本次复用。
 - **Review 修复**：渲染时 head 不足 `cap` 会用空格补齐到 `cap`，使 `▲ ▼ ✕` 真正落在右边缘与 hit rect 对齐（否则短 prompt 下字形浮在文本后、点击错位）；抽出纯函数 `btn_x_offsets(width)` 统一几何并单测。
+- **宽字符对齐修复**：队列行 head 原按 `chars().count()`（Unicode 标量）测宽，CJK/emoji 下 pad 过大、字形与 hit rect 错位且会换行；改用新增的 `composer::str_width`/`truncate_to_width`（按显示列截断 + 补 `…`），`▲ ▼ ✕` 与 `btn_x_offsets` 在任何字符宽度下都对齐。
 
 ## 涉及文件
 - `crates/tui/src/queue_panel.rs` — **新增**，122 行（纯交互逻辑 + 8 单元测试）
@@ -31,7 +32,7 @@ Commit: (working-tree, pre-initial-commit)
 - `crates/store/src/store.rs` — trait `swap_input_order`
 - `crates/store/src/libsql_store/inputs.rs` — `swap_input_order` 实现
 - `crates/store/src/libsql_store/mod.rs` — Store impl 接线
-- `crates/store/tests/store_integration.rs` — `swap_input_order_changes_drain_order`
+- `crates/store/tests/inputs_integration.rs` — `swap_input_order_changes_drain_order`
 
 ## 测试覆盖
 
@@ -47,13 +48,13 @@ Commit: (working-tree, pre-initial-commit)
 | queue 删除返回 seq | `delete_returns_seq` | `tui/src/queue_panel.rs` |
 | 本地 swap 重排 | `apply_swap_reorders_locally` | `tui/src/queue_panel.rs` |
 | 按钮 hit-rect 几何（右边缘对齐） | `btn_x_offsets_pin_glyphs_to_right_edge` | `tui/src/queue_panel.rs` |
-| swap 改变 drain 顺序 | `swap_input_order_changes_drain_order` | `store/tests/store_integration.rs` |
-| 删除 pending 项保序 + 幂等 | `delete_input_removes_pending_and_preserves_order` | `store/tests/store_integration.rs` |
+| swap 改变 drain 顺序 | `swap_input_order_changes_drain_order` | `store/tests/inputs_integration.rs` |
+| 删除 pending 项保序 + 幂等 | `delete_input_removes_pending_and_preserves_order` | `store/tests/inputs_integration.rs` |
 
-- 全量回归：`cargo test --workspace` → 248 passed / 0 failed
+- 全量回归：`cargo test --workspace` → 258 passed / 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
-- 行数 gate：新文件 `queue_panel.rs` 138 ≤ 400；`app.rs` 775 ≤ 800
+- 行数 gate：新文件 `queue_panel.rs` 142 ≤ 400；`app.rs` 788 ≤ 800
 
 ## 执行方式
 按文件归属并发：Wave 1 两个并发 `general` subagent（store crate ∥ tui 换行，文件零交叉），Wave 2 主 agent 单线做队列面板（4 文件紧耦合不可并行），Wave 3 回归 gate。

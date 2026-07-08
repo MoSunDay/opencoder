@@ -145,6 +145,7 @@ fn print_event(ev: &SessionEvent) {
         }
         SessionEvent::TranscriptReset(_) => {}
         SessionEvent::QueueConsumed { .. } => {}
+        SessionEvent::SubagentChild { .. } => {}
     }
 }
 

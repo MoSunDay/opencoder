@@ -30,6 +30,20 @@ pub enum ChatBlock {
         header: Line<'static>,
         output: Vec<Line<'static>>,
     },
+    /// Foldable subagent block. Child events (routed via `SubagentChild`)
+    /// populate `view`, which is rendered inline when expanded or as the
+    /// full body when the user "enters" the subagent (ctx-switch).
+    Subagent {
+        id: String,
+        child_session_id: String,
+        kind: String,
+        prompt: String,
+        collapsed: bool,
+        view: ChatView,
+        done: bool,
+        ok: bool,
+        summary: String,
+    },
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -41,6 +55,8 @@ pub struct ChatView {
     /// SubagentEnd yet). Surfaced in the status bar as a live "running" badge so
     /// concurrent dispatch is visible.
     pub subagents_running: u32,
+    /// Total subagents dispatched this session (running + completed).
+    pub subagents_total: u32,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.
@@ -48,6 +64,13 @@ pub struct ChatView {
 /// header line; `block_idx` is its index in `ChatView::blocks`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThinkingHeader {
+    pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
+/// Locates a `Subagent` block's header line for mouse hit-testing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SubagentHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
 }
@@ -121,30 +144,48 @@ impl ChatView {
                 ))]));
             }
             SessionEvent::Status(s) => self.status = s.clone(),
-            SessionEvent::SubagentStart { kind, prompt, .. } => {
+            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => {
                 self.subagents_running = self.subagents_running.saturating_add(1);
+                self.subagents_total = self.subagents_total.saturating_add(1);
                 self.finalize_assistant();
-                self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
-                    Span::styled(
-                        "\u{2937} subagent ",
-                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(kind.clone(), Style::default().fg(Color::Blue)),
-                    Span::styled(
-                        format!("  {}", short(prompt, 90)),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ])]));
+                self.blocks.push(ChatBlock::Subagent {
+                    id: id.clone(),
+                    child_session_id: child_session_id.clone(),
+                    kind: kind.clone(),
+                    prompt: short(prompt, 90),
+                    collapsed: true,
+                    view: ChatView::default(),
+                    done: false,
+                    ok: false,
+                    summary: String::new(),
+                });
             }
-            SessionEvent::SubagentEnd { ok, summary, .. } => {
+            SessionEvent::SubagentChild { id, ev } => {
+                if let Some(ChatBlock::Subagent { view, .. }) =
+                    self.blocks.iter_mut().rev().find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+                {
+                    view.apply(ev);
+                }
+            }
+            SessionEvent::SubagentEnd { id, ok, summary } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
-                let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-                let color = if *ok { Color::Green } else { Color::Red };
-                self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
-                    Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
-                    Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
-                ])]));
+                if let Some(block) =
+                    self.blocks.iter_mut().rev().find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+                {
+                    if let ChatBlock::Subagent { done, ok: bok, summary: smry, .. } = block {
+                        *done = true;
+                        *bok = *ok;
+                        *smry = summary.clone();
+                    }
+                } else {
+                    let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
+                    let color = if *ok { Color::Green } else { Color::Red };
+                    self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
+                        Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
+                        Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
+                    ])]));
+                }
             }
             SessionEvent::Done => {
                 self.subagents_running = 0;
@@ -189,6 +230,13 @@ impl ChatView {
         }
     }
 
+    /// Toggle collapse on the subagent block at `block_idx`.
+    pub fn toggle_subagent_at(&mut self, block_idx: usize) {
+        if let Some(ChatBlock::Subagent { collapsed, .. }) = self.blocks.get_mut(block_idx) {
+            *collapsed = !*collapsed;
+        }
+    }
+
     /// Return each Thinking block's `(block_idx, header_line_idx)`, where
     /// `header_line_idx` is the index in `flatten()` of its header line. Walks
     /// the blocks with the same per-block line accounting `flatten()` uses, so
@@ -220,6 +268,55 @@ impl ChatView {
                 ChatBlock::Tool { output, .. } => {
                     // header line + output lines + trailing blank line.
                     line_idx += 1 + output.len() + 1;
+                }
+                ChatBlock::Subagent { collapsed, view, done, .. } => {
+                    line_idx += 1; // header
+                    if !collapsed {
+                        line_idx += view.flatten().len();
+                        if *done {
+                            line_idx += 1; // summary line
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Return each Subagent block's `(block_idx, header_line_idx)` for
+    /// mouse hit-testing, using the same line accounting as `flatten()`.
+    pub fn subagent_headers(&self) -> Vec<SubagentHeader> {
+        let mut out = Vec::new();
+        let mut line_idx = 0usize;
+        for (block_idx, block) in self.blocks.iter().enumerate() {
+            match block {
+                ChatBlock::Marker(lines) => line_idx += lines.len(),
+                ChatBlock::Assistant { raw, rendered, done } => {
+                    line_idx += 1;
+                    line_idx += if *done {
+                        rendered.len()
+                    } else {
+                        raw.split('\n').count()
+                    };
+                }
+                ChatBlock::Thinking { text, collapsed } => {
+                    line_idx += 1;
+                    if !collapsed {
+                        line_idx += text.lines().count();
+                    }
+                }
+                ChatBlock::Tool { output, .. } => {
+                    line_idx += 1 + output.len() + 1;
+                }
+                ChatBlock::Subagent { collapsed, view, done, .. } => {
+                    out.push(SubagentHeader { block_idx, header_line_idx: line_idx });
+                    line_idx += 1;
+                    if !collapsed {
+                        line_idx += view.flatten().len();
+                        if *done {
+                            line_idx += 1;
+                        }
+                    }
                 }
             }
         }
@@ -282,6 +379,44 @@ impl ChatView {
                     out.push(header.clone());
                     out.extend(output.iter().cloned());
                     out.push(Line::from(""));
+                }
+                ChatBlock::Subagent { kind, prompt, collapsed, view, done, ok, summary, .. } => {
+                    let arrow = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
+                    let status = if *done {
+                        if *ok { "done" } else { "failed" }
+                    } else {
+                        "running"
+                    };
+                    let tool_count = view.blocks.iter()
+                        .filter(|b| matches!(b, ChatBlock::Tool { .. }))
+                        .count();
+                    out.push(Line::from(vec![
+                        Span::styled(
+                            format!("{arrow} \u{2937} subagent "),
+                            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("[{kind}] "), Style::default().fg(Color::Cyan)),
+                        Span::styled(prompt.clone(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            format!(" [{status}, {tool_count} tools]"),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                    if !collapsed {
+                        for l in view.flatten() {
+                            let mut spans = vec![Span::raw("  ")];
+                            spans.extend(l.spans);
+                            out.push(Line::from(spans));
+                        }
+                        if *done {
+                            let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
+                            let color = if *ok { Color::Green } else { Color::Red };
+                            out.push(Line::from(vec![
+                                Span::raw("  "),
+                                Span::styled(format!("{mark} {summary}"), Style::default().fg(color)),
+                            ]));
+                        }
+                    }
                 }
             }
         }
@@ -508,9 +643,33 @@ mod tests {
         let mut v = ChatView::default();
         v.apply(&SessionEvent::SubagentStart {
             id: "s1".into(), kind: "explore".into(), prompt: "search".into(),
+            child_session_id: "sub-1".into(),
         });
         assert!(block_text(&v).contains("subagent"));
         assert!(block_text(&v).contains("explore"));
+        assert_eq!(v.subagents_total, 1);
+        assert_eq!(v.subagents_running, 1);
+
+        // Child events routed into the subagent block's view.
+        v.apply(&SessionEvent::SubagentChild {
+            id: "s1".into(),
+            ev: Box::new(SessionEvent::TextDelta("child output".into())),
+        });
+        // Collapsed by default — child output hidden.
+        assert!(!block_text(&v).contains("child output"));
+        // Expand and verify child content appears.
+        let headers = v.subagent_headers();
+        assert_eq!(headers.len(), 1);
+        v.toggle_subagent_at(headers[0].block_idx);
+        assert!(block_text(&v).contains("child output"));
+
+        // SubagentEnd marks done and decrements running.
+        v.apply(&SessionEvent::SubagentEnd {
+            id: "s1".into(), ok: true, summary: "found it".into(),
+        });
+        assert_eq!(v.subagents_running, 0);
+        assert_eq!(v.subagents_total, 1);
+        assert!(block_text(&v).contains("found it"));
     }
 
     #[test]

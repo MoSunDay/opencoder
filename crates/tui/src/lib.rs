@@ -3,6 +3,7 @@ pub mod chat;
 pub mod command;
 pub mod composer;
 pub mod fmt;
+pub mod key_handler;
 pub mod keybind;
 pub mod markdown;
 pub mod menu;

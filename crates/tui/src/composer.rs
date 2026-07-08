@@ -40,6 +40,32 @@ pub fn char_width(ch: char) -> usize {
     1
 }
 
+/// Display width of a string: sum of per-char widths.
+pub fn str_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+/// Truncate `s` to fit `max_w` display columns, appending an ellipsis (`…`,
+/// width 1) when truncated. Returns the string unchanged if it already fits.
+pub fn truncate_to_width(s: &str, max_w: usize) -> String {
+    if str_width(s) <= max_w {
+        return s.to_string();
+    }
+    let budget = max_w.saturating_sub(1);
+    let mut out = String::new();
+    let mut w = 0usize;
+    for ch in s.chars() {
+        let cw = char_width(ch);
+        if w + cw > budget {
+            break;
+        }
+        out.push(ch);
+        w += cw;
+    }
+    out.push('\u{2026}');
+    out
+}
+
 /// Move a char index clamped to [0, len].
 pub fn clamp_idx(idx: usize, len: usize) -> usize {
     idx.min(len)
@@ -232,5 +258,26 @@ mod tests {
         assert_eq!(display_rows("aaaa\nbbbb", 80), 2);
         assert_eq!(display_rows("aaaaaaaaaaaa", 5), 3); // 12 / 5 = 3 rows
         assert_eq!(display_rows("", 80), 1);
+    }
+
+    #[test]
+    fn str_width_counts_wide_chars_double() {
+        assert_eq!(str_width("abc"), 3);
+        // 你好 = two wide chars = 4 display cols
+        assert_eq!(str_width("你好"), 4);
+        assert_eq!(str_width("a你b"), 4);
+    }
+
+    #[test]
+    fn truncate_to_width_fits_display_columns() {
+        // Fits → unchanged (boundary inclusive).
+        assert_eq!(truncate_to_width("abc", 5), "abc");
+        assert_eq!(truncate_to_width("abc", 3), "abc");
+        // ASCII truncation reserves 1 col for the ellipsis.
+        assert_eq!(truncate_to_width("abcdef", 4), "abc…");
+        // CJK: 你好xy = 6 cols, cap 5 → budget 4 → 你(2)+好(2), x won't fit → "你好…"
+        assert_eq!(truncate_to_width("你好xy", 5), "你好…");
+        // CJK mid-width boundary: cap 3 → budget 2 → only 你 fits → "你…"
+        assert_eq!(truncate_to_width("你好", 3), "你…");
     }
 }

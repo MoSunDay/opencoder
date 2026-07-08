@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyModifiers,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode,
     MouseButton, MouseEventKind,
 };
 use crossterm::execute;
@@ -14,7 +14,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use futures::StreamExt;
-use opencode_core::{discover_skills, resolve_agent, Config};
+use opencode_core::{resolve_agent, Config};
 use opencode_llm::{estimate, ChatClient, ChatStream};
 use opencode_session::{SessionEvent, SessionState};
 use opencode_store::{Delivery, LibsqlStore, SessionInput, Store};
@@ -27,17 +27,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::key_handler::{handle_key, KeyAction};
 use crate::worker::{process_cmd, rebind_session, gate_compact, CompactGate, UiCmd, UiEvent};
-use crate::composer;
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
 use crate::render::{in_rect, render, MouseHits, Term};
 use crate::queue_panel;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::TuiOpts;
-
-/// Double-Esc window: two Esc presses within this interval cancel the run.
-const ESC_CANCEL_WINDOW_MS: u64 = 350;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
@@ -134,6 +131,9 @@ async fn run_app(
     let mut active_skill: Option<String> = None;
     let mut anim_tick: u32 = 0;
     let mut last_esc: Option<Instant> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut parent_scroll: u16 = 0;
+    let mut parent_follow: bool = true;
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
@@ -153,6 +153,17 @@ async fn run_app(
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
+        let (display_chat, display_agent) = if let Some(idx) = subagent_focus {
+            match chat.blocks.get(idx) {
+                Some(crate::chat::ChatBlock::Subagent { view, kind, prompt, .. }) => (
+                    view as &crate::chat::ChatView,
+                    format!("\u{2190} [Esc] back | \u{2937}sub [{kind}] {prompt}"),
+                ),
+                _ => (&chat, agent_name.clone()),
+            }
+        } else {
+            (&chat, agent_name.clone())
+        };
         // Compose status-bar model label with reasoning-effort badge (e.g.
         // "glm-5.2 \u{00b7}high") so the active thinking depth is visible.
         let status_model = match &config.reasoning_effort {
@@ -162,10 +173,10 @@ async fn run_app(
         let mut hits = MouseHits::default();
         render(
             terminal,
-            &chat,
+            display_chat,
             &input,
             cursor_idx,
-            &agent_name,
+            &display_agent,
             running,
             show_help,
             context_used,
@@ -358,6 +369,14 @@ async fn run_app(
                                 }
                                 continue;
                             }
+                            // Subagent ctx-switch: Esc exits to parent view.
+                            if subagent_focus.is_some() && k.code == KeyCode::Esc {
+                                subagent_focus = None;
+                                scroll = parent_scroll;
+                                follow = parent_follow;
+                                last_esc = None;
+                                continue;
+                            }
                             match handle_key(
                                 k,
                                 &mut input,
@@ -477,6 +496,27 @@ async fn run_app(
                                             break;
                                         }
                                     }
+                                    // Click on a Subagent-block header: first click
+                                    // expands, second click (already expanded) dives
+                                    // into the subagent's ctx-switch view.
+                                    for btn in &hits.subagent_btns {
+                                        if in_rect(btn.rect, m.column, m.row) {
+                                            let already_expanded = matches!(
+                                                chat.blocks.get(btn.block_idx),
+                                                Some(crate::chat::ChatBlock::Subagent { collapsed: false, .. })
+                                            );
+                                            if already_expanded {
+                                                parent_scroll = scroll;
+                                                parent_follow = follow;
+                                                scroll = 0;
+                                                follow = true;
+                                                subagent_focus = Some(btn.block_idx);
+                                            } else {
+                                                chat.toggle_subagent_at(btn.block_idx);
+                                            }
+                                            break;
+                                        }
+                                    }
                                 }
                                 MouseEventKind::ScrollUp => {
                                     if let Some(r) = hits.body {
@@ -490,7 +530,7 @@ async fn run_app(
                                     if let Some(r) = hits.body {
                                         if in_rect(r, m.column, m.row) {
                                             let visible_h = r.height.saturating_sub(2) as usize;
-                                            let inner_w = r.width.saturating_sub(2);
+                                            let inner_w = r.width.saturating_sub(3);
                                             let total_rows = Paragraph::new(chat.flatten())
                                                 .wrap(Wrap { trim: false })
                                                 .line_count(inner_w);
@@ -567,6 +607,7 @@ fn track_context(ev: &SessionEvent, used: &mut u64) {
         SessionEvent::TextDelta(t) | SessionEvent::ReasoningDelta(t) => *used += estimate(t) as u64,
         SessionEvent::ToolEnd { output, .. } => *used += estimate(output) as u64,
         SessionEvent::SubagentEnd { summary, .. } => *used += estimate(summary) as u64,
+        SessionEvent::SubagentChild { ev, .. } => track_context(ev, used),
         SessionEvent::Compaction(c) => *used = estimate(c) as u64,
         _ => {}
     }
@@ -593,185 +634,6 @@ fn push_user(chat: &mut ChatView, history: &mut Vec<String>, hist_idx: &mut Opti
     chat.push_marker(Line::from(""));
 }
 
-#[derive(Debug, PartialEq)]
-pub(crate) enum KeyAction {
-    None,
-    Submit(String),
-    Steer(String),
-    Queue(String),
-    SwitchAgent(String),
-    Cancel,
-    SetSkill(Option<(String, String)>),
-    OpenCommand,
-    Quit,
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_key(
-    k: KeyEvent,
-    input: &mut String,
-    cursor_idx: &mut usize,
-    history: &[String],
-    hist_idx: &mut Option<usize>,
-    running: bool,
-    agent: &str,
-    show_help: &mut bool,
-    scroll: &mut u16,
-    follow: &mut bool,
-    last_esc: &mut Option<Instant>,
-    skill_menu: &mut Option<SkillMenu>,
-    active_skill: Option<&str>,
-) -> KeyAction {
-    // Modal skill picker: intercept all keys while open.
-    if skill_menu.is_some() {
-        return match crate::menu::handle_menu_key(skill_menu, k) {
-            crate::menu::MenuOutcome::Quit => KeyAction::Quit,
-            crate::menu::MenuOutcome::Pick(opt) => KeyAction::SetSkill(opt),
-            crate::menu::MenuOutcome::Idle => KeyAction::None,
-        };
-    }
-    // Alt+Tab (and Ctrl+T fallback) switches act <-> plan mode.
-    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgent(next.into());
-    }
-
-    if k.modifiers.contains(KeyModifiers::CONTROL) {
-        match k.code {
-            KeyCode::Char('c') | KeyCode::Char('d') => return KeyAction::Quit,
-            // Fallback mode switch for terminals that swallow Alt+Tab.
-            KeyCode::Char('t') => {
-                let next = if agent == "plan" { "act" } else { "plan" };
-                return KeyAction::SwitchAgent(next.into());
-            }
-            KeyCode::Char('h') => { *show_help = !*show_help; return KeyAction::None; }
-            KeyCode::Char('n') => { move_hist(history, hist_idx, input, cursor_idx, 1); return KeyAction::None; }
-            KeyCode::Char('p') => { move_hist(history, hist_idx, input, cursor_idx, -1); return KeyAction::None; }
-            KeyCode::Char('u') => { *scroll = scroll.saturating_sub(10); *follow = false; return KeyAction::None; }
-            KeyCode::Char('j') => {
-                let (s, i) = composer::insert_newline(input, *cursor_idx);
-                *input = s; *cursor_idx = i;
-                return KeyAction::None;
-            }
-            _ => return KeyAction::None,
-        }
-    }
-    match k.code {
-        KeyCode::BackTab => {
-            // Shift+Tab = primary mode switch (codex-cli style).
-            let next = if agent == "plan" { "act" } else { "plan" };
-            KeyAction::SwitchAgent(next.into())
-        }
-        KeyCode::Enter => {
-            // Shift+Enter / Alt+Enter insert a newline (multi-line input).
-            if k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
-                let (s, i) = composer::insert_newline(input, *cursor_idx);
-                *input = s; *cursor_idx = i;
-                return KeyAction::None;
-            }
-            if input.trim().is_empty() { return KeyAction::None; }
-            let text = input.trim().to_string();
-            input.clear(); *cursor_idx = 0; *hist_idx = None;
-            // Enter = Steer when running (strong intervention, promoted at
-            // turn boundary); normal submit when idle.
-            if running { KeyAction::Steer(text) } else { KeyAction::Submit(text) }
-        }
-        KeyCode::Tab => {
-            // Tab = follow-up (queue) when running; normal submit when idle.
-            if input.trim().is_empty() { return KeyAction::None; }
-            let text = input.trim().to_string();
-            input.clear(); *cursor_idx = 0; *hist_idx = None;
-            if running { KeyAction::Queue(text) } else { KeyAction::Submit(text) }
-        }
-        KeyCode::Esc => {
-            // 1) If help is open, Esc just closes it.
-            if *show_help {
-                *show_help = false;
-                return KeyAction::None;
-            }
-            // 2) Double-Esc within the window while running => hard-abort.
-            let now = Instant::now();
-            let is_double = running
-                && last_esc
-                    .map(|t| now.duration_since(t) < Duration::from_millis(ESC_CANCEL_WINDOW_MS))
-                    .unwrap_or(false);
-            if is_double {
-                *last_esc = None;
-                KeyAction::Cancel
-            } else {
-                *last_esc = Some(now);
-                input.clear(); *cursor_idx = 0; *hist_idx = None;
-                KeyAction::None
-            }
-        }
-        KeyCode::Up => {
-            if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, -1);
-            } else {
-                move_hist(history, hist_idx, input, cursor_idx, -1);
-            }
-            KeyAction::None
-        }
-        KeyCode::Down => {
-            if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, 1);
-            } else {
-                move_hist(history, hist_idx, input, cursor_idx, 1);
-            }
-            KeyAction::None
-        }
-        KeyCode::Left => { *cursor_idx = cursor_idx.saturating_sub(1); KeyAction::None }
-        KeyCode::Right => { *cursor_idx = (*cursor_idx + 1).min(input.chars().count()); KeyAction::None }
-        KeyCode::Home => { *cursor_idx = 0; KeyAction::None }
-        KeyCode::End => { *cursor_idx = input.chars().count(); KeyAction::None }
-        KeyCode::PageUp => { *scroll = scroll.saturating_sub(20); *follow = false; KeyAction::None }
-        KeyCode::PageDown => { *follow = true; KeyAction::None }
-        KeyCode::Backspace => {
-            if let Some((s, i)) = composer::backspace(input, *cursor_idx) {
-                *input = s; *cursor_idx = i;
-            }
-            KeyAction::None
-        }
-        KeyCode::Char(c) => {
-            // Fallback quit for terminals/crossterm configs that deliver Ctrl+C
-            // (ETX, 0x03) and Ctrl+D (EOT, 0x04) as raw control chars without the
-            // CONTROL modifier flag (the Ctrl-block match above would miss them).
-            if c == '\u{3}' || c == '\u{4}' {
-                return KeyAction::Quit;
-            }
-            if c == '$' && input.is_empty() && *cursor_idx == 0 {
-                *skill_menu = Some(SkillMenu::new(discover_skills(), active_skill.is_some()));
-                return KeyAction::None;
-            }
-            // `/` on empty input opens the slash-command picker. Bare `/` +
-            // Enter defaults to /task (first row) for muscle memory.
-            if c == '/' && input.is_empty() && *cursor_idx == 0 {
-                return KeyAction::OpenCommand;
-            }
-            let (s, i) = composer::insert_char(input, *cursor_idx, c);
-            *input = s; *cursor_idx = i;
-            KeyAction::None
-        }
-        _ => KeyAction::None,
-    }
-}
-
-fn move_hist(history: &[String], hist_idx: &mut Option<usize>, input: &mut String, cursor_idx: &mut usize, delta: i32) {
-    if history.is_empty() { return; }
-    let cur = hist_idx.unwrap_or(history.len());
-    let next = (cur as i32 + delta).clamp(0, history.len() as i32) as usize;
-    if next < history.len() {
-        *hist_idx = Some(next);
-        *input = history[next].clone();
-    } else {
-        *hist_idx = None;
-        input.clear();
-    }
-    *cursor_idx = input.chars().count();
-}
-
-/// Mouse hit-targets exported by `render` for the event loop to test clicks
-/// and wheel scrolls against. Recomputed every frame.
 fn data_dir_for(workdir: &Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();

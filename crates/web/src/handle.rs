@@ -42,8 +42,9 @@ impl SseEvt {
             SessionEvent::Done => ("done".to_string(), serde_json::json!({}), EventKind::Done),
             SessionEvent::Error(e) => ("error".to_string(), serde_json::json!({ "error": e }), EventKind::Error),
             SessionEvent::ReasoningDelta(r) => ("reasoning_delta".to_string(), serde_json::json!({ "text": r }), EventKind::TextDelta),
-            SessionEvent::SubagentStart { id, kind, prompt } => ("subagent_start".to_string(), serde_json::json!({ "id": id, "kind": kind, "prompt": prompt }), EventKind::Step),
+            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => ("subagent_start".to_string(), serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id }), EventKind::Step),
             SessionEvent::SubagentEnd { id, ok, summary } => ("subagent_end".to_string(), serde_json::json!({ "id": id, "ok": ok, "summary": summary }), EventKind::Step),
+            SessionEvent::SubagentChild { id, ev } => ("subagent_child".to_string(), serde_json::json!({ "id": id, "event": ev }), EventKind::Step),
             SessionEvent::TranscriptReset(_) => ("transcript_reset".to_string(), serde_json::json!({}), EventKind::Compaction),
             SessionEvent::QueueConsumed { seq } => ("queue_consumed".to_string(), serde_json::json!({ "seq": seq }), EventKind::Step),
         };

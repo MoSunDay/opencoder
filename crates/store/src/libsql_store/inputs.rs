@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use libsql::{params, Connection};
+use libsql::{params, Connection, TransactionBehavior};
 use tracing::warn;
 
 use crate::types::{Delivery, SessionInput};
@@ -100,7 +100,7 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
 /// Returns the row seq alongside the input so callers (e.g. the TUI mirror) can
 /// reconcile by identity.
 pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Option<(i64, SessionInput)>> {
-    let tx = conn.transaction().await?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).await?;
     let stmt = tx
         .prepare("SELECT seq, id, session_id, delivery, prompt, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
         .await?;

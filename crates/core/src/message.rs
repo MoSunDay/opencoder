@@ -107,6 +107,27 @@ impl Message {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    /// Faithful textual rendering of **all** content blocks — Text, Reasoning,
+    /// ToolUse input JSON, and ToolResult content — for token estimation.
+    /// `text()` only returns `Text` blocks and would undercount an agent-heavy
+    /// transcript by 10–50×, breaking compaction thresholds.
+    pub fn estimate_chars(&self) -> String {
+        let mut out = String::new();
+        for block in &self.blocks {
+            match block {
+                ContentBlock::Text { text } => out.push_str(text),
+                ContentBlock::Reasoning { text } => out.push_str(text),
+                ContentBlock::ToolUse { name, input, .. } => {
+                    out.push_str(name);
+                    out.push_str(&serde_json::to_string(input).unwrap_or_default());
+                }
+                ContentBlock::ToolResult { content, .. } => out.push_str(content),
+            }
+            out.push('\n');
+        }
+        out
+    }
 }
 
 pub fn now_ms() -> i64 {

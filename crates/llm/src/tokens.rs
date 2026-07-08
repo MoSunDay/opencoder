@@ -16,10 +16,11 @@ pub fn estimate(text: &str) -> usize {
     chars.div_ceil(CHARS_PER_TOKEN)
 }
 
-/// Estimate tokens for a slice of messages: sum of each message's text content
-/// plus a small structural overhead per message.
+/// Estimate tokens for a slice of messages: sum of each message's full
+/// content (text + reasoning + tool-use input + tool-result content) plus a
+/// small structural overhead per message.
 pub fn estimate_messages(messages: &[Message]) -> usize {
-    messages.iter().map(|m| estimate(&m.text()) + PER_MESSAGE_OVERHEAD).sum()
+    messages.iter().map(|m| estimate(&m.estimate_chars()) + PER_MESSAGE_OVERHEAD).sum()
 }
 
 /// Estimate tokens for the full session transcript that will be sent to the
@@ -55,22 +56,45 @@ mod tests {
 
     #[test]
     fn estimate_messages_grows_with_count() {
-        let m1 = Message::user("id1", "abcdefgh"); // 2 + 4 = 6
+        let m1 = Message::user("id1", "abcdefgh"); // "abcdefgh\n" 9ch → 3 + 4 = 7
         let m2 = Message::assistant("id2"); // 0 + 4 = 4
         let total = estimate_messages(&[m1, m2]);
-        assert_eq!(total, 10);
+        assert_eq!(total, 11);
     }
 
     #[test]
     fn estimate_transcript_combines_system_and_messages() {
         let sys = "abcdefgh"; // 2 tokens
-        let m1 = Message::user("id1", "abcdefgh"); // 2 + 4 = 6
+        let m1 = Message::user("id1", "abcdefgh"); // 3 + 4 = 7
         let total = estimate_transcript(sys, &[m1]);
-        assert_eq!(total, 8); // 2 + 6
+        assert_eq!(total, 9); // 2 + 7
     }
 
     #[test]
     fn estimate_transcript_empty_both_is_zero() {
         assert_eq!(estimate_transcript("", &[]), 0);
+    }
+
+    #[test]
+    fn estimate_messages_counts_tool_results_and_tool_use() {
+        use opencode_core::ContentBlock;
+        use serde_json::json;
+
+        let mut m = Message::assistant("id1");
+        m.blocks.push(ContentBlock::ToolUse {
+            id: "call_1".into(),
+            name: "bash".into(),
+            input: json!({"cmd": "ls -la"}),
+        });
+        m.blocks.push(ContentBlock::ToolResult {
+            tool_use_id: "call_1".into(),
+            content: "x".repeat(400),
+            is_error: false,
+        });
+        let total = estimate_messages(&[m]);
+        assert!(
+            total > 100,
+            "tool result (400ch) must be counted, got {total}"
+        );
     }
 }

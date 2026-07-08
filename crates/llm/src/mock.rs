@@ -68,6 +68,7 @@ impl ChatStream for MockChatClient {
         let (tx, rx) = mpsc::channel::<LlmEvent>(128);
         tokio::spawn(async move {
             for ev in script {
+                tokio::task::yield_now().await;
                 if tx.send(ev).await.is_err() {
                     break;
                 }

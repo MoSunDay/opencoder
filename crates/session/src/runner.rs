@@ -25,10 +25,14 @@ pub enum SessionEvent {
     AgentSwitch(String),
     Compaction(String),
     Status(String),
-    /// A subagent (task tool) started. `kind` is the subagent_type, `prompt` its task.
-    SubagentStart { id: String, kind: String, prompt: String },
-    /// A subagent finished. `depth` is nesting level (1 = direct child).
+    /// A subagent (task tool) started. `child_session_id` is the child's
+    /// session for loading its transcript from the store.
+    SubagentStart { id: String, kind: String, prompt: String, child_session_id: String },
+    /// A subagent finished.
     SubagentEnd { id: String, ok: bool, summary: String },
+    /// A child event from a running subagent, tagged with the tool-call id so
+    /// the TUI can route it into the subagent's foldable block.
+    SubagentChild { id: String, ev: Box<SessionEvent> },
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<opencode_core::Message>),
@@ -42,11 +46,6 @@ pub enum SessionEvent {
 
 const MAX_OUTPUT: usize = 20_000;
 const DOOM_THRESHOLD: usize = 3;
-
-/// Resolves when the session is cancelled token has been tripped (hard-abort).
-fn cancelled(session: &SessionState) -> bool {
-    session.cancel.as_ref().map(|c| c.is_cancelled()).unwrap_or(false)
-}
 
 /// Shared event sink for concurrent tool dispatch. Wraps the borrowed `FnMut`
 /// closure in a `Mutex` so multiple in-flight tool/subagent futures can emit
@@ -216,6 +215,7 @@ async fn run_loop(
             for (i, tc) in tool_calls.iter().enumerate() {
                 let sink = Arc::clone(&sink);
                 futs.push(async move {
+                    tokio::task::yield_now().await;
                     let out = execute_call(tc, session_ref, registry, &sink).await;
                     (i, out)
                 });
@@ -229,9 +229,11 @@ async fn run_loop(
                     is_error: out.is_error,
                 });
                 results.push((i, out));
-                if cancelled(session_ref) {
-                    break;
-                }
+                // Drain the whole batch even under cancel: breaking would drop
+                // in-flight subagent futures, skipping their SubagentEnd +
+                // complete_subagent_task and leaving tool_use ids without
+                // results. Cancelled tools resolve fast (select! / child.cancel),
+                // and the run halts at the next run_loop top-of-loop check.
             }
             results.sort_by_key(|(i, _)| *i);
             results
@@ -379,6 +381,7 @@ async fn run_subagent(
         id: call_id.clone(),
         kind: kind.clone(),
         prompt: preview,
+        child_session_id: child_session_id.clone(),
     });
 
     let mut child = SessionState::new(
@@ -443,11 +446,12 @@ async fn run_subagent(
     let summary_chars = &mut child_chars;
     let tool_count = &mut child_tools;
     let parent_sink = Arc::clone(sink);
+    let call_id_for_cb = call_id.clone();
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
         registry,
-        |cev| {
+        move |cev| {
             // Persist child events to session_events for replay/JSONL export.
             if let Some(ref store) = child_store {
                 let kind_str = match &cev {
@@ -472,24 +476,17 @@ async fn run_subagent(
                     let _ = store_clone.append_event(&rec).await;
                 });
             }
-            match cev {
-                SessionEvent::ToolStart { id, name, input } => {
-                    *tool_count += 1;
-                    emit(&parent_sink, SessionEvent::ToolStart { id, name, input });
-                }
-                SessionEvent::ToolEnd { id, name, output, is_error } => {
-                    emit(&parent_sink, SessionEvent::ToolEnd { id, name, output, is_error });
-                }
-                SessionEvent::TextDelta(t) => {
-                    if summary_chars.len() < 240 {
-                        summary_chars.push_str(&t);
-                    }
-                }
-                SessionEvent::Error(e) => {
-                    emit(&parent_sink, SessionEvent::Status(format!("subagent error: {e}")));
+            match &cev {
+                SessionEvent::ToolStart { .. } => *tool_count += 1,
+                SessionEvent::TextDelta(t) if summary_chars.len() < 240 => {
+                    summary_chars.push_str(t);
                 }
                 _ => {}
             }
+            emit(&parent_sink, SessionEvent::SubagentChild {
+                id: call_id_for_cb.clone(),
+                ev: Box::new(cev),
+            });
         },
     ))
     .await;

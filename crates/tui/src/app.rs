@@ -4,16 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, MouseButton,
-    MouseEventKind,
-};
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use futures::StreamExt;
+use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use opencode_core::{resolve_agent, Config};
 use opencode_llm::{estimate, ChatClient, ChatStream};
 use opencode_session::{SessionEvent, SessionState};
@@ -27,12 +18,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
 use crate::queue_panel;
 use crate::render::{in_rect, render, MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
+use crate::terminal::TerminalGuard;
 use crate::worker::{gate_compact, process_cmd, rebind_session, CompactGate, UiCmd, UiEvent};
 use crate::TuiOpts;
 
@@ -88,27 +81,17 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     )
     .with_store(store.clone());
 
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    // Best-effort Kitty keyboard enhancement so Shift+Enter can be
-    // distinguished from Enter. Silently ignored on terminals that don't
-    // support it.
-    {
-        use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
-        let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-            | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
-        let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
-    }
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        SetCursorStyle::SteadyBar,
-        EnableMouseCapture
-    )?;
-    let backend = CrosstermBackend::new(stdout);
+    // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
+    // hook it installs — restore raw/alt-screen/mouse/kitty state on ANY exit
+    // path (normal return, `?` error, or a panic that unwinds). This removes
+    // the old "cleanup only ran on the happy path" trap that bricked the
+    // terminal on any panic, leaving the user with a frozen last frame, no
+    // echo, and ineffective Ctrl+C/D.
+    let _guard = TerminalGuard::enter()?;
+    let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Term::new(backend)?;
 
-    let result = run_app(
+    run_app(
         &mut terminal,
         session,
         store,
@@ -119,15 +102,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         config,
         client,
     )
-    .await;
-
-    disable_raw_mode()?;
-    {
-        use crossterm::event::PopKeyboardEnhancementFlags;
-        let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
-    }
-    execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
-    result
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -194,7 +169,13 @@ async fn run_app(
         }
     });
 
-    let mut events = EventStream::new();
+    // Terminal input is collected by a dedicated OS thread (bounded
+    // `poll`+`read`) and delivered here over `input_rx` — see `crate::input`.
+    // Unlike `crossterm::EventStream`, whose reader could wedge forever on a
+    // half-disambiguated Esc sequence under the Kitty protocol (freezing the
+    // whole loop, Ctrl+C/D included), the bounded poll wakes at least every
+    // 150ms, so this loop can never be starved of input.
+    let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
     loop {
         let agent_name = chat.agent.clone();
@@ -261,12 +242,12 @@ async fn run_app(
         )?;
 
         tokio::select! {
-            maybe_evt = events.next() => {
-                let ev = match maybe_evt {
-                    Some(Ok(ev)) => ev,
-                    // Stream closed (e.g. terminal EOF / Ctrl+D on some PTYs).
-                    // Quit instead of busy-looping on a dead stream.
-                    _ => {
+            maybe_ev = input_rx.recv() => {
+                // `None` ⇒ the input collector thread exited (stdin closed or a
+                // read error). Quit instead of busy-looping on a dead source.
+                let ev = match maybe_ev {
+                    Some(ev) => ev,
+                    None => {
                         let _ = cmd_tx.send(UiCmd::Quit).await;
                         break;
                     }
@@ -421,7 +402,12 @@ async fn run_app(
                                 CommandOutcome::Dispatch(SlashAction::Compact) => {
                                     match gate_compact(running) {
                                         CompactGate::Run => {
-                                            start_turn(&cmd_tx, &mut cancel, UiCmd::Compact).await;
+                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Compact)
+                                                .await
+                                            {
+                                                worker_dead(&mut chat);
+                                                break;
+                                            }
                                             running = true;
                                             follow = true;
                                         }
@@ -468,7 +454,11 @@ async fn run_app(
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&text) as u64;
-                                    start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(text)).await;
+                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(text)).await
+                                    {
+                                        worker_dead(&mut chat);
+                                        break;
+                                    }
                                     running = true;
                                     follow = true;
                                 }
@@ -491,7 +481,12 @@ async fn run_app(
                                 let plan_to_act = chat.agent == "plan" && name == "act" && !running;
                                 sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
                                 if plan_to_act && !chat.blocks.is_empty() {
-                                    start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name)).await;
+                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name))
+                                        .await
+                                    {
+                                        worker_dead(&mut chat);
+                                        break;
+                                    }
                                     running = true;
                                     follow = true;
                                 } else {
@@ -633,7 +628,10 @@ async fn run_app(
                         running = false;
                         if let Some(next) = local_queue.pop_front() {
                             push_user(&mut chat, &mut history, &mut hist_idx, &next);
-                            start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(next)).await;
+                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(next)).await {
+                                worker_dead(&mut chat);
+                                break;
+                            }
                             running = true;
                         }
                     }
@@ -672,11 +670,33 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
 /// top-of-loop `is_cancelled()` check rejects every subsequent prompt. FIFO
 /// ordering on the single-consumer command channel guarantees the worker
 /// applies `ResetCancel` before processing the work command.
-async fn start_turn(cmd_tx: &mpsc::Sender<UiCmd>, cancel: &mut CancellationToken, cmd: UiCmd) {
+///
+/// Returns `false` if the command channel is closed — i.e. the worker task has
+/// died (panic or unexpected exit). The caller treats this as fatal: pushes a
+/// marker and breaks. Because input collection runs on its own thread, the UI
+/// stays interactive (Ctrl+C/D still work) so the user exits cleanly instead
+/// of facing a wedged spinner.
+async fn start_turn(
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    cmd: UiCmd,
+) -> bool {
     let fresh = CancellationToken::new();
     *cancel = fresh.clone();
-    let _ = cmd_tx.send(UiCmd::ResetCancel(fresh)).await;
-    let _ = cmd_tx.send(cmd).await;
+    if cmd_tx.send(UiCmd::ResetCancel(fresh)).await.is_err() {
+        return false;
+    }
+    cmd_tx.send(cmd).await.is_ok()
+}
+
+/// Record that the worker task is gone and the session can no longer progress.
+/// Called at every turn-start site when `start_turn` reports the worker dead;
+/// the caller then breaks the main loop.
+fn worker_dead(chat: &mut ChatView) {
+    chat.push_marker(Line::from(Span::styled(
+        "[worker stopped] session engine exited unexpectedly — please restart",
+        Style::default().fg(Color::Red),
+    )));
 }
 
 /// Estimated tokens of the system prompt that will accompany every request:

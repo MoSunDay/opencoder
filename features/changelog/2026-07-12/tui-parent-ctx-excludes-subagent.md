@@ -58,10 +58,17 @@ Commit: (working-tree, pre-initial-commit)
 
 ### 端到端实证（替代手动 TUI 验证）
 - **`crates/tui/tests/subagent_context_isolation.rs`**（新增）：用 `MockChatClient` 驱动真实
-  `session::run` 派遣 subagent，收集完整 `SessionEvent` 流（含 `SubagentChild`），replay 进
-  `ChatView`，断言父 `context_used` 在子事件流期间**不增长**、子 ChatView 独立计数。这把
-  「修复对用户可见行为有效」从代码推理提升为受测不变量，自动化替代人眼观察 TUI。
+  `session::run`，收集完整 `SessionEvent` 流（含 `SubagentChild`），replay 进 `ChatView`。两个测试：
+  - `real_subagent_stream_does_not_inflate_parent_context`：单个 subagent。
+  - `concurrent_subagents_do_not_inflate_parent_context`：**一轮派两个并发 subagent**
+    （`two_task_turn`），直接覆盖用户原始「并发 subagent」诉求。
+- **断言设计要点**：逐 `SubagentChild` 验证 apply 前后父 `context_used` 不变（非窗口 before/after）。
+  并发时 `SubagentEnd`（其 summary 合法计入父）会交织在两组 `SubagentChild` 之间，窗口跨度会混淆。
+  逐事件断言精确隔离「子事件不计父」契约。调试轨迹证实：每个 `SubagentChild` apply 前后父值恒定
+  （22→22、31→31），`SubagentEnd` 的 +9 是 summary，属合法。
 - `crates/tui/Cargo.toml` 新增 `[dev-dependencies] tempfile = "3"`。
+- **e2e Python 语法 gate**：`python3 -m py_compile scripts/e2e/*.py scripts/e2e_glm.py` → OK
+  （e2e 重构为 Python 契约套件，确认可导入；不在 cargo test 范围）。
 
 ### 显示链路（未改，本就正确）
 `app.rs:194-209` 已按焦点 view 取 `context_used`：聚焦父窗口取
@@ -75,14 +82,16 @@ Commit: (working-tree, pre-initial-commit)
 | 父 context 不含子 token（precondition 非零 + apply SubagentChild 后父值不变） | `subagent_events_render` | `crates/tui/src/chat.rs`（强化） |
 | 完成态边界：SubagentEnd 后父只 +summary token | `subagent_events_render` 末断言 | `crates/tui/src/chat.rs`（强化） |
 | **端到端**：真实 session::run subagent 事件流 replay 进 ChatView，父 context_used 在子事件期间不增长 | `real_subagent_stream_does_not_inflate_parent_context` | `crates/tui/tests/subagent_context_isolation.rs`（**新增**） |
+| **并发端到端**：一轮两并发 subagent，逐 SubagentChild 断言父值不变（覆盖用户原始「并发」诉求） | `concurrent_subagents_do_not_inflate_parent_context` | `crates/tui/tests/subagent_context_isolation.rs`（**新增**） |
 | 子 view 独立 track 自身 context（既有，未回归） | `subagent_events_render` 内 `view.context_used > 0` | `crates/tui/src/chat.rs` |
 | subagent 隔离语义（父 LLM 请求只用 session.messages） | 既有 `subagent.rs` 6 项 | `crates/session/tests/subagent.rs`（未改，全绿） |
 
-- 全量回归：`cargo test --workspace` → **296 passed / 0 failed**
-  （cli 22 · core 34 · llm 23 · session 62 · store 27 · tui 111 · web 17）
+- 全量回归：`cargo test --workspace` → **299 passed / 0 failed**
+  （tui: 110 unit + 2 端到端集成 = 112；余为 cli/core/llm/session/store/web）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
-- 行数：`chat.rs` 800 ≤ 800；新增 `subagent_context_isolation.rs` 107 ≤ 400
+- e2e：`python3 -m py_compile scripts/e2e/*.py` → OK
+- 行数：`chat.rs` 800 ≤ 800；`subagent_context_isolation.rs` 203 ≤ 400
 
 ## Impact Surface
 

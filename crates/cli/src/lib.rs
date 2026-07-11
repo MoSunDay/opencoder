@@ -83,7 +83,14 @@ pub enum SessionSub {
     /// List sessions for the current workdir.
     List,
     /// Show a session's messages.
-    Show { id: String },
+    Show {
+        id: String,
+        /// Emit full session state (meta + all message blocks + subagent
+        /// tasks) as machine-readable JSON. Enables deep e2e assertions
+        /// without coupling to storage internals.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Delete a session.
     Delete { id: String },
     /// Export a session (with subagent tree) to an opencode binary file.

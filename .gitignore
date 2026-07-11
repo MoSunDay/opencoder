@@ -39,3 +39,4 @@ logs/
 *.bun-build
 tsconfig.tsbuildinfo
 link_repos
+__pycache__/

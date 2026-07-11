@@ -72,8 +72,16 @@ fn session_subcommands() {
 
     let cli = parse(&["opencoder", "session", "show", "sess-1"]);
     assert!(
-        matches!(cli.command, Some(Command::Session { sub: SessionSub::Show { id } }) if id == "sess-1")
+        matches!(cli.command, Some(Command::Session { sub: SessionSub::Show { id, .. } }) if id == "sess-1")
     );
+
+    let cli = parse(&["opencoder", "session", "show", "sess-1", "--json"]);
+    assert!(matches!(
+        cli.command,
+        Some(Command::Session {
+            sub: SessionSub::Show { id, json }
+        }) if id == "sess-1" && json
+    ));
 
     let cli = parse(&["opencoder", "session", "delete", "sess-2"]);
     assert!(

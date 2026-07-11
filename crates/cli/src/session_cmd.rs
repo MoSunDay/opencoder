@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 
 use opencode_core::Config;
 use opencode_store::{
@@ -92,7 +92,10 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             }
             Ok(())
         }
-        SessionSub::Show { id } => {
+        SessionSub::Show { id, json } => {
+            if *json {
+                return show_session_json(&store, id).await;
+            }
             for m in store.load_messages(id).await? {
                 println!("[{:?}] {}", m.role, m.text());
             }
@@ -128,6 +131,32 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Build the full session JSON value: meta (incl. compaction summary) + all
+/// message blocks (Text/Reasoning/ToolUse/ToolResult) + subagent task records
+/// (status/result/ok). Extracted from `show_session_json` so the shape is
+/// unit-testable without capturing stdout.
+pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<serde_json::Value> {
+    let meta = store
+        .get_session(id)
+        .await?
+        .ok_or_else(|| anyhow!("session not found: {id}"))?;
+    let messages = store.load_messages(id).await?;
+    let subagent_tasks = store.list_subagent_tasks(id).await?;
+    Ok(serde_json::json!({
+        "meta": meta,
+        "messages": messages,
+        "subagent_tasks": subagent_tasks,
+    }))
+}
+
+/// Emit full session state as JSON (see `build_session_json`). Machine-readable
+/// surface for deep e2e assertions, decoupled from storage internals.
+async fn show_session_json(store: &LibsqlStore, id: &str) -> Result<()> {
+    let body = build_session_json(store, id).await?;
+    println!("{}", serde_json::to_string_pretty(&body)?);
+    Ok(())
 }
 
 pub(crate) fn apply_cli_overrides(cli: &Cli, cfg: &mut Config) {
@@ -212,5 +241,71 @@ mod tests {
             s.contains("interleave   : off"),
             "interleaved_thinking=false must render off, got:\n{s}"
         );
+    }
+
+    #[tokio::test]
+    async fn build_session_json_emits_meta_messages_and_subagent_tasks() {
+        use super::build_session_json;
+        use opencode_core::{ContentBlock, Message, Role};
+        use opencode_store::{LibsqlStore, SessionMeta, Store};
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+        store
+            .create_session(&SessionMeta {
+                id: "s1".into(),
+                title: Some("t".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: None,
+                created_at: 0,
+                updated_at: 0,
+                summary: None,
+                summary_seq: None,
+            })
+            .await
+            .unwrap();
+        let msg = Message {
+            id: "m1".into(),
+            role: Role::Assistant,
+            blocks: vec![
+                ContentBlock::Text { text: "hello".into() },
+                ContentBlock::ToolUse {
+                    id: "tu1".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "ls"}),
+                },
+            ],
+            model: None,
+            agent: None,
+            usage: Default::default(),
+            created_at: 0,
+            synthetic: false,
+        };
+        store.append_message("s1", &msg).await.unwrap();
+
+        let body = build_session_json(&store, "s1").await.unwrap();
+        assert_eq!(body["meta"]["id"], "s1", "meta.id must round-trip");
+        let messages = body["messages"].as_array().expect("messages is array");
+        assert_eq!(messages.len(), 1, "one message persisted");
+        // Tool-use block survives — NOT filtered to text (the whole point of --json).
+        let blocks = messages[0]["blocks"].as_array().expect("blocks is array");
+        assert_eq!(blocks.len(), 2, "both content blocks present");
+        assert_eq!(blocks[1]["kind"], "tool_use");
+        assert_eq!(blocks[1]["name"], "bash");
+        assert_eq!(
+            body["subagent_tasks"].as_array().unwrap().len(),
+            0,
+            "no subagent tasks"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_session_json_errors_on_missing_session() {
+        use super::build_session_json;
+        use opencode_store::LibsqlStore;
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+        let err = build_session_json(&store, "does-not-exist").await;
+        assert!(err.is_err(), "missing session must error, not empty output");
     }
 }

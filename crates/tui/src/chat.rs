@@ -137,11 +137,6 @@ impl ChatView {
             SessionEvent::AgentSwitch(to) => {
                 self.finalize_assistant();
                 self.agent = to.clone();
-                self.blocks
-                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                        format!("[switched to {to} mode]"),
-                        Style::default().fg(Color::Magenta),
-                    ))]));
             }
             SessionEvent::Compaction(c) => {
                 self.finalize_assistant();
@@ -692,6 +687,39 @@ mod tests {
         v.apply(&SessionEvent::TextDelta("more".into()));
         assert!(block_text(&v).contains("[queued] foo"));
         assert!(block_text(&v).contains("more"));
+    }
+
+    #[test]
+    fn agent_switch_updates_agent_without_marker() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::AgentSwitch("act".into()));
+        assert_eq!(v.agent, "act");
+        assert!(
+            !v.blocks
+                .iter()
+                .any(|b| matches!(b, ChatBlock::Marker(_))),
+            "AgentSwitch must not pollute the chat body with a marker"
+        );
+    }
+
+    #[test]
+    fn agent_switch_finalizes_pending_assistant() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta("mid-stream".into()));
+        v.apply(&SessionEvent::AgentSwitch("act".into()));
+        let pending = v
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::Assistant { done, .. } => Some(*done),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!pending.is_empty(), "assistant block should exist");
+        assert!(
+            pending.iter().all(|d| *d),
+            "assistant block must be finalized on AgentSwitch"
+        );
     }
 
     #[test]

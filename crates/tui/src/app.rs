@@ -38,6 +38,15 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
+/// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
+const MODE_FLASH_TICKS: u32 = 5;
+
+/// Whether a transient flash started at `start` is still visible at `now`,
+/// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
+/// stays correct across the u32 wraparound of `anim_tick`.
+pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
+    now.wrapping_sub(start) < ticks
+}
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts
@@ -164,6 +173,7 @@ async fn run_app(
     let mut model_menu: Option<ModelMenu> = None;
     let mut active_skill: Option<String> = None;
     let mut anim_tick: u32 = 0;
+    let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut parent_scroll: u16 = 0;
@@ -233,6 +243,15 @@ async fn run_app(
             &mut scroll,
             follow,
             anim_tick,
+            mode_flash
+                .as_ref()
+                .and_then(|(t, s)| {
+                    if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
+                        Some(t.as_str())
+                    } else {
+                        None
+                    }
+                }),
             active_skill.as_deref(),
             skill_menu.as_ref(),
             task_picker.as_ref(),
@@ -446,8 +465,6 @@ async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
                                         queue_items.push((seq, text.clone()));
                                     }
-                                    chat.push_marker(Line::from(Span::styled(
-                                        format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&text) as u64;
@@ -467,11 +484,10 @@ async fn run_app(
                                 if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
                                     queue_items.push((seq, text.clone()));
                                 }
-                                chat.push_marker(Line::from(Span::styled(
-                                    format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
                                 follow = true;
                             }
                             KeyAction::SwitchAgent(name) => {
+                                mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
                                 let plan_to_act = chat.agent == "plan" && name == "act" && !running;
                                 sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
                                 if plan_to_act && !chat.blocks.is_empty() {

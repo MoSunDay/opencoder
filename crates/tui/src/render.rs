@@ -86,6 +86,7 @@ pub(crate) fn render(
     scroll: &mut u16,
     follow: bool,
     anim_tick: u32,
+    mode_flash: Option<&str>,
     active_skill: Option<&str>,
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
@@ -182,6 +183,27 @@ pub(crate) fn render(
         }
         if let Some(mm) = model_menu {
             crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
+        }
+        if let Some(text) = mode_flash {
+            let pad = 1u16;
+            let text_w = text.chars().count() as u16;
+            let chip_w = text_w + pad * 2;
+            let avail = composer_area.width.saturating_sub(2);
+            let w = chip_w.min(avail);
+            let row = composer_area.y;
+            let x = composer_area.x + composer_area.width.saturating_sub(w).saturating_sub(1);
+            let chip_rect = Rect { x, y: row, width: w, height: 1 };
+            f.render_widget(Clear, chip_rect);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!(" {text} "),
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ))),
+                chip_rect,
+            );
         }
         place_cursor(f, composer_area, input, cursor_idx);
     })?;

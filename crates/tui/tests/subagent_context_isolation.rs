@@ -71,24 +71,21 @@ async fn real_subagent_stream_does_not_inflate_parent_context() {
     // context_used immediately before the first SubagentChild and immediately
     // after the last SubagentChild.
     let mut view = ChatView::default();
-    let mut before_first_child: Option<u64> = None;
-    let mut after_last_child: Option<u64> = None;
+    let mut child_events = 0usize;
     for ev in &events {
-        if matches!(ev, SessionEvent::SubagentChild { .. }) && before_first_child.is_none() {
-            before_first_child = Some(view.context_used);
-        }
-        view.apply(ev);
-        if matches!(ev, SessionEvent::SubagentChild { .. }) {
-            after_last_child = Some(view.context_used);
+        if let SessionEvent::SubagentChild { .. } = ev {
+            let before = view.context_used;
+            view.apply(ev);
+            assert_eq!(
+                view.context_used, before,
+                "SubagentChild must not change parent context_used"
+            );
+            child_events += 1;
+        } else {
+            view.apply(ev);
         }
     }
-
-    let before = before_first_child.expect("run must emit SubagentChild events");
-    let after = after_last_child.expect("run must emit SubagentChild events");
-    assert_eq!(
-        before, after,
-        "parent context_used must not grow while subagent child events stream in"
-    );
+    assert!(child_events > 0, "run must emit SubagentChild events");
 
     // The child ChatView (nested in the Subagent block) carries the child's
     // own tokens — visible when the user switches into the subagent view.
@@ -103,5 +100,104 @@ async fn real_subagent_stream_does_not_inflate_parent_context() {
     assert!(
         child_ctx > 0,
         "child ChatView must track its own tokens, got {child_ctx}"
+    );
+}
+
+fn two_task_turn() -> LlmEvent {
+    LlmEvent::Completed {
+        text: "delegating to two".into(),
+        tool_calls: vec![
+            CompletedToolCall {
+                id: "task-A".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job A", "subagent_type": "explore"}),
+            },
+            CompletedToolCall {
+                id: "task-B".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job B", "subagent_type": "explore"}),
+            },
+        ],
+        usage: None,
+    }
+}
+
+/// Covers the user's ORIGINAL report: "并发 subagent 之后父 context 暴涨".
+/// Two task calls in one turn dispatch concurrent subagents; their interleaved
+/// SubagentChild streams must not inflate the parent ChatView's context_used.
+#[tokio::test]
+async fn concurrent_subagents_do_not_inflate_parent_context() {
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![two_task_turn()])
+            .push_script(vec![
+                LlmEvent::TextDelta("child A secret output".into()),
+                text_done(""),
+            ])
+            .push_script(vec![
+                LlmEvent::TextDelta("child B secret output".into()),
+                text_done(""),
+            ])
+            .push_script(vec![text_done("parent done")]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent-conc",
+        agent,
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events: Vec<SessionEvent> = Vec::new();
+    run(&mut session, "research two things".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let subagent_count = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::SubagentStart { .. }))
+        .count();
+    assert!(
+        subagent_count >= 2,
+        "precondition: must dispatch >=2 concurrent subagents, got {subagent_count}"
+    );
+
+    // Each SubagentChild must not change the parent's context_used. Assert
+    // per-event: concurrent interleave means SubagentEnd (which legitimately
+    // adds the finished child's summary) can land between child streams, so a
+    // window span would conflate the two. Per-event isolates the contract.
+    let mut view = ChatView::default();
+    let mut child_events = 0usize;
+    for ev in &events {
+        if let SessionEvent::SubagentChild { .. } = ev {
+            let before = view.context_used;
+            view.apply(ev);
+            assert_eq!(
+                view.context_used, before,
+                "SubagentChild must not change parent context_used (concurrent interleave)"
+            );
+            child_events += 1;
+        } else {
+            view.apply(ev);
+        }
+    }
+    assert!(child_events > 0, "must see SubagentChild events");
+
+    let child_views: Vec<&ChatView> = view
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Subagent { view, .. } => Some(view),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        child_views.len() >= 2 && child_views.iter().all(|v| v.context_used > 0),
+        "each of >=2 child ChatViews must track its own tokens"
     );
 }

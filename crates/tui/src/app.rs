@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode,
-    MouseButton, MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, MouseButton,
+    MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -28,24 +28,37 @@ use tokio_util::sync::CancellationToken;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::key_handler::{handle_key, KeyAction};
-use crate::worker::{process_cmd, rebind_session, gate_compact, CompactGate, UiCmd, UiEvent};
 use crate::menu::SkillMenu;
 use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
-use crate::render::{in_rect, render, MouseHits, Term};
 use crate::queue_panel;
+use crate::render::{in_rect, render, MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
+use crate::worker::{gate_compact, process_cmd, rebind_session, CompactGate, UiCmd, UiEvent};
 use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
-    let workdir = opts.workdir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let workdir = opts
+        .workdir
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let mut config = Config::load(&workdir)?;
-    if let Some(m) = &opts.model { config.model = m.clone(); }
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(&config.provider.base_url, &config.api_key()?)?);
-    let agent_name = opts.agent.clone().unwrap_or_else(|| config.agent.default.clone());
-    let agent = resolve_agent(&agent_name).or_else(|| resolve_agent("act")).context("agent")?;
+    if let Some(m) = &opts.model {
+        config.model = m.clone();
+    }
+    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
+        &config.provider.base_url,
+        &config.api_key()?,
+    )?);
+    let agent_name = opts
+        .agent
+        .clone()
+        .unwrap_or_else(|| config.agent.default.clone());
+    let agent = resolve_agent(&agent_name)
+        .or_else(|| resolve_agent("act"))
+        .context("agent")?;
 
     let session_id = opencode_session::runner::new_id();
     let context_limit = config.context_limit();
@@ -77,11 +90,27 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
             | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
         let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
     }
-    execute!(stdout, EnterAlternateScreen, SetCursorStyle::SteadyBar, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        SetCursorStyle::SteadyBar,
+        EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Term::new(backend)?;
 
-    let result = run_app(&mut terminal, session, store, session_id, context_limit, model_label, workdir, config, client).await;
+    let result = run_app(
+        &mut terminal,
+        session,
+        store,
+        session_id,
+        context_limit,
+        model_label,
+        workdir,
+        config,
+        client,
+    )
+    .await;
 
     disable_raw_mode()?;
     {
@@ -110,7 +139,10 @@ async fn run_app(
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
 
-    let mut chat = crate::chat::ChatView { agent: session.agent.name.clone(), ..Default::default() };
+    let mut chat = crate::chat::ChatView {
+        agent: session.agent.name.clone(),
+        ..Default::default()
+    };
     let mut input = String::new();
     let mut cursor_idx: usize = 0;
     let mut history: Vec<String> = Vec::new();
@@ -120,8 +152,10 @@ async fn run_app(
     let mut show_help = false;
     let mut scroll: u16 = 0;
     let mut follow = true;
-    let mut context_used: u64 = 0;
     let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
+    // Cached system-prompt tokens for the subagent currently being viewed.
+    // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
+    let mut subagent_sys: u64 = 0;
     let mut steer_items: Vec<String> = Vec::new();
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut skill_menu: Option<SkillMenu> = None;
@@ -144,7 +178,9 @@ async fn run_app(
     let worker = tokio::spawn(async move {
         let mut sess = session;
         while let Some(cmd) = cmd_rx.recv().await {
-            if process_cmd(cmd, &mut sess, &evt_tx).await { break; }
+            if process_cmd(cmd, &mut sess, &evt_tx).await {
+                break;
+            }
         }
     });
 
@@ -153,17 +189,24 @@ async fn run_app(
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
-        let (display_chat, display_agent) = if let Some(idx) = subagent_focus {
-            match chat.blocks.get(idx) {
-                Some(crate::chat::ChatBlock::Subagent { view, kind, prompt, .. }) => (
-                    view as &crate::chat::ChatView,
-                    format!("\u{2190} [Esc] back | \u{2937}sub [{kind}] {prompt}"),
-                ),
-                _ => (&chat, agent_name.clone()),
-            }
-        } else {
-            (&chat, agent_name.clone())
-        };
+        // When viewing a subagent's perspective, swap in its child ChatView,
+        // back-title, and its own context stats (instead of the parent's).
+        let (display_chat, display_agent, display_ctx, display_sys) =
+            if let Some(idx) = subagent_focus {
+                match chat.blocks.get(idx) {
+                    Some(crate::chat::ChatBlock::Subagent {
+                        view, kind, prompt, ..
+                    }) => (
+                        view as &crate::chat::ChatView,
+                        format!("\u{2190} [Esc] back | \u{2937}sub [{kind}] {prompt}"),
+                        view.context_used,
+                        subagent_sys,
+                    ),
+                    _ => (&chat, agent_name.clone(), chat.context_used, sys_tokens),
+                }
+            } else {
+                (&chat, agent_name.clone(), chat.context_used, sys_tokens)
+            };
         // Compose status-bar model label with reasoning-effort badge (e.g.
         // "glm-5.2 \u{00b7}high") so the active thinking depth is visible.
         let status_model = match &config.reasoning_effort {
@@ -179,8 +222,8 @@ async fn run_app(
             &display_agent,
             running,
             show_help,
-            context_used,
-            sys_tokens,
+            display_ctx,
+            display_sys,
             context_limit,
             &status_model,
             &workdir,
@@ -200,353 +243,356 @@ async fn run_app(
 
         tokio::select! {
             maybe_evt = events.next() => {
-                if let Some(Ok(ev)) = maybe_evt {
-                    match ev {
-                        Event::Key(k) => {
-                            // Task picker modal: intercept all keys while open.
-                            if task_picker.is_some() {
-                                match handle_task_key(&mut task_picker, k) {
-                                    TaskOutcome::Pick(pick) => {
-                                        // Perform session switch.
-                                        let _ = cmd_tx.send(UiCmd::Quit).await;
-                                        let new_session_id = match &pick {
-                                            crate::task::TaskPick::New => {
-                                                opencode_session::runner::new_id()
-                                            }
-                                            crate::task::TaskPick::Resume(id) => id.clone(),
-                                        };
-                                        let new_agent = resolve_agent("act").context("agent")?;
-                                        let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());                                        let mut new_session = SessionState::new(
-                                            new_session_id.clone(),
-                                            new_agent,
-                                            new_config,
-                                            client.clone(),
-                                            workdir.clone(),
-                                        ).with_store(store.clone());
-                                        new_session.model = model_label.clone();
-                                        if let crate::task::TaskPick::Resume(ref id) = pick {
-                                            if let Ok(msgs) = store.load_messages(id).await {
-                                                new_session.messages = msgs;
-                                            }
+                let ev = match maybe_evt {
+                    Some(Ok(ev)) => ev,
+                    // Stream closed (e.g. terminal EOF / Ctrl+D on some PTYs).
+                    // Quit instead of busy-looping on a dead stream.
+                    _ => {
+                        let _ = cmd_tx.send(UiCmd::Quit).await;
+                        break;
+                    }
+                };
+                match ev {
+                    Event::Key(k) => {
+                        // Task picker modal: intercept all keys while open.
+                        if task_picker.is_some() {
+                            match handle_task_key(&mut task_picker, k) {
+                                TaskOutcome::Pick(pick) => {
+                                    // Perform session switch.
+                                    let _ = cmd_tx.send(UiCmd::Quit).await;
+                                    let new_session_id = match &pick {
+                                        crate::task::TaskPick::New => {
+                                            opencode_session::runner::new_id()
                                         }
-                                        let new_cancel = CancellationToken::new();
-                                        let new_session = new_session.with_cancel(new_cancel.clone());
-                                        let resumed_messages = if let crate::task::TaskPick::Resume(_) = &pick {
-                                            new_session.messages.clone()
-                                        } else {
-                                            Vec::new()
-                                        };
-                                        let (ntx, nrx) = mpsc::channel::<UiEvent>(512);
-                                        let (n_cmd_tx, mut n_cmd_rx) = mpsc::channel::<UiCmd>(64);
-                                        let session_for_worker = new_session;
-                                        let agent_name_for_tokens = session_for_worker.agent.name.clone();
-                                        let workdir_for_tokens = session_for_worker.working_dir.clone();
-                                        tokio::spawn(async move {
-                                            let mut sess = session_for_worker;
-                                            while let Some(cmd) = n_cmd_rx.recv().await {
-                                                if process_cmd(cmd, &mut sess, &ntx).await { break; }
-                                            }
-                                        });
-                                        // Save current session's UI state before switching.
-                                        session_states.insert(session_id.clone(), crate::session_ui::SessionUiState::snapshot(
-                                            running, &chat, &history, scroll, follow, context_used, sys_tokens, &steer_items, &queue_items, &active_skill,
-                                        ));
-                                        // Restore or create the target session's UI state.
-                                        let restored = session_states.remove(&new_session_id);
-                                        if let Some(st) = restored {
-                                            chat = st.chat;
-                                            history = st.history;
-                                            scroll = st.scroll;
-                                            follow = st.follow;
-                                            context_used = st.context_used;
-                                            sys_tokens = st.sys_tokens;
-                                            steer_items = st.steer_items;
-                                            queue_items = st.queue_items;
-                                            active_skill = st.active_skill;
-                                            running = false; // worker was killed on switch
-                                        } else {
-                                            // Fresh state for a new or resumed session.
-                                            if let crate::task::TaskPick::Resume(_) = pick {
-                                                chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages);
-                                            } else {
-                                                chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
-                                            }
-                                            scroll = 0; follow = true;
-                                            context_used = 0;
-                                            sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
-                                            steer_items.clear(); queue_items.clear();
-                                            active_skill = None; running = false;
+                                        crate::task::TaskPick::Resume(id) => id.clone(),
+                                    };
+                                    let new_agent = resolve_agent("act").context("agent")?;
+                                    let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());                                        let mut new_session = SessionState::new(
+                                        new_session_id.clone(),
+                                        new_agent,
+                                        new_config,
+                                        client.clone(),
+                                        workdir.clone(),
+                                    ).with_store(store.clone());
+                                    new_session.model = model_label.clone();
+                                    if let crate::task::TaskPick::Resume(ref id) = pick {
+                                        if let Ok(msgs) = store.load_messages(id).await {
+                                            new_session.messages = msgs;
                                         }
-                                        input.clear(); cursor_idx = 0; hist_idx = None;
-                                        rebind_session(
-                                            &mut cmd_tx,
-                                            &mut evt_rx,
-                                            &mut session_id,
-                                            &mut cancel,
-                                            n_cmd_tx,
-                                            nrx,
-                                            new_session_id,
-                                            new_cancel,
-                                        );
                                     }
-                                    TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
-                                    TaskOutcome::Idle => {}
+                                    let new_cancel = CancellationToken::new();
+                                    let new_session = new_session.with_cancel(new_cancel.clone());
+                                    let resumed_messages = if let crate::task::TaskPick::Resume(_) = &pick {
+                                        new_session.messages.clone()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    let (ntx, nrx) = mpsc::channel::<UiEvent>(512);
+                                    let (n_cmd_tx, mut n_cmd_rx) = mpsc::channel::<UiCmd>(64);
+                                    let session_for_worker = new_session;
+                                    let agent_name_for_tokens = session_for_worker.agent.name.clone();
+                                    let workdir_for_tokens = session_for_worker.working_dir.clone();
+                                    tokio::spawn(async move {
+                                        let mut sess = session_for_worker;
+                                        while let Some(cmd) = n_cmd_rx.recv().await {
+                                            if process_cmd(cmd, &mut sess, &ntx).await { break; }
+                                        }
+                                    });
+                                    // Save current session's UI state before switching.
+                                    session_states.insert(session_id.clone(), crate::session_ui::SessionUiState::snapshot(
+                                        running, &chat, &history, scroll, follow, sys_tokens, &steer_items, &queue_items, &active_skill,
+                                    ));
+                                    // Restore or create the target session's UI state.
+                                    let restored = session_states.remove(&new_session_id);
+                                    if let Some(st) = restored {
+                                        chat = st.chat;
+                                        history = st.history;
+                                        scroll = st.scroll;
+                                        follow = st.follow;
+                                        sys_tokens = st.sys_tokens;
+                                        steer_items = st.steer_items;
+                                        queue_items = st.queue_items;
+                                        active_skill = st.active_skill;
+                                        running = false; // worker was killed on switch
+                                    } else {
+                                        // Fresh state for a new or resumed session.
+                                        if let crate::task::TaskPick::Resume(_) = pick {
+                                            chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages);
+                                        } else {
+                                            chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
+                                        }
+                                        scroll = 0; follow = true;
+                                        sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
+                                        steer_items.clear(); queue_items.clear();
+                                        active_skill = None; running = false;
+                                    }
+                                    input.clear(); cursor_idx = 0; hist_idx = None;
+                                    rebind_session(
+                                        &mut cmd_tx,
+                                        &mut evt_rx,
+                                        &mut session_id,
+                                        &mut cancel,
+                                        n_cmd_tx,
+                                        nrx,
+                                        new_session_id,
+                                        new_cancel,
+                                    );
                                 }
-                                continue;
+                                TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                                TaskOutcome::Idle => {}
                             }
-                            // `/model` modal: intercept all keys while open.
-                            if model_menu.is_some() {
-                                match handle_model_key(&mut model_menu, k) {
-                                    ModelOutcome::Save(patch) => {
-                                        let json = patch.to_json();
-                                        match Config::save(&workdir, &json) {
-                                            Ok(path) => {
-                                                match Config::load(&workdir) {
-                                                    Ok(reloaded) => {
-                                                        model_label = reloaded.model_id().to_string();
-                                                        context_limit = reloaded.context_limit();
-                                                        // Rebuild the outer `client` too so subsequent
-                                                        // `/task` new sessions pick up the new endpoint
-                                                        // (the worker only swaps its own sess.client).
-                                                        let api_key = reloaded.api_key().unwrap_or_default();
-                                                        if let Ok(new_client) = opencode_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
-                                                            client = Arc::new(new_client);
-                                                        }
-                                                        config = reloaded.clone();
-                                                        let _ = cmd_tx.send(UiCmd::ReloadConfig(reloaded)).await;
-                                                        chat.push_marker(Line::from(Span::styled(
-                                                            format!("[/model] saved \u{2192} {}", path.display()),
-                                                            Style::default().fg(Color::Green))));
+                            continue;
+                        }
+                        // `/model` modal: intercept all keys while open.
+                        if model_menu.is_some() {
+                            match handle_model_key(&mut model_menu, k) {
+                                ModelOutcome::Save(patch) => {
+                                    let json = patch.to_json();
+                                    match Config::save(&workdir, &json) {
+                                        Ok(path) => {
+                                            match Config::load(&workdir) {
+                                                Ok(reloaded) => {
+                                                    model_label = reloaded.model_id().to_string();
+                                                    context_limit = reloaded.context_limit();
+                                                    // Rebuild the outer `client` too so subsequent
+                                                    // `/task` new sessions pick up the new endpoint
+                                                    // (the worker only swaps its own sess.client).
+                                                    let api_key = reloaded.api_key().unwrap_or_default();
+                                                    if let Ok(new_client) = opencode_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
+                                                        client = Arc::new(new_client);
                                                     }
-                                                    Err(e) => {
-                                                        chat.push_marker(Line::from(Span::styled(
-                                                            format!("[/model] reload failed: {e:#}"),
-                                                            Style::default().fg(Color::Red))));
-                                                    }
+                                                    config = reloaded.clone();
+                                                    let _ = cmd_tx.send(UiCmd::ReloadConfig(reloaded)).await;
+                                                    chat.push_marker(Line::from(Span::styled(
+                                                        format!("[/model] saved \u{2192} {}", path.display()),
+                                                        Style::default().fg(Color::Green))));
+                                                }
+                                                Err(e) => {
+                                                    chat.push_marker(Line::from(Span::styled(
+                                                        format!("[/model] reload failed: {e:#}"),
+                                                        Style::default().fg(Color::Red))));
                                                 }
                                             }
-                                            Err(e) => {
-                                                chat.push_marker(Line::from(Span::styled(
-                                                    format!("[/model] save failed: {e:#}"),
-                                                    Style::default().fg(Color::Red))));
-                                            }
+                                        }
+                                        Err(e) => {
+                                            chat.push_marker(Line::from(Span::styled(
+                                                format!("[/model] save failed: {e:#}"),
+                                                Style::default().fg(Color::Red))));
                                         }
                                     }
-                                    ModelOutcome::Cancel | ModelOutcome::Idle => {}
-                                    ModelOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                                 }
-                                continue;
+                                ModelOutcome::Cancel | ModelOutcome::Idle => {}
+                                ModelOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                             }
-                            // `/` command picker: intercept all keys while open.
-                            if command_menu.is_some() {
-                                let (outcome, quit) = handle_command_key(&mut command_menu, k);
-                                if quit { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
-                                match outcome {
-                                    CommandOutcome::Dispatch(SlashAction::Task) => {
-                                        let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
-                                            .await.unwrap_or_default();
-                                        task_picker = Some(TaskPicker::new(sessions));
-                                    }
-                                    CommandOutcome::Dispatch(SlashAction::Model) => {
-                                        model_menu = Some(ModelMenu::new(&config));
-                                    }
-                                    CommandOutcome::Dispatch(SlashAction::Compact) => {
-                                        match gate_compact(running) {
-                                            CompactGate::Run => {
-                                                let _ = cmd_tx.send(UiCmd::Compact).await;
-                                                running = true;
-                                                follow = true;
-                                            }
-                                            CompactGate::SkipRunning => {
-                                                chat.push_marker(Line::from(Span::styled(
-                                                    "[compact] busy \u{2014} retry when idle",
-                                                    Style::default().fg(Color::Yellow),
-                                                )));
-                                            }
+                            continue;
+                        }
+                        // `/` command picker: intercept all keys while open.
+                        if command_menu.is_some() {
+                            let (outcome, quit) = handle_command_key(&mut command_menu, k);
+                            if quit { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                            match outcome {
+                                CommandOutcome::Dispatch(SlashAction::Task) => {
+                                    let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
+                                        .await.unwrap_or_default();
+                                    task_picker = Some(TaskPicker::new(sessions));
+                                }
+                                CommandOutcome::Dispatch(SlashAction::Model) => {
+                                    model_menu = Some(ModelMenu::new(&config));
+                                }
+                                CommandOutcome::Dispatch(SlashAction::Compact) => {
+                                    match gate_compact(running) {
+                                        CompactGate::Run => {
+                                            start_turn(&cmd_tx, &mut cancel, UiCmd::Compact).await;
+                                            running = true;
+                                            follow = true;
+                                        }
+                                        CompactGate::SkipRunning => {
+                                            chat.push_marker(Line::from(Span::styled(
+                                                "[compact] busy \u{2014} retry when idle",
+                                                Style::default().fg(Color::Yellow),
+                                            )));
                                         }
                                     }
-                                    CommandOutcome::Idle => {}
                                 }
-                                continue;
+                                CommandOutcome::Idle => {}
                             }
-                            // Subagent ctx-switch: Esc exits to parent view.
-                            if subagent_focus.is_some() && k.code == KeyCode::Esc {
-                                subagent_focus = None;
-                                scroll = parent_scroll;
-                                follow = parent_follow;
-                                last_esc = None;
-                                continue;
-                            }
-                            match handle_key(
-                                k,
-                                &mut input,
-                                &mut cursor_idx,
-                                &history,
-                                &mut hist_idx,
-                                running,
-                                &agent_name,
-                                &mut show_help,
-                                &mut scroll,
-                                &mut follow,
-                                &mut last_esc,
-                                &mut skill_menu,
-                                active_skill.as_deref(),
-                            ) {
-                                KeyAction::Submit(text) => {
-                                    if running {
-                                        if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
-                                            queue_items.push((seq, text.clone()));
-                                        }
-                                        chat.push_marker(Line::from(Span::styled(
-                                            format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
-                                    } else {
-                                        push_user(&mut chat, &mut history, &mut hist_idx, &text);
-                                        context_used += estimate(&text) as u64;
-                                        let _ = cmd_tx.send(UiCmd::Prompt(text)).await;
-                                        running = true;
-                                        follow = true;
-                                    }
-                                }
-                                KeyAction::Steer(text) => {
-                                    let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, &text)).await;
-                                    steer_items.push(text.clone());
-                                    chat.push_marker(Line::from(Span::styled(
-                                        format!("\u{21b3} steer: {text}"), Style::default().fg(Color::Blue))));
-                                    follow = true;
-                                }
-                                KeyAction::Queue(text) => {
+                            continue;
+                        }
+                        // Subagent ctx-switch: Esc exits to parent view.
+                        if subagent_focus.is_some() && k.code == KeyCode::Esc {
+                            subagent_focus = None;
+                            scroll = parent_scroll;
+                            follow = parent_follow;
+                            last_esc = None;
+                            continue;
+                        }
+                        match handle_key(
+                            k,
+                            &mut input,
+                            &mut cursor_idx,
+                            &history,
+                            &mut hist_idx,
+                            running,
+                            &agent_name,
+                            &mut show_help,
+                            &mut scroll,
+                            &mut follow,
+                            &mut last_esc,
+                            &mut skill_menu,
+                            active_skill.as_deref(),
+                        ) {
+                            KeyAction::Submit(text) => {
+                                if running {
                                     if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
                                         queue_items.push((seq, text.clone()));
                                     }
                                     chat.push_marker(Line::from(Span::styled(
                                         format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
+                                } else {
+                                    push_user(&mut chat, &mut history, &mut hist_idx, &text);
+                                    chat.context_used += estimate(&text) as u64;
+                                    start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(text)).await;
+                                    running = true;
                                     follow = true;
                                 }
-                                KeyAction::SwitchAgent(name) => {
-                                    let plan_to_act = chat.agent == "plan" && name == "act" && !running;
-                                    sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
-                                    if plan_to_act && !chat.blocks.is_empty() {
-                                        let _ = cmd_tx.send(UiCmd::SwitchAndStart(name)).await;
-                                        running = true;
-                                        follow = true;
-                                    } else {
-                                        let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
-                                    }
-                                }
-                                KeyAction::SetSkill(opt) => {
-                                    match opt {
-                                        Some((name, body)) => {
-                                            active_skill = Some(name.clone());
-                                            sys_tokens = sys_tokens_for(&agent_name, &workdir, Some(&body));
-                                            let _ = cmd_tx.send(UiCmd::SetSkill(Some(body))).await;
-                                        }
-                                        None => {
-                                            active_skill = None;
-                                            sys_tokens = sys_tokens_for(&agent_name, &workdir, None);
-                                            let _ = cmd_tx.send(UiCmd::SetSkill(None)).await;
-                                        }
-                                    }
-                                }
-                                KeyAction::Cancel => {
-                                    cancel.cancel();
-                                    chat.push_marker(Line::from(Span::styled(
-                                        "[interrupted] stopping…", Style::default().fg(Color::Yellow))));
-                                    running = false;
-                                    follow = true;
-                                }
-                                KeyAction::OpenCommand => {
-                                    command_menu = Some(CommandMenu::new());
-                                }
-                                KeyAction::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
-                                KeyAction::None => {}
                             }
-                        }
-                        Event::Mouse(m) => {
-                            match m.kind {
-                                MouseEventKind::Down(MouseButton::Left) => {
-                                    if let Some(r) = hits.jump_btn {
-                                        if in_rect(r, m.column, m.row) {
-                                            follow = true;
-                                        }
+                            KeyAction::Steer(text) => {
+                                let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, &text)).await;
+                                steer_items.push(text.clone());
+                                chat.push_marker(Line::from(Span::styled(
+                                    format!("\u{21b3} steer: {text}"), Style::default().fg(Color::Blue))));
+                                follow = true;
+                            }
+                            KeyAction::Queue(text) => {
+                                if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &text)).await {
+                                    queue_items.push((seq, text.clone()));
+                                }
+                                chat.push_marker(Line::from(Span::styled(
+                                    format!("[queued] {text}"), Style::default().fg(Color::Yellow))));
+                                follow = true;
+                            }
+                            KeyAction::SwitchAgent(name) => {
+                                let plan_to_act = chat.agent == "plan" && name == "act" && !running;
+                                sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
+                                if plan_to_act && !chat.blocks.is_empty() {
+                                    start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name)).await;
+                                    running = true;
+                                    follow = true;
+                                } else {
+                                    let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                                }
+                            }
+                            KeyAction::SetSkill(opt) => {
+                                match opt {
+                                    Some((name, body)) => {
+                                        active_skill = Some(name.clone());
+                                        sys_tokens = sys_tokens_for(&agent_name, &workdir, Some(&body));
+                                        let _ = cmd_tx.send(UiCmd::SetSkill(Some(body))).await;
                                     }
-                                    for btn in &hits.queue_btns {
-                                        if !in_rect(btn.rect, m.column, m.row) {
-                                            continue;
+                                    None => {
+                                        active_skill = None;
+                                        sys_tokens = sys_tokens_for(&agent_name, &workdir, None);
+                                        let _ = cmd_tx.send(UiCmd::SetSkill(None)).await;
+                                    }
+                                }
+                            }
+                            KeyAction::Cancel => {
+                                cancel.cancel();
+                                chat.push_marker(Line::from(Span::styled(
+                                    "[interrupted] stopping…", Style::default().fg(Color::Yellow))));
+                                running = false;
+                                follow = true;
+                            }
+                            KeyAction::OpenCommand => {
+                                command_menu = Some(CommandMenu::new());
+                            }
+                            KeyAction::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                            KeyAction::None => {}
+                        }
+                    }
+                    Event::Mouse(m) => {
+                        match m.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                if let Some(r) = hits.jump_btn {
+                                    if in_rect(r, m.column, m.row) {
+                                        follow = true;
+                                    }
+                                }
+                                for btn in &hits.queue_btns {
+                                    if !in_rect(btn.rect, m.column, m.row) {
+                                        continue;
+                                    }
+                                    match queue_panel::plan(&queue_items, btn.seq, btn.action) {
+                                        queue_panel::QueueEffect::Delete(seq) => {
+                                            if store.delete_input(seq).await.is_ok() {
+                                                queue_items.retain(|(s, _)| *s != seq);
+                                            }
                                         }
-                                        match queue_panel::plan(&queue_items, btn.seq, btn.action) {
-                                            queue_panel::QueueEffect::Delete(seq) => {
-                                                if store.delete_input(seq).await.is_ok() {
-                                                    queue_items.retain(|(s, _)| *s != seq);
-                                                }
+                                        queue_panel::QueueEffect::Swap(a, b) => {
+                                            if store.swap_input_order(&session_id, a, b).await.is_ok() {
+                                                queue_panel::apply_swap(&mut queue_items, a, b);
                                             }
-                                            queue_panel::QueueEffect::Swap(a, b) => {
-                                                if store.swap_input_order(&session_id, a, b).await.is_ok() {
-                                                    queue_panel::apply_swap(&mut queue_items, a, b);
-                                                }
-                                            }
-                                            queue_panel::QueueEffect::None => {}
+                                        }
+                                        queue_panel::QueueEffect::None => {}
+                                    }
+                                    break;
+                                }
+                                // Click on a Thinking-block header toggles its
+                                // collapse state (default collapsed → expand).
+                                for btn in &hits.thinking_btns {
+                                    if in_rect(btn.rect, m.column, m.row) {
+                                        chat.toggle_thinking_at(btn.block_idx);
+                                        break;
+                                    }
+                                }
+                                // Click on a Subagent-block header: enter
+                                // the subagent's perspective (ctx-switch).
+                                // No inline expansion — the child view and
+                                // its context stats are shown full-body.
+                                for btn in &hits.subagent_btns {
+                                    if in_rect(btn.rect, m.column, m.row) {
+                                        parent_scroll = scroll;
+                                        parent_follow = follow;
+                                        scroll = 0;
+                                        follow = true;
+                                        subagent_focus = Some(btn.block_idx);
+                                        // Cache subagent's system-prompt
+                                        // token estimate once on entry.
+                                        if let Some(crate::chat::ChatBlock::Subagent { kind, .. }) = chat.blocks.get(btn.block_idx) {
+                                            subagent_sys = sys_tokens_for(kind, &workdir, None);
                                         }
                                         break;
                                     }
-                                    // Click on a Thinking-block header toggles its
-                                    // collapse state (default collapsed → expand).
-                                    for btn in &hits.thinking_btns {
-                                        if in_rect(btn.rect, m.column, m.row) {
-                                            chat.toggle_thinking_at(btn.block_idx);
-                                            break;
-                                        }
-                                    }
-                                    // Click on a Subagent-block header: first click
-                                    // expands, second click (already expanded) dives
-                                    // into the subagent's ctx-switch view.
-                                    for btn in &hits.subagent_btns {
-                                        if in_rect(btn.rect, m.column, m.row) {
-                                            let already_expanded = matches!(
-                                                chat.blocks.get(btn.block_idx),
-                                                Some(crate::chat::ChatBlock::Subagent { collapsed: false, .. })
-                                            );
-                                            if already_expanded {
-                                                parent_scroll = scroll;
-                                                parent_follow = follow;
-                                                scroll = 0;
-                                                follow = true;
-                                                subagent_focus = Some(btn.block_idx);
-                                            } else {
-                                                chat.toggle_subagent_at(btn.block_idx);
-                                            }
-                                            break;
-                                        }
-                                    }
                                 }
-                                MouseEventKind::ScrollUp => {
-                                    if let Some(r) = hits.body {
-                                        if in_rect(r, m.column, m.row) {
-                                            scroll = scroll.saturating_sub(3);
-                                            follow = false;
-                                        }
-                                    }
-                                }
-                                MouseEventKind::ScrollDown => {
-                                    if let Some(r) = hits.body {
-                                        if in_rect(r, m.column, m.row) {
-                                            let visible_h = r.height.saturating_sub(2) as usize;
-                                            let inner_w = r.width.saturating_sub(3);
-                                            let total_rows = Paragraph::new(chat.flatten())
-                                                .wrap(Wrap { trim: false })
-                                                .line_count(inner_w);
-                                            let max_rows = total_rows.saturating_sub(visible_h);
-                                            scroll = scroll.saturating_add(3);
-                                            if (scroll as usize) >= max_rows {
-                                                follow = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
                             }
+                            MouseEventKind::ScrollUp => {
+                                if let Some(r) = hits.body {
+                                    if in_rect(r, m.column, m.row) {
+                                        scroll = scroll.saturating_sub(3);
+                                        follow = false;
+                                    }
+                                }
+                            }
+                            MouseEventKind::ScrollDown => {
+                                if let Some(r) = hits.body {
+                                    if in_rect(r, m.column, m.row) {
+                                        let visible_h = r.height.saturating_sub(2) as usize;
+                                        let inner_w = r.width.saturating_sub(3);
+                                        let total_rows = Paragraph::new(chat.flatten())
+                                            .wrap(Wrap { trim: false })
+                                            .line_count(inner_w);
+                                        let max_rows = total_rows.saturating_sub(visible_h);
+                                        scroll = scroll.saturating_add(3);
+                                        if (scroll as usize) >= max_rows {
+                                            follow = true;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
             Some(ev) = evt_rx.recv() => {
@@ -556,7 +602,6 @@ async fn run_app(
                             let agent = chat.agent.clone();
                             chat = crate::session_ui::replay_into_chat(&agent, msgs);
                         } else {
-                            track_context(&sev, &mut context_used);
                             chat.apply(&sev);
                         }
                         if let SessionEvent::QueueConsumed { seq } = &sev {
@@ -572,7 +617,7 @@ async fn run_app(
                         running = false;
                         if let Some(next) = local_queue.pop_front() {
                             push_user(&mut chat, &mut history, &mut hist_idx, &next);
-                            let _ = cmd_tx.send(UiCmd::Prompt(next)).await;
+                            start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(next)).await;
                             running = true;
                         }
                     }
@@ -602,20 +647,25 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
     }
 }
 
-fn track_context(ev: &SessionEvent, used: &mut u64) {
-    match ev {
-        SessionEvent::TextDelta(t) | SessionEvent::ReasoningDelta(t) => *used += estimate(t) as u64,
-        SessionEvent::ToolEnd { output, .. } => *used += estimate(output) as u64,
-        SessionEvent::SubagentEnd { summary, .. } => *used += estimate(summary) as u64,
-        SessionEvent::SubagentChild { ev, .. } => track_context(ev, used),
-        SessionEvent::Compaction(c) => *used = estimate(c) as u64,
-        _ => {}
-    }
+/// Begin a new worker turn with a fresh, uncancelled cancellation token.
+///
+/// The loop's `cancel` handle and the worker's `sess.cancel` must point at the
+/// same token so double-Esc still targets the live turn. Refreshing on every
+/// turn start is what unblocks submission after a prior double-Esc abort —
+/// without it `sess.cancel` stays permanently cancelled and `run_loop`'s
+/// top-of-loop `is_cancelled()` check rejects every subsequent prompt. FIFO
+/// ordering on the single-consumer command channel guarantees the worker
+/// applies `ResetCancel` before processing the work command.
+async fn start_turn(cmd_tx: &mpsc::Sender<UiCmd>, cancel: &mut CancellationToken, cmd: UiCmd) {
+    let fresh = CancellationToken::new();
+    *cancel = fresh.clone();
+    let _ = cmd_tx.send(UiCmd::ResetCancel(fresh)).await;
+    let _ = cmd_tx.send(cmd).await;
 }
 
 /// Estimated tokens of the system prompt that will accompany every request:
 /// `agent.prompt + environment block + active skill`. Tracked separately from
-/// `context_used` (which only sums the streamed transcript and resets on
+/// `ChatView::context_used` (which sums the streamed transcript and resets on
 /// compaction) so the context meter reflects the real request size.
 pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {
     let agent = match resolve_agent(agent_name) {
@@ -626,11 +676,18 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
     estimate(&text) as u64
 }
 
-fn push_user(chat: &mut ChatView, history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {
+fn push_user(
+    chat: &mut ChatView,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+    text: &str,
+) {
     history.push(text.to_string());
     *hist_idx = None;
     chat.push_marker(Line::from(Span::styled(
-        format!("user: {text}"), Style::default().add_modifier(Modifier::BOLD))));
+        format!("user: {text}"),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
     chat.push_marker(Line::from(""));
 }
 

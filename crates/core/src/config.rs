@@ -27,6 +27,25 @@ pub struct Config {
     /// thinking). Edited at runtime via the TUI `/model` menu.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Interleaved thinking: when true, the `reasoning_content` produced on
+    /// tool-call turns is persisted into the assistant message and sent back
+    /// on subsequent requests, letting the model continue its chain-of-thought
+    /// across tool results. Required by some providers (e.g. DeepSeek-V4
+    /// returns HTTP 400 if reasoning_content is omitted after a tool call).
+    /// Defaults to `Some(true)`.
+    #[serde(
+        default = "default_interleaved_thinking",
+        skip_serializing_if = "is_none_interleaved"
+    )]
+    pub interleaved_thinking: Option<bool>,
+}
+
+fn default_interleaved_thinking() -> Option<bool> {
+    Some(true)
+}
+
+fn is_none_interleaved(v: &Option<bool>) -> bool {
+    v.is_none()
 }
 
 fn default_model() -> String {
@@ -57,7 +76,9 @@ pub struct AgentDefaults {
 }
 impl Default for AgentDefaults {
     fn default() -> Self {
-        AgentDefaults { default: "act".to_string() }
+        AgentDefaults {
+            default: "act".to_string(),
+        }
     }
 }
 
@@ -71,8 +92,6 @@ pub struct CompactionConfig {
     pub tail_turns: u32,
     #[serde(default = "default_reserved")]
     pub reserved: u64,
-    #[serde(default)]
-    pub prune: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub buffer: Option<u64>,
 }
@@ -83,15 +102,22 @@ impl Default for CompactionConfig {
             context_threshold: 80_000,
             tail_turns: 2,
             reserved: 20_000,
-            prune: false,
             buffer: None,
         }
     }
 }
-fn default_true() -> bool { true }
-fn default_threshold() -> u64 { 80_000 }
-fn default_tail_turns() -> u32 { 2 }
-fn default_reserved() -> u64 { 20_000 }
+fn default_true() -> bool {
+    true
+}
+fn default_threshold() -> u64 {
+    80_000
+}
+fn default_tail_turns() -> u32 {
+    2
+}
+fn default_reserved() -> u64 {
+    20_000
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -104,6 +130,7 @@ impl Default for Config {
             context_limit: None,
             max_tokens: None,
             reasoning_effort: None,
+            interleaved_thinking: Some(true),
         }
     }
 }
@@ -128,10 +155,16 @@ impl Config {
         Ok(cfg)
     }
     pub fn model_id(&self) -> &str {
-        self.model.split_once('/').map(|(_, m)| m).unwrap_or(&self.model)
+        self.model
+            .split_once('/')
+            .map(|(_, m)| m)
+            .unwrap_or(&self.model)
     }
     pub fn provider_id(&self) -> &str {
-        self.model.split_once('/').map(|(p, _)| p).unwrap_or("openai")
+        self.model
+            .split_once('/')
+            .map(|(p, _)| p)
+            .unwrap_or("openai")
     }
     /// Effective context window: explicit override, else the default.
     pub fn context_limit(&self) -> u64 {
@@ -218,18 +251,23 @@ fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("small_model")
         || obj.contains_key("max_tokens")
         || obj.contains_key("reasoning_effort")
+        || obj.contains_key("interleaved_thinking")
         || obj.contains_key("context_limit")
     {
         return true;
     }
-    if obj.get("provider").and_then(|v| v.as_object()).is_some_and(|p| {
-        p.contains_key("base_url") || p.contains_key("api_key")
-    }) {
+    if obj
+        .get("provider")
+        .and_then(|v| v.as_object())
+        .is_some_and(|p| p.contains_key("base_url") || p.contains_key("api_key"))
+    {
         return true;
     }
-    if obj.get("compaction").and_then(|v| v.as_object()).is_some_and(|c| {
-        c.contains_key("context_threshold") || c.contains_key("auto")
-    }) {
+    if obj
+        .get("compaction")
+        .and_then(|v| v.as_object())
+        .is_some_and(|c| c.contains_key("context_threshold") || c.contains_key("auto"))
+    {
         return true;
     }
     false
@@ -271,7 +309,8 @@ fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value) {
 pub fn looks_like_env_var(s: &str) -> bool {
     let t = s.trim();
     !t.is_empty()
-        && t.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && t.chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
         && t.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
@@ -338,6 +377,9 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 cfg.reasoning_effort = Some(trimmed.to_string());
             }
         }
+        if let Some(it) = obj.get("interleaved_thinking").and_then(|v| v.as_bool()) {
+            cfg.interleaved_thinking = Some(it);
+        }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {
                 cfg.provider.base_url = b.to_string();
@@ -347,15 +389,26 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
         }
         if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
-            if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) { cfg.compaction.auto = v; }
-            if let Some(v) = c.get("context_threshold").and_then(|v| v.as_u64()) { cfg.compaction.context_threshold = v; }
-            if let Some(v) = c.get("tail_turns").and_then(|v| v.as_u64()) { cfg.compaction.tail_turns = v as u32; }
-            if let Some(v) = c.get("reserved").and_then(|v| v.as_u64()) { cfg.compaction.reserved = v; }
-            if let Some(v) = c.get("prune").and_then(|v| v.as_bool()) { cfg.compaction.prune = v; }
-            if let Some(v) = c.get("buffer").and_then(|v| v.as_u64()) { cfg.compaction.buffer = Some(v); }
+            if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
+                cfg.compaction.auto = v;
+            }
+            if let Some(v) = c.get("context_threshold").and_then(|v| v.as_u64()) {
+                cfg.compaction.context_threshold = v;
+            }
+            if let Some(v) = c.get("tail_turns").and_then(|v| v.as_u64()) {
+                cfg.compaction.tail_turns = v as u32;
+            }
+            if let Some(v) = c.get("reserved").and_then(|v| v.as_u64()) {
+                cfg.compaction.reserved = v;
+            }
+            if let Some(v) = c.get("buffer").and_then(|v| v.as_u64()) {
+                cfg.compaction.buffer = Some(v);
+            }
         }
         if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
-            if let Some(d) = a.get("default").and_then(|v| v.as_str()) { cfg.agent.default = d.to_string(); }
+            if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
+                cfg.agent.default = d.to_string();
+            }
         }
     }
 }

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use opencode_core::Message;
 
 use crate::types::{
-    ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, SubagentTaskRecord,
+    ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+    SessionPatch, SubagentTaskRecord,
 };
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
@@ -29,8 +29,17 @@ pub trait Store: Send + Sync {
     async fn last_message_seq(&self, session_id: &str) -> Result<i64>;
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64>;
-    async fn pending_inputs(&self, session_id: &str, delivery: crate::types::Delivery) -> Result<Vec<SessionInput>>;
-    async fn promote_inputs(&self, session_id: &str, up_to_admitted_seq: i64, delivery: crate::types::Delivery) -> Result<Vec<i64>>;
+    async fn pending_inputs(
+        &self,
+        session_id: &str,
+        delivery: crate::types::Delivery,
+    ) -> Result<Vec<SessionInput>>;
+    async fn promote_inputs(
+        &self,
+        session_id: &str,
+        up_to_admitted_seq: i64,
+        delivery: crate::types::Delivery,
+    ) -> Result<Vec<i64>>;
     async fn promote_next_queued(&self, session_id: &str) -> Result<Option<i64>>;
     /// Atomically return the oldest pending queued input (with its prompt) and
     /// mark it promoted. Used by the runner drain at idle to consume exactly one
@@ -45,7 +54,11 @@ pub trait Store: Send + Sync {
     async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()>;
 
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64>;
-    async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>>;
+    async fn events_after(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<SessionEventRecord>>;
 
     /// Record a new subagent task (parent-child agent relationship) when a
     /// subagent is spawned. The task starts in `Running` status.
@@ -54,7 +67,8 @@ pub trait Store: Send + Sync {
     /// success/failure flag.
     async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()>;
     /// List all subagent tasks for a given parent session.
-    async fn list_subagent_tasks(&self, parent_session_id: &str) -> Result<Vec<SubagentTaskRecord>>;
+    async fn list_subagent_tasks(&self, parent_session_id: &str)
+        -> Result<Vec<SubagentTaskRecord>>;
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         let seqs = self.append_messages(session_id, msgs).await?;

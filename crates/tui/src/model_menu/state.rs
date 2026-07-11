@@ -12,6 +12,7 @@ pub struct ModelPatch {
     pub base_url: String,
     pub api_key: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub interleaved_thinking: Option<bool>,
     pub context_threshold: u64,
 }
 
@@ -39,6 +40,7 @@ impl ModelPatch {
             "model": self.model,
             "provider": provider,
             "reasoning_effort": self.reasoning_effort,
+            "interleaved_thinking": self.interleaved_thinking,
             "compaction": {
                 "context_threshold": self.context_threshold,
             },
@@ -102,17 +104,19 @@ pub enum Field {
     BaseUrl,
     ApiKey,
     Reasoning,
+    InterleavedThinking,
     Threshold,
     Save,
     Cancel,
 }
 
 impl Field {
-    const ORDER: [Field; 7] = [
+    const ORDER: [Field; 8] = [
         Field::Model,
         Field::BaseUrl,
         Field::ApiKey,
         Field::Reasoning,
+        Field::InterleavedThinking,
         Field::Threshold,
         Field::Save,
         Field::Cancel,
@@ -144,6 +148,7 @@ pub struct ModelMenu {
     pub(crate) api_key_original: String,
     pub(crate) api_key_edited: bool,
     pub reasoning: Reasoning,
+    pub interleaved_thinking: bool,
     pub threshold: u64,
     pub focus: Field,
     pub error: Option<String>,
@@ -159,6 +164,7 @@ impl ModelMenu {
             api_key_original: original_key,
             api_key_edited: false,
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
+            interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
             threshold: config.compaction.context_threshold,
             focus: Field::Model,
             error: None,
@@ -199,6 +205,7 @@ impl ModelMenu {
             base_url: self.base_url.clone(),
             api_key: self.resolve_api_key(),
             reasoning_effort: self.reasoning.to_option(),
+            interleaved_thinking: Some(self.interleaved_thinking),
             context_threshold: self.threshold,
         }
     }
@@ -211,7 +218,13 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
         None => return ModelOutcome::Idle,
     };
     if k.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d')) {
+        if matches!(
+            k.code,
+            KeyCode::Char('c')
+                | KeyCode::Char('d')
+                | KeyCode::Char('\u{3}')
+                | KeyCode::Char('\u{4}')
+        ) {
             *menu = None;
             return ModelOutcome::Quit;
         }
@@ -234,6 +247,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
         KeyCode::Up => {
             match m.focus {
                 Field::Reasoning => m.reasoning = m.reasoning.prev(),
+                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Threshold => m.adjust_threshold(1000),
                 _ => m.focus = m.focus.prev(),
             }
@@ -242,17 +256,26 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
         KeyCode::Down => {
             match m.focus {
                 Field::Reasoning => m.toggle_reasoning(),
+                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Threshold => m.adjust_threshold(-1000),
                 _ => m.focus = m.focus.next(),
             }
             ModelOutcome::Idle
         }
-        KeyCode::Left if m.focus == Field::Reasoning => {
-            m.reasoning = m.reasoning.prev();
+        KeyCode::Left if matches!(m.focus, Field::Reasoning | Field::InterleavedThinking) => {
+            match m.focus {
+                Field::Reasoning => m.reasoning = m.reasoning.prev(),
+                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                _ => {}
+            }
             ModelOutcome::Idle
         }
-        KeyCode::Right if m.focus == Field::Reasoning => {
-            m.toggle_reasoning();
+        KeyCode::Right if matches!(m.focus, Field::Reasoning | Field::InterleavedThinking) => {
+            match m.focus {
+                Field::Reasoning => m.toggle_reasoning(),
+                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                _ => {}
+            }
             ModelOutcome::Idle
         }
         KeyCode::Enter => match m.focus {
@@ -269,11 +292,14 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 *menu = None;
                 ModelOutcome::Cancel
             }
-            Field::Reasoning => {
-                m.toggle_reasoning();
+            // Confirm the current value and advance to the next field, so the
+            // natural flow is: type → Enter → next field → … → Enter on [Save]
+            // commits. Value changes for Reasoning/Threshold stay on
+            // ↑/↓/←/→/Space, leaving Enter free as the confirm-and-advance key.
+            _ => {
+                m.focus = m.focus.next();
                 ModelOutcome::Idle
             }
-            _ => ModelOutcome::Idle,
         },
         KeyCode::Backspace => match m.focus {
             Field::Model | Field::BaseUrl | Field::ApiKey => {
@@ -306,6 +332,9 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                     }
                 }
                 Field::Reasoning if c == ' ' => m.toggle_reasoning(),
+                Field::InterleavedThinking if c == ' ' => {
+                    m.interleaved_thinking = !m.interleaved_thinking
+                }
                 _ => {}
             }
             ModelOutcome::Idle

@@ -8,61 +8,126 @@ use ratatui::Frame;
 
 use super::state::{Field, ModelMenu};
 
-/// Draw the `/model` modal as a centered overlay.
-pub fn render_model_popup(f: &mut Frame, area: Rect, menu: &ModelMenu) {
-    let h = 16u16.min(area.height.saturating_sub(2));
+/// Draw the `/model` modal as a dropdown overlay anchored above the composer.
+///
+/// `composer_top` is the screen row of the composer's top border; the popup's
+/// bottom edge sits just above it, so the form floats over the transcript like
+/// a dropdown instead of covering the screen center.
+pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &ModelMenu) {
+    let want_h = 17u16;
+    let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let y = composer_top.saturating_sub(h);
     let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
     let title = match &menu.error {
         Some(e) => format!(" /model \u{2014} ERROR: {e} "),
-        None => " /model \u{2014} Tab move, Enter on [Save], Esc cancel ".to_string(),
+        None => " /model \u{2014} \u{2191}/\u{2193} field, Enter=confirm/next, [Save] commits, Esc cancel ".to_string(),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    let focus_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let focus_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let dim = Style::default().fg(Color::Gray);
     let val_style = Style::default().fg(Color::White);
 
     let field = |label: &str, value: &str, focused: bool, hint: &str| -> Line<'_> {
         let mut spans = vec![
             Span::styled(format!(" {label:<14}"), dim),
-            Span::styled(value.to_string(), if focused { focus_style } else { val_style }),
+            Span::styled(
+                value.to_string(),
+                if focused { focus_style } else { val_style },
+            ),
         ];
         if focused {
-            spans.push(Span::styled(format!("  {hint}"), Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!("  {hint}"),
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         Line::from(spans)
     };
 
-    let threshold_hint = format!("{} tokens (\u{2248}{}k)", menu.threshold, menu.threshold / 1000);
+    let threshold_hint = format!(
+        "{} tokens (\u{2248}{}k)",
+        menu.threshold,
+        menu.threshold / 1000
+    );
     let reasoning_val = format!("[ {} ]", menu.reasoning.label());
+    let interleave_val = format!(
+        "[ {} ]",
+        if menu.interleaved_thinking {
+            "on"
+        } else {
+            "off"
+        }
+    );
 
     let lines = vec![
-        field("model:", menu.model.as_str(), menu.focus == Field::Model, "type to edit"),
-        field("base_url:", menu.base_url.as_str(), menu.focus == Field::BaseUrl, "type to edit"),
-        field("api_key:", menu.api_key_display().as_str(), menu.focus == Field::ApiKey, "type new value (hidden)"),
-        field("thinking:", reasoning_val.as_str(), menu.focus == Field::Reasoning, "\u{2190}/\u{2192} or Space to cycle"),
-        field("ctx threshold:", threshold_hint.as_str(), menu.focus == Field::Threshold, "digits / \u{2191}\u{2193} \u{00b1}1k"),
+        field(
+            "model:",
+            menu.model.as_str(),
+            menu.focus == Field::Model,
+            "type, Enter=next",
+        ),
+        field(
+            "base_url:",
+            menu.base_url.as_str(),
+            menu.focus == Field::BaseUrl,
+            "type, Enter=next",
+        ),
+        field(
+            "api_key:",
+            menu.api_key_display().as_str(),
+            menu.focus == Field::ApiKey,
+            "type new value, Enter=next",
+        ),
+        field(
+            "thinking:",
+            reasoning_val.as_str(),
+            menu.focus == Field::Reasoning,
+            "\u{2190}/\u{2192}/Space cycle, Enter=next",
+        ),
+        field(
+            "interleave:",
+            interleave_val.as_str(),
+            menu.focus == Field::InterleavedThinking,
+            "\u{2190}/\u{2192}/Space toggle, Enter=next",
+        ),
+        field(
+            "ctx threshold:",
+            threshold_hint.as_str(),
+            menu.focus == Field::Threshold,
+            "digits/\u{2191}\u{2193} \u{00b1}1k, Enter=next",
+        ),
         Line::from(""),
         button_line(menu),
     ];
 
-    let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: false }).alignment(Alignment::Left);
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .alignment(Alignment::Left);
     f.render_widget(para, popup);
 }
 
 fn button_line(menu: &ModelMenu) -> Line<'_> {
     let save_style = if menu.focus == Field::Save {
-        Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Green)
     };
     let cancel_style = if menu.focus == Field::Cancel {
-        Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Red)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Red)
     };

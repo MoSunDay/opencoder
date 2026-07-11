@@ -7,18 +7,25 @@ pub struct ListTool;
 
 #[async_trait]
 impl Tool for ListTool {
-    fn name(&self) -> &str { "ls" }
+    fn name(&self) -> &str {
+        "ls"
+    }
     fn description(&self) -> &str {
         "Lists the contents of a directory. Returns names with a trailing '/' for directories."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
-        props.insert("path".into(), json::prop_str("Optional directory path (defaults to working dir)."));
+        props.insert(
+            "path".into(),
+            json::prop_str("Optional directory path (defaults to working dir)."),
+        );
         json::object_schema(Value::Object(props), &[])
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let base = input.get("path").and_then(|v| v.as_str())
+        let base = input
+            .get("path")
+            .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| ctx.working_dir.display().to_string());
         let path = std::path::Path::new(&base);
@@ -33,7 +40,12 @@ impl Tool for ListTool {
             names.push(if is_dir { format!("{name}/") } else { name });
         }
         names.sort();
-        if names.is_empty() { return Ok(ToolOutput::ok("(empty)")); }
-        Ok(opencode_core::tool::truncate_output(names.join("\n"), ctx.max_output))
+        if names.is_empty() {
+            return Ok(ToolOutput::ok("(empty)"));
+        }
+        Ok(opencode_core::tool::truncate_output(
+            names.join("\n"),
+            ctx.max_output,
+        ))
     }
 }

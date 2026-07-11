@@ -14,16 +14,18 @@
 use std::sync::Arc;
 
 use opencode_core::{ContentBlock, Message, Role};
-use opencode_store::{
-    LibsqlStore, SessionFilter, SessionMeta, Store,
-};
+use opencode_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
 use tempfile::TempDir;
 
 fn conv(seed: &str, n: usize) -> Vec<Message> {
     (0..n)
         .map(|i| {
             let id = format!("{seed}-{i}");
-            let role = if i % 2 == 0 { Role::User } else { Role::Assistant };
+            let role = if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            };
             let text = format!("{seed} msg {i}");
             let mut m = match role {
                 Role::User => Message::user(id, text),
@@ -66,7 +68,11 @@ async fn create_get_update_delete_session_contract() {
     let (_dir, store) = fresh().await;
     make_session(&store, "s1", 1000).await;
 
-    let got = store.get_session("s1").await.unwrap().expect("session exists");
+    let got = store
+        .get_session("s1")
+        .await
+        .unwrap()
+        .expect("session exists");
     assert_eq!(got.id, "s1");
     assert_eq!(got.title.as_deref(), Some("title-s1"));
     assert_eq!(got.model.as_deref(), Some("glm-5.2"));
@@ -162,7 +168,10 @@ async fn concurrent_readers_while_writer() {
     let dir = tempfile::tempdir().unwrap();
     let store_raw = LibsqlStore::open(dir.path().join("cw.db")).await.unwrap();
     make_session(&store_raw, "s", 1).await;
-    store_raw.append_messages("s", &conv("seed", 10)).await.unwrap();
+    store_raw
+        .append_messages("s", &conv("seed", 10))
+        .await
+        .unwrap();
     let store = Arc::new(store_raw);
     let _dir = dir; // keep alive
 
@@ -170,7 +179,10 @@ async fn concurrent_readers_while_writer() {
     let writer = tokio::spawn(async move {
         for b in 0..20u32 {
             let msgs = conv(&format!("w{b}"), 5);
-            store_w.append_messages("s", &msgs).await.expect("append ok");
+            store_w
+                .append_messages("s", &msgs)
+                .await
+                .expect("append ok");
             tokio::time::sleep(std::time::Duration::from_millis(2)).await;
         }
     });
@@ -205,13 +217,20 @@ async fn wal_crash_recovery() {
     {
         let store = LibsqlStore::open(&db_path).await.unwrap();
         make_session(&store, "persist", 5).await;
-        store.append_messages("persist", &conv("c", 7)).await.unwrap();
+        store
+            .append_messages("persist", &conv("c", 7))
+            .await
+            .unwrap();
         // drop store WITHOUT graceful shutdown — simulates process crash
         drop(store);
     }
     // Reopen from the same file; committed data must survive.
     let store = LibsqlStore::open(&db_path).await.unwrap();
-    let got = store.get_session("persist").await.unwrap().expect("survived");
+    let got = store
+        .get_session("persist")
+        .await
+        .unwrap()
+        .expect("survived");
     assert_eq!(got.id, "persist");
     let loaded = store.load_messages("persist").await.unwrap();
     assert_eq!(loaded.len(), 7);
@@ -260,7 +279,10 @@ async fn jsonl_import_roundtrip() {
 async fn schema_migration_versioning() {
     let (_dir, store) = fresh().await;
     let conn = store.conn().await.unwrap();
-    let stmt = conn.prepare("SELECT version FROM schema_version LIMIT 1").await.unwrap();
+    let stmt = conn
+        .prepare("SELECT version FROM schema_version LIMIT 1")
+        .await
+        .unwrap();
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
@@ -274,11 +296,13 @@ async fn transaction_rollback_on_partial_failure() {
 
     // Atomicity contract: appending to a non-existent session (FK violation)
     // fails and leaves NO partial state for that session.
-    let bad = store
-        .append_messages("ghost-session", &conv("g", 3))
-        .await;
+    let bad = store.append_messages("ghost-session", &conv("g", 3)).await;
     assert!(bad.is_err(), "FK violation must error");
-    assert!(store.load_messages("ghost-session").await.unwrap().is_empty());
+    assert!(store
+        .load_messages("ghost-session")
+        .await
+        .unwrap()
+        .is_empty());
 
     // The legit session is unaffected.
     store.append_messages("ok", &conv("ok", 2)).await.unwrap();
@@ -308,7 +332,7 @@ async fn transaction_rollback_on_partial_failure() {
         .await;
     assert!(failed.is_err(), "NOT NULL violation must error");
     drop(tx); // explicit drop = rollback
-    // none of r1/r2 landed
+              // none of r1/r2 landed
     let loaded = store.load_messages("ok").await.unwrap();
     assert_eq!(loaded.len(), 2, "rolled-back rows must not appear");
 }
@@ -323,7 +347,10 @@ async fn list_pagination_with_metadata() {
     }
 
     let page1 = store
-        .list_sessions(&SessionFilter { limit: 3, ..Default::default() })
+        .list_sessions(&SessionFilter {
+            limit: 3,
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(page1.len(), 3);
@@ -334,14 +361,22 @@ async fn list_pagination_with_metadata() {
 
     let cursor = format!("{}|{}", page1[2].created_at, page1[2].id);
     let page2 = store
-        .list_sessions(&SessionFilter { limit: 3, cursor: Some(cursor), ..Default::default() })
+        .list_sessions(&SessionFilter {
+            limit: 3,
+            cursor: Some(cursor),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(page2.len(), 3);
     assert_eq!(page2[0].id, "p2");
 
     let hits = store
-        .list_sessions(&SessionFilter { limit: 10, search: Some("p3".into()), ..Default::default() })
+        .list_sessions(&SessionFilter {
+            limit: 10,
+            search: Some("p3".into()),
+            ..Default::default()
+        })
         .await
         .unwrap();
     assert_eq!(hits.len(), 1);
@@ -357,7 +392,11 @@ async fn events_append_and_after_replay() {
         store
             .append_event(&SessionEventRecord {
                 session_id: "s".into(),
-                kind: if i == 0 { EventKind::PromptAdmitted } else { EventKind::TextDelta },
+                kind: if i == 0 {
+                    EventKind::PromptAdmitted
+                } else {
+                    EventKind::TextDelta
+                },
                 payload: serde_json::json!({"i": i}),
                 ts: i as i64,
                 seq: None,
@@ -494,7 +533,10 @@ async fn subagent_task_list_filters_by_parent() {
 async fn subagent_status_parse_and_as_str() {
     use opencode_store::SubagentStatus;
     assert_eq!(SubagentStatus::parse("running"), SubagentStatus::Running);
-    assert_eq!(SubagentStatus::parse("completed"), SubagentStatus::Completed);
+    assert_eq!(
+        SubagentStatus::parse("completed"),
+        SubagentStatus::Completed
+    );
     assert_eq!(SubagentStatus::parse("failed"), SubagentStatus::Failed);
     assert_eq!(SubagentStatus::parse("bogus"), SubagentStatus::Running);
     assert_eq!(SubagentStatus::Running.as_str(), "running");
@@ -504,8 +546,9 @@ async fn subagent_status_parse_and_as_str() {
 
 #[tokio::test]
 async fn bundle_export_import_roundtrip() {
-    use opencode_store::{export_bundle, import_bundle, read_bundle, write_bundle,
-        SubagentTaskRecord, SubagentStatus};
+    use opencode_store::{
+        export_bundle, import_bundle, read_bundle, write_bundle, SubagentStatus, SubagentTaskRecord,
+    };
 
     let dir = TempDir::new().unwrap();
     let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
@@ -577,7 +620,9 @@ async fn bundle_export_import_roundtrip() {
 
     // Import into a fresh store.
     let dir2 = TempDir::new().unwrap();
-    let store2 = LibsqlStore::open(dir2.path().join("test2.db")).await.unwrap();
+    let store2 = LibsqlStore::open(dir2.path().join("test2.db"))
+        .await
+        .unwrap();
     let id = import_bundle(&store2, &restored, None).await.unwrap();
     assert_eq!(id, "parent-1");
 

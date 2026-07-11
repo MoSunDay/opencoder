@@ -6,7 +6,10 @@ use libsql::{Builder, Connection};
 use tracing::debug;
 
 use crate::store::Store;
-use crate::types::{Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord};
+use crate::types::{
+    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, SubagentTaskRecord,
+};
 
 mod events;
 mod inputs;
@@ -44,7 +47,10 @@ impl LibsqlStore {
 
     /// Open an in-memory database (used by tests and ephemeral runs).
     pub async fn open_memory() -> Result<Self> {
-        let db = Builder::new_local(":memory:").build().await.context("open in-memory db")?;
+        let db = Builder::new_local(":memory:")
+            .build()
+            .await
+            .context("open in-memory db")?;
         let conn = db.connect().context("connect in-memory")?;
         schema::apply_connection_pragmas(&conn).await?;
         schema::bootstrap(&conn).await?;
@@ -88,7 +94,11 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         messages::append(&conn, session_id, msg).await
     }
-    async fn append_messages(&self, session_id: &str, msgs: &[opencode_core::Message]) -> Result<Vec<i64>> {
+    async fn append_messages(
+        &self,
+        session_id: &str,
+        msgs: &[opencode_core::Message],
+    ) -> Result<Vec<i64>> {
         let conn = self.conn().await?;
         messages::append_many(&conn, session_id, msgs).await
     }
@@ -105,11 +115,20 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::admit(&conn, input).await
     }
-    async fn pending_inputs(&self, session_id: &str, delivery: Delivery) -> Result<Vec<SessionInput>> {
+    async fn pending_inputs(
+        &self,
+        session_id: &str,
+        delivery: Delivery,
+    ) -> Result<Vec<SessionInput>> {
         let conn = self.conn().await?;
         inputs::pending(&conn, session_id, delivery).await
     }
-    async fn promote_inputs(&self, session_id: &str, up_to_admitted_seq: i64, delivery: Delivery) -> Result<Vec<i64>> {
+    async fn promote_inputs(
+        &self,
+        session_id: &str,
+        up_to_admitted_seq: i64,
+        delivery: Delivery,
+    ) -> Result<Vec<i64>> {
         let conn = self.conn().await?;
         inputs::promote(&conn, session_id, up_to_admitted_seq, delivery).await
     }
@@ -134,7 +153,11 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         events::append(&conn, event).await
     }
-    async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>> {
+    async fn events_after(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<SessionEventRecord>> {
         let conn = self.conn().await?;
         events::after(&conn, session_id, after_seq).await
     }
@@ -147,12 +170,19 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         subagent_tasks::complete(&conn, task_id, result, ok).await
     }
-    async fn list_subagent_tasks(&self, parent_session_id: &str) -> Result<Vec<SubagentTaskRecord>> {
+    async fn list_subagent_tasks(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Vec<SubagentTaskRecord>> {
         let conn = self.conn().await?;
         subagent_tasks::list(&conn, parent_session_id).await
     }
 
-    async fn import_messages(&self, session_id: &str, msgs: &[opencode_core::Message]) -> Result<ImportReport> {
+    async fn import_messages(
+        &self,
+        session_id: &str,
+        msgs: &[opencode_core::Message],
+    ) -> Result<ImportReport> {
         let conn = self.conn().await?;
         messages::import(&conn, session_id, msgs).await
     }

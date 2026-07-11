@@ -7,6 +7,7 @@
 //! broadcast — so any process (or browser tab) sees a consistent stream.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -33,31 +34,126 @@ impl SseEvt {
     pub fn from_session_event(_session_id: &str, ev: &SessionEvent) -> (Self, EventKind) {
         let ts = opencode_core::message::now_ms();
         let (kind, data, event_kind) = match ev {
-            SessionEvent::TextDelta(t) => ("text_delta".to_string(), serde_json::json!({ "text": t }), EventKind::TextDelta),
-            SessionEvent::ToolStart { id, name, input } => ("tool_start".to_string(), serde_json::json!({ "id": id, "name": name, "input": input }), EventKind::ToolStart),
-            SessionEvent::ToolEnd { id, name, output, is_error } => ("tool_end".to_string(), serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error }), EventKind::ToolEnd),
-            SessionEvent::AgentSwitch(a) => ("agent_switched".to_string(), serde_json::json!({ "agent": a }), EventKind::AgentSwitched),
-            SessionEvent::Compaction(s) => ("compaction".to_string(), serde_json::json!({ "summary": s }), EventKind::Compaction),
-            SessionEvent::Status(s) => ("status".to_string(), serde_json::json!({ "status": s }), EventKind::Step),
+            SessionEvent::TextDelta(t) => (
+                "text_delta".to_string(),
+                serde_json::json!({ "text": t }),
+                EventKind::TextDelta,
+            ),
+            SessionEvent::ToolStart { id, name, input } => (
+                "tool_start".to_string(),
+                serde_json::json!({ "id": id, "name": name, "input": input }),
+                EventKind::ToolStart,
+            ),
+            SessionEvent::ToolEnd {
+                id,
+                name,
+                output,
+                is_error,
+            } => (
+                "tool_end".to_string(),
+                serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error }),
+                EventKind::ToolEnd,
+            ),
+            SessionEvent::AgentSwitch(a) => (
+                "agent_switched".to_string(),
+                serde_json::json!({ "agent": a }),
+                EventKind::AgentSwitched,
+            ),
+            SessionEvent::Compaction(s) => (
+                "compaction".to_string(),
+                serde_json::json!({ "summary": s }),
+                EventKind::Compaction,
+            ),
+            SessionEvent::Status(s) => (
+                "status".to_string(),
+                serde_json::json!({ "status": s }),
+                EventKind::Step,
+            ),
             SessionEvent::Done => ("done".to_string(), serde_json::json!({}), EventKind::Done),
-            SessionEvent::Error(e) => ("error".to_string(), serde_json::json!({ "error": e }), EventKind::Error),
-            SessionEvent::ReasoningDelta(r) => ("reasoning_delta".to_string(), serde_json::json!({ "text": r }), EventKind::TextDelta),
-            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => ("subagent_start".to_string(), serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id }), EventKind::Step),
-            SessionEvent::SubagentEnd { id, ok, summary } => ("subagent_end".to_string(), serde_json::json!({ "id": id, "ok": ok, "summary": summary }), EventKind::Step),
-            SessionEvent::SubagentChild { id, ev } => ("subagent_child".to_string(), serde_json::json!({ "id": id, "event": ev }), EventKind::Step),
-            SessionEvent::TranscriptReset(_) => ("transcript_reset".to_string(), serde_json::json!({}), EventKind::Compaction),
-            SessionEvent::QueueConsumed { seq } => ("queue_consumed".to_string(), serde_json::json!({ "seq": seq }), EventKind::Step),
+            SessionEvent::Error(e) => (
+                "error".to_string(),
+                serde_json::json!({ "error": e }),
+                EventKind::Error,
+            ),
+            SessionEvent::ReasoningDelta(r) => (
+                "reasoning_delta".to_string(),
+                serde_json::json!({ "text": r }),
+                EventKind::TextDelta,
+            ),
+            SessionEvent::SubagentStart {
+                id,
+                kind,
+                prompt,
+                child_session_id,
+            } => (
+                "subagent_start".to_string(),
+                serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id }),
+                EventKind::Step,
+            ),
+            SessionEvent::SubagentEnd { id, ok, summary } => (
+                "subagent_end".to_string(),
+                serde_json::json!({ "id": id, "ok": ok, "summary": summary }),
+                EventKind::Step,
+            ),
+            SessionEvent::SubagentChild { id, ev } => (
+                "subagent_child".to_string(),
+                serde_json::json!({ "id": id, "event": ev }),
+                EventKind::Step,
+            ),
+            SessionEvent::TranscriptReset(_) => (
+                "transcript_reset".to_string(),
+                serde_json::json!({}),
+                EventKind::Compaction,
+            ),
+            SessionEvent::QueueConsumed { seq } => (
+                "queue_consumed".to_string(),
+                serde_json::json!({ "seq": seq }),
+                EventKind::Step,
+            ),
         };
-        (SseEvt { kind, data, ts, seq: None }, event_kind)
+        (
+            SseEvt {
+                kind,
+                data,
+                ts,
+                seq: None,
+            },
+            event_kind,
+        )
     }
 }
 
-/// Per-session runtime state shared across HTTP requests and the drain task.
+/// Per-session runtime state shared across HTTP requests, SSE subscribers, and
+/// the background drain task. A handle is get-or-created by either `/events`
+/// (to share the broadcast channel with future live events) or `/prompt` (to
+/// drive a drain). Whether a drain is *actually running* is tracked by
+/// `draining`, NOT by map presence — otherwise an early SSE subscriber's handle
+/// would block the drain from spawning (`/prompt` would admit then never run).
 pub struct SessionHandle {
     pub tx: broadcast::Sender<SseEvt>,
-    pub cancel: CancellationToken,
+    /// Per-drain cancel token, refreshed on each spawn so a prior interrupt's
+    /// permanent cancellation can't poison a subsequent drain.
+    pub cancel: Mutex<CancellationToken>,
     /// mutable runtime overrides applied at the next drain boundary
     pub overrides: Mutex<RuntimeOverrides>,
+    /// CAS guard: the first caller to flip this `true` owns the drain spawn.
+    /// Cleared by `DrainGuard` when the drain ends (normal/early/panic).
+    pub draining: AtomicBool,
+}
+
+const BROADCAST_CAPACITY: usize = 256;
+
+impl SessionHandle {
+    /// Fresh handle with a non-cancelled token and `draining = false`.
+    pub fn new() -> Arc<Self> {
+        let (tx, _rx) = broadcast::channel::<SseEvt>(BROADCAST_CAPACITY);
+        Arc::new(SessionHandle {
+            tx,
+            cancel: Mutex::new(CancellationToken::new()),
+            overrides: Mutex::new(RuntimeOverrides::default()),
+            draining: AtomicBool::new(false),
+        })
+    }
 }
 
 #[derive(Default)]
@@ -73,12 +169,25 @@ pub fn new_handle_map() -> HandleMap {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-const BROADCAST_CAPACITY: usize = 256;
+/// RAII guard that clears the handle's `draining` flag on drop. Covers normal
+/// completion, early returns, and task panic (tokio unwinds spawned futures so
+/// `Drop` still runs), ensuring a crashed/idle drain can be re-spawned.
+struct DrainGuard {
+    handle: Arc<SessionHandle>,
+}
+
+impl Drop for DrainGuard {
+    fn drop(&mut self) {
+        self.handle.draining.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Admit a prompt durably, then ensure exactly one drain task is running for the
-/// session. Returns the admitted input's seq. If the session has no live handle,
-/// one is created and a drain is spawned; otherwise the running drain absorbs
-/// the new input at its next turn boundary (steer) or idle point (queue).
+/// session. Returns the admitted input's seq. A handle is get-or-created to
+/// share the broadcast channel (so early SSE subscribers receive live events);
+/// a `draining` CAS picks the single drain owner, independent of handle
+/// presence. A running drain absorbs the new input at its next turn boundary
+/// (steer) or idle point (queue).
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_and_drain(
     handles: HandleMap,
@@ -100,34 +209,52 @@ pub async fn admit_and_drain(
     };
     let seq = store.admit_input(&input).await?;
 
-    let mut map = handles.lock().await;
-    let need_spawn = !map.contains_key(session_id);
-    if need_spawn {
-        let (tx, _rx) = broadcast::channel::<SseEvt>(BROADCAST_CAPACITY);
-        let cancel = CancellationToken::new();
-        let handle = Arc::new(SessionHandle {
-            tx,
-            cancel: cancel.clone(),
-            overrides: Mutex::new(RuntimeOverrides::default()),
-        });
-        map.insert(session_id.to_string(), handle.clone());
+    // get-or-create the channel handle so an early /events subscriber (which
+    // may have created it) keeps receiving once the drain broadcasts here.
+    let handle = {
+        let mut map = handles.lock().await;
+        map.entry(session_id.to_string())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+
+    // CAS: first to flip draining true owns the spawn. Handle presence alone
+    // (e.g. a handle created by /events with no drain) must NOT gate spawning,
+    // otherwise the prompt is admitted but never processed.
+    if !handle.draining.swap(true, Ordering::SeqCst) {
+        // refresh the cancel token so a previous interrupt's permanent cancel
+        // cannot immediately abort this fresh drain.
+        let token = CancellationToken::new();
+        *handle.cancel.lock().await = token.clone();
         let handles_clone = handles.clone();
         let store_clone = store.clone();
         let sid = session_id.to_string();
         let cfg = config.clone();
         let client_clone = client.clone();
         let wd = workdir.clone();
+        let handle_clone = handle.clone();
         tokio::spawn(async move {
-            drain_to_completion(handles_clone, store_clone, &sid, client_clone, wd, cfg, handle).await;
+            drain_to_completion(
+                handles_clone,
+                store_clone,
+                &sid,
+                client_clone,
+                wd,
+                cfg,
+                handle_clone,
+            )
+            .await;
         });
     }
     Ok(seq)
 }
 
 /// Drive the session runner to completion, broadcasting events. Applies runtime
-/// overrides (agent/model) before starting. When the drain finishes (Done /
-/// interrupted / error), the handle is left in the map so late SSE subscribers
-/// can still replay, but a fresh prompt will spawn a new drain.
+/// overrides (agent/model) before starting. The handle is left in the map when
+/// the drain ends (normal or interrupted) so late SSE subscribers can still
+/// replay from the store and a fresh prompt spawns a new drain; the `DrainGuard`
+/// clears `draining` on any exit path. On a missing session row the handle is
+/// removed (nothing is replayable and the caller must POST /sessions first).
 async fn drain_to_completion(
     handles: HandleMap,
     store: Arc<dyn Store>,
@@ -137,6 +264,11 @@ async fn drain_to_completion(
     mut config: Config,
     handle: Arc<SessionHandle>,
 ) {
+    // clear `draining` on any exit (including panic) so the session is re-spawnable.
+    let _guard = DrainGuard {
+        handle: handle.clone(),
+    };
+
     // apply overrides
     {
         let ov = handle.overrides.lock().await;
@@ -149,7 +281,15 @@ async fn drain_to_completion(
     }
 
     // build the session (resume if history exists)
-    let mut session = match resume_session(store.clone(), session_id, config.clone(), client.clone(), workdir.clone()).await {
+    let mut session = match resume_session(
+        store.clone(),
+        session_id,
+        config.clone(),
+        client.clone(),
+        workdir.clone(),
+    )
+    .await
+    {
         Ok(s) => s,
         Err(e) => {
             // session row missing — caller must create it first (POST /sessions).
@@ -159,7 +299,7 @@ async fn drain_to_completion(
             return;
         }
     };
-    session.cancel = Some(handle.cancel.clone());
+    session.cancel = Some(handle.cancel.lock().await.clone());
 
     let tx = handle.tx.clone();
     let store_for_evt = store.clone();
@@ -188,8 +328,6 @@ async fn drain_to_completion(
         warn!(session_id, error = %e, "drain ended with error");
     }
 
-    // mark idle: leave the handle so SSE replay works, but cancel token stays
-    // so a re-admit spawns a fresh drain via the need_spawn check after removal.
-    let mut map = handles.lock().await;
-    map.remove(session_id);
+    // idle: leave the handle in the map so SSE replay (from the store) and a
+    // later re-admit both work; `DrainGuard` has already cleared `draining`.
 }

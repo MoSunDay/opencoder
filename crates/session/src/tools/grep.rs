@@ -9,15 +9,26 @@ pub struct GrepTool;
 
 #[async_trait]
 impl Tool for GrepTool {
-    fn name(&self) -> &str { "grep" }
+    fn name(&self) -> &str {
+        "grep"
+    }
     fn description(&self) -> &str {
         "Searches file contents with a regex. Returns matching lines with file:line prefixes. Searches recursively under the given path (default working dir)."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
-        props.insert("pattern".into(), json::prop_str("Regular expression to search for."));
-        props.insert("path".into(), json::prop_str("Optional directory or file to search in."));
-        props.insert("include".into(), json::prop_str("Optional glob filter for file names, e.g. \"*.rs\"."));
+        props.insert(
+            "pattern".into(),
+            json::prop_str("Regular expression to search for."),
+        );
+        props.insert(
+            "path".into(),
+            json::prop_str("Optional directory or file to search in."),
+        );
+        props.insert(
+            "include".into(),
+            json::prop_str("Optional glob filter for file names, e.g. \"*.rs\"."),
+        );
         json::object_schema(Value::Object(props), &["pattern"])
     }
 
@@ -27,7 +38,9 @@ impl Tool for GrepTool {
             Ok(r) => r,
             Err(e) => return Ok(ToolOutput::err(format!("invalid regex: {e}"))),
         };
-        let base = input.get("path").and_then(|v| v.as_str())
+        let base = input
+            .get("path")
+            .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| ctx.working_dir.display().to_string());
         let include = input.get("include").and_then(|v| v.as_str());
@@ -44,25 +57,46 @@ impl Tool for GrepTool {
     }
 }
 
-fn walk(dir: &Path, re: &Regex, inc_re: &Option<Regex>, out: &mut Vec<String>, visited: &mut u32, cap: usize) {
-    if *visited > 50_000 || out.len() >= cap { return; }
-    let entries = match std::fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
+fn walk(
+    dir: &Path,
+    re: &Regex,
+    inc_re: &Option<Regex>,
+    out: &mut Vec<String>,
+    visited: &mut u32,
+    cap: usize,
+) {
+    if *visited > 50_000 || out.len() >= cap {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if path.is_dir() {
-            if matches!(name.as_ref(), ".git" | "node_modules" | "target" | "dist" | ".next" | ".cache") { continue; }
+            if matches!(
+                name.as_ref(),
+                ".git" | "node_modules" | "target" | "dist" | ".next" | ".cache"
+            ) {
+                continue;
+            }
             walk(&path, re, inc_re, out, visited, cap);
         } else if path.is_file() {
             *visited += 1;
             if let Some(inc) = inc_re {
-                if !inc.is_match(&name) { continue; }
+                if !inc.is_match(&name) {
+                    continue;
+                }
             }
             if let Ok(content) = std::fs::read_to_string(&path) {
                 for (i, line) in content.lines().enumerate() {
                     if re.is_match(line) {
-                        if out.len() >= cap { return; }
+                        if out.len() >= cap {
+                            return;
+                        }
                         out.push(format!("{}:{}: {}", path.display(), i + 1, line.trim_end()));
                     }
                 }
@@ -77,7 +111,10 @@ fn glob_to_regex(glob: &str) -> Regex {
         match ch {
             '*' => s.push_str(".*"),
             '?' => s.push('.'),
-            c if "\\.+()[]{}|^$".contains(c) => { s.push('\\'); s.push(c); }
+            c if "\\.+()[]{}|^$".contains(c) => {
+                s.push('\\');
+                s.push(c);
+            }
             c => s.push(c),
         }
     }

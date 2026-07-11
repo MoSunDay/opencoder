@@ -100,9 +100,15 @@ pub fn cursor_row_col(input: &str, char_idx: usize) -> (usize, usize) {
     let mut row = 0usize;
     let mut col = 0usize;
     for (i, ch) in input.chars().enumerate() {
-        if i >= char_idx { break; }
-        if ch == '\n' { row += 1; col = 0; }
-        else { col += char_width(ch); }
+        if i >= char_idx {
+            break;
+        }
+        if ch == '\n' {
+            row += 1;
+            col = 0;
+        } else {
+            col += char_width(ch);
+        }
     }
     (row, col)
 }
@@ -110,16 +116,28 @@ pub fn cursor_row_col(input: &str, char_idx: usize) -> (usize, usize) {
 /// Move cursor up/down by one visual row in multi-line text.
 /// Returns the original index if already at the top/bottom row.
 pub fn move_cursor_vertical(input: &str, char_idx: usize, direction: i32) -> usize {
-    if input.is_empty() { return char_idx; }
+    if input.is_empty() {
+        return char_idx;
+    }
     let mut line_starts: Vec<usize> = vec![0];
     for (i, ch) in input.chars().enumerate() {
-        if ch == '\n' { line_starts.push(i + 1); }
+        if ch == '\n' {
+            line_starts.push(i + 1);
+        }
     }
-    let row = line_starts.iter().rev().position(|&s| s <= char_idx)
-        .map(|r| line_starts.len() - 1 - r).unwrap_or(0);
+    let row = line_starts
+        .iter()
+        .rev()
+        .position(|&s| s <= char_idx)
+        .map(|r| line_starts.len() - 1 - r)
+        .unwrap_or(0);
     let line_start = line_starts[row];
-    let col: usize = input.chars().skip(line_start)
-        .take(char_idx.saturating_sub(line_start)).map(char_width).sum();
+    let col: usize = input
+        .chars()
+        .skip(line_start)
+        .take(char_idx.saturating_sub(line_start))
+        .map(char_width)
+        .sum();
     let target_row = row as i32 + direction;
     if target_row < 0 || target_row as usize >= line_starts.len() {
         return char_idx;
@@ -134,8 +152,12 @@ pub fn move_cursor_vertical(input: &str, char_idx: usize, direction: i32) -> usi
     let mut actual = 0usize;
     let mut idx = target_start;
     for (i, ch) in input.chars().enumerate().skip(target_start) {
-        if i >= target_end { break; }
-        if actual + char_width(ch) > col { break; }
+        if i >= target_end {
+            break;
+        }
+        if actual + char_width(ch) > col {
+            break;
+        }
         actual += char_width(ch);
         idx = i + 1;
     }
@@ -221,10 +243,10 @@ mod tests {
     fn cursor_row_col_multi_line() {
         let input = "abc\ndef\nghi";
         assert_eq!(cursor_row_col(input, 0), (0, 0));
-        assert_eq!(cursor_row_col(input, 3), (0, 3));  // before \n
-        assert_eq!(cursor_row_col(input, 4), (1, 0));  // start of line 2
-        assert_eq!(cursor_row_col(input, 7), (1, 3));  // before second \n
-        assert_eq!(cursor_row_col(input, 8), (2, 0));  // start of line 3
+        assert_eq!(cursor_row_col(input, 3), (0, 3)); // before \n
+        assert_eq!(cursor_row_col(input, 4), (1, 0)); // start of line 2
+        assert_eq!(cursor_row_col(input, 7), (1, 3)); // before second \n
+        assert_eq!(cursor_row_col(input, 8), (2, 0)); // start of line 3
     }
 
     #[test]

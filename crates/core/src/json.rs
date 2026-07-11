@@ -8,13 +8,15 @@ pub fn object_schema(properties: Value, required: &[&str]) -> Value {
     let mut m = Map::new();
     m.insert("type".into(), Value::String("object".into()));
     m.insert("properties".into(), properties);
-    m.insert(
-        "additionalProperties".into(),
-        Value::Bool(false),
-    );
+    m.insert("additionalProperties".into(), Value::Bool(false));
     m.insert(
         "required".into(),
-        Value::Array(required.iter().map(|s| Value::String((*s).to_string())).collect()),
+        Value::Array(
+            required
+                .iter()
+                .map(|s| Value::String((*s).to_string()))
+                .collect(),
+        ),
     );
     Value::Object(m)
 }
@@ -36,6 +38,9 @@ pub fn opt(value: Value) -> Value {
             return Value::Object(m);
         }
     };
-    o.insert("description".into(), o.get("description").cloned().unwrap_or(Value::Null));
+    o.insert(
+        "description".into(),
+        o.get("description").cloned().unwrap_or(Value::Null),
+    );
     Value::Object(o)
 }

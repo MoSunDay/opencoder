@@ -31,7 +31,10 @@ pub async fn serve(host: String, port: u16, _web: bool) -> Result<()> {
 
     let app = Router::new()
         .route("/", get(html::index))
-        .route("/api/sessions", get(api::list_sessions).post(api::create_session))
+        .route(
+            "/api/sessions",
+            get(api::list_sessions).post(api::create_session),
+        )
         .route("/api/sessions/:id", get(api::get_session))
         .route("/api/sessions/:id/messages", get(api::get_messages))
         .route("/api/sessions/:id/prompt", post(api::post_prompt))
@@ -57,9 +60,39 @@ pub fn data_dir_for(workdir: &std::path::Path) -> std::path::PathBuf {
         .join(hash_of(workdir))
 }
 
+/// Stable 64-bit fingerprint of a workdir path, used to key the local data
+/// directory. Uses FNV-1a (deterministic, no extra dependency) rather than
+/// `std::collections::hash_map::DefaultHasher`, which the std docs explicitly
+/// warn is NOT stable across Rust versions — basing DB-path identity on it
+/// would silently "lose" sessions after a toolchain bump. This is an identity
+/// key, not a security primitive, so a non-cryptographic hash is appropriate.
 fn hash_of(p: &std::path::Path) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    p.hash(&mut h);
-    format!("{:016x}", h.finish())
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = FNV_OFFSET;
+    for byte in p.as_os_str().as_encoded_bytes() {
+        h ^= u64::from(*byte);
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    format!("{h:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_of;
+    use std::path::Path;
+
+    /// Pin the hash to a fixed value so any future change to the algorithm
+    /// (which would silently remap workdirs to new data dirs and "lose"
+    /// sessions) is caught at test time.
+    #[test]
+    fn hash_of_is_stable_and_pinned() {
+        // FNV-1a 64 of the bytes of "/tmp/opencode-pin"
+        assert_eq!(hash_of(Path::new("/tmp/opencode-pin")), "832ee9edd819d93b");
+    }
+
+    #[test]
+    fn hash_of_distinguishes_paths() {
+        assert_ne!(hash_of(Path::new("/a/b")), hash_of(Path::new("/a/bb")));
+    }
 }

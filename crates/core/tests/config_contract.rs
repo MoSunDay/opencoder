@@ -19,7 +19,7 @@ fn merge_project_file_overrides_defaults() {
             "model": "zhipuai-coding-plan/glm-5.2",
             "small_model": "cheap/mini",
             "context_limit": 60000,
-            "compaction": { "auto": true, "context_threshold": 40000, "reserved": 8000, "tail_turns": 3, "prune": true }
+            "compaction": { "auto": true, "context_threshold": 40000, "reserved": 8000, "tail_turns": 3 }
         }"#,
     )
     .unwrap();
@@ -35,7 +35,6 @@ fn merge_project_file_overrides_defaults() {
     assert_eq!(cfg.compaction.context_threshold, 40000);
     assert_eq!(cfg.compaction.reserved, 8000);
     assert_eq!(cfg.compaction.tail_turns, 3);
-    assert!(cfg.compaction.prune);
 }
 
 #[test]
@@ -58,7 +57,10 @@ fn env_overrides_project_file() {
     std::env::remove_var("OPENCODE_SMALL_MODEL");
     std::env::remove_var("OPENCODE_CONTEXT_LIMIT");
 
-    assert_eq!(cfg.model, "env/model-from-env", "OPENCODE_MODEL wins over file");
+    assert_eq!(
+        cfg.model, "env/model-from-env",
+        "OPENCODE_MODEL wins over file"
+    );
     assert_eq!(cfg.small_model.as_deref(), Some("env/small"));
     assert_eq!(cfg.context_limit(), 99999);
 }
@@ -75,7 +77,11 @@ fn braces_api_key_resolves_env_var() {
     .unwrap();
     let cfg = Config::load(dir.path()).unwrap();
     std::env::remove_var("ZHIPU_API_KEY");
-    assert_eq!(cfg.api_key().unwrap(), "secret-value-123", "braces var must resolve");
+    assert_eq!(
+        cfg.api_key().unwrap(),
+        "secret-value-123",
+        "braces var must resolve"
+    );
 }
 
 #[test]
@@ -101,9 +107,15 @@ fn reserved_saturates_against_context_limit() {
     let cfg = Config::load(dir.path()).unwrap();
     // reserved > context_limit must not underflow usable budget in compaction logic;
     // we expose the primitives so the contract is testable.
-    let reserved = cfg.compaction.reserved.min(cfg.context_limit().saturating_sub(1));
+    let reserved = cfg
+        .compaction
+        .reserved
+        .min(cfg.context_limit().saturating_sub(1));
     let usable = cfg.context_limit().saturating_sub(reserved);
-    assert!(usable >= 1, "usable must stay positive even with over-large reserved");
+    assert!(
+        usable >= 1,
+        "usable must stay positive even with over-large reserved"
+    );
 }
 
 #[test]
@@ -117,7 +129,10 @@ fn home_opencoder_config_is_discovered() {
     // No project config — load from a clean cwd.
     let cwd = tempfile::tempdir().unwrap();
     let cfg_no_home = Config::load(cwd.path()).unwrap();
-    assert_eq!(cfg_no_home.model, "openai/gpt-4o-mini", "default when no ~/.opencoder");
+    assert_eq!(
+        cfg_no_home.model, "openai/gpt-4o-mini",
+        "default when no ~/.opencoder"
+    );
 
     // Drop ~/.opencoder/config.json → must be picked up from any cwd.
     let cfg_dir = fake_home.path().join(".opencoder");
@@ -135,7 +150,10 @@ fn home_opencoder_config_is_discovered() {
         None => std::env::remove_var("HOME"),
     }
 
-    assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2", "~/.opencoder/config.json must be discovered");
+    assert_eq!(
+        cfg.model, "zhipuai-coding-plan/glm-5.2",
+        "~/.opencoder/config.json must be discovered"
+    );
     assert_eq!(cfg.provider.base_url, "https://x.example/v4");
     assert_eq!(cfg.max_tokens, Some(4096));
 }
@@ -158,7 +176,49 @@ fn reasoning_effort_defaults_to_none() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();
     let cfg = Config::load(dir.path()).unwrap();
-    assert!(cfg.reasoning_effort.is_none(), "absent reasoning_effort must stay None");
+    assert!(
+        cfg.reasoning_effort.is_none(),
+        "absent reasoning_effort must stay None"
+    );
+}
+
+#[test]
+fn interleaved_thinking_defaults_to_true() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(
+        cfg.interleaved_thinking,
+        Some(true),
+        "absent interleaved_thinking must default to Some(true)"
+    );
+}
+
+#[test]
+fn interleaved_thinking_parsed_from_config() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencode.json"),
+        r#"{"interleaved_thinking": false}"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.interleaved_thinking, Some(false));
+}
+
+#[test]
+fn interleaved_thinking_roundtrips_through_save() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    let patch = serde_json::json!({ "interleaved_thinking": false });
+    Config::save(dir.path(), &patch).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(
+        cfg.interleaved_thinking,
+        Some(false),
+        "save → load must preserve interleaved_thinking=false"
+    );
 }
 
 #[test]
@@ -172,11 +232,17 @@ fn save_persists_patch_and_roundtrips() {
         "compaction": { "context_threshold": 100000 }
     });
     let written = Config::save(dir.path(), &patch).unwrap();
-    assert!(written.ends_with("opencode.json"), "must save to project-local opencode.json");
+    assert!(
+        written.ends_with("opencode.json"),
+        "must save to project-local opencode.json"
+    );
 
     let cfg = Config::load(dir.path()).unwrap();
     assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2");
-    assert_eq!(cfg.provider.base_url, "https://open.bigmodel.cn/api/coding/paas/v4");
+    assert_eq!(
+        cfg.provider.base_url,
+        "https://open.bigmodel.cn/api/coding/paas/v4"
+    );
     assert_eq!(cfg.provider.api_key.as_deref(), Some("sk-plaintext"));
     assert_eq!(cfg.reasoning_effort.as_deref(), Some("high"));
     assert_eq!(cfg.compaction.context_threshold, 100_000);
@@ -197,8 +263,14 @@ fn save_preserves_unrelated_keys_on_merge() {
     });
     Config::save(dir.path(), &patch).unwrap();
     let cfg = Config::load(dir.path()).unwrap();
-    assert_eq!(cfg.compaction.context_threshold, 9000, "patched key updates");
-    assert_eq!(cfg.compaction.tail_turns, 5, "sibling key preserved by deep merge");
+    assert_eq!(
+        cfg.compaction.context_threshold, 9000,
+        "patched key updates"
+    );
+    assert_eq!(
+        cfg.compaction.tail_turns, 5,
+        "sibling key preserved by deep merge"
+    );
 }
 
 #[test]
@@ -224,7 +296,10 @@ fn save_can_remove_reasoning_effort_via_null() {
     let patch = serde_json::json!({ "reasoning_effort": serde_json::Value::Null });
     Config::save(dir.path(), &patch).unwrap();
     let cfg = Config::load(dir.path()).unwrap();
-    assert!(cfg.reasoning_effort.is_none(), "null patch must delete reasoning_effort");
+    assert!(
+        cfg.reasoning_effort.is_none(),
+        "null patch must delete reasoning_effort"
+    );
 }
 
 #[test]
@@ -240,7 +315,11 @@ fn save_env_var_api_key_roundtrips_through_resolve() {
     Config::save(dir.path(), &patch).unwrap();
     let cfg = Config::load(dir.path()).unwrap();
     std::env::remove_var("MY_TEST_KEY");
-    assert_eq!(cfg.api_key().unwrap(), "resolved-secret", "{{ENV}} api_key must resolve on reload");
+    assert_eq!(
+        cfg.api_key().unwrap(),
+        "resolved-secret",
+        "{{ENV}} api_key must resolve on reload"
+    );
 }
 
 /// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`
@@ -253,7 +332,13 @@ fn isolated_home() -> (HomeGuard, tempfile::TempDir) {
     std::env::set_var("HOME", home.path());
     std::env::set_var("XDG_CONFIG_HOME", home.path());
     let cwd = tempfile::tempdir().unwrap();
-    (HomeGuard { prev_home, prev_xdg }, cwd)
+    (
+        HomeGuard {
+            prev_home,
+            prev_xdg,
+        },
+        cwd,
+    )
 }
 
 struct HomeGuard {

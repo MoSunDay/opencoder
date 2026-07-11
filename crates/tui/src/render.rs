@@ -28,8 +28,8 @@ const CONTEXT_BASELINE: u64 = 4_000;
 
 /// Braille spinner frames shown while a task is running.
 const SPINNER: [&str; 10] = [
-    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}",
-    "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
 ];
 
 /// Mouse hit-targets exported by `render` for the event loop to test clicks
@@ -100,7 +100,11 @@ pub(crate) fn render(
         let input_rows = composer::display_rows(input, composer_inner_w).max(2);
         let composer_h = (input_rows + 2).min(area.height / 3);
         let pending = steer_items.len() + queue_items.len();
-        let queue_h = if pending > 0 { pending.min(3) as u16 } else { 0 };
+        let queue_h = if pending > 0 {
+            pending.min(3) as u16
+        } else {
+            0
+        };
         let skill_h = if skill_menu.is_some() { 8 } else { 0 };
 
         let chunks = Layout::default()
@@ -118,10 +122,26 @@ pub(crate) fn render(
         hits.queue_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
-        render_body(f, chunks[ci], chat, agent, scroll, follow, &mut hits.body, &mut hits.thinking_btns, &mut hits.subagent_btns);
+        render_body(
+            f,
+            chunks[ci],
+            chat,
+            agent,
+            scroll,
+            follow,
+            &mut hits.body,
+            &mut hits.thinking_btns,
+            &mut hits.subagent_btns,
+        );
         ci += 1;
         if queue_h > 0 {
-            render_queue_panel(f, chunks[ci], steer_items, queue_items, &mut hits.queue_btns);
+            render_queue_panel(
+                f,
+                chunks[ci],
+                steer_items,
+                queue_items,
+                &mut hits.queue_btns,
+            );
         }
         ci += 1;
         if skill_h > 0 {
@@ -134,10 +154,21 @@ pub(crate) fn render(
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
-            f, chunks[ci], running, status, steer_items.len() as u32, queue_items.len() as u32,
-            chat.subagents_running, chat.subagents_total,
-            model, agent, workdir, context_used + sys_tokens, context_limit,
-            anim_tick, active_skill,
+            f,
+            chunks[ci],
+            running,
+            status,
+            steer_items.len() as u32,
+            queue_items.len() as u32,
+            chat.subagents_running,
+            chat.subagents_total,
+            model,
+            agent,
+            workdir,
+            context_used + sys_tokens,
+            context_limit,
+            anim_tick,
+            active_skill,
         );
 
         if show_help {
@@ -147,10 +178,10 @@ pub(crate) fn render(
             crate::task::render_task_picker(f, area, tp);
         }
         if let Some(cm) = command_menu {
-            crate::command::render_command_popup(f, area, cm);
+            crate::command::render_command_popup(f, area, composer_area.y, cm);
         }
         if let Some(mm) = model_menu {
-            crate::model_menu::render_model_popup(f, area, mm);
+            crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
         }
         place_cursor(f, composer_area, input, cursor_idx);
     })?;
@@ -214,7 +245,10 @@ fn render_body(
     );
 
     f.render_widget(block, area);
-    let text_area = Rect { width: text_w, ..inner };
+    let text_area = Rect {
+        width: text_w,
+        ..inner
+    };
     f.render_widget(para.scroll((scroll_y, 0)), text_area);
 
     if total_rows > visible_h {
@@ -226,7 +260,13 @@ fn render_body(
 /// overflows the viewport. ratatui's `ScrollbarState` inflates the denominator
 /// by `viewport − 1`, which parks the thumb mid-track at the bottom when
 /// content ≈ viewport. This uses the simple ratio `scroll / max_scroll`.
-fn draw_scrollbar(f: &mut Frame, inner: Rect, total_rows: usize, visible_h: usize, scroll_y: usize) {
+fn draw_scrollbar(
+    f: &mut Frame,
+    inner: Rect,
+    total_rows: usize,
+    visible_h: usize,
+    scroll_y: usize,
+) {
     let max_scroll = total_rows.saturating_sub(visible_h);
     let track_h = inner.height as u64;
     let thumb_h = (visible_h as u64 * track_h / total_rows as u64).max(1) as u16;
@@ -368,16 +408,26 @@ fn render_composer(
     let line = Line::from(vec![
         Span::styled(
             "\u{276f} ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(input.to_string()),
     ]);
     f.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), inner);
 
     let (label, style) = if follow {
-        ("\u{8ddf}\u{968f}\u{4e2d}\u{2026}", Style::default().fg(Color::Cyan))
+        (
+            "\u{8ddf}\u{968f}\u{4e2d}\u{2026}",
+            Style::default().fg(Color::Cyan),
+        )
     } else {
-        ("\u{2193}", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        (
+            "\u{2193}",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
     };
     let disp_w: u16 = label.chars().map(composer::char_width).sum::<usize>() as u16;
     let lbl_w = disp_w.saturating_add(2).min(area.width);
@@ -413,14 +463,25 @@ fn render_status(
     active_skill: Option<&str>,
 ) {
     let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
-    let ctx_color = if pct >= 85 { Color::Red } else if pct >= 60 { Color::Yellow } else { Color::Green };
+    let ctx_color = if pct >= 85 {
+        Color::Red
+    } else if pct >= 60 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
     let dir_name = workdir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".into());
 
     let mut spans = vec![
-        Span::styled(" opencoder ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " opencoder ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("| "),
         Span::styled(model.to_string(), Style::default().fg(Color::White)),
         Span::raw(" | "),
@@ -429,7 +490,12 @@ fn render_status(
         Span::styled(dir_name, Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
         Span::styled(
-            format!("ctx {}% ({}/{})", pct, fmtmod::format_tokens_compact(used), fmtmod::format_tokens_compact(limit)),
+            format!(
+                "ctx {}% ({}/{})",
+                pct,
+                fmtmod::format_tokens_compact(used),
+                fmtmod::format_tokens_compact(limit)
+            ),
             Style::default().fg(ctx_color),
         ),
     ];
@@ -438,27 +504,43 @@ fn render_status(
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
             format!("skill:{name}"),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
     if running {
         let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(format!("{spin} {status}"), Style::default().fg(Color::Yellow)));
+        spans.push(Span::styled(
+            format!("{spin} {status}"),
+            Style::default().fg(Color::Yellow),
+        ));
     } else if !status.is_empty() {
-        spans.push(Span::styled(format!("  | {status}"), Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            format!("  | {status}"),
+            Style::default().fg(Color::DarkGray),
+        ));
     }
     if steer_count > 0 {
-        spans.push(Span::styled(format!(" | \u{21b3}steer:{steer_count}"), Style::default().fg(Color::Blue)));
+        spans.push(Span::styled(
+            format!(" | \u{21b3}steer:{steer_count}"),
+            Style::default().fg(Color::Blue),
+        ));
     }
     if queue_count > 0 {
-        spans.push(Span::styled(format!(" | queue:{queue_count}"), Style::default().fg(Color::Yellow)));
+        spans.push(Span::styled(
+            format!(" | queue:{queue_count}"),
+            Style::default().fg(Color::Yellow),
+        ));
     }
     if subagents_total > 0 {
         spans.push(Span::styled(
             format!(" | \u{2937}sub:{subagents}/{subagents_total}"),
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -479,10 +561,20 @@ fn render_queue_panel(
     }
     let mut entries: Vec<E> = Vec::new();
     for s in steer_items {
-        entries.push(E { prefix: "\u{21b3} steer", text: s.as_str(), color: Color::Blue, seq: None });
+        entries.push(E {
+            prefix: "\u{21b3} steer",
+            text: s.as_str(),
+            color: Color::Blue,
+            seq: None,
+        });
     }
     for (seq, q) in queue_items {
-        entries.push(E { prefix: "[queued]", text: q.as_str(), color: Color::Yellow, seq: Some(*seq) });
+        entries.push(E {
+            prefix: "[queued]",
+            text: q.as_str(),
+            color: Color::Yellow,
+            seq: Some(*seq),
+        });
     }
     let total = entries.len();
     if total == 0 || area.height == 0 {
@@ -492,7 +584,11 @@ fn render_queue_panel(
     let max_lines = (area.height as usize).min(3);
     let avail_w = area.width as usize;
     let overflow = total > max_lines;
-    let item_capacity = if overflow { max_lines.saturating_sub(1) } else { max_lines };
+    let item_capacity = if overflow {
+        max_lines.saturating_sub(1)
+    } else {
+        max_lines
+    };
     let start = total.saturating_sub(item_capacity);
     let visible = &entries[start..];
 
@@ -509,7 +605,11 @@ fn render_queue_panel(
     let btn_w = 6usize;
     for e in visible {
         let clickable = e.seq.is_some() && avail_w > btn_w + 4;
-        let cap = if clickable { avail_w.saturating_sub(btn_w) } else { avail_w };
+        let cap = if clickable {
+            avail_w.saturating_sub(btn_w)
+        } else {
+            avail_w
+        };
         let head = format!(" {}: {}", e.prefix, e.text);
         let head_display = composer::truncate_to_width(&head, cap);
         let head_len = composer::str_width(&head_display);
@@ -618,9 +718,9 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
         // Content lines are now present in the flattened output.
-        assert!(lines.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains("think-a-1"))
-        }));
+        assert!(lines
+            .iter()
+            .any(|l| { l.spans.iter().any(|s| s.content.contains("think-a-1")) }));
     }
 
     /// Scrolling past the header removes its hit rect (header scrolled out of
@@ -632,7 +732,10 @@ mod tests {
         let mut hits = Vec::new();
         // scroll_y = 1 pushes the row-0 header above the viewport.
         record_thinking_hits(&v, &lines, 40, 1, 10, 1, 2, &mut hits);
-        assert!(hits.is_empty(), "header above viewport should not be hittable");
+        assert!(
+            hits.is_empty(),
+            "header above viewport should not be hittable"
+        );
     }
 
     /// No thinking blocks ⇒ no work and no hits.

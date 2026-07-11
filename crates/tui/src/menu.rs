@@ -35,7 +35,13 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
     };
     // Quit still works from inside the modal; other Ctrl combos are ignored.
     if k.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d')) {
+        if matches!(
+            k.code,
+            KeyCode::Char('c')
+                | KeyCode::Char('d')
+                | KeyCode::Char('\u{3}')
+                | KeyCode::Char('\u{4}')
+        ) {
             *menu = None;
             return MenuOutcome::Quit;
         }
@@ -92,7 +98,13 @@ impl SkillMenu {
     /// row is shown (i.e. whether there's an active skill to un-set).
     pub fn new(skills: Vec<Skill>, has_active: bool) -> Self {
         let rows = Self::build_rows(&skills, "", has_active);
-        SkillMenu { skills, rows, selected: 0, query: String::new(), has_active }
+        SkillMenu {
+            skills,
+            rows,
+            selected: 0,
+            query: String::new(),
+            has_active,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -180,8 +192,7 @@ impl SkillMenu {
             .filter_map(|(i, s)| {
                 let name_l = s.name.to_lowercase();
                 let desc_l = s.description.to_lowercase();
-                let score = fuzzy_score(&q, &name_l)
-                    .or_else(|| fuzzy_score(&q, &desc_l))?;
+                let score = fuzzy_score(&q, &name_l).or_else(|| fuzzy_score(&q, &desc_l))?;
                 Some((i, score))
             })
             .collect();
@@ -240,9 +251,9 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     let popup = centered_popup(area, menu.visible_count());
     f.render_widget(Clear, popup);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Select skill (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel) ");
+    let block = Block::default().borders(Borders::ALL).title(
+        " Select skill (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel) ",
+    );
 
     let skill_rows: Vec<ListItem> = menu
         .rows
@@ -257,7 +268,9 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         s.name.clone(),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" \u{2014} "),
                     Span::styled(s.description.clone(), Style::default().fg(Color::Gray)),
@@ -283,7 +296,11 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();
@@ -304,11 +321,16 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
             Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 menu.query(),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("_"),
         ]);
-        f.render_widget(Paragraph::new(footer_line).wrap(Wrap { trim: false }), footer);
+        f.render_widget(
+            Paragraph::new(footer_line).wrap(Wrap { trim: false }),
+            footer,
+        );
     }
 }
 
@@ -331,7 +353,12 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
             Row::Skill(i) => {
                 let s = &menu.skills[*i];
                 ListItem::new(Line::from(vec![
-                    Span::styled(s.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        s.name.clone(),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" \u{2014} "),
                     Span::styled(s.description.clone(), Style::default().fg(Color::Gray)),
                 ]))
@@ -350,7 +377,11 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();
@@ -387,7 +418,10 @@ mod tests {
     }
 
     fn menu_of(names: &[&str]) -> SkillMenu {
-        SkillMenu::new(names.iter().map(|n| sk(n, &format!("desc {n}"))).collect(), false)
+        SkillMenu::new(
+            names.iter().map(|n| sk(n, &format!("desc {n}"))).collect(),
+            false,
+        )
     }
 
     #[test]
@@ -422,11 +456,14 @@ mod tests {
 
     #[test]
     fn query_filters_by_name_or_description_case_insensitive() {
-        let mut m = SkillMenu::new(vec![
-            sk("repo-memory", "maintain local docs"),
-            sk("task-plan", "build a go-live plan"),
-            sk("ship", "deliver to production"),
-        ], false);
+        let mut m = SkillMenu::new(
+            vec![
+                sk("repo-memory", "maintain local docs"),
+                sk("task-plan", "build a go-live plan"),
+                sk("ship", "deliver to production"),
+            ],
+            false,
+        );
         for c in "PLAN".chars() {
             m.on_char(c);
         }
@@ -475,7 +512,7 @@ mod tests {
         for c in "zzz".chars() {
             m.on_char(c);
         } // matches nothing
-        // clear row always remains, skills filtered out
+          // clear row always remains, skills filtered out
         assert_eq!(m.visible_count(), 1);
         assert!(m.is_clear_selected());
     }
@@ -486,7 +523,10 @@ mod tests {
         assert!(fuzzy_score("exp", "build").is_none());
         assert!(fuzzy_score("", "anything").is_some());
         assert!(fuzzy_score("abc", "axbxc").is_some());
-        assert!(fuzzy_score("abc", "acb").is_none(), "order must be preserved");
+        assert!(
+            fuzzy_score("abc", "acb").is_none(),
+            "order must be preserved"
+        );
     }
 
     #[test]
@@ -503,11 +543,19 @@ mod tests {
             m.on_char(c);
         }
         // "epr" is a subsequence of "explore" (e-x-p-l-o-r-e) but NOT of "build"
-        let names: Vec<&str> = m.rows.iter().filter_map(|r| match r {
-            Row::Skill(i) => Some(m.skills[*i].name.as_str()),
-            _ => None,
-        }).collect();
-        assert!(names.contains(&"explore"), "explore should match 'epr': {:?}", names);
+        let names: Vec<&str> = m
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Skill(i) => Some(m.skills[*i].name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            names.contains(&"explore"),
+            "explore should match 'epr': {:?}",
+            names
+        );
         assert!(!names.contains(&"build"), "build should NOT match 'epr'");
     }
 }

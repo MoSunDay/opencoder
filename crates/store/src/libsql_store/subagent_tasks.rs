@@ -42,12 +42,9 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
         SubagentStatus::Failed
     };
     let now = opencode_core::message::now_ms();
-    conn.execute(
-        COMPLETE,
-        params![result, ok, status.as_str(), now, task_id],
-    )
-    .await
-    .context("update subagent_task completion")?;
+    conn.execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
+        .await
+        .context("update subagent_task completion")?;
     Ok(())
 }
 

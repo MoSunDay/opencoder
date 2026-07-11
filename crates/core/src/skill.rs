@@ -235,7 +235,10 @@ mod tests {
     #[test]
     fn discover_picks_flat_md_and_nested_skill_md() {
         let dir = tempfile::tempdir().unwrap();
-        write(dir.path().join("alpha.md"), "---\nname: Alpha\n---\na body\n");
+        write(
+            dir.path().join("alpha.md"),
+            "---\nname: Alpha\n---\na body\n",
+        );
         write(
             dir.path().join("nested").join("SKILL.md"),
             "nested body line\n",
@@ -261,7 +264,10 @@ mod tests {
         write(dir.path().join("zeta.md"), "z\n");
         write(dir.path().join("alpha.md"), "a\n");
         write(dir.path().join("mid.md"), "m\n");
-        let names: Vec<_> = discover_in(dir.path()).into_iter().map(|s| s.name).collect();
+        let names: Vec<_> = discover_in(dir.path())
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
         assert_eq!(names, vec!["alpha", "mid", "zeta"]);
     }
 }

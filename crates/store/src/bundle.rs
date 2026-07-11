@@ -12,9 +12,7 @@ use opencode_core::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::store::Store;
-use crate::types::{
-    Delivery, SessionEventRecord, SessionInput, SessionMeta, SubagentTaskRecord,
-};
+use crate::types::{Delivery, SessionEventRecord, SessionInput, SessionMeta, SubagentTaskRecord};
 
 const MAGIC: &[u8; 8] = b"OPENCODR";
 const FORMAT_VERSION: u32 = 1;
@@ -56,22 +54,35 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
     for task in tasks {
         let child = Box::pin(export_bundle(store, &task.child_session_id)).await;
         match child {
-            Ok(bundle) => subagents.push(SubagentBundle { task, child: bundle }),
+            Ok(bundle) => subagents.push(SubagentBundle {
+                task,
+                child: bundle,
+            }),
             Err(e) => {
                 tracing::warn!(task_id = %task.task_id, error = %e, "skipping subagent export");
             }
         }
     }
 
-    Ok(SessionBundle { meta, messages, events, inputs, subagents })
+    Ok(SessionBundle {
+        meta,
+        messages,
+        events,
+        inputs,
+        subagents,
+    })
 }
 
 /// Write a bundle to a writer in opencode binary format.
 pub fn write_bundle(bundle: &SessionBundle, writer: &mut impl Write) -> Result<()> {
     writer.write_all(MAGIC).context("write magic")?;
-    writer.write_all(&FORMAT_VERSION.to_le_bytes()).context("write version")?;
+    writer
+        .write_all(&FORMAT_VERSION.to_le_bytes())
+        .context("write version")?;
     let payload = serde_json::to_vec(bundle).context("serialize bundle")?;
-    writer.write_all(&(payload.len() as u64).to_le_bytes()).context("write length")?;
+    writer
+        .write_all(&(payload.len() as u64).to_le_bytes())
+        .context("write length")?;
     writer.write_all(&payload).context("write payload")?;
     Ok(())
 }
@@ -145,7 +156,13 @@ async fn import_bundle_inner(
 
     // Recursively import subagent children (child session first, then link).
     for sub in &bundle.subagents {
-        Box::pin(import_bundle_inner(store, &sub.child, workdir_hash, depth + 1)).await?;
+        Box::pin(import_bundle_inner(
+            store,
+            &sub.child,
+            workdir_hash,
+            depth + 1,
+        ))
+        .await?;
         store.create_subagent_task(&sub.task).await?;
     }
 
@@ -161,7 +178,9 @@ mod tests {
         let msg = Message {
             id: "msg1".into(),
             role: Role::User,
-            blocks: vec![ContentBlock::Text { text: "hello".into() }],
+            blocks: vec![ContentBlock::Text {
+                text: "hello".into(),
+            }],
             model: Some("test-model".into()),
             agent: Some("act".into()),
             usage: MessageUsage::default(),

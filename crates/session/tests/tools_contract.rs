@@ -35,7 +35,10 @@ async fn write_tool_creates_parent_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     let out = WriteTool
-        .execute(json!({"path": "sub/dir/file.rs", "content": "fn main() {}"}), &c)
+        .execute(
+            json!({"path": "sub/dir/file.rs", "content": "fn main() {}"}),
+            &c,
+        )
         .await
         .unwrap();
     assert!(!out.is_error);
@@ -81,7 +84,10 @@ async fn edit_tool_errors_on_ambiguous_without_replace_all() {
     std::fs::write(dir.path().join("f.txt"), "foo foo foo").unwrap();
     let c = ctx(dir.path());
     let out = EditTool
-        .execute(json!({"path": "f.txt", "old_string": "foo", "new_string": "bar"}), &c)
+        .execute(
+            json!({"path": "f.txt", "old_string": "foo", "new_string": "bar"}),
+            &c,
+        )
         .await
         .unwrap();
     assert!(out.is_error);
@@ -101,7 +107,10 @@ async fn edit_tool_replace_all() {
         .await
         .unwrap();
     assert!(!out.is_error);
-    assert_eq!(std::fs::read_to_string(dir.path().join("f.txt")).unwrap(), "bar bar bar");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
+        "bar bar bar"
+    );
 }
 
 #[tokio::test]
@@ -128,10 +137,7 @@ async fn ls_tool_lists_directory() {
     std::fs::create_dir(dir.path().join("subdir")).unwrap();
     let c = ctx(dir.path());
     // No path → defaults to working_dir
-    let out = ListTool
-        .execute(json!({}), &c)
-        .await
-        .unwrap();
+    let out = ListTool.execute(json!({}), &c).await.unwrap();
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("file1.txt"));
     assert!(out.content.contains("subdir/"));

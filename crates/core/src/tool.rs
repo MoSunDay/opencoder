@@ -20,10 +20,16 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn ok(content: impl Into<String>) -> Self {
-        ToolOutput { content: content.into(), is_error: false }
+        ToolOutput {
+            content: content.into(),
+            is_error: false,
+        }
     }
     pub fn err(content: impl Into<String>) -> Self {
-        ToolOutput { content: content.into(), is_error: true }
+        ToolOutput {
+            content: content.into(),
+            is_error: true,
+        }
     }
 }
 

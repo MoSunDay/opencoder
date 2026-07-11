@@ -101,18 +101,30 @@ mod tests {
         let mut acc = ToolAccumulator::default();
         // First call with id+name → emits ToolCallStart (just_created + id/name set)
         let evs1 = acc.apply(0, Some("call_1"), Some("bash"), None);
-        assert!(evs1.iter().any(|e| matches!(
-            e,
-            LlmEvent::ToolCallStart { id, name, .. } if id == "call_1" && name == "bash"
-        )), "expected ToolCallStart in {:?}", evs1);
-        assert!(!evs1.iter().any(|e| matches!(e, LlmEvent::ToolCallDelta { .. })));
+        assert!(
+            evs1.iter().any(|e| matches!(
+                e,
+                LlmEvent::ToolCallStart { id, name, .. } if id == "call_1" && name == "bash"
+            )),
+            "expected ToolCallStart in {:?}",
+            evs1
+        );
+        assert!(!evs1
+            .iter()
+            .any(|e| matches!(e, LlmEvent::ToolCallDelta { .. })));
         // Second call with same index + args → only Delta (already started)
         let evs2 = acc.apply(0, Some("call_1"), Some("bash"), Some("{\"cmd\":"));
-        assert!(!evs2.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { .. })));
-        assert!(evs2.iter().any(|e| matches!(
-            e,
-            LlmEvent::ToolCallDelta { arguments, .. } if arguments == "{\"cmd\":"
-        )), "expected ToolCallDelta in {:?}", evs2);
+        assert!(!evs2
+            .iter()
+            .any(|e| matches!(e, LlmEvent::ToolCallStart { .. })));
+        assert!(
+            evs2.iter().any(|e| matches!(
+                e,
+                LlmEvent::ToolCallDelta { arguments, .. } if arguments == "{\"cmd\":"
+            )),
+            "expected ToolCallDelta in {:?}",
+            evs2
+        );
     }
 
     #[test]

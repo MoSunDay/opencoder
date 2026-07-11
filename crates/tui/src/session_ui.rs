@@ -18,7 +18,6 @@ pub struct SessionUiState {
     pub history: Vec<String>,
     pub scroll: u16,
     pub follow: bool,
-    pub context_used: u64,
     pub sys_tokens: u64,
     pub steer_items: Vec<String>,
     pub queue_items: Vec<(i64, String)>,
@@ -38,7 +37,6 @@ impl SessionUiState {
             history: Vec::new(),
             scroll: 0,
             follow: true,
-            context_used: 0,
             sys_tokens,
             steer_items: Vec::new(),
             queue_items: Vec::new(),
@@ -56,7 +54,6 @@ impl SessionUiState {
         history: &[String],
         scroll: u16,
         follow: bool,
-        context_used: u64,
         sys_tokens: u64,
         steer_items: &[String],
         queue_items: &[(i64, String)],
@@ -68,7 +65,6 @@ impl SessionUiState {
             history: history.to_vec(),
             scroll,
             follow,
-            context_used,
             sys_tokens,
             steer_items: steer_items.to_vec(),
             queue_items: queue_items.to_vec(),
@@ -110,7 +106,9 @@ pub fn replay_into_chat(agent_name: &str, messages: &[Message]) -> ChatView {
             Role::Assistant => {
                 chat.push_marker(Line::from(Span::styled(
                     "say:",
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 chat.push_marker(Line::from(format!("    {text}")));
             }
@@ -141,7 +139,6 @@ mod tests {
         assert!(!st.running);
         assert!(st.follow);
         assert_eq!(st.scroll, 0);
-        assert_eq!(st.context_used, 0);
         assert_eq!(st.sys_tokens, 5000);
         assert!(st.steer_items.is_empty());
         assert!(st.queue_items.is_empty());
@@ -158,16 +155,7 @@ mod tests {
         let queues = vec![(1_i64, "run lint".into())];
 
         let snap = SessionUiState::snapshot(
-            true,
-            &chat,
-            &history,
-            42,
-            false,
-            8000,
-            12000,
-            &steers,
-            &queues,
-            &skill,
+            true, &chat, &history, 42, false, 12000, &steers, &queues, &skill,
         );
 
         assert!(snap.running);
@@ -175,7 +163,6 @@ mod tests {
         assert_eq!(snap.history, history);
         assert_eq!(snap.scroll, 42);
         assert!(!snap.follow);
-        assert_eq!(snap.context_used, 8000);
         assert_eq!(snap.sys_tokens, 12000);
         assert_eq!(snap.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
@@ -187,7 +174,7 @@ mod tests {
     fn snapshot_is_independent_of_source() {
         // Mutating the source chat after snapshot must not affect the snapshot.
         let mut chat = sample_chat();
-        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, 0, &[], &[], &None);
+        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &[], &None);
         chat.push_marker(ratatui::text::Line::from("new line"));
         assert_ne!(snap.chat, chat, "snapshot must be a deep copy");
     }
@@ -199,7 +186,15 @@ mod tests {
         let steers = vec!["s1".into()];
         let queues = vec![(1_i64, "q1".into()), (2_i64, "q2".into())];
         let snap = SessionUiState::snapshot(
-            true, &chat, &["h1".into()], 10, false, 100, 200, &steers, &queues, &Some("s".into()),
+            true,
+            &chat,
+            &["h1".into()],
+            10,
+            false,
+            200,
+            &steers,
+            &queues,
+            &Some("s".into()),
         );
         // After "restore", all fields must match the snapshot.
         assert!(snap.running);
@@ -207,7 +202,6 @@ mod tests {
         assert_eq!(snap.history, vec!["h1".to_string()]);
         assert_eq!(snap.scroll, 10);
         assert!(!snap.follow);
-        assert_eq!(snap.context_used, 100);
         assert_eq!(snap.sys_tokens, 200);
         assert_eq!(snap.steer_items, steers);
         assert_eq!(snap.queue_items, queues);

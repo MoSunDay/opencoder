@@ -16,7 +16,15 @@ fn default_is_run_with_no_prompt() {
 
 #[test]
 fn global_flags_parsed() {
-    let cli = parse(&["opencoder", "--model", "glm-5.2", "--agent", "plan", "--small-model", "glm-flash"]);
+    let cli = parse(&[
+        "opencoder",
+        "--model",
+        "glm-5.2",
+        "--agent",
+        "plan",
+        "--small-model",
+        "glm-flash",
+    ]);
     assert_eq!(cli.model.as_deref(), Some("glm-5.2"));
     assert_eq!(cli.agent.as_deref(), Some("plan"));
     assert_eq!(cli.small_model.as_deref(), Some("glm-flash"));
@@ -44,24 +52,45 @@ fn tui_subcommand() {
 #[test]
 fn config_show_subcommand() {
     let cli = parse(&["opencoder", "config", "show"]);
-    assert!(matches!(cli.command, Some(Command::Config { sub: Some(ConfigSub::Show) })));
+    assert!(matches!(
+        cli.command,
+        Some(Command::Config {
+            sub: Some(ConfigSub::Show)
+        })
+    ));
 }
 
 #[test]
 fn session_subcommands() {
     let cli = parse(&["opencoder", "session", "list"]);
-    assert!(matches!(cli.command, Some(Command::Session { sub: SessionSub::List })));
+    assert!(matches!(
+        cli.command,
+        Some(Command::Session {
+            sub: SessionSub::List
+        })
+    ));
 
     let cli = parse(&["opencoder", "session", "show", "sess-1"]);
-    assert!(matches!(cli.command, Some(Command::Session { sub: SessionSub::Show { id } }) if id == "sess-1"));
+    assert!(
+        matches!(cli.command, Some(Command::Session { sub: SessionSub::Show { id } }) if id == "sess-1")
+    );
 
     let cli = parse(&["opencoder", "session", "delete", "sess-2"]);
-    assert!(matches!(cli.command, Some(Command::Session { sub: SessionSub::Delete { id } }) if id == "sess-2"));
+    assert!(
+        matches!(cli.command, Some(Command::Session { sub: SessionSub::Delete { id } }) if id == "sess-2")
+    );
 }
 
 #[test]
 fn serve_subcommand() {
-    let cli = parse(&["opencoder", "serve", "--port", "9090", "--host", "127.0.0.1"]);
+    let cli = parse(&[
+        "opencoder",
+        "serve",
+        "--port",
+        "9090",
+        "--host",
+        "127.0.0.1",
+    ]);
     match cli.command {
         Some(Command::Serve { port, host, .. }) => {
             assert_eq!(port, 9090);

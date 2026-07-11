@@ -7,7 +7,11 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "opencoder", version, about = "High-performance minimal coding agent (Rust)")]
+#[command(
+    name = "opencoder",
+    version,
+    about = "High-performance minimal coding agent (Rust)"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -47,7 +51,7 @@ pub enum Command {
     Tui,
     /// Start the HTTP/JSON API server with the web session manager.
     Serve {
-        #[arg(long, default_value = "0.0.0.0")]
+        #[arg(long, default_value = "127.0.0.1")]
         host: String,
         #[arg(long, default_value_t = 0)]
         port: u16,
@@ -97,7 +101,11 @@ pub enum SessionSub {
 }
 
 pub fn init_logging(verbose: bool) {
-    let filter = if verbose { "debug" } else { "opencode=info,warn" };
+    let filter = if verbose {
+        "debug"
+    } else {
+        "opencode=info,warn"
+    };
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

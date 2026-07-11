@@ -16,7 +16,10 @@ fn tool_filter_allow_list_gates_tools() {
     assert!(filter.allows("read"));
     assert!(filter.allows("glob"));
     assert!(filter.allows("grep"));
-    assert!(!filter.allows("bash"), "bash should be blocked by plan-agent filter");
+    assert!(
+        !filter.allows("bash"),
+        "bash should be blocked by plan-agent filter"
+    );
     assert!(!filter.allows("edit"), "edit should be blocked");
     assert!(!filter.allows("write"), "write should be blocked");
 }

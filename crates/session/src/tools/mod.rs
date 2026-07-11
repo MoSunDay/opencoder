@@ -30,13 +30,15 @@ pub fn registry() -> HashMap<String, ToolArc> {
 pub fn schema_for(tools: &HashMap<String, ToolArc>) -> Vec<Value> {
     tools
         .values()
-        .map(|t| serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": t.name(),
-                "description": t.description(),
-                "parameters": opencode_llm::schema::sanitize_tool_schema(&t.parameters()),
-            }
-        }))
+        .map(|t| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": t.name(),
+                    "description": t.description(),
+                    "parameters": opencode_llm::schema::sanitize_tool_schema(&t.parameters()),
+                }
+            })
+        })
         .collect()
 }

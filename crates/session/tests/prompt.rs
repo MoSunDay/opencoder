@@ -1,8 +1,10 @@
 //! Prompt construction tests — verifies build_system, environment_block,
-//! and compaction_prompt produce correct content.
+//! and compaction prompts produce correct content.
 
 use opencode_core::resolve_agent;
-use opencode_session::prompt::{build_system, compaction_prompt, environment_block};
+use opencode_session::prompt::{
+    build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
+};
 
 #[test]
 fn build_system_includes_agent_prompt_and_environment() {
@@ -45,8 +47,38 @@ fn environment_block_contains_cwd_and_platform() {
 }
 
 #[test]
-fn compaction_prompt_is_non_empty_and_mentions_summary() {
-    let p = compaction_prompt();
-    assert!(!p.is_empty());
+fn compaction_system_prompt_is_anchored_summarizer() {
+    let p = compaction_system_prompt();
     assert!(p.to_lowercase().contains("summar"));
+    assert!(p.contains("anchored"));
+    assert!(p.contains("<previous-summary>"));
+}
+
+#[test]
+fn compaction_user_prompt_has_all_structured_sections() {
+    let p = compaction_user_prompt(None);
+    assert!(p.contains("## Objective"));
+    assert!(p.contains("## Important Details"));
+    assert!(p.contains("## Work State"));
+    assert!(p.contains("### Completed"));
+    assert!(p.contains("### Active"));
+    assert!(p.contains("### Blocked"));
+    assert!(p.contains("## Next Move"));
+    assert!(p.contains("## Relevant Files"));
+    assert!(p.contains("<template>"));
+}
+
+#[test]
+fn compaction_user_prompt_includes_previous_summary_when_provided() {
+    let p = compaction_user_prompt(Some("## Objective\n- Do the thing"));
+    assert!(p.contains("<previous-summary>"));
+    assert!(p.contains("Do the thing"));
+    assert!(p.contains("Update the anchored summary"));
+}
+
+#[test]
+fn compaction_user_prompt_without_previous_summary_says_create_new() {
+    let p = compaction_user_prompt(None);
+    assert!(p.contains("Create a new anchored summary"));
+    assert!(!p.contains("<previous-summary>"));
 }

@@ -31,7 +31,11 @@ pub async fn append(conn: &Connection, session_id: &str, msg: &Message) -> Resul
     last_seq(conn, session_id).await
 }
 
-pub async fn append_many(conn: &Connection, session_id: &str, msgs: &[Message]) -> Result<Vec<i64>> {
+pub async fn append_many(
+    conn: &Connection,
+    session_id: &str,
+    msgs: &[Message],
+) -> Result<Vec<i64>> {
     let tx = conn.transaction().await.context("begin tx")?;
     let mut seqs = Vec::with_capacity(msgs.len());
     for m in msgs {
@@ -125,7 +129,11 @@ pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Re
         count += 1;
     }
     tx.commit().await?;
-    Ok(ImportReport { sessions: 1, messages: count, skipped: 0 })
+    Ok(ImportReport {
+        sessions: 1,
+        messages: count,
+        skipped: 0,
+    })
 }
 
 fn row_to_message(r: &libsql::Row) -> Result<Message> {

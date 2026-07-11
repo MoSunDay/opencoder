@@ -13,7 +13,11 @@ use opencode_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
 use opencode_session::SessionState;
 
 fn done() -> Vec<LlmEvent> {
-    vec![LlmEvent::Completed { text: "ok".into(), tool_calls: vec![], usage: None }]
+    vec![LlmEvent::Completed {
+        text: "ok".into(),
+        tool_calls: vec![],
+        usage: None,
+    }]
 }
 
 fn req() -> ChatRequest {
@@ -64,13 +68,20 @@ async fn apply_config_reload_swaps_client_model_and_config() {
     sess.apply_config_reload(cfg("new/model"), mock_b.clone() as Arc<dyn ChatStream>);
 
     // Fields updated.
-    assert_eq!(sess.model, "model", "model must be derived from new config model_id");
+    assert_eq!(
+        sess.model, "model",
+        "model must be derived from new config model_id"
+    );
     assert_eq!(sess.config.model, "new/model");
     assert_eq!(sess.config.reasoning_effort.as_deref(), Some("high"));
 
     // Post-reload call routes through mock_b only.
     drain(sess.client.chat_stream(req()).unwrap()).await;
-    assert_eq!(mock_a.call_count(), 1, "old client must NOT serve after reload");
+    assert_eq!(
+        mock_a.call_count(),
+        1,
+        "old client must NOT serve after reload"
+    );
     assert_eq!(mock_b.call_count(), 1, "new client must serve after reload");
 }
 
@@ -97,8 +108,16 @@ async fn fresh_session_after_reload_uses_new_client() {
     );
 
     drain(new_sess.client.chat_stream(req()).unwrap()).await;
-    assert_eq!(mock_old.call_count(), 0, "stale startup client must not serve new sessions");
-    assert_eq!(mock_new.call_count(), 1, "rebuilt client must serve the new session");
+    assert_eq!(
+        mock_old.call_count(),
+        0,
+        "stale startup client must not serve new sessions"
+    );
+    assert_eq!(
+        mock_new.call_count(),
+        1,
+        "rebuilt client must serve the new session"
+    );
 }
 
 #[tokio::test]
@@ -108,7 +127,11 @@ async fn apply_config_reload_with_same_client_keeps_routing() {
     let agent = resolve_agent("act").unwrap();
     let mock = Arc::new(MockChatClient::new().with_default(done()));
     let mut sess = SessionState::new(
-        "s1", agent, cfg("a/b"), mock.clone() as Arc<dyn ChatStream>, "/tmp".into(),
+        "s1",
+        agent,
+        cfg("a/b"),
+        mock.clone() as Arc<dyn ChatStream>,
+        "/tmp".into(),
     );
     sess.apply_config_reload(cfg("c/d"), mock.clone() as Arc<dyn ChatStream>);
     assert_eq!(sess.model, "d");

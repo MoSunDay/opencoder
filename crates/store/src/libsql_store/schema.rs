@@ -11,7 +11,8 @@ const PRAGMAS: &[&str] = &[
     "PRAGMA cache_size=-65536",
 ];
 
-const CREATE_SCHEMA_VERSION: &str = "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)";
+const CREATE_SCHEMA_VERSION: &str =
+    "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)";
 const CREATE_SESSIONS: &str = "\
 CREATE TABLE IF NOT EXISTS sessions (
   id           TEXT PRIMARY KEY,
@@ -72,11 +73,15 @@ CREATE TABLE IF NOT EXISTS subagent_tasks (
   started_at        INTEGER NOT NULL,
   completed_at      INTEGER
 )";
-const CREATE_INDEX_MSG: &str = "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)";
+const CREATE_INDEX_MSG: &str =
+    "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)";
 const CREATE_INDEX_IN: &str = "CREATE INDEX IF NOT EXISTS idx_inputs_pending ON session_inputs(session_id, promoted_seq, delivery, admitted_seq)";
-const CREATE_INDEX_EV: &str = "CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id, seq)";
-const CREATE_INDEX_SA_PARENT: &str = "CREATE INDEX IF NOT EXISTS idx_subagent_parent ON subagent_tasks(parent_session_id, seq)";
-const CREATE_INDEX_SA_CHILD: &str = "CREATE INDEX IF NOT EXISTS idx_subagent_child ON subagent_tasks(child_session_id)";
+const CREATE_INDEX_EV: &str =
+    "CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id, seq)";
+const CREATE_INDEX_SA_PARENT: &str =
+    "CREATE INDEX IF NOT EXISTS idx_subagent_parent ON subagent_tasks(parent_session_id, seq)";
+const CREATE_INDEX_SA_CHILD: &str =
+    "CREATE INDEX IF NOT EXISTS idx_subagent_child ON subagent_tasks(child_session_id)";
 
 /// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
 ///
@@ -85,8 +90,14 @@ const CREATE_INDEX_SA_CHILD: &str = "CREATE INDEX IF NOT EXISTS idx_subagent_chi
 /// rows works for both row-returning and empty pragmas.
 pub async fn apply_connection_pragmas(conn: &Connection) -> Result<()> {
     for p in PRAGMAS {
-        let stmt = conn.prepare(p).await.with_context(|| format!("prepare pragma: {p}"))?;
-        let mut rows = stmt.query(()).await.with_context(|| format!("pragma: {p}"))?;
+        let stmt = conn
+            .prepare(p)
+            .await
+            .with_context(|| format!("prepare pragma: {p}"))?;
+        let mut rows = stmt
+            .query(())
+            .await
+            .with_context(|| format!("pragma: {p}"))?;
         while rows.next().await?.is_some() {
             // drain
         }
@@ -113,7 +124,9 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
 
 #[allow(dead_code)]
 pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
-    let stmt = conn.prepare("SELECT version FROM schema_version LIMIT 1").await?;
+    let stmt = conn
+        .prepare("SELECT version FROM schema_version LIMIT 1")
+        .await?;
     let mut rows = stmt.query(()).await?;
     if let Some(row) = rows.next().await? {
         Ok(Some(row.get::<i64>(0)?))
@@ -124,6 +137,10 @@ pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
 
 async fn set_version(conn: &Connection, version: i64) -> Result<()> {
     conn.execute("DELETE FROM schema_version", ()).await?;
-    conn.execute("INSERT INTO schema_version(version) VALUES (?1)", libsql::params![version]).await?;
+    conn.execute(
+        "INSERT INTO schema_version(version) VALUES (?1)",
+        libsql::params![version],
+    )
+    .await?;
     Ok(())
 }

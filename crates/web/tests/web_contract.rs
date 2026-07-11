@@ -1,14 +1,15 @@
-//! P4 functional tests for the web layer (SSE + prompt-admit + switch).
+//! P4 functional tests for the web HTTP surface (CRUD + SSE replay + switch).
 //!
-//! These exercise the HTTP handlers directly (no network) against a real
-//! libsql store + a MockChatClient, asserting the behavioral contracts:
+//! These exercise the HTTP handlers directly (no network) against a real libsql
+//! store + a MockChatClient, asserting the behavioral contracts:
 //! - prompt_admit_returns_immediately: POST /prompt returns an admitted_seq
 //!   without blocking on the LLM drain
-//! - sse_replays_after_then_live: GET /events replays persisted events then
-//!   forwards live broadcast events
-//! - concurrent_operators_consistent: two SSE subscribers see the same events
+//! - sse_replays_persisted_events_then_live: GET /events replays persisted
+//!   events then forwards live broadcast events
 //! - switch_agent_takes_effect: POST /agent updates the stored meta + handle
 //! - interrupt_cancels_drain: POST /interrupt cancels the running drain token
+//!
+//! Drain spawn/cancel/live-lifecycle contracts live in `web_drain_contract.rs`.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -65,6 +66,31 @@ async fn app() -> (Router, Arc<opencode_web::AppState>) {
     (app, state)
 }
 
+/// Seed a session row with the given title/agent/model.
+async fn seed(
+    state: &opencode_web::AppState,
+    sid: &str,
+    title: Option<&str>,
+    agent: &str,
+    model: &str,
+) {
+    state
+        .store
+        .create_session(&opencode_store::SessionMeta {
+            id: sid.to_string(),
+            title: title.map(String::from),
+            agent: Some(agent.into()),
+            model: Some(model.into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+        })
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn health_ok() {
     let (app, _) = app().await;
@@ -106,23 +132,8 @@ async fn create_and_get_session_roundtrip() {
 #[tokio::test]
 async fn prompt_admit_returns_immediately_with_seq() {
     let (_app, state) = app().await;
-    // create session first (prompt handler also ensures the row, but be explicit)
     let sid = Uuid::new_v4().to_string();
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.clone(),
-            title: None,
-            agent: Some("act".into()),
-            model: Some("m".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
+    seed(&state, &sid, None, "act", "m").await;
 
     // Inject a MockChatClient by calling admit_and_drain directly (the HTTP
     // path builds a real ChatClient which needs a key; the contract under test
@@ -158,7 +169,7 @@ async fn prompt_admit_returns_immediately_with_seq() {
 
     // give the drain a moment to consume + persist messages
     for _ in 0..20 {
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
         let n = state.store.load_messages(&sid).await.unwrap().len();
         if n > 0 {
             break;
@@ -175,21 +186,7 @@ async fn prompt_admit_returns_immediately_with_seq() {
 async fn sse_replays_persisted_events_then_live() {
     let (_app, state) = app().await;
     let sid = "sse-sess";
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.into(),
-            title: None,
-            agent: Some("act".into()),
-            model: Some("m".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
+    seed(&state, sid, None, "act", "m").await;
     // seed 3 persisted events
     for i in 0..3u32 {
         state
@@ -248,21 +245,7 @@ async fn sse_replays_persisted_events_then_live() {
 async fn switch_agent_updates_stored_meta_and_handle() {
     let (app, state) = app().await;
     let sid = Uuid::new_v4().to_string();
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.clone(),
-            title: None,
-            agent: Some("act".into()),
-            model: Some("m".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
+    seed(&state, &sid, None, "act", "m").await;
     // install a live handle so the override path is exercised
     let (tx, _rx) = tokio::sync::broadcast::channel(8);
     let handle = Arc::new(opencode_web::handle::SessionHandle {
@@ -325,21 +308,8 @@ async fn list_sessions_returns_created_sessions() {
     let (app, state) = app().await;
     // Create two sessions
     for agent in ["act", "plan"] {
-        state
-            .store
-            .create_session(&opencode_store::SessionMeta {
-                id: Uuid::new_v4().to_string(),
-                title: None,
-                agent: Some(agent.into()),
-                model: Some("m".into()),
-                workdir_hash: None,
-                created_at: 0,
-                updated_at: 0,
-                summary: None,
-                summary_seq: None,
-            })
-            .await
-            .unwrap();
+        let id = Uuid::new_v4().to_string();
+        seed(&state, &id, None, agent, "m").await;
     }
     let resp = app
         .oneshot(
@@ -367,21 +337,7 @@ async fn list_sessions_returns_created_sessions() {
 async fn get_session_returns_meta() {
     let (app, state) = app().await;
     let sid = Uuid::new_v4().to_string();
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.clone(),
-            title: Some("test title".into()),
-            agent: Some("act".into()),
-            model: Some("m/g".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
+    seed(&state, &sid, Some("test title"), "act", "m/g").await;
     let resp = app
         .oneshot(
             Request::builder()
@@ -404,21 +360,7 @@ async fn get_session_returns_meta() {
 async fn post_model_switches_stored_meta() {
     let (app, state) = app().await;
     let sid = Uuid::new_v4().to_string();
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.clone(),
-            title: None,
-            agent: Some("act".into()),
-            model: Some("old-model".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
+    seed(&state, &sid, None, "act", "old-model").await;
     let resp = app
         .oneshot(
             Request::builder()
@@ -436,79 +378,5 @@ async fn post_model_switches_stored_meta() {
         meta.model.as_deref(),
         Some("new-model"),
         "model switch must persist"
-    );
-}
-
-/// Regression: a `SessionHandle` pre-existing in the map (e.g. created by an
-/// early GET /events subscriber, with no drain running) must NOT prevent
-/// admit_and_drain from spawning a drain — otherwise the prompt is admitted but
-/// never processed. The `draining` flag, not map presence, gates spawning.
-#[tokio::test]
-async fn pre_existing_events_handle_does_not_block_drain() {
-    let (_app, state) = app().await;
-    let sid = Uuid::new_v4().to_string();
-    state
-        .store
-        .create_session(&opencode_store::SessionMeta {
-            id: sid.clone(),
-            title: None,
-            agent: Some("act".into()),
-            model: Some("m".into()),
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-        })
-        .await
-        .unwrap();
-
-    // Simulate an early SSE subscriber: a handle sits in the map with no drain.
-    state
-        .handles
-        .lock()
-        .await
-        .insert(sid.clone(), opencode_web::handle::SessionHandle::new());
-
-    // Admit a prompt — a drain MUST spawn despite the pre-existing handle.
-    let mock: Arc<dyn ChatStream> =
-        Arc::new(
-            MockChatClient::new().with_default(vec![opencode_llm::LlmEvent::Completed {
-                text: "ok".into(),
-                tool_calls: vec![],
-                usage: None,
-            }]),
-        );
-    let cfg = opencode_core::Config {
-        model: "m/g".into(),
-        ..Default::default()
-    };
-    let seq = opencode_web::handle::admit_and_drain(
-        state.handles.clone(),
-        state.store.clone(),
-        &sid,
-        "hello".into(),
-        opencode_store::Delivery::Steer,
-        mock,
-        std::env::temp_dir(),
-        cfg,
-    )
-    .await
-    .unwrap();
-    assert!(seq > 0, "admit must return a positive seq: {seq}");
-
-    // The proof: messages get persisted, i.e. a drain actually ran. Before the
-    // fix the pre-existing handle made need_spawn=false and this loop timed out.
-    let mut persisted = false;
-    for _ in 0..40 {
-        tokio::time::sleep(Duration::from_millis(25)).await;
-        if !state.store.load_messages(&sid).await.unwrap().is_empty() {
-            persisted = true;
-            break;
-        }
-    }
-    assert!(
-        persisted,
-        "pre-existing events handle must not swallow the prompt"
     );
 }

@@ -32,23 +32,32 @@ web 逻辑 go-live review 发现三个问题：
 
 ## 测试覆盖
 
+drain 生命周期契约独立到 `crates/web/tests/web_drain_contract.rs`（HTTP CRUD/SSE/switch 留在 `web_contract.rs`），两文件均 ≤400 行（规则 03）。
+
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
-| 早订阅 handle 不阻塞 drain（F1 回归） | `pre_existing_events_handle_does_not_block_drain` | `crates/web/tests/web_contract.rs` |
+| 早订阅 handle 不阻塞 drain（F1 回归） | `pre_existing_events_handle_does_not_block_drain` | `web_drain_contract.rs` |
+| drain 完成后再次 prompt 再 spawn（draining 复位 / DrainGuard） | `second_prompt_after_drain_completion_spawns_fresh_drain` | `web_drain_contract.rs` |
+| interrupt 后再 prompt 跑到完（cancel token 每 spawn 刷新） | `prompt_after_interrupt_runs_to_completion` | `web_drain_contract.rs` |
+| 先订 /events 再 prompt 收 live 帧（共享通道） | `events_subscriber_before_prompt_receives_live` | `web_drain_contract.rs` |
+| POST /prompt 配置加载失败 → 结构化 500（错误路径） | `post_prompt_returns_500_on_malformed_config` | `web_drain_contract.rs` |
+| /events 慢订阅者背压：lag 丢弃不阻塞、最近帧仍送达 | `events_stream_survives_subscriber_lag` | `web_drain_contract.rs` |
 | hash_of 跨版本稳定 + pin（F3） | `hash_of_is_stable_and_pinned` / `hash_of_distinguishes_paths` | `crates/web/src/lib.rs` |
-| interrupt 取消 token（重构后） | `interrupt_cancels_running_drain_token` | `crates/web/tests/web_contract.rs` |
-| SSE replay+live | `sse_replays_persisted_events_then_live` | `crates/web/tests/web_contract.rs` |
+| interrupt 取消 token（重构后） | `interrupt_cancels_running_drain_token` | `web_contract.rs` |
+| SSE replay+live | `sse_replays_persisted_events_then_live` | `web_contract.rs` |
 
-- 全量回归：`cargo test --workspace` → 288 passed / 0 failed
+- 全量回归：`cargo test --workspace` → 293 passed / 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
+- fmt：`cargo fmt --all --check` → 干净
 
 ## Gate
 | 项 | 变更前 | 变更后 |
 |----|--------|--------|
-| clippy (web+cli) | clean | clean |
-| test (web) | 9 passed | 10 passed + 2 unit |
-| build workspace | ok | ok |
-| 全量 test | 285 passed | 288 passed |
+| clippy workspace | clean | clean |
+| fmt | clean | clean |
+| test (web) | 9 | 9 contract + 6 drain + 2 unit |
+| 全量 test | 285 passed | 293 passed |
+| 测试文件行数 | web_contract 514（超软 400） | web_contract 382 / web_drain 378（均 ≤400） |
 
 ## 相关文档
 - [agents/web](../../../agents/web/index.md) — 关键抽象与主流程已同步

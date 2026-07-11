@@ -260,10 +260,9 @@ impl ChatView {
         }
     }
 
-    /// Accumulate estimated token counts for this view's transcript, including
-    /// child subagent tokens (via `SubagentChild` recursion). Each ChatView's
-    /// `context_used` thus reflects the full request size it represents — the
-    /// parent includes all descendants, each child includes its own subtree.
+    /// Accumulate estimated token counts for this view's OWN transcript only.
+    /// Child subagent tokens are excluded — each child ChatView tracks its own
+    /// subtree via its own `apply` (events route through `SubagentChild`).
     fn track_context(&mut self, ev: &SessionEvent) {
         match ev {
             SessionEvent::TextDelta(t) | SessionEvent::ReasoningDelta(t) => {
@@ -277,9 +276,6 @@ impl ChatView {
             }
             SessionEvent::SubagentEnd { summary, .. } => {
                 self.context_used += estimate(summary) as u64;
-            }
-            SessionEvent::SubagentChild { ev, .. } => {
-                self.track_context(ev);
             }
             SessionEvent::Compaction(c) => {
                 self.context_used = estimate(c) as u64;
@@ -715,6 +711,7 @@ mod tests {
     #[test]
     fn subagent_events_render() {
         let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta("parent asks subagent".into()));
         v.apply(&SessionEvent::SubagentStart {
             id: "s1".into(),
             kind: "explore".into(),
@@ -727,10 +724,13 @@ mod tests {
         assert_eq!(v.subagents_running, 1);
 
         // Child events routed into the subagent block's view.
+        let parent_ctx = v.context_used;
+        assert!(parent_ctx > 0, "precondition: parent has its own tokens");
         v.apply(&SessionEvent::SubagentChild {
             id: "s1".into(),
             ev: Box::new(SessionEvent::TextDelta("child output".into())),
         });
+        assert_eq!(v.context_used, parent_ctx, "parent must not include child tokens");
         // No inline expansion — child output is always hidden in the parent.
         assert!(!block_text(&v).contains("child output"));
         // Child view itself contains the output (visible via ctx-switch).
@@ -755,6 +755,7 @@ mod tests {
         assert_eq!(v.subagents_running, 0);
         assert_eq!(v.subagents_total, 1);
         assert!(block_text(&v).contains("found it"));
+        assert_eq!(v.context_used, parent_ctx + estimate("found it") as u64);
     }
 
     #[test]

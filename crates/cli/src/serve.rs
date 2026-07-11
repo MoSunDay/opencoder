@@ -7,5 +7,5 @@ pub async fn serve_run(_cli: &Cli, host: String, port: u16, web: bool) -> Result
 }
 
 pub async fn serve_launch(_cli: &Cli) -> Result<()> {
-    opencode_web::serve("0.0.0.0".to_string(), 0, true).await
+    opencode_web::serve("127.0.0.1".to_string(), 0, true).await
 }

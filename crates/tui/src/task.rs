@@ -29,7 +29,10 @@ pub struct TaskPicker {
 
 impl TaskPicker {
     pub fn new(sessions: Vec<SessionListItem>) -> Self {
-        TaskPicker { sessions, selected: 0 }
+        TaskPicker {
+            sessions,
+            selected: 0,
+        }
     }
 
     fn row_count(&self) -> usize {
@@ -54,7 +57,9 @@ impl TaskPicker {
         if self.selected == 0 {
             Some(TaskPick::New)
         } else {
-            self.sessions.get(self.selected - 1).map(|s| TaskPick::Resume(s.id.clone()))
+            self.sessions
+                .get(self.selected - 1)
+                .map(|s| TaskPick::Resume(s.id.clone()))
         }
     }
 }
@@ -67,7 +72,10 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
     };
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
-            KeyCode::Char('c') | KeyCode::Char('d') => return TaskOutcome::Quit,
+            KeyCode::Char('c')
+            | KeyCode::Char('d')
+            | KeyCode::Char('\u{3}')
+            | KeyCode::Char('\u{4}') => return TaskOutcome::Quit,
             _ => return TaskOutcome::Idle,
         }
     }
@@ -82,7 +90,9 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
                 None => TaskOutcome::Idle,
             };
         }
-        KeyCode::Esc => { *picker = None; }
+        KeyCode::Esc => {
+            *picker = None;
+        }
         _ => {}
     }
     TaskOutcome::Idle
@@ -91,7 +101,9 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
 /// Render the task picker as a centered popup.
 pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     let visible = picker.row_count();
-    let want_h = (visible as u16 + 4).min(area.height.saturating_sub(2)).max(7);
+    let want_h = (visible as u16 + 4)
+        .min(area.height.saturating_sub(2))
+        .max(7);
     let h = want_h.min(area.height.saturating_sub(2));
     let w = 60u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -103,7 +115,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
 
     // "+ New task" row
     let new_style = if picker.selected == 0 {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::Green)
     };
@@ -118,14 +132,19 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         let agent = s.agent.as_deref().unwrap_or("act");
         let title = s.title.as_deref().unwrap_or("(untitled)");
         let style = if selected {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("[{agent}] "), Style::default().fg(Color::Magenta)),
             Span::styled(title.to_string(), style),
-            Span::styled(format!("  {}", short_preview(&s.preview)), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("  {}", short_preview(&s.preview)),
+                Style::default().fg(Color::DarkGray),
+            ),
         ])));
     }
 
@@ -135,7 +154,11 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
                 .borders(Borders::ALL)
                 .title(" Tasks (\u{2191}/\u{2193} select, Enter=switch, Esc=cancel) "),
         )
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();

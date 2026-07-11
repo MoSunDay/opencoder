@@ -13,8 +13,15 @@ pub struct Usage {
 pub enum LlmEvent {
     TextDelta(String),
     ReasoningDelta(String),
-    ToolCallStart { index: usize, id: String, name: String },
-    ToolCallDelta { index: usize, arguments: String },
+    ToolCallStart {
+        index: usize,
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        index: usize,
+        arguments: String,
+    },
     Completed {
         text: String,
         tool_calls: Vec<CompletedToolCall>,

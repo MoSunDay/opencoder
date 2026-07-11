@@ -29,17 +29,29 @@ struct MdRenderer {
 }
 
 #[derive(Clone, Copy)]
-enum ListKind { Unordered, Ordered }
+enum ListKind {
+    Unordered,
+    Ordered,
+}
 
 impl MdRenderer {
     fn new() -> Self {
-        Self { lines: Vec::new(), spans: Vec::new(), style_stack: Vec::new(),
-            in_code: false, code_lang: String::new(), code_buf: Vec::new(),
-            list_stack: Vec::new(), in_para: false }
+        Self {
+            lines: Vec::new(),
+            spans: Vec::new(),
+            style_stack: Vec::new(),
+            in_code: false,
+            code_lang: String::new(),
+            code_buf: Vec::new(),
+            list_stack: Vec::new(),
+            in_para: false,
+        }
     }
 
     fn style(&self) -> Style {
-        self.style_stack.iter().fold(Style::default(), |a, &b| a.patch(b))
+        self.style_stack
+            .iter()
+            .fold(Style::default(), |a, &b| a.patch(b))
     }
 
     fn push_str(&mut self, s: String) {
@@ -56,13 +68,15 @@ impl MdRenderer {
         for ev in p {
             match ev {
                 Event::Text(t) => {
-                    if self.in_code { self.code_buf.push(t.into_string()); }
-                    else { self.push_str(t.into_string()); }
+                    if self.in_code {
+                        self.code_buf.push(t.into_string());
+                    } else {
+                        self.push_str(t.into_string());
+                    }
                 }
                 Event::Code(c) => {
-                    self.spans.push(Span::styled(
-                        format!("`{c}`"),
-                        self.style().fg(Color::Cyan)));
+                    self.spans
+                        .push(Span::styled(format!("`{c}`"), self.style().fg(Color::Cyan)));
                 }
                 Event::SoftBreak | Event::HardBreak => self.flush(),
                 Event::Rule => {
@@ -83,9 +97,15 @@ impl MdRenderer {
             Tag::Paragraph => self.in_para = true,
             Tag::Heading { level, .. } => {
                 let s = match level {
-                    pulldown_cmark::HeadingLevel::H1 => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    pulldown_cmark::HeadingLevel::H2 => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                    _ => Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    pulldown_cmark::HeadingLevel::H1 => Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                    pulldown_cmark::HeadingLevel::H2 => Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                    _ => Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
                 };
                 self.style_stack.push(s);
             }
@@ -98,9 +118,15 @@ impl MdRenderer {
                 };
                 self.code_buf.clear();
             }
-            Tag::Emphasis => self.style_stack.push(Style::default().add_modifier(Modifier::ITALIC)),
-            Tag::Strong => self.style_stack.push(Style::default().add_modifier(Modifier::BOLD)),
-            Tag::Strikethrough => self.style_stack.push(Style::default().add_modifier(Modifier::CROSSED_OUT)),
+            Tag::Emphasis => self
+                .style_stack
+                .push(Style::default().add_modifier(Modifier::ITALIC)),
+            Tag::Strong => self
+                .style_stack
+                .push(Style::default().add_modifier(Modifier::BOLD)),
+            Tag::Strikethrough => self
+                .style_stack
+                .push(Style::default().add_modifier(Modifier::CROSSED_OUT)),
             Tag::BlockQuote(_) => {
                 self.style_stack.push(Style::default().fg(Color::DarkGray));
                 self.push_str("\u{258e} ".to_string());
@@ -110,7 +136,10 @@ impl MdRenderer {
             Tag::Item => {
                 self.in_para = true;
                 let (kind, count) = match self.list_stack.last_mut() {
-                    Some(e) => { e.1 += 1; (e.0, e.1) }
+                    Some(e) => {
+                        e.1 += 1;
+                        (e.0, e.1)
+                    }
                     None => return,
                 };
                 let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
@@ -121,35 +150,74 @@ impl MdRenderer {
                 self.push_str(prefix);
             }
             Tag::Link { .. } => {
-                self.style_stack.push(self.style().fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
+                self.style_stack.push(
+                    self.style()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::UNDERLINED),
+                );
                 self.push_str("[".to_string());
             }
-            _ => { self.in_para = true; }
+            _ => {
+                self.in_para = true;
+            }
         }
     }
 
     fn end_tag(&mut self, tag: TagEnd) {
         match tag {
-            TagEnd::Paragraph => { self.flush(); self.in_para = false; self.lines.push(Line::from("")); }
-            TagEnd::Heading(_) => { self.flush(); self.style_stack.pop(); self.lines.push(Line::from("")); }
-            TagEnd::CodeBlock => { self.flush_code(); self.in_code = false; }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => { self.style_stack.pop(); }
-            TagEnd::BlockQuote(_) => { self.flush(); self.style_stack.pop(); }
-            TagEnd::List(_) => { self.list_stack.pop(); }
-            TagEnd::Item => { self.flush(); self.in_para = false; }
-            TagEnd::Link => { self.push_str("]".to_string()); self.style_stack.pop(); }
+            TagEnd::Paragraph => {
+                self.flush();
+                self.in_para = false;
+                self.lines.push(Line::from(""));
+            }
+            TagEnd::Heading(_) => {
+                self.flush();
+                self.style_stack.pop();
+                self.lines.push(Line::from(""));
+            }
+            TagEnd::CodeBlock => {
+                self.flush_code();
+                self.in_code = false;
+            }
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
+                self.style_stack.pop();
+            }
+            TagEnd::BlockQuote(_) => {
+                self.flush();
+                self.style_stack.pop();
+            }
+            TagEnd::List(_) => {
+                self.list_stack.pop();
+            }
+            TagEnd::Item => {
+                self.flush();
+                self.in_para = false;
+            }
+            TagEnd::Link => {
+                self.push_str("]".to_string());
+                self.style_stack.pop();
+            }
             _ => {}
         }
     }
 
     fn flush_code(&mut self) {
-        let label = if self.code_lang.is_empty() { String::new() } else { self.code_lang.clone() };
+        let label = if self.code_lang.is_empty() {
+            String::new()
+        } else {
+            self.code_lang.clone()
+        };
         self.lines.push(Line::from(Span::styled(
-            format!("\u{250c} {label} "), Style::default().fg(Color::DarkGray))));
+            format!("\u{250c} {label} "),
+            Style::default().fg(Color::DarkGray),
+        )));
         for line in &self.code_buf {
             let t = line.trim_end_matches('\n');
             if t.is_empty() {
-                self.lines.push(Line::from(Span::styled("\u{2502}", Style::default().fg(Color::DarkGray))));
+                self.lines.push(Line::from(Span::styled(
+                    "\u{2502}",
+                    Style::default().fg(Color::DarkGray),
+                )));
             } else {
                 self.lines.push(Line::from(vec![
                     Span::styled("\u{2502} ", Style::default().fg(Color::DarkGray)),
@@ -166,7 +234,12 @@ impl MdRenderer {
 
     fn finish(mut self) -> Vec<Line<'static>> {
         self.flush();
-        while self.lines.last().map(|l| l.spans.is_empty()).unwrap_or(false) {
+        while self
+            .lines
+            .last()
+            .map(|l| l.spans.is_empty())
+            .unwrap_or(false)
+        {
             self.lines.pop();
         }
         self.lines
@@ -180,13 +253,19 @@ mod tests {
     #[test]
     fn heading() {
         let ls = render("# Hello");
-        assert!(ls.iter().any(|l| l.spans.iter().any(|s| s.content.contains("Hello"))));
+        assert!(ls
+            .iter()
+            .any(|l| l.spans.iter().any(|s| s.content.contains("Hello"))));
     }
 
     #[test]
     fn code_block() {
         let ls = render("```rust\nfn main() {}\n```");
-        let t: String = ls.iter().flat_map(|l| &l.spans).map(|s| s.content.clone()).collect();
+        let t: String = ls
+            .iter()
+            .flat_map(|l| &l.spans)
+            .map(|s| s.content.clone())
+            .collect();
         assert!(t.contains("fn main()"), "{t}");
         assert!(t.contains("rust"), "{t}");
     }
@@ -194,22 +273,34 @@ mod tests {
     #[test]
     fn bold_italic() {
         let ls = render("**b** *i*");
-        assert!(ls.iter().flat_map(|l| &l.spans).any(|s| s.style.add_modifier == Modifier::BOLD));
+        assert!(ls
+            .iter()
+            .flat_map(|l| &l.spans)
+            .any(|s| s.style.add_modifier == Modifier::BOLD));
     }
 
     #[test]
     fn list() {
         let ls = render("- one\n- two");
-        let t: String = ls.iter().flat_map(|l| &l.spans).map(|s| s.content.clone()).collect();
+        let t: String = ls
+            .iter()
+            .flat_map(|l| &l.spans)
+            .map(|s| s.content.clone())
+            .collect();
         assert!(t.contains("\u{2022}"), "{t}");
     }
 
     #[test]
     fn inline_code() {
         let ls = render("use `cargo`");
-        assert!(ls.iter().flat_map(|l| &l.spans).any(|s| s.content.contains("cargo")));
+        assert!(ls
+            .iter()
+            .flat_map(|l| &l.spans)
+            .any(|s| s.content.contains("cargo")));
     }
 
     #[test]
-    fn empty() { assert!(render("").is_empty()); }
+    fn empty() {
+        assert!(render("").is_empty());
+    }
 }

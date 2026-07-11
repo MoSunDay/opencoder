@@ -23,26 +23,60 @@ pub enum BashVerdict {
 /// Matched as the first token (before any arguments). Case-sensitive: these
 /// are conventionally lowercase.
 const MUTATING_COMMANDS: &[&str] = &[
-    "rm", "rmdir", "mv", "cp", "mkdir", "touch", "chmod", "chown", "ln",
-    "dd", "mkfs", "mount", "umount", "fdisk", "parted",
-    "kill", "pkill", "killall",
-    "systemctl", "service", "shutdown", "reboot", "poweroff", "halt",
+    "rm",
+    "rmdir",
+    "mv",
+    "cp",
+    "mkdir",
+    "touch",
+    "chmod",
+    "chown",
+    "ln",
+    "dd",
+    "mkfs",
+    "mount",
+    "umount",
+    "fdisk",
+    "parted",
+    "kill",
+    "pkill",
+    "killall",
+    "systemctl",
+    "service",
+    "shutdown",
+    "reboot",
+    "poweroff",
+    "halt",
     "tee",
 ];
 
 /// Git subcommands that write state.
 const GIT_WRITE_SUBS: &[&str] = &[
-    "push", "commit", "merge", "rebase", "reset", "clean", "stash",
-    "tag", "init", "clone", "fetch", "pull", "cherry-pick", "revert",
-    "bisect", "worktree", "reflog", "update-ref", "symbolic-ref",
+    "push",
+    "commit",
+    "merge",
+    "rebase",
+    "reset",
+    "clean",
+    "stash",
+    "tag",
+    "init",
+    "clone",
+    "fetch",
+    "pull",
+    "cherry-pick",
+    "revert",
+    "bisect",
+    "worktree",
+    "reflog",
+    "update-ref",
+    "symbolic-ref",
 ];
 
 /// Package manager install/update commands.
 const PACKAGE_MANAGERS: &[&str] = &[
-    "apt", "apt-get", "yum", "dnf", "pacman", "zypper", "brew",
-    "pip", "pip3", "pipx", "uv", "conda",
-    "npm", "pnpm", "yarn", "bun",
-    "cargo", "go", "gem", "composer",
+    "apt", "apt-get", "yum", "dnf", "pacman", "zypper", "brew", "pip", "pip3", "pipx", "uv",
+    "conda", "npm", "pnpm", "yarn", "bun", "cargo", "go", "gem", "composer",
 ];
 
 /// Classify a bash command string.
@@ -186,13 +220,15 @@ fn classify_segment(segment: &str) -> Option<String> {
     if cmd_base == "awk" && cmd_words.iter().any(|w| w == &"-i" || w == &"--inplace") {
         return Some("awk -i (in-place edit)".into());
     }
-    if cmd_base == "perl" && cmd_words.iter().any(|w| {
-        // perl's `-i` (in-place edit) may be combined with other short flags
-        // in a single token, e.g. `-pi`, `-nip`. No other lowercase perl
-        // short flag contains 'i', so detecting it within a combined group is
-        // unambiguous. `-I` (include path) is uppercase and excluded.
-        w.starts_with('-') && !w.starts_with("--") && w.chars().skip(1).any(|c| c == 'i')
-    }) {
+    if cmd_base == "perl"
+        && cmd_words.iter().any(|w| {
+            // perl's `-i` (in-place edit) may be combined with other short flags
+            // in a single token, e.g. `-pi`, `-nip`. No other lowercase perl
+            // short flag contains 'i', so detecting it within a combined group is
+            // unambiguous. `-I` (include path) is uppercase and excluded.
+            w.starts_with('-') && !w.starts_with("--") && w.chars().skip(1).any(|c| c == 'i')
+        })
+    {
         return Some("perl -i (in-place edit)".into());
     }
 
@@ -227,10 +263,22 @@ mod tests {
 
     #[test]
     fn redirects_blocked() {
-        assert!(matches!(classify("echo x > file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("echo x >> file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("cmd &> file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("echo x 2> file"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("echo x > file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("echo x >> file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cmd &> file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("echo x 2> file"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -238,21 +286,51 @@ mod tests {
         assert!(matches!(classify("rm -rf /"), BashVerdict::WriteBlocked(_)));
         assert!(matches!(classify("mv a b"), BashVerdict::WriteBlocked(_)));
         assert!(matches!(classify("cp a b"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("mkdir newdir"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("touch newfile"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("chmod +x script"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("kill -9 1234"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("dd if=/dev/zero of=file"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("mkdir newdir"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("touch newfile"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("chmod +x script"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("kill -9 1234"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("dd if=/dev/zero of=file"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
     fn git_writes_blocked() {
         assert!(matches!(classify("git push"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("git commit -m msg"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("git merge feature"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("git reset --hard"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("git checkout -- file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("git stash"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("git commit -m msg"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("git merge feature"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("git reset --hard"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("git checkout -- file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("git stash"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -267,11 +345,26 @@ mod tests {
 
     #[test]
     fn package_managers_blocked() {
-        assert!(matches!(classify("apt install foo"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("pip install requests"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("npm install express"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("cargo install ripgrep"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("brew install htop"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("apt install foo"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("pip install requests"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("npm install express"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cargo install ripgrep"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("brew install htop"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -284,8 +377,14 @@ mod tests {
 
     #[test]
     fn inplace_editors_blocked() {
-        assert!(matches!(classify("sed -i 's/a/b/' file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("perl -pi -e 's/a/b/' file"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("sed -i 's/a/b/' file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("perl -pi -e 's/a/b/' file"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -295,15 +394,30 @@ mod tests {
         assert_eq!(classify("echo a; echo b"), BashVerdict::ReadOnly);
         assert_eq!(classify("git log | head -5"), BashVerdict::ReadOnly);
         // Any mutating segment blocks the whole command
-        assert!(matches!(classify("ls && rm file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("echo a; git push"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("cat file | tee copy"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("ls && rm file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("echo a; git push"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cat file | tee copy"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
     fn sudo_prefix_checked() {
-        assert!(matches!(classify("sudo rm file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("sudo git push"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("sudo rm file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("sudo git push"),
+            BashVerdict::WriteBlocked(_)
+        ));
         assert_eq!(classify("sudo ls"), BashVerdict::ReadOnly);
     }
 
@@ -311,7 +425,10 @@ mod tests {
     fn blocked_reason_is_descriptive() {
         match classify("rm -rf /tmp") {
             BashVerdict::WriteBlocked(reason) => {
-                assert!(reason.contains("rm"), "reason should mention the command: {reason}");
+                assert!(
+                    reason.contains("rm"),
+                    "reason should mention the command: {reason}"
+                );
             }
             BashVerdict::ReadOnly => panic!("rm should be blocked"),
         }

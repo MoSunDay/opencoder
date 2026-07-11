@@ -18,7 +18,11 @@ fn bash_call(cmd: &str) -> LlmEvent {
             name: "bash".into(),
             input: serde_json::json!({ "command": cmd }),
         }],
-        usage: Some(Usage { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),
+        usage: Some(Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+        }),
     }
 }
 
@@ -26,7 +30,11 @@ fn done_event() -> LlmEvent {
     LlmEvent::Completed {
         text: "done".into(),
         tool_calls: vec![],
-        usage: Some(Usage { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),
+        usage: Some(Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+        }),
     }
 }
 
@@ -39,17 +47,14 @@ async fn cancel_hard_aborts_a_running_tool() {
             .push_script(vec![bash_call("sleep 5")])
             .with_default(vec![done_event()]),
     ) as Arc<dyn ChatStream>;
-    let config = Config { model: "main/glm-5.2".into(), ..Config::default() };
+    let config = Config {
+        model: "main/glm-5.2".into(),
+        ..Config::default()
+    };
     let agent = resolve_agent("act").unwrap();
     let cancel = CancellationToken::new();
-    let mut s = SessionState::new(
-        "hard-abort",
-        agent,
-        config,
-        mock,
-        std::env::temp_dir(),
-    )
-    .with_cancel(cancel.clone());
+    let mut s = SessionState::new("hard-abort", agent, config, mock, std::env::temp_dir())
+        .with_cancel(cancel.clone());
 
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ev_clone = events.clone();
@@ -71,7 +76,10 @@ async fn cancel_hard_aborts_a_running_tool() {
     let outcome = tokio::time::timeout(Duration::from_secs(8), handle).await;
     let elapsed = start.elapsed();
 
-    assert!(outcome.is_ok(), "run did not return within 8s; hard-abort is broken");
+    assert!(
+        outcome.is_ok(),
+        "run did not return within 8s; hard-abort is broken"
+    );
     assert!(
         elapsed < Duration::from_secs(3),
         "run took {elapsed:?}; expected a sub-3s abort (sleep 5 was supposed to be killed)"
@@ -82,5 +90,8 @@ async fn cancel_hard_aborts_a_running_tool() {
         .unwrap()
         .iter()
         .any(|ev| matches!(ev, SessionEvent::Status(msg) if msg == "interrupted"));
-    assert!(saw_interrupted, "expected a Status(interrupted) event after cancel");
+    assert!(
+        saw_interrupted,
+        "expected a Status(interrupted) event after cancel"
+    );
 }

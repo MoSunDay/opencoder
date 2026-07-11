@@ -21,8 +21,14 @@ use ratatui::Frame;
 /// the default highlight when the popup opens with an empty query.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
-    ("/model", "配置模型 / 思考深度 / base_url / api_key / 上下文阈值"),
-    ("/compact", "手动压缩对话历史（总结早期消息，释放上下文窗口）"),
+    (
+        "/model",
+        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值",
+    ),
+    (
+        "/compact",
+        "手动压缩对话历史（总结早期消息，释放上下文窗口）",
+    ),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -109,7 +115,11 @@ impl CommandMenu {
             })
             .map(|(i, _)| i)
             .collect();
-        self.selected = if self.rows.is_empty() { 0 } else { self.selected.min(self.rows.len() - 1) };
+        self.selected = if self.rows.is_empty() {
+            0
+        } else {
+            self.selected.min(self.rows.len() - 1)
+        };
     }
 }
 
@@ -145,7 +155,13 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
         None => return (CommandOutcome::Idle, false),
     };
     if k.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d')) {
+        if matches!(
+            k.code,
+            KeyCode::Char('c')
+                | KeyCode::Char('d')
+                | KeyCode::Char('\u{3}')
+                | KeyCode::Char('\u{4}')
+        ) {
             let quit = true;
             *menu = None;
             return (CommandOutcome::Idle, quit);
@@ -188,11 +204,22 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
     (outcome, false)
 }
 
-/// Draw the command menu as a centered overlay.
-pub fn render_command_popup(f: &mut Frame, area: Rect, menu: &CommandMenu) {
-    let h = (menu.visible_count() as u16 + 4).min(area.height.saturating_sub(2));
+/// Draw the command menu as a dropdown overlay anchored above the composer.
+///
+/// `composer_top` is the screen row of the composer's top border; the popup's
+/// bottom edge (plus its 1-row query footer) sits just above it, mimicking an
+/// IDE autocomplete dropdown rather than a centered modal.
+pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &CommandMenu) {
+    // Box = 2 borders + content rows; +1 row for the query footer drawn below.
+    let want_box = menu.visible_count() as u16 + 4;
+    let want_total = want_box.saturating_add(1);
+    let avail = composer_top.max(1);
+    let total = want_total.min(avail);
+    let h = total.saturating_sub(1).max(3);
     let w = 72u16.min(area.width.saturating_sub(4));
-    let popup = centered(area, w, h);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = composer_top.saturating_sub(total);
+    let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -205,7 +232,12 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, menu: &CommandMenu) {
         .map(|&i| {
             let (name, desc) = COMMANDS[i];
             ListItem::new(Line::from(vec![
-                Span::styled(name.to_string(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    name.to_string(),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" \u{2014} "),
                 Span::styled(desc.to_string(), Style::default().fg(Color::Gray)),
             ]))
@@ -223,7 +255,11 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, menu: &CommandMenu) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();
@@ -233,26 +269,25 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, menu: &CommandMenu) {
     f.render_stateful_widget(list, popup, &mut state);
 
     // Query footer.
-    let footer = Rect::new(popup.x, popup.bottom(), popup.width, 1u16.min(area.height.saturating_sub(popup.bottom())));
+    let footer = Rect::new(
+        popup.x,
+        popup.bottom(),
+        popup.width,
+        1u16.min(area.height.saturating_sub(popup.bottom())),
+    );
     if footer.height > 0 {
         let line = Line::from(vec![
             Span::styled(" /", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 menu.query().to_string(),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("_"),
         ]);
         f.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), footer);
     }
-}
-
-fn centered(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width);
-    let h = h.min(area.height);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    Rect::new(x, y, w, h)
 }
 
 #[cfg(test)]
@@ -276,7 +311,10 @@ mod tests {
     #[test]
     fn menu_filters_by_query() {
         let mut m = CommandMenu::new();
-        assert!(m.visible_count() >= 3, "all commands visible with empty query");
+        assert!(
+            m.visible_count() >= 3,
+            "all commands visible with empty query"
+        );
         for c in "model".chars() {
             m.on_char(c);
         }
@@ -297,6 +335,10 @@ mod tests {
     #[test]
     fn empty_query_defaults_to_task() {
         let m = CommandMenu::new();
-        assert_eq!(m.selected_action(), Some(SlashAction::Task), "first row is /task");
+        assert_eq!(
+            m.selected_action(),
+            Some(SlashAction::Task),
+            "first row is /task"
+        );
     }
 }

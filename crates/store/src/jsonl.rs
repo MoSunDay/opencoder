@@ -44,7 +44,9 @@ impl JsonlStore {
                 let mut out = Vec::new();
                 for line in text.lines() {
                     let line = line.trim();
-                    if line.is_empty() { continue; }
+                    if line.is_empty() {
+                        continue;
+                    }
                     match serde_json::from_str::<Message>(line) {
                         Ok(m) => out.push(m),
                         Err(e) => {
@@ -59,5 +61,7 @@ impl JsonlStore {
         }
     }
 
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }

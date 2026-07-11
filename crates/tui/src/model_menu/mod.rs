@@ -15,7 +15,9 @@
 pub mod state;
 pub mod view;
 
-pub use state::{handle_model_key, mask_key, Field, ModelMenu, ModelOutcome, ModelPatch, Reasoning};
+pub use state::{
+    handle_model_key, mask_key, Field, ModelMenu, ModelOutcome, ModelPatch, Reasoning,
+};
 pub use view::render_model_popup;
 
 #[cfg(test)]
@@ -63,14 +65,22 @@ mod tests {
             super::handle_model_key(&mut menu_opt, key(c));
         }
         let m = menu_opt.expect("menu still open");
-        assert!(m.api_key_edited, "api_key field must be marked edited after typing");
+        assert!(
+            m.api_key_edited,
+            "api_key field must be marked edited after typing"
+        );
         assert_eq!(m.api_key_input, "sk-newkey");
     }
 
     #[test]
     fn reasoning_cycle_is_circular() {
         let mut r = Reasoning::Off;
-        let seq = [Reasoning::Low, Reasoning::Medium, Reasoning::High, Reasoning::Off];
+        let seq = [
+            Reasoning::Low,
+            Reasoning::Medium,
+            Reasoning::High,
+            Reasoning::Off,
+        ];
         for expect in seq {
             r = r.next();
             assert_eq!(r, expect);
@@ -84,6 +94,7 @@ mod tests {
             base_url: "u".into(),
             api_key: Some("MY_KEY".into()),
             reasoning_effort: None,
+            interleaved_thinking: None,
             context_threshold: 1000,
         };
         let v = p.to_json();
@@ -99,6 +110,7 @@ mod tests {
             base_url: "u".into(),
             api_key: None,
             reasoning_effort: Some("high".into()),
+            interleaved_thinking: None,
             context_threshold: 1000,
         };
         let v = p.to_json();
@@ -106,7 +118,10 @@ mod tests {
             .get("provider")
             .and_then(|p| p.as_object())
             .is_some_and(|o| o.contains_key("api_key"));
-        assert!(!provider_has_key, "untouched api_key must be absent from patch JSON");
+        assert!(
+            !provider_has_key,
+            "untouched api_key must be absent from patch JSON"
+        );
         assert_eq!(v["reasoning_effort"], serde_json::json!("high"));
     }
 
@@ -118,6 +133,7 @@ mod tests {
             base_url: "u".into(),
             api_key: Some("".into()),
             reasoning_effort: None,
+            interleaved_thinking: None,
             context_threshold: 1000,
         };
         let v = p.to_json();
@@ -129,5 +145,79 @@ mod tests {
         assert_eq!(mask_key(""), "(unset)");
         assert_eq!(mask_key("abc"), "****");
         assert_eq!(mask_key("sk-abcd1234567"), "sk****4567");
+    }
+
+    fn enter() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
+    }
+
+    // Enter on a text field confirms the value and advances focus to the next
+    // field — the core "fill → Enter → next" flow requested for the form.
+    #[test]
+    fn enter_on_text_field_advances_to_next() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        {
+            let m = menu_opt.as_ref().unwrap();
+            assert_eq!(m.focus, Field::Model, "menu opens focused on Model");
+        }
+        super::handle_model_key(&mut menu_opt, enter());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().focus,
+            Field::BaseUrl,
+            "Enter on Model advances to BaseUrl"
+        );
+    }
+
+    // Enter on Reasoning must advance WITHOUT toggling the value (Enter is
+    // "confirm current selection", not "change it" — cycling stays on Space/←→).
+    #[test]
+    fn enter_on_reasoning_advances_without_toggling() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let before = menu_opt.as_ref().unwrap().reasoning;
+        menu_opt.as_mut().unwrap().focus = Field::Reasoning;
+        super::handle_model_key(&mut menu_opt, enter());
+        let m = menu_opt.as_ref().unwrap();
+        assert_eq!(
+            m.focus,
+            Field::InterleavedThinking,
+            "Enter on Reasoning advances to InterleavedThinking"
+        );
+        assert_eq!(
+            m.reasoning, before,
+            "Enter must not change the reasoning value"
+        );
+    }
+
+    // Repeated Enter walks the whole field order and lands on Save.
+    #[test]
+    fn enter_chains_through_fields_to_save() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let order = [
+            Field::BaseUrl,
+            Field::ApiKey,
+            Field::Reasoning,
+            Field::InterleavedThinking,
+            Field::Threshold,
+            Field::Save,
+        ];
+        // starts on Model
+        assert_eq!(menu_opt.as_ref().unwrap().focus, Field::Model);
+        for expect in order {
+            super::handle_model_key(&mut menu_opt, enter());
+            assert_eq!(menu_opt.as_ref().unwrap().focus, expect);
+        }
+    }
+
+    // Enter on Save with valid input commits (returns Save, closes the menu).
+    #[test]
+    fn enter_on_save_commits_patch() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Save;
+        let outcome = super::handle_model_key(&mut menu_opt, enter());
+        assert!(
+            matches!(outcome, super::ModelOutcome::Save(_)),
+            "Enter on Save must commit"
+        );
+        assert!(menu_opt.is_none(), "menu must close after save");
     }
 }

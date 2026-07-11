@@ -53,26 +53,48 @@ pub(crate) fn handle_key(
         };
     }
     // Alt+Tab (and Ctrl+T fallback) switches act <-> plan mode.
-    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab) {
+    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab)
+    {
         let next = if agent == "plan" { "act" } else { "plan" };
         return KeyAction::SwitchAgent(next.into());
     }
 
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
-            KeyCode::Char('c') | KeyCode::Char('d') => return KeyAction::Quit,
+            // Ctrl+C / Ctrl+D quit. Under Kitty keyboard protocol
+            // (DISAMBIGUATE_ESCAPE_CODES) crossterm reports these as the raw
+            // control chars `\u{3}` (ETX) / `\u{4}` (EOT) with the CONTROL
+            // modifier set, so match those too.
+            KeyCode::Char('c')
+            | KeyCode::Char('d')
+            | KeyCode::Char('\u{3}')
+            | KeyCode::Char('\u{4}') => return KeyAction::Quit,
             // Fallback mode switch for terminals that swallow Alt+Tab.
             KeyCode::Char('t') => {
                 let next = if agent == "plan" { "act" } else { "plan" };
                 return KeyAction::SwitchAgent(next.into());
             }
-            KeyCode::Char('h') => { *show_help = !*show_help; return KeyAction::None; }
-            KeyCode::Char('n') => { move_hist(history, hist_idx, input, cursor_idx, 1); return KeyAction::None; }
-            KeyCode::Char('p') => { move_hist(history, hist_idx, input, cursor_idx, -1); return KeyAction::None; }
-            KeyCode::Char('u') => { *scroll = scroll.saturating_sub(10); *follow = false; return KeyAction::None; }
+            KeyCode::Char('h') => {
+                *show_help = !*show_help;
+                return KeyAction::None;
+            }
+            KeyCode::Char('n') => {
+                move_hist(history, hist_idx, input, cursor_idx, 1);
+                return KeyAction::None;
+            }
+            KeyCode::Char('p') => {
+                move_hist(history, hist_idx, input, cursor_idx, -1);
+                return KeyAction::None;
+            }
+            KeyCode::Char('u') => {
+                *scroll = scroll.saturating_sub(10);
+                *follow = false;
+                return KeyAction::None;
+            }
             KeyCode::Char('j') => {
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
-                *input = s; *cursor_idx = i;
+                *input = s;
+                *cursor_idx = i;
                 return KeyAction::None;
             }
             _ => return KeyAction::None,
@@ -86,24 +108,43 @@ pub(crate) fn handle_key(
         }
         KeyCode::Enter => {
             // Shift+Enter / Alt+Enter insert a newline (multi-line input).
-            if k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+            if k.modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+            {
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
-                *input = s; *cursor_idx = i;
+                *input = s;
+                *cursor_idx = i;
                 return KeyAction::None;
             }
-            if input.trim().is_empty() { return KeyAction::None; }
+            if input.trim().is_empty() {
+                return KeyAction::None;
+            }
             let text = input.trim().to_string();
-            input.clear(); *cursor_idx = 0; *hist_idx = None;
+            input.clear();
+            *cursor_idx = 0;
+            *hist_idx = None;
             // Enter = Steer when running (strong intervention, promoted at
             // turn boundary); normal submit when idle.
-            if running { KeyAction::Steer(text) } else { KeyAction::Submit(text) }
+            if running {
+                KeyAction::Steer(text)
+            } else {
+                KeyAction::Submit(text)
+            }
         }
         KeyCode::Tab => {
             // Tab = follow-up (queue) when running; normal submit when idle.
-            if input.trim().is_empty() { return KeyAction::None; }
+            if input.trim().is_empty() {
+                return KeyAction::None;
+            }
             let text = input.trim().to_string();
-            input.clear(); *cursor_idx = 0; *hist_idx = None;
-            if running { KeyAction::Queue(text) } else { KeyAction::Submit(text) }
+            input.clear();
+            *cursor_idx = 0;
+            *hist_idx = None;
+            if running {
+                KeyAction::Queue(text)
+            } else {
+                KeyAction::Submit(text)
+            }
         }
         KeyCode::Esc => {
             // 1) If help is open, Esc just closes it.
@@ -122,7 +163,9 @@ pub(crate) fn handle_key(
                 KeyAction::Cancel
             } else {
                 *last_esc = Some(now);
-                input.clear(); *cursor_idx = 0; *hist_idx = None;
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
                 KeyAction::None
             }
         }
@@ -142,15 +185,35 @@ pub(crate) fn handle_key(
             }
             KeyAction::None
         }
-        KeyCode::Left => { *cursor_idx = cursor_idx.saturating_sub(1); KeyAction::None }
-        KeyCode::Right => { *cursor_idx = (*cursor_idx + 1).min(input.chars().count()); KeyAction::None }
-        KeyCode::Home => { *cursor_idx = 0; KeyAction::None }
-        KeyCode::End => { *cursor_idx = input.chars().count(); KeyAction::None }
-        KeyCode::PageUp => { *scroll = scroll.saturating_sub(20); *follow = false; KeyAction::None }
-        KeyCode::PageDown => { *follow = true; KeyAction::None }
+        KeyCode::Left => {
+            *cursor_idx = cursor_idx.saturating_sub(1);
+            KeyAction::None
+        }
+        KeyCode::Right => {
+            *cursor_idx = (*cursor_idx + 1).min(input.chars().count());
+            KeyAction::None
+        }
+        KeyCode::Home => {
+            *cursor_idx = 0;
+            KeyAction::None
+        }
+        KeyCode::End => {
+            *cursor_idx = input.chars().count();
+            KeyAction::None
+        }
+        KeyCode::PageUp => {
+            *scroll = scroll.saturating_sub(20);
+            *follow = false;
+            KeyAction::None
+        }
+        KeyCode::PageDown => {
+            *follow = true;
+            KeyAction::None
+        }
         KeyCode::Backspace => {
             if let Some((s, i)) = composer::backspace(input, *cursor_idx) {
-                *input = s; *cursor_idx = i;
+                *input = s;
+                *cursor_idx = i;
             }
             KeyAction::None
         }
@@ -171,15 +234,24 @@ pub(crate) fn handle_key(
                 return KeyAction::OpenCommand;
             }
             let (s, i) = composer::insert_char(input, *cursor_idx, c);
-            *input = s; *cursor_idx = i;
+            *input = s;
+            *cursor_idx = i;
             KeyAction::None
         }
         _ => KeyAction::None,
     }
 }
 
-fn move_hist(history: &[String], hist_idx: &mut Option<usize>, input: &mut String, cursor_idx: &mut usize, delta: i32) {
-    if history.is_empty() { return; }
+fn move_hist(
+    history: &[String],
+    hist_idx: &mut Option<usize>,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    delta: i32,
+) {
+    if history.is_empty() {
+        return;
+    }
     let cur = hist_idx.unwrap_or(history.len());
     let next = (cur as i32 + delta).clamp(0, history.len() as i32) as usize;
     if next < history.len() {

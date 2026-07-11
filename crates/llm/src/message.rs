@@ -17,7 +17,13 @@ pub fn lower_messages(messages: &[Message]) -> Vec<OpenAIMessage> {
 }
 
 fn push_system(out: &mut Vec<OpenAIMessage>, msg: &Message) {
-    let text: String = msg.blocks.iter().filter_map(|b| b.as_text()).map(|s| s.to_string()).collect::<Vec<_>>().join("\n");
+    let text: String = msg
+        .blocks
+        .iter()
+        .filter_map(|b| b.as_text())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     if !text.is_empty() {
         out.push(json!({ "role": "system", "content": text }));
     }
@@ -25,11 +31,22 @@ fn push_system(out: &mut Vec<OpenAIMessage>, msg: &Message) {
 
 fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
     for block in &msg.blocks {
-        if let ContentBlock::ToolResult { tool_use_id, content, .. } = block {
+        if let ContentBlock::ToolResult {
+            tool_use_id,
+            content,
+            ..
+        } = block
+        {
             out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": content }));
         }
     }
-    let text: String = msg.blocks.iter().filter_map(|b| b.as_text()).map(|s| s.to_string()).collect::<Vec<_>>().join("\n");
+    let text: String = msg
+        .blocks
+        .iter()
+        .filter_map(|b| b.as_text())
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     if !text.is_empty() {
         out.push(json!({ "role": "user", "content": text }));
     }
@@ -74,7 +91,11 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
     m.insert("role".to_string(), Value::String("assistant".into()));
     m.insert(
         "content".to_string(),
-        if text.is_empty() { Value::Null } else { Value::String(text) },
+        if text.is_empty() {
+            Value::Null
+        } else {
+            Value::String(text)
+        },
     );
     if !tool_calls.is_empty() {
         m.insert("tool_calls".to_string(), Value::Array(tool_calls));
@@ -87,7 +108,12 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
 
 fn push_tool_results(out: &mut Vec<OpenAIMessage>, msg: &Message) {
     for block in &msg.blocks {
-        if let ContentBlock::ToolResult { tool_use_id, content, .. } = block {
+        if let ContentBlock::ToolResult {
+            tool_use_id,
+            content,
+            ..
+        } = block
+        {
             out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": content }));
         }
     }

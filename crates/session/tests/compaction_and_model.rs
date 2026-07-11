@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use opencode_core::{resolve_agent, Config, Message};
-use opencode_llm::{CompletedToolCall, ChatStream, LlmEvent, MockChatClient, Usage};
+use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencode_session::{compaction::should_compact, run, SessionState};
 
 fn client_with_default_done(text: &str) -> Arc<MockChatClient> {
@@ -15,12 +15,19 @@ fn done_event(text: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: text.to_string(),
         tool_calls: Vec::<CompletedToolCall>::new(),
-        usage: Some(Usage { input_tokens: 0, output_tokens: 0, total_tokens: 0 }),
+        usage: Some(Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+        }),
     }
 }
 
 fn base_config() -> Config {
-    Config { model: "main/glm-5.2".into(), ..Config::default() }
+    Config {
+        model: "main/glm-5.2".into(),
+        ..Config::default()
+    }
 }
 
 async fn session_with(
@@ -56,7 +63,10 @@ async fn compaction_triggers_by_token_estimate_without_any_reported_usage() {
     // 8000 chars ≈ 2000 tokens + overhead → exceeds usable(1800)
     s.messages.push(big_user_message("u1", 8_000));
 
-    assert!(s.last_usage.total_tokens == 0, "precondition: no usage reported yet");
+    assert!(
+        s.last_usage.total_tokens == 0,
+        "precondition: no usage reported yet"
+    );
     assert!(should_compact(&s), "estimate alone must trigger compaction");
 }
 
@@ -114,7 +124,8 @@ async fn small_model_is_used_for_compaction_summary_call() {
     assert!(!reqs.is_empty(), "at least the compaction call must happen");
     assert_eq!(
         reqs[0].model, "mini",
-        "compaction summarize must use small_model id, got {}", reqs[0].model
+        "compaction summarize must use small_model id, got {}",
+        reqs[0].model
     );
 }
 
@@ -137,7 +148,10 @@ async fn model_switch_takes_effect_on_next_request_body() {
     let reqs = mock.requests();
     assert!(reqs.len() >= 2, "need >=2 calls");
     let last = reqs.last().unwrap();
-    assert_eq!(last.model, "switched/claude", "switched model must reach the provider");
+    assert_eq!(
+        last.model, "switched/claude",
+        "switched model must reach the provider"
+    );
 }
 
 #[tokio::test]
@@ -148,5 +162,44 @@ async fn compaction_disabled_does_not_trigger() {
     config.compaction.reserved = 0;
     let (_dir, mut s) = session_with(config, client_with_default_done("ok")).await;
     s.messages.push(big_user_message("u1", 100_000));
-    assert!(!should_compact(&s), "auto=false disables compaction entirely");
+    assert!(
+        !should_compact(&s),
+        "auto=false disables compaction entirely"
+    );
+}
+
+#[tokio::test]
+async fn reported_tokens_uses_input_only_not_total() {
+    let mut config = base_config();
+    config.context_limit = Some(10_000);
+    config.compaction.context_threshold = 10_000; // larger than usable → usable binds
+    config.compaction.reserved = 2_000; // usable = 8_000
+
+    let (_dir, mut s) = session_with(config, client_with_default_done("ok")).await;
+    // Small messages so the estimate-based trigger does NOT fire.
+    s.messages.push(Message::user("u1", "small"));
+
+    // Simulate a turn where input is well under budget but output is huge.
+    // total_tokens would exceed budget, but input_tokens alone does not.
+    s.last_usage = Usage {
+        input_tokens: 3_000,
+        output_tokens: 9_000,
+        total_tokens: 12_000,
+    };
+
+    assert!(
+        !should_compact(&s),
+        "must NOT trigger on output-heavy turns: input=3k < budget=8k, even though total=12k > 8k"
+    );
+
+    // Now set input_tokens above budget — should trigger.
+    s.last_usage = Usage {
+        input_tokens: 9_000,
+        output_tokens: 0,
+        total_tokens: 9_000,
+    };
+    assert!(
+        should_compact(&s),
+        "must trigger when input_tokens exceeds budget"
+    );
 }

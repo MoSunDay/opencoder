@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use opencode_core::{Message, Role, ToolArc};
 use opencode_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 
-use crate::prompt::{build_system, compaction_prompt};
+use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
 use crate::SessionState;
 
 /// Decide whether to compact. Two signals are checked: the estimated tokens
@@ -34,7 +34,11 @@ pub fn should_compact(session: &SessionState) -> bool {
 
 /// Estimated tokens of the conversation about to be sent (system + messages).
 fn estimated_tokens(session: &SessionState) -> u64 {
-    let system = build_system(&session.agent, &session.working_dir, session.skill_prompt.as_deref());
+    let system = build_system(
+        &session.agent,
+        &session.working_dir,
+        session.skill_prompt.as_deref(),
+    );
     let est = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
     est as u64
 }
@@ -43,26 +47,41 @@ fn estimate(s: &str) -> usize {
     opencode_llm::estimate(s)
 }
 
+/// Provider-reported input tokens from the last call. Uses `input_tokens`
+/// (not `total_tokens`) so output-heavy turns don't prematurely trip the
+/// input budget.
 fn reported_tokens(session: &SessionState) -> u64 {
-    if session.last_usage.total_tokens > 0 {
-        session.last_usage.total_tokens
-    } else {
-        session.last_usage.input_tokens + session.last_usage.output_tokens
-    }
+    session.last_usage.input_tokens
 }
 
-pub async fn compact(session: &mut SessionState, _registry: &HashMap<String, ToolArc>) -> Result<String> {
+pub async fn compact(
+    session: &mut SessionState,
+    _registry: &HashMap<String, ToolArc>,
+) -> Result<Option<String>> {
     let tail = session.config.compaction.tail_turns.max(1) as usize;
     let split = split_index(&session.messages, tail);
     if split == 0 {
-        return Ok("nothing to compact".into());
+        return Ok(None);
     }
     let head: Vec<Message> = session.messages[..split].to_vec();
-    let summary = summarize(&head, session).await?;
+
+    // If a previous compaction summary exists in the head, extract its text so
+    // the summarizer can incrementally update it rather than starting fresh.
+    let previous_summary: Option<String> = head
+        .iter()
+        .find(|m| m.synthetic && m.role == Role::User)
+        .map(|m| {
+            let text = m.text();
+            text.strip_prefix("[Conversation summary so far]\n")
+                .unwrap_or(&text)
+                .to_string()
+        });
+
+    let summary = summarize(&head, session, previous_summary.as_deref()).await?;
     let summary_msg = compaction_message(summary.clone());
     let tail_msgs: Vec<Message> = session.messages[split..].to_vec();
     session.messages = vec![summary_msg].into_iter().chain(tail_msgs).collect();
-    Ok(summary)
+    Ok(Some(summary))
 }
 
 fn split_index(messages: &[Message], tail_turns: usize) -> usize {
@@ -78,9 +97,20 @@ fn split_index(messages: &[Message], tail_turns: usize) -> usize {
     user_idx[user_idx.len() - tail_turns]
 }
 
-async fn summarize(head: &[Message], session: &SessionState) -> Result<String> {
-    let mut msgs = lower_messages(head);
-    msgs.push(serde_json::json!({ "role": "user", "content": compaction_prompt() }));
+async fn summarize(
+    head: &[Message],
+    session: &SessionState,
+    previous_summary: Option<&str>,
+) -> Result<String> {
+    let mut msgs: Vec<serde_json::Value> = Vec::new();
+    // System prompt: anchored context summarization assistant.
+    msgs.push(serde_json::json!({ "role": "system", "content": compaction_system_prompt() }));
+    // The conversation head to summarize.
+    msgs.extend(lower_messages(head));
+    // User prompt: structured output template (+ optional previous-summary).
+    msgs.push(
+        serde_json::json!({ "role": "user", "content": compaction_user_prompt(previous_summary) }),
+    );
     // Summarization is a cheap background call → use small_model when configured.
     let model = session.config.small_model_or_primary().to_string();
     let req = ChatRequest {
@@ -113,7 +143,10 @@ async fn summarize(head: &[Message], session: &SessionState) -> Result<String> {
 }
 
 fn compaction_message(summary: String) -> Message {
-    let mut m = Message::user(crate::runner::new_id(), format!("[Conversation summary so far]\n{summary}"));
+    let mut m = Message::user(
+        crate::runner::new_id(),
+        format!("[Conversation summary so far]\n{summary}"),
+    );
     m.synthetic = true;
     m
 }

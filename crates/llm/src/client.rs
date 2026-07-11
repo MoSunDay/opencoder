@@ -38,10 +38,7 @@ impl ChatClient {
         })
     }
 
-    pub fn chat_stream(
-        &self,
-        req: ChatRequest,
-    ) -> Result<mpsc::Receiver<LlmEvent>> {
+    pub fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
         let (tx, rx) = mpsc::channel::<LlmEvent>(128);
         let url = format!("{}/chat/completions", self.base_url);
         let body = req.to_body();
@@ -50,7 +47,9 @@ impl ChatClient {
 
         tokio::spawn(async move {
             if let Err(e) = run_stream(client, url, key, body, tx.clone()).await {
-                let _ = tx.send(LlmEvent::Error(format!("stream failed: {e:#}"))).await;
+                let _ = tx
+                    .send(LlmEvent::Error(format!("stream failed: {e:#}")))
+                    .await;
             }
         });
         Ok(rx)
@@ -108,12 +107,28 @@ async fn run_stream(
                 Some(v) => v,
                 None => continue,
             };
-            handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, &tx).await?;
+            handle_event(
+                &parsed,
+                &mut tools,
+                &mut usage,
+                &mut finished,
+                &mut text_buf,
+                &tx,
+            )
+            .await?;
         }
     }
     for data in decoder.flush_remaining() {
         if let Some(parsed) = crate::sse::parse_chunk(&data) {
-            handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, &tx).await?;
+            handle_event(
+                &parsed,
+                &mut tools,
+                &mut usage,
+                &mut finished,
+                &mut text_buf,
+                &tx,
+            )
+            .await?;
         }
     }
 
@@ -157,7 +172,12 @@ async fn handle_event(
     Ok(())
 }
 
-async fn emit_delta(delta: &Value, tools: &mut ToolAccumulator, text_buf: &mut String, tx: &mpsc::Sender<LlmEvent>) -> Result<()> {
+async fn emit_delta(
+    delta: &Value,
+    tools: &mut ToolAccumulator,
+    text_buf: &mut String,
+    tx: &mpsc::Sender<LlmEvent>,
+) -> Result<()> {
     if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
         if !content.is_empty() {
             text_buf.push_str(content);
@@ -166,15 +186,23 @@ async fn emit_delta(delta: &Value, tools: &mut ToolAccumulator, text_buf: &mut S
     }
     if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
         if !reasoning.is_empty() {
-            let _ = tx.send(LlmEvent::ReasoningDelta(reasoning.to_string())).await;
+            let _ = tx
+                .send(LlmEvent::ReasoningDelta(reasoning.to_string()))
+                .await;
         }
     }
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
         for tc in tool_calls {
             let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let id = tc.get("id").and_then(|v| v.as_str());
-            let name = tc.get("function").and_then(|f| f.get("name")).and_then(|v| v.as_str());
-            let args = tc.get("function").and_then(|f| f.get("arguments")).and_then(|v| v.as_str());
+            let name = tc
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|v| v.as_str());
+            let args = tc
+                .get("function")
+                .and_then(|f| f.get("arguments"))
+                .and_then(|v| v.as_str());
             for ev in tools.apply(index, id, name, args) {
                 let _ = tx.send(ev).await;
             }
@@ -185,12 +213,25 @@ async fn emit_delta(delta: &Value, tools: &mut ToolAccumulator, text_buf: &mut S
 
 fn parse_usage(u: &Value) -> Usage {
     Usage {
-        input_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or_default(),
-        output_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or_default(),
-        total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or_default(),
+        input_tokens: u
+            .get("prompt_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default(),
+        output_tokens: u
+            .get("completion_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default(),
+        total_tokens: u
+            .get("total_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default(),
     }
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n { s.to_string() } else { format!("{}...", &s[..n]) }
+    if s.len() <= n {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..n])
+    }
 }

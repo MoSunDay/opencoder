@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use opencode_llm::estimate;
 use opencode_session::SessionEvent;
 
 const TOOL_OUTPUT_LINES: usize = 6;
@@ -21,24 +22,21 @@ pub enum ChatBlock {
         done: bool,
     },
     /// Collapsible reasoning/thinking block with dimmed italic styling.
-    Thinking {
-        text: String,
-        collapsed: bool,
-    },
+    Thinking { text: String, collapsed: bool },
     /// Tool invocation: header line + truncated output lines.
     Tool {
         header: Line<'static>,
         output: Vec<Line<'static>>,
     },
-    /// Foldable subagent block. Child events (routed via `SubagentChild`)
-    /// populate `view`, which is rendered inline when expanded or as the
-    /// full body when the user "enters" the subagent (ctx-switch).
+    /// Foldable subagent block. Clicking the header enters the subagent's
+    /// perspective (ctx-switch) showing its child `view` as the full body plus
+    /// its own context stats. The header always renders as a single clickable
+    /// line with running/done/failed status — no inline expansion.
     Subagent {
         id: String,
         child_session_id: String,
         kind: String,
         prompt: String,
-        collapsed: bool,
         view: ChatView,
         done: bool,
         ok: bool,
@@ -57,6 +55,10 @@ pub struct ChatView {
     pub subagents_running: u32,
     /// Total subagents dispatched this session (running + completed).
     pub subagents_total: u32,
+    /// Estimated tokens consumed by this view's own transcript (excludes
+    /// child subagent tokens, which live on the child ChatView). Used to
+    /// show context stats when viewing a subagent's perspective.
+    pub context_used: u64,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.
@@ -77,6 +79,7 @@ pub struct SubagentHeader {
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
+        self.track_context(ev);
         match ev {
             SessionEvent::TextDelta(t) => {
                 self.ensure_assistant_open();
@@ -96,25 +99,28 @@ impl ChatView {
                     header: Line::from(vec![
                         Span::styled(
                             format!("\u{25b8} {name} "),
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
                     ]),
                     output: Vec::new(),
                 });
             }
-            SessionEvent::ToolEnd { output, is_error, .. } => {
+            SessionEvent::ToolEnd {
+                output, is_error, ..
+            } => {
                 self.finalize_assistant();
-                let color = if *is_error { Color::Red } else { Color::DarkGray };
+                let color = if *is_error {
+                    Color::Red
+                } else {
+                    Color::DarkGray
+                };
                 let out: Vec<Line<'static>> = output
                     .lines()
                     .take(TOOL_OUTPUT_LINES)
-                    .map(|l| {
-                        Line::from(Span::styled(
-                            format!("  {l}"),
-                            Style::default().fg(color),
-                        ))
-                    })
+                    .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
                 if let Some(ChatBlock::Tool { output: o, .. }) = self.blocks.last_mut() {
                     o.extend(out);
@@ -131,20 +137,27 @@ impl ChatView {
             SessionEvent::AgentSwitch(to) => {
                 self.finalize_assistant();
                 self.agent = to.clone();
-                self.blocks.push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                    format!("[switched to {to} mode]"),
-                    Style::default().fg(Color::Magenta),
-                ))]));
+                self.blocks
+                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
+                        format!("[switched to {to} mode]"),
+                        Style::default().fg(Color::Magenta),
+                    ))]));
             }
             SessionEvent::Compaction(c) => {
                 self.finalize_assistant();
-                self.blocks.push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                    format!("[context compacted] {}", short(c, 100)),
-                    Style::default().fg(Color::Yellow),
-                ))]));
+                self.blocks
+                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
+                        format!("[context compacted] {}", short(c, 100)),
+                        Style::default().fg(Color::Yellow),
+                    ))]));
             }
             SessionEvent::Status(s) => self.status = s.clone(),
-            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => {
+            SessionEvent::SubagentStart {
+                id,
+                kind,
+                prompt,
+                child_session_id,
+            } => {
                 self.subagents_running = self.subagents_running.saturating_add(1);
                 self.subagents_total = self.subagents_total.saturating_add(1);
                 self.finalize_assistant();
@@ -153,7 +166,6 @@ impl ChatView {
                     child_session_id: child_session_id.clone(),
                     kind: kind.clone(),
                     prompt: short(prompt, 90),
-                    collapsed: true,
                     view: ChatView::default(),
                     done: false,
                     ok: false,
@@ -161,8 +173,11 @@ impl ChatView {
                 });
             }
             SessionEvent::SubagentChild { id, ev } => {
-                if let Some(ChatBlock::Subagent { view, .. }) =
-                    self.blocks.iter_mut().rev().find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+                if let Some(ChatBlock::Subagent { view, .. }) = self
+                    .blocks
+                    .iter_mut()
+                    .rev()
+                    .find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
                 {
                     view.apply(ev);
                 }
@@ -170,10 +185,19 @@ impl ChatView {
             SessionEvent::SubagentEnd { id, ok, summary } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
-                if let Some(block) =
-                    self.blocks.iter_mut().rev().find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+                if let Some(block) = self
+                    .blocks
+                    .iter_mut()
+                    .rev()
+                    .find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
                 {
-                    if let ChatBlock::Subagent { done, ok: bok, summary: smry, .. } = block {
+                    if let ChatBlock::Subagent {
+                        done,
+                        ok: bok,
+                        summary: smry,
+                        ..
+                    } = block
+                    {
                         *done = true;
                         *bok = *ok;
                         *smry = summary.clone();
@@ -195,10 +219,11 @@ impl ChatView {
             SessionEvent::Error(e) => {
                 self.subagents_running = 0;
                 self.finalize_assistant();
-                self.blocks.push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                    format!("error: {e}"),
-                    Style::default().fg(Color::Red),
-                ))]));
+                self.blocks
+                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
+                        format!("error: {e}"),
+                        Style::default().fg(Color::Red),
+                    ))]));
             }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
@@ -214,7 +239,12 @@ impl ChatView {
 
     /// Render the current assistant block's raw text as markdown (idempotent).
     pub fn finalize_assistant(&mut self) {
-        if let Some(ChatBlock::Assistant { raw, rendered, done }) = self.blocks.last_mut() {
+        if let Some(ChatBlock::Assistant {
+            raw,
+            rendered,
+            done,
+        }) = self.blocks.last_mut()
+        {
             if !*done {
                 *rendered = crate::markdown::render(raw);
                 *done = true;
@@ -230,10 +260,31 @@ impl ChatView {
         }
     }
 
-    /// Toggle collapse on the subagent block at `block_idx`.
-    pub fn toggle_subagent_at(&mut self, block_idx: usize) {
-        if let Some(ChatBlock::Subagent { collapsed, .. }) = self.blocks.get_mut(block_idx) {
-            *collapsed = !*collapsed;
+    /// Accumulate estimated token counts for this view's transcript, including
+    /// child subagent tokens (via `SubagentChild` recursion). Each ChatView's
+    /// `context_used` thus reflects the full request size it represents — the
+    /// parent includes all descendants, each child includes its own subtree.
+    fn track_context(&mut self, ev: &SessionEvent) {
+        match ev {
+            SessionEvent::TextDelta(t) | SessionEvent::ReasoningDelta(t) => {
+                self.context_used += estimate(t) as u64;
+            }
+            SessionEvent::ToolStart { input, .. } => {
+                self.context_used += estimate(&input.to_string()) as u64;
+            }
+            SessionEvent::ToolEnd { output, .. } => {
+                self.context_used += estimate(output) as u64;
+            }
+            SessionEvent::SubagentEnd { summary, .. } => {
+                self.context_used += estimate(summary) as u64;
+            }
+            SessionEvent::SubagentChild { ev, .. } => {
+                self.track_context(ev);
+            }
+            SessionEvent::Compaction(c) => {
+                self.context_used = estimate(c) as u64;
+            }
+            _ => {}
         }
     }
 
@@ -248,7 +299,11 @@ impl ChatView {
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => line_idx += lines.len(),
-                ChatBlock::Assistant { raw, rendered, done } => {
+                ChatBlock::Assistant {
+                    raw,
+                    rendered,
+                    done,
+                } => {
                     // +1 for the "say:" header line emitted by flatten().
                     line_idx += 1;
                     line_idx += if *done {
@@ -258,7 +313,10 @@ impl ChatView {
                     };
                 }
                 ChatBlock::Thinking { text, collapsed } => {
-                    out.push(ThinkingHeader { block_idx, header_line_idx: line_idx });
+                    out.push(ThinkingHeader {
+                        block_idx,
+                        header_line_idx: line_idx,
+                    });
                     // Header line always emitted; content lines only when expanded.
                     line_idx += 1;
                     if !collapsed {
@@ -269,14 +327,8 @@ impl ChatView {
                     // header line + output lines + trailing blank line.
                     line_idx += 1 + output.len() + 1;
                 }
-                ChatBlock::Subagent { collapsed, view, done, .. } => {
-                    line_idx += 1; // header
-                    if !collapsed {
-                        line_idx += view.flatten().len();
-                        if *done {
-                            line_idx += 1; // summary line
-                        }
-                    }
+                ChatBlock::Subagent { .. } => {
+                    line_idx += 1; // header only — no inline expansion
                 }
             }
         }
@@ -291,7 +343,11 @@ impl ChatView {
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => line_idx += lines.len(),
-                ChatBlock::Assistant { raw, rendered, done } => {
+                ChatBlock::Assistant {
+                    raw,
+                    rendered,
+                    done,
+                } => {
                     line_idx += 1;
                     line_idx += if *done {
                         rendered.len()
@@ -308,15 +364,12 @@ impl ChatView {
                 ChatBlock::Tool { output, .. } => {
                     line_idx += 1 + output.len() + 1;
                 }
-                ChatBlock::Subagent { collapsed, view, done, .. } => {
-                    out.push(SubagentHeader { block_idx, header_line_idx: line_idx });
-                    line_idx += 1;
-                    if !collapsed {
-                        line_idx += view.flatten().len();
-                        if *done {
-                            line_idx += 1;
-                        }
-                    }
+                ChatBlock::Subagent { .. } => {
+                    out.push(SubagentHeader {
+                        block_idx,
+                        header_line_idx: line_idx,
+                    });
+                    line_idx += 1; // header only — no inline expansion
                 }
             }
         }
@@ -331,12 +384,18 @@ impl ChatView {
         for block in &self.blocks {
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
-                ChatBlock::Assistant { raw, rendered, done } => {
+                ChatBlock::Assistant {
+                    raw,
+                    rendered,
+                    done,
+                } => {
                     // Visual header so assistant output has its own labelled region,
                     // mirroring the `user:` marker on user prompts.
                     out.push(Line::from(Span::styled(
                         "say:",
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     let indent = Span::raw("    ");
                     if *done {
@@ -380,43 +439,53 @@ impl ChatView {
                     out.extend(output.iter().cloned());
                     out.push(Line::from(""));
                 }
-                ChatBlock::Subagent { kind, prompt, collapsed, view, done, ok, summary, .. } => {
-                    let arrow = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
-                    let status = if *done {
-                        if *ok { "done" } else { "failed" }
-                    } else {
-                        "running"
-                    };
-                    let tool_count = view.blocks.iter()
+                ChatBlock::Subagent {
+                    kind,
+                    prompt,
+                    view,
+                    done,
+                    ok,
+                    summary,
+                    ..
+                } => {
+                    let tool_count = view
+                        .blocks
+                        .iter()
                         .filter(|b| matches!(b, ChatBlock::Tool { .. }))
                         .count();
-                    out.push(Line::from(vec![
+                    // Status badge: colored dot/check/cross + word.
+                    let (mark, mark_color, status_word) = if *done {
+                        if *ok {
+                            ("\u{2714}", Color::Green, "done")
+                        } else {
+                            ("\u{2718}", Color::Red, "failed")
+                        }
+                    } else {
+                        ("\u{25cf}", Color::Yellow, "running")
+                    };
+                    let mut spans = vec![
                         Span::styled(
-                            format!("{arrow} \u{2937} subagent "),
-                            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                            "\u{2937} subagent ",
+                            Style::default()
+                                .fg(Color::Blue)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(format!("[{kind}] "), Style::default().fg(Color::Cyan)),
                         Span::styled(prompt.clone(), Style::default().fg(Color::DarkGray)),
+                        Span::raw(" "),
                         Span::styled(
-                            format!(" [{status}, {tool_count} tools]"),
-                            Style::default().fg(Color::DarkGray),
+                            format!("{mark} {status_word}, {tool_count} tools"),
+                            Style::default().fg(mark_color),
                         ),
-                    ]));
-                    if !collapsed {
-                        for l in view.flatten() {
-                            let mut spans = vec![Span::raw("  ")];
-                            spans.extend(l.spans);
-                            out.push(Line::from(spans));
-                        }
-                        if *done {
-                            let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-                            let color = if *ok { Color::Green } else { Color::Red };
-                            out.push(Line::from(vec![
-                                Span::raw("  "),
-                                Span::styled(format!("{mark} {summary}"), Style::default().fg(color)),
-                            ]));
-                        }
+                        Span::styled(" [\u{2192} view]", Style::default().fg(Color::DarkGray)),
+                    ];
+                    if *done && !summary.is_empty() {
+                        spans.push(Span::styled(
+                            format!("  {summary}"),
+                            Style::default().fg(if *ok { Color::DarkGray } else { Color::Red }),
+                        ));
                     }
+                    out.push(Line::from(spans));
                 }
             }
         }
@@ -424,7 +493,10 @@ impl ChatView {
     }
 
     fn ensure_assistant_open(&mut self) {
-        if !matches!(self.blocks.last(), Some(ChatBlock::Assistant { done: false, .. })) {
+        if !matches!(
+            self.blocks.last(),
+            Some(ChatBlock::Assistant { done: false, .. })
+        ) {
             self.blocks.push(ChatBlock::Assistant {
                 raw: String::new(),
                 rendered: Vec::new(),
@@ -494,9 +566,9 @@ mod tests {
         v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
         let flat = v.flatten();
         // Collapsed by default: header shows "Thinking"
-        assert!(flat.iter().any(|l| {
-            l.spans.iter().any(|s| s.content.contains("Thinking"))
-        }));
+        assert!(flat
+            .iter()
+            .any(|l| { l.spans.iter().any(|s| s.content.contains("Thinking")) }));
         // Content hidden when collapsed
         assert!(!block_text(&v).contains("analyzing"));
         // Expand via block index and verify content
@@ -585,7 +657,9 @@ mod tests {
     #[test]
     fn done_renders_markdown() {
         let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("# Title\n\nSome **bold** text".into()));
+        v.apply(&SessionEvent::TextDelta(
+            "# Title\n\nSome **bold** text".into(),
+        ));
         v.apply(&SessionEvent::Done);
         // After Done, the assistant block is finalized — check it has rendered
         for b in &v.blocks {
@@ -642,7 +716,9 @@ mod tests {
     fn subagent_events_render() {
         let mut v = ChatView::default();
         v.apply(&SessionEvent::SubagentStart {
-            id: "s1".into(), kind: "explore".into(), prompt: "search".into(),
+            id: "s1".into(),
+            kind: "explore".into(),
+            prompt: "search".into(),
             child_session_id: "sub-1".into(),
         });
         assert!(block_text(&v).contains("subagent"));
@@ -655,17 +731,26 @@ mod tests {
             id: "s1".into(),
             ev: Box::new(SessionEvent::TextDelta("child output".into())),
         });
-        // Collapsed by default — child output hidden.
+        // No inline expansion — child output is always hidden in the parent.
         assert!(!block_text(&v).contains("child output"));
-        // Expand and verify child content appears.
-        let headers = v.subagent_headers();
-        assert_eq!(headers.len(), 1);
-        v.toggle_subagent_at(headers[0].block_idx);
-        assert!(block_text(&v).contains("child output"));
+        // Child view itself contains the output (visible via ctx-switch).
+        if let Some(ChatBlock::Subagent { view, .. }) = v
+            .blocks
+            .iter()
+            .find(|b| matches!(b, ChatBlock::Subagent { .. }))
+        {
+            assert!(block_text(view).contains("child output"));
+            // Child view tracks its own context.
+            assert!(view.context_used > 0);
+        } else {
+            panic!("expected a Subagent block");
+        }
 
-        // SubagentEnd marks done and decrements running.
+        // SubagentEnd marks done and decrements running; summary shows on header.
         v.apply(&SessionEvent::SubagentEnd {
-            id: "s1".into(), ok: true, summary: "found it".into(),
+            id: "s1".into(),
+            ok: true,
+            summary: "found it".into(),
         });
         assert_eq!(v.subagents_running, 0);
         assert_eq!(v.subagents_total, 1);
@@ -683,7 +768,7 @@ mod tests {
     fn paragraph_scroll_uses_wrapped_rows_and_pins_tail() {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
-        use ratatui::widgets::{Paragraph, Wrap, Widget};
+        use ratatui::widgets::{Paragraph, Widget, Wrap};
 
         let lines: Vec<Line> = vec![
             Line::from("AAAAAAAAAA"),
@@ -704,7 +789,9 @@ mod tests {
             .scroll((scroll_y as u16, 0))
             .render(area, &mut buf);
         let rs = |y: u16| -> String {
-            (0..width).map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' ')).collect()
+            (0..width)
+                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect()
         };
         assert!(rs(0).starts_with("CCCCCCCCCC"));
         assert!(rs(visible_h - 1).starts_with("END"));

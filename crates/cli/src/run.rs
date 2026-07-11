@@ -5,7 +5,9 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use opencode_core::{resolve_agent, Config};
 use opencode_llm::{ChatClient, ChatStream};
-use opencode_session::{generate_title, resume as resume_session, run_once, SessionEvent, SessionState};
+use opencode_session::{
+    generate_title, resume as resume_session, run_once, SessionEvent, SessionState,
+};
 use opencode_store::{SessionFilter, Store};
 
 use crate::Cli;
@@ -20,16 +22,25 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         config.small_model = Some(m.clone());
     }
     let api_key = config.api_key()?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(&config.provider.base_url, &api_key)?);
+    let client: Arc<dyn ChatStream> =
+        Arc::new(ChatClient::new(&config.provider.base_url, &api_key)?);
     let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
         .await
         .ok()
         .map(|s| Arc::new(s) as Arc<dyn Store>);
 
     let mut session = if let Some(id) = pick_resume_id(cli, store.as_deref()).await? {
+        let st = store
+            .clone()
+            .ok_or_else(|| anyhow!("store unavailable for resume"))?;
+        let effective_id = if cli.fork {
+            fork_session(st.as_ref(), &id).await?
+        } else {
+            id
+        };
         resume_session(
-            store.clone().ok_or_else(|| anyhow!("store unavailable for resume"))?,
-            &id,
+            st,
+            &effective_id,
             config.clone(),
             client.clone(),
             workdir.clone(),
@@ -77,10 +88,44 @@ async fn pick_resume_id(cli: &Cli, store: Option<&dyn Store>) -> Result<Option<S
     }
     if cli.continue_ {
         let s = store.ok_or_else(|| anyhow!("no store available for --continue"))?;
-        let list = s.list_sessions(&SessionFilter { limit: 1, ..Default::default() }).await?;
+        let list = s
+            .list_sessions(&SessionFilter {
+                limit: 1,
+                ..Default::default()
+            })
+            .await?;
         return Ok(list.into_iter().next().map(|i| i.id));
     }
     Ok(None)
+}
+
+/// Copy a session's meta and messages into a new session id, leaving the
+/// original untouched. Returns the new id.
+pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> {
+    let meta = store
+        .get_session(parent_id)
+        .await?
+        .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
+    let messages = store.load_messages(parent_id).await?;
+    let new_id = opencode_session::runner::new_id();
+    let now = opencode_core::message::now_ms();
+    let forked = opencode_store::SessionMeta {
+        id: new_id.clone(),
+        title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
+        agent: meta.agent.clone(),
+        model: meta.model.clone(),
+        workdir_hash: meta.workdir_hash.clone(),
+        created_at: now,
+        updated_at: now,
+        summary: meta.summary.clone(),
+        summary_seq: meta.summary_seq,
+    };
+    store.create_session(&forked).await?;
+    if !messages.is_empty() {
+        store.append_messages(&new_id, &messages).await?;
+    }
+    eprintln!("\n\x1b[2m[forked {parent_id} \u{2192} {new_id}]\x1b[0m");
+    Ok(new_id)
 }
 
 #[allow(dead_code)]
@@ -114,9 +159,17 @@ fn print_event(ev: &SessionEvent) {
         }
         SessionEvent::ReasoningDelta(_) => {}
         SessionEvent::ToolStart { name, input, .. } => {
-            eprintln!("\n\x1b[36m\u{25b8} {name}\x1b[0m {}", summarize_input(input));
+            eprintln!(
+                "\n\x1b[36m\u{25b8} {name}\x1b[0m {}",
+                summarize_input(input)
+            );
         }
-        SessionEvent::ToolEnd { name, output, is_error, .. } => {
+        SessionEvent::ToolEnd {
+            name,
+            output,
+            is_error,
+            ..
+        } => {
             let color = if *is_error { "31" } else { "2" };
             eprintln!("\x1b[{color}m  {}\x1b[0m", indent_first(output, 2));
             let _ = name;
@@ -190,7 +243,9 @@ fn indent_first(s: &str, n: usize) -> String {
 }
 
 #[allow(dead_code)]
-pub fn _duration() -> Duration { Duration::from_secs(0) }
+pub fn _duration() -> Duration {
+    Duration::from_secs(0)
+}
 
 #[cfg(test)]
 mod tests {

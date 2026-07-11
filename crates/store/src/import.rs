@@ -55,7 +55,9 @@ async fn import_jsonl_file<S: Store + ?Sized>(
     session_id: &str,
     path: &Path,
 ) -> Result<ImportReport> {
-    let text = tokio::fs::read_to_string(path).await.context("read jsonl")?;
+    let text = tokio::fs::read_to_string(path)
+        .await
+        .context("read jsonl")?;
     let mut msgs: Vec<Message> = Vec::new();
     let mut skipped = 0u32;
     let mut first_user_text: Option<String> = None;
@@ -77,15 +79,27 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         }
     }
     if msgs.is_empty() {
-        return Ok(ImportReport { sessions: 0, messages: 0, skipped });
+        return Ok(ImportReport {
+            sessions: 0,
+            messages: 0,
+            skipped,
+        });
     }
     let now = opencode_core::message::now_ms();
     let earliest = msgs.first().map(|m| m.created_at).unwrap_or(now);
     let meta = crate::types::SessionMeta {
         id: session_id.to_string(),
         title: first_user_text.map(|t| t.chars().take(80).collect()),
-        agent: msgs.iter().rev().find(|m| m.agent.is_some()).and_then(|m| m.agent.clone()),
-        model: msgs.iter().rev().find(|m| m.model.is_some()).and_then(|m| m.model.clone()),
+        agent: msgs
+            .iter()
+            .rev()
+            .find(|m| m.agent.is_some())
+            .and_then(|m| m.agent.clone()),
+        model: msgs
+            .iter()
+            .rev()
+            .find(|m| m.model.is_some())
+            .and_then(|m| m.model.clone()),
         workdir_hash: None,
         created_at: earliest,
         updated_at: msgs.last().map(|m| m.created_at).unwrap_or(now),
@@ -94,5 +108,9 @@ async fn import_jsonl_file<S: Store + ?Sized>(
     };
     store.create_session(&meta).await?;
     store.append_messages(session_id, &msgs).await?;
-    Ok(ImportReport { sessions: 1, messages: msgs.len() as u32, skipped })
+    Ok(ImportReport {
+        sessions: 1,
+        messages: msgs.len() as u32,
+        skipped,
+    })
 }

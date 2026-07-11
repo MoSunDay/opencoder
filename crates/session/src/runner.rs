@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
-use opencode_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc, ToolContext, ToolOutput};
+use opencode_core::{
+    message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc,
+    ToolContext, ToolOutput,
+};
 use opencode_llm::tool_call::CompletedToolCall;
 use opencode_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
 use opencode_store::{EventKind, SessionEventRecord, SubagentStatus, SubagentTaskRecord};
@@ -20,26 +23,49 @@ use serde::Serialize;
 pub enum SessionEvent {
     TextDelta(String),
     ReasoningDelta(String),
-    ToolStart { id: String, name: String, input: Value },
-    ToolEnd { id: String, name: String, output: String, is_error: bool },
+    ToolStart {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolEnd {
+        id: String,
+        name: String,
+        output: String,
+        is_error: bool,
+    },
     AgentSwitch(String),
     Compaction(String),
     Status(String),
     /// A subagent (task tool) started. `child_session_id` is the child's
     /// session for loading its transcript from the store.
-    SubagentStart { id: String, kind: String, prompt: String, child_session_id: String },
+    SubagentStart {
+        id: String,
+        kind: String,
+        prompt: String,
+        child_session_id: String,
+    },
     /// A subagent finished.
-    SubagentEnd { id: String, ok: bool, summary: String },
+    SubagentEnd {
+        id: String,
+        ok: bool,
+        summary: String,
+    },
     /// A child event from a running subagent, tagged with the tool-call id so
     /// the TUI can route it into the subagent's foldable block.
-    SubagentChild { id: String, ev: Box<SessionEvent> },
+    SubagentChild {
+        id: String,
+        ev: Box<SessionEvent>,
+    },
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<opencode_core::Message>),
     /// A queued follow-up was consumed (drained) at an idle boundary. Carries
     /// the consumed input's row seq so the TUI can drop it from its pending
     /// mirror instead of leaving a stale `[queued]` row until `Done`.
-    QueueConsumed { seq: i64 },
+    QueueConsumed {
+        seq: i64,
+    },
     Done,
     Error(String),
 }
@@ -124,15 +150,19 @@ async fn run_loop(
                 m.synthetic = true;
                 session.record(m).await;
             }
-            on_event(SessionEvent::Status(format!("steer promoted ({} new input(s))", steer_prompts.len())));
+            on_event(SessionEvent::Status(format!(
+                "steer promoted ({} new input(s))",
+                steer_prompts.len()
+            )));
         }
 
         if compaction::should_compact(session) {
             match compaction::compact(session, registry).await {
-                Ok(summary) => {
+                Ok(Some(summary)) => {
                     on_event(SessionEvent::TranscriptReset(session.messages.clone()));
                     on_event(SessionEvent::Compaction(summary));
                 }
+                Ok(None) => {}
                 Err(e) => on_event(SessionEvent::Error(format!("compaction failed: {e:#}"))),
             }
         }
@@ -144,12 +174,20 @@ async fn run_loop(
                 return Err(e);
             }
         };
-        let (text, tool_calls, usage) = turn;
+        let (text, reasoning, tool_calls, usage) = turn;
         if let Some(u) = &usage {
             session.last_usage = u.clone();
         }
 
         let mut blocks: Vec<ContentBlock> = Vec::new();
+        // Interleaved thinking: persist reasoning_content into the assistant
+        // message so it's sent back on subsequent requests. Only needed on
+        // tool-call turns (DeepSeek-V4 requires this and returns 400 if
+        // omitted; non-tool reasoning is ignored by the API anyway).
+        let it_on = session.config.interleaved_thinking.unwrap_or(true);
+        if it_on && !tool_calls.is_empty() && !reasoning.is_empty() {
+            blocks.push(ContentBlock::Reasoning { text: reasoning });
+        }
         if !text.is_empty() {
             blocks.push(ContentBlock::Text { text });
         }
@@ -198,17 +236,23 @@ async fn run_loop(
                     doom.pop_front();
                 }
                 if doom.len() == DOOM_THRESHOLD && doom.iter().all(|s| s == &sig) {
-                    emit(&sink, SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()));
+                    emit(
+                        &sink,
+                        SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()),
+                    );
                     return Ok(());
                 }
             }
             // Announce every tool start up front, in call order.
             for tc in &tool_calls {
-                emit(&sink, SessionEvent::ToolStart {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    input: tc.input.clone(),
-                });
+                emit(
+                    &sink,
+                    SessionEvent::ToolStart {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        input: tc.input.clone(),
+                    },
+                );
             }
             let session_ref: &SessionState = session;
             let mut futs = FuturesUnordered::new();
@@ -222,12 +266,15 @@ async fn run_loop(
             }
             let mut results: Vec<(usize, ToolOutput)> = Vec::with_capacity(tool_calls.len());
             while let Some((i, out)) = futs.next().await {
-                emit(&sink, SessionEvent::ToolEnd {
-                    id: tool_calls[i].id.clone(),
-                    name: tool_calls[i].name.clone(),
-                    output: out.content.clone(),
-                    is_error: out.is_error,
-                });
+                emit(
+                    &sink,
+                    SessionEvent::ToolEnd {
+                        id: tool_calls[i].id.clone(),
+                        name: tool_calls[i].name.clone(),
+                        output: out.content.clone(),
+                        is_error: out.is_error,
+                    },
+                );
                 results.push((i, out));
                 // Drain the whole batch even under cancel: breaking would drop
                 // in-flight subagent futures, skipping their SubagentEnd +
@@ -264,8 +311,12 @@ async fn run_one_llm_call(
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
-) -> Result<(String, Vec<CompletedToolCall>, Option<Usage>)> {
-    let system = build_system(&session.agent, &session.working_dir, session.skill_prompt.as_deref());
+) -> Result<(String, String, Vec<CompletedToolCall>, Option<Usage>)> {
+    let system = build_system(
+        &session.agent,
+        &session.working_dir,
+        session.skill_prompt.as_deref(),
+    );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
     let openai_msgs = lower_messages(&to_send);
@@ -281,26 +332,34 @@ async fn run_one_llm_call(
         model: session.model.clone(),
         messages: openai_msgs,
         tools: tool_schemas,
-        tool_choice: if allowed.is_empty() { None } else { Some("auto".into()) },
+        tool_choice: if allowed.is_empty() {
+            None
+        } else {
+            Some("auto".into())
+        },
         temperature: None,
         max_tokens: session.config.max_tokens,
         reasoning_effort: session.config.reasoning_effort.clone(),
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
+    let mut reasoning_buf = String::new();
     let mut cancel_fut = std::pin::pin!(await_cancel(session));
     loop {
         tokio::select! {
             biased;
             _ = &mut cancel_fut => {
                 on_event(SessionEvent::Status("interrupted".into()));
-                return Ok((String::new(), Vec::new(), None));
+                return Ok((String::new(), String::new(), Vec::new(), None));
             }
             ev = rx.recv() => {
                 let ev = match ev { Some(ev) => ev, None => break };
                 match ev {
                     LlmEvent::TextDelta(t) => on_event(SessionEvent::TextDelta(t)),
-                    LlmEvent::ReasoningDelta(r) => on_event(SessionEvent::ReasoningDelta(r)),
+                    LlmEvent::ReasoningDelta(r) => {
+                        reasoning_buf.push_str(&r);
+                        on_event(SessionEvent::ReasoningDelta(r));
+                    }
                     LlmEvent::ToolCallStart { .. } | LlmEvent::ToolCallDelta { .. } => {}
                     LlmEvent::Completed { text, tool_calls, usage } => {
                         completed = Some((text, tool_calls, usage));
@@ -310,7 +369,9 @@ async fn run_one_llm_call(
             }
         }
     }
-    completed.ok_or_else(|| anyhow!("stream ended without completion"))
+    let (text, tool_calls, usage) =
+        completed.ok_or_else(|| anyhow!("stream ended without completion"))?;
+    Ok((text, reasoning_buf, tool_calls, usage))
 }
 
 async fn execute_call(
@@ -325,8 +386,14 @@ async fn execute_call(
     // Plan-mode bash write guard: classify the command and block mutating
     // operations, returning a descriptive error to the model so it can adapt.
     if tc.name == "bash" && session.agent.kind == AgentKind::Plan {
-        let cmd = tc.input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-        if let crate::bash_guard::BashVerdict::WriteBlocked(reason) = crate::bash_guard::classify(cmd) {
+        let cmd = tc
+            .input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if let crate::bash_guard::BashVerdict::WriteBlocked(reason) =
+            crate::bash_guard::classify(cmd)
+        {
             return ToolOutput::err(format!(
                 "Blocked in plan mode: this bash command modifies state ({reason}). \
                  Plan mode is read-only. To make changes, switch to act mode \
@@ -362,11 +429,19 @@ async fn run_subagent(
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
 ) -> ToolOutput {
-    let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let prompt = input
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if prompt.is_empty() {
         return ToolOutput::err("task requires a prompt");
     }
-    let kind = input.get("subagent_type").and_then(|v| v.as_str()).unwrap_or("explore").to_string();
+    let kind = input
+        .get("subagent_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("explore")
+        .to_string();
     let agent = match resolve_agent(&kind) {
         Some(a) => a,
         None => {
@@ -377,12 +452,15 @@ async fn run_subagent(
     };
     let child_session_id = format!("sub-{}", new_id());
     let preview: String = prompt.chars().take(80).collect();
-    emit(sink, SessionEvent::SubagentStart {
-        id: call_id.clone(),
-        kind: kind.clone(),
-        prompt: preview,
-        child_session_id: child_session_id.clone(),
-    });
+    emit(
+        sink,
+        SessionEvent::SubagentStart {
+            id: call_id.clone(),
+            kind: kind.clone(),
+            prompt: preview,
+            child_session_id: child_session_id.clone(),
+        },
+    );
 
     let mut child = SessionState::new(
         child_session_id.clone(),
@@ -483,10 +561,13 @@ async fn run_subagent(
                 }
                 _ => {}
             }
-            emit(&parent_sink, SessionEvent::SubagentChild {
-                id: call_id_for_cb.clone(),
-                ev: Box::new(cev),
-            });
+            emit(
+                &parent_sink,
+                SessionEvent::SubagentChild {
+                    id: call_id_for_cb.clone(),
+                    ev: Box::new(cev),
+                },
+            );
         },
     ))
     .await;
@@ -510,11 +591,14 @@ async fn run_subagent(
     } else {
         child_chars.chars().take(120).collect()
     };
-    emit(sink, SessionEvent::SubagentEnd {
-        id: call_id.clone(),
-        ok,
-        summary: format!("({} tool calls) {}", child_tools, summary_preview),
-    });
+    emit(
+        sink,
+        SessionEvent::SubagentEnd {
+            id: call_id.clone(),
+            ok,
+            summary: format!("({} tool calls) {}", child_tools, summary_preview),
+        },
+    );
     if ok {
         ToolOutput::ok(text)
     } else {
@@ -550,7 +634,10 @@ async fn claim_steers(session: &mut SessionState) -> Vec<String> {
         Some(s) => s,
         None => return Vec::new(),
     };
-    let pending = match store.pending_inputs(&session.id, opencode_store::Delivery::Steer).await {
+    let pending = match store
+        .pending_inputs(&session.id, opencode_store::Delivery::Steer)
+        .await
+    {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(error = %e, "claim_steers: pending_inputs failed");

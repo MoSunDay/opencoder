@@ -40,5 +40,7 @@ impl SessionStore {
         self.jsonl(session_id).append(msg).await
     }
 
-    pub fn root(&self) -> &Path { &self.root }
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
 }

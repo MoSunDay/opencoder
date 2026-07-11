@@ -20,7 +20,10 @@ pub fn estimate(text: &str) -> usize {
 /// content (text + reasoning + tool-use input + tool-result content) plus a
 /// small structural overhead per message.
 pub fn estimate_messages(messages: &[Message]) -> usize {
-    messages.iter().map(|m| estimate(&m.estimate_chars()) + PER_MESSAGE_OVERHEAD).sum()
+    messages
+        .iter()
+        .map(|m| estimate(&m.estimate_chars()) + PER_MESSAGE_OVERHEAD)
+        .sum()
 }
 
 /// Estimate tokens for the full session transcript that will be sent to the

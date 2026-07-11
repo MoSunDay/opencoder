@@ -48,7 +48,10 @@ async fn mock_records_request_bodies_for_assertion() {
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 1);
-    assert_eq!(reqs[0].model, "glm-5.2", "model must be captured for switch assertions");
+    assert_eq!(
+        reqs[0].model, "glm-5.2",
+        "model must be captured for switch assertions"
+    );
 }
 
 #[tokio::test]

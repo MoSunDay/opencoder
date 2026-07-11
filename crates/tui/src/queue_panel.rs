@@ -87,7 +87,10 @@ mod tests {
 
     #[test]
     fn up_swaps_with_predecessor() {
-        assert_eq!(plan(&items(), 20, QueueBtnAction::Up), QueueEffect::Swap(20, 10));
+        assert_eq!(
+            plan(&items(), 20, QueueBtnAction::Up),
+            QueueEffect::Swap(20, 10)
+        );
     }
 
     #[test]
@@ -97,7 +100,10 @@ mod tests {
 
     #[test]
     fn down_swaps_with_successor() {
-        assert_eq!(plan(&items(), 20, QueueBtnAction::Down), QueueEffect::Swap(20, 30));
+        assert_eq!(
+            plan(&items(), 20, QueueBtnAction::Down),
+            QueueEffect::Swap(20, 30)
+        );
     }
 
     #[test]
@@ -107,7 +113,10 @@ mod tests {
 
     #[test]
     fn delete_returns_seq() {
-        assert_eq!(plan(&items(), 20, QueueBtnAction::Delete), QueueEffect::Delete(20));
+        assert_eq!(
+            plan(&items(), 20, QueueBtnAction::Delete),
+            QueueEffect::Delete(20)
+        );
     }
 
     #[test]

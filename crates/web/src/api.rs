@@ -11,13 +11,12 @@ use axum::Json;
 use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::sync::Mutex;
 
 use opencode_core::Config;
 use opencode_llm::{ChatClient, ChatStream};
 use opencode_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
 
-use crate::handle::{admit_and_drain, RuntimeOverrides, SessionHandle, SseEvt};
+use crate::handle::{admit_and_drain, SessionHandle, SseEvt};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -26,13 +25,19 @@ pub struct CreateBody {
     model: Option<String>,
 }
 
-pub async fn create_session(State(state): State<Arc<AppState>>, body: Option<Json<CreateBody>>) -> impl IntoResponse {
+pub async fn create_session(
+    State(state): State<Arc<AppState>>,
+    body: Option<Json<CreateBody>>,
+) -> impl IntoResponse {
     let id = opencode_session::runner::new_id();
     let now = opencode_core::message::now_ms();
     let meta = SessionMeta {
         id: id.clone(),
         title: None,
-        agent: body.as_ref().and_then(|b| b.agent.clone()).or_else(|| Some("act".into())),
+        agent: body
+            .as_ref()
+            .and_then(|b| b.agent.clone())
+            .or_else(|| Some("act".into())),
         model: body.as_ref().and_then(|b| b.model.clone()),
         workdir_hash: None,
         created_at: now,
@@ -51,7 +56,10 @@ pub struct ListQuery {
     pub search: Option<String>,
 }
 
-pub async fn list_sessions(State(state): State<Arc<AppState>>, Query(q): Query<ListQuery>) -> impl IntoResponse {
+pub async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ListQuery>,
+) -> impl IntoResponse {
     let filter = SessionFilter {
         limit: q.limit.unwrap_or(50).clamp(1, 500),
         cursor: q.cursor,
@@ -62,11 +70,17 @@ pub async fn list_sessions(State(state): State<Arc<AppState>>, Query(q): Query<L
     Json(json!({ "sessions": items })).into_response()
 }
 
-pub async fn get_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse {
+pub async fn get_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     messages_response(&state, &id).await
 }
 
-pub async fn get_messages(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse {
+pub async fn get_messages(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     messages_response(&state, &id).await
 }
 
@@ -109,7 +123,11 @@ pub async fn post_prompt(
         Ok(c) => Arc::new(c),
         Err(e) => return error_500(format!("client: {e:#}")),
     };
-    let delivery = body.delivery.as_deref().and_then(Delivery::parse).unwrap_or(Delivery::Steer);
+    let delivery = body
+        .delivery
+        .as_deref()
+        .and_then(Delivery::parse)
+        .unwrap_or(Delivery::Steer);
     ensure_session_row(&state, &id, &body.prompt, &config).await;
     match admit_and_drain(
         state.handles.clone(),
@@ -154,10 +172,21 @@ pub struct SwitchBody {
     pub value: String,
 }
 
-pub async fn post_agent(State(state): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<SwitchBody>) -> impl IntoResponse {
+pub async fn post_agent(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SwitchBody>,
+) -> impl IntoResponse {
     let _ = state
         .store
-        .update_session(&id, &SessionPatch { agent: Some(body.value.clone()), updated_at: Some(opencode_core::message::now_ms()), ..Default::default() })
+        .update_session(
+            &id,
+            &SessionPatch {
+                agent: Some(body.value.clone()),
+                updated_at: Some(opencode_core::message::now_ms()),
+                ..Default::default()
+            },
+        )
         .await;
     if let Some(h) = state.handles.lock().await.get(&id).cloned() {
         h.overrides.lock().await.agent = Some(body.value.clone());
@@ -165,10 +194,21 @@ pub async fn post_agent(State(state): State<Arc<AppState>>, Path(id): Path<Strin
     Json(json!({ "ok": true, "agent": body.value }))
 }
 
-pub async fn post_model(State(state): State<Arc<AppState>>, Path(id): Path<String>, Json(body): Json<SwitchBody>) -> impl IntoResponse {
+pub async fn post_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<SwitchBody>,
+) -> impl IntoResponse {
     let _ = state
         .store
-        .update_session(&id, &SessionPatch { model: Some(body.value.clone()), updated_at: Some(opencode_core::message::now_ms()), ..Default::default() })
+        .update_session(
+            &id,
+            &SessionPatch {
+                model: Some(body.value.clone()),
+                updated_at: Some(opencode_core::message::now_ms()),
+                ..Default::default()
+            },
+        )
         .await;
     if let Some(h) = state.handles.lock().await.get(&id).cloned() {
         h.overrides.lock().await.model = Some(body.value.clone());
@@ -176,9 +216,12 @@ pub async fn post_model(State(state): State<Arc<AppState>>, Path(id): Path<Strin
     Json(json!({ "ok": true, "model": body.value }))
 }
 
-pub async fn post_interrupt(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> impl IntoResponse {
+pub async fn post_interrupt(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     if let Some(h) = state.handles.lock().await.get(&id).cloned() {
-        h.cancel.cancel();
+        h.cancel.lock().await.cancel();
     }
     Json(json!({ "ok": true }))
 }
@@ -216,26 +259,17 @@ pub async fn get_events(
 
     let rx = {
         let mut map = state.handles.lock().await;
-        let handle = map.entry(id.clone()).or_insert_with(|| {
-            let (tx, _rx) = tokio::sync::broadcast::channel::<SseEvt>(256);
-            Arc::new(SessionHandle {
-                tx,
-                cancel: tokio_util::sync::CancellationToken::new(),
-                overrides: Mutex::new(RuntimeOverrides::default()),
-            })
-        });
+        let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
         handle.tx.subscribe()
     };
 
     let replay = futures::stream::iter(persisted);
-    let live = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|r| async move { r.ok() });
-    let merged = replay
-        .chain(live)
-        .map(|evt| {
-            let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
-            Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
-        });
+    let live =
+        tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|r| async move { r.ok() });
+    let merged = replay.chain(live).map(|evt| {
+        let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
+        Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
+    });
 
     Sse::new(merged).keep_alive(KeepAlive::default())
 }

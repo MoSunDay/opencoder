@@ -94,12 +94,30 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
 pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result<()> {
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
-    if let Some(v) = &patch.title { sets.push("title = ?"); args.push(v.clone().into()); }
-    if let Some(v) = &patch.agent { sets.push("agent = ?"); args.push(v.clone().into()); }
-    if let Some(v) = &patch.model { sets.push("model = ?"); args.push(v.clone().into()); }
-    if let Some(v) = &patch.summary { sets.push("summary = ?"); args.push(v.clone().into()); }
-    if let Some(v) = patch.summary_seq { sets.push("summary_seq = ?"); args.push(v.into()); }
-    if let Some(v) = patch.updated_at { sets.push("updated_at = ?"); args.push(v.into()); }
+    if let Some(v) = &patch.title {
+        sets.push("title = ?");
+        args.push(v.clone().into());
+    }
+    if let Some(v) = &patch.agent {
+        sets.push("agent = ?");
+        args.push(v.clone().into());
+    }
+    if let Some(v) = &patch.model {
+        sets.push("model = ?");
+        args.push(v.clone().into());
+    }
+    if let Some(v) = &patch.summary {
+        sets.push("summary = ?");
+        args.push(v.clone().into());
+    }
+    if let Some(v) = patch.summary_seq {
+        sets.push("summary_seq = ?");
+        args.push(v.into());
+    }
+    if let Some(v) = patch.updated_at {
+        sets.push("updated_at = ?");
+        args.push(v.into());
+    }
     if sets.is_empty() {
         return Ok(());
     }
@@ -110,7 +128,8 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
 }
 
 pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM sessions WHERE id = ?", params![id]).await?;
+    conn.execute("DELETE FROM sessions WHERE id = ?", params![id])
+        .await?;
     Ok(())
 }
 

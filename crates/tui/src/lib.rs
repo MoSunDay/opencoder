@@ -27,7 +27,11 @@ pub struct TuiOpts {
 
 impl TuiOpts {
     pub fn new(model: Option<String>, agent: Option<String>, workdir: Option<PathBuf>) -> Self {
-        TuiOpts { model, agent, workdir }
+        TuiOpts {
+            model,
+            agent,
+            workdir,
+        }
     }
 }
 

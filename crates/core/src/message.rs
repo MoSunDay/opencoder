@@ -12,8 +12,12 @@ pub enum Role {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    Reasoning { text: String },
+    Text {
+        text: String,
+    },
+    Reasoning {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,

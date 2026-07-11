@@ -39,7 +39,12 @@ pub async fn models_dispatch(cli: &Cli) -> Result<()> {
 /// without spawning the binary or a live model.
 pub(crate) fn models_summary(cfg: &Config) -> String {
     let mut s = String::new();
-    s.push_str(&format!("primary      : {}  (provider: {}, id: {})\n", cfg.model, cfg.provider_id(), cfg.model_id()));
+    s.push_str(&format!(
+        "primary      : {}  (provider: {}, id: {})\n",
+        cfg.model,
+        cfg.provider_id(),
+        cfg.model_id()
+    ));
     match &cfg.small_model {
         Some(m) => s.push_str(&format!("small_model  : {m}\n")),
         None => s.push_str("small_model  : <unset, falls back to primary>\n"),
@@ -48,14 +53,20 @@ pub(crate) fn models_summary(cfg: &Config) -> String {
         Some(e) => s.push_str(&format!("thinking     : {e}  (reasoning_effort)\n")),
         None => s.push_str("thinking     : <unset, provider default>\n"),
     }
+    match cfg.interleaved_thinking {
+        Some(true) => {
+            s.push_str("interleave   : on  (reasoning_content round-trip on tool turns)\n")
+        }
+        Some(false) => s.push_str("interleave   : off\n"),
+        None => s.push_str("interleave   : <unset, defaults on>\n"),
+    }
     s.push_str(&format!("context_limit: {}\n", cfg.context_limit()));
     s.push_str(&format!(
-        "compaction   : auto={} threshold={} reserved={} tail_turns={} prune={}\n",
+        "compaction   : auto={} threshold={} reserved={} tail_turns={}\n",
         cfg.compaction.auto,
         cfg.compaction.context_threshold,
         cfg.compaction.reserved,
         cfg.compaction.tail_turns,
-        cfg.compaction.prune,
     ));
     s
 }
@@ -65,7 +76,12 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
     let store = open_store(&workdir).await?;
     match sub {
         SessionSub::List => {
-            let items = store.list_sessions(&SessionFilter { limit: 50, ..Default::default() }).await?;
+            let items = store
+                .list_sessions(&SessionFilter {
+                    limit: 50,
+                    ..Default::default()
+                })
+                .await?;
             if items.is_empty() {
                 println!("(no sessions for this workdir)");
                 return Ok(());
@@ -89,7 +105,9 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
         }
         SessionSub::Export { id, out } => {
             let bundle = export_bundle(&store, id).await?;
-            let path = out.clone().unwrap_or_else(|| format!("{id}.opencode").into());
+            let path = out
+                .clone()
+                .unwrap_or_else(|| format!("{id}.opencode").into());
             let mut file = std::fs::File::create(&path)
                 .with_context(|| format!("create {}", path.display()))?;
             write_bundle(&bundle, &mut file)?;
@@ -98,12 +116,14 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             Ok(())
         }
         SessionSub::Import { input } => {
-            let mut file = std::fs::File::open(input)
-                .with_context(|| "open bundle file")?;
+            let mut file = std::fs::File::open(input).with_context(|| "open bundle file")?;
             let bundle = read_bundle(&mut file)?;
             let id = import_bundle(&store, &bundle, None).await?;
-            println!("imported session {id} ({} messages, {} subagents)",
-                bundle.messages.len(), bundle.subagents.len());
+            println!(
+                "imported session {id} ({} messages, {} subagents)",
+                bundle.messages.len(),
+                bundle.subagents.len()
+            );
             println!("continue with: opencoder --session {id}");
             Ok(())
         }
@@ -150,7 +170,10 @@ mod tests {
 
     #[test]
     fn models_summary_shows_reasoning_effort_when_set() {
-        let cfg = Config { reasoning_effort: Some("medium".into()), ..Default::default() };
+        let cfg = Config {
+            reasoning_effort: Some("medium".into()),
+            ..Default::default()
+        };
         let s = models_summary(&cfg);
         assert!(
             s.contains("thinking     : medium  (reasoning_effort)"),
@@ -165,6 +188,29 @@ mod tests {
         assert!(
             s.contains("thinking     : <unset, provider default>"),
             "absent reasoning_effort must render unset marker, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn models_summary_shows_interleave_on_by_default() {
+        let cfg = Config::default();
+        let s = models_summary(&cfg);
+        assert!(
+            s.contains("interleave   : on  (reasoning_content round-trip on tool turns)"),
+            "default interleaved_thinking must render on, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn models_summary_shows_interleave_off() {
+        let cfg = Config {
+            interleaved_thinking: Some(false),
+            ..Default::default()
+        };
+        let s = models_summary(&cfg);
+        assert!(
+            s.contains("interleave   : off"),
+            "interleaved_thinking=false must render off, got:\n{s}"
         );
     }
 }

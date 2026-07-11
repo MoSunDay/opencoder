@@ -28,7 +28,11 @@ pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
     Ok(seq)
 }
 
-pub async fn pending(conn: &Connection, session_id: &str, delivery: Delivery) -> Result<Vec<SessionInput>> {
+pub async fn pending(
+    conn: &Connection,
+    session_id: &str,
+    delivery: Delivery,
+) -> Result<Vec<SessionInput>> {
     let stmt = conn
         .prepare("SELECT seq, id, session_id, delivery, prompt, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL ORDER BY admitted_seq ASC")
         .await?;
@@ -52,7 +56,9 @@ pub async fn promote(
     let stmt = tx
         .prepare("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL AND admitted_seq <= ? ORDER BY admitted_seq ASC")
         .await?;
-    let mut rows = stmt.query(params![session_id, delivery.as_str(), up_to_admitted_seq]).await?;
+    let mut rows = stmt
+        .query(params![session_id, delivery.as_str(), up_to_admitted_seq])
+        .await?;
     let mut seqs: Vec<i64> = Vec::new();
     while let Some(r) = rows.next().await? {
         seqs.push(r.get::<i64>(0)?);
@@ -62,7 +68,10 @@ pub async fn promote(
     let promoted_seq = last_input_seq_in_tx(&tx).await? + 1;
     for s in &seqs {
         let n = tx
-            .execute("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?", params![promoted_seq, s])
+            .execute(
+                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+                params![promoted_seq, s],
+            )
             .await?;
         if n == 0 {
             warn!(seq = s, "input vanished during promote");
@@ -87,7 +96,11 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
     drop(rows);
     if let Some(s) = target {
         let promoted_seq = last_input_seq_in_tx(&tx).await? + 1;
-        tx.execute("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?", params![promoted_seq, s]).await?;
+        tx.execute(
+            "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+            params![promoted_seq, s],
+        )
+        .await?;
         tx.commit().await?;
         Ok(Some(s))
     } else {
@@ -99,8 +112,13 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
 /// promoted. The runner drain uses this to consume one queued follow-up at idle.
 /// Returns the row seq alongside the input so callers (e.g. the TUI mirror) can
 /// reconcile by identity.
-pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Option<(i64, SessionInput)>> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate).await?;
+pub async fn claim_next_queue(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<(i64, SessionInput)>> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .await?;
     let stmt = tx
         .prepare("SELECT seq, id, session_id, delivery, prompt, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
         .await?;
@@ -117,7 +135,11 @@ pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Opt
     drop(rows);
     if let Some((seq, input)) = claimed {
         let promoted_seq = last_input_seq_in_tx(&tx).await? + 1;
-        tx.execute("UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?", params![promoted_seq, seq]).await?;
+        tx.execute(
+            "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+            params![promoted_seq, seq],
+        )
+        .await?;
         tx.commit().await?;
         Ok(Some((seq, input)))
     } else {
@@ -130,14 +152,23 @@ pub async fn claim_next_queue(conn: &Connection, session_id: &str) -> Result<Opt
 /// an already-drained audit row. Deleting a missing or already-promoted row
 /// matches 0 rows and is not an error (idempotent).
 pub async fn delete_input(conn: &Connection, seq: i64) -> Result<()> {
-    conn.execute("DELETE FROM session_inputs WHERE seq = ? AND promoted_seq IS NULL", params![seq]).await?;
+    conn.execute(
+        "DELETE FROM session_inputs WHERE seq = ? AND promoted_seq IS NULL",
+        params![seq],
+    )
+    .await?;
     Ok(())
 }
 
 /// Swap the drain order of two pending inputs by exchanging their
 /// `admitted_seq`. Both rows must belong to `session_id` and be still
 /// unpromoted. Used by the TUI queue panel to reorder follow-ups.
-pub async fn swap_input_order(conn: &Connection, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()> {
+pub async fn swap_input_order(
+    conn: &Connection,
+    session_id: &str,
+    seq_a: i64,
+    seq_b: i64,
+) -> Result<()> {
     if seq_a == seq_b {
         return Ok(());
     }
@@ -173,7 +204,9 @@ pub async fn swap_input_order(conn: &Connection, session_id: &str, seq_a: i64, s
 }
 
 async fn next_admitted_seq(tx: &libsql::Transaction, session_id: &str) -> Result<i64> {
-    let stmt = tx.prepare("SELECT COALESCE(MAX(admitted_seq), 0) FROM session_inputs WHERE session_id = ?").await?;
+    let stmt = tx
+        .prepare("SELECT COALESCE(MAX(admitted_seq), 0) FROM session_inputs WHERE session_id = ?")
+        .await?;
     let mut rows = stmt.query(params![session_id]).await?;
     if let Some(r) = rows.next().await? {
         Ok(r.get::<i64>(0)? + 1)

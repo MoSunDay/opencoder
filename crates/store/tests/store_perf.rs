@@ -77,7 +77,11 @@ async fn load_1000_messages_under_50ms() {
     let elapsed = t.elapsed();
     assert_eq!(loaded.len(), 1000);
     eprintln!("load 1000 msgs: {:.2?}", elapsed);
-    assert!(elapsed.as_millis() < 50, "load 1000 must be < 50ms, got {:?}", elapsed);
+    assert!(
+        elapsed.as_millis() < 50,
+        "load 1000 must be < 50ms, got {:?}",
+        elapsed
+    );
 }
 
 #[tokio::test]
@@ -102,11 +106,21 @@ async fn list_200_sessions_under_100ms() {
         store.append_messages(&id, &bulk(&id, 1)).await.unwrap();
     }
     let t = Instant::now();
-    let items = store.list_sessions(&SessionFilter { limit: 200, ..Default::default() }).await.unwrap();
+    let items = store
+        .list_sessions(&SessionFilter {
+            limit: 200,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     let elapsed = t.elapsed();
     assert_eq!(items.len(), 200);
     eprintln!("list 200 sessions (with preview subquery): {:.2?}", elapsed);
-    assert!(elapsed.as_millis() < 100, "list 200 must be < 100ms, got {:?}", elapsed);
+    assert!(
+        elapsed.as_millis() < 100,
+        "list 200 must be < 100ms, got {:?}",
+        elapsed
+    );
     // keep ContentBlock import honest
     let _ = ContentBlock::text("x");
     let _ = Role::User;

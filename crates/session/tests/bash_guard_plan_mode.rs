@@ -14,7 +14,10 @@ use opencode_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencode_session::{run, SessionEvent, SessionState};
 
 fn config() -> Config {
-    Config { model: "m/g".into(), ..Config::default() }
+    Config {
+        model: "m/g".into(),
+        ..Config::default()
+    }
 }
 
 fn bash_turn(cmd: &str) -> LlmEvent {
@@ -25,12 +28,20 @@ fn bash_turn(cmd: &str) -> LlmEvent {
             name: "bash".into(),
             input: serde_json::json!({"command": cmd}),
         }],
-        usage: Some(Usage { input_tokens: 5, output_tokens: 1, total_tokens: 6 }),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 1,
+            total_tokens: 6,
+        }),
     }
 }
 
 fn done_turn() -> LlmEvent {
-    LlmEvent::Completed { text: "ok".into(), tool_calls: vec![], usage: None }
+    LlmEvent::Completed {
+        text: "ok".into(),
+        tool_calls: vec![],
+        usage: None,
+    }
 }
 
 #[tokio::test]
@@ -45,17 +56,27 @@ async fn plan_mode_blocks_write_command() {
     let mut session = SessionState::new("guard-1", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
-    run(&mut session, "try to delete".into(), |ev| events.push(ev)).await.unwrap();
+    run(&mut session, "try to delete".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
 
-    let blocked = events.iter().find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    let blocked = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
     assert!(
         blocked.is_some(),
         "expected a ToolEnd for bash, got: {:?}",
         events.iter().map(ev_name).collect::<Vec<_>>()
     );
-    if let SessionEvent::ToolEnd { is_error, output, .. } = blocked.unwrap() {
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = blocked.unwrap()
+    {
         assert!(*is_error, "write command must be blocked (is_error=true)");
-        assert!(output.contains("Blocked in plan mode"), "output must explain the block, got: {output}");
+        assert!(
+            output.contains("Blocked in plan mode"),
+            "output must explain the block, got: {output}"
+        );
     }
 }
 
@@ -71,12 +92,22 @@ async fn plan_mode_allows_read_only_command() {
     let mut session = SessionState::new("guard-2", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
-    run(&mut session, "list files".into(), |ev| events.push(ev)).await.unwrap();
+    run(&mut session, "list files".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
 
-    let tool_end = events.iter().find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
     assert!(tool_end.is_some(), "expected a ToolEnd for bash");
-    if let SessionEvent::ToolEnd { is_error, output, .. } = tool_end.unwrap() {
-        assert!(!*is_error, "read-only command must succeed, output: {output}");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(
+            !*is_error,
+            "read-only command must succeed, output: {output}"
+        );
     }
 }
 
@@ -93,11 +124,20 @@ async fn act_mode_is_not_guarded() {
     let mut session = SessionState::new("guard-3", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
-    run(&mut session, "make dir".into(), |ev| events.push(ev)).await.unwrap();
+    run(&mut session, "make dir".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
 
-    let tool_end = events.iter().find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
     assert!(tool_end.is_some());
-    if let SessionEvent::ToolEnd { is_error: _, output, .. } = tool_end.unwrap() {
+    if let SessionEvent::ToolEnd {
+        is_error: _,
+        output,
+        ..
+    } = tool_end.unwrap()
+    {
         assert!(
             !output.contains("Blocked in plan mode"),
             "act mode must not be guarded, got: {output}"

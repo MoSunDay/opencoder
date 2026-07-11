@@ -11,11 +11,18 @@ pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64
     let payload_json = serde_json::to_string(&event.payload).context("serialize event payload")?;
     conn.execute(
         INSERT_EVENT,
-        params![event.session_id.as_str(), kind_str(event.kind), payload_json, event.ts],
+        params![
+            event.session_id.as_str(),
+            kind_str(event.kind),
+            payload_json,
+            event.ts
+        ],
     )
     .await
     .context("insert event")?;
-    let stmt = conn.prepare("SELECT MAX(seq) FROM session_events WHERE session_id = ?").await?;
+    let stmt = conn
+        .prepare("SELECT MAX(seq) FROM session_events WHERE session_id = ?")
+        .await?;
     let mut rows = stmt.query(params![event.session_id.as_str()]).await?;
     if let Some(r) = rows.next().await? {
         Ok(r.get::<Option<i64>>(0)?.unwrap_or(0))
@@ -24,7 +31,11 @@ pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64
     }
 }
 
-pub async fn after(conn: &Connection, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>> {
+pub async fn after(
+    conn: &Connection,
+    session_id: &str,
+    after_seq: i64,
+) -> Result<Vec<SessionEventRecord>> {
     let stmt = conn
         .prepare("SELECT seq, type, payload_json, ts FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq ASC")
         .await?;
@@ -35,7 +46,8 @@ pub async fn after(conn: &Connection, session_id: &str, after_seq: i64) -> Resul
         let kind_s: String = r.get(1)?;
         let payload_json: String = r.get(2)?;
         let ts: i64 = r.get(3)?;
-        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
         out.push(SessionEventRecord {
             session_id: session_id.to_string(),
             kind: parse_kind(&kind_s),

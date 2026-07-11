@@ -21,6 +21,14 @@ pub enum UiCmd {
     SetSkill(Option<String>),
     /// Hot-reload config at the next turn boundary. Sent by the `/model` menu.
     ReloadConfig(Config),
+    /// Swap the session's cancellation token for a fresh, uncancelled one.
+    /// Sent before every turn-starting command so a prior double-Esc abort
+    /// doesn't leave `sess.cancel` permanently cancelled (which would make
+    /// `run_loop` break instantly at its top-of-loop `is_cancelled()` check,
+    /// silently rejecting all subsequent submissions). The loop reassigns its
+    /// own `cancel` handle to a clone of the same token so double-Esc still
+    /// targets the live turn.
+    ResetCancel(CancellationToken),
     Quit,
 }
 
@@ -82,7 +90,8 @@ pub async fn process_cmd(
             let tx = evt_tx.clone();
             let res = run_session(sess, prompt, move |sev| {
                 let _ = tx.try_send(UiEvent::Session(sev));
-            }).await;
+            })
+            .await;
             if let Err(e) = res {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
             }
@@ -102,7 +111,8 @@ pub async fn process_cmd(
             let tx = evt_tx.clone();
             let res = run_session(sess, String::new(), move |sev| {
                 let _ = tx.try_send(UiEvent::Session(sev));
-            }).await;
+            })
+            .await;
             if let Err(e) = res {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
             }
@@ -111,23 +121,32 @@ pub async fn process_cmd(
         UiCmd::Compact => {
             let registry = opencode_session::tools::registry();
             match opencode_session::compaction::compact(sess, &registry).await {
-                Ok(summary) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(sess.messages.clone())));
+                Ok(Some(summary)) => {
+                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
+                        sess.messages.clone(),
+                    )));
                     let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Compaction(summary)));
                 }
+                Ok(None) => {}
                 Err(e) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(
-                        format!("compaction failed: {e:#}"))));
+                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!(
+                        "compaction failed: {e:#}"
+                    ))));
                 }
             }
             let _ = evt_tx.try_send(UiEvent::TurnDone);
         }
-        UiCmd::SetSkill(body) => { sess.skill_prompt = body; }
+        UiCmd::SetSkill(body) => {
+            sess.skill_prompt = body;
+        }
         UiCmd::ReloadConfig(new_cfg) => {
             let api_key = new_cfg.api_key().unwrap_or_default();
             if let Ok(new_client) = ChatClient::new(&new_cfg.provider.base_url, &api_key) {
                 sess.apply_config_reload(new_cfg, Arc::new(new_client));
             }
+        }
+        UiCmd::ResetCancel(c) => {
+            sess.cancel = Some(c);
         }
         UiCmd::Quit => return true,
     }
@@ -169,15 +188,75 @@ mod tests {
         let new_cancel_probe = new_cancel.clone();
 
         rebind_session(
-            &mut cmd_tx, &mut evt_rx, &mut session_id, &mut cancel,
-            new_cmd_tx, new_evt_rx, "s2".into(), new_cancel,
+            &mut cmd_tx,
+            &mut evt_rx,
+            &mut session_id,
+            &mut cancel,
+            new_cmd_tx,
+            new_evt_rx,
+            "s2".into(),
+            new_cancel,
         );
 
         cancel.cancel();
-        assert!(new_cancel_probe.is_cancelled(),
-            "active loop token must target the switched session");
-        assert!(!first_cancel.is_cancelled(),
-            "old session token must be orphaned, not the active one");
+        assert!(
+            new_cancel_probe.is_cancelled(),
+            "active loop token must target the switched session"
+        );
+        assert!(
+            !first_cancel.is_cancelled(),
+            "old session token must be orphaned, not the active one"
+        );
         assert_eq!(session_id, "s2");
+    }
+
+    // Regression guard for the "Esc then can't submit" bug: after a double-Esc
+    // abort the session's cancel token is permanently cancelled. The loop
+    // recovers by sending `ResetCancel(fresh)` before the next turn. This test
+    // verifies that `process_cmd(ResetCancel)` actually swaps `sess.cancel` for
+    // a fresh, uncancelled token — the exact invariant `run_loop` relies on at
+    // its top-of-loop `is_cancelled()` check.
+    #[tokio::test]
+    async fn reset_cancel_replaces_with_fresh_uncancelled_token() {
+        use opencode_core::resolve_agent;
+        use opencode_llm::MockChatClient;
+
+        let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
+        let agent = resolve_agent("act").expect("act agent");
+        let stale = CancellationToken::new();
+        stale.cancel();
+        let stale_probe = stale.clone();
+        let mut sess = SessionState::new(
+            "reset-test",
+            agent,
+            opencode_core::Config::default(),
+            std::sync::Arc::new(MockChatClient::new())
+                as std::sync::Arc<dyn opencode_llm::ChatStream>,
+            std::env::temp_dir(),
+        )
+        .with_cancel(stale);
+        assert!(
+            sess.cancel.as_ref().unwrap().is_cancelled(),
+            "precondition: token cancelled"
+        );
+
+        let fresh = CancellationToken::new();
+        let fresh_probe = fresh.clone();
+        let should_break = process_cmd(UiCmd::ResetCancel(fresh), &mut sess, &evt_tx).await;
+
+        assert!(!should_break, "ResetCancel must not break the worker loop");
+        let active = sess.cancel.as_ref().expect("token present after reset");
+        assert!(
+            !active.is_cancelled(),
+            "session token must be uncancelled after reset"
+        );
+        assert!(
+            !fresh_probe.is_cancelled(),
+            "the fresh token itself must be uncancelled"
+        );
+        assert!(
+            stale_probe.is_cancelled(),
+            "the old token must remain cancelled (not reused)"
+        );
     }
 }

@@ -268,7 +268,9 @@ mod tests {
             id: "m1".into(),
             role: Role::Assistant,
             blocks: vec![
-                ContentBlock::Text { text: "hello".into() },
+                ContentBlock::Text {
+                    text: "hello".into(),
+                },
                 ContentBlock::ToolUse {
                     id: "tu1".into(),
                     name: "bash".into(),

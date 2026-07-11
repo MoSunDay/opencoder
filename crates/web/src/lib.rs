@@ -17,8 +17,7 @@ pub struct AppState {
     pub handles: HandleMap,
 }
 
-pub async fn serve(host: String, port: u16, _web: bool) -> Result<()> {
-    let workdir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::PathBuf) -> Result<()> {
     let data_dir = data_dir_for(&workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(data_dir.join("opencode.db")).await?);

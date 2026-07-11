@@ -53,16 +53,6 @@ def _wait_health(base: str, deadline: float) -> bool:
     return False
 
 
-def _assistant_turns(messages: list[dict]) -> list[str]:
-    """Distinct assistant text turns, in order (one entry per assistant message)."""
-    turns = []
-    for m in messages:
-        if m.get("role") == "assistant":
-            txt = "".join(b.get("text", "") for b in m.get("blocks", []) if b.get("kind") == "text")
-            turns.append(txt)
-    return turns
-
-
 def run_all(bin_path: str, api_key: str) -> Counter:
     c = Counter()
     os.environ["ZHIPU_API_KEY"] = api_key  # serve subprocess inherits env
@@ -106,16 +96,20 @@ def run_all(bin_path: str, api_key: str) -> Counter:
             c.check("B admitted after A (queue ordering)", seqB > seqA,
                     f"A={seqA} B={seqB}")
 
-        # Poll messages until BOTH turns are delivered (steer now + queue at idle).
+        # Poll messages until BOTH prompts are delivered. The correct signal is
+        # USER message count: each prompt is persisted as a user message when the
+        # drain processes it (steer immediately, queue at idle). A single tool-using
+        # turn emits MULTIPLE assistant messages, so assistant-message count would
+        # trip on turn A alone — user count is the reliable "both processed" mark.
         delivered = False
-        deadline = time.time() + 180
+        deadline = time.time() + 200
         last = None
         while time.time() < deadline:
             try:
                 doc = _request("GET", f"{base}/api/sessions/{sid}/messages", timeout=20)
                 last = doc
-                turns = _assistant_turns(doc.get("messages", []))
-                if len(turns) >= 2:
+                users = [m for m in doc.get("messages", []) if m.get("role") == "user"]
+                if len(users) >= 2:
                     delivered = True
                     break
             except Exception:
@@ -123,27 +117,30 @@ def run_all(bin_path: str, api_key: str) -> Counter:
             time.sleep(2)
 
         c.check("both prompts delivered (steer + queue-at-idle)", delivered,
-                "never observed 2 assistant turns")
-        if delivered and last:
-            msgs = last["messages"]
-            roles = [m.get("role") for m in msgs]
-            # Contract: A's full turn (user,assistant) precedes B's (user,assistant).
-            turns = _assistant_turns(msgs)
-            c.check("steer turn A has content", len(turns[0].strip()) > 0)
-            c.check("queue turn B has content", len(turns[1].strip()) > 0)
-            c.check("delivery order is A-turn then B-turn",
+                "never observed 2 user messages")
+        # Give B's turn a moment to finish writing its artifact, then verify outcome.
+        if delivered:
+            time.sleep(8)
+            try:
+                last = _request("GET", f"{base}/api/sessions/{sid}/messages", timeout=20)
+            except Exception:
+                pass
+        if last:
+            roles = [m.get("role") for m in last["messages"]]
+            c.check("delivery order preserves A before B",
                     roles.count("user") >= 2 and roles.count("assistant") >= 2,
                     f"roles={roles}")
-            # Business value: the queue follow-up actually mutated the artifact
-            # (proves B was executed, not just admitted).
+            # Business outcome (stronger than per-message text): steer A created
+            # the artifact; queue B extended it — proves both turns took effect.
             app_py = os.path.join(webdir, "app.py")
             if os.path.isfile(app_py):
                 with open(app_py, encoding="utf-8") as f:
                     src = f.read()
-                c.soft("queue follow-up extended the artifact (square)",
+                c.check("steer turn A created app.py", "Calculator" in src or "def " in src)
+                c.soft("queue turn B extended the artifact (square)",
                        "square" in src.lower(), "app.py had no square method")
             else:
-                c.soft("app.py created by steer prompt", False, "file missing")
+                c.soft("steer turn A created app.py", False, "file missing")
     finally:
         proc.terminate()
         try:

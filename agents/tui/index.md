@@ -18,17 +18,17 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - 手动 `draw_scrollbar()`（`src/render.rs`）：替代 ratatui ScrollbarState——简单比例 `scroll_y * max_off / max_scroll`，短内容对齐正确。滚轮处理器换行宽度 `r.width - 3` 与 render 的 `text_w = inner.width - 1` 对齐。
 
 ## 主流程
-`run_app` loop：每帧 `render()` → `tokio::select!` 三臂（crossterm 事件 / worker `evt_rx` / anim ticker）。crossterm 事件臂 `events.next()` 返回 `None`/`Err`（流关闭，如终端 EOF）时直接 `UiCmd::Quit` + break，防止死流忙循环。
+`run_app` loop：每帧 `render()` → `tokio::select!` 三臂（终端事件 `input_rx` / worker `evt_rx` / anim ticker）。**输入采集**（`src/input.rs`）：专用 OS 线程跑有界 `crossterm::event::poll(150ms)`+`read()`，经 tokio mpsc `blocking_send` 投递到 `input_rx`——弃用 `EventStream`（其 reader 在 Kitty 键盘协议下可被半个 Esc 消歧序列永久挂死，把整循环冻死、Ctrl+C/D 全失效）；有界 poll 每 ≤150ms 必醒，该失败模式在结构上不再可能。receiver drop（`is_closed()`）即令线程退出。**终端生命周期**（`src/terminal.rs`）：`TerminalGuard` RAII（`run()` 持有）——enter 开 raw+alt-screen+鼠标+Kitty 并装 panic hook（panic 时先恢复终端再打印），Drop 幂等恢复；任何退出路径（正常/`?`错误/panic unwind）都恢复终端，不再"变砖"。`input_rx.recv()` 返回 `None`（采集线程退出/stdin EOF）时 `UiCmd::Quit` + break。
 
 - **render**：`display_chat` / `display_agent` / `display_ctx` / `display_sys` = subagent_focus 时取子 ChatView 及其 `context_used` + 缓存的 `subagent_sys`（进入时 `sys_tokens_for(kind, workdir, None)` 算一次），否则取 `&chat` + `chat.context_used` / `sys_tokens`。`display_agent` = focus 时 `← [Esc] back | ⇲sub [kind] prompt`。
 - **Session 事件**：`chat.apply(&sev)` 内部调 `track_context` 更新 `chat.context_used`（只计本 view token，SubagentChild 不计入父），SubagentChild 路由到子 block view（子 view 的 apply 独立更新自身 context_used）；TranscriptReset 重建 ChatView（context_used 归零）。
 - **subagent ctx 切换**：`subagent_focus: Option<usize>` 状态。进入时保存 `parent_scroll/parent_follow`，退出时恢复。Esc 优先拦截（在 handle_key 之前）。
 - **输入模式**：Enter = steer（运行中）/ submit（idle）；Tab = followup（运行中）/ submit（idle）；Shift+Tab 切 plan/act。
-- **中止与续跑**：双击 Esc 硬中止（`KeyAction::Cancel` → `cancel.cancel()`，`run_app` 即刻 `running=false`）。每个新 turn 由 `start_turn` 先发 `UiCmd::ResetCancel(新 token)` 再发工作命令（mpsc FIFO，4 个派发点：Submit idle / SwitchAndStart / Compact / TurnDone 续跑），刷新 worker 的 `sess.cancel`——否则 token 永久取消会使 `run_loop` 顶部 `is_cancelled()` 永真、后续提交被静默丢弃。
+- **中止与续跑**：双击 Esc 硬中止（`KeyAction::Cancel` → `cancel.cancel()`，`run_app` 即刻 `running=false`）。每个新 turn 由 `start_turn` 先发 `UiCmd::ResetCancel(新 token)` 再发工作命令（mpsc FIFO，4 个派发点：Submit idle / SwitchAndStart / Compact / TurnDone 续跑），刷新 worker 的 `sess.cancel`——否则 token 永久取消会使 `run_loop` 顶部 `is_cancelled()` 永真、后续提交被静默丢弃。`start_turn` 返回 `bool`：`false` = 命令通道关闭（worker 已死，panic 或意外退出），派发点收到 `false` 时 `worker_dead()` 推 `[worker stopped]` marker 并 break。输入采集在独立 OS 线程，worker 死后 UI 仍响应 Ctrl+C/D，用户可干净退出而非面对冻死 spinner。
 - **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。
 
 ## 依赖与接口
-- 依赖：ratatui 0.29、crossterm、tokio、opencode-session、opencode-core、opencode-store、opencode-llm（estimate）。
+- 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencode-session、opencode-core、opencode-store、opencode-llm（estimate）。
 - 被依赖：binary crate（`src/main.rs` → `opencode_tui::run_tui`）。
 - worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。
 
@@ -42,3 +42,6 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - thinking 命中测试一致性：`chat::tests::thinking_headers_match_flatten_line_indices`
 - worker cancel-token 交换回归：`worker::tests::rebind_session_swaps_the_active_cancel_token`
 - cancel-token 刷新回归（双击 Esc 后可提交）：`worker::tests::reset_cancel_replaces_with_fresh_uncancelled_token`、`session/tests/cancel_reset.rs`
+- 输入采集线程 receiver drop 即退出：`input::tests::pump_exits_when_receiver_dropped`
+- 终端恢复幂等（无 TTY 也可调用）：`terminal::tests::restore_is_idempotent_without_a_tty`
+- worker 死亡检测（start_turn 通道关闭返 false）：`app::tests::start_turn_reports_false_when_worker_is_dead`

@@ -1,6 +1,6 @@
 //! Tests for app::handle_key — split into a separate file to keep app.rs ≤800 lines.
 
-use crate::app::{handle_key, KeyAction};
+use crate::app::{flash_visible, handle_key, KeyAction};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use std::time::Instant;
 
@@ -606,4 +606,60 @@ fn skill_menu_clear_row_unsets_skill() {
         "clear row must yield SetSkill(None)"
     );
     assert!(menu.is_none());
+}
+
+#[test]
+fn flash_visible_within_window() {
+    assert!(flash_visible(10, 11, 5));
+    assert!(flash_visible(10, 14, 5));
+}
+
+#[test]
+fn flash_visible_expired() {
+    assert!(!flash_visible(10, 15, 5));
+    assert!(!flash_visible(10, 99, 5));
+}
+
+#[test]
+fn flash_visible_handles_wraparound() {
+    // start near u32::MAX; `now` wraps past 0. Ages 0..4 -> visible, 5 -> expired.
+    assert!(flash_visible(u32::MAX, u32::MAX, 5));
+    assert!(flash_visible(u32::MAX, 0, 5));
+    assert!(flash_visible(u32::MAX, 3, 5));
+    assert!(!flash_visible(u32::MAX, 4, 5));
+    assert!(!flash_visible(u32::MAX, 99, 5));
+}
+
+/// `start_turn` must report failure when the worker command channel has no
+/// consumer — the exact signature of a dead worker task (panic or unexpected
+/// exit). The main loop relies on this `false` to surface a marker and exit
+/// instead of silently queuing into a void and spinning the spinner forever.
+#[tokio::test]
+async fn start_turn_reports_false_when_worker_is_dead() {
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    use crate::worker::UiCmd;
+
+    let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(8);
+    drop(cmd_rx); // worker gone — channel closed
+    let mut cancel = CancellationToken::new();
+    let ok = crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into())).await;
+    assert!(
+        !ok,
+        "start_turn must return false when the worker channel is closed"
+    );
+}
+
+/// `worker_dead` surfaces a visible marker so the user understands the engine
+/// stopped (rather than an unexplained freeze).
+#[test]
+fn worker_dead_pushes_a_marker() {
+    let mut chat = crate::chat::ChatView::default();
+    crate::app::worker_dead(&mut chat);
+    let text = crate::chat::block_text(&chat);
+    assert!(
+        text.contains("worker stopped"),
+        "expected a worker-stopped marker; got: {text}"
+    );
 }

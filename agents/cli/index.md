@@ -17,7 +17,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - `fork_session(store, parent_id)`（`src/run.rs`）：读 parent meta+messages → 新 id → `create_session` + `append_messages`，返回新 id，打印 `[forked P → C]`。
 - `print_event`（`src/run.rs`）：headless 事件渲染——`▸ name input`（ToolStart，input 取 command/path/description 摘要）、缩进输出（ToolEnd，错误红色）、`[context compacted] summary`、`⤷ subagent [kind] prompt` / `✔|✘ summary`、`[switched to X mode]`、`[session <id>]`（run 结束）、`[status]`。`ReasoningDelta`/`TranscriptReset`/`QueueConsumed`/`SubagentChild` 不打印。这套 marker 是 e2e 日志断言的稳定来源。
 - `build_session_json(store, id)`（`src/session_cmd.rs`）：返回 `{meta, messages, subagent_tasks}` 的 JSON 值——meta 含 compaction summary 字段；messages 含**全部** ContentBlock（Text/Reasoning/ToolUse/ToolResult，不过滤）；subagent_tasks 含 status/result/ok。`session show <id> --json` 打印之。这是 e2e 深度断言的机器可读观测面，解耦存储内部（不依赖 sqlite 直查 / hash 路径）。
-- `data_dir_for(workdir)`（`src/session_cmd.rs`）：workdir → 本地数据目录（`<data_local>/opencode/<hash>/opencode.db`）。**注意**：仍用 `std::collections::hash_map::DefaultHasher`（std 不保证跨版本稳定）——web 层已在 go-live review 改用 FNV-1a，CLI 层尚未同步，是已知隐患。
+- `data_dir_for(workdir)`（`src/session_cmd.rs`）：workdir → 本地数据目录（`<data_local>/opencoder/<hash>/opencoder.db`）。**注意**：仍用 `std::collections::hash_map::DefaultHasher`（std 不保证跨版本稳定）——web 层已在 go-live review 改用 FNV-1a，CLI 层尚未同步，是已知隐患。
 
 ## 主流程
 - 裸 prompt / `run`：`run_headless` → 一次性 run → `[session <id>]`。
@@ -29,8 +29,8 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 ## e2e 测试套件
 - 入口：`scripts/e2e-glm.sh [binary]` 或 `python3 scripts/e2e_glm.py [binary]`。Flag：`--skip-web`（跳过 serve/HTTP 场景）、`--only {cli,web}`。
 - binary 解析：CLI 参数 → `OPENCODER_BIN` 环境变量 → `target/debug/opencoder`。
-- 鉴权：`ZHIPU_API_KEY` 环境变量，或 `~/.local/share/opencode/auth.json`。
-- 观测面：`opencode session show <id> --json`（`build_session_json`）返回 `{meta, messages, subagent_tasks}`——messages 含全部 ContentBlock（Text/Reasoning/ToolUse/ToolResult），e2e 据此做深度断言而不耦合存储内部。headless 事件 marker（`▸`/`[context compacted]`/`subagent [`/`[session <id>]`）是日志断言来源。
+- 鉴权：`ZHIPU_API_KEY` 环境变量，或 `~/.local/share/opencoder/auth.json`。
+- 观测面：`opencoder session show <id> --json`（`build_session_json`）返回 `{meta, messages, subagent_tasks}`——messages 含全部 ContentBlock（Text/Reasoning/ToolUse/ToolResult），e2e 据此做深度断言而不耦合存储内部。headless 事件 marker（`▸`/`[context compacted]`/`subagent [`/`[session <id>]`）是日志断言来源。
 - 断言模型：HARD = 确定性 store/契约断言（fork 拷贝完整性、bundle 往返、resume 上下文加载、plan 只读、session list/delete、config show JSON）；SOFT = 模型配合相关（工具调用 marker、压缩摘要内容、subagent 派发、reasoning_content 持久化），模型不配合时记 skip 而非 fail。
 - 语法 gate（无 API key 也可跑）：`python3 -m py_compile scripts/e2e/*.py scripts/e2e_glm.py`——仅校验 Python 语法，不执行场景。
 - 不属于 `cargo test --workspace`——需真实 API key + glm5.2 模型调用，手动 / CI 触发。

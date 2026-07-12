@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_BIN = os.path.join(os.getcwd(), "target", "debug", "opencoder")
-AUTH_PATH = os.path.expanduser("~/.local/share/opencode/auth.json")
+AUTH_PATH = os.path.expanduser("~/.local/share/opencoder/auth.json")
 
 # Tool markers emitted by the headless event printer (see cli/src/run.rs).
 RE_SESSION_ID = re.compile(r"\[session ([0-9A-Z]+)\]")
@@ -51,7 +51,7 @@ def ensure_auth() -> str:
         with open(AUTH_PATH) as f:
             data = json.load(f)
         return data["zhipuai-coding-plan"]["key"]
-    raise SystemExit("FAIL: set ZHIPU_API_KEY or install opencode auth.json")
+    raise SystemExit("FAIL: set ZHIPU_API_KEY or install opencoder auth.json")
 
 
 def make_config(
@@ -82,9 +82,9 @@ def make_config(
 
 
 def seed_workdir(cfg: dict[str, Any]) -> str:
-    """Create a temp workdir, write opencode.json, return the path."""
+    """Create a temp workdir, write opencoder.json, return the path."""
     d = tempfile.mkdtemp(prefix="opencoder_e2e_")
-    with open(os.path.join(d, "opencode.json"), "w") as f:
+    with open(os.path.join(d, "opencoder.json"), "w") as f:
         json.dump(cfg, f)
     return d
 

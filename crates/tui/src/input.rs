@@ -2,17 +2,20 @@
 //! `crossterm::event::poll` + `read`, forwarding events over a tokio channel.
 //!
 //! This replaces `crossterm::event::EventStream`. The previous design polled
-//! `EventStream::next()` directly inside the main `tokio::select!`; under the
-//! Kitty keyboard enhancement (`DISAMBIGUATE_ESCAPE_CODES`) a lone Esc yields a
-//! sequence that needs disambiguation, and the stream's internal reader could
-//! block on that read indefinitely — starving the whole event loop (no keys,
-//! no Ctrl+C/D, process alive but wedged).
+//! `EventStream::next()` directly inside the main `tokio::select!`. The async
+//! stream's reader task (mio + tokio waker) could stall — once it stopped
+//! resolving, the `select!` arm never fired, starving the whole event loop
+//! (no keys, no Ctrl+C/D, process alive but wedged).
 //!
-//! `poll(timeout)` is contractually bounded: it returns within `timeout` whether
-//! or not an event arrived. The collector thread therefore wakes at least every
-//! `POLL_TIMEOUT`, so it can never be trapped in an unbounded read, and it
-//! notices receiver-drop promptly. The wedge failure mode is eliminated
-//! structurally — no watchdog, no stream rebuild.
+//! The fix sidesteps the async layer entirely: a plain OS thread drives the
+//! *synchronous* `event::poll(timeout)` + `event::read()`. This path is
+//! bounded end to end — crossterm's unix source backs `poll` with
+//! `filedescriptor::poll` + non-blocking reads, so there is no unbounded
+//! `read()`; a lone `\x1b` commits as Esc immediately (`more=false`); and
+//! `event::read()` after a successful `event::poll()` pops the already-queued
+//! event without re-polling. The collector thread therefore wakes at least
+//! every `POLL_TIMEOUT` and notices receiver-drop promptly. The wedge failure
+//! mode is eliminated structurally — no watchdog, no stream rebuild.
 
 use std::thread;
 use std::time::Duration;
@@ -43,11 +46,16 @@ pub fn spawn_input_pump() -> (mpsc::Receiver<Event>, thread::JoinHandle<()>) {
         if tx.is_closed() {
             break;
         }
-        // Bounded poll: returns within POLL_TIMEOUT. `false`/err → loop and
-        // re-check `is_closed()`. A wedged read is impossible here.
+        // Bounded poll: returns within POLL_TIMEOUT regardless of whether an
+        // event arrived (crossterm backs this with `filedescriptor::poll` +
+        // non-blocking reads). `false`/err → loop and re-check `is_closed()`.
         if !event::poll(POLL_TIMEOUT).unwrap_or(false) {
             continue;
         }
+        // `read()` is safe here (not unbounded): the successful `poll()` above
+        // already queued a complete event, so `read()` pops it from the
+        // internal queue immediately — it never reaches its own `poll(None)`
+        // fallback path.
         match event::read() {
             Ok(ev) => {
                 // blocking_send is legal on a dedicated OS thread (not inside a

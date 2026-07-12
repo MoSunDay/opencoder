@@ -1,11 +1,13 @@
-//! Mouse-driven text selection in the chat body + OSC52 clipboard copy.
+//! Mouse-driven text selection in the chat body + clipboard copy (OSC52 with a
+//! local clipboard-command fallback).
 //!
 //! The body renders `chat.flatten()` wrapped at `text_w` columns. Selection is
 //! tracked in *absolute content rows* (screen row + scroll offset) so it stays
 //! anchored to the text while the viewport scrolls. A drag selects whole
 //! logical lines (a logical line may wrap across several screen rows); on
-//! mouse-up the selected text is copied to the system clipboard via an OSC52
-//! escape sequence (works over SSH; no external dependency).
+//! mouse-up the selected text is copied to the system clipboard via OSC52
+//! (works over SSH) and, as a fallback, a local clipboard command (pbcopy /
+//! wl-copy / xclip / xsel / clip.exe) for terminals that lack OSC52 support.
 //!
 //! Scope (v1): line-range selection. The selection is cleared once copied.
 
@@ -15,6 +17,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::chat::ChatView;
+use std::time::Duration;
 
 /// An active selection: an absolute content-row range `[a, b]` (inclusive,
 /// un-normalised — either end may be the anchor or the current drag position).
@@ -51,7 +54,7 @@ pub fn finish_copy(viewed: &ChatView, body: Option<Rect>, sel: SelRange) {
     let text_w = body.map(|r| r.width.saturating_sub(3)).unwrap_or(0);
     let text = extract_text(viewed, text_w, sel);
     if !text.trim().is_empty() {
-        copy_osc52(&text);
+        copy_to_clipboard(&text);
     }
 }
 
@@ -129,6 +132,106 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u16, sel: Option
             let inv_fg = cur.bg.unwrap_or(ratatui::style::Color::Reset);
             let inv_bg = cur.fg.unwrap_or(ratatui::style::Color::Reset);
             cell.set_style(ratatui::style::Style::default().fg(inv_fg).bg(inv_bg));
+        }
+    }
+}
+
+/// Copy `text` to the system clipboard using every available backend,
+/// best-effort. Both backends are attempted so that:
+/// - OSC52 covers SSH-remote sessions and OSC52-capable local terminals.
+/// - A local clipboard command covers local terminals that ignore OSC52
+///   (e.g. some Linux terminal emulators with the feature disabled).
+///
+/// OSC52 runs synchronously (it is just a fast stdout write — the primary path
+/// for SSH). The local clipboard command runs on a **background thread** because
+/// it spawns an external process (`pbcopy`/`wl-copy`/`xclip`/`xsel`/`clip.exe`)
+/// that may block for seconds if, say, `xclip` stalls on an unresponsive X
+/// server. Keeping that off the event loop prevents a hung helper from
+/// freezing the TUI. [`try_spawn`] enforces its own timeout so the background
+/// thread always terminates. Errors are swallowed: a clipboard failure must
+/// never crash the UI.
+pub fn copy_to_clipboard(text: &str) {
+    copy_osc52(text);
+    let text = text.to_string();
+    std::thread::spawn(move || {
+        copy_local(&text);
+    });
+}
+
+/// Copy `text` via a platform-native clipboard command, trying each candidate
+/// in turn and stopping at the first that exits successfully. Returns without
+/// error if no command is available (the caller still has OSC52 as a backend).
+fn copy_local(text: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = try_spawn("pbcopy", &[], text);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if try_spawn("wl-copy", &[], text).is_some() {
+            return;
+        }
+        if try_spawn("xclip", &["-selection", "clipboard"], text).is_some() {
+            return;
+        }
+        let _ = try_spawn("xsel", &["--clipboard", "--input"], text);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = try_spawn("clip.exe", &[], text);
+    }
+    // Platforms without a known local clipboard command: OSC52 is the only path.
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = text;
+    }
+}
+
+/// Maximum time to wait for a single local clipboard command before giving up
+/// and killing it. Generous enough for the slowest reasonable command (e.g.
+/// `xclip` initialising an X connection) yet short enough that a hung helper
+/// never blocks for long.
+const CLIP_CMD_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Spawn `prog` with `args`, write `input` to its stdin, and wait for it to
+/// exit — but no longer than [`CLIP_CMD_TIMEOUT`]. Returns `Some(())` only when
+/// the program was found *and* exited successfully within the deadline;
+/// `None` otherwise (missing binary, non-zero exit, timeout, I/O error). On
+/// timeout the child is killed. Never panics.
+fn try_spawn(prog: &str, args: &[&str], input: &str) -> Option<()> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+    let mut child = Command::new(prog)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input.as_bytes());
+        // `stdin` drops here, closing the pipe and signalling EOF so the child
+        // can finish reading.
+    }
+    // Poll instead of a blocking `wait()`: a clipboard helper that hangs (e.g.
+    // `xclip` against an unresponsive X server) would otherwise block the
+    // calling thread indefinitely.
+    let deadline = Instant::now() + CLIP_CMD_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() { Some(()) } else { None };
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait(); // reap the zombie after kill
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return None,
         }
     }
 }
@@ -271,5 +374,36 @@ mod tests {
         // encoder and that copy_osc52 must not panic on arbitrary unicode.
         assert_eq!(base64_encode(b"hi"), "aGk=");
         copy_osc52("hello 世界 \u{1f600}");
+    }
+
+    #[test]
+    fn try_spawn_missing_program_returns_none() {
+        // A program name that almost certainly does not exist on PATH. Must not
+        // panic and must report failure as `None`.
+        assert!(try_spawn("opencode-not-a-real-clipboard-bin-zz", &[], "").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn try_spawn_existing_program_succeeds_and_false_fails() {
+        // `true` exits 0 and ignores stdin -> reported as success.
+        assert!(try_spawn("true", &[], "").is_some());
+        // `false` exits non-zero -> reported as failure (None).
+        assert!(try_spawn("false", &[], "").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn try_spawn_times_out_on_long_running_command() {
+        // `sleep 30` would block for 30 s if there were no timeout. With the
+        // timeout it must return `None` in roughly CLIP_CMD_TIMEOUT seconds.
+        let start = std::time::Instant::now();
+        let result = try_spawn("sleep", &["30"], "");
+        assert!(result.is_none(), "expected timeout → None, got {result:?}");
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(20),
+            "timed-out command should return well under 30 s, took {elapsed:?}"
+        );
     }
 }

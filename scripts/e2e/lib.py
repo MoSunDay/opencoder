@@ -205,3 +205,32 @@ def all_text(session: dict[str, Any]) -> str:
 
 def message_roles(session: dict[str, Any]) -> list[str]:
     return [m.get("role") for m in session.get("messages", [])]
+
+
+def session_list(bin_path: str, workdir: str) -> str:
+    """List sessions for a workdir; returns stdout."""
+    _, out = run(bin_path, ["--workdir", workdir, "session", "list"], timeout=60)
+    return out
+
+
+def session_delete(bin_path: str, workdir: str, sid: str) -> str:
+    """Delete a session; returns stdout."""
+    _, out = run(bin_path, ["--workdir", workdir, "session", "delete", sid], timeout=60)
+    return out
+
+
+def config_show(bin_path: str, workdir: str) -> str:
+    """Show merged config as JSON; returns stdout."""
+    _, out = run(bin_path, ["--workdir", workdir, "config", "show"], timeout=30)
+    return out
+
+
+def has_reasoning_blocks(session: dict[str, Any]) -> bool:
+    """True if any assistant message has a Reasoning content block
+    (interleaved thinking: reasoning_content persisted on tool turns)."""
+    for m in session.get("messages", []):
+        if m.get("role") == "assistant":
+            for b in m.get("blocks", []):
+                if b.get("kind") == "reasoning":
+                    return True
+    return False

@@ -738,8 +738,10 @@ async fn list_sessions_excludes_subagents_by_default() {
     assert_eq!(items[0].id, "parent");
 
     // With include_subagents == true, both appear.
-    let mut filter = SessionFilter::default();
-    filter.include_subagents = true;
+    let filter = SessionFilter {
+        include_subagents: true,
+        ..Default::default()
+    };
     let items = store.list_sessions(&filter).await.unwrap();
     assert_eq!(
         items.len(),

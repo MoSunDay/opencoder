@@ -1,7 +1,6 @@
 //! All TUI rendering functions — body, composer, status bar, popups, cursor.
 
 use std::io::Stdout;
-use std::path::Path;
 
 use anyhow::Result;
 use ratatui::backend::CrosstermBackend;
@@ -80,7 +79,6 @@ pub(crate) fn render(
     sys_tokens: u64,
     context_limit: u64,
     model: &str,
-    workdir: &Path,
     status: &str,
     steer_items: &[String],
     queue_items: &[(i64, String)],
@@ -180,7 +178,6 @@ pub(crate) fn render(
             queue_items.len() as u32,
             model,
             agent,
-            workdir,
             context_used + sys_tokens,
             context_limit,
             anim_tick,
@@ -548,7 +545,6 @@ fn render_status(
     queue_count: u32,
     model: &str,
     agent: &str,
-    workdir: &Path,
     used: u64,
     limit: u64,
     anim_tick: u32,
@@ -562,10 +558,6 @@ fn render_status(
     } else {
         Color::Green
     };
-    let dir_name = workdir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".into());
 
     let mut spans = vec![
         Span::raw(" "),
@@ -577,8 +569,6 @@ fn render_status(
             format!("[{agent}]"),
             Style::default().fg(agent_chip_fg(agent)),
         ),
-        Span::raw(" | "),
-        Span::styled(dir_name, Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
         Span::styled(
             format!(

@@ -1,12 +1,22 @@
 use opencoder_core::{message::now_ms, Message};
+use std::path::{Path, PathBuf};
 
 pub fn build_system(
     agent: &opencoder_core::Agent,
-    working_dir: &std::path::Path,
+    working_dir: &Path,
     skill_prompt: Option<&str>,
 ) -> Message {
+    let mut text = agent.prompt.clone();
+
+    if let Some(instructions) = load_instructions(working_dir) {
+        text.push_str("\n\n## Project instructions\n");
+        text.push_str(&instructions);
+    }
+
     let env = environment_block(working_dir);
-    let mut text = format!("{}\n\n{}", agent.prompt, env);
+    text.push_str("\n\n");
+    text.push_str(&env);
+
     if let Some(skill) = skill_prompt {
         let trimmed = skill.trim();
         if !trimmed.is_empty() {
@@ -16,10 +26,84 @@ pub fn build_system(
             text.push_str(trimmed);
         }
     }
+
     Message::system("system", text)
 }
 
-pub fn environment_block(working_dir: &std::path::Path) -> String {
+/// Load and concatenate project instruction files (AGENTS.md) from up to
+/// three locations, in increasing priority:
+///   1. Global:    `~/.opencode/AGENTS.md`
+///   2. Git root:  `<git_root>/AGENTS.md` (found by walking up from working_dir)
+///   3. Working:   `<working_dir>/AGENTS.md`
+///
+/// Filenames are matched case-insensitively. Missing or unreadable files are
+/// silently skipped. Duplicate directories (e.g. git root == working_dir) are
+/// loaded only once. Returns `None` when no file was found.
+fn load_instructions(working_dir: &Path) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen: Vec<PathBuf> = Vec::new();
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".opencode"));
+    }
+    if let Some(root) = find_git_root(working_dir) {
+        candidates.push(root);
+    }
+    candidates.push(working_dir.to_path_buf());
+
+    for dir in candidates {
+        let canon = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        if seen.iter().any(|s| s == &canon) {
+            continue;
+        }
+        seen.push(canon);
+
+        if let Some(path) = find_agents_md(&dir) {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    parts.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+/// Case-insensitive search for an `AGENTS.md` file inside `dir`.
+fn find_agents_md(dir: &Path) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        if entry.file_name().eq_ignore_ascii_case("AGENTS.md") {
+            let path = entry.path();
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Walk up from `start` to find the nearest directory containing a `.git`
+/// marker (file or directory). Returns the containing directory.
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+pub fn environment_block(working_dir: &Path) -> String {
     let platform = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let date = chrono::Utc::now().format("%a %b %d %Y").to_string();

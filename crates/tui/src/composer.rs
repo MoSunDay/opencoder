@@ -107,6 +107,56 @@ pub fn backspace(text: &str, idx: usize) -> Option<(String, usize)> {
     Some((s, idx - 1))
 }
 
+/// Delete the word before the cursor (readline `unix-word-rubout`, a.k.a.
+/// Ctrl+W). Skips trailing whitespace, then deletes the preceding run of
+/// non-whitespace. Does not cross newline boundaries — the deletion stops at
+/// the start of the current line.
+///
+/// Returns `(new_text, new_idx)` or `None` if the cursor is already at the
+/// start of the current line.
+pub fn delete_word_back(text: &str, idx: usize) -> Option<(String, usize)> {
+    if idx == 0 {
+        return None;
+    }
+    // Find the start of the current line (char index after the last '\n'
+    // before the cursor, or 0 if there is none).
+    let chars: Vec<char> = text.chars().collect();
+    let mut line_start = 0usize;
+    for (i, &ch) in chars.iter().enumerate() {
+        if i >= idx {
+            break;
+        }
+        if ch == '\n' {
+            line_start = i + 1;
+        }
+    }
+    if idx <= line_start {
+        return None;
+    }
+    let mut new_idx = idx;
+    // 1. Skip whitespace backward (space, tab, etc. — but not '\n').
+    while new_idx > line_start && is_word_whitespace(chars[new_idx - 1]) {
+        new_idx -= 1;
+    }
+    // 2. Skip non-whitespace backward.
+    while new_idx > line_start && !is_word_whitespace(chars[new_idx - 1]) {
+        new_idx -= 1;
+    }
+    if new_idx == idx {
+        return None;
+    }
+    let byte_start = byte_offset_for_char(text, new_idx);
+    let byte_end = byte_offset_for_char(text, idx);
+    let mut s = String::with_capacity(text.len() - (byte_end - byte_start));
+    s.push_str(&text[..byte_start]);
+    s.push_str(&text[byte_end..]);
+    Some((s, new_idx))
+}
+
+fn is_word_whitespace(ch: char) -> bool {
+    ch.is_whitespace() && ch != '\n'
+}
+
 /// Compute (row, col) display position from a char index in multi-line text,
 /// accounting for both explicit newlines and soft-wrapping. The first visual
 /// row is narrower because the prompt prefix (`prompt_w` columns) occupies its
@@ -398,5 +448,98 @@ mod tests {
         assert_eq!(display_rows("aaaaaa", 5, 2), 2); // 3 + 3
         assert_eq!(display_rows("aaaaaaaa", 5, 2), 2); // 3 + 5
         assert_eq!(display_rows("aaaaaaaaaa", 5, 2), 3); // 3 + 5 + 2
+    }
+
+    #[test]
+    fn delete_word_back_basic() {
+        // "hello world|" → "hello |"
+        let (s, i) = delete_word_back("hello world", 11).unwrap();
+        assert_eq!(s, "hello ");
+        assert_eq!(i, 6);
+    }
+
+    #[test]
+    fn delete_word_back_single_word() {
+        // "hello|" → ""
+        let (s, i) = delete_word_back("hello", 5).unwrap();
+        assert_eq!(s, "");
+        assert_eq!(i, 0);
+    }
+
+    #[test]
+    fn delete_word_back_trailing_whitespace() {
+        // "hello   |" → "" (deletes word + trailing spaces, like bash)
+        let (s, i) = delete_word_back("hello   ", 8).unwrap();
+        assert_eq!(s, "");
+        assert_eq!(i, 0);
+    }
+
+    #[test]
+    fn delete_word_back_mid_word() {
+        // "hello wo|rld" → "hello |rld"
+        let (s, i) = delete_word_back("hello world", 8).unwrap();
+        assert_eq!(s, "hello rld");
+        assert_eq!(i, 6);
+    }
+
+    #[test]
+    fn delete_word_back_after_space() {
+        // "hello |world" → "|world" (deletes "hello " including the space)
+        let (s, i) = delete_word_back("hello world", 6).unwrap();
+        assert_eq!(s, "world");
+        assert_eq!(i, 0);
+    }
+
+    #[test]
+    fn delete_word_back_at_line_start_returns_none() {
+        // Cursor at start of first line → nothing to delete
+        assert!(delete_word_back("hello", 0).is_none());
+    }
+
+    #[test]
+    fn delete_word_back_empty_input_returns_none() {
+        assert!(delete_word_back("", 0).is_none());
+    }
+
+    #[test]
+    fn delete_word_back_does_not_cross_newline() {
+        // "line1\nline2|" → "line1\n" (only deletes "line2")
+        let (s, i) = delete_word_back("line1\nline2", 11).unwrap();
+        assert_eq!(s, "line1\n");
+        assert_eq!(i, 6);
+    }
+
+    #[test]
+    fn delete_word_back_at_second_line_start_returns_none() {
+        // "line1\n|line2" → None (cursor at start of second line)
+        assert!(delete_word_back("line1\nline2", 6).is_none());
+    }
+
+    #[test]
+    fn delete_word_back_multibyte_chars() {
+        // "你好 world|" → "你好 |"
+        let (s, i) = delete_word_back("你好 world", 8).unwrap();
+        assert_eq!(s, "你好 ");
+        assert_eq!(i, 3);
+    }
+
+    #[test]
+    fn delete_word_back_only_whitespace_before_cursor() {
+        // "hello\n   |" → "hello\n" (deletes trailing spaces on current line)
+        let (s, i) = delete_word_back("hello\n   ", 9).unwrap();
+        assert_eq!(s, "hello\n");
+        assert_eq!(i, 6);
+    }
+
+    #[test]
+    fn delete_word_back_consecutive_presses() {
+        // Simulate pressing Ctrl+W twice on "hello world"
+        let (s1, i1) = delete_word_back("hello world", 11).unwrap();
+        assert_eq!(s1, "hello ");
+        assert_eq!(i1, 6);
+        // Second press: "hello |" → "|"
+        let (s2, i2) = delete_word_back(&s1, i1).unwrap();
+        assert_eq!(s2, "");
+        assert_eq!(i2, 0);
     }
 }

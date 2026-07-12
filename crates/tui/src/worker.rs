@@ -168,7 +168,7 @@ pub async fn process_cmd(
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SetSkill(body) => {
-            sess.skill_prompt = body;
+            sess.set_skill(body);
         }
         UiCmd::ReloadConfig(new_cfg) => {
             let api_key = new_cfg.api_key().unwrap_or_default();

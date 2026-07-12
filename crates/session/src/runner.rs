@@ -347,7 +347,7 @@ async fn run_one_llm_call(
     let system = build_system(
         &session.agent,
         &session.working_dir,
-        session.skill_prompt.as_deref(),
+        session.skill_prompt_cloned().as_deref(),
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
@@ -452,8 +452,7 @@ async fn execute_call(
         {
             return ToolOutput::err(format!(
                 "Blocked in plan mode: this bash command modifies state ({reason}). \
-                 Plan mode is read-only. To make changes, switch to act mode \
-                 (Alt+Tab) or delegate to a 'build' subagent via the task tool."
+                 Plan mode is read-only. To make changes, switch to act mode (Alt+Tab)."
             ));
         }
     }
@@ -498,6 +497,14 @@ async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
+    // Plan mode may only spawn read-only 'explore' subagents. Any other type
+    // (including 'build') is rejected as "unknown" so the model is never told
+    // that 'build' exists.
+    if parent.agent.kind == AgentKind::Plan && kind != "explore" {
+        return ToolOutput::err(format!(
+            "Unknown subagent_type '{kind}'. Valid option: 'explore' (read-only)."
+        ));
+    }
     let agent = match resolve_agent(&kind) {
         Some(a) => a,
         None => {

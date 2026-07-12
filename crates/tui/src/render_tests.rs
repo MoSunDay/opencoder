@@ -116,19 +116,7 @@ fn status_bar_omits_branding() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f,
-                area,
-                false,
-                "",
-                0,
-                0,
-                "glm-4.6",
-                "act",
-                Path::new("/home/user/myproj"),
-                5000,
-                200000,
-                0,
-                None,
+                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0, None,
             );
         })
         .unwrap();
@@ -143,7 +131,6 @@ fn status_bar_omits_branding() {
         row.contains("[act]"),
         "agent chip should appear; got: {row}"
     );
-    assert!(row.contains("myproj"), "dir name should appear; got: {row}");
     assert!(
         row.contains("ctx"),
         "context indicator should appear; got: {row}"
@@ -160,19 +147,7 @@ fn status_bar_running_shows_spinner_and_status() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f,
-                area,
-                true,
-                "thinking",
-                0,
-                0,
-                "glm-4.6",
-                "act",
-                Path::new("/home/user/myproj"),
-                5000,
-                200000,
-                0,
-                None,
+                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 5000, 200000, 0, None,
             );
         })
         .unwrap();
@@ -327,7 +302,15 @@ fn place_cursor_with_scroll() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            place_cursor(f, Rect::new(0, 5, 40, 4), "line1\nline2\nline3", 12, 80, 2, 1);
+            place_cursor(
+                f,
+                Rect::new(0, 5, 40, 4),
+                "line1\nline2\nline3",
+                12,
+                80,
+                2,
+                1,
+            );
         })
         .unwrap();
     // cursor_row_col("line1\nline2\nline3", 12, 80, 2) = (2, 0)

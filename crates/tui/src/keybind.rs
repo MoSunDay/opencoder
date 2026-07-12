@@ -4,7 +4,7 @@ Keybindings:
   Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
-  $                select skill (dropdown; fuzzy match)
+  $                pick skill anywhere -> {$name}; loaded on submit
   /                slash command picker: /task (sessions), /model (config), /compact (compress history)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
@@ -14,8 +14,11 @@ Keybindings:
   Up / Down        cursor vertical (multi-line) / history (single-line)
   Left / Right     move cursor
   Home / End       cursor to start / end
+  Ctrl+A / Ctrl+E  cursor to start / end (same as Home / End)
+  Ctrl+W           delete word before cursor (backward-kill-word)
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
   Ctrl+U           scroll up
+  Ctrl+L           collapse all thinking / exit subagent view / clear input
 Mouse:            scroll wheel to scroll transcript; click arrow to follow
                   drag in the body to select text and copy it to the clipboard (OSC52)
 ";

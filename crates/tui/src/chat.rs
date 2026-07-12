@@ -305,6 +305,17 @@ impl ChatView {
         }
     }
 
+    /// Collapse every Thinking block in this view. Bound to Ctrl+L: clears
+    /// any expanded reasoning blocks in one keystroke (also applied to a
+    /// child subagent view before exiting it).
+    pub fn collapse_all_thinking(&mut self) {
+        for block in &mut self.blocks {
+            if let ChatBlock::Thinking { collapsed, .. } = block {
+                *collapsed = true;
+            }
+        }
+    }
+
     /// Accumulate estimated token counts for this view's OWN transcript only.
     /// Child subagent tokens are excluded — each child ChatView tracks its own
     /// subtree via its own `apply` (events route through `SubagentChild`).
@@ -645,6 +656,18 @@ impl ChatView {
                 sealed: false,
             });
         }
+    }
+
+    /// True if the last block is a collapsed Thinking block — i.e. the active
+    /// reasoning stream is hidden, so per-delta re-renders can be skipped.
+    pub fn last_thinking_collapsed(&self) -> bool {
+        matches!(
+            self.blocks.last(),
+            Some(ChatBlock::Thinking {
+                collapsed: true,
+                ..
+            })
+        )
     }
 }
 

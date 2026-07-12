@@ -10,7 +10,7 @@ pub use resume::{generate_title, resume};
 pub use runner::{run, run_once, SessionEvent};
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use opencoder_core::{message::now_ms, Agent, Config, Message, Role};
@@ -31,7 +31,7 @@ pub struct SessionState {
     pub store: Option<Arc<dyn Store>>,
     /// Active skill instructions, injected into the system prompt each turn.
     /// `None` means no skill is active. Set from the TUI `$` picker.
-    pub skill_prompt: Option<String>,
+    pub skill_prompt: Arc<Mutex<Option<String>>>,
     /// Number of messages already persisted to `store` (loaded on resume).
     persisted_count: usize,
     /// Whether the session row has been created in the store.
@@ -60,7 +60,7 @@ impl SessionState {
             client,
             last_usage: opencoder_llm::Usage::default(),
             store: None,
-            skill_prompt: None,
+            skill_prompt: Arc::new(Mutex::new(None)),
             persisted_count: 0,
             session_created: false,
             cancel: None,
@@ -88,9 +88,19 @@ impl SessionState {
     }
 
     /// Set the active skill instructions, injected into the system prompt.
-    pub fn with_skill(mut self, skill_prompt: String) -> Self {
-        self.skill_prompt = Some(skill_prompt);
+    pub fn with_skill(self, skill_prompt: String) -> Self {
+        *self.skill_prompt.lock().unwrap() = Some(skill_prompt);
         self
+    }
+
+    /// Snapshot the active skill instructions (clones the inner String).
+    pub fn skill_prompt_cloned(&self) -> Option<String> {
+        self.skill_prompt.lock().unwrap().clone()
+    }
+
+    /// Update the active skill instructions in place. `None` clears the skill.
+    pub fn set_skill(&self, body: Option<String>) {
+        *self.skill_prompt.lock().unwrap() = body;
     }
 
     /// Apply a hot-reloaded config: swap the client, model, and config in

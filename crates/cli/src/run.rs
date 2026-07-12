@@ -3,12 +3,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{ChatClient, ChatStream};
-use opencode_session::{
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_session::{
     generate_title, resume as resume_session, run_once, SessionEvent, SessionState,
 };
-use opencode_store::{SessionFilter, Store};
+use opencoder_store::{SessionFilter, Store};
 
 use crate::Cli;
 
@@ -52,7 +52,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             .or_else(|| resolve_agent("act"))
             .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
         let mut s = SessionState::new(
-            opencode_session::runner::new_id(),
+            opencoder_session::runner::new_id(),
             agent,
             config.clone(),
             client.clone(),
@@ -72,7 +72,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
 
     print_prompt_header(&session, &prompt);
     let prompt_owned = prompt.clone();
-    opencode_session::run(&mut session, prompt_owned, |ev| print_event(&ev)).await?;
+    opencoder_session::run(&mut session, prompt_owned, |ev| print_event(&ev)).await?;
 
     // cheap background title generation (small model) after the first round
     generate_title(&session).await;
@@ -107,9 +107,9 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
         .await?
         .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
     let messages = store.load_messages(parent_id).await?;
-    let new_id = opencode_session::runner::new_id();
-    let now = opencode_core::message::now_ms();
-    let forked = opencode_store::SessionMeta {
+    let new_id = opencoder_session::runner::new_id();
+    let now = opencoder_core::message::now_ms();
+    let forked = opencoder_store::SessionMeta {
         id: new_id.clone(),
         title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
         agent: meta.agent.clone(),
@@ -198,6 +198,7 @@ fn print_event(ev: &SessionEvent) {
         }
         SessionEvent::TranscriptReset(_) => {}
         SessionEvent::QueueConsumed { .. } => {}
+        SessionEvent::SteerConsumed { .. } => {}
         SessionEvent::SubagentChild { .. } => {}
     }
 }

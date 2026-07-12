@@ -6,7 +6,7 @@ Commit: (working-tree)
 clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tui/serve/config/models/session），把用户意图分发到 session/web/store 层。headless 模式（`run` 或裸 prompt）是 e2e 与脚本化的主入口。
 
 ## 边界与非目标
-- 不做终端渲染（TUI 在 `opencode_tui`）、不做 HTTP 服务实现（web 在 `opencode_web`）。
+- 不做终端渲染（TUI 在 `opencoder_tui`）、不做 HTTP 服务实现（web 在 `opencoder_web`）。
 - 不持有长期运行态——headless 一次性 run 完即退；serve 委托 web。
 - 非目标：CLI 不直接暴露 steer/queue 两段式 delivery（那是 web `POST /prompt` 的 `delivery` 字段）；CLI headless 单 prompt。
 
@@ -38,7 +38,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - TUI 专属功能（plan→act handoff、TaskPicker clear-all、鼠标选择、弹窗交互等）不在 e2e 覆盖范围——e2e 套件仅 CLI/HTTP 可达，TUI 交互由 `crates/tui/` 单元 + 集成测试覆盖。
 
 ## 依赖与接口
-- 依赖：clap、opencode-core、opencode-llm（ChatClient）、opencode-session（run/resume/generate_title）、opencode-store、opencode-web（serve）。
+- 依赖：clap、opencoder-core、opencoder-llm（ChatClient）、opencoder-session（run/resume/generate_title）、opencoder-store、opencoder-web（serve）。
 - 被依赖：binary crate（`src/main.rs` 解析 `Cli` 并分发）。
 
 ## 相关模块

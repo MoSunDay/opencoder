@@ -1,8 +1,8 @@
 //! Prompt construction tests — verifies build_system, environment_block,
 //! and compaction prompts produce correct content.
 
-use opencode_core::resolve_agent;
-use opencode_session::prompt::{
+use opencoder_core::resolve_agent;
+use opencoder_session::prompt::{
     build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
 };
 

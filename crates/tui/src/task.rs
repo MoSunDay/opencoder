@@ -1,7 +1,7 @@
 //! `/task` session picker — switch between or create new conversations.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use opencode_store::SessionListItem;
+use opencoder_store::SessionListItem;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

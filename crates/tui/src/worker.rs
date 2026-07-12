@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::ChatClient;
-use opencode_session::{run as run_session, SessionEvent, SessionState};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::ChatClient;
+use opencoder_session::{run as run_session, SessionEvent, SessionState};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -130,7 +130,7 @@ pub async fn process_cmd(
             // from only the final plan, not the full read-only planning noise.
             // Mirrors compaction — in-memory mutation + TranscriptReset so the
             // UI rebuilds clean; the append-only store keeps the raw history.
-            if opencode_session::plan_handoff::handoff(sess) {
+            if opencoder_session::plan_handoff::handoff(sess) {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
                     sess.messages.clone(),
                 )));
@@ -146,12 +146,12 @@ pub async fn process_cmd(
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::Compact => {
-            let registry = opencode_session::tools::registry();
+            let registry = opencoder_session::tools::registry();
             let tx = evt_tx.clone();
             let mut emit = move |sev: SessionEvent| {
                 let _ = tx.try_send(UiEvent::Session(sev));
             };
-            match opencode_session::compaction::compact(sess, &registry, &mut emit).await {
+            match opencoder_session::compaction::compact(sess, &registry, &mut emit).await {
                 Ok(Some(summary)) => {
                     let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
                         sess.messages.clone(),
@@ -261,8 +261,8 @@ mod tests {
     // its top-of-loop `is_cancelled()` check.
     #[tokio::test]
     async fn reset_cancel_replaces_with_fresh_uncancelled_token() {
-        use opencode_core::resolve_agent;
-        use opencode_llm::MockChatClient;
+        use opencoder_core::resolve_agent;
+        use opencoder_llm::MockChatClient;
 
         let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
         let agent = resolve_agent("act").expect("act agent");
@@ -272,9 +272,9 @@ mod tests {
         let mut sess = SessionState::new(
             "reset-test",
             agent,
-            opencode_core::Config::default(),
+            opencoder_core::Config::default(),
             std::sync::Arc::new(MockChatClient::new())
-                as std::sync::Arc<dyn opencode_llm::ChatStream>,
+                as std::sync::Arc<dyn opencoder_llm::ChatStream>,
             std::env::temp_dir(),
         )
         .with_cancel(stale);

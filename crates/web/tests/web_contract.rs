@@ -23,52 +23,52 @@ use axum::Router;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use opencode_llm::{ChatStream, MockChatClient};
-use opencode_store::{LibsqlStore, Store};
+use opencoder_llm::{ChatStream, MockChatClient};
+use opencoder_store::{LibsqlStore, Store};
 
 // Reuse the production AppState + handlers via a thin test router.
-async fn app() -> (Router, Arc<opencode_web::AppState>) {
+async fn app() -> (Router, Arc<opencoder_web::AppState>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir();
-    let state = Arc::new(opencode_web::AppState {
+    let state = Arc::new(opencoder_web::AppState {
         store: store.clone(),
         workdir: workdir.clone(),
-        handles: opencode_web::handle::new_handle_map(),
+        handles: opencoder_web::handle::new_handle_map(),
     });
     let app = Router::new()
         .route(
             "/api/sessions",
-            post(opencode_web::api::create_session).get(opencode_web::api::list_sessions),
+            post(opencoder_web::api::create_session).get(opencoder_web::api::list_sessions),
         )
-        .route("/api/sessions/:id", get(opencode_web::api::get_session))
+        .route("/api/sessions/:id", get(opencoder_web::api::get_session))
         .route(
             "/api/sessions/:id/prompt",
-            post(opencode_web::api::post_prompt),
+            post(opencoder_web::api::post_prompt),
         )
         .route(
             "/api/sessions/:id/agent",
-            post(opencode_web::api::post_agent),
+            post(opencoder_web::api::post_agent),
         )
         .route(
             "/api/sessions/:id/model",
-            post(opencode_web::api::post_model),
+            post(opencoder_web::api::post_model),
         )
         .route(
             "/api/sessions/:id/interrupt",
-            post(opencode_web::api::post_interrupt),
+            post(opencoder_web::api::post_interrupt),
         )
         .route(
             "/api/sessions/:id/events",
-            get(opencode_web::api::get_events),
+            get(opencoder_web::api::get_events),
         )
-        .route("/api/health", get(opencode_web::api::health))
+        .route("/api/health", get(opencoder_web::api::health))
         .with_state(state.clone());
     (app, state)
 }
 
 /// Seed a session row with the given title/agent/model.
 async fn seed(
-    state: &opencode_web::AppState,
+    state: &opencoder_web::AppState,
     sid: &str,
     title: Option<&str>,
     agent: &str,
@@ -76,7 +76,7 @@ async fn seed(
 ) {
     state
         .store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: sid.to_string(),
             title: title.map(String::from),
             agent: Some(agent.into()),
@@ -140,22 +140,22 @@ async fn prompt_admit_returns_immediately_with_seq() {
     // is "admit returns a seq fast", which we verify via the store layer).
     let mock: Arc<dyn ChatStream> =
         Arc::new(
-            MockChatClient::new().with_default(vec![opencode_llm::LlmEvent::Completed {
+            MockChatClient::new().with_default(vec![opencoder_llm::LlmEvent::Completed {
                 text: "ok".into(),
                 tool_calls: vec![],
                 usage: None,
             }]),
         );
-    let cfg = opencode_core::Config {
+    let cfg = opencoder_core::Config {
         model: "m/g".into(),
         ..Default::default()
     };
-    let seq = opencode_web::handle::admit_and_drain(
+    let seq = opencoder_web::handle::admit_and_drain(
         state.handles.clone(),
         state.store.clone(),
         &sid,
         "hello".into(),
-        opencode_store::Delivery::Steer,
+        opencoder_store::Delivery::Steer,
         mock,
         std::env::temp_dir(),
         cfg,
@@ -191,9 +191,9 @@ async fn sse_replays_persisted_events_then_live() {
     for i in 0..3u32 {
         state
             .store
-            .append_event(&opencode_store::SessionEventRecord {
+            .append_event(&opencoder_store::SessionEventRecord {
                 session_id: sid.into(),
-                kind: opencode_store::EventKind::TextDelta,
+                kind: opencoder_store::EventKind::TextDelta,
                 payload: serde_json::json!({ "i": i }),
                 ts: i as i64,
                 seq: None,
@@ -206,8 +206,8 @@ async fn sse_replays_persisted_events_then_live() {
     // The live broadcast stays open (no drain to close it), so read frames
     // incrementally with a short timeout — the replay window is flushed first.
     use futures::StreamExt;
-    let query = opencode_web::api::EventsQuery { after: Some(0) };
-    let resp = opencode_web::api::get_events(
+    let query = opencoder_web::api::EventsQuery { after: Some(0) };
+    let resp = opencoder_web::api::get_events(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::extract::Query(query),
@@ -248,10 +248,10 @@ async fn switch_agent_updates_stored_meta_and_handle() {
     seed(&state, &sid, None, "act", "m").await;
     // install a live handle so the override path is exercised
     let (tx, _rx) = tokio::sync::broadcast::channel(8);
-    let handle = Arc::new(opencode_web::handle::SessionHandle {
+    let handle = Arc::new(opencoder_web::handle::SessionHandle {
         tx,
         cancel: tokio::sync::Mutex::new(tokio_util::sync::CancellationToken::new()),
-        overrides: tokio::sync::Mutex::new(opencode_web::handle::RuntimeOverrides::default()),
+        overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
         draining: AtomicBool::new(false),
     });
     state.handles.lock().await.insert(sid.clone(), handle);
@@ -283,15 +283,15 @@ async fn interrupt_cancels_running_drain_token() {
     let sid = "int-sess";
     let (tx, _rx) = tokio::sync::broadcast::channel(8);
     let cancel = tokio_util::sync::CancellationToken::new();
-    let handle = Arc::new(opencode_web::handle::SessionHandle {
+    let handle = Arc::new(opencoder_web::handle::SessionHandle {
         tx,
         cancel: tokio::sync::Mutex::new(cancel.clone()),
-        overrides: tokio::sync::Mutex::new(opencode_web::handle::RuntimeOverrides::default()),
+        overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
         draining: AtomicBool::new(false),
     });
     state.handles.lock().await.insert(sid.into(), handle);
 
-    let resp = opencode_web::api::post_interrupt(
+    let resp = opencoder_web::api::post_interrupt(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
     )

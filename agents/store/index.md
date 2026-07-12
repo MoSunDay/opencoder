@@ -25,7 +25,7 @@ Commit: (working-tree, pre-initial-commit)
 - **二进制导出/导入**（`src/bundle.rs`）：`SessionBundle` 递归结构（meta + messages + events + inputs + subagents）。自定义 opencoder 二进制格式（magic `OPENCODR` + 版本 + payload）。`export_bundle` 递归收集父子 session 树；`import_bundle` 幂等写入（已存在则跳过）。CLI：`opencoder session export <id> -o <file>`（默认输出 `<id>.opencoder`）/ `opencoder session import <file>`（读取 `.opencoder` 二进制）。不导出 Config（含 API key）。
 
 ## 依赖与接口
-- 依赖：libsql 0.9.30（锁定 0.9 系列）、opencode-core（Message 类型）、async-trait。
+- 依赖：libsql 0.9.30（锁定 0.9 系列）、opencoder-core（Message 类型）、async-trait。
 - 被依赖：session（resume/drain/record）、web（AppState.store）、cli（session 子命令）。
 
 ## 相关模块

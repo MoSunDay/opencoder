@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use opencode_core::Message;
+use opencoder_core::Message;
 
 pub struct SessionStore {
     root: PathBuf,

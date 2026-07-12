@@ -337,17 +337,17 @@ fn apply_env(cfg: &mut Config) {
             cfg.provider.base_url = b.trim_end_matches('/').to_string();
         }
     }
-    if let Ok(m) = std::env::var("OPENCODE_MODEL") {
+    if let Ok(m) = std::env::var("OPENCODER_MODEL") {
         if !m.is_empty() {
             cfg.model = m;
         }
     }
-    if let Ok(m) = std::env::var("OPENCODE_SMALL_MODEL") {
+    if let Ok(m) = std::env::var("OPENCODER_SMALL_MODEL") {
         if !m.is_empty() {
             cfg.small_model = Some(m);
         }
     }
-    if let Ok(v) = std::env::var("OPENCODE_CONTEXT_LIMIT") {
+    if let Ok(v) = std::env::var("OPENCODER_CONTEXT_LIMIT") {
         if let Ok(n) = v.parse::<u64>() {
             cfg.context_limit = Some(n);
         }

@@ -1,15 +1,15 @@
 [package]
-name = "opencode-cli"
+name = "opencoder-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencode-core.workspace = true
-opencode-llm.workspace = true
-opencode-session.workspace = true
-opencode-store.workspace = true
-opencode-web.workspace = true
+opencoder-core.workspace = true
+opencoder-llm.workspace = true
+opencoder-session.workspace = true
+opencoder-store.workspace = true
+opencoder-web.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

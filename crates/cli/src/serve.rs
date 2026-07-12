@@ -15,9 +15,9 @@ fn resolve_workdir(cli: &Cli) -> PathBuf {
 }
 
 pub async fn serve_run(cli: &Cli, host: String, port: u16, web: bool) -> Result<()> {
-    opencode_web::serve(host, port, web, resolve_workdir(cli)).await
+    opencoder_web::serve(host, port, web, resolve_workdir(cli)).await
 }
 
 pub async fn serve_launch(cli: &Cli) -> Result<()> {
-    opencode_web::serve("127.0.0.1".to_string(), 0, true, resolve_workdir(cli)).await
+    opencoder_web::serve("127.0.0.1".to_string(), 0, true, resolve_workdir(cli)).await
 }

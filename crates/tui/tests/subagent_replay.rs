@@ -6,14 +6,14 @@
 
 use std::sync::Arc;
 
-use opencode_core::{ContentBlock, Message};
-use opencode_session::SessionEvent;
-use opencode_store::{
+use opencoder_core::{ContentBlock, Message};
+use opencoder_session::SessionEvent;
+use opencoder_store::{
     EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store, SubagentStatus,
     SubagentTaskRecord,
 };
-use opencode_tui::chat::ChatBlock;
-use opencode_tui::session_ui::replay_into_chat;
+use opencoder_tui::chat::ChatBlock;
+use opencoder_tui::session_ui::replay_into_chat;
 use tempfile::TempDir;
 
 async fn fresh() -> (TempDir, Arc<LibsqlStore>) {

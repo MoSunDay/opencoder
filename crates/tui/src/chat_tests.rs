@@ -401,3 +401,67 @@ fn block_text_for_tick(v: &ChatView, tick: u32) -> String {
         .map(|s| s.content.clone())
         .collect()
 }
+
+#[test]
+fn parallel_tool_outputs_route_to_own_block() {
+    // Regression: when two tools start before either ends (parallel bash
+    // calls), each ToolEnd must append output to its own block by id, not to
+    // the last-pushed block. Previously all output piled into the final block.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "a".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo A"}),
+    });
+    v.apply(&SessionEvent::ToolStart {
+        id: "b".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo B"}),
+    });
+    // End out of call order: B finishes first, then A.
+    v.apply(&SessionEvent::ToolEnd {
+        id: "b".into(),
+        name: "bash".into(),
+        output: "B-out".into(),
+        is_error: false,
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "a".into(),
+        name: "bash".into(),
+        output: "A-out".into(),
+        is_error: false,
+    });
+
+    // Two distinct tool blocks, in start order.
+    let tools: Vec<_> = v
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 2, "expected two tool blocks");
+    assert_eq!(tools[0].0, "a");
+    assert_eq!(tools[1].0, "b");
+
+    let text = |i: usize| -> String {
+        tools[i]
+            .1
+            .spans
+            .iter()
+            .chain(tools[i].2.iter().flat_map(|l| l.spans.iter()))
+            .map(|s| s.content.clone())
+            .collect()
+    };
+    let text_a = text(0);
+    let text_b = text(1);
+
+    assert!(text_a.contains("echo A"), "block A header: {text_a}");
+    assert!(text_a.contains("A-out"), "block A output: {text_a}");
+    assert!(!text_a.contains("B-out"), "block A contaminated: {text_a}");
+
+    assert!(text_b.contains("echo B"), "block B header: {text_b}");
+    assert!(text_b.contains("B-out"), "block B output: {text_b}");
+    assert!(!text_b.contains("A-out"), "block B contaminated: {text_b}");
+}

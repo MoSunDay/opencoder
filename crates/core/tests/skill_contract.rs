@@ -5,8 +5,8 @@
 
 use std::fs;
 
-use opencode_core::skill::{discover_in, parse_skill};
-use opencode_core::{discover_skills, skills_dir, Skill};
+use opencoder_core::skill::{discover_in, parse_skill};
+use opencoder_core::{discover_skills, skills_dir, Skill};
 
 fn write(path: &std::path::Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();

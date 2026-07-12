@@ -1,4 +1,4 @@
-use opencode_core::Message;
+use opencoder_core::Message;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -190,7 +190,7 @@ pub struct SubagentTaskRecord {
 pub fn message_preview(msgs: &[Message], max_chars: usize) -> String {
     let mut out = String::new();
     for m in msgs {
-        if m.role != opencode_core::Role::User {
+        if m.role != opencoder_core::Role::User {
             continue;
         }
         let t = m.text();

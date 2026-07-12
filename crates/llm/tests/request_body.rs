@@ -1,6 +1,6 @@
 //! Contract test for `ChatRequest::to_body` reasoning_effort serialization.
 
-use opencode_llm::ChatRequest;
+use opencoder_llm::ChatRequest;
 
 fn req(reasoning: Option<&str>) -> ChatRequest {
     ChatRequest {

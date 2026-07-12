@@ -1,6 +1,6 @@
 use super::*;
 use crate::chat::ChatView;
-use opencode_session::SessionEvent;
+use opencoder_session::SessionEvent;
 use ratatui::backend::TestBackend;
 
 fn thinking_view() -> ChatView {

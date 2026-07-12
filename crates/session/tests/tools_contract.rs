@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
-use opencode_core::{Tool, ToolContext};
-use opencode_session::tools::{edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool};
+use opencoder_core::{Tool, ToolContext};
+use opencoder_session::tools::{edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool};
 use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {

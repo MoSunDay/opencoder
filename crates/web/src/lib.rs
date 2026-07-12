@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::routing::{get, post};
 use axum::Router;
-use opencode_store::{LibsqlStore, Store};
+use opencoder_store::{LibsqlStore, Store};
 
 use crate::handle::HandleMap;
 
@@ -86,8 +86,8 @@ mod tests {
     /// sessions) is caught at test time.
     #[test]
     fn hash_of_is_stable_and_pinned() {
-        // FNV-1a 64 of the bytes of "/tmp/opencode-pin"
-        assert_eq!(hash_of(Path::new("/tmp/opencode-pin")), "832ee9edd819d93b");
+        // FNV-1a 64 of the bytes of "/tmp/opencoder-pin"
+        assert_eq!(hash_of(Path::new("/tmp/opencoder-pin")), "ecd58ecfd9089443");
     }
 
     #[test]

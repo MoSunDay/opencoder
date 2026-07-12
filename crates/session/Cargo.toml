@@ -1,13 +1,13 @@
 [package]
-name = "opencode-session"
+name = "opencoder-session"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencode-core.workspace = true
-opencode-llm.workspace = true
-opencode-store.workspace = true
+opencoder-core.workspace = true
+opencoder-llm.workspace = true
+opencoder-store.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["rt"] }

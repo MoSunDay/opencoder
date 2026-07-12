@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
-use opencode_core::{resolve_agent, Agent, Config, Message};
-use opencode_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
-use opencode_store::Store;
+use opencoder_core::{resolve_agent, Agent, Config, Message};
+use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
+use opencoder_store::Store;
 
 use crate::SessionState;
 
@@ -47,7 +47,7 @@ pub async fn resume(
         working_dir,
         config,
         client,
-        last_usage: opencode_llm::Usage::default(),
+        last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
         skill_prompt: None,
         persisted_count: n,
@@ -104,9 +104,9 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
     store
         .update_session(
             &session.id,
-            &opencode_store::SessionPatch {
+            &opencoder_store::SessionPatch {
                 title: Some(title),
-                updated_at: Some(opencode_core::message::now_ms()),
+                updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },
         )

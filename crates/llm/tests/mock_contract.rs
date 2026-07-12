@@ -1,6 +1,6 @@
 //! MockChatClient contract: replays scripted events FIFO and records requests.
 
-use opencode_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
+use opencoder_llm::{ChatRequest, ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
 
 fn req_with(model: &str) -> ChatRequest {
     ChatRequest {

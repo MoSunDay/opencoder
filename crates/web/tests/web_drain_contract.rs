@@ -24,32 +24,32 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use futures::StreamExt;
-use opencode_core::ContentBlock;
-use opencode_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencode_store::{LibsqlStore, Store};
+use opencoder_core::ContentBlock;
+use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
+use opencoder_store::{LibsqlStore, Store};
 use serde_json::json;
 
 /// Fresh in-memory AppState (drain tests call handlers/fns directly, no router).
-async fn state() -> Arc<opencode_web::AppState> {
+async fn state() -> Arc<opencoder_web::AppState> {
     state_with_workdir(std::env::temp_dir()).await
 }
 
 /// AppState backed by an in-memory store but a custom workdir (for tests that
 /// need to place config files on disk).
-async fn state_with_workdir(workdir: std::path::PathBuf) -> Arc<opencode_web::AppState> {
+async fn state_with_workdir(workdir: std::path::PathBuf) -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    Arc::new(opencode_web::AppState {
+    Arc::new(opencoder_web::AppState {
         store,
         workdir,
-        handles: opencode_web::handle::new_handle_map(),
+        handles: opencoder_web::handle::new_handle_map(),
     })
 }
 
 /// Seed a session row (default agent "act", model "m").
-async fn seed(state: &opencode_web::AppState, sid: &str) {
+async fn seed(state: &opencoder_web::AppState, sid: &str) {
     state
         .store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: sid.to_string(),
             title: None,
             agent: Some("act".into()),
@@ -77,16 +77,16 @@ fn mock_reply(text: &str) -> Arc<dyn ChatStream> {
 
 /// Admit a prompt and spawn its drain, returning the admitted seq. Wraps the
 /// production `admit_and_drain` so each test stays focused on the contract.
-async fn admit(state: &opencode_web::AppState, sid: &str, prompt: &str, reply: &str) -> i64 {
-    opencode_web::handle::admit_and_drain(
+async fn admit(state: &opencoder_web::AppState, sid: &str, prompt: &str, reply: &str) -> i64 {
+    opencoder_web::handle::admit_and_drain(
         state.handles.clone(),
         state.store.clone(),
         sid,
         prompt.to_string(),
-        opencode_store::Delivery::Steer,
+        opencoder_store::Delivery::Steer,
         mock_reply(reply),
         std::env::temp_dir(),
-        opencode_core::Config {
+        opencoder_core::Config {
             model: "m/g".into(),
             ..Default::default()
         },
@@ -96,7 +96,7 @@ async fn admit(state: &opencode_web::AppState, sid: &str, prompt: &str, reply: &
 }
 
 /// True once an assistant Text block containing `needle` is persisted.
-async fn replied(state: &opencode_web::AppState, sid: &str, needle: &str) -> bool {
+async fn replied(state: &opencoder_web::AppState, sid: &str, needle: &str) -> bool {
     state
         .store
         .load_messages(sid)
@@ -108,7 +108,7 @@ async fn replied(state: &opencode_web::AppState, sid: &str, needle: &str) -> boo
 }
 
 /// Poll until `replied` holds or ~3s elapse.
-async fn eventually_replied(state: &opencode_web::AppState, sid: &str, needle: &str) -> bool {
+async fn eventually_replied(state: &opencoder_web::AppState, sid: &str, needle: &str) -> bool {
     for _ in 0..120 {
         if replied(state, sid, needle).await {
             return true;
@@ -120,7 +120,7 @@ async fn eventually_replied(state: &opencode_web::AppState, sid: &str, needle: &
 
 /// Poll until the session's drain is idle (`draining` reset). The handle stays
 /// in the map after completion, so this also asserts the DrainGuard ran.
-async fn wait_idle(state: &opencode_web::AppState, sid: &str) {
+async fn wait_idle(state: &opencoder_web::AppState, sid: &str) {
     for _ in 0..120 {
         let idle = state
             .handles
@@ -151,7 +151,7 @@ async fn pre_existing_events_handle_does_not_block_drain() {
         .handles
         .lock()
         .await
-        .insert(sid.to_string(), opencode_web::handle::SessionHandle::new());
+        .insert(sid.to_string(), opencoder_web::handle::SessionHandle::new());
 
     admit(&state, sid, "hello", "ok").await;
     assert!(
@@ -233,10 +233,10 @@ async fn events_subscriber_before_prompt_receives_live() {
     seed(&state, sid).await;
 
     // 1. subscribe first — get_events creates a handle with no drain.
-    let resp = opencode_web::api::get_events(
+    let resp = opencoder_web::api::get_events(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
-        axum::extract::Query(opencode_web::api::EventsQuery { after: Some(0) }),
+        axum::extract::Query(opencoder_web::api::EventsQuery { after: Some(0) }),
     )
     .await
     .into_response();
@@ -251,15 +251,15 @@ async fn events_subscriber_before_prompt_receives_live() {
             usage: None,
         },
     ]));
-    opencode_web::handle::admit_and_drain(
+    opencoder_web::handle::admit_and_drain(
         state.handles.clone(),
         state.store.clone(),
         sid,
         "ping".into(),
-        opencode_store::Delivery::Steer,
+        opencoder_store::Delivery::Steer,
         mock,
         std::env::temp_dir(),
-        opencode_core::Config {
+        opencoder_core::Config {
             model: "m/g".into(),
             ..Default::default()
         },
@@ -294,10 +294,10 @@ async fn post_prompt_returns_500_on_malformed_config() {
     std::fs::write(dir.path().join("opencoder.json"), "{ not valid json").unwrap();
     let state = state_with_workdir(dir.path().to_path_buf()).await;
 
-    let resp = opencode_web::api::post_prompt(
+    let resp = opencoder_web::api::post_prompt(
         axum::extract::State(state),
         axum::extract::Path("any-sid".to_string()),
-        axum::extract::Json(opencode_web::api::PromptBody {
+        axum::extract::Json(opencoder_web::api::PromptBody {
             prompt: "hi".into(),
             delivery: None,
             agent: None,
@@ -330,10 +330,10 @@ async fn events_stream_survives_subscriber_lag() {
     seed(&state, sid).await;
 
     // subscribe first — get_events creates the handle and hands back a receiver.
-    let resp = opencode_web::api::get_events(
+    let resp = opencoder_web::api::get_events(
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
-        axum::extract::Query(opencode_web::api::EventsQuery { after: Some(0) }),
+        axum::extract::Query(opencoder_web::api::EventsQuery { after: Some(0) }),
     )
     .await
     .into_response();
@@ -343,7 +343,7 @@ async fn events_stream_survives_subscriber_lag() {
     // simulating a drain that has out-run a subscriber not yet reading frames.
     let tx = state.handles.lock().await.get(sid).unwrap().tx.clone();
     for i in 0..600u32 {
-        let _ = tx.send(opencode_web::handle::SseEvt {
+        let _ = tx.send(opencoder_web::handle::SseEvt {
             kind: "text_delta".into(),
             data: json!({ "i": i }),
             ts: i as i64,

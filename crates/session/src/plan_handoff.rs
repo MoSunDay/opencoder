@@ -13,7 +13,7 @@
 
 use crate::runner::new_id;
 use crate::SessionState;
-use opencode_core::{Message, Role};
+use opencoder_core::{Message, Role};
 
 /// Instruction prepended to the extracted plan. Worded as a user directive so
 /// the act agent treats the plan as the task to execute rather than re-planning.

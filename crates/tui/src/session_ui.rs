@@ -5,9 +5,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use opencode_core::{ContentBlock, Message, Role};
-use opencode_session::SessionEvent;
-use opencode_store::{Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_core::{ContentBlock, Message, Role};
+use opencoder_session::SessionEvent;
+use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -27,6 +27,7 @@ pub struct SessionUiState {
     pub steer_items: Vec<String>,
     pub queue_items: Vec<(i64, String)>,
     pub active_skill: Option<String>,
+    pub active_skill_body: Option<String>,
     pub agent_name: String,
 }
 
@@ -46,6 +47,7 @@ impl SessionUiState {
             steer_items: Vec::new(),
             queue_items: Vec::new(),
             active_skill: None,
+            active_skill_body: None,
             agent_name,
         }
     }
@@ -63,6 +65,7 @@ impl SessionUiState {
         steer_items: &[String],
         queue_items: &[(i64, String)],
         active_skill: &Option<String>,
+        active_skill_body: &Option<String>,
     ) -> Self {
         SessionUiState {
             running,
@@ -74,6 +77,7 @@ impl SessionUiState {
             steer_items: steer_items.to_vec(),
             queue_items: queue_items.to_vec(),
             active_skill: active_skill.clone(),
+            active_skill_body: active_skill_body.clone(),
             agent_name: chat.agent.clone(),
         }
     }
@@ -323,11 +327,21 @@ mod tests {
         let chat = sample_chat();
         let history = vec!["msg1".into(), "msg2".into()];
         let skill = Some("code-review".into());
+        let skill_body = Some("review every change carefully".into());
         let steers = vec!["fix bug".into(), "add tests".into(), "refactor".into()];
         let queues = vec![(1_i64, "run lint".into())];
 
         let snap = SessionUiState::snapshot(
-            true, &chat, &history, 42, false, 12000, &steers, &queues, &skill,
+            true,
+            &chat,
+            &history,
+            42,
+            false,
+            12000,
+            &steers,
+            &queues,
+            &skill,
+            &skill_body,
         );
 
         assert!(snap.running);
@@ -339,6 +353,7 @@ mod tests {
         assert_eq!(snap.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill, skill);
+        assert_eq!(snap.active_skill_body, skill_body);
         assert_eq!(snap.agent_name, "act");
     }
 
@@ -346,7 +361,7 @@ mod tests {
     fn snapshot_is_independent_of_source() {
         // Mutating the source chat after snapshot must not affect the snapshot.
         let mut chat = sample_chat();
-        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &[], &None);
+        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &[], &None, &None);
         chat.push_marker(ratatui::text::Line::from("new line"));
         assert_ne!(snap.chat, chat, "snapshot must be a deep copy");
     }
@@ -367,6 +382,7 @@ mod tests {
             &steers,
             &queues,
             &Some("s".into()),
+            &Some("body-of-s".into()),
         );
         // After "restore", all fields must match the snapshot.
         assert!(snap.running);
@@ -378,6 +394,7 @@ mod tests {
         assert_eq!(snap.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill.as_deref(), Some("s"));
+        assert_eq!(snap.active_skill_body.as_deref(), Some("body-of-s"));
     }
 
     #[test]

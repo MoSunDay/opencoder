@@ -45,7 +45,7 @@ Commit: (working-tree)
 - `features/index.md` e2e 描述改为深度契约版（12 项 + hard/soft 策略）。
 
 ### D — 修复：`serve` 子命令此前忽略全局 `--workdir` flag（e2e 暴露）
-- E11 启动 `opencoder --workdir <tmp> serve` 后，模型写的 `app.py` 落到了**仓库根目录**而非临时 workdir——根因：`opencode_web::serve()` 用 `std::env::current_dir()` 作 workdir，`serve_run`/`serve_launch` 丢弃了 `cli.workdir`。即 `opencoder --workdir X serve` 静默服务 cwd，对用户是隐蔽 bug。
+- E11 启动 `opencoder --workdir <tmp> serve` 后，模型写的 `app.py` 落到了**仓库根目录**而非临时 workdir——根因：`opencoder_web::serve()` 用 `std::env::current_dir()` 作 workdir，`serve_run`/`serve_launch` 丢弃了 `cli.workdir`。即 `opencoder --workdir X serve` 静默服务 cwd，对用户是隐蔽 bug。
 - 修复：`web::serve` 增 `workdir: PathBuf` 参数；`serve_run`/`serve_launch` 经 `resolve_workdir(cli)`（`--workdir` 优先、回退 cwd）传入。E11 现在正确隔离（app.py 进临时 workdir）。
 
 ## 涉及文件

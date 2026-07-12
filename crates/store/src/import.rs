@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use opencode_core::Message;
+use opencoder_core::Message;
 use tracing::{info, warn};
 
 use crate::store::Store;
@@ -68,7 +68,7 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         }
         match serde_json::from_str::<Message>(line) {
             Ok(m) => {
-                if first_user_text.is_none() && m.role == opencode_core::Role::User {
+                if first_user_text.is_none() && m.role == opencoder_core::Role::User {
                     first_user_text = Some(m.text());
                 }
                 msgs.push(m);
@@ -85,7 +85,7 @@ async fn import_jsonl_file<S: Store + ?Sized>(
             skipped,
         });
     }
-    let now = opencode_core::message::now_ms();
+    let now = opencoder_core::message::now_ms();
     let earliest = msgs.first().map(|m| m.created_at).unwrap_or(now);
     let meta = crate::types::SessionMeta {
         id: session_id.to_string(),

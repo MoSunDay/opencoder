@@ -31,7 +31,7 @@ use common::PtyStdin;
 async fn incomplete_csi_does_not_wedge_pump() {
     let pty = PtyStdin::open();
 
-    let (mut rx, _handle) = opencode_tui::input::spawn_input_pump();
+    let (mut rx, _handle) = opencoder_tui::input::spawn_input_pump();
     // `_handle` detached — see `input_pty.rs` for the rationale.
 
     // Partial CSI: parser buffers `\x1b[`, returns Ok(None). The pump's

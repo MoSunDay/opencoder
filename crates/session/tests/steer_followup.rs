@@ -18,10 +18,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use opencode_core::{resolve_agent, Config, ContentBlock, Message};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionEvent, SessionState};
-use opencode_store::{Delivery, LibsqlStore, SessionInput, Store};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionEvent, SessionState};
+use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
@@ -76,7 +76,7 @@ fn session(store: Arc<dyn Store>, mock: Arc<dyn ChatStream>) -> (tempfile::TempD
 /// Create the session row so input admission (FK) succeeds before the run.
 async fn seed_session(store: &Arc<dyn Store>) {
     store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: "drain-sess".into(),
             title: Some("t".into()),
             agent: Some("act".into()),
@@ -89,6 +89,39 @@ async fn seed_session(store: &Arc<dyn Store>) {
         })
         .await
         .unwrap();
+}
+
+/// Create the session row (parameterized id) so input admission (FK) succeeds.
+async fn seed_session_id(store: &Arc<dyn Store>, id: &str) {
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: id.into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+        })
+        .await
+        .unwrap();
+}
+
+/// Admit a steer input; returns the row PK seq (`admit_input`'s return value).
+async fn admit_steer(store: &Arc<dyn Store>, session_id: &str, id: &str, prompt: &str) -> i64 {
+    store
+        .admit_input(&SessionInput {
+            id: id.into(),
+            session_id: session_id.into(),
+            delivery: Delivery::Steer,
+            prompt: prompt.into(),
+            admitted_seq: 0,
+            promoted_seq: None,
+        })
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -274,4 +307,111 @@ async fn no_store_attached_behaves_classically() {
     let _ = ContentBlock::text("x");
     let _: Message = Message::user("id", "x");
     let _ = Duration::from_millis(0);
+}
+
+/// Regression: `SteerConsumed` must carry the row PK seq (what `admit_input`
+/// returns and the TUI stores), NOT the per-session `admitted_seq`. With the
+/// bug the event carried `admitted_seq`, so the TUI's `retain(|(s,_)| s != seq)`
+/// compared a stored PK against an `admitted_seq` -> never matched -> the steer
+/// row lingered until `Done`. To make PK != admitted_seq we first admit noise
+/// inputs to a DIFFERENT session: those bump the global autoincrement PK but
+/// not `drain-sess`'s per-session `admitted_seq`.
+#[tokio::test]
+async fn steer_consumed_carries_pk_seq_not_admitted_seq() {
+    let store = mem_store().await;
+    // Noise in another session: advances the global PK counter only.
+    seed_session_id(&store, "other").await;
+    for i in 0..3u32 {
+        admit_steer(&store, "other", &format!("noise-{i}"), &format!("n{i}")).await;
+    }
+
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn(1)])
+            .push_script(vec![done_turn("done")]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut s) = session(store.clone(), mock);
+    seed_session(&store).await;
+    let pk_seq = admit_steer(&store, "drain-sess", "sc-1", "STEER-SEQ").await;
+
+    // Sanity: the PK must differ from admitted_seq (1) for this test to mean
+    // anything. 3 noise rows -> this steer is row 4 globally, admitted_seq 1.
+    assert_ne!(
+        pk_seq, 1,
+        "test setup must diverge PK from admitted_seq; got pk={pk_seq}"
+    );
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut s, "kickoff".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    let consumed: Vec<i64> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::SteerConsumed { seq } => Some(*seq),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        consumed,
+        vec![pk_seq],
+        "SteerConsumed must carry the admit_input PK seq, not admitted_seq"
+    );
+}
+
+/// Multiple steers promoted at one boundary must each emit a `SteerConsumed`
+/// carrying the correct distinct PK seq, in `admitted_seq ASC` order. Guards
+/// the zip alignment between `pending_inputs` and `promote_inputs` returns.
+#[tokio::test]
+async fn multiple_steers_consumed_each_carries_distinct_pk_seq() {
+    let store = mem_store().await;
+    // Noise in another session so PKs diverge from admitted_seqs.
+    seed_session_id(&store, "other").await;
+    for i in 0..2u32 {
+        admit_steer(&store, "other", &format!("noise-{i}"), &format!("n{i}")).await;
+    }
+
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn(1)])
+            .push_script(vec![done_turn("done")]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut s) = session(store.clone(), mock);
+    seed_session(&store).await;
+    // 3 steers: PKs 3,4,5 ; admitted_seq 1,2,3.
+    let pk0 = admit_steer(&store, "drain-sess", "ms-0", "S0").await;
+    let pk1 = admit_steer(&store, "drain-sess", "ms-1", "S1").await;
+    let pk2 = admit_steer(&store, "drain-sess", "ms-2", "S2").await;
+    let expected = vec![pk0, pk1, pk2];
+    // Sanity: PKs are strictly increasing and distinct from admitted_seqs.
+    assert!(pk0 < pk1 && pk1 < pk2, "PKs must be distinct/increasing");
+    assert_eq!(pk0, 3, "2 noise rows -> first drain-sess steer is row 3");
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut s, "kickoff".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    let consumed: Vec<i64> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::SteerConsumed { seq } => Some(*seq),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        consumed, expected,
+        "each SteerConsumed must carry the correct PK in admitted_seq order"
+    );
 }

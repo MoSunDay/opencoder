@@ -3,13 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
-use opencode_core::{
+use opencoder_core::{
     message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc,
     ToolContext, ToolOutput,
 };
-use opencode_llm::tool_call::CompletedToolCall;
-use opencode_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
-use opencode_store::{EventKind, SessionEventRecord, SubagentStatus, SubagentTaskRecord};
+use opencoder_llm::tool_call::CompletedToolCall;
+use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
+use opencoder_store::{EventKind, SessionEventRecord, SubagentStatus, SubagentTaskRecord};
 use serde_json::Value;
 
 use crate::compaction;
@@ -59,11 +59,17 @@ pub enum SessionEvent {
     },
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
-    TranscriptReset(Vec<opencode_core::Message>),
+    TranscriptReset(Vec<opencoder_core::Message>),
     /// A queued follow-up was consumed (drained) at an idle boundary. Carries
     /// the consumed input's row seq so the TUI can drop it from its pending
     /// mirror instead of leaving a stale `[queued]` row until `Done`.
     QueueConsumed {
+        seq: i64,
+    },
+    /// A steered input was consumed (promoted) at a turn boundary. Carries
+    /// the consumed input's row seq so the TUI can drop it from its pending
+    /// mirror instead of leaving a stale `steer` row until `Done`.
+    SteerConsumed {
         seq: i64,
     },
     Done,
@@ -145,10 +151,11 @@ async fn run_loop(
         // last turn. A steer is absorbed into history HERE.
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
-            for p in &steer_prompts {
+            for (seq, p) in &steer_prompts {
                 let mut m = Message::user(new_id(), p.clone());
                 m.synthetic = true;
                 session.record(m).await;
+                on_event(SessionEvent::SteerConsumed { seq: *seq });
             }
             on_event(SessionEvent::Status(format!(
                 "steer promoted ({} new input(s))",
@@ -528,7 +535,7 @@ async fn run_subagent(
         child = child.with_store(store.clone());
         // Seed the child session row so the FK on subagent_tasks resolves.
         let _ = store
-            .create_session(&opencode_store::SessionMeta {
+            .create_session(&opencoder_store::SessionMeta {
                 id: child_session_id.clone(),
                 title: Some(prompt.chars().take(60).collect()),
                 agent: Some(kind.clone()),
@@ -695,15 +702,21 @@ fn core_usage(u: &Usage) -> MessageUsage {
 }
 
 /// Claim all pending steer inputs at a turn boundary: read them, mark promoted,
-/// return their prompts to be appended to history. No-op when no store is
-/// attached or none pending. Idempotent (promote only touches NULL promoted_seq).
-async fn claim_steers(session: &mut SessionState) -> Vec<String> {
+/// return their `(row seq, prompt)` pairs to be appended to history. The row
+/// seq is the `session_inputs` primary key -- the same identity `admit_input`
+/// returns and the TUI stores in its `steer_items` mirror -- so a
+/// `SteerConsumed` event lets the TUI drop the row by identity instead of
+/// leaving a stale `steer` row until `Done`. This is NOT the per-session
+/// `admitted_seq` (a different column scoped per session). No-op when no store
+/// is attached or none pending. Idempotent (promote only touches NULL
+/// promoted_seq).
+async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String)> {
     let store = match session.store.clone() {
         Some(s) => s,
         None => return Vec::new(),
     };
     let pending = match store
-        .pending_inputs(&session.id, opencode_store::Delivery::Steer)
+        .pending_inputs(&session.id, opencoder_store::Delivery::Steer)
         .await
     {
         Ok(v) => v,
@@ -716,14 +729,26 @@ async fn claim_steers(session: &mut SessionState) -> Vec<String> {
         return Vec::new();
     }
     let max_seq = pending.iter().map(|i| i.admitted_seq).max().unwrap_or(0);
-    if let Err(e) = store
-        .promote_inputs(&session.id, max_seq, opencode_store::Delivery::Steer)
+    // `promote_inputs` returns the promoted rows' PK seqs (`SELECT seq ...
+    // ORDER BY admitted_seq ASC`) -- the same ordering `pending_inputs` uses,
+    // so the two vectors align 1:1. Pair each PK with its prompt rather than
+    // using `admitted_seq`, so `SteerConsumed` carries the identity the TUI
+    // stored via `admit_input`'s return value.
+    let promoted_seqs = match store
+        .promote_inputs(&session.id, max_seq, opencoder_store::Delivery::Steer)
         .await
     {
-        tracing::warn!(error = %e, "claim_steers: promote_inputs failed");
-        return Vec::new();
-    }
-    pending.into_iter().map(|i| i.prompt).collect()
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "claim_steers: promote_inputs failed");
+            return Vec::new();
+        }
+    };
+    pending
+        .into_iter()
+        .zip(promoted_seqs)
+        .map(|(i, seq)| (seq, i.prompt))
+        .collect()
 }
 
 /// Claim exactly one queued input at idle. Returns its (row seq, prompt), or None.
@@ -745,7 +770,7 @@ pub fn new_id() -> String {
 
 pub async fn run_once(
     agent_name: &str,
-    config: opencode_core::Config,
+    config: opencoder_core::Config,
     client: Arc<dyn ChatStream>,
     working_dir: std::path::PathBuf,
     prompt: String,

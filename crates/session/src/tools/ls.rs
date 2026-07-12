@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use opencode_core::{json, Tool, ToolContext, ToolOutput};
+use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 
 pub struct ListTool;
@@ -43,7 +43,7 @@ impl Tool for ListTool {
         if names.is_empty() {
             return Ok(ToolOutput::ok("(empty)"));
         }
-        Ok(opencode_core::tool::truncate_output(
+        Ok(opencoder_core::tool::truncate_output(
             names.join("\n"),
             ctx.max_output,
         ))

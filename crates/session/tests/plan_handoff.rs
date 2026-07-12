@@ -13,9 +13,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config, ContentBlock, Message, Role};
-use opencode_llm::MockChatClient;
-use opencode_session::{plan_handoff, SessionState};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
+use opencoder_llm::MockChatClient;
+use opencoder_session::{plan_handoff, SessionState};
 
 fn config() -> Config {
     Config {
@@ -114,7 +114,7 @@ async fn handoff_skips_empty_assistant_turns() {
 
 #[tokio::test]
 async fn handoff_does_not_touch_store() {
-    use opencode_store::{LibsqlStore, Store};
+    use opencoder_store::{LibsqlStore, Store};
 
     // Attach a real in-memory store and populate the durable transcript via
     // `record` (which persists). handoff must collapse the in-memory transcript

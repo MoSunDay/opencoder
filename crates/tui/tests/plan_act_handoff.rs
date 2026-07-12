@@ -9,10 +9,10 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config, ContentBlock, Message};
-use opencode_llm::{LlmEvent, MockChatClient};
-use opencode_session::{SessionEvent, SessionState};
-use opencode_tui::worker::{process_cmd, UiCmd, UiEvent};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
+use opencoder_llm::{LlmEvent, MockChatClient};
+use opencoder_session::{SessionEvent, SessionState};
+use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
 fn assistant_with_text(id: &str, text: &str) -> Message {

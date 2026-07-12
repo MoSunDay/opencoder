@@ -9,7 +9,7 @@
 //! from the help popup.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use opencode_core::Skill;
+use opencoder_core::Skill;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

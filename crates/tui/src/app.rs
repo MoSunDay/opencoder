@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{estimate, ChatClient, ChatStream};
-use opencode_session::{SessionEvent, SessionState};
-use opencode_store::{Delivery, LibsqlStore, Store};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{estimate, ChatClient, ChatStream};
+use opencoder_session::{SessionEvent, SessionState};
+use opencoder_store::{Delivery, LibsqlStore, Store};
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -65,7 +65,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         .or_else(|| resolve_agent("act"))
         .context("agent")?;
 
-    let session_id = opencode_session::runner::new_id();
+    let session_id = opencoder_session::runner::new_id();
     let context_limit = config.context_limit();
     let model_label = config.model_id().to_string();
 
@@ -151,6 +151,7 @@ async fn run_app(
     let mut command_menu: Option<CommandMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut active_skill: Option<String> = None;
+    let mut active_skill_body: Option<String> = None;
     let mut anim_tick: u32 = 0;
     let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;
@@ -285,7 +286,7 @@ async fn run_app(
                                     let _ = cmd_tx.send(UiCmd::Quit).await;
                                     let new_session_id = match &pick {
                                         crate::task::TaskPick::New => {
-                                            opencode_session::runner::new_id()
+                                            opencoder_session::runner::new_id()
                                         }
                                         crate::task::TaskPick::Resume(id) => id.clone(),
                                     };
@@ -323,7 +324,7 @@ async fn run_app(
                                     });
                                     // Save current session's UI state before switching.
                                     session_states.insert(session_id.clone(), crate::session_ui::SessionUiState::snapshot(
-                                        running, &chat, &history, scroll, follow, sys_tokens, &steer_items, &queue_items, &active_skill,
+                                        running, &chat, &history, scroll, follow, sys_tokens, &steer_items, &queue_items, &active_skill, &active_skill_body,
                                     ));
                                     // Restore or create the target session's UI state.
                                     let restored = session_states.remove(&new_session_id);
@@ -336,6 +337,7 @@ async fn run_app(
                                         steer_items = st.steer_items;
                                         queue_items = st.queue_items;
                                         active_skill = st.active_skill;
+                                        active_skill_body = st.active_skill_body;
                                         running = false; // worker was killed on switch
                                     } else {
                                         // Fresh state for a new or resumed session.
@@ -347,7 +349,7 @@ async fn run_app(
                                         scroll = 0; follow = true;
                                         sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
                                         steer_items.clear(); queue_items.clear();
-                                        active_skill = None; running = false;
+                                        active_skill = None; active_skill_body = None; running = false;
                                     }
                                     input.clear(); cursor_idx = 0; hist_idx = None;
                                     rebind_session(
@@ -380,7 +382,7 @@ async fn run_app(
                                             let before = task_picker.as_ref().map(|p| p.deletable_count()).unwrap_or(0);
                                             match store.clear_other_sessions(&keep_session_id).await {
                                                 Ok(n) => {
-                                                    let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
+                                                    let sessions = store.list_sessions(&opencoder_store::SessionFilter::default())
                                                         .await.unwrap_or_default();
                                                     if let Some(p) = task_picker.as_mut() {
                                                         p.reset_sessions(sessions);
@@ -422,7 +424,7 @@ async fn run_app(
                                                     // `/task` new sessions pick up the new endpoint
                                                     // (the worker only swaps its own sess.client).
                                                     let api_key = reloaded.api_key().unwrap_or_default();
-                                                    if let Ok(new_client) = opencode_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
+                                                    if let Ok(new_client) = opencoder_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
                                                         client = Arc::new(new_client);
                                                     }
                                                     config = reloaded.clone();
@@ -456,7 +458,7 @@ async fn run_app(
                             if quit { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                             match outcome {
                                 CommandOutcome::Dispatch(SlashAction::Task) => {
-                                    let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
+                                    let sessions = store.list_sessions(&opencoder_store::SessionFilter::default())
                                         .await.unwrap_or_default();
                                     task_picker = Some(TaskPicker::new(sessions, session_id.clone()));
                                 }
@@ -546,7 +548,7 @@ async fn run_app(
                             KeyAction::SwitchAgent(name) => {
                                 mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
                                 let plan_to_act = chat.agent == "plan" && name == "act" && !running;
-                                sys_tokens = sys_tokens_for(&name, &workdir, active_skill.as_deref());
+                                sys_tokens = sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
                                 if plan_to_act && !chat.blocks.is_empty() {
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name))
                                         .await
@@ -565,11 +567,13 @@ async fn run_app(
                                 match opt {
                                     Some((name, body)) => {
                                         active_skill = Some(name.clone());
+                                        active_skill_body = Some(body.clone());
                                         sys_tokens = sys_tokens_for(&agent_name, &workdir, Some(&body));
                                         let _ = cmd_tx.send(UiCmd::SetSkill(Some(body))).await;
                                     }
                                     None => {
                                         active_skill = None;
+                                        active_skill_body = None;
                                         sys_tokens = sys_tokens_for(&agent_name, &workdir, None);
                                         let _ = cmd_tx.send(UiCmd::SetSkill(None)).await;
                                     }

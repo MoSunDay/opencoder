@@ -5,9 +5,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionEvent, SessionState};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionEvent, SessionState};
 use tokio_util::sync::CancellationToken;
 
 fn bash_call(cmd: &str) -> LlmEvent {

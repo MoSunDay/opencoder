@@ -19,13 +19,13 @@ Commit: (working-tree, pre-initial-commit)
 ## Impact Surface
 - 重写：`crates/tui/src/app.rs`（472→646 行，仍 ≤800 限）、`crates/tui/src/keybind.rs`。
 - 改动：`crates/session/src/runner.rs`（新增 `cancelled` / `await_cancel` 辅助；run_one_llm_call 与 execute_call 改 select!；run_loop 工具循环加 `if cancelled(session) { break; }`；`run_subagent` 透传 `child.cancel`）。
-- 新增依赖：`opencode-tui` 加 `tokio-util.workspace = true`（CancellationToken）。
+- 新增依赖：`opencoder-tui` 加 `tokio-util.workspace = true`（CancellationToken）。
 - 新增测试：`crates/session/tests/hard_abort.rs`（cancel 中止运行中 bash `sleep`，sub-3s 返回 + `Status(interrupted)`）。
 - 不变：`SessionEvent` 枚举、`Store`/`ChatStream` trait、web/CLI 入口、持久化路径。
 
 ## Verification
 - `cargo build --bin opencoder`：dev profile 无 warning。
-- `cargo clippy -p opencode-tui -p opencode-session --tests`：全绿。
+- `cargo clippy -p opencoder-tui -p opencoder-session --tests`：全绿。
 - `cargo test --workspace`：全过（含既有 58 + 新增 hard_abort；web 的 turn 边界 interrupt 测试仍绿，证明两套 cancel 共存）。
 - PTY 冒烟（`script` + `timeout 1.5 opencode tui`）：进程进入渲染循环、运行满 1.5s 被 timeout 杀（exit 124），无 panic / 无 stderr。
 

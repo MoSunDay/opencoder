@@ -12,10 +12,10 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config, ContentBlock, Role};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{generate_title, resume, run, SessionState};
-use opencode_store::{LibsqlStore, Store};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Role};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{generate_title, resume, run, SessionState};
+use opencoder_store::{LibsqlStore, Store};
 
 async fn mem_store() -> LibsqlStore {
     LibsqlStore::open_memory().await.unwrap()
@@ -258,7 +258,7 @@ async fn fork_does_not_mutate_parent() {
     // fork: copy parent's messages into a NEW session id, then run more on the child
     let child_msgs = parent.messages.clone();
     store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: "child".into(),
             title: Some("forked".into()),
             agent: Some("act".into()),

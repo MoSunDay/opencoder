@@ -40,3 +40,6 @@ logs/
 tsconfig.tsbuildinfo
 link_repos
 __pycache__/
+.cargo
+.opencode
+.opencoder

@@ -8,9 +8,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
-use opencode_session::SessionState;
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
+use opencoder_session::SessionState;
 
 fn done() -> Vec<LlmEvent> {
     vec![LlmEvent::Completed {

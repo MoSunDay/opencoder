@@ -21,8 +21,8 @@ name = "opencoder"
 path = "src/main.rs"
 
 [dependencies]
-opencode-cli.workspace = true
-opencode-tui.workspace = true
+opencoder-cli.workspace = true
+opencoder-tui.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -34,13 +34,13 @@ authors = ["opencoder"]
 license = "MIT"
 
 [workspace.dependencies]
-opencode-core   = { path = "crates/core" }
-opencode-llm    = { path = "crates/llm" }
-opencode-store  = { path = "crates/store" }
-opencode-session = { path = "crates/session" }
-opencode-tui    = { path = "crates/tui" }
-opencode-web    = { path = "crates/web" }
-opencode-cli    = { path = "crates/cli" }
+opencoder-core   = { path = "crates/core" }
+opencoder-llm    = { path = "crates/llm" }
+opencoder-store  = { path = "crates/store" }
+opencoder-session = { path = "crates/session" }
+opencoder-tui    = { path = "crates/tui" }
+opencoder-web    = { path = "crates/web" }
+opencoder-cli    = { path = "crates/cli" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

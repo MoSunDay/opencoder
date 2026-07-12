@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use opencode_core::{json, Tool, ToolContext, ToolOutput};
+use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 
 pub struct EditTool;

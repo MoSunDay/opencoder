@@ -12,9 +12,9 @@ use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 
-use opencode_core::Config;
-use opencode_llm::{ChatClient, ChatStream};
-use opencode_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
+use opencoder_core::Config;
+use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
 
 use crate::handle::{admit_and_drain, SessionHandle, SseEvt};
 use crate::AppState;
@@ -29,8 +29,8 @@ pub async fn create_session(
     State(state): State<Arc<AppState>>,
     body: Option<Json<CreateBody>>,
 ) -> impl IntoResponse {
-    let id = opencode_session::runner::new_id();
-    let now = opencode_core::message::now_ms();
+    let id = opencoder_session::runner::new_id();
+    let now = opencoder_core::message::now_ms();
     let meta = SessionMeta {
         id: id.clone(),
         title: None,
@@ -151,7 +151,7 @@ async fn ensure_session_row(state: &AppState, id: &str, prompt: &str, config: &C
     if state.store.get_session(id).await.ok().flatten().is_some() {
         return;
     }
-    let now = opencode_core::message::now_ms();
+    let now = opencoder_core::message::now_ms();
     let _ = state
         .store
         .create_session(&SessionMeta {
@@ -184,7 +184,7 @@ pub async fn post_agent(
             &id,
             &SessionPatch {
                 agent: Some(body.value.clone()),
-                updated_at: Some(opencode_core::message::now_ms()),
+                updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },
         )
@@ -206,7 +206,7 @@ pub async fn post_model(
             &id,
             &SessionPatch {
                 model: Some(body.value.clone()),
-                updated_at: Some(opencode_core::message::now_ms()),
+                updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },
         )

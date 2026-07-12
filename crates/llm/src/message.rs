@@ -1,4 +1,4 @@
-use opencode_core::{ContentBlock, Message, Role};
+use opencoder_core::{ContentBlock, Message, Role};
 use serde_json::{json, Value};
 
 pub type OpenAIMessage = Value;

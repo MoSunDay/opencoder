@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use libsql::{params, Connection};
-use opencode_core::{ContentBlock, Message, MessageUsage, Role};
+use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
 use crate::types::ImportReport;
 

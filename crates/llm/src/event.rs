@@ -30,6 +30,9 @@ pub enum LlmEvent {
     /// Emitted before each retry backoff during the pre-stream retry loop
     /// (`attempt` is 1-based, `max` is the total attempt budget). Lets the UI
     /// surface "↻ retry attempt/max" so a transient failure isn't silent.
-    Retrying { attempt: u8, max: u8 },
+    Retrying {
+        attempt: u8,
+        max: u8,
+    },
     Error(String),
 }

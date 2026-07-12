@@ -19,7 +19,7 @@ fn skills_dir_points_at_global_home() {
     let dir = skills_dir();
     let s = dir.to_string_lossy();
     assert!(
-        s.ends_with(".opencoder/skills") || s.ends_with(".opencode/skills"),
+        s.ends_with(".opencoder/skills"),
         "unexpected skills_dir: {s}"
     );
 }

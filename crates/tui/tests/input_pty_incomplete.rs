@@ -56,8 +56,8 @@ async fn incomplete_csi_does_not_wedge_pump() {
             KeyCode::Up,
             "expected Up (from completed CSI \\x1b[A), got {k:?}"
         ),
-        other => panic!(
-            "pump wedged on incomplete CSI — no event after completing byte: {other:?}"
-        ),
+        other => {
+            panic!("pump wedged on incomplete CSI — no event after completing byte: {other:?}")
+        }
     }
 }

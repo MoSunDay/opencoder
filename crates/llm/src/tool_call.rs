@@ -151,7 +151,9 @@ mod tests {
         let mut acc = ToolAccumulator::default();
         // First delta: arguments only, no id/name
         let evs1 = acc.apply(0, None, None, Some("{\"cmd\":"));
-        assert!(evs1.iter().all(|e| !matches!(e, LlmEvent::ToolCallStart { .. })));
+        assert!(evs1
+            .iter()
+            .all(|e| !matches!(e, LlmEvent::ToolCallStart { .. })));
         // Second delta: id and name arrive
         let evs2 = acc.apply(0, Some("call_1"), Some("bash"), None);
         assert!(evs2.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { id, name, .. } if id == "call_1" && name == "bash")));
@@ -177,7 +179,8 @@ mod tests {
         acc.apply(0, Some("call_1"), Some("bash"), Some("{}"));
         let evs = acc.apply(0, Some("call_1"), Some("bash"), Some("{}"));
         assert!(
-            !evs.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { .. })),
+            !evs.iter()
+                .any(|e| matches!(e, LlmEvent::ToolCallStart { .. })),
             "ToolCallStart must not be emitted twice"
         );
     }

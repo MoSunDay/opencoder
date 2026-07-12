@@ -406,7 +406,8 @@ mod tests {
     #[test]
     fn replay_renders_assistant_as_markdown_block() {
         let mut msg = Message::assistant("a1");
-        msg.blocks.push(ContentBlock::text("Here is **bold** text."));
+        msg.blocks
+            .push(ContentBlock::text("Here is **bold** text."));
         let chat = replay_messages("act", &[msg]);
         // The replay must produce a finalized Assistant block (markdown-rendered)
         // rather than a plain Marker, so flatten() emits the "say:" header and

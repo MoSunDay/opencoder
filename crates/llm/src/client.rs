@@ -142,10 +142,7 @@ const BASE_BACKOFF_MS: u64 = 500;
 /// Whether an HTTP status is transient enough to warrant a retry. Network/send
 /// errors (no status) are always retried; only these status codes qualify.
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(
-        status.as_u16(),
-        408 | 425 | 429 | 500 | 502 | 503 | 504
-    )
+    matches!(status.as_u16(), 408 | 425 | 429 | 500 | 502 | 503 | 504)
 }
 
 /// Classification of a single send attempt's outcome, abstracted away from
@@ -290,9 +287,9 @@ async fn connect_with_retry(
                 if retry_decision(AttemptOutcome::RetryableError, attempt, MAX_ATTEMPTS)
                     == RetryDecision::Fail
                 {
-                    return Err(e.context(format!(
-                        "send chat request failed after {attempt} attempts"
-                    )));
+                    return Err(
+                        e.context(format!("send chat request failed after {attempt} attempts"))
+                    );
                 }
                 warn!(attempt, error = %e, "send error, will retry");
                 let _ = tx

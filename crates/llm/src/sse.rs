@@ -166,7 +166,10 @@ mod tests {
         let mut dec = SseDecoder::new();
         // A single continuation byte — not valid UTF-8 on its own
         dec.push(b"\xc3");
-        assert!(dec.drain().is_empty(), "incomplete UTF-8 should yield no frames");
+        assert!(
+            dec.drain().is_empty(),
+            "incomplete UTF-8 should yield no frames"
+        );
         // Now complete it
         dec.push(b"\xa9\n\n");
         // \xc3\xa9 = é, but there's no data: prefix so nothing is extracted —

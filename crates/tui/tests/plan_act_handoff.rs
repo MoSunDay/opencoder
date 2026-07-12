@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, ContentBlock, Config, Message};
+use opencode_core::{resolve_agent, Config, ContentBlock, Message};
 use opencode_llm::{LlmEvent, MockChatClient};
 use opencode_session::{SessionEvent, SessionState};
 use opencode_tui::worker::{process_cmd, UiCmd, UiEvent};
@@ -33,9 +33,8 @@ fn text_done(text: &str) -> LlmEvent {
 async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     // The act turn returns one completed text turn with no tool calls, so the
     // run loop settles after a single LLM call.
-    let mock = Arc::new(
-        MockChatClient::new().push_script(vec![text_done("starting implementation now")]),
-    );
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![text_done("starting implementation now")]));
     let dir = tempfile::tempdir().unwrap();
     let plan_agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
@@ -97,7 +96,10 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     //     message is the seed, and the act turn's response is appended after.
     //     Crucially the planning chatter must NOT be present anymore.
     assert!(
-        session.messages.iter().any(|m| m.text().contains("## Plan\n1. do X\n2. do Y")),
+        session
+            .messages
+            .iter()
+            .any(|m| m.text().contains("## Plan\n1. do X\n2. do Y")),
         "handoff seed must be in the transcript"
     );
     assert!(
@@ -123,8 +125,15 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
         .count();
-    assert_eq!(user_msgs.len(), 1, "only the handoff user message must reach act");
-    assert_eq!(assistant_msgs, 0, "no planning assistant turn may leak to act");
+    assert_eq!(
+        user_msgs.len(),
+        1,
+        "only the handoff user message must reach act"
+    );
+    assert_eq!(
+        assistant_msgs, 0,
+        "no planning assistant turn may leak to act"
+    );
 
     let content = user_msgs[0]
         .get("content")

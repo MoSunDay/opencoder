@@ -18,9 +18,7 @@ use tempfile::TempDir;
 
 async fn fresh() -> (TempDir, Arc<LibsqlStore>) {
     let dir = tempfile::tempdir().unwrap();
-    let store = LibsqlStore::open(dir.path().join("test.db"))
-        .await
-        .unwrap();
+    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
     (dir, Arc::new(store))
 }
 
@@ -89,7 +87,9 @@ async fn replay_reconstructs_subagent_blocks_with_status_and_child_view() {
     // Parent messages: user asks, assistant responds (id "a1").
     let user_msg = Message::user("u1", "do the thing");
     let mut asst_msg = Message::assistant("a1");
-    asst_msg.blocks.push(ContentBlock::text("delegating to subagents"));
+    asst_msg
+        .blocks
+        .push(ContentBlock::text("delegating to subagents"));
     store.append_message("parent", &user_msg).await.unwrap();
     store.append_message("parent", &asst_msg).await.unwrap();
 
@@ -268,8 +268,13 @@ async fn replay_falls_back_to_message_replay_when_no_events() {
 
     // Child has messages but no events — tests the fallback path.
     let mut child_asst = Message::assistant("c1");
-    child_asst.blocks.push(ContentBlock::text("child result text"));
-    store.append_message("child-noev", &child_asst).await.unwrap();
+    child_asst
+        .blocks
+        .push(ContentBlock::text("child result text"));
+    store
+        .append_message("child-noev", &child_asst)
+        .await
+        .unwrap();
 
     store
         .create_subagent_task(&running_task(
@@ -343,7 +348,10 @@ async fn replay_shows_interrupted_for_running_subagent() {
         .find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "task-run"))
         .expect("should have the subagent block");
 
-    if let ChatBlock::Subagent { done, ok, summary, .. } = sub {
+    if let ChatBlock::Subagent {
+        done, ok, summary, ..
+    } = sub
+    {
         assert!(*done, "interrupted subagent should display as done");
         assert!(!*ok, "interrupted subagent should display as failed");
         assert_eq!(summary, "(interrupted)");

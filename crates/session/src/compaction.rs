@@ -5,8 +5,8 @@ use opencode_core::{Message, Role, ToolArc};
 use opencode_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
-use crate::SessionState;
 use crate::runner::SessionEvent;
+use crate::SessionState;
 
 /// Decide whether to compact. Two signals are checked: the estimated tokens
 /// of the transcript (works on round 1, before any usage) and the model-reported

@@ -14,7 +14,7 @@ fn merge_project_file_overrides_defaults() {
     let _g = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{
             "model": "zhipuai-coding-plan/glm-5.2",
             "small_model": "cheap/mini",
@@ -47,7 +47,7 @@ fn env_overrides_project_file() {
 
     let dir = tempfile::tempdir().unwrap();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"model":"file/model","small_model":"file/sm","context_limit":1000}"#,
     )
     .unwrap();
@@ -71,7 +71,7 @@ fn braces_api_key_resolves_env_var() {
     std::env::set_var("ZHIPU_API_KEY", "secret-value-123");
     let dir = tempfile::tempdir().unwrap();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"provider":{"api_key":"{ZHIPU_API_KEY}"}}"#,
     )
     .unwrap();
@@ -100,7 +100,7 @@ fn reserved_saturates_against_context_limit() {
     let _g = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"context_limit": 1000, "compaction": {"reserved": 5000}}"#,
     )
     .unwrap();
@@ -163,7 +163,7 @@ fn reasoning_effort_is_parsed_and_default_none() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"reasoning_effort":"high"}"#,
     )
     .unwrap();
@@ -199,7 +199,7 @@ fn interleaved_thinking_parsed_from_config() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"interleaved_thinking": false}"#,
     )
     .unwrap();
@@ -233,8 +233,8 @@ fn save_persists_patch_and_roundtrips() {
     });
     let written = Config::save(dir.path(), &patch).unwrap();
     assert!(
-        written.ends_with("opencode.json"),
-        "must save to project-local opencode.json"
+        written.ends_with("opencoder.json"),
+        "must save to project-local opencoder.json"
     );
 
     let cfg = Config::load(dir.path()).unwrap();
@@ -254,7 +254,7 @@ fn save_preserves_unrelated_keys_on_merge() {
     let (_home_guard, dir) = isolated_home();
     // Pre-existing file with a sibling compaction key we must NOT clobber.
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"compaction":{"tail_turns":5,"context_threshold":5000}}"#,
     )
     .unwrap();
@@ -289,7 +289,7 @@ fn save_can_remove_reasoning_effort_via_null() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();
     fs::write(
-        dir.path().join("opencode.json"),
+        dir.path().join("opencoder.json"),
         r#"{"model":"m","reasoning_effort":"high"}"#,
     )
     .unwrap();

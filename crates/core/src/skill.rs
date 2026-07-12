@@ -6,7 +6,7 @@
 //! `~/.opencoder/skills/` and load them on demand without touching the agent
 //! registry or config.
 //!
-//! Two on-disk layouts are accepted, mirroring the opencode skill convention:
+//! Two on-disk layouts are accepted, mirroring the opencoder skill convention:
 //!
 //! ```text
 //! ~/.opencoder/skills/<name>.md
@@ -38,12 +38,12 @@ pub struct Skill {
 }
 
 /// Default discovery root: the binary's own global config home
-/// (`~/.opencoder/skills`). Returns `~/.opencode/skills` only as an absolute
+/// (`~/.opencoder/skills`). Returns `~/.opencoder/skills` only as an absolute
 /// fallback when no home directory can be resolved, so discovery never panics.
 pub fn skills_dir() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".opencoder").join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".opencode").join("skills"))
+        .unwrap_or_else(|| PathBuf::from(".opencoder").join("skills"))
 }
 
 /// Scan `~/.opencoder/skills` and return every skill found, sorted by name.

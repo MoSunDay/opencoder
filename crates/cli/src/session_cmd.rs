@@ -34,7 +34,7 @@ pub async fn models_dispatch(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Render the `opencode models` summary as a string. Extracted from
+/// Render the `opencoder models` summary as a string. Extracted from
 /// `models_dispatch` so the reasoning_effort display path is unit-testable
 /// without spawning the binary or a live model.
 pub(crate) fn models_summary(cfg: &Config) -> String {
@@ -110,7 +110,7 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             let bundle = export_bundle(&store, id).await?;
             let path = out
                 .clone()
-                .unwrap_or_else(|| format!("{id}.opencode").into());
+                .unwrap_or_else(|| format!("{id}.opencoder").into());
             let mut file = std::fs::File::create(&path)
                 .with_context(|| format!("create {}", path.display()))?;
             write_bundle(&bundle, &mut file)?;
@@ -178,7 +178,7 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
 pub(crate) async fn open_store(workdir: &PathBuf) -> Result<LibsqlStore> {
     let data_dir = data_dir_for(workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
-    LibsqlStore::open(data_dir.join("opencode.db")).await
+    LibsqlStore::open(data_dir.join("opencoder.db")).await
 }
 
 fn data_dir_for(workdir: &PathBuf) -> PathBuf {
@@ -187,7 +187,7 @@ fn data_dir_for(workdir: &PathBuf) -> PathBuf {
     workdir.hash(&mut h);
     let digest = h.finish();
     let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencode");
+    base.push("opencoder");
     base.push(format!("{digest:x}"));
     base
 }

@@ -93,26 +93,26 @@ pub enum SessionSub {
     },
     /// Delete a session.
     Delete { id: String },
-    /// Export a session (with subagent tree) to an opencode binary file.
+    /// Export a session (with subagent tree) to an opencoder binary file.
     Export {
         id: String,
-        /// Output path. Defaults to `<id>.opencode`.
+        /// Output path. Defaults to `<id>.opencoder`.
         #[arg(short, long)]
         out: Option<PathBuf>,
     },
-    /// Import a session from an opencode binary file.
+    /// Import a session from an opencoder binary file.
     Import {
-        /// Path to the `.opencode` bundle file.
+        /// Path to the `.opencoder` bundle file.
         input: PathBuf,
     },
 }
 
 /// Path used to sink TUI logs so they never corrupt the alternate screen.
-/// `<data_local_dir>/opencode/tui.log`. Returns `None` if the data dir is
+/// `<data_local_dir>/opencoder/tui.log`. Returns `None` if the data dir is
 /// unavailable; the caller treats `None` as "log to stdout".
 pub fn tui_log_path() -> Option<PathBuf> {
     let mut p = dirs::data_local_dir()?;
-    p.push("opencode");
+    p.push("opencoder");
     p.push("tui.log");
     Some(p)
 }
@@ -128,7 +128,7 @@ pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
     let default_filter = if verbose {
         "debug"
     } else {
-        "opencode=info,warn"
+        "opencoder=info,warn"
     };
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));

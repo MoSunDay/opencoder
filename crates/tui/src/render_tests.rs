@@ -281,7 +281,7 @@ fn place_cursor_row_zero() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            place_cursor(f, Rect::new(0, 5, 40, 4), "hello", 2, 36, 0);
+            place_cursor(f, Rect::new(0, 5, 40, 4), "hello", 2, 36, 2, 0);
         })
         .unwrap();
     // row=0, col=2 → x = 0+1+2+2 = 5, y = 5+1+0-0 = 6.
@@ -296,10 +296,10 @@ fn place_cursor_second_line() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            place_cursor(f, Rect::new(0, 5, 40, 4), "hello\nworld", 8, 36, 0);
+            place_cursor(f, Rect::new(0, 5, 40, 4), "hello\nworld", 8, 36, 2, 0);
         })
         .unwrap();
-    // cursor_row_col("hello\nworld", 8, 36) = (1, 2)
+    // cursor_row_col("hello\nworld", 8, 36, 2) = (1, 2)
     // row>0 → x = 0+1+2 = 3, y = 5+1+1-0 = 7.
     terminal.backend_mut().assert_cursor_position((3, 7));
 }
@@ -312,12 +312,12 @@ fn place_cursor_soft_wrap_advances_row() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            place_cursor(f, Rect::new(0, 5, 40, 4), "aaaaaa", 6, 5, 0);
+            place_cursor(f, Rect::new(0, 5, 40, 4), "aaaaaa", 6, 5, 2, 0);
         })
         .unwrap();
-    // cursor_row_col("aaaaaa", 6, 5) = (1, 1)
-    // row>0 → x = 0+1+1 = 2, y = 5+1+1-0 = 7.
-    terminal.backend_mut().assert_cursor_position((2, 7));
+    // cursor_row_col("aaaaaa", 6, 5, 2) = (1, 3)
+    // first_w = 5-2 = 3, rest_w = 5; row>0 → x = 0+1+3 = 4, y = 5+1+1-0 = 7.
+    terminal.backend_mut().assert_cursor_position((4, 7));
 }
 
 /// Scrolling the composer shifts the cursor's screen row by `scroll`.
@@ -327,10 +327,10 @@ fn place_cursor_with_scroll() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            place_cursor(f, Rect::new(0, 5, 40, 4), "line1\nline2\nline3", 12, 80, 1);
+            place_cursor(f, Rect::new(0, 5, 40, 4), "line1\nline2\nline3", 12, 80, 2, 1);
         })
         .unwrap();
-    // cursor_row_col("line1\nline2\nline3", 12, 80) = (2, 0)
+    // cursor_row_col("line1\nline2\nline3", 12, 80, 2) = (2, 0)
     // row>0 → x = 0+1+0 = 1, y = 5+1+2-1 = 7.
     terminal.backend_mut().assert_cursor_position((1, 7));
 }

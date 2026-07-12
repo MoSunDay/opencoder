@@ -465,3 +465,98 @@ fn parallel_tool_outputs_route_to_own_block() {
     assert!(text_b.contains("B-out"), "block B output: {text_b}");
     assert!(!text_b.contains("A-out"), "block B contaminated: {text_b}");
 }
+
+#[test]
+fn orphan_tool_end_creates_synthetic_block() {
+    // A ToolEnd with no preceding ToolStart (e.g. a lost event) must not
+    // panic; it creates a synthetic "(output)" tool block carrying the id.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolEnd {
+        id: "orphan".into(),
+        name: "bash".into(),
+        output: "loose output".into(),
+        is_error: false,
+    });
+    let tools: Vec<_> = v
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 1, "orphan ToolEnd should create one block");
+    assert_eq!(tools[0].0, "orphan");
+    let header: String = tools[0].1.spans.iter().map(|s| s.content.clone()).collect();
+    assert!(header.contains("(output)"), "synthetic header: {header}");
+    let out: String = tools[0]
+        .2
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(out.contains("loose output"), "output appended: {out}");
+}
+
+#[test]
+fn tool_end_error_colors_output_red() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "e1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "false"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "e1".into(),
+        name: "bash".into(),
+        output: "boom".into(),
+        is_error: true,
+    });
+    let tool = v
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::Tool { output, .. } => Some(output),
+            _ => None,
+        })
+        .expect("tool block");
+    assert!(!tool.is_empty(), "error output should be appended");
+    assert_eq!(
+        tool[0].spans[0].style.fg,
+        Some(ratatui::style::Color::Red),
+        "error output must be styled red"
+    );
+}
+
+#[test]
+fn tool_output_truncated_to_six_lines() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "seq 20"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "t1".into(),
+        name: "bash".into(),
+        output: (1..=20)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        is_error: false,
+    });
+    let tool = v
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::Tool { output, .. } => Some(output),
+            _ => None,
+        })
+        .expect("tool block");
+    assert_eq!(
+        tool.len(),
+        6,
+        "output must be truncated to TOOL_OUTPUT_LINES (6); got {}",
+        tool.len()
+    );
+}

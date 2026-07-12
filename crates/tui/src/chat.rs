@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
 
-const TOOL_OUTPUT_LINES: usize = 6;
+pub(crate) const TOOL_OUTPUT_LINES: usize = 6;
 
 /// Braille spinner frames shown next to a running subagent header. Matches the
 /// status-bar spinner in `render.rs` so the UI has one consistent motion.
@@ -648,7 +648,7 @@ impl ChatView {
     }
 }
 
-fn summarize(input: &serde_json::Value) -> String {
+pub(crate) fn summarize(input: &serde_json::Value) -> String {
     match input {
         serde_json::Value::Object(m) => {
             for k in ["command", "path", "description", "pattern", "prompt"] {

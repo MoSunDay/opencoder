@@ -25,7 +25,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - **subagent ctx 切换**：`subagent_focus: Option<usize>` 状态。进入时保存 `parent_scroll/parent_follow`，退出时恢复。Esc 优先拦截（在 handle_key 之前）。
 - **输入模式**：Enter = steer（运行中）/ submit（idle）；Tab = followup（运行中）/ submit（idle）；Shift+Tab 切 plan/act。
 - **中止与续跑**：双击 Esc 硬中止（`KeyAction::Cancel` → `cancel.cancel()`，`run_app` 即刻 `running=false`）。每个新 turn 由 `start_turn` 先发 `UiCmd::ResetCancel(新 token)` 再发工作命令（mpsc FIFO，4 个派发点：Submit idle / SwitchAndStart / Compact / TurnDone 续跑），刷新 worker 的 `sess.cancel`——否则 token 永久取消会使 `run_loop` 顶部 `is_cancelled()` 永真、后续提交被静默丢弃。`start_turn` 返回 `bool`：`false` = 命令通道关闭（worker 已死，panic 或意外退出），派发点收到 `false` 时 `worker_dead()` 推 `[worker stopped]` marker 并 break。输入采集在独立 OS 线程，worker 死后 UI 仍响应 Ctrl+C/D，用户可干净退出而非面对冻死 spinner。
-- **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。
+- **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。`/task` 会话选择器（`task.rs`）为屏幕居中模态：`+ New task` + 历史 session 列表（当前会话标 `(current)`），底部红色 `✕ Clear all N task(s)` destructive 行——选中 Enter 进入红色两步确认态（再 Enter 触发 `TaskOutcome::ClearAll`，经 `Store::clear_other_sessions` 删除除当前会话外的全部会话并刷新列表；Esc 取消确认、确认态锁定 ↑/↓、Ctrl+C/D 仍即时退出）。
 
 ## 依赖与接口
 - 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencode-session、opencode-core、opencode-store、opencode-llm（estimate）。
@@ -43,5 +43,8 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - worker cancel-token 交换回归：`worker::tests::rebind_session_swaps_the_active_cancel_token`
 - cancel-token 刷新回归（双击 Esc 后可提交）：`worker::tests::reset_cancel_replaces_with_fresh_uncancelled_token`、`session/tests/cancel_reset.rs`
 - 输入采集线程 receiver drop 即退出：`input::tests::pump_exits_when_receiver_dropped`
+- **单按 Esc 在有界时间内投递（pty 表征，冻死失败模式消失的直接证据）**：`tests/input_pty.rs::lone_esc_is_delivered_within_bound`
 - 终端恢复幂等（无 TTY 也可调用）：`terminal::tests::restore_is_idempotent_without_a_tty`
+- `write_restore` 依序发出三条恢复序列：`terminal::tests::write_restore_emits_all_three_sequences`
+- panic hook 先恢复终端再链到原 hook：`terminal::tests::hook_body_restores_before_chaining_to_prev`
 - worker 死亡检测（start_turn 通道关闭返 false）：`app::tests::start_turn_reports_false_when_worker_is_dead`

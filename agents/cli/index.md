@@ -26,6 +26,17 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - `session show <id> [--json]`：默认按 `[role] text()` 打印（仅 Text 块）；`--json` 打印完整状态。
 - `session export <id> -o <file>` / `session import <file>`：见 [agents/store](../store/index.md) 的 bundle。
 
+## e2e 测试套件
+- 入口：`scripts/e2e-glm.sh [binary]` 或 `python3 scripts/e2e_glm.py [binary]`。Flag：`--skip-web`（跳过 serve/HTTP 场景）、`--only {cli,web}`。
+- binary 解析：CLI 参数 → `OPENCODER_BIN` 环境变量 → `target/debug/opencoder`。
+- 鉴权：`ZHIPU_API_KEY` 环境变量，或 `~/.local/share/opencode/auth.json`。
+- 观测面：`opencode session show <id> --json`（`build_session_json`）返回 `{meta, messages, subagent_tasks}`——messages 含全部 ContentBlock（Text/Reasoning/ToolUse/ToolResult），e2e 据此做深度断言而不耦合存储内部。headless 事件 marker（`▸`/`[context compacted]`/`subagent [`/`[session <id>]`）是日志断言来源。
+- 断言模型：HARD = 确定性 store/契约断言（fork 拷贝完整性、bundle 往返、resume 上下文加载、plan 只读、session list/delete、config show JSON）；SOFT = 模型配合相关（工具调用 marker、压缩摘要内容、subagent 派发、reasoning_content 持久化），模型不配合时记 skip 而非 fail。
+- 语法 gate（无 API key 也可跑）：`python3 -m py_compile scripts/e2e/*.py scripts/e2e_glm.py`——仅校验 Python 语法，不执行场景。
+- 不属于 `cargo test --workspace`——需真实 API key + glm5.2 模型调用，手动 / CI 触发。
+- 场景清单：E1 写文件+py_compile / E2 --continue 恢复上下文 / E3 压缩触发 / E3b 压缩后续跑 / E4 subagent 派发+DB 追踪 / E5 --fork 拷贝+不污染原 / E6 跨游戏回归 / E7/E9 models 显示 / E8 bundle 导出导入往返 / E10 plan agent 只读 / E11 web steer+queue 两段式 delivery / E12 session list+delete 生命周期 / E13 交错思考 reasoning_content 持久化 / E14 config show 合法 JSON。
+- TUI 专属功能（plan→act handoff、TaskPicker clear-all、鼠标选择、弹窗交互等）不在 e2e 覆盖范围——e2e 套件仅 CLI/HTTP 可达，TUI 交互由 `crates/tui/` 单元 + 集成测试覆盖。
+
 ## 依赖与接口
 - 依赖：clap、opencode-core、opencode-llm（ChatClient）、opencode-session（run/resume/generate_title）、opencode-store、opencode-web（serve）。
 - 被依赖：binary crate（`src/main.rs` 解析 `Cli` 并分发）。
@@ -40,3 +51,4 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - fork 实现测试：`cli/tests/fork_session.rs`
 - CLI 解析测试：`cli/tests/cli_parse.rs`（含 `session show --json` 解析）
 - headless 事件渲染：`run::tests::{summarize_input_extracts_command, truncate_adds_ellipsis}`
+- e2e 场景契约：`scripts/e2e/cli_scenarios.py`（E1–E14）、`scripts/e2e/web_scenarios.py`（E11）

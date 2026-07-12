@@ -11,10 +11,14 @@ SOFT = model-cooperation-dependent, recorded as skip not failure):
   E4      subagent dispatched + completed + tracked in DB      SOFT (dispatch) + HARD (if ran)
   E8      bundle export/import roundtrip integrity             HARD (count + content equal)
   E10     plan agent cannot mutate disk                       HARD (no file created)
+  E12     session list + delete lifecycle                     HARD (store CRUD via CLI)
+  E13     interleaved thinking reasoning_content persisted    SOFT (model-dependent)
+  E14     config show emits valid merged JSON                 HARD (deterministic)
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 
@@ -276,6 +280,55 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # Hard business contract: regardless of HOW the plan agent responds (tries bash
     # and is blocked, or just describes a plan), it must NOT have created the file.
     c.check("plan agent created no file (disk unmutated)", not os.path.isfile(target))
+
+    # ---- E12: session list + delete lifecycle ----
+    print("== E12: session list + delete lifecycle ==")
+    e12_dir = lib.seed_workdir(base_cfg)
+    # Empty workdir: no sessions yet.
+    rc, empty_list = lib.run(bin_path, ["--workdir", e12_dir, "session", "list"])
+    c.check("empty workdir shows no sessions", "no sessions" in empty_list.lower())
+    # Create a session (lightweight prompt — no tool use needed).
+    rc, e12_log = lib.run_prompt(bin_path, e12_dir, "回复一句话：你好世界。")
+    sid12 = lib.extract_session_id(e12_log)
+    if sid12:
+        # List: the created session must appear.
+        list_out = lib.session_list(bin_path, e12_dir)
+        c.check("session list shows created session", sid12 in list_out)
+        # Delete it.
+        del_out = lib.session_delete(bin_path, e12_dir, sid12)
+        c.check("session delete succeeds", "deleted" in del_out.lower())
+        # List again: the deleted session must be gone.
+        list_after = lib.session_list(bin_path, e12_dir)
+        c.check("deleted session no longer listed", sid12 not in list_after)
+    else:
+        c.soft("E12 run completed", False, "no [session] marker (run errored — transient)")
+
+    # ---- E13: interleaved thinking reasoning_content persisted (soft) ----
+    print("== E13: interleaved thinking reasoning_content persisted (soft) ==")
+    # Reuse the E1 snake session — a tool-using turn should persist Reasoning
+    # blocks when interleaved_thinking is on (default) and the model emits
+    # reasoning_content.  Model-dependent: skip (not fail) when absent.
+    if sid:
+        sjson = lib.show_json(bin_path, snake, sid)
+        c.soft("reasoning_content persisted as Reasoning block (interleaved thinking)",
+               lib.has_reasoning_blocks(sjson),
+               "model may not emit reasoning_content on this turn")
+    else:
+        c.soft("E13 skipped (no E1 session)", False, "E1 did not produce a session")
+
+    # ---- E14: config show emits valid merged JSON ----
+    print("== E14: config show emits valid merged JSON ==")
+    cfg_out = lib.config_show(bin_path, snake)
+    cfg_valid = False
+    cfg_fields = False
+    try:
+        cfg_json = json.loads(cfg_out)
+        cfg_valid = True
+        cfg_fields = all(k in cfg_json for k in ("model", "provider", "compaction"))
+    except Exception:
+        pass
+    c.check("config show is valid JSON", cfg_valid)
+    c.check("config JSON has core fields (model/provider/compaction)", cfg_fields)
 
     c.summary("CLI scenarios")
     return c

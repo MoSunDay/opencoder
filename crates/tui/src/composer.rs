@@ -81,6 +81,18 @@ pub fn insert_char(text: &str, idx: usize, ch: char) -> (String, usize) {
     (s, idx + 1)
 }
 
+/// Insert a string at the cursor index, returning (new_text, new_idx). The
+/// cursor advances by the number of chars in `s` (not bytes), staying on a
+/// char boundary for multi-byte insertions.
+pub fn insert_str(text: &str, idx: usize, s: &str) -> (String, usize) {
+    let mut out = String::with_capacity(text.len() + s.len());
+    let byte = byte_offset_for_char(text, idx);
+    out.push_str(&text[..byte]);
+    out.push_str(s);
+    out.push_str(&text[byte..]);
+    (out, idx + s.chars().count())
+}
+
 /// Delete the char before the cursor; returns (new_text, new_idx) or None if
 /// at start.
 pub fn backspace(text: &str, idx: usize) -> Option<(String, usize)> {
@@ -96,10 +108,12 @@ pub fn backspace(text: &str, idx: usize) -> Option<(String, usize)> {
 }
 
 /// Compute (row, col) display position from a char index in multi-line text,
-/// accounting for both explicit newlines and soft-wrapping at `width` display
-/// columns. `width` is the usable text width (excluding borders/prompt).
-pub fn cursor_row_col(input: &str, char_idx: usize, width: u16) -> (usize, usize) {
-    let w = (width as usize).max(1);
+/// accounting for both explicit newlines and soft-wrapping. The first visual
+/// row is narrower because the prompt prefix (`prompt_w` columns) occupies its
+/// leading columns; subsequent visual rows use the full `inner_w`.
+pub fn cursor_row_col(input: &str, char_idx: usize, inner_w: u16, prompt_w: u16) -> (usize, usize) {
+    let first_w = (inner_w.saturating_sub(prompt_w) as usize).max(1);
+    let rest_w = (inner_w as usize).max(1);
     let mut row = 0usize;
     let mut col = 0usize;
     for (i, ch) in input.chars().enumerate() {
@@ -111,6 +125,7 @@ pub fn cursor_row_col(input: &str, char_idx: usize, width: u16) -> (usize, usize
             col = 0;
         } else {
             let cw = char_width(ch);
+            let w = if row == 0 { first_w } else { rest_w };
             if col + cw > w && col > 0 {
                 row += 1;
                 col = 0;
@@ -172,13 +187,24 @@ pub fn move_cursor_vertical(input: &str, char_idx: usize, direction: i32) -> usi
     idx
 }
 
-/// Count how many display rows the input occupies at the given width.
-pub fn display_rows(input: &str, width: u16) -> u16 {
-    let w = (width as usize).max(1);
+/// Count how many display rows the input occupies. The first logical line's
+/// first visual row is narrowed by `prompt_w`; all other visual rows use the
+/// full `inner_w`.
+pub fn display_rows(input: &str, inner_w: u16, prompt_w: u16) -> u16 {
+    let first_w = (inner_w.saturating_sub(prompt_w) as usize).max(1);
+    let rest_w = (inner_w as usize).max(1);
     let mut rows = 0usize;
-    for line in input.split('\n') {
+    for (i, line) in input.split('\n').enumerate() {
         let lw: usize = line.chars().map(char_width).sum();
-        rows += if lw == 0 { 1 } else { lw.div_ceil(w) };
+        if i == 0 {
+            if lw <= first_w {
+                rows += 1;
+            } else {
+                rows += 1 + (lw - first_w).div_ceil(rest_w);
+            }
+        } else {
+            rows += if lw == 0 { 1 } else { lw.div_ceil(rest_w) };
+        }
     }
     (rows as u16).max(1)
 }
@@ -242,27 +268,27 @@ mod tests {
 
     #[test]
     fn cursor_row_col_single_line() {
-        assert_eq!(cursor_row_col("hello", 0, 80), (0, 0));
-        assert_eq!(cursor_row_col("hello", 3, 80), (0, 3));
-        assert_eq!(cursor_row_col("hello", 5, 80), (0, 5));
+        assert_eq!(cursor_row_col("hello", 0, 80, 0), (0, 0));
+        assert_eq!(cursor_row_col("hello", 3, 80, 0), (0, 3));
+        assert_eq!(cursor_row_col("hello", 5, 80, 0), (0, 5));
     }
 
     #[test]
     fn cursor_row_col_multi_line() {
         let input = "abc\ndef\nghi";
-        assert_eq!(cursor_row_col(input, 0, 80), (0, 0));
-        assert_eq!(cursor_row_col(input, 3, 80), (0, 3)); // before \n
-        assert_eq!(cursor_row_col(input, 4, 80), (1, 0)); // start of line 2
-        assert_eq!(cursor_row_col(input, 7, 80), (1, 3)); // before second \n
-        assert_eq!(cursor_row_col(input, 8, 80), (2, 0)); // start of line 3
+        assert_eq!(cursor_row_col(input, 0, 80, 0), (0, 0));
+        assert_eq!(cursor_row_col(input, 3, 80, 0), (0, 3)); // before \n
+        assert_eq!(cursor_row_col(input, 4, 80, 0), (1, 0)); // start of line 2
+        assert_eq!(cursor_row_col(input, 7, 80, 0), (1, 3)); // before second \n
+        assert_eq!(cursor_row_col(input, 8, 80, 0), (2, 0)); // start of line 3
     }
 
     #[test]
     fn cursor_row_col_soft_wrap() {
         // width 5: 5 chars per row; cursor past 5 wraps to next row.
-        assert_eq!(cursor_row_col("aaaaaa", 4, 5), (0, 4));
-        assert_eq!(cursor_row_col("aaaaaa", 5, 5), (0, 5));
-        assert_eq!(cursor_row_col("aaaaaa", 6, 5), (1, 1));
+        assert_eq!(cursor_row_col("aaaaaa", 4, 5, 0), (0, 4));
+        assert_eq!(cursor_row_col("aaaaaa", 5, 5, 0), (0, 5));
+        assert_eq!(cursor_row_col("aaaaaa", 6, 5, 0), (1, 1));
     }
 
     #[test]
@@ -270,37 +296,37 @@ mod tests {
         // 1. CJK wide chars (each width 2) cause a soft-wrap mid-text at
         //    width 5: 你好你好 = 8 display cols → wraps after 2 chars (4 cols)
         //    since the 3rd char (你, width 2) would exceed col 5.
-        assert_eq!(cursor_row_col("你好你好", 0, 5), (0, 0));
-        assert_eq!(cursor_row_col("你好你好", 1, 5), (0, 2));
-        assert_eq!(cursor_row_col("你好你好", 2, 5), (0, 4));
-        assert_eq!(cursor_row_col("你好你好", 3, 5), (1, 2));
-        assert_eq!(cursor_row_col("你好你好", 4, 5), (1, 4));
+        assert_eq!(cursor_row_col("你好你好", 0, 5, 0), (0, 0));
+        assert_eq!(cursor_row_col("你好你好", 1, 5, 0), (0, 2));
+        assert_eq!(cursor_row_col("你好你好", 2, 5, 0), (0, 4));
+        assert_eq!(cursor_row_col("你好你好", 3, 5, 0), (1, 2));
+        assert_eq!(cursor_row_col("你好你好", 4, 5, 0), (1, 4));
 
         // 2. Minimum width = 1: every char occupies its own row after the first.
-        assert_eq!(cursor_row_col("abc", 0, 1), (0, 0));
-        assert_eq!(cursor_row_col("abc", 1, 1), (0, 1));
-        assert_eq!(cursor_row_col("abc", 2, 1), (1, 1));
-        assert_eq!(cursor_row_col("abc", 3, 1), (2, 1));
+        assert_eq!(cursor_row_col("abc", 0, 1, 0), (0, 0));
+        assert_eq!(cursor_row_col("abc", 1, 1, 0), (0, 1));
+        assert_eq!(cursor_row_col("abc", 2, 1, 0), (1, 1));
+        assert_eq!(cursor_row_col("abc", 3, 1, 0), (2, 1));
 
         // 3. Empty input: loop never executes regardless of char_idx.
-        assert_eq!(cursor_row_col("", 0, 80), (0, 0));
-        assert_eq!(cursor_row_col("", 5, 80), (0, 0));
+        assert_eq!(cursor_row_col("", 0, 80, 0), (0, 0));
+        assert_eq!(cursor_row_col("", 5, 80, 0), (0, 0));
 
         // 4. CJK chars exactly fill the width, then an explicit newline resets.
         //    你好 = 4 cols, exactly fills width 4 (no soft-wrap since 4 > 4 is
         //    false), then '\n' moves to the next row.
-        assert_eq!(cursor_row_col("你好\nabc", 0, 4), (0, 0));
-        assert_eq!(cursor_row_col("你好\nabc", 1, 4), (0, 2));
-        assert_eq!(cursor_row_col("你好\nabc", 2, 4), (0, 4));
-        assert_eq!(cursor_row_col("你好\nabc", 3, 4), (1, 0));
-        assert_eq!(cursor_row_col("你好\nabc", 4, 4), (1, 1));
+        assert_eq!(cursor_row_col("你好\nabc", 0, 4, 0), (0, 0));
+        assert_eq!(cursor_row_col("你好\nabc", 1, 4, 0), (0, 2));
+        assert_eq!(cursor_row_col("你好\nabc", 2, 4, 0), (0, 4));
+        assert_eq!(cursor_row_col("你好\nabc", 3, 4, 0), (1, 0));
+        assert_eq!(cursor_row_col("你好\nabc", 4, 4, 0), (1, 1));
 
         // 5. Cursor at char_idx 0 is always (0, 0) on any input.
-        assert_eq!(cursor_row_col("hello\nworld", 0, 80), (0, 0));
-        assert_eq!(cursor_row_col("你好", 0, 80), (0, 0));
+        assert_eq!(cursor_row_col("hello\nworld", 0, 80, 0), (0, 0));
+        assert_eq!(cursor_row_col("你好", 0, 80, 0), (0, 0));
 
         // 6. char_idx beyond end of input: the loop processes every char.
-        assert_eq!(cursor_row_col("ab", 100, 80), (0, 2));
+        assert_eq!(cursor_row_col("ab", 100, 80, 0), (0, 2));
     }
 
     #[test]
@@ -308,10 +334,10 @@ mod tests {
         let input = "aaaa\nbbbb\ncccc";
         // Index 2 = row 0 col 2 (display). Move down → row 1 col 2 = index 7.
         let idx = move_cursor_vertical(input, 2, 1);
-        assert_eq!(cursor_row_col(input, idx, 80), (1, 2));
+        assert_eq!(cursor_row_col(input, idx, 80, 0), (1, 2));
         // Index 7 = row 1 col 2. Move up → row 0 col 2 = index 2.
         let idx = move_cursor_vertical(input, 7, -1);
-        assert_eq!(cursor_row_col(input, idx, 80), (0, 2));
+        assert_eq!(cursor_row_col(input, idx, 80, 0), (0, 2));
         // Can't move up from row 0
         assert_eq!(move_cursor_vertical(input, 2, -1), 2);
         // Can't move down from last row
@@ -330,10 +356,10 @@ mod tests {
 
     #[test]
     fn display_rows_counts_wrapped() {
-        assert_eq!(display_rows("hello", 80), 1);
-        assert_eq!(display_rows("aaaa\nbbbb", 80), 2);
-        assert_eq!(display_rows("aaaaaaaaaaaa", 5), 3); // 12 / 5 = 3 rows
-        assert_eq!(display_rows("", 80), 1);
+        assert_eq!(display_rows("hello", 80, 0), 1);
+        assert_eq!(display_rows("aaaa\nbbbb", 80, 0), 2);
+        assert_eq!(display_rows("aaaaaaaaaaaa", 5, 0), 3); // 12 / 5 = 3 rows
+        assert_eq!(display_rows("", 80, 0), 1);
     }
 
     #[test]
@@ -355,5 +381,22 @@ mod tests {
         assert_eq!(truncate_to_width("你好xy", 5), "你好…");
         // CJK mid-width boundary: cap 3 → budget 2 → only 你 fits → "你…"
         assert_eq!(truncate_to_width("你好", 3), "你…");
+    }
+
+    #[test]
+    fn cursor_row_col_dual_width_prompt() {
+        // inner_w=5, prompt_w=2: first visual row holds 3 cols, rest hold 5.
+        assert_eq!(cursor_row_col("aaaaaa", 0, 5, 2), (0, 0));
+        assert_eq!(cursor_row_col("aaaaaa", 3, 5, 2), (0, 3)); // fills first row
+        assert_eq!(cursor_row_col("aaaaaa", 4, 5, 2), (1, 1)); // wraps to row 1
+        assert_eq!(cursor_row_col("aaaaaa", 6, 5, 2), (1, 3)); // end of input
+    }
+
+    #[test]
+    fn display_rows_dual_width_prompt() {
+        // inner_w=5, prompt_w=2: first row holds 3, rest hold 5.
+        assert_eq!(display_rows("aaaaaa", 5, 2), 2); // 3 + 3
+        assert_eq!(display_rows("aaaaaaaa", 5, 2), 2); // 3 + 5
+        assert_eq!(display_rows("aaaaaaaaaa", 5, 2), 3); // 3 + 5 + 2
     }
 }

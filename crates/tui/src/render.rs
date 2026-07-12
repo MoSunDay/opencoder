@@ -99,11 +99,11 @@ pub(crate) fn render(
     terminal.draw(|f| {
         let area = f.area();
         let prompt_w = 2u16;
-        let composer_inner_w = area.width.saturating_sub(2 + prompt_w);
-        let input_rows = composer::display_rows(input, composer_inner_w).max(2);
+        let inner_w = area.width.saturating_sub(2);
+        let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
         let composer_h = (input_rows + 2).min(area.height / 3);
         let composer_inner_h = composer_h.saturating_sub(2).max(1);
-        let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, composer_inner_w);
+        let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
         let max_scroll = input_rows.saturating_sub(composer_inner_h);
         let composer_scroll = (cur_row as u16)
             .saturating_sub(composer_inner_h.saturating_sub(1))
@@ -235,7 +235,8 @@ pub(crate) fn render(
             composer_area,
             input,
             cursor_idx,
-            composer_inner_w,
+            inner_w,
+            prompt_w,
             composer_scroll,
         );
     })?;
@@ -752,11 +753,11 @@ fn place_cursor(
     input: &str,
     cursor_idx: usize,
     inner_w: u16,
+    prompt_w: u16,
     scroll: u16,
 ) {
     let border = 1u16;
-    let prompt_w = 2u16;
-    let (row, col) = composer::cursor_row_col(input, cursor_idx, inner_w);
+    let (row, col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
     let x = if row == 0 {
         composer_area.x + border + prompt_w + col as u16
     } else {

@@ -8,10 +8,10 @@ use std::sync::Arc;
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_session::SessionEvent;
 use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::chat::{short, ChatBlock, ChatView};
+use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -83,6 +83,116 @@ impl SessionUiState {
     }
 }
 
+/// Replay a single persisted message into `chat`, reconstructing `Assistant`
+/// text blocks and `Tool` blocks (header from `ToolUse`, output appended from
+/// the matching `ToolResult`). Mirrors the live `ChatView::apply` path so a
+/// resumed or compacted session renders tool invocations identically.
+fn replay_one(chat: &mut ChatView, msg: &Message) {
+    match msg.role {
+        Role::User => {
+            let text: String = msg
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            if text.is_empty() {
+                return;
+            }
+            chat.push_marker(Line::from(Span::styled(
+                "user:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            let rendered = crate::markdown::render(&text);
+            if !rendered.is_empty() {
+                chat.blocks.push(ChatBlock::Marker(rendered));
+            }
+            chat.push_marker(Line::from(""));
+        }
+        Role::Assistant => {
+            let text: String = msg
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            if !text.is_empty() {
+                let rendered = crate::markdown::render(&text);
+                chat.blocks.push(ChatBlock::Assistant {
+                    raw: text,
+                    rendered,
+                    done: true,
+                });
+            }
+            for b in &msg.blocks {
+                if let ContentBlock::ToolUse { id, name, input } = b {
+                    chat.blocks.push(ChatBlock::Tool {
+                        id: id.clone(),
+                        header: Line::from(vec![
+                            Span::styled(
+                                format!("\u{25b8} {name} "),
+                                Style::default()
+                                    .fg(Color::Cyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
+                        ]),
+                        output: Vec::new(),
+                    });
+                }
+            }
+        }
+        Role::Tool => {
+            for b in &msg.blocks {
+                if let ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } = b
+                {
+                    let color = if *is_error {
+                        Color::Red
+                    } else {
+                        Color::DarkGray
+                    };
+                    let out: Vec<Line<'static>> = content
+                        .lines()
+                        .take(TOOL_OUTPUT_LINES)
+                        .map(|l| {
+                            Line::from(Span::styled(format!("  {l}"), Style::default().fg(color)))
+                        })
+                        .collect();
+                    if let Some(ChatBlock::Tool { output: o, .. }) = chat
+                        .blocks
+                        .iter_mut()
+                        .rev()
+                        .find(|blk| {
+                            matches!(blk, ChatBlock::Tool { id: bid, .. } if bid == tool_use_id)
+                        }) {
+                        o.extend(out);
+                    } else {
+                        chat.blocks.push(ChatBlock::Tool {
+                            id: tool_use_id.clone(),
+                            header: Line::from(Span::styled(
+                                "\u{25b8} (output)",
+                                Style::default().fg(Color::Cyan),
+                            )),
+                            output: out,
+                        });
+                    }
+                }
+            }
+        }
+        Role::System => {}
+    }
+}
+
 /// Build a fresh `ChatView` for a resumed session by replaying stored messages
 /// as styled markers (user: / say: headers) and reconstructing subagent blocks
 /// from persisted `subagent_tasks` records. Used when restoring a session
@@ -122,49 +232,16 @@ pub async fn replay_into_chat(
     orphan_tasks.sort_by_key(|t| t.started_at);
 
     for msg in messages {
-        let text: String = msg
-            .blocks
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        if text.is_empty() {
-            continue;
-        }
-        match msg.role {
-            Role::User => {
-                chat.push_marker(Line::from(Span::styled(
-                    "user:",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )));
-                let rendered = crate::markdown::render(&text);
-                if !rendered.is_empty() {
-                    chat.blocks.push(ChatBlock::Marker(rendered));
-                }
-                chat.push_marker(Line::from(""));
-            }
-            Role::Assistant => {
-                // Use a finalized `Assistant` block so `flatten()` adds the
-                // "say:" header + indent and the text is markdown-rendered,
-                // matching the live streaming path.
-                chat.blocks.push(ChatBlock::Assistant {
-                    raw: text.clone(),
-                    rendered: crate::markdown::render(&text),
-                    done: true,
-                });
-                // Interleave subagent blocks whose parent_message_id matches
-                // this assistant message.
-                if let Some(task_list) = tasks_by_parent.remove(&msg.id) {
-                    for task in task_list {
-                        let block = build_subagent_block(&task, store).await;
-                        chat.blocks.push(block);
-                    }
+        replay_one(&mut chat, msg);
+        // Interleave subagent blocks whose parent_message_id matches this
+        // assistant message (only relevant for assistant turns).
+        if msg.role == Role::Assistant {
+            if let Some(task_list) = tasks_by_parent.remove(&msg.id) {
+                for task in task_list {
+                    let block = build_subagent_block(&task, store).await;
+                    chat.blocks.push(block);
                 }
             }
-            _ => {}
         }
     }
 
@@ -257,39 +334,7 @@ fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
         ..Default::default()
     };
     for msg in messages {
-        let text: String = msg
-            .blocks
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        if text.is_empty() {
-            continue;
-        }
-        match msg.role {
-            Role::User => {
-                chat.push_marker(Line::from(Span::styled(
-                    "user:",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )));
-                let rendered = crate::markdown::render(&text);
-                if !rendered.is_empty() {
-                    chat.blocks.push(ChatBlock::Marker(rendered));
-                }
-                chat.push_marker(Line::from(""));
-            }
-            Role::Assistant => {
-                chat.blocks.push(ChatBlock::Assistant {
-                    raw: text.clone(),
-                    rendered: crate::markdown::render(&text),
-                    done: true,
-                });
-            }
-            _ => {}
-        }
+        replay_one(&mut chat, msg);
     }
     chat
 }
@@ -436,5 +481,127 @@ mod tests {
             "assistant replay must produce a finalized Assistant block; got: {:?}",
             chat.blocks
         );
+    }
+
+    #[test]
+    fn replay_reconstructs_tool_blocks() {
+        // Assistant message with a ToolUse, followed by a Role::Tool message
+        // carrying the matching ToolResult. Replay must produce a
+        // ChatBlock::Tool with the correct id, header, and appended output.
+        let mut asst = Message::assistant("a1");
+        asst.blocks.push(ContentBlock::text("Running a command."));
+        asst.blocks.push(ContentBlock::ToolUse {
+            id: "t1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "echo hi"}),
+        });
+        let mut tool_msg = Message::assistant("tool1");
+        tool_msg.role = Role::Tool;
+        tool_msg.blocks = vec![ContentBlock::ToolResult {
+            tool_use_id: "t1".into(),
+            content: "hi".into(),
+            is_error: false,
+        }];
+        let chat = replay_messages("act", &[asst, tool_msg]);
+        let tools: Vec<_> = chat
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tools.len(), 1, "expected one tool block");
+        assert_eq!(tools[0].0, "t1");
+        let text: String = tools[0]
+            .1
+            .spans
+            .iter()
+            .chain(tools[0].2.iter().flat_map(|l| l.spans.iter()))
+            .map(|s| s.content.clone())
+            .collect();
+        assert!(
+            text.contains("echo hi"),
+            "header should show command: {text}"
+        );
+        assert!(text.contains("hi"), "output should be appended: {text}");
+    }
+
+    #[test]
+    fn replay_tool_only_assistant_not_skipped() {
+        // An assistant turn with only a ToolUse (no Text) must not be skipped
+        // — previously the `text.is_empty() { continue }` guard dropped it.
+        let mut asst = Message::assistant("a1");
+        asst.blocks.push(ContentBlock::ToolUse {
+            id: "t9".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "ls"}),
+        });
+        let chat = replay_messages("act", &[asst]);
+        assert!(
+            chat.blocks
+                .iter()
+                .any(|b| matches!(b, ChatBlock::Tool { id, .. } if id == "t9")),
+            "tool-only assistant turn must not be skipped; got: {:?}",
+            chat.blocks
+        );
+    }
+
+    #[test]
+    fn replay_parallel_tools_paired_by_id() {
+        // Two tool calls in one assistant message; results arrive in a
+        // separate Role::Tool message in reverse order. Each result must land
+        // in its own block, paired by tool_use_id.
+        let mut asst = Message::assistant("a1");
+        asst.blocks.push(ContentBlock::ToolUse {
+            id: "p1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "echo one"}),
+        });
+        asst.blocks.push(ContentBlock::ToolUse {
+            id: "p2".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": "echo two"}),
+        });
+        let mut tool_msg = Message::assistant("t1");
+        tool_msg.role = Role::Tool;
+        tool_msg.blocks = vec![
+            ContentBlock::ToolResult {
+                tool_use_id: "p2".into(),
+                content: "two".into(),
+                is_error: false,
+            },
+            ContentBlock::ToolResult {
+                tool_use_id: "p1".into(),
+                content: "one".into(),
+                is_error: false,
+            },
+        ];
+        let chat = replay_messages("act", &[asst, tool_msg]);
+        let tools: Vec<_> = chat
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::Tool { id, output, .. } => Some((id, output)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tools.len(), 2, "expected two tool blocks");
+        assert_eq!(tools[0].0, "p1");
+        assert_eq!(tools[1].0, "p2");
+        let out0: String = tools[0]
+            .1
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect();
+        let out1: String = tools[1]
+            .1
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect();
+        assert!(out0.contains("one"), "p1 output: {out0}");
+        assert!(out1.contains("two"), "p2 output: {out1}");
     }
 }

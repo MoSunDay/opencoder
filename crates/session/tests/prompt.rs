@@ -5,6 +5,7 @@ use opencoder_core::resolve_agent;
 use opencoder_session::prompt::{
     build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
 };
+use std::sync::Mutex;
 
 #[test]
 fn build_system_includes_agent_prompt_and_environment() {
@@ -89,4 +90,164 @@ fn environment_block_constrains_to_working_directory() {
     assert!(block.contains("Stay within the working directory"));
     assert!(block.contains("subdirectories"));
     assert!(block.contains("do not access or modify anything outside it"));
+}
+
+// ---------------------------------------------------------------------------
+// AGENTS.md auto-loading tests
+// ---------------------------------------------------------------------------
+
+/// Serialize tests that touch the `HOME` environment variable so they don't
+/// interfere with each other or with the rest of the test suite.
+static HOME_MUTEX: Mutex<()> = Mutex::new(());
+
+fn with_home<R>(home: &std::path::Path, f: impl FnOnce() -> R) -> R {
+    let _guard = HOME_MUTEX.lock().unwrap();
+    let old = std::env::var_os("HOME");
+    std::env::set_var("HOME", home);
+    let result = f();
+    match old {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    result
+}
+
+#[test]
+fn project_instructions_from_working_dir_only() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "Use Rust 2021 edition.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Use Rust 2021 edition."));
+    });
+}
+
+#[test]
+fn project_instructions_from_global_and_working_dir() {
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::write(
+        home.path().join(".opencode").join("AGENTS.md"),
+        "Global rule.",
+    )
+    .unwrap();
+
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "Local rule.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Global rule."));
+        assert!(text.contains("Local rule."));
+        // Global comes before local (lower priority first)
+        let g = text.find("Global rule.").unwrap();
+        let l = text.find("Local rule.").unwrap();
+        assert!(g < l);
+    });
+}
+
+#[test]
+fn project_instructions_from_git_root_when_in_subdir() {
+    let home = tempfile::TempDir::new().unwrap();
+
+    let repo = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join("AGENTS.md"), "Repo-wide rule.").unwrap();
+
+    let subdir = repo.path().join("src").join("deep");
+    std::fs::create_dir_all(&subdir).unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, &subdir, None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Repo-wide rule."));
+    });
+}
+
+#[test]
+fn project_instructions_absent_when_no_agents_md() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(!text.contains("## Project instructions"));
+    });
+}
+
+#[test]
+fn project_instructions_case_insensitive_lowercase() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("agents.md"), "Lowercase filename.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Lowercase filename."));
+    });
+}
+
+#[test]
+fn project_instructions_case_insensitive_uppercase_ext() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("AGENTS.MD"), "Uppercase ext.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Uppercase ext."));
+    });
+}
+
+#[test]
+fn project_instructions_dedup_when_git_root_is_working_dir() {
+    let home = tempfile::TempDir::new().unwrap();
+
+    let repo = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(repo.path().join(".git")).unwrap();
+    std::fs::write(repo.path().join("AGENTS.md"), "Single rule.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, repo.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        // The content must appear exactly once (dedup: git root == working dir)
+        let count = text.matches("Single rule.").count();
+        assert_eq!(count, 1);
+    });
+}
+
+#[test]
+fn project_instructions_appears_before_environment() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "My rule.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        let instr_pos = text.find("## Project instructions").unwrap();
+        let env_pos = text.find("# Environment").unwrap();
+        assert!(instr_pos < env_pos);
+    });
 }

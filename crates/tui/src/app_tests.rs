@@ -511,7 +511,9 @@ fn dollar_on_empty_input_opens_skill_menu() {
 }
 
 #[test]
-fn dollar_on_non_empty_input_is_literal() {
+fn dollar_anywhere_opens_skill_menu() {
+    // `$` triggers the skill picker regardless of cursor position or existing
+    // text — the `$` itself is consumed (never inserted into the composer).
     let mut input = String::from("pay ");
     let mut idx = 4;
     let mut menu: Option<SkillMenu> = None;
@@ -523,8 +525,12 @@ fn dollar_on_non_empty_input_is_literal() {
         None,
     );
     assert!(matches!(action, KeyAction::None));
-    assert!(menu.is_none(), "menu must not open when input is non-empty");
-    assert_eq!(input, "pay $");
+    assert!(
+        menu.is_some(),
+        "`$` must open the skill menu even on non-empty input"
+    );
+    assert_eq!(input, "pay ", "the `$` must be consumed, not inserted");
+    assert_eq!(idx, 4, "cursor must stay where it was");
 }
 
 #[test]
@@ -547,14 +553,45 @@ fn skill_menu_enter_picks_selected_skill() {
         &mut menu,
         None,
     );
-    match action {
-        KeyAction::SetSkill(Some((name, body))) => {
-            assert_eq!(name, "alpha");
-            assert_eq!(body, "the body");
-        }
-        _ => panic!("expected KeyAction::SetSkill(Some)"),
-    }
+    // Picking now inserts a `{$name}` token at the cursor instead of emitting
+    // SetSkill; the skill body is resolved and loaded on submit.
+    assert!(
+        matches!(action, KeyAction::None),
+        "pick must not emit SetSkill"
+    );
     assert!(menu.is_none(), "menu must close after a pick");
+    assert_eq!(input, "{$alpha}");
+    assert_eq!(
+        idx,
+        input.chars().count(),
+        "cursor must sit just after the inserted token"
+    );
+}
+
+#[test]
+fn pick_inserts_token_at_cursor_mid_text() {
+    use opencoder_core::Skill;
+    use std::path::PathBuf;
+    let skill = Skill {
+        name: "alpha".into(),
+        description: "d".into(),
+        body: "b".into(),
+        source: PathBuf::from("/x.md"),
+    };
+    let mut menu = Some(SkillMenu::new(vec![skill], false));
+    let mut input = String::from("hello ");
+    let mut idx = 6; // end of "hello "
+    let action = run_handle_menu(
+        key(KeyCode::Enter, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        &mut menu,
+        None,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(menu.is_none());
+    assert_eq!(input, "hello {$alpha}");
+    assert_eq!(idx, input.chars().count());
 }
 
 #[test]
@@ -689,5 +726,330 @@ fn worker_dead_pushes_a_marker() {
     assert!(
         text.contains("worker stopped"),
         "expected a worker-stopped marker; got: {text}"
+    );
+}
+
+#[test]
+fn ctrl_a_moves_cursor_to_start() {
+    let mut input = String::from("hello");
+    let mut idx = 4;
+    let action = run_handle(
+        key(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(idx, 0, "Ctrl+A must move cursor to the first char");
+    assert_eq!(input, "hello", "Ctrl+A must not mutate the input");
+}
+
+#[test]
+fn ctrl_e_moves_cursor_to_end() {
+    let mut input = String::from("hello");
+    let mut idx = 1;
+    let action = run_handle(
+        key(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(idx, 5, "Ctrl+E must move cursor past the last char");
+    assert_eq!(input, "hello", "Ctrl+E must not mutate the input");
+}
+
+#[test]
+fn ctrl_a_e_on_empty_input_stay_at_zero() {
+    let mut input = String::new();
+    let mut idx = 0;
+    run_handle(
+        key(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert_eq!(idx, 0);
+    run_handle(
+        key(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert_eq!(idx, 0, "Ctrl+E on empty input must stay at 0");
+}
+
+#[test]
+fn ctrl_a_e_handle_multibyte_chars() {
+    // "héllo" is 5 chars but 6 bytes; cursor_idx is a char index.
+    let mut input = String::from("héllo");
+    let mut idx = 3;
+    run_handle(
+        key(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert_eq!(idx, 0);
+    run_handle(
+        key(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert_eq!(idx, 5, "Ctrl+E must land at char count, not byte length");
+}
+
+#[test]
+fn ctrl_w_deletes_word_before_cursor() {
+    let mut input = String::from("hello world");
+    let mut idx = 11;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hello ");
+    assert_eq!(idx, 6, "Ctrl+W must move cursor to end of remaining text");
+}
+
+#[test]
+fn ctrl_w_at_start_is_noop() {
+    let mut input = String::from("hello");
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hello", "Ctrl+W at start must not mutate input");
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn ctrl_w_empty_input_is_noop() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn ctrl_w_does_not_cross_newline() {
+    let mut input = String::from("line1\nline2");
+    let mut idx = 11;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "line1\n", "Ctrl+W must not delete across newlines");
+    assert_eq!(idx, 6);
+}
+
+#[test]
+fn ctrl_w_trailing_whitespace() {
+    // "hello   |" → "" — Ctrl+W deletes word + trailing whitespace (bash behavior)
+    let mut input = String::from("hello   ");
+    let mut idx = 8;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "");
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn ctrl_w_multibyte_chars() {
+    // "你好 world|" → "你好 |"
+    let mut input = String::from("你好 world");
+    let mut idx = 8;
+    let action = run_handle(
+        key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "你好 ");
+    assert_eq!(idx, 3, "cursor must be at char boundary after 你好 ");
+}
+
+// ---- apply_skill_tokens tests ----
+// `apply_skill_tokens` calls `discover_skills()` which reads `~/.opencoder/skills`,
+// so these tests serialize `HOME` mutations via a dedicated mutex (mirroring the
+// pattern in session/tests/prompt.rs) and point HOME at a tempdir.
+
+static APPTEST_HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn with_home<R>(home: &std::path::Path, f: impl FnOnce() -> R) -> R {
+    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
+    let old = std::env::var_os("HOME");
+    std::env::set_var("HOME", home);
+    let result = f();
+    match old {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    result
+}
+
+/// Create a tempdir whose `~/.opencoder/skills/<name>.md` contains a skill
+/// with the given body, returning the tempdir (keep alive for the test).
+fn skill_tempdir(name: &str, body: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let skills = dir.path().join(".opencoder").join("skills");
+    std::fs::create_dir_all(&skills).unwrap();
+    std::fs::write(skills.join(format!("{name}.md")), body).unwrap();
+    dir
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn apply_skill_tokens_resolves_and_activates_known_skill() {
+    let dir = skill_tempdir("alpha", "the alpha body");
+    let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut active_skill = None;
+    let mut active_skill_body = None;
+    let mut sys_tokens = 0u64;
+    let workdir = std::path::PathBuf::from("/tmp");
+
+    let (clean, unresolved) = with_home(dir.path(), || {
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::block_in_place(|| {
+            rt.block_on(crate::app_helpers::apply_skill_tokens(
+                "hello {$alpha} world",
+                &mut active_skill,
+                &mut active_skill_body,
+                &mut sys_tokens,
+                "act",
+                &workdir,
+                &skill_handle,
+            ))
+        })
+    });
+
+    // Token stripped from clean text; name not unresolved.
+    assert_eq!(clean, "hello  world");
+    assert!(unresolved.is_empty(), "known skill must not be unresolved");
+    // Skill activated (sticky display + body).
+    assert_eq!(active_skill.as_deref(), Some("alpha"));
+    assert_eq!(active_skill_body.as_deref(), Some("the alpha body"));
+    assert!(
+        sys_tokens > 0,
+        "sys_tokens must be recomputed with the skill body"
+    );
+    // The shared skill_handle (session.skill_prompt) is updated in-place.
+    assert_eq!(
+        skill_handle.lock().unwrap().as_deref(),
+        Some("the alpha body"),
+        "skill_handle must hold the resolved body"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn apply_skill_tokens_reports_unknown_skill() {
+    let dir = skill_tempdir("alpha", "alpha body");
+    let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut active_skill = None;
+    let mut active_skill_body = None;
+    let mut sys_tokens = 0u64;
+    let workdir = std::path::PathBuf::from("/tmp");
+
+    let (clean, unresolved) = with_home(dir.path(), || {
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::block_in_place(|| {
+            rt.block_on(crate::app_helpers::apply_skill_tokens(
+                "go {$ghost} now",
+                &mut active_skill,
+                &mut active_skill_body,
+                &mut sys_tokens,
+                "act",
+                &workdir,
+                &skill_handle,
+            ))
+        })
+    });
+
+    assert_eq!(clean, "go  now");
+    assert_eq!(unresolved, vec!["ghost".to_string()]);
+    // No skill resolved -> active skill untouched, sys_tokens unchanged.
+    assert!(active_skill.is_none());
+    assert!(active_skill_body.is_none());
+    assert_eq!(
+        sys_tokens, 0,
+        "sys_tokens must not change when nothing resolves"
+    );
+    assert!(
+        skill_handle.lock().unwrap().is_none(),
+        "skill_handle must not be written when nothing resolves"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
+    let dir = skill_tempdir("alpha", "alpha body");
+    let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Some("prior body".to_string())));
+    let mut active_skill = Some("prior".to_string());
+    let mut active_skill_body = Some("prior body".to_string());
+    let mut sys_tokens = 999u64;
+    let workdir = std::path::PathBuf::from("/tmp");
+
+    let (clean, unresolved) = with_home(dir.path(), || {
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::block_in_place(|| {
+            rt.block_on(crate::app_helpers::apply_skill_tokens(
+                "plain text no tokens",
+                &mut active_skill,
+                &mut active_skill_body,
+                &mut sys_tokens,
+                "act",
+                &workdir,
+                &skill_handle,
+            ))
+        })
+    });
+
+    // No tokens -> text unchanged, nothing unresolved, sticky skill preserved.
+    assert_eq!(clean, "plain text no tokens");
+    assert!(unresolved.is_empty());
+    assert_eq!(active_skill.as_deref(), Some("prior"));
+    assert_eq!(active_skill_body.as_deref(), Some("prior body"));
+    assert_eq!(sys_tokens, 999, "sys_tokens must not be recomputed");
+    assert_eq!(
+        skill_handle.lock().unwrap().as_deref(),
+        Some("prior body"),
+        "skill_handle must be untouched when no tokens present"
     );
 }

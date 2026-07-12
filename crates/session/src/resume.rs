@@ -2,7 +2,7 @@
 //! cheap background title generation (uses `small_model`).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use opencoder_core::{resolve_agent, Agent, Config, Message};
@@ -49,7 +49,7 @@ pub async fn resume(
         client,
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
-        skill_prompt: None,
+        skill_prompt: Arc::new(Mutex::new(None)),
         persisted_count: n,
         session_created: true,
         cancel: None,

@@ -14,6 +14,7 @@ pub mod queue_panel;
 pub mod render;
 pub mod selection;
 pub mod session_ui;
+pub mod skill_token;
 pub mod task;
 pub mod terminal;
 pub mod worker;

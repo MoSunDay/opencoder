@@ -38,7 +38,7 @@ fn estimated_tokens(session: &SessionState) -> u64 {
     let system = build_system(
         &session.agent,
         &session.working_dir,
-        session.skill_prompt.as_deref(),
+        session.skill_prompt_cloned().as_deref(),
     );
     let est = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
     est as u64

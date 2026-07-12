@@ -112,7 +112,11 @@ pub fn base_prompt_act() -> String {
 }
 
 pub fn base_prompt_plan() -> String {
-    format!("{BASE_PROMPT}\n\n{}", PLAN_SUFFIX)
+    // Plan mode must not advertise the 'build' subagent: strip the build
+    // delegation clause from the shared base prompt before appending the plan
+    // suffix. Act mode keeps the full BASE_PROMPT unchanged.
+    let base = BASE_PROMPT.replace(", 'build' (full tools) for implementation", "");
+    format!("{base}\n\n{}", PLAN_SUFFIX)
 }
 
 pub fn base_prompt_explore() -> String {
@@ -132,12 +136,10 @@ pub fn base_prompt_build() -> String {
 }
 
 const PLAN_SUFFIX: &str = "\
-You are in PLAN mode: read-only. You cannot edit, write, or run mutating bash commands. \
-Bash write commands (redirects, rm, mv, git push, pip install, etc.) will be intercepted and rejected. \
-Use the task tool to spawn 'explore' subagents for codebase investigation. \
-Produce a clear, actionable plan as text. The user will review it and switch to act mode to execute. \
-If any requirement is ambiguous or involves trade-offs that affect the user, ask clarifying questions \
-BEFORE finalizing the plan. Do not assume user intent.";
+PLAN mode (read-only): no edits/writes; mutating bash (redirects, rm, mv, git push, pip install, ...) is intercepted. \
+Investigate via 'explore' subagents. \
+Output an actionable plan the user reviews before switching to act mode; ask clarifying questions first if anything is ambiguous -- do not assume intent. \
+The plan MUST have these sections: Goal / TODO / Verify / Risks / Align.";
 
 const BASE_PROMPT: &str = "\
 You are OpenCoder, a high-performance coding agent in a terminal.
@@ -159,3 +161,39 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 - When a tool errors, read the error, fix the approach, and retry; do not loop on the same failing command.
 - After finishing, briefly state what you did and the key files, and suggest logical next steps (tests, build, commit).
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards the `.replace()` in `base_prompt_plan()`: if BASE_PROMPT's wording
+    /// ever drifts so the replace becomes a no-op, the build subagent advertisement
+    /// silently leaks into the plan prompt. These assertions fail loudly instead.
+    #[test]
+    fn plan_prompt_strips_build_subagent_advertisement() {
+        // The exact substring targeted by `.replace()` in base_prompt_plan().
+        // If this assertion fails, BASE_PROMPT has changed — update the
+        // `.replace()` call to match the new wording.
+        let replace_target = ", 'build' (full tools) for implementation";
+        assert!(
+            base_prompt_act().contains(replace_target),
+            "BASE_PROMPT no longer contains the '.replace()' target substring \
+             {replace_target:?}. Update the .replace() call in base_prompt_plan()."
+        );
+
+        let plan = base_prompt_plan();
+
+        // Safety property: the plan prompt must not advertise 'build'.
+        assert!(
+            !plan.contains("'build' (full tools)"),
+            "plan prompt must not advertise the 'build' subagent, got: {plan}"
+        );
+
+        // Sanity: the 'explore' advertisement must survive (the replace should
+        // only strip the build clause, not the entire delegation line).
+        assert!(
+            plan.contains("'explore' (read-only)"),
+            "plan prompt must still advertise 'explore', got: {plan}"
+        );
+    }
+}

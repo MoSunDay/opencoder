@@ -48,7 +48,19 @@ pub(crate) fn handle_key(
     if skill_menu.is_some() {
         return match handle_menu_key(skill_menu, k) {
             MenuOutcome::Quit => KeyAction::Quit,
-            MenuOutcome::Pick(opt) => KeyAction::SetSkill(opt),
+            // A skill pick inserts a `{$name}` token at the cursor (the `$`
+            // that opened the menu was already consumed). The skill body is
+            // resolved and loaded on submit, not here, so picking is cheap and
+            // reversible (backspace removes the token).
+            MenuOutcome::Pick(Some((name, _body))) => {
+                let token = format!("{{${}}}", name);
+                let (s, i) = composer::insert_str(input, *cursor_idx, &token);
+                *input = s;
+                *cursor_idx = i;
+                KeyAction::None
+            }
+            // The "clear skill" row clears immediately (sticky skill unset now).
+            MenuOutcome::Pick(None) => KeyAction::SetSkill(None),
             MenuOutcome::Idle => KeyAction::None,
         };
     }
@@ -95,6 +107,25 @@ pub(crate) fn handle_key(
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s;
                 *cursor_idx = i;
+                return KeyAction::None;
+            }
+            // Ctrl+A / Ctrl+E: cursor to start / end of the input buffer
+            // (same as Home / End).
+            KeyCode::Char('a') => {
+                *cursor_idx = 0;
+                return KeyAction::None;
+            }
+            KeyCode::Char('e') => {
+                *cursor_idx = input.chars().count();
+                return KeyAction::None;
+            }
+            // Ctrl+W: delete the word before the cursor (readline
+            // backward-kill-word / unix-word-rubout, same as terminal).
+            KeyCode::Char('w') => {
+                if let Some((s, i)) = composer::delete_word_back(input, *cursor_idx) {
+                    *input = s;
+                    *cursor_idx = i;
+                }
                 return KeyAction::None;
             }
             _ => return KeyAction::None,
@@ -224,7 +255,7 @@ pub(crate) fn handle_key(
             if c == '\u{3}' || c == '\u{4}' {
                 return KeyAction::Quit;
             }
-            if c == '$' && input.is_empty() && *cursor_idx == 0 {
+            if c == '$' {
                 *skill_menu = Some(SkillMenu::new(discover_skills(), active_skill.is_some()));
                 return KeyAction::None;
             }

@@ -33,7 +33,7 @@ target
 .bak*
 
 # Local dev files
-opencode-dev
+opencoder-dev
 UPCOMING_CHANGELOG.md
 logs/
 *.bun-build

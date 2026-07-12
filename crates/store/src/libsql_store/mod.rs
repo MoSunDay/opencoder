@@ -89,6 +89,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         sessions::delete(&conn, id).await
     }
+    async fn clear_other_sessions(&self, keep_session_id: &str) -> Result<u64> {
+        let conn = self.conn().await?;
+        sessions::clear_others(&conn, keep_session_id).await
+    }
 
     async fn append_message(&self, session_id: &str, msg: &opencode_core::Message) -> Result<i64> {
         let conn = self.conn().await?;

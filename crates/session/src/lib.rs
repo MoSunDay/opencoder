@@ -1,5 +1,6 @@
 pub mod bash_guard;
 pub mod compaction;
+pub mod plan_handoff;
 pub mod prompt;
 pub mod resume;
 pub mod runner;

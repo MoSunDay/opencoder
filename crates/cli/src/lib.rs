@@ -2,7 +2,7 @@ pub mod run;
 pub mod serve;
 pub mod session_cmd;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -107,17 +107,46 @@ pub enum SessionSub {
     },
 }
 
-pub fn init_logging(verbose: bool) {
-    let filter = if verbose {
+/// Path used to sink TUI logs so they never corrupt the alternate screen.
+/// `<data_local_dir>/opencode/tui.log`. Returns `None` if the data dir is
+/// unavailable; the caller treats `None` as "log to stdout".
+pub fn tui_log_path() -> Option<PathBuf> {
+    let mut p = dirs::data_local_dir()?;
+    p.push("opencode");
+    p.push("tui.log");
+    Some(p)
+}
+
+/// Initialise the global tracing subscriber.
+/// `file_sink`, when `Some`, directs log output to that file (truncated on
+/// start). This is required for the TUI: the alternate screen + raw mode mean
+/// any log written to stdout/stderr overlays the interface as garbage text
+/// (e.g. the "WARN stream finished early" line). Headless commands pass `None`
+/// to keep logging on stdout. Opening the file is best-effort — on failure we
+/// fall back to stdout so logging never breaks the app.
+pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
+    let default_filter = if verbose {
         "debug"
     } else {
         "opencode=info,warn"
     };
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter)),
-        )
-        .with_target(false)
-        .try_init();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
+
+    let file = file_sink.and_then(|p| std::fs::File::create(p).ok());
+    match file {
+        Some(f) => {
+            let _ = tracing_subscriber::fmt()
+                .with_writer(std::sync::Mutex::new(f))
+                .with_env_filter(env_filter)
+                .with_target(false)
+                .try_init();
+        }
+        None => {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_target(false)
+                .try_init();
+        }
+    }
 }

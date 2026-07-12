@@ -6,6 +6,13 @@ use opencode_session::SessionEvent;
 
 const TOOL_OUTPUT_LINES: usize = 6;
 
+/// Braille spinner frames shown next to a running subagent header. Matches the
+/// status-bar spinner in `render.rs` so the UI has one consistent motion.
+const SPINNER: [&str; 10] = [
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
+];
+
 /// A single visual block in the transcript. Replaces the flat `Vec<Line>`
 /// model so we can have collapsible thinking blocks, streaming-vs-rendered
 /// assistant text, and tool blocks with structured output.
@@ -59,6 +66,16 @@ pub struct ChatView {
     /// child subagent tokens, which live on the child ChatView). Used to
     /// show context stats when viewing a subagent's perspective.
     pub context_used: u64,
+    /// Index of the parent's assistant block whose content is withheld while
+    /// MULTIPLE subagents are in flight (see issue #5). The block renders zero
+    /// lines in `flatten_with` and is excluded from header line-accounting so
+    /// hit-rects stay aligned. Cleared once all subagents finish (the content
+    /// then appears in one shot).
+    pub hidden_assistant_idx: Option<usize>,
+    /// Buffered `(id, ok, summary)` for `SubagentEnd` events that arrived while
+    /// other subagents were still running. Applied in a single batch when the
+    /// last sibling finishes, so completion summaries never pop in one-by-one.
+    pub pending_subagent_ends: Vec<(String, bool, String)>,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.
@@ -156,6 +173,18 @@ impl ChatView {
                 self.subagents_running = self.subagents_running.saturating_add(1);
                 self.subagents_total = self.subagents_total.saturating_add(1);
                 self.finalize_assistant();
+                // On the SECOND concurrent subagent, begin withholding the
+                // parent's preamble assistant text (issue #5). It renders zero
+                // lines until every sibling finishes, then reappears in one shot.
+                if self.subagents_running == 2 && self.hidden_assistant_idx.is_none() {
+                    self.hidden_assistant_idx = self
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|(_, b)| matches!(b, ChatBlock::Assistant { .. }))
+                        .map(|(i, _)| i);
+                }
                 self.blocks.push(ChatBlock::Subagent {
                     id: id.clone(),
                     child_session_id: child_session_id.clone(),
@@ -180,39 +209,31 @@ impl ChatView {
             SessionEvent::SubagentEnd { id, ok, summary } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
-                if let Some(block) = self
-                    .blocks
-                    .iter_mut()
-                    .rev()
-                    .find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
-                {
-                    if let ChatBlock::Subagent {
-                        done,
-                        ok: bok,
-                        summary: smry,
-                        ..
-                    } = block
-                    {
-                        *done = true;
-                        *bok = *ok;
-                        *smry = summary.clone();
-                    }
+                if self.subagents_running > 0 {
+                    // Other siblings still running — buffer so all completion
+                    // summaries surface together when the last one finishes
+                    // (issue #5), instead of popping in one-by-one.
+                    self.pending_subagent_ends
+                        .push((id.clone(), *ok, summary.clone()));
                 } else {
-                    let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-                    let color = if *ok { Color::Green } else { Color::Red };
-                    self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
-                        Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
-                        Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
-                    ])]));
+                    // Last (or only) sibling done — flush buffered ends in
+                    // arrival order, apply this one, then reveal the preamble.
+                    self.flush_pending_subagent_ends();
+                    self.mark_subagent_done(id, *ok, summary);
+                    self.hidden_assistant_idx = None;
                 }
             }
             SessionEvent::Done => {
                 self.subagents_running = 0;
+                self.flush_pending_subagent_ends();
+                self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
             SessionEvent::Error(e) => {
                 self.subagents_running = 0;
+                self.flush_pending_subagent_ends();
+                self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
@@ -295,6 +316,11 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
+                    // Withheld preamble renders zero lines (issue #5); skip it
+                    // so header line indices stay aligned with `flatten_with`.
+                    if self.is_withheld(block_idx) {
+                        continue;
+                    }
                     // +1 for the "say:" header line emitted by flatten().
                     line_idx += 1;
                     line_idx += if *done {
@@ -339,6 +365,9 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
+                    if self.is_withheld(block_idx) {
+                        continue;
+                    }
                     line_idx += 1;
                     line_idx += if *done {
                         rendered.len()
@@ -367,12 +396,14 @@ impl ChatView {
         out
     }
 
-    /// Flatten all blocks into a single `Vec<Line>` for rendering. This is
-    /// called once per frame; markdown rendering happens only at finalization,
-    /// so streaming stays O(text length) not O(parse + render).
-    pub fn flatten(&self) -> Vec<Line<'static>> {
+    /// Flatten all blocks into a single `Vec<Line>` for rendering, using
+    /// `anim_tick` only to advance the running-subagent spinner. Delegated to
+    /// by `flatten()` (which passes `0`) for non-render callers (selection,
+    /// scroll-counting, tests) — line counts are identical across tick values,
+    /// so hit-rects and selection math stay aligned with the live render.
+    pub fn flatten_with(&self, anim_tick: u32) -> Vec<Line<'static>> {
         let mut out = Vec::with_capacity(self.blocks.len() * 2);
-        for block in &self.blocks {
+        for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
                 ChatBlock::Assistant {
@@ -380,6 +411,11 @@ impl ChatView {
                     rendered,
                     done,
                 } => {
+                    // Withheld while multiple subagents run (issue #5): render
+                    // zero lines so hit-rect/selection indices stay aligned.
+                    if self.is_withheld(block_idx) {
+                        continue;
+                    }
                     // Visual header so assistant output has its own labelled region,
                     // mirroring the `user:` marker on user prompts.
                     out.push(Line::from(Span::styled(
@@ -444,7 +480,8 @@ impl ChatView {
                         .iter()
                         .filter(|b| matches!(b, ChatBlock::Tool { .. }))
                         .count();
-                    // Status badge: colored dot/check/cross + word.
+                    // Status badge: animated spinner/check/cross + word. The
+                    // running spinner uses the live anim_tick for motion.
                     let (mark, mark_color, status_word) = if *done {
                         if *ok {
                             ("\u{2714}", Color::Green, "done")
@@ -452,7 +489,7 @@ impl ChatView {
                             ("\u{2718}", Color::Red, "failed")
                         }
                     } else {
-                        ("\u{25cf}", Color::Yellow, "running")
+                        (SPINNER[(anim_tick as usize) % SPINNER.len()], Color::Yellow, "running")
                     };
                     let mut spans = vec![
                         Span::styled(
@@ -481,6 +518,54 @@ impl ChatView {
             }
         }
         out
+    }
+
+    /// Non-animated flatten for callers that don't render (selection extract,
+    /// scroll-counting, tests). Line counts match `flatten_with` exactly.
+    pub fn flatten(&self) -> Vec<Line<'static>> {
+        self.flatten_with(0)
+    }
+
+    /// Whether the block at `idx` is currently withheld from the rendered
+    /// output — the parent's preamble assistant block while MULTIPLE
+    /// subagents are in flight (issue #5). `flatten_with` and both header
+    /// line-accounting functions consult this so hit-rects stay aligned with
+    /// what's on screen.
+    fn is_withheld(&self, idx: usize) -> bool {
+        self.hidden_assistant_idx == Some(idx) && self.subagents_running >= 1
+    }
+
+    /// Mark the subagent block matching `id` as done. If no block exists
+    /// (defensive), emit a fallback marker so the event stays visible.
+    fn mark_subagent_done(&mut self, id: &str, ok: bool, summary: &str) {
+        if let Some(ChatBlock::Subagent {
+            done, ok: bok, summary: smry, ..
+        }) = self
+            .blocks
+            .iter_mut()
+            .rev()
+            .find(|b| matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == id))
+        {
+            *done = true;
+            *bok = ok;
+            *smry = summary.to_string();
+        } else {
+            let mark = if ok { "\u{2714}" } else { "\u{2718}" };
+            let color = if ok { Color::Green } else { Color::Red };
+            self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
+                Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
+                Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
+            ])]));
+        }
+    }
+
+    /// Apply all buffered subagent completions in arrival order. Called when
+    /// the last sibling finishes, or on Done/Error as a safety flush.
+    fn flush_pending_subagent_ends(&mut self) {
+        let drained = std::mem::take(&mut self.pending_subagent_ends);
+        for (id, ok, summary) in drained {
+            self.mark_subagent_done(&id, ok, &summary);
+        }
     }
 
     fn ensure_assistant_open(&mut self) {
@@ -520,7 +605,7 @@ fn summarize(input: &serde_json::Value) -> String {
     }
 }
 
-fn short(s: &str, n: usize) -> String {
+pub(crate) fn short(s: &str, n: usize) -> String {
     let t = s.trim();
     if t.chars().count() <= n {
         t.to_string()
@@ -539,290 +624,5 @@ pub fn block_text(view: &ChatView) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_delta_appends_to_assistant_block() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("hello ".into()));
-        v.apply(&SessionEvent::TextDelta("world".into()));
-        assert!(block_text(&v).contains("hello"));
-        assert!(block_text(&v).contains("world"));
-    }
-
-    #[test]
-    fn reasoning_delta_creates_thinking_block() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::ReasoningDelta("analyzing".into()));
-        let flat = v.flatten();
-        // Collapsed by default: header shows "Thinking"
-        assert!(flat
-            .iter()
-            .any(|l| { l.spans.iter().any(|s| s.content.contains("Thinking")) }));
-        // Content hidden when collapsed
-        assert!(!block_text(&v).contains("analyzing"));
-        // Expand via block index and verify content
-        v.toggle_thinking_at(0);
-        assert!(block_text(&v).contains("analyzing"));
-    }
-
-    #[test]
-    fn thinking_block_collapses() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::ReasoningDelta("line1\nline2\nline3".into()));
-        // Collapsed by default: summary line only, content hidden
-        let text = block_text(&v);
-        assert!(text.contains("3 lines"));
-        assert!(!text.contains("line1"));
-        // Expand: should contain all 3 lines
-        v.toggle_thinking_at(0);
-        assert!(block_text(&v).contains("line1"));
-        assert!(block_text(&v).contains("line3"));
-        // Collapse again
-        v.toggle_thinking_at(0);
-        assert!(!block_text(&v).contains("line1"));
-    }
-
-    #[test]
-    fn thinking_headers_match_flatten_line_indices() {
-        let mut v = ChatView::default();
-        // Two thinking blocks separated by an assistant block.
-        v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
-        v.apply(&SessionEvent::TextDelta("hi".into()));
-        v.apply(&SessionEvent::Done);
-        v.apply(&SessionEvent::ReasoningDelta("think-b-1\nthink-b-2".into()));
-
-        let flat = v.flatten();
-        let headers = v.thinking_headers();
-        assert_eq!(headers.len(), 2, "expected two thinking headers");
-        // Each recorded header line must contain the "Thinking" header text.
-        for h in &headers {
-            let line = &flat[h.header_line_idx];
-            assert!(
-                line.spans.iter().any(|s| s.content.contains("Thinking")),
-                "header_line_idx {} is not a Thinking header: {:?}",
-                h.header_line_idx,
-                line,
-            );
-        }
-        // block_idx maps back to a Thinking block.
-        for h in &headers {
-            assert!(
-                matches!(v.blocks[h.block_idx], ChatBlock::Thinking { .. }),
-                "block_idx {} is not a Thinking block",
-                h.block_idx,
-            );
-        }
-        // Expanding the second block shifts nothing before it; first header
-        // line index is unchanged.
-        let first_before = headers[0].header_line_idx;
-        v.toggle_thinking_at(headers[1].block_idx);
-        let first_after = v.thinking_headers()[0].header_line_idx;
-        assert_eq!(first_before, first_after);
-    }
-
-    #[test]
-    fn toggle_thinking_at_toggles_specific_block() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::ReasoningDelta("first".into()));
-        v.apply(&SessionEvent::TextDelta("between".into()));
-        v.apply(&SessionEvent::Done);
-        v.apply(&SessionEvent::ReasoningDelta("second".into()));
-
-        let headers = v.thinking_headers();
-        assert_eq!(headers.len(), 2);
-        // Both collapsed initially.
-        assert!(!block_text(&v).contains("first"));
-        assert!(!block_text(&v).contains("second"));
-        // Toggle only the first: its content shows, second stays hidden.
-        v.toggle_thinking_at(headers[0].block_idx);
-        assert!(block_text(&v).contains("first"));
-        assert!(!block_text(&v).contains("second"));
-        // Out-of-range / non-thinking index is a no-op.
-        v.toggle_thinking_at(999);
-        v.toggle_thinking_at(headers[0].block_idx + 1); // assistant block index
-        assert!(block_text(&v).contains("first"));
-    }
-
-    #[test]
-    fn done_renders_markdown() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta(
-            "# Title\n\nSome **bold** text".into(),
-        ));
-        v.apply(&SessionEvent::Done);
-        // After Done, the assistant block is finalized — check it has rendered
-        for b in &v.blocks {
-            if let ChatBlock::Assistant { done, .. } = b {
-                assert!(*done, "assistant should be finalized after Done");
-            }
-        }
-    }
-
-    #[test]
-    fn text_after_tool_starts_fresh_block() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("result:".into()));
-        v.apply(&SessionEvent::ToolStart {
-            id: "t1".into(),
-            name: "bash".into(),
-            input: serde_json::json!({"command": "ls"}),
-        });
-        v.apply(&SessionEvent::ToolEnd {
-            id: "t1".into(),
-            name: "bash".into(),
-            output: "file1".into(),
-            is_error: false,
-        });
-        v.apply(&SessionEvent::TextDelta("done".into()));
-        assert!(block_text(&v).contains("done"));
-    }
-
-    #[test]
-    fn push_marker_separates_from_assistant() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("streaming".into()));
-        v.push_marker(Line::from("[queued] foo"));
-        v.apply(&SessionEvent::TextDelta("more".into()));
-        assert!(block_text(&v).contains("[queued] foo"));
-        assert!(block_text(&v).contains("more"));
-    }
-
-    #[test]
-    fn agent_switch_updates_agent_without_marker() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::AgentSwitch("act".into()));
-        assert_eq!(v.agent, "act");
-        assert!(
-            !v.blocks
-                .iter()
-                .any(|b| matches!(b, ChatBlock::Marker(_))),
-            "AgentSwitch must not pollute the chat body with a marker"
-        );
-    }
-
-    #[test]
-    fn agent_switch_finalizes_pending_assistant() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("mid-stream".into()));
-        v.apply(&SessionEvent::AgentSwitch("act".into()));
-        let pending = v
-            .blocks
-            .iter()
-            .filter_map(|b| match b {
-                ChatBlock::Assistant { done, .. } => Some(*done),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(!pending.is_empty(), "assistant block should exist");
-        assert!(
-            pending.iter().all(|d| *d),
-            "assistant block must be finalized on AgentSwitch"
-        );
-    }
-
-    #[test]
-    fn multiline_delta_splits_lines() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("line1\nline2".into()));
-        let flat = v.flatten();
-        let texts: Vec<String> = flat
-            .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
-            .collect();
-        // Assistant text is indented under the `say:` header
-        assert!(texts.iter().any(|t| t.contains("line1")), "got {:?}", texts);
-        assert!(texts.iter().any(|t| t.contains("line2")), "got {:?}", texts);
-    }
-
-    #[test]
-    fn subagent_events_render() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("parent asks subagent".into()));
-        v.apply(&SessionEvent::SubagentStart {
-            id: "s1".into(),
-            kind: "explore".into(),
-            prompt: "search".into(),
-            child_session_id: "sub-1".into(),
-        });
-        assert!(block_text(&v).contains("subagent"));
-        assert!(block_text(&v).contains("explore"));
-        assert_eq!(v.subagents_total, 1);
-        assert_eq!(v.subagents_running, 1);
-
-        // Child events routed into the subagent block's view.
-        let parent_ctx = v.context_used;
-        assert!(parent_ctx > 0, "precondition: parent has its own tokens");
-        v.apply(&SessionEvent::SubagentChild {
-            id: "s1".into(),
-            ev: Box::new(SessionEvent::TextDelta("child output".into())),
-        });
-        assert_eq!(v.context_used, parent_ctx, "parent must not include child tokens");
-        // No inline expansion — child output is always hidden in the parent.
-        assert!(!block_text(&v).contains("child output"));
-        // Child view itself contains the output (visible via ctx-switch).
-        if let Some(ChatBlock::Subagent { view, .. }) = v
-            .blocks
-            .iter()
-            .find(|b| matches!(b, ChatBlock::Subagent { .. }))
-        {
-            assert!(block_text(view).contains("child output"));
-            // Child view tracks its own context.
-            assert!(view.context_used > 0);
-        } else {
-            panic!("expected a Subagent block");
-        }
-
-        // SubagentEnd marks done and decrements running; summary shows on header.
-        v.apply(&SessionEvent::SubagentEnd {
-            id: "s1".into(),
-            ok: true,
-            summary: "found it".into(),
-        });
-        assert_eq!(v.subagents_running, 0);
-        assert_eq!(v.subagents_total, 1);
-        assert!(block_text(&v).contains("found it"));
-        assert_eq!(v.context_used, parent_ctx + estimate("found it") as u64);
-    }
-
-    #[test]
-    fn error_renders() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::Error("broke".into()));
-        assert!(block_text(&v).contains("broke"));
-    }
-
-    #[test]
-    fn paragraph_scroll_uses_wrapped_rows_and_pins_tail() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-        use ratatui::widgets::{Paragraph, Widget, Wrap};
-
-        let lines: Vec<Line> = vec![
-            Line::from("AAAAAAAAAA"),
-            Line::from("BBBBBBBBBB"),
-            Line::from("CCCCCCCCCCEND"),
-        ];
-        let width = 10u16;
-        let visible_h = 2u16;
-        let total_rows = Paragraph::new(lines.clone())
-            .wrap(Wrap { trim: false })
-            .line_count(width);
-        assert_eq!(total_rows, 4);
-        let scroll_y = total_rows - visible_h as usize;
-        let area = Rect::new(0, 0, width, visible_h);
-        let mut buf = Buffer::empty(area);
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll_y as u16, 0))
-            .render(area, &mut buf);
-        let rs = |y: u16| -> String {
-            (0..width)
-                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
-                .collect()
-        };
-        assert!(rs(0).starts_with("CCCCCCCCCC"));
-        assert!(rs(visible_h - 1).starts_with("END"));
-    }
-}
+#[path = "chat_tests.rs"]
+mod tests;

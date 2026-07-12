@@ -65,6 +65,7 @@ pub async fn list_sessions(
         cursor: q.cursor,
         workdir_hash: None,
         search: q.search,
+        include_subagents: false,
     };
     let items = state.store.list_sessions(&filter).await.unwrap_or_default();
     Json(json!({ "sessions": items })).into_response()

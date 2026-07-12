@@ -16,16 +16,17 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - `MouseHits`（`src/render.rs`）：每帧重算的命中目标——`jump_btn/body/queue_btns/thinking_btns/subagent_btns`。`record_thinking_hits` / `record_subagent_hits` 映射逻辑行号到屏幕行号。
 - `key_handler`（`src/key_handler.rs`）：`KeyAction` enum + `handle_key()` 分发器 + `move_hist()` 历史导航。从 app.rs 提取（行数控制）。Ctrl+C/Ctrl+D 在 CONTROL 块同时匹配 `Char('c')|Char('d')` 和 Kitty 键盘协议下的原始控制字符 `Char('\u{3}')|Char('\u{4}')`——后者由 `DISAMBIGUATE_ESCAPE_CODES` 导致，不带 'c'/'d' 字面量。
 - 手动 `draw_scrollbar()`（`src/render.rs`）：替代 ratatui ScrollbarState——简单比例 `scroll_y * max_off / max_scroll`，短内容对齐正确。滚轮处理器换行宽度 `r.width - 3` 与 render 的 `text_w = inner.width - 1` 对齐。
+- **composer 与状态栏渲染**（`src/render.rs`）：`render_composer` 按行拆分输入（`split('\n')`），首行带 `❯ ` Cyan 提示符，用 `Paragraph::wrap(Wrap{trim:false})` 软换行 + `.scroll()` 支持滚动；`render_status` 底栏显示 model | [agent] | dir | ctx%（**不再含 "opencoder" 品牌字样**）；`place_cursor` 经 `composer::cursor_row_col`（同时处理显式 `\n` 和软换行）计算 (row,col) 后 `f.set_cursor_position` 定位可见光标。render 测试首次引入 ratatui `TestBackend`（in-process buffer 断言 + cursor position 验证）。
 
 ## 主流程
-`run_app` loop：每帧 `render()` → `tokio::select!` 三臂（终端事件 `input_rx` / worker `evt_rx` / anim ticker）。**输入采集**（`src/input.rs`）：专用 OS 线程跑有界 `crossterm::event::poll(150ms)`+`read()`，经 tokio mpsc `blocking_send` 投递到 `input_rx`——弃用 `EventStream`（其 reader 在 Kitty 键盘协议下可被半个 Esc 消歧序列永久挂死，把整循环冻死、Ctrl+C/D 全失效）；有界 poll 每 ≤150ms 必醒，该失败模式在结构上不再可能。receiver drop（`is_closed()`）即令线程退出。**终端生命周期**（`src/terminal.rs`）：`TerminalGuard` RAII（`run()` 持有）——enter 开 raw+alt-screen+鼠标+Kitty 并装 panic hook（panic 时先恢复终端再打印），Drop 幂等恢复；任何退出路径（正常/`?`错误/panic unwind）都恢复终端，不再"变砖"。`input_rx.recv()` 返回 `None`（采集线程退出/stdin EOF）时 `UiCmd::Quit` + break。
+`run_app` loop：每帧 `render()` → `tokio::select!` 三臂（终端事件 `input_rx` / worker `evt_rx` / anim ticker）。**输入采集**（`src/input.rs`）：专用 OS 线程跑同步有界 `crossterm::event::poll(150ms)`+`read()`，经 tokio mpsc `blocking_send` 投递到 `input_rx`——弃用 `EventStream`（其 async reader 任务走 mio + tokio waker，一旦停滞 `select!` 输入臂永不触发，整循环冻死、Ctrl+C/D 全失效）；改走同步路径端到端绕过该失败模式（crossterm unix source 用 `filedescriptor::poll`+非阻塞读，有界；`poll` 成功后 `read()` 从内部队列弹已入队事件，不触及 `poll(None)` 回退）。receiver drop（`is_closed()`）即令线程退出。**终端生命周期**（`src/terminal.rs`）：`TerminalGuard` RAII（`run()` 持有）——enter 开 raw+alt-screen+鼠标+Kitty 并装 panic hook（panic 时先恢复终端再打印），Drop 幂等恢复；任何退出路径（正常/`?`错误/panic unwind）都恢复终端，不再"变砖"。`input_rx.recv()` 返回 `None`（采集线程退出/stdin EOF）时 `UiCmd::Quit` + break。
 
 - **render**：`display_chat` / `display_agent` / `display_ctx` / `display_sys` = subagent_focus 时取子 ChatView 及其 `context_used` + 缓存的 `subagent_sys`（进入时 `sys_tokens_for(kind, workdir, None)` 算一次），否则取 `&chat` + `chat.context_used` / `sys_tokens`。`display_agent` = focus 时 `← [Esc] back | ⇲sub [kind] prompt`。
 - **Session 事件**：`chat.apply(&sev)` 内部调 `track_context` 更新 `chat.context_used`（只计本 view token，SubagentChild 不计入父），SubagentChild 路由到子 block view（子 view 的 apply 独立更新自身 context_used）；TranscriptReset 重建 ChatView（context_used 归零）。
 - **subagent ctx 切换**：`subagent_focus: Option<usize>` 状态。进入时保存 `parent_scroll/parent_follow`，退出时恢复。Esc 优先拦截（在 handle_key 之前）。
 - **输入模式**：Enter = steer（运行中）/ submit（idle）；Tab = followup（运行中）/ submit（idle）；Shift+Tab 切 plan/act。
 - **中止与续跑**：双击 Esc 硬中止（`KeyAction::Cancel` → `cancel.cancel()`，`run_app` 即刻 `running=false`）。每个新 turn 由 `start_turn` 先发 `UiCmd::ResetCancel(新 token)` 再发工作命令（mpsc FIFO，4 个派发点：Submit idle / SwitchAndStart / Compact / TurnDone 续跑），刷新 worker 的 `sess.cancel`——否则 token 永久取消会使 `run_loop` 顶部 `is_cancelled()` 永真、后续提交被静默丢弃。`start_turn` 返回 `bool`：`false` = 命令通道关闭（worker 已死，panic 或意外退出），派发点收到 `false` 时 `worker_dead()` 推 `[worker stopped]` marker 并 break。输入采集在独立 OS 线程，worker 死后 UI 仍响应 Ctrl+C/D，用户可干净退出而非面对冻死 spinner。
-- **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。`/task` 会话选择器（`task.rs`）为屏幕居中模态：`+ New task` + 历史 session 列表（当前会话标 `(current)`），底部红色 `✕ Clear all N task(s)` destructive 行——选中 Enter 进入红色两步确认态（再 Enter 触发 `TaskOutcome::ClearAll`，经 `Store::clear_other_sessions` 删除除当前会话外的全部会话并刷新列表；Esc 取消确认、确认态锁定 ↑/↓、Ctrl+C/D 仍即时退出）。
+- **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。`/task` 会话选择器（`task.rs`）为屏幕居中模态：`+ New task` + 历史 session 列表（当前会话标 `(current)`），底部红色 `✕ Clear all N task(s)` destructive 行——选中 Enter 进入红色两步确认态（再 Enter 触发 `TaskOutcome::ClearAll`；app 层经 `gate_clear_all(running)` 守卫：`running==true` 即 turn/subagent 飞行中时拒绝并推黄色 busy marker，idle 后才调 `Store::clear_other_sessions` 删除除当前会话外的全部会话并刷新列表；Esc 取消确认、确认态锁定 ↑/↓、Ctrl+C/D 仍即时退出）。
 
 ## 依赖与接口
 - 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencode-session、opencode-core、opencode-store、opencode-llm（estimate）。
@@ -43,8 +44,15 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - worker cancel-token 交换回归：`worker::tests::rebind_session_swaps_the_active_cancel_token`
 - cancel-token 刷新回归（双击 Esc 后可提交）：`worker::tests::reset_cancel_replaces_with_fresh_uncancelled_token`、`session/tests/cancel_reset.rs`
 - 输入采集线程 receiver drop 即退出：`input::tests::pump_exits_when_receiver_dropped`
-- **单按 Esc 在有界时间内投递（pty 表征，冻死失败模式消失的直接证据）**：`tests/input_pty.rs::lone_esc_is_delivered_within_bound`
+- 单按 Esc 在同步 pump 上有界投递（pty 基础交付回归）：`tests/input_pty.rs::lone_esc_is_delivered_within_bound`
+- **不完整 CSI（`\x1b[`）不挂死 pump；补全字节有界投递（结构不变量直接证据）**：`tests/input_pty_incomplete.rs::incomplete_csi_does_not_wedge_pump`
+- pty 线束（openpty + raw + fd 0 重定向 + Drop 恢复）：`tests/common/mod.rs::PtyStdin`
 - 终端恢复幂等（无 TTY 也可调用）：`terminal::tests::restore_is_idempotent_without_a_tty`
 - `write_restore` 依序发出三条恢复序列：`terminal::tests::write_restore_emits_all_three_sequences`
 - panic hook 先恢复终端再链到原 hook：`terminal::tests::hook_body_restores_before_chaining_to_prev`
 - worker 死亡检测（start_turn 通道关闭返 false）：`app::tests::start_turn_reports_false_when_worker_is_dead`
+- 状态栏不含 "opencoder" 品牌、仍含 model/agent/dir/ctx：`render::tests::status_bar_omits_branding`
+- 状态栏运行态显示 spinner + status 文本：`render::tests::status_bar_running_shows_spinner_and_status`
+- composer 多行渲染（❯ 提示符 + 文本 + 跟随/跳转标签）：`render::tests::composer_renders_prompt_and_multiline_text`、`render::tests::composer_jump_label_when_not_following`
+- 光标定位（首行/次行/软换行/滚动）：`render::tests::place_cursor_row_zero`、`render::tests::place_cursor_second_line`、`render::tests::place_cursor_soft_wrap_advances_row`、`render::tests::place_cursor_with_scroll`
+- cursor_row_col 软换行边界（CJK 宽字符/width=1/空行/char_idx 越界）：`composer::tests::cursor_row_col_soft_wrap_edge_cases`

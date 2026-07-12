@@ -91,6 +91,9 @@ pub fn classify(command: &str) -> BashVerdict {
     }
 
     // Check for redirect operators anywhere in the command (>, >>, &>).
+    // All redirects are blocked — over-blocking is safe in plan mode, and the
+    // bash tool captures stdout/stderr separately so 2>&1 / 2>/dev/null are
+    // redundant anyway.
     if has_redirect(trimmed) {
         return BashVerdict::WriteBlocked("redirect operator (>/>>)".into());
     }
@@ -105,17 +108,17 @@ pub fn classify(command: &str) -> BashVerdict {
     BashVerdict::ReadOnly
 }
 
-/// Detect redirect operators: `>` (but not `->` or `2>` in a comparison),
-/// `>>`, `&>`, `>&`.
+/// Detect redirect operators: `>`, `>>`, `&>`, and fd-redirect variants
+/// (`2>`, `1>&2`, etc.). All are blocked uniformly — the bash tool already
+/// captures stdout and stderr as separate streams, so output redirects like
+/// `2>&1` or `2>/dev/null` are redundant and need not be allowed.
 fn has_redirect(cmd: &str) -> bool {
     let chars: Vec<char> = cmd.chars().collect();
     for i in 0..chars.len() {
         let c = chars[i];
         if c == '>' {
-            // Skip "2>" etc. (fd redirect) — still a redirect!
             return true;
         }
-        // Check for &> (redirect stdout+stderr)
         if c == '&' && i + 1 < chars.len() && chars[i + 1] == '>' {
             return true;
         }
@@ -277,6 +280,28 @@ mod tests {
         ));
         assert!(matches!(
             classify("echo x 2> file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        // All redirects blocked uniformly — 2>&1 and /dev/null are redundant
+        // (the bash tool captures stdout/stderr separately).
+        assert!(matches!(
+            classify("cmd 2>&1"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cmd 2>/dev/null"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cmd > /dev/null"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cmd &>/dev/null"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("grep foo file 2>&1 | head"),
             BashVerdict::WriteBlocked(_)
         ));
     }

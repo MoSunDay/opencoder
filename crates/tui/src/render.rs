@@ -7,7 +7,7 @@ use anyhow::Result;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -72,6 +72,7 @@ pub(crate) fn render(
     chat: &ChatView,
     input: &str,
     cursor_idx: usize,
+    title: &str,
     agent: &str,
     running: bool,
     show_help: bool,
@@ -93,6 +94,7 @@ pub(crate) fn render(
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
     hits: &mut MouseHits,
+    selection: Option<crate::selection::SelRange>,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -100,6 +102,12 @@ pub(crate) fn render(
         let composer_inner_w = area.width.saturating_sub(2 + prompt_w);
         let input_rows = composer::display_rows(input, composer_inner_w).max(2);
         let composer_h = (input_rows + 2).min(area.height / 3);
+        let composer_inner_h = composer_h.saturating_sub(2).max(1);
+        let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, composer_inner_w);
+        let max_scroll = input_rows.saturating_sub(composer_inner_h);
+        let composer_scroll = (cur_row as u16)
+            .saturating_sub(composer_inner_h.saturating_sub(1))
+            .min(max_scroll);
         let pending = steer_items.len() + queue_items.len();
         let queue_h = if pending > 0 {
             pending.min(3) as u16
@@ -127,12 +135,14 @@ pub(crate) fn render(
             f,
             chunks[ci],
             chat,
-            agent,
+            title,
             scroll,
             follow,
+            anim_tick,
             &mut hits.body,
             &mut hits.thinking_btns,
             &mut hits.subagent_btns,
+            selection,
         );
         ci += 1;
         if queue_h > 0 {
@@ -151,7 +161,7 @@ pub(crate) fn render(
             }
         }
         ci += 1;
-        render_composer(f, chunks[ci], input, follow, &mut hits.jump_btn);
+        render_composer(f, chunks[ci], input, follow, composer_scroll, &mut hits.jump_btn);
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
@@ -161,8 +171,6 @@ pub(crate) fn render(
             status,
             steer_items.len() as u32,
             queue_items.len() as u32,
-            chat.subagents_running,
-            chat.subagents_total,
             model,
             agent,
             workdir,
@@ -194,18 +202,23 @@ pub(crate) fn render(
             let x = composer_area.x + composer_area.width.saturating_sub(w).saturating_sub(1);
             let chip_rect = Rect { x, y: row, width: w, height: 1 };
             f.render_widget(Clear, chip_rect);
+            // Plan/act flash is themed to match the agent chip: Yellow for
+            // read-only plan mode, Cyan for act (issue #6 — was Magenta, which
+            // clashed with the Cyan-themed UI).
+            let is_plan = text.contains("plan");
+            let bg = mode_flash_bg(is_plan);
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!(" {text} "),
                     Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Magenta)
+                        .fg(Color::Black)
+                        .bg(bg)
                         .add_modifier(Modifier::BOLD),
                 ))),
                 chip_rect,
             );
         }
-        place_cursor(f, composer_area, input, cursor_idx);
+        place_cursor(f, composer_area, input, cursor_idx, composer_inner_w, composer_scroll);
     })?;
     Ok(())
 }
@@ -218,9 +231,11 @@ fn render_body(
     title: &str,
     scroll: &mut u16,
     follow: bool,
+    anim_tick: u32,
     body_out: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
+    selection: Option<crate::selection::SelRange>,
 ) {
     *body_out = Some(area);
     let block = Block::default()
@@ -229,7 +244,7 @@ fn render_body(
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
-    let lines = chat.flatten();
+    let lines = chat.flatten_with(anim_tick);
     let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
     let total_rows = para.line_count(text_w);
     let max_rows = total_rows.saturating_sub(visible_h);
@@ -276,6 +291,9 @@ fn render_body(
     if total_rows > visible_h {
         draw_scrollbar(f, inner, total_rows, visible_h, scroll_y as usize);
     }
+
+    // Selection highlight — drawn last so it sits on top of the text.
+    crate::selection::render_overlay(f, text_area, scroll_y, selection);
 }
 
 /// Manual scrollbar with correct thumb positioning even when content barely
@@ -422,21 +440,32 @@ fn render_composer(
     area: Rect,
     input: &str,
     follow: bool,
+    scroll: u16,
     jump_btn: &mut Option<Rect>,
 ) {
     let block = Block::default().borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
-    let line = Line::from(vec![
-        Span::styled(
-            "\u{276f} ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(input.to_string()),
-    ]);
-    f.render_widget(Paragraph::new(line).wrap(Wrap { trim: false }), inner);
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, segment) in input.split('\n').enumerate() {
+        let mut spans: Vec<Span> = Vec::new();
+        if i == 0 {
+            spans.push(Span::styled(
+                "\u{276f} ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        spans.push(Span::raw(segment.to_string()));
+        lines.push(Line::from(spans));
+    }
+    f.render_widget(
+        Paragraph::new(Text::from(lines))
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        inner,
+    );
 
     let (label, style) = if follow {
         (
@@ -467,6 +496,29 @@ fn render_composer(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Foreground color of the `[agent]` status chip (issue #6): Yellow in
+/// read-only plan mode (caution), Cyan for act. Was uniformly Magenta.
+/// Shared by the status bar and the `/task` picker so the two stay
+/// visually consistent.
+pub(crate) fn agent_chip_fg(agent: &str) -> Color {
+    if agent == "plan" {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    }
+}
+
+/// Background color of the plan/act mode-flash chip (issue #6): Yellow for
+/// plan, Cyan for act. Extracted pure so the theme mapping is testable.
+fn mode_flash_bg(is_plan: bool) -> Color {
+    if is_plan {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_status(
     f: &mut Frame,
     area: Rect,
@@ -474,8 +526,6 @@ fn render_status(
     status: &str,
     steer_count: u32,
     queue_count: u32,
-    subagents: u32,
-    subagents_total: u32,
     model: &str,
     agent: &str,
     workdir: &Path,
@@ -498,16 +548,15 @@ fn render_status(
         .unwrap_or_else(|| ".".into());
 
     let mut spans = vec![
-        Span::styled(
-            " opencoder ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("| "),
+        Span::raw(" "),
         Span::styled(model.to_string(), Style::default().fg(Color::White)),
         Span::raw(" | "),
-        Span::styled(format!("[{agent}]"), Style::default().fg(Color::Magenta)),
+        // Agent chip: plan = Yellow (read-only caution), otherwise Cyan (issue
+        // #6 — was uniformly Magenta, clashing with the Cyan theme).
+        Span::styled(
+            format!("[{agent}]"),
+            Style::default().fg(agent_chip_fg(agent)),
+        ),
         Span::raw(" | "),
         Span::styled(dir_name, Style::default().fg(Color::DarkGray)),
         Span::raw("  "),
@@ -555,14 +604,6 @@ fn render_status(
         spans.push(Span::styled(
             format!(" | queue:{queue_count}"),
             Style::default().fg(Color::Yellow),
-        ));
-    }
-    if subagents_total > 0 {
-        spans.push(Span::styled(
-            format!(" | \u{2937}sub:{subagents}/{subagents_total}"),
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
         ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -686,105 +727,26 @@ fn render_help_popup(f: &mut Frame, area: Rect) {
     f.render_widget(Paragraph::new(crate::keybind::HELP).block(block), popup);
 }
 
-fn place_cursor(f: &mut Frame, composer_area: Rect, input: &str, cursor_idx: usize) {
+fn place_cursor(
+    f: &mut Frame,
+    composer_area: Rect,
+    input: &str,
+    cursor_idx: usize,
+    inner_w: u16,
+    scroll: u16,
+) {
     let border = 1u16;
     let prompt_w = 2u16;
-    let (row, col) = composer::cursor_row_col(input, cursor_idx);
-    let x = composer_area.x + border + prompt_w + col as u16;
-    let y = composer_area.y + border + row as u16;
+    let (row, col) = composer::cursor_row_col(input, cursor_idx, inner_w);
+    let x = if row == 0 {
+        composer_area.x + border + prompt_w + col as u16
+    } else {
+        composer_area.x + border + col as u16
+    };
+    let y = composer_area.y + border + (row as u16).saturating_sub(scroll);
     f.set_cursor_position((x, y));
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::chat::ChatView;
-    use opencode_session::SessionEvent;
-
-    fn thinking_view() -> ChatView {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::ReasoningDelta("think-a-1\nthink-a-2".into()));
-        v.apply(&SessionEvent::TextDelta("answer".into()));
-        v.apply(&SessionEvent::Done);
-        v
-    }
-
-    /// A collapsed thinking header at the top is visible at scroll 0 and gets
-    /// a full-width hit rect on its header row.
-    #[test]
-    fn collapsed_header_visible_gets_hit_rect() {
-        let v = thinking_view();
-        let lines = v.flatten();
-        // Header is the first line (line index 0).
-        let headers = v.thinking_headers();
-        assert_eq!(headers.len(), 1);
-        assert_eq!(headers[0].header_line_idx, 0);
-
-        let mut hits = Vec::new();
-        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].block_idx, headers[0].block_idx);
-        // screen_y = y0 + (0 - 0) = 2; full text width.
-        assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
-    }
-
-    /// Expanding the thinking block grows its rendered lines but the header
-    /// stays at the same screen row (row 0 → screen y0).
-    #[test]
-    fn expanded_header_row_unchanged() {
-        let mut v = thinking_view();
-        v.toggle_thinking_at(v.thinking_headers()[0].block_idx);
-        let lines = v.flatten();
-        let mut hits = Vec::new();
-        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
-        // Content lines are now present in the flattened output.
-        assert!(lines
-            .iter()
-            .any(|l| { l.spans.iter().any(|s| s.content.contains("think-a-1")) }));
-    }
-
-    /// Scrolling past the header removes its hit rect (header scrolled out of
-    /// view above).
-    #[test]
-    fn header_scrolled_above_is_not_hittable() {
-        let v = thinking_view();
-        let lines = v.flatten();
-        let mut hits = Vec::new();
-        // scroll_y = 1 pushes the row-0 header above the viewport.
-        record_thinking_hits(&v, &lines, 40, 1, 10, 1, 2, &mut hits);
-        assert!(
-            hits.is_empty(),
-            "header above viewport should not be hittable"
-        );
-    }
-
-    /// No thinking blocks ⇒ no work and no hits.
-    #[test]
-    fn no_thinking_blocks_means_no_hits() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("just text".into()));
-        v.apply(&SessionEvent::Done);
-        let lines = v.flatten();
-        let mut hits = Vec::new();
-        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
-        assert!(hits.is_empty());
-    }
-
-    /// in_rect matches a click on the header row and misses other rows.
-    #[test]
-    fn hit_rect_matches_click_on_header_row() {
-        let v = thinking_view();
-        let lines = v.flatten();
-        let mut hits = Vec::new();
-        record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
-        let rect = hits[0].rect;
-        // Click anywhere on the header row (y == 2) within x..x+width hits.
-        assert!(in_rect(rect, 5, 2));
-        assert!(in_rect(rect, 1, 2));
-        // Adjacent rows do not hit.
-        assert!(!in_rect(rect, 5, 1));
-        assert!(!in_rect(rect, 5, 3));
-    }
-}
+#[path = "render_tests.rs"]
+mod tests;

@@ -6,6 +6,7 @@ use opencode_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
 use crate::SessionState;
+use crate::runner::SessionEvent;
 
 /// Decide whether to compact. Two signals are checked: the estimated tokens
 /// of the transcript (works on round 1, before any usage) and the model-reported
@@ -57,19 +58,26 @@ fn reported_tokens(session: &SessionState) -> u64 {
 pub async fn compact(
     session: &mut SessionState,
     _registry: &HashMap<String, ToolArc>,
+    on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<Option<String>> {
     let tail = session.config.compaction.tail_turns.max(1) as usize;
     let split = split_index(&session.messages, tail);
     if split == 0 {
+        on_event(SessionEvent::Status("nothing to compact yet".into()));
         return Ok(None);
     }
+    on_event(SessionEvent::Status("compacting conversation…".into()));
     let head: Vec<Message> = session.messages[..split].to_vec();
 
     // If a previous compaction summary exists in the head, extract its text so
     // the summarizer can incrementally update it rather than starting fresh.
     let previous_summary: Option<String> = head
         .iter()
-        .find(|m| m.synthetic && m.role == Role::User)
+        .find(|m| {
+            m.synthetic
+                && m.role == Role::User
+                && m.text().starts_with("[Conversation summary so far]\n")
+        })
         .map(|m| {
             let text = m.text();
             text.strip_prefix("[Conversation summary so far]\n")
@@ -77,10 +85,11 @@ pub async fn compact(
                 .to_string()
         });
 
-    let summary = summarize(&head, session, previous_summary.as_deref()).await?;
+    let summary = summarize(&head, session, previous_summary.as_deref(), on_event).await?;
     let summary_msg = compaction_message(summary.clone());
     let tail_msgs: Vec<Message> = session.messages[split..].to_vec();
     session.messages = vec![summary_msg].into_iter().chain(tail_msgs).collect();
+    on_event(SessionEvent::Status(String::new()));
     Ok(Some(summary))
 }
 
@@ -101,6 +110,7 @@ async fn summarize(
     head: &[Message],
     session: &SessionState,
     previous_summary: Option<&str>,
+    on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<String> {
     let mut msgs: Vec<serde_json::Value> = Vec::new();
     // System prompt: anchored context summarization assistant.
@@ -126,7 +136,10 @@ async fn summarize(
     let mut text = String::new();
     while let Some(ev) = rx.recv().await {
         match ev {
-            LlmEvent::TextDelta(t) => text.push_str(&t),
+            LlmEvent::TextDelta(t) => {
+                text.push_str(&t);
+                on_event(SessionEvent::TextDelta(t));
+            }
             LlmEvent::Completed { text: t, .. } => {
                 if !t.is_empty() {
                     text = t;

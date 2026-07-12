@@ -17,9 +17,9 @@ use crate::prompt::build_system;
 use crate::tools::{registry as build_registry, schema_for};
 use crate::SessionState;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionEvent {
     TextDelta(String),
     ReasoningDelta(String),
@@ -157,7 +157,7 @@ async fn run_loop(
         }
 
         if compaction::should_compact(session) {
-            match compaction::compact(session, registry).await {
+            match compaction::compact(session, registry, &mut *on_event).await {
                 Ok(Some(summary)) => {
                     on_event(SessionEvent::TranscriptReset(session.messages.clone()));
                     on_event(SessionEvent::Compaction(summary));
@@ -240,6 +240,31 @@ async fn run_loop(
                         &sink,
                         SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()),
                     );
+                    // The assistant message carrying these `tool_use` blocks
+                    // was already persisted above (line ~207). The chat API
+                    // requires every `tool_use` to be followed by a matching
+                    // `tool_result`; omitting them makes resuming the session
+                    // fail with HTTP 400. Synthesize error results for each
+                    // call so history stays well-formed.
+                    let doom_blocks: Vec<ContentBlock> = tool_calls
+                        .iter()
+                        .map(|tc| ContentBlock::ToolResult {
+                            tool_use_id: tc.id.clone(),
+                            content: "doom-loop: tool execution skipped".to_string(),
+                            is_error: true,
+                        })
+                        .collect();
+                    let doom_msg = Message {
+                        id: new_id(),
+                        role: Role::Tool,
+                        blocks: doom_blocks,
+                        model: None,
+                        agent: None,
+                        usage: MessageUsage::default(),
+                        created_at: now_ms(),
+                        synthetic: false,
+                    };
+                    session.record(doom_msg).await;
                     return Ok(());
                 }
             }
@@ -344,6 +369,10 @@ async fn run_one_llm_call(
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
     let mut reasoning_buf = String::new();
+    // True once a `Retrying` status has been shown; cleared (with an empty
+    // Status event) the moment real content streams so the "↻ retry" badge
+    // doesn't linger after recovery.
+    let mut retried = false;
     let mut cancel_fut = std::pin::pin!(await_cancel(session));
     loop {
         tokio::select! {
@@ -355,14 +384,34 @@ async fn run_one_llm_call(
             ev = rx.recv() => {
                 let ev = match ev { Some(ev) => ev, None => break };
                 match ev {
-                    LlmEvent::TextDelta(t) => on_event(SessionEvent::TextDelta(t)),
+                    LlmEvent::TextDelta(t) => {
+                        if retried {
+                            retried = false;
+                            on_event(SessionEvent::Status(String::new()));
+                        }
+                        on_event(SessionEvent::TextDelta(t));
+                    }
                     LlmEvent::ReasoningDelta(r) => {
+                        if retried {
+                            retried = false;
+                            on_event(SessionEvent::Status(String::new()));
+                        }
                         reasoning_buf.push_str(&r);
                         on_event(SessionEvent::ReasoningDelta(r));
                     }
                     LlmEvent::ToolCallStart { .. } | LlmEvent::ToolCallDelta { .. } => {}
                     LlmEvent::Completed { text, tool_calls, usage } => {
+                        if retried {
+                            retried = false;
+                            on_event(SessionEvent::Status(String::new()));
+                        }
                         completed = Some((text, tool_calls, usage));
+                    }
+                    LlmEvent::Retrying { attempt, max } => {
+                        retried = true;
+                        on_event(SessionEvent::Status(format!(
+                            "\u{21bb} retry {attempt}/{max}"
+                        )));
                     }
                     LlmEvent::Error(e) => return Err(anyhow!(e)),
                 }
@@ -525,13 +574,20 @@ async fn run_subagent(
     let tool_count = &mut child_tools;
     let parent_sink = Arc::clone(sink);
     let call_id_for_cb = call_id.clone();
+    let has_store = child_store.is_some();
+    let pending_records: Arc<Mutex<Vec<SessionEventRecord>>> = Arc::new(Mutex::new(Vec::new()));
+    let pending_records_clone = Arc::clone(&pending_records);
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
         registry,
         move |cev| {
-            // Persist child events to session_events for replay/JSONL export.
-            if let Some(ref store) = child_store {
+            // Buffer child events for ordered persistence after the run.
+            // Previously each event was persisted via a detached tokio::spawn,
+            // which made DB seq ordering non-deterministic and could lose
+            // events if the process exited before the spawned task completed.
+            // Buffering + ordered flush keeps seq aligned with emission order.
+            if has_store {
                 let kind_str = match &cev {
                     SessionEvent::TextDelta(_) => "text_delta",
                     SessionEvent::ReasoningDelta(_) => "reasoning_delta",
@@ -549,10 +605,7 @@ async fn run_subagent(
                     ts: now_ms(),
                     seq: None,
                 };
-                let store_clone = store.clone();
-                tokio::spawn(async move {
-                    let _ = store_clone.append_event(&rec).await;
-                });
+                pending_records_clone.lock().unwrap().push(rec);
             }
             match &cev {
                 SessionEvent::ToolStart { .. } => *tool_count += 1,
@@ -571,6 +624,21 @@ async fn run_subagent(
         },
     ))
     .await;
+
+    // Flush buffered child events in emission order so DB seq matches the
+    // order events were produced by the subagent.
+    if let Some(ref store) = child_store {
+        let records = pending_records
+            .lock()
+            .unwrap()
+            .drain(..)
+            .collect::<Vec<_>>();
+        for rec in &records {
+            if let Err(e) = store.append_event(rec).await {
+                tracing::warn!(error = %e, "subagent: failed to persist child event");
+            }
+        }
+    }
 
     let ok = res.is_ok();
     let text = child
@@ -647,8 +715,9 @@ async fn claim_steers(session: &mut SessionState) -> Vec<String> {
     if pending.is_empty() {
         return Vec::new();
     }
+    let max_seq = pending.iter().map(|i| i.admitted_seq).max().unwrap_or(0);
     if let Err(e) = store
-        .promote_inputs(&session.id, i64::MAX, opencode_store::Delivery::Steer)
+        .promote_inputs(&session.id, max_seq, opencode_store::Delivery::Steer)
         .await
     {
         tracing::warn!(error = %e, "claim_steers: promote_inputs failed");

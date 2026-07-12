@@ -1,4 +1,5 @@
 pub mod app;
+pub mod app_helpers;
 pub mod chat;
 pub mod command;
 pub mod composer;
@@ -11,6 +12,7 @@ pub mod menu;
 pub mod model_menu;
 pub mod queue_panel;
 pub mod render;
+pub mod selection;
 pub mod session_ui;
 pub mod task;
 pub mod terminal;

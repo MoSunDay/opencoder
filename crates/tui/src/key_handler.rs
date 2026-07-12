@@ -252,6 +252,10 @@ fn move_hist(
     if history.is_empty() {
         return;
     }
+    // If not currently browsing history, Down is a no-op (don't wipe input).
+    if delta > 0 && hist_idx.is_none() {
+        return;
+    }
     let cur = hist_idx.unwrap_or(history.len());
     let next = (cur as i32 + delta).clamp(0, history.len() as i32) as usize;
     if next < history.len() {
@@ -262,4 +266,52 @@ fn move_hist(
         input.clear();
     }
     *cursor_idx = input.chars().count();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn move_hist_down_does_not_clear_input_when_not_browsing() {
+        let history = vec!["previous command".to_string()];
+        let mut hist_idx = None;
+        let mut input = "typing something".to_string();
+        let mut cursor = 5;
+        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, 1);
+        assert_eq!(
+            input, "typing something",
+            "Down should not clear input when not browsing history"
+        );
+        assert_eq!(hist_idx, None, "hist_idx should remain None");
+    }
+
+    #[test]
+    fn move_hist_up_loads_previous_entry() {
+        let history = vec!["cmd1".to_string(), "cmd2".to_string()];
+        let mut hist_idx = None;
+        let mut input = "current".to_string();
+        let mut cursor = 0;
+        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, -1);
+        assert_eq!(
+            input, "cmd2",
+            "Up should load the most recent history entry"
+        );
+        assert_eq!(hist_idx, Some(1));
+    }
+
+    #[test]
+    fn move_hist_down_after_up_restores_blank() {
+        let history = vec!["cmd1".to_string()];
+        let mut hist_idx = None;
+        let mut input = "original".to_string();
+        let mut cursor = 0;
+        // Up loads history
+        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, -1);
+        assert_eq!(input, "cmd1");
+        // Down goes past the end → clears
+        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, 1);
+        assert_eq!(input, "", "Down past newest should clear input");
+        assert_eq!(hist_idx, None);
+    }
 }

@@ -22,6 +22,10 @@ pub trait Store: Send + Sync {
     async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<SessionListItem>>;
     async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()>;
     async fn delete_session(&self, id: &str) -> Result<()>;
+    /// Delete every session except `keep_session_id` (the currently-active
+    /// one). Cascades to messages/inputs/events/subagent_tasks via the schema's
+    /// `ON DELETE CASCADE` foreign keys. Returns the number of sessions removed.
+    async fn clear_other_sessions(&self, keep_session_id: &str) -> Result<u64>;
 
     async fn append_message(&self, session_id: &str, msg: &Message) -> Result<i64>;
     async fn append_messages(&self, session_id: &str, msgs: &[Message]) -> Result<Vec<i64>>;

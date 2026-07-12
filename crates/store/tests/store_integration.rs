@@ -11,7 +11,7 @@
 //! These run against a real on-disk libsql file (tempdir) so WAL behaviour
 //! is exercised truthfully, not mocked.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use opencode_core::{ContentBlock, Message, Role};
 use opencode_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
@@ -91,6 +91,61 @@ async fn create_get_update_delete_session_contract() {
 
     store.delete_session("s1").await.unwrap();
     assert!(store.get_session("s1").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn clear_other_sessions_keeps_current_and_cascades() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "keep", 1000).await;
+    make_session(&store, "old-a", 2000).await;
+    make_session(&store, "old-b", 3000).await;
+    store
+        .append_messages("old-a", &conv("old-a", 2))
+        .await
+        .unwrap();
+    store
+        .append_messages("old-b", &conv("old-b", 3))
+        .await
+        .unwrap();
+
+    let deleted = store.clear_other_sessions("keep").await.unwrap();
+    assert_eq!(deleted, 2, "two non-current sessions should be deleted");
+
+    let remaining: Vec<String> = store
+        .list_sessions(&SessionFilter::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(remaining, vec!["keep".to_string()]);
+
+    // FK ON DELETE CASCADE removed the child message rows too.
+    assert!(
+        store.load_messages("old-a").await.unwrap().is_empty(),
+        "old-a messages must cascade-delete"
+    );
+    assert!(
+        store.load_messages("old-b").await.unwrap().is_empty(),
+        "old-b messages must cascade-delete"
+    );
+    assert_eq!(
+        store.load_messages("keep").await.unwrap().len(),
+        0,
+        "keep session survives (just had no messages)"
+    );
+
+    // Clearing again is a no-op: count 0, keep still present.
+    let again = store.clear_other_sessions("keep").await.unwrap();
+    assert_eq!(again, 0);
+    assert_eq!(
+        store
+            .list_sessions(&SessionFilter::default())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -643,4 +698,303 @@ async fn bundle_export_import_roundtrip() {
     import_bundle(&store2, &restored, None).await.unwrap();
     let msgs3 = store2.load_messages("parent-1").await.unwrap();
     assert_eq!(msgs3.len(), 4, "re-import must not duplicate");
+}
+
+#[tokio::test]
+async fn list_sessions_excludes_subagents_by_default() {
+    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+
+    let (_dir, store) = fresh().await;
+    // Parent and child sessions.
+    make_session(&store, "parent", 1000).await;
+    make_session(&store, "child-sub", 2000).await;
+
+    // Link child as a subagent of parent.
+    let rec = SubagentTaskRecord {
+        task_id: "task-1".into(),
+        parent_session_id: "parent".into(),
+        child_session_id: "child-sub".into(),
+        parent_message_id: None,
+        agent: "explore".into(),
+        prompt: "do stuff".into(),
+        result: None,
+        status: SubagentStatus::Running,
+        ok: None,
+        started_at: 1500,
+        completed_at: None,
+    };
+    store.create_subagent_task(&rec).await.unwrap();
+
+    // Default filter (include_subagents == false) excludes the child.
+    let items = store
+        .list_sessions(&SessionFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        items.len(),
+        1,
+        "subagent session should be excluded by default"
+    );
+    assert_eq!(items[0].id, "parent");
+
+    // With include_subagents == true, both appear.
+    let mut filter = SessionFilter::default();
+    filter.include_subagents = true;
+    let items = store.list_sessions(&filter).await.unwrap();
+    assert_eq!(
+        items.len(),
+        2,
+        "both parent and child should appear with include_subagents"
+    );
+}
+
+// =============================================================================
+// Diagnostic reproduction tests for concurrent-write failures.
+//
+// The existing `concurrent_readers_while_writer` test only covers 1 writer +
+// N readers, so it can never surface write-lock contention. These two tests
+// hammer a FILE-BACKED libsql DB with many CONCURRENT WRITERS (mimicking
+// parallel subagent sessions, which all share one `Arc<dyn Store>`), to
+// surface SQLITE_BUSY / other write-lock errors and capture the real error
+// text. They REPORT rather than hard-assert, because the contention itself is
+// the phenomenon under investigation. Run with: --nocapture --test-threads=1.
+// =============================================================================
+
+/// Test A — pure concurrent writers: 8 sessions x 50 single-row append_message
+/// (the exact path `SessionState::record` -> `append_message` takes), no sleep,
+/// to maximize write-lock contention.
+#[tokio::test]
+async fn concurrent_writers_reproduce_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        LibsqlStore::open(dir.path().join("busy.db"))
+            .await
+            .unwrap(),
+    );
+    const W: u32 = 8;
+    const N: u32 = 50;
+    for w in 0..W {
+        make_session(&store, &format!("child{w}"), w as i64).await;
+    }
+    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+    for w in 0..W {
+        let s = store.clone();
+        let errs = errs.clone();
+        handles.push(tokio::spawn(async move {
+            let sid = format!("child{w}");
+            for k in 0..N {
+                let m = Message::user(format!("u-{w}-{k}"), format!("body-{w}-{k}"));
+                if let Err(e) = s.append_message(&sid, &m).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k} append_message] {e:#}"));
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    let errs = errs.lock().unwrap();
+    let total = W * N;
+    eprintln!(
+        "== concurrent_writers_reproduce_busy: {}/{} writes failed ==",
+        errs.len(),
+        total
+    );
+    for e in errs.iter() {
+        eprintln!("WRITE_ERR {e}");
+    }
+    let landed = store.load_messages("child0").await.unwrap().len();
+    eprintln!("child0 landed messages: {landed}/{N}");
+}
+
+/// Test B — mixed concurrent writes: each writer interleaves
+/// append_message + append_event + claim_next_queue (BEGIN IMMEDIATE tx),
+/// which holds the write lock for the whole transaction and may starve
+/// concurrent message appends — closer to the real runner mix.
+#[tokio::test]
+async fn mixed_concurrent_writes_with_immediate_tx() {
+    use opencode_store::{Delivery, EventKind, SessionEventRecord, SessionInput};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        LibsqlStore::open(dir.path().join("mixed.db"))
+            .await
+            .unwrap(),
+    );
+    const W: u32 = 8;
+    const ITERS: u32 = 20;
+    for w in 0..W {
+        let sid = format!("child{w}");
+        make_session(&store, &sid, w as i64).await;
+        for k in 0..ITERS {
+            let inp = SessionInput {
+                id: format!("in-{w}-{k}"),
+                session_id: sid.clone(),
+                delivery: Delivery::Queue,
+                prompt: format!("q-{w}-{k}"),
+                admitted_seq: k as i64 + 1,
+                promoted_seq: None,
+            };
+            store.admit_input(&inp).await.unwrap();
+        }
+    }
+    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+    for w in 0..W {
+        let s = store.clone();
+        let errs = errs.clone();
+        handles.push(tokio::spawn(async move {
+            let sid = format!("child{w}");
+            for k in 0..ITERS {
+                let m = Message::user(format!("u-{w}-{k}"), format!("body-{w}-{k}"));
+                if let Err(e) = s.append_message(&sid, &m).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k} append_message] {e:#}"));
+                }
+                let rec = SessionEventRecord {
+                    session_id: sid.clone(),
+                    kind: EventKind::TextDelta,
+                    payload: serde_json::Value::String(format!("ev-{w}-{k}")),
+                    ts: k as i64,
+                    seq: None,
+                };
+                if let Err(e) = s.append_event(&rec).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k} append_event] {e:#}"));
+                }
+                if let Err(e) = s.claim_next_queue(&sid).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k} claim_next_queue] {e:#}"));
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    let errs = errs.lock().unwrap();
+    eprintln!(
+        "== mixed_concurrent_writes_with_immediate_tx: {} ops failed ==",
+        errs.len()
+    );
+    for e in errs.iter() {
+        eprintln!("WRITE_ERR {e}");
+    }
+}
+
+/// Test C — extreme pressure: 32 sessions x 200 single-row appends, to test
+/// whether `busy_timeout=5000` ever breaks under heavy intra-process load.
+#[tokio::test]
+async fn extreme_concurrent_writers() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        LibsqlStore::open(dir.path().join("extreme.db"))
+            .await
+            .unwrap(),
+    );
+    const W: u32 = 32;
+    const N: u32 = 200;
+    for w in 0..W {
+        make_session(&store, &format!("c{w}"), w as i64).await;
+    }
+    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+    for w in 0..W {
+        let s = store.clone();
+        let errs = errs.clone();
+        handles.push(tokio::spawn(async move {
+            let sid = format!("c{w}");
+            for k in 0..N {
+                let payload = "x".repeat(512);
+                let m = Message::user(format!("u{w}-{k}"), payload);
+                if let Err(e) = s.append_message(&sid, &m).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k}] {e:#}"));
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    let errs = errs.lock().unwrap();
+    eprintln!(
+        "== extreme_concurrent_writers: {}/{} writes failed ==",
+        errs.len(),
+        W * N
+    );
+    for e in errs.iter().take(20) {
+        eprintln!("WRITE_ERR {e}");
+    }
+}
+
+/// Test D — TWO separate `LibsqlStore` handles opened on the SAME db file
+/// (mimicking two processes — e.g. TUI + web server — or two independent
+/// connection pools hitting one opencode.db). Each store spawns concurrent
+/// writers. This is the configuration most likely to surface cross-connection
+/// write-lock contention.
+#[tokio::test]
+async fn two_stores_same_file_concurrent_writers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shared.db");
+    let store_a = Arc::new(LibsqlStore::open(&path).await.unwrap());
+    let store_b = Arc::new(LibsqlStore::open(&path).await.unwrap());
+    const W: u32 = 6;
+    const N: u32 = 50;
+    for w in 0..W {
+        let sid = format!("c{w}");
+        store_a.create_session(&meta_for(&sid)).await.unwrap();
+    }
+    let _ = (store_a, store_b); // moved into closures below
+    let store_a = Arc::new(LibsqlStore::open(&path).await.unwrap());
+    let store_b = Arc::new(LibsqlStore::open(&path).await.unwrap());
+    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+    for w in 0..W {
+        let s = if w % 2 == 0 { store_a.clone() } else { store_b.clone() };
+        let errs = errs.clone();
+        handles.push(tokio::spawn(async move {
+            let sid = format!("c{w}");
+            for k in 0..N {
+                let m = Message::user(format!("u{w}-{k}"), format!("b{w}-{k}"));
+                if let Err(e) = s.append_message(&sid, &m).await {
+                    errs.lock()
+                        .unwrap()
+                        .push(format!("[w{w} k{k}] {e:#}"));
+                }
+            }
+        }));
+    }
+    for h in handles {
+        h.await.unwrap();
+    }
+    let errs = errs.lock().unwrap();
+    eprintln!(
+        "== two_stores_same_file_concurrent_writers: {}/{} writes failed ==",
+        errs.len(),
+        W * N
+    );
+    for e in errs.iter().take(20) {
+        eprintln!("WRITE_ERR {e}");
+    }
+}
+
+fn meta_for(id: &str) -> SessionMeta {
+    SessionMeta {
+        id: id.to_string(),
+        title: Some(format!("t-{id}")),
+        agent: Some("act".into()),
+        model: Some("glm-5.2".into()),
+        workdir_hash: Some("h".into()),
+        created_at: 1,
+        updated_at: 1,
+        summary: None,
+        summary_seq: None,
+    }
 }

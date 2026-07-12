@@ -44,6 +44,7 @@ pub struct SessionFilter {
     pub cursor: Option<String>,
     pub workdir_hash: Option<String>,
     pub search: Option<String>,
+    pub include_subagents: bool,
 }
 
 impl Default for SessionFilter {
@@ -53,6 +54,7 @@ impl Default for SessionFilter {
             cursor: None,
             workdir_hash: None,
             search: None,
+            include_subagents: false,
         }
     }
 }

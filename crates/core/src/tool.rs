@@ -59,13 +59,21 @@ pub fn schema_of(tool: &dyn Tool) -> ToolSchema {
 pub type ToolArc = Arc<dyn Tool>;
 
 pub fn truncate_output(content: String, max: usize) -> ToolOutput {
+    truncate_output_with_error(content, max, false)
+}
+
+/// Like `truncate_output` but preserves the `is_error` flag.
+pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -> ToolOutput {
     if content.len() <= max {
-        ToolOutput::ok(content)
+        ToolOutput { content, is_error }
     } else {
         let preview: String = content.chars().take(max.min(2000)).collect();
-        ToolOutput::ok(format!(
-            "{preview}\n\n...[output truncated, total {total} bytes]",
-            total = content.chars().count()
-        ))
+        ToolOutput {
+            content: format!(
+                "{preview}\n\n...[output truncated, total {total} bytes]",
+                total = content.chars().count()
+            ),
+            is_error,
+        }
     }
 }

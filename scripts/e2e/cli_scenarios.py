@@ -249,7 +249,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # ---- E8: bundle export/import roundtrip INTEGRITY ----
     print("== E8: bundle export/import roundtrip integrity ==")
     if sid:
-        bundle = os.path.join(tempfile_dir(), "snake.opencode")
+        bundle = os.path.join(tempfile_dir(), "snake.opencoder")
         rc, _ = lib.run(bin_path, ["--workdir", snake, "session", "export", sid, "--out", bundle])
         c.check("bundle exported", os.path.isfile(bundle))
         rc, imp_out = lib.run(bin_path, ["--workdir", snake, "session", "import", bundle])

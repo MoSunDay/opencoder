@@ -7,7 +7,7 @@ node_modules
 .idea
 .vscode
 .codex
-.opencode/
+.opencoder/
 *~
 playground
 tmp
@@ -21,7 +21,7 @@ ts-dist
 /result
 refs
 Session.vim
-/opencode.json
+/opencoder.json
 a.out
 target
 .scripts

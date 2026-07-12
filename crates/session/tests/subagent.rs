@@ -9,10 +9,10 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionEvent, SessionState};
-use opencode_store::{LibsqlStore, Store, SubagentStatus};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionEvent, SessionState};
+use opencoder_store::{LibsqlStore, Store, SubagentStatus};
 
 fn config() -> Config {
     Config {
@@ -255,7 +255,7 @@ async fn subagent_wraps_child_events_in_subagent_child() {
 async fn subagent_persists_parent_child_to_store() {
     let store = mem_store().await;
     store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: "sub-persist".into(),
             title: Some("t".into()),
             agent: Some("act".into()),
@@ -344,7 +344,7 @@ async fn subagent_persists_parent_child_to_store() {
 async fn subagent_persists_child_events_to_store() {
     let store = mem_store().await;
     store
-        .create_session(&opencode_store::SessionMeta {
+        .create_session(&opencoder_store::SessionMeta {
             id: "sub-ev".into(),
             title: Some("t".into()),
             agent: Some("act".into()),

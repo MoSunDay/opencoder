@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use opencode_core::Message;
+use opencoder_core::Message;
 use tokio::io::AsyncWriteExt;
 
 pub struct JsonlStore {

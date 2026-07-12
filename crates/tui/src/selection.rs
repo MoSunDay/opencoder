@@ -379,7 +379,7 @@ mod tests {
     fn try_spawn_missing_program_returns_none() {
         // A program name that almost certainly does not exist on PATH. Must not
         // panic and must report failure as `None`.
-        assert!(try_spawn("opencode-not-a-real-clipboard-bin-zz", &[], "").is_none());
+        assert!(try_spawn("opencoder-not-a-real-clipboard-bin-zz", &[], "").is_none());
     }
 
     #[cfg(unix)]

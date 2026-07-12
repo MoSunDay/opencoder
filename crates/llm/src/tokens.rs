@@ -2,7 +2,7 @@
 //! enough to drive compaction thresholds without calling the model — so
 //! compaction can fire on the very first round before any `usage` is reported.
 
-use opencode_core::Message;
+use opencoder_core::Message;
 
 const CHARS_PER_TOKEN: usize = 4;
 const PER_MESSAGE_OVERHEAD: usize = 4;
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn estimate_messages_counts_tool_results_and_tool_use() {
-        use opencode_core::ContentBlock;
+        use opencoder_core::ContentBlock;
         use serde_json::json;
 
         let mut m = Message::assistant("id1");

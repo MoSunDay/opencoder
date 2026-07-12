@@ -1,14 +1,14 @@
 [package]
-name = "opencode-tui"
+name = "opencoder-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencode-core.workspace = true
-opencode-llm.workspace = true
-opencode-session.workspace = true
-opencode-store.workspace = true
+opencoder-core.workspace = true
+opencoder-llm.workspace = true
+opencoder-session.workspace = true
+opencoder-store.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 anyhow.workspace = true

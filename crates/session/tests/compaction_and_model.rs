@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config, Message};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{compaction::should_compact, run, SessionState};
+use opencoder_core::{resolve_agent, Config, Message};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{compaction::should_compact, run, SessionState};
 
 fn client_with_default_done(text: &str) -> Arc<MockChatClient> {
     Arc::new(MockChatClient::new().with_default(vec![done_event(text)]))

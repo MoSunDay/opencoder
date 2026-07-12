@@ -1,11 +1,11 @@
 [package]
-name = "opencode-llm"
+name = "opencoder-llm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencode-core.workspace = true
+opencoder-core.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true

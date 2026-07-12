@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use opencode_core::ToolArc;
+use opencoder_core::ToolArc;
 use serde_json::Value;
 
 pub mod bash;
@@ -36,7 +36,7 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>) -> Vec<Value> {
                 "function": {
                     "name": t.name(),
                     "description": t.description(),
-                    "parameters": opencode_llm::schema::sanitize_tool_schema(&t.parameters()),
+                    "parameters": opencoder_llm::schema::sanitize_tool_schema(&t.parameters()),
                 }
             })
         })

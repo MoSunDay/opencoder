@@ -41,7 +41,7 @@ deterministic tests (MockChatClient-driven, zero network). The glm5.2 e2e
 ## 5. Notes & methodology
 
 - Startup measured via `date +%s%N` wall-clock around `opencoder --help` (5 samples).
-- Store timings from `cargo test --release -p opencode-store --test store_perf -- --nocapture`.
+- Store timings from `cargo test --release -p opencoder-store --test store_perf -- --nocapture`.
 - First-token latency is provider-bound (glm5.2 RTT); the Rust client adds no buffering
   beyond the SSE decoder, so it tracks the model RTT within ~1 ms locally.
 - Token estimation (the compaction trigger) is O(n) over message text — negligible vs

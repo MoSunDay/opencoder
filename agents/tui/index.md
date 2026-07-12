@@ -31,8 +31,8 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。`/task` 会话选择器（`task.rs`）为屏幕居中模态：`+ New task` + 历史 session 列表（当前会话标 `(current)`），底部红色 `✕ Clear all N task(s)` destructive 行——选中 Enter 进入红色两步确认态（再 Enter 触发 `TaskOutcome::ClearAll`；app 层经 `gate_clear_all(running)` 守卫：`running==true` 即 turn/subagent 飞行中时拒绝并推黄色 busy marker，idle 后才调 `Store::clear_other_sessions` 删除除当前会话外的全部会话并刷新列表；Esc 取消确认、确认态锁定 ↑/↓、Ctrl+C/D 仍即时退出）。
 
 ## 依赖与接口
-- 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencode-session、opencode-core、opencode-store、opencode-llm（estimate）。
-- 被依赖：binary crate（`src/main.rs` → `opencode_tui::run_tui`）。
+- 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencoder-session、opencoder-core、opencoder-store、opencoder-llm（estimate）。
+- 被依赖：binary crate（`src/main.rs` → `opencoder_tui::run_tui`）。
 - worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。
 
 ## 相关模块

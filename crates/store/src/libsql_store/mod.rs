@@ -94,19 +94,19 @@ impl Store for LibsqlStore {
         sessions::clear_others(&conn, keep_session_id).await
     }
 
-    async fn append_message(&self, session_id: &str, msg: &opencode_core::Message) -> Result<i64> {
+    async fn append_message(&self, session_id: &str, msg: &opencoder_core::Message) -> Result<i64> {
         let conn = self.conn().await?;
         messages::append(&conn, session_id, msg).await
     }
     async fn append_messages(
         &self,
         session_id: &str,
-        msgs: &[opencode_core::Message],
+        msgs: &[opencoder_core::Message],
     ) -> Result<Vec<i64>> {
         let conn = self.conn().await?;
         messages::append_many(&conn, session_id, msgs).await
     }
-    async fn load_messages(&self, session_id: &str) -> Result<Vec<opencode_core::Message>> {
+    async fn load_messages(&self, session_id: &str) -> Result<Vec<opencoder_core::Message>> {
         let conn = self.conn().await?;
         messages::load(&conn, session_id).await
     }
@@ -185,7 +185,7 @@ impl Store for LibsqlStore {
     async fn import_messages(
         &self,
         session_id: &str,
-        msgs: &[opencode_core::Message],
+        msgs: &[opencoder_core::Message],
     ) -> Result<ImportReport> {
         let conn = self.conn().await?;
         messages::import(&conn, session_id, msgs).await

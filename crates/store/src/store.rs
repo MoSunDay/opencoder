@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use opencode_core::Message;
+use opencoder_core::Message;
 
 use crate::types::{
     ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,

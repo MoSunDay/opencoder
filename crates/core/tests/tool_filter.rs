@@ -1,6 +1,6 @@
 //! Core misc tests — ToolFilter::allows + truncate_output.
 
-use opencode_core::{
+use opencoder_core::{
     tool::{truncate_output, truncate_output_with_error},
     ToolFilter, ToolOutput,
 };

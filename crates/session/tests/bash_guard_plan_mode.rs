@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionEvent, SessionState};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionEvent, SessionState};
 
 fn config() -> Config {
     Config {
@@ -48,7 +48,7 @@ fn done_turn() -> LlmEvent {
 async fn plan_mode_blocks_write_command() {
     let mock = Arc::new(
         MockChatClient::new()
-            .push_script(vec![bash_turn("rm -rf /tmp/opencode-test-guard")])
+            .push_script(vec![bash_turn("rm -rf /tmp/opencoder-test-guard")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
@@ -116,7 +116,7 @@ async fn act_mode_is_not_guarded() {
     // The same write command in act mode should NOT be blocked by bash_guard.
     let mock = Arc::new(
         MockChatClient::new()
-            .push_script(vec![bash_turn("mkdir -p /tmp/opencode-test-act-guard")])
+            .push_script(vec![bash_turn("mkdir -p /tmp/opencoder-test-act-guard")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();

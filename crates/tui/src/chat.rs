@@ -1,8 +1,8 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use opencode_llm::estimate;
-use opencode_session::SessionEvent;
+use opencoder_llm::estimate;
+use opencoder_session::SessionEvent;
 
 const TOOL_OUTPUT_LINES: usize = 6;
 
@@ -36,6 +36,7 @@ pub enum ChatBlock {
     },
     /// Tool invocation: header line + truncated output lines.
     Tool {
+        id: String,
         header: Line<'static>,
         output: Vec<Line<'static>>,
     },
@@ -114,9 +115,10 @@ impl ChatView {
                     text.push_str(t);
                 }
             }
-            SessionEvent::ToolStart { name, input, .. } => {
+            SessionEvent::ToolStart { id, name, input } => {
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Tool {
+                    id: id.clone(),
                     header: Line::from(vec![
                         Span::styled(
                             format!("\u{25b8} {name} "),
@@ -130,7 +132,7 @@ impl ChatView {
                 });
             }
             SessionEvent::ToolEnd {
-                output, is_error, ..
+                id, output, is_error, ..
             } => {
                 self.finalize_assistant();
                 let color = if *is_error {
@@ -143,10 +145,16 @@ impl ChatView {
                     .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
-                if let Some(ChatBlock::Tool { output: o, .. }) = self.blocks.last_mut() {
+                if let Some(ChatBlock::Tool { output: o, .. }) = self
+                    .blocks
+                    .iter_mut()
+                    .rev()
+                    .find(|b| matches!(b, ChatBlock::Tool { id: bid, .. } if bid == id))
+                {
                     o.extend(out);
                 } else {
                     self.blocks.push(ChatBlock::Tool {
+                        id: id.clone(),
                         header: Line::from(Span::styled(
                             "\u{25b8} (output)",
                             Style::default().fg(Color::Cyan),
@@ -247,6 +255,7 @@ impl ChatView {
             }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
+            SessionEvent::SteerConsumed { .. } => {}
         }
     }
 
@@ -487,7 +496,7 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Tool { header, output } => {
+                ChatBlock::Tool { header, output, .. } => {
                     out.push(header.clone());
                     out.extend(output.iter().cloned());
                     out.push(Line::from(""));

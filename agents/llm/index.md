@@ -17,7 +17,7 @@ OpenAI 兼容流式客户端 + LLM 抽象口子 + token 估算器。
 - `MockChatClient`（`src/mock.rs`）：`scripts: Vec<Vec<LlmEvent>>` FIFO 回放——每调 `chat_stream` 弹一个脚本。`requests()` 返回已录制的 `Vec<ChatRequest>`，供集成测试断言「模型实际收到什么」（如 plan_handoff 集成测试验证 act 请求结构）。这是 session/tui 集成测试的零 token 接缝。
 
 ## 依赖与接口
-- 依赖：reqwest（rustls）、tokio、opencode-core（Message）。
+- 依赖：reqwest（rustls）、tokio、opencoder-core（Message）。
 - 被依赖：session（runner/compaction/title）、web（POST /prompt 建客户端）、cli/tui。
 
 ## 相关模块

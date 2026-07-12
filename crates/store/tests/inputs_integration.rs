@@ -4,7 +4,7 @@
 //! delivery. Split out of `store_integration.rs` to keep each file focused and
 //! under the line-count limit. Runs against a real on-disk libsql file (tempdir).
 
-use opencode_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
 use tempfile::TempDir;
 
 async fn fresh() -> (TempDir, LibsqlStore) {

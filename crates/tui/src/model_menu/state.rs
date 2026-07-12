@@ -1,8 +1,8 @@
 //! State + key handling for the `/model` modal. See [`crate::model_menu`] docs.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use opencode_core::looks_like_env_var;
-use opencode_core::Config;
+use opencoder_core::looks_like_env_var;
+use opencoder_core::Config;
 
 /// Editable subset of config produced by the `/model` menu. `api_key: None`
 /// means "leave the existing value untouched"; `Some(v)` replaces it.

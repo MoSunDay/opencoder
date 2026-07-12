@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use opencode_core::{message::now_ms, Agent, Config, Message, Role};
-use opencode_llm::ChatStream;
-use opencode_store::{SessionMeta, Store};
+use opencoder_core::{message::now_ms, Agent, Config, Message, Role};
+use opencoder_llm::ChatStream;
+use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
 
 pub struct SessionState {
@@ -26,7 +26,7 @@ pub struct SessionState {
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
-    pub last_usage: opencode_llm::Usage,
+    pub last_usage: opencoder_llm::Usage,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
     /// Active skill instructions, injected into the system prompt each turn.
@@ -58,7 +58,7 @@ impl SessionState {
             working_dir,
             config,
             client,
-            last_usage: opencode_llm::Usage::default(),
+            last_usage: opencoder_llm::Usage::default(),
             store: None,
             skill_prompt: None,
             persisted_count: 0,

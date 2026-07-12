@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config, ContentBlock, Message, Role};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionState};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionState};
 
 fn reasoning_delta(text: &str) -> LlmEvent {
     LlmEvent::ReasoningDelta(text.to_string())

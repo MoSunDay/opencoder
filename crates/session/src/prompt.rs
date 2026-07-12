@@ -1,7 +1,7 @@
-use opencode_core::{message::now_ms, Message};
+use opencoder_core::{message::now_ms, Message};
 
 pub fn build_system(
-    agent: &opencode_core::Agent,
+    agent: &opencoder_core::Agent,
     working_dir: &std::path::Path,
     skill_prompt: Option<&str>,
 ) -> Message {

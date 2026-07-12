@@ -13,8 +13,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use opencode_core::{ContentBlock, Message, Role};
-use opencode_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_core::{ContentBlock, Message, Role};
+use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
 use tempfile::TempDir;
 
 fn conv(seed: &str, n: usize) -> Vec<Message> {
@@ -77,7 +77,7 @@ async fn create_get_update_delete_session_contract() {
     assert_eq!(got.title.as_deref(), Some("title-s1"));
     assert_eq!(got.model.as_deref(), Some("glm-5.2"));
 
-    let patch = opencode_store::SessionPatch {
+    let patch = opencoder_store::SessionPatch {
         title: Some("renamed".into()),
         model: Some("other/model".into()),
         updated_at: Some(2000),
@@ -167,7 +167,7 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
             ];
             m.agent = Some("act".into());
             m.model = Some("glm-5.2".into());
-            m.usage = opencode_core::MessageUsage {
+            m.usage = opencoder_core::MessageUsage {
                 input_tokens: 10,
                 output_tokens: 5,
                 total_tokens: 15,
@@ -309,7 +309,7 @@ async fn jsonl_import_roundtrip() {
 
     let db = dir.path().join("imp.db");
     let store = LibsqlStore::open(&db).await.unwrap();
-    let report = opencode_store::import::import_jsonl_dir(&store, &jsonl_dir)
+    let report = opencoder_store::import::import_jsonl_dir(&store, &jsonl_dir)
         .await
         .unwrap();
     assert_eq!(report.sessions, 1);
@@ -324,7 +324,7 @@ async fn jsonl_import_roundtrip() {
     }
 
     // idempotent re-run: skips already-imported
-    let report2 = opencode_store::import::import_jsonl_dir(&store, &jsonl_dir)
+    let report2 = opencoder_store::import::import_jsonl_dir(&store, &jsonl_dir)
         .await
         .unwrap();
     assert_eq!(report2.sessions, 0, "second run skips existing");
@@ -442,7 +442,7 @@ async fn list_pagination_with_metadata() {
 async fn events_append_and_after_replay() {
     let (_dir, store) = fresh().await;
     make_session(&store, "s", 1).await;
-    use opencode_store::{EventKind, SessionEventRecord};
+    use opencoder_store::{EventKind, SessionEventRecord};
     for i in 0..5u32 {
         store
             .append_event(&SessionEventRecord {
@@ -491,7 +491,7 @@ async fn last_message_seq_tracks_appends() {
 
 #[tokio::test]
 async fn delivery_parse_and_as_str_roundtrip() {
-    use opencode_store::Delivery;
+    use opencoder_store::Delivery;
     assert_eq!(Delivery::parse("steer"), Some(Delivery::Steer));
     assert_eq!(Delivery::parse("queue"), Some(Delivery::Queue));
     assert_eq!(Delivery::parse("invalid"), None);
@@ -504,7 +504,7 @@ async fn delivery_parse_and_as_str_roundtrip() {
 
 #[tokio::test]
 async fn subagent_task_crud_roundtrip() {
-    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+    use opencoder_store::{SubagentStatus, SubagentTaskRecord};
 
     let (_dir, store) = fresh().await;
     // Seed session rows so the FK constraints on parent/child resolve.
@@ -553,7 +553,7 @@ async fn subagent_task_crud_roundtrip() {
 
 #[tokio::test]
 async fn subagent_task_list_filters_by_parent() {
-    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+    use opencoder_store::{SubagentStatus, SubagentTaskRecord};
 
     let (_dir, store) = fresh().await;
 
@@ -586,7 +586,7 @@ async fn subagent_task_list_filters_by_parent() {
 
 #[tokio::test]
 async fn subagent_status_parse_and_as_str() {
-    use opencode_store::SubagentStatus;
+    use opencoder_store::SubagentStatus;
     assert_eq!(SubagentStatus::parse("running"), SubagentStatus::Running);
     assert_eq!(
         SubagentStatus::parse("completed"),
@@ -601,7 +601,7 @@ async fn subagent_status_parse_and_as_str() {
 
 #[tokio::test]
 async fn bundle_export_import_roundtrip() {
-    use opencode_store::{
+    use opencoder_store::{
         export_bundle, import_bundle, read_bundle, write_bundle, SubagentStatus, SubagentTaskRecord,
     };
 
@@ -702,7 +702,7 @@ async fn bundle_export_import_roundtrip() {
 
 #[tokio::test]
 async fn list_sessions_excludes_subagents_by_default() {
-    use opencode_store::{SubagentStatus, SubagentTaskRecord};
+    use opencoder_store::{SubagentStatus, SubagentTaskRecord};
 
     let (_dir, store) = fresh().await;
     // Parent and child sessions.
@@ -818,7 +818,7 @@ async fn concurrent_writers_reproduce_busy() {
 /// concurrent message appends — closer to the real runner mix.
 #[tokio::test]
 async fn mixed_concurrent_writes_with_immediate_tx() {
-    use opencode_store::{Delivery, EventKind, SessionEventRecord, SessionInput};
+    use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput};
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(
         LibsqlStore::open(dir.path().join("mixed.db"))
@@ -938,7 +938,7 @@ async fn extreme_concurrent_writers() {
 
 /// Test D — TWO separate `LibsqlStore` handles opened on the SAME db file
 /// (mimicking two processes — e.g. TUI + web server — or two independent
-/// connection pools hitting one opencode.db). Each store spawns concurrent
+/// connection pools hitting one opencoder.db). Each store spawns concurrent
 /// writers. This is the configuration most likely to surface cross-connection
 /// write-lock contention.
 #[tokio::test]

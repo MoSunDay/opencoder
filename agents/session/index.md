@@ -27,7 +27,7 @@ CLI/HTTP 入口 → 建/恢复 SessionState（store 可选）→ `run(session, p
 empty prompt = drain / continuation 模式：不 push 合成 user msg，直接进 run_loop（web drain 依赖 store 中已 admit 的 steer/queue 提供输入；TUI plan→act 手动切换经 `SwitchAndStart` 也走此路径——但**先经 `plan_handoff::handoff` 把 transcript 清为只含最终计划**，系统提示变 act，act 以干净 ctx 执行计划）。
 
 ## 依赖与接口
-- 依赖：opencode-core、opencode-llm（ChatStream）、opencode-store（Store）、tokio-util（CancellationToken）。
+- 依赖：opencoder-core、opencoder-llm（ChatStream）、opencoder-store（Store）、tokio-util（CancellationToken）。
 - 被依赖：web（drain_to_completion）、cli（run_headless / resume）、tui。
 
 ## 相关模块

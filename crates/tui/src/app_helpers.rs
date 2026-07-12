@@ -5,9 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-use opencode_core::resolve_agent;
-use opencode_llm::estimate;
-use opencode_store::{Delivery, SessionInput};
+use opencoder_core::resolve_agent;
+use opencoder_llm::estimate;
+use opencoder_store::{Delivery, SessionInput};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
@@ -18,7 +18,7 @@ use crate::worker::UiCmd;
 
 pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
     SessionInput {
-        id: opencode_session::runner::new_id(),
+        id: opencoder_session::runner::new_id(),
         session_id: session_id.to_string(),
         delivery,
         prompt: prompt.to_string(),
@@ -74,7 +74,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         Some(a) => a,
         None => return 0,
     };
-    let text = opencode_session::prompt::build_system(&agent, workdir, skill).text();
+    let text = opencoder_session::prompt::build_system(&agent, workdir, skill).text();
     estimate(&text) as u64
 }
 

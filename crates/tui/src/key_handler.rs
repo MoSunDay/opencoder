@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use opencode_core::discover_skills;
+use opencoder_core::discover_skills;
 
 use crate::composer;
 use crate::menu::{handle_menu_key, MenuOutcome, SkillMenu};

@@ -1,11 +1,11 @@
 [package]
-name = "opencode-store"
+name = "opencoder-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opencode-core.workspace = true
+opencoder-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

@@ -11,10 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
-use opencode_core::Config;
-use opencode_llm::ChatStream;
-use opencode_session::{resume as resume_session, run, SessionEvent};
-use opencode_store::{Delivery, EventKind, SessionEventRecord, SessionInput, Store};
+use opencoder_core::Config;
+use opencoder_llm::ChatStream;
+use opencoder_session::{resume as resume_session, run, SessionEvent};
+use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, Store};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -32,7 +32,7 @@ pub struct SseEvt {
 
 impl SseEvt {
     pub fn from_session_event(_session_id: &str, ev: &SessionEvent) -> (Self, EventKind) {
-        let ts = opencode_core::message::now_ms();
+        let ts = opencoder_core::message::now_ms();
         let (kind, data, event_kind) = match ev {
             SessionEvent::TextDelta(t) => (
                 "text_delta".to_string(),
@@ -107,6 +107,11 @@ impl SseEvt {
             ),
             SessionEvent::QueueConsumed { seq } => (
                 "queue_consumed".to_string(),
+                serde_json::json!({ "seq": seq }),
+                EventKind::Step,
+            ),
+            SessionEvent::SteerConsumed { seq } => (
+                "steer_consumed".to_string(),
                 serde_json::json!({ "seq": seq }),
                 EventKind::Step,
             ),

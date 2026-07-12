@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use opencode_core::{Message, Role, ToolArc};
-use opencode_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
+use opencoder_core::{Message, Role, ToolArc};
+use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
 use crate::runner::SessionEvent;
@@ -45,7 +45,7 @@ fn estimated_tokens(session: &SessionState) -> u64 {
 }
 
 fn estimate(s: &str) -> usize {
-    opencode_llm::estimate(s)
+    opencoder_llm::estimate(s)
 }
 
 /// Provider-reported input tokens from the last call. Uses `input_tokens`

@@ -4,7 +4,7 @@
 use std::fs;
 use std::sync::Mutex;
 
-use opencode_core::Config;
+use opencoder_core::Config;
 
 // Env mutation is process-global; serialize tests that touch the environment.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -40,9 +40,9 @@ fn merge_project_file_overrides_defaults() {
 #[test]
 fn env_overrides_project_file() {
     let _g = ENV_LOCK.lock().unwrap();
-    std::env::set_var("OPENCODE_MODEL", "env/model-from-env");
-    std::env::set_var("OPENCODE_SMALL_MODEL", "env/small");
-    std::env::set_var("OPENCODE_CONTEXT_LIMIT", "99999");
+    std::env::set_var("OPENCODER_MODEL", "env/model-from-env");
+    std::env::set_var("OPENCODER_SMALL_MODEL", "env/small");
+    std::env::set_var("OPENCODER_CONTEXT_LIMIT", "99999");
     std::env::remove_var("OPENAI_BASE_URL");
 
     let dir = tempfile::tempdir().unwrap();
@@ -53,13 +53,13 @@ fn env_overrides_project_file() {
     .unwrap();
     let cfg = Config::load(dir.path()).unwrap();
 
-    std::env::remove_var("OPENCODE_MODEL");
-    std::env::remove_var("OPENCODE_SMALL_MODEL");
-    std::env::remove_var("OPENCODE_CONTEXT_LIMIT");
+    std::env::remove_var("OPENCODER_MODEL");
+    std::env::remove_var("OPENCODER_SMALL_MODEL");
+    std::env::remove_var("OPENCODER_CONTEXT_LIMIT");
 
     assert_eq!(
         cfg.model, "env/model-from-env",
-        "OPENCODE_MODEL wins over file"
+        "OPENCODER_MODEL wins over file"
     );
     assert_eq!(cfg.small_model.as_deref(), Some("env/small"));
     assert_eq!(cfg.context_limit(), 99999);
@@ -89,7 +89,7 @@ fn defaults_when_no_config_present() {
     let _g = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let cfg = Config::load(dir.path()).unwrap();
-    assert_eq!(cfg.context_limit(), opencode_core::DEFAULT_CONTEXT_LIMIT);
+    assert_eq!(cfg.context_limit(), opencoder_core::DEFAULT_CONTEXT_LIMIT);
     assert_eq!(cfg.compaction.reserved, 20_000);
     assert!(cfg.compaction.auto);
     assert_eq!(cfg.agent.default, "act");
@@ -275,7 +275,7 @@ fn save_preserves_unrelated_keys_on_merge() {
 
 #[test]
 fn save_wraps_env_var_name_in_braces() {
-    use opencode_core::looks_like_env_var;
+    use opencoder_core::looks_like_env_var;
     assert!(looks_like_env_var("ZHIPU_API_KEY"));
     assert!(!looks_like_env_var("sk-abcd"));
     assert!(!looks_like_env_var(""));

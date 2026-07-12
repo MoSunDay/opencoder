@@ -1,7 +1,7 @@
 //! `/model` configuration modal for the TUI.
 //!
 //! A form overlay (modeled on `menu.rs`) that edits five fields and persists
-//! them to `opencoder.json` via [`opencode_core::Config::save`]:
+//! them to `opencoder.json` via [`opencoder_core::Config::save`]:
 //! - model id
 //! - provider base_url
 //! - provider api_key (masked display; editing replaces the value)
@@ -24,17 +24,17 @@ pub use view::render_model_popup;
 mod tests {
     use super::state::{mask_key, Field, ModelMenu, ModelPatch, Reasoning};
     use crossterm::event::{KeyCode, KeyModifiers};
-    use opencode_core::Config;
+    use opencoder_core::Config;
 
     fn cfg() -> Config {
         Config {
             model: "openai/gpt-4o-mini".to_string(),
-            provider: opencode_core::ProviderConfig {
+            provider: opencoder_core::ProviderConfig {
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: Some("sk-abcd1234567".to_string()),
             },
             reasoning_effort: Some("high".to_string()),
-            compaction: opencode_core::CompactionConfig {
+            compaction: opencoder_core::CompactionConfig {
                 context_threshold: 80_000,
                 ..Default::default()
             },

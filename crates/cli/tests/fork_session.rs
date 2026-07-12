@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use opencode_cli::run::fork_session;
-use opencode_core::{ContentBlock, Message};
-use opencode_store::{LibsqlStore, SessionMeta, Store};
+use opencoder_cli::run::fork_session;
+use opencoder_core::{ContentBlock, Message};
+use opencoder_store::{LibsqlStore, SessionMeta, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())

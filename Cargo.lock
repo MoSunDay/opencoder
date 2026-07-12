@@ -1350,17 +1350,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "opencode-cli"
+name = "opencoder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "opencoder-cli",
+ "opencoder-tui",
+ "tokio",
+]
+
+[[package]]
+name = "opencoder-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "dirs",
- "opencode-core",
- "opencode-llm",
- "opencode-session",
- "opencode-store",
- "opencode-web",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-session",
+ "opencoder-store",
+ "opencoder-web",
  "serde_json",
  "tokio",
  "tracing",
@@ -1368,7 +1379,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-core"
+name = "opencoder-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1383,13 +1394,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-llm"
+name = "opencoder-llm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "futures",
- "opencode-core",
+ "opencoder-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -1400,7 +1411,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-session"
+name = "opencoder-session"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1408,9 +1419,9 @@ dependencies = [
  "chrono",
  "futures",
  "glob",
- "opencode-core",
- "opencode-llm",
- "opencode-store",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-store",
  "regex",
  "serde",
  "serde_json",
@@ -1424,14 +1435,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-store"
+name = "opencoder-store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "libsql",
- "opencode-core",
+ "opencoder-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -1441,17 +1452,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-tui"
+name = "opencoder-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
  "dirs",
  "libc",
- "opencode-core",
- "opencode-llm",
- "opencode-session",
- "opencode-store",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-session",
+ "opencoder-store",
  "pulldown-cmark",
  "ratatui",
  "serde_json",
@@ -1461,7 +1472,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "opencode-web"
+name = "opencoder-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1469,10 +1480,10 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
- "opencode-core",
- "opencode-llm",
- "opencode-session",
- "opencode-store",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-session",
+ "opencoder-store",
  "reqwest",
  "serde",
  "serde_json",
@@ -1484,17 +1495,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "opencoder"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "opencode-cli",
- "opencode-tui",
- "tokio",
 ]
 
 [[package]]

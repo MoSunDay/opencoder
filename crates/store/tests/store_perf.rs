@@ -6,8 +6,8 @@
 
 use std::time::Instant;
 
-use opencode_core::{ContentBlock, Message, Role};
-use opencode_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_core::{ContentBlock, Message, Role};
+use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
 use tempfile::TempDir;
 
 async fn setup() -> (TempDir, LibsqlStore) {

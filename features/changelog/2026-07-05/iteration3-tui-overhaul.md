@@ -28,7 +28,7 @@ Commit: (working-tree, pre-initial-commit)
 - PTY smoke test（80×24）：header / ctx display / prompt / agent label / alt screen / bar cursor / no panic 全 PASS。
 
 ## Notes / Compatibility
-- TUI Store 与 CLI/web 共享同一路径（`data_local_dir()/opencode/{hash}/opencode.db`），但不同 entry 可能 hash 不同 → 不同 workdir 的 session 独立。
+- TUI Store 与 CLI/web 共享同一路径（`data_local_dir()/opencode/{hash}/opencoder.db`），但不同 entry 可能 hash 不同 → 不同 workdir 的 session 独立。
 - 上下文用量为增量估算（TextDelta / ReasoningDelta / ToolEnd / SubagentEnd 累加 estimate，Compaction 重置），非精确 token——status bar 用途足够。
 - ratatui `Paragraph::scroll` 以行为单位，长行 wrap 时 scroll 可能略偏——MVP 可接受，后续可引入 `ScrollState`。
 

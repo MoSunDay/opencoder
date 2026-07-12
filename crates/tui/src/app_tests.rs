@@ -459,6 +459,34 @@ fn sys_tokens_counts_system_prompt() {
     assert_eq!(crate::app::sys_tokens_for("does-not-exist", &dir, None), 0);
 }
 
+/// Regression for the SwitchAgent token-recalculation bug (`app.rs`,
+/// `KeyAction::SwitchAgent`): when a skill is active and the user switches
+/// agent mode (plan <-> act), `sys_tokens` is recomputed via
+/// `sys_tokens_for(agent, workdir, skill)`. The `skill` argument must be the
+/// skill **body** (the injected instruction text), not the skill **name** —
+/// otherwise the "ctx N%" meter under-counts, estimating a short label instead
+/// of the (potentially long) instruction. This pins the contract that call
+/// relies on: a long body must dominate a short name by a wide margin, so
+/// passing the body is observably correct.
+#[test]
+fn sys_tokens_skill_body_dominates_skill_name() {
+    let dir = std::env::temp_dir();
+    // A realistic short skill name vs. a long instruction body.
+    let name = "code-review";
+    let body = "x".repeat(500);
+    let by_name = crate::app::sys_tokens_for("act", &dir, Some(name));
+    let by_body = crate::app::sys_tokens_for("act", &dir, Some(&body));
+    assert!(
+        by_body > by_name + 100,
+        "estimating the skill body ({by_body}) must far exceed estimating the \
+         skill name ({by_name}); otherwise the SwitchAgent recalculation \
+         under-counts the context meter"
+    );
+    // Sanity: the body-based estimate also exceeds the no-skill baseline.
+    let base = crate::app::sys_tokens_for("act", &dir, None);
+    assert!(by_body > base, "a long skill body must raise the count");
+}
+
 #[test]
 fn dollar_on_empty_input_opens_skill_menu() {
     let mut input = String::new();
@@ -501,7 +529,7 @@ fn dollar_on_non_empty_input_is_literal() {
 
 #[test]
 fn skill_menu_enter_picks_selected_skill() {
-    use opencode_core::Skill;
+    use opencoder_core::Skill;
     use std::path::PathBuf;
     let skill = Skill {
         name: "alpha".into(),
@@ -550,7 +578,7 @@ fn skill_menu_esc_closes_without_picking() {
 
 #[test]
 fn skill_menu_intercepts_typing_from_composer() {
-    use opencode_core::Skill;
+    use opencoder_core::Skill;
     use std::path::PathBuf;
     let mut menu = Some(SkillMenu::new(
         vec![Skill {
@@ -580,7 +608,7 @@ fn skill_menu_intercepts_typing_from_composer() {
 
 #[test]
 fn skill_menu_clear_row_unsets_skill() {
-    use opencode_core::Skill;
+    use opencoder_core::Skill;
     use std::path::PathBuf;
     // has_active=true prepends the "✕ clear" row, selected by default.
     let mut menu = Some(SkillMenu::new(

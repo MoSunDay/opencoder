@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use opencode_core::{json, Tool, ToolContext, ToolOutput};
+use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 
 pub struct BashTool;
@@ -79,7 +79,7 @@ impl Tool for BashTool {
         }
         combined.push_str(&format!("\n[exit code: {code}]"));
         let is_error = code != 0;
-        Ok(opencode_core::tool::truncate_output_with_error(
+        Ok(opencoder_core::tool::truncate_output_with_error(
             combined,
             ctx.max_output,
             is_error,

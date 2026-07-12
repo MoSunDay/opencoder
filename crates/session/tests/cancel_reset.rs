@@ -10,9 +10,9 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencode_session::{run, SessionEvent, SessionState};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+use opencoder_session::{run, SessionEvent, SessionState};
 use tokio_util::sync::CancellationToken;
 
 fn done_event(text: &str) -> LlmEvent {
@@ -69,7 +69,7 @@ async fn cancelled_token_skips_turn_then_reset_lets_it_run() {
     assert!(
         s.messages
             .iter()
-            .all(|m| m.role == opencode_core::Role::User),
+            .all(|m| m.role == opencoder_core::Role::User),
         "no assistant turn should be recorded while cancelled"
     );
 
@@ -92,7 +92,7 @@ async fn cancelled_token_skips_turn_then_reset_lets_it_run() {
         .messages
         .iter()
         .rev()
-        .find(|m| m.role == opencode_core::Role::Assistant)
+        .find(|m| m.role == opencoder_core::Role::Assistant)
         .map(|m| m.text())
         .unwrap_or_default();
     assert_eq!(

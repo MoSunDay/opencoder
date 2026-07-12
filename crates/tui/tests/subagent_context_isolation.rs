@@ -13,10 +13,10 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, Config};
-use opencode_llm::{CompletedToolCall, LlmEvent, MockChatClient};
-use opencode_session::{run, SessionEvent, SessionState};
-use opencode_tui::chat::{ChatBlock, ChatView};
+use opencoder_core::{resolve_agent, Config};
+use opencoder_llm::{CompletedToolCall, LlmEvent, MockChatClient};
+use opencoder_session::{run, SessionEvent, SessionState};
+use opencoder_tui::chat::{ChatBlock, ChatView};
 
 fn task_turn(prompt: &str) -> LlmEvent {
     LlmEvent::Completed {

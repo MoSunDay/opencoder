@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 
-use opencode_core::Config;
-use opencode_store::{
+use opencoder_core::Config;
+use opencoder_store::{
     export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter, Store,
 };
 
@@ -195,7 +195,7 @@ fn data_dir_for(workdir: &PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::models_summary;
-    use opencode_core::Config;
+    use opencoder_core::Config;
 
     #[test]
     fn models_summary_shows_reasoning_effort_when_set() {
@@ -246,8 +246,8 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_emits_meta_messages_and_subagent_tasks() {
         use super::build_session_json;
-        use opencode_core::{ContentBlock, Message, Role};
-        use opencode_store::{LibsqlStore, SessionMeta, Store};
+        use opencoder_core::{ContentBlock, Message, Role};
+        use opencoder_store::{LibsqlStore, SessionMeta, Store};
 
         let store = LibsqlStore::open_memory().await.unwrap();
         store
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn build_session_json_errors_on_missing_session() {
         use super::build_session_json;
-        use opencode_store::LibsqlStore;
+        use opencoder_store::LibsqlStore;
 
         let store = LibsqlStore::open_memory().await.unwrap();
         let err = build_session_json(&store, "does-not-exist").await;

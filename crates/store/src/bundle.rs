@@ -8,7 +8,7 @@
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result};
-use opencode_core::Message;
+use opencoder_core::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::store::Store;
@@ -172,7 +172,7 @@ async fn import_bundle_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencode_core::{ContentBlock, Message, MessageUsage, Role};
+    use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
     fn sample_bundle() -> SessionBundle {
         let msg = Message {

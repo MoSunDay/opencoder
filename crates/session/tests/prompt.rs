@@ -82,3 +82,11 @@ fn compaction_user_prompt_without_previous_summary_says_create_new() {
     assert!(p.contains("Create a new anchored summary"));
     assert!(!p.contains("<previous-summary>"));
 }
+
+#[test]
+fn environment_block_constrains_to_working_directory() {
+    let block = environment_block(std::path::Path::new("/home/user/repo"));
+    assert!(block.contains("Stay within the working directory"));
+    assert!(block.contains("subdirectories"));
+    assert!(block.contains("do not access or modify anything outside it"));
+}

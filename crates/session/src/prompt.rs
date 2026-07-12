@@ -26,6 +26,7 @@ pub fn environment_block(working_dir: &std::path::Path) -> String {
     let mut s = String::new();
     s.push_str("# Environment\n");
     s.push_str(&format!("- Working directory: {}\n", working_dir.display()));
+    s.push_str("- Stay within the working directory: you may work in its subdirectories, but do not access or modify anything outside it.\n");
     s.push_str(&format!("- Platform: {platform}-{arch}\n"));
     s.push_str(&format!("- Date: {date}\n"));
     s.push_str("- You have file system and shell access via your tools. Run tools in parallel when independent.\n");

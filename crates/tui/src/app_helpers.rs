@@ -146,7 +146,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
 /// and every name is reported as unresolved. The shared skill handle is updated
 /// directly before the caller issues `Prompt`, so the worker — which holds the
 /// same `Arc` — observes the new skill on its next turn without a channel hop.
-pub(crate) async fn apply_skill_tokens(
+pub(crate) fn apply_skill_tokens(
     text: &str,
     active_skill: &mut Option<String>,
     active_skill_body: &mut Option<String>,
@@ -194,7 +194,7 @@ pub(crate) async fn apply_skill_tokens(
 /// The 8th arg (`chat`) is load-bearing: it lets the caller avoid a separate
 /// `push_marker` round-trip after every submit/steer/queue.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn resolve_and_warn(
+pub(crate) fn resolve_and_warn(
     text: &str,
     active_skill: &mut Option<String>,
     active_skill_body: &mut Option<String>,
@@ -212,8 +212,7 @@ pub(crate) async fn resolve_and_warn(
         agent_name,
         workdir,
         skill_handle,
-    )
-    .await;
+    );
     if !unresolved.is_empty() {
         chat.push_marker(Line::from(Span::styled(
             format!("\u{26a0} unknown skill: {}", unresolved.join(", ")),

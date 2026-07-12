@@ -10,7 +10,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - 非目标：TUI 不是 Web 替代品——无 SSE replay，仅 live event 流。
 
 ## 关键抽象
-- `ChatView`（`src/chat.rs`）：`blocks: Vec<ChatBlock>` + `agent/status/subagents_running/subagents_total/context_used`。`apply(&SessionEvent)` 逐事件更新——核心接缝；内部 `track_context` 只累加本 view transcript token（不递归 SubagentChild——父 view 的 context_used 仅含自身，子 view 独立维护自身子树）。app.rs 不再有独立 `context_used` 变量——直接读写 `chat.context_used`。
+- `ChatView`（`src/chat.rs`）：`blocks: Vec<ChatBlock>` + `agent/status/subagents_running/subagents_total/context_used`。`apply(&SessionEvent)` 逐事件更新——核心接缝；内部 `track_context` 只累加本 view transcript token（不递归 SubagentChild——父 view 的 context_used 仅含自身，子 view 独立维护自身子树）。app.rs 不再有独立 `context_used` 变量——直接读写 `chat.context_used`。 `last_thinking_collapsed()` 返回末尾块是否为折叠 Thinking——供 app.rs 在 `ReasoningDelta` 流式写入时跳过逐 delta 全量重绘（折叠态无可见变化，300ms anim_ticker 仍周期刷新 spinner + 行数计数）。
 - `ChatBlock`（`src/chat.rs`）：`Marker(Vec<Line>)` / `Assistant{raw,rendered,done}` / `Thinking{text,collapsed}` / `Tool{header,output}` / `Subagent{id,child_session_id,kind,prompt,view:ChatView,done,ok,summary}`。`flatten()` → `Vec<Line>` 供 Paragraph 渲染。
 - `Subagent` block 不可内联展开：始终单行表头 `⇲ subagent [kind] prompt [●/✔/✘ status, N tools] [→ view]`（running=黄● / done=绿✔ / failed=红✘）。点击表头直接进入子会话 ctx 视图（body 渲染子 ChatView + 子 view 自有 context_used 驱动状态栏 ctx 仪表），Esc 返回主进程。
 - `MouseHits`（`src/render.rs`）：每帧重算的命中目标——`jump_btn/body/queue_btns/thinking_btns/subagent_btns`。`record_thinking_hits` / `record_subagent_hits` 映射逻辑行号到屏幕行号。
@@ -22,7 +22,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - **composer 与状态栏渲染**（`src/render.rs`）：`render_composer` 按行拆分输入（`split('\n')`），首行带 `❯ ` Cyan 提示符，用 `Paragraph::wrap(Wrap{trim:false})` 软换行 + `.scroll()` 支持滚动；`render_status` 底栏显示 model | [agent] | dir | ctx%（**不再含 "opencoder" 品牌字样**）；`place_cursor` 经 `composer::cursor_row_col`（同时处理显式 `\n` 和软换行）计算 (row,col) 后 `f.set_cursor_position` 定位可见光标。render 测试首次引入 ratatui `TestBackend`（in-process buffer 断言 + cursor position 验证）。
 
 ## 主流程
-`run_app` loop：每帧 `render()` → `tokio::select!` 三臂（终端事件 `input_rx` / worker `evt_rx` / anim ticker）。**输入采集**（`src/input.rs`）：专用 OS 线程跑同步有界 `crossterm::event::poll(150ms)`+`read()`，经 tokio mpsc `blocking_send` 投递到 `input_rx`——弃用 `EventStream`（其 async reader 任务走 mio + tokio waker，一旦停滞 `select!` 输入臂永不触发，整循环冻死、Ctrl+C/D 全失效）；改走同步路径端到端绕过该失败模式（crossterm unix source 用 `filedescriptor::poll`+非阻塞读，有界；`poll` 成功后 `read()` 从内部队列弹已入队事件，不触及 `poll(None)` 回退）。receiver drop（`is_closed()`）即令线程退出。**终端生命周期**（`src/terminal.rs`）：`TerminalGuard` RAII（`run()` 持有）——enter 开 raw+alt-screen+鼠标+Kitty 并装 panic hook（panic 时先恢复终端再打印），Drop 幂等恢复；任何退出路径（正常/`?`错误/panic unwind）都恢复终端，不再"变砖"。`input_rx.recv()` 返回 `None`（采集线程退出/stdin EOF）时 `UiCmd::Quit` + break。
+`run_app` loop：每帧 `render()`（受 `skip_next_render` 门控——折叠态 `ReasoningDelta` 跳过全量重绘，300ms anim_ticker 仍周期刷新）→ `tokio::select!` 三臂（终端事件 `input_rx` / worker `evt_rx` / anim ticker）。**输入采集**（`src/input.rs`）：专用 OS 线程跑同步有界 `crossterm::event::poll(150ms)`+`read()`，经 tokio mpsc `blocking_send` 投递到 `input_rx`——弃用 `EventStream`（其 async reader 任务走 mio + tokio waker，一旦停滞 `select!` 输入臂永不触发，整循环冻死、Ctrl+C/D 全失效）；改走同步路径端到端绕过该失败模式（crossterm unix source 用 `filedescriptor::poll`+非阻塞读，有界；`poll` 成功后 `read()` 从内部队列弹已入队事件，不触及 `poll(None)` 回退）。receiver drop（`is_closed()`）即令线程退出。**终端生命周期**（`src/terminal.rs`）：`TerminalGuard` RAII（`run()` 持有）——enter 开 raw+alt-screen+鼠标+Kitty 并装 panic hook（panic 时先恢复终端再打印），Drop 幂等恢复；任何退出路径（正常/`?`错误/panic unwind）都恢复终端，不再"变砖"。`input_rx.recv()` 返回 `None`（采集线程退出/stdin EOF）时 `UiCmd::Quit` + break。
 
 - **render**：`display_chat` / `display_agent` / `display_ctx` / `display_sys` = subagent_focus 时取子 ChatView 及其 `context_used` + 缓存的 `subagent_sys`（进入时 `sys_tokens_for(kind, workdir, None)` 算一次），否则取 `&chat` + `chat.context_used` / `sys_tokens`。`display_agent` = focus 时 `← [Esc] back | ⇲sub [kind] prompt`。
 - **Session 事件**：`chat.apply(&sev)` 内部调 `track_context` 更新 `chat.context_used`（只计本 view token，SubagentChild 不计入父），SubagentChild 路由到子 block view（子 view 的 apply 独立更新自身 context_used）；TranscriptReset 重建 ChatView（context_used 归零）。
@@ -44,6 +44,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - ChatBlock/Subagent ctx 视图测试：`chat::tests::subagent_events_render`
 - Kitty 键盘协议 Ctrl+D/Ctrl+C 退出回归：`app::tests::kitty_ctrl_d_quits` / `app::tests::kitty_ctrl_c_quits`
 - thinking 命中测试一致性：`chat::tests::thinking_headers_match_flatten_line_indices`
+- 折叠 thinking 跳过逐 delta 重绘（`last_thinking_collapsed` 四态）：`chat::tests::last_thinking_collapsed_empty_view` / `last_thinking_collapsed_true_when_collapsed` / `last_thinking_collapsed_false_when_expanded` / `last_thinking_collapsed_false_when_last_block_not_thinking`
 - worker cancel-token 交换回归：`worker::tests::rebind_session_swaps_the_active_cancel_token`
 - cancel-token 刷新回归（双击 Esc 后可提交）：`worker::tests::reset_cancel_replaces_with_fresh_uncancelled_token`、`session/tests/cancel_reset.rs`
 - 输入采集线程 receiver drop 即退出：`input::tests::pump_exits_when_receiver_dropped`

@@ -29,7 +29,11 @@ pub enum ChatBlock {
         done: bool,
     },
     /// Collapsible reasoning/thinking block with dimmed italic styling.
-    Thinking { text: String, collapsed: bool, sealed: bool },
+    Thinking {
+        text: String,
+        collapsed: bool,
+        sealed: bool,
+    },
     /// Tool invocation: header line + truncated output lines.
     Tool {
         header: Line<'static>,
@@ -345,7 +349,9 @@ impl ChatView {
                         raw.split('\n').count()
                     };
                 }
-                ChatBlock::Thinking { text, collapsed, .. } => {
+                ChatBlock::Thinking {
+                    text, collapsed, ..
+                } => {
                     out.push(ThinkingHeader {
                         block_idx,
                         header_line_idx: line_idx,
@@ -391,7 +397,9 @@ impl ChatView {
                         raw.split('\n').count()
                     };
                 }
-                ChatBlock::Thinking { text, collapsed, .. } => {
+                ChatBlock::Thinking {
+                    text, collapsed, ..
+                } => {
                     line_idx += 1;
                     if !collapsed {
                         line_idx += text.lines().count();
@@ -453,7 +461,9 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Thinking { text, collapsed, .. } => {
+                ChatBlock::Thinking {
+                    text, collapsed, ..
+                } => {
                     let count = text.lines().count().max(1);
                     if *collapsed {
                         out.push(Line::from(Span::styled(
@@ -505,7 +515,11 @@ impl ChatView {
                             ("\u{2718}", Color::Red, "failed")
                         }
                     } else {
-                        (SPINNER[(anim_tick as usize) % SPINNER.len()], Color::Yellow, "running")
+                        (
+                            SPINNER[(anim_tick as usize) % SPINNER.len()],
+                            Color::Yellow,
+                            "running",
+                        )
                     };
                     let mut spans = vec![
                         Span::styled(
@@ -555,7 +569,10 @@ impl ChatView {
     /// (defensive), emit a fallback marker so the event stays visible.
     fn mark_subagent_done(&mut self, id: &str, ok: bool, summary: &str) {
         if let Some(ChatBlock::Subagent {
-            done, ok: bok, summary: smry, ..
+            done,
+            ok: bok,
+            summary: smry,
+            ..
         }) = self
             .blocks
             .iter_mut()

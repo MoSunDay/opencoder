@@ -58,15 +58,24 @@ fn tool_output_ok_and_err_constructors() {
 fn truncate_output_with_error_preserves_error_flag() {
     let long = "x".repeat(10_000);
     let out = truncate_output_with_error(long, 100, true);
-    assert!(out.is_error, "is_error must be preserved when truncating error output");
-    assert!(out.content.contains("truncated"), "truncation marker must be present");
+    assert!(
+        out.is_error,
+        "is_error must be preserved when truncating error output"
+    );
+    assert!(
+        out.content.contains("truncated"),
+        "truncation marker must be present"
+    );
 }
 
 #[test]
 fn truncate_output_with_error_preserves_ok_flag() {
     let long = "x".repeat(10_000);
     let out = truncate_output_with_error(long, 100, false);
-    assert!(!out.is_error, "is_error must remain false for non-error output");
+    assert!(
+        !out.is_error,
+        "is_error must remain false for non-error output"
+    );
 }
 
 #[test]

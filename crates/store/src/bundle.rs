@@ -1,8 +1,8 @@
-//! Opencode session bundle — binary export/import.
+//! Opencoder session bundle — binary export/import.
 //!
 //! Format: `[8B magic "OPENCODR"][4B version LE][8B payload_len LE][payload]`
 //! Payload is a serde_json-serialized `SessionBundle`. The whole file is a
-//! custom opencode binary (`.opencode` extension), not a raw JSON document.
+//! custom opencoder binary (`.opencoder` extension), not a raw JSON document.
 //! Recursively includes subagent sessions.
 
 use std::io::{Read, Write};
@@ -73,7 +73,7 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
     })
 }
 
-/// Write a bundle to a writer in opencode binary format.
+/// Write a bundle to a writer in opencoder binary format.
 pub fn write_bundle(bundle: &SessionBundle, writer: &mut impl Write) -> Result<()> {
     writer.write_all(MAGIC).context("write magic")?;
     writer
@@ -87,12 +87,12 @@ pub fn write_bundle(bundle: &SessionBundle, writer: &mut impl Write) -> Result<(
     Ok(())
 }
 
-/// Read a bundle from a reader in opencode binary format.
+/// Read a bundle from a reader in opencoder binary format.
 pub fn read_bundle(reader: &mut impl Read) -> Result<SessionBundle> {
     let mut magic = [0u8; 8];
     reader.read_exact(&mut magic).context("read magic")?;
     if &magic != MAGIC {
-        anyhow::bail!("not an opencode bundle (bad magic)");
+        anyhow::bail!("not an opencoder bundle (bad magic)");
     }
     let mut vbuf = [0u8; 4];
     reader.read_exact(&mut vbuf).context("read version")?;

@@ -20,7 +20,7 @@ pub struct AppState {
 pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::PathBuf) -> Result<()> {
     let data_dir = data_dir_for(&workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(data_dir.join("opencode.db")).await?);
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?);
 
     let state = Arc::new(AppState {
         store,
@@ -54,8 +54,8 @@ pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::Path
 
 pub fn data_dir_for(workdir: &std::path::Path) -> std::path::PathBuf {
     dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".opencode"))
-        .join("opencode")
+        .unwrap_or_else(|| std::path::PathBuf::from(".opencoder"))
+        .join("opencoder")
         .join(hash_of(workdir))
 }
 

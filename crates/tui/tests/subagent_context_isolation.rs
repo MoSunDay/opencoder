@@ -154,9 +154,11 @@ async fn concurrent_subagents_do_not_inflate_parent_context() {
     );
 
     let mut events: Vec<SessionEvent> = Vec::new();
-    run(&mut session, "research two things".into(), |ev| events.push(ev))
-        .await
-        .unwrap();
+    run(&mut session, "research two things".into(), |ev| {
+        events.push(ev)
+    })
+    .await
+    .unwrap();
 
     let subagent_count = events
         .iter()

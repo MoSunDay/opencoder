@@ -1,7 +1,7 @@
 //! `/model` configuration modal for the TUI.
 //!
 //! A form overlay (modeled on `menu.rs`) that edits five fields and persists
-//! them to `opencode.json` via [`opencode_core::Config::save`]:
+//! them to `opencoder.json` via [`opencode_core::Config::save`]:
 //! - model id
 //! - provider base_url
 //! - provider api_key (masked display; editing replaces the value)

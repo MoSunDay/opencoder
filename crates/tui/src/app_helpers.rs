@@ -99,7 +99,7 @@ pub(crate) fn data_dir_for(workdir: &Path) -> PathBuf {
     workdir.hash(&mut h);
     let digest = h.finish();
     let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencode");
+    base.push("opencoder");
     base.push(format!("{digest:x}"));
     base
 }

@@ -139,8 +139,8 @@ impl Config {
     pub fn load(working_dir: &Path) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
-        // override the global base (matches opencode). This lets ~/.opencoder
-        // provide the provider+key while a project opencode.json overrides only
+        // override the global base (matches opencoder). This lets ~/.opencoder
+        // provide the provider+key while a project opencoder.json overrides only
         // the model — `opencoder` then runs directly from any directory.
         let mut candidates = config_candidates(working_dir);
         candidates.reverse(); // global first, project last (wins)
@@ -196,7 +196,7 @@ impl Config {
 
     /// Pick the file to persist config edits to. Rule (project-first, global
     /// fallback): the first existing candidate that already holds any of the
-    /// editable keys; if none, create the project-local `./opencode.json`.
+    /// editable keys; if none, create the project-local `./opencoder.json`.
     pub fn save_target(working_dir: &Path) -> PathBuf {
         let candidates = config_candidates(working_dir);
         // candidates are ordered project-first (index 0) → global-last, which
@@ -212,13 +212,13 @@ impl Config {
                 }
             }
         }
-        // Nothing editable on disk yet → create the project-local opencode.json
-        // at the working-dir root (more idiomatic than .opencode/config.json).
-        working_dir.join("opencode.json")
+        // Nothing editable on disk yet → create the project-local opencoder.json
+        // at the working-dir root (more idiomatic than .opencoder/config.json).
+        working_dir.join("opencoder.json")
     }
 
     /// Merge `patch` into the JSON at `save_target`, preserving unrelated keys
-    /// and pretty-printing. Creates the file (and parent `.opencode/` dir) if
+    /// and pretty-printing. Creates the file (and parent `.opencoder/` dir) if
     /// missing. Returns the path written.
     pub fn save(working_dir: &Path, patch: &serde_json::Value) -> Result<PathBuf> {
         let target = Self::save_target(working_dir);
@@ -316,18 +316,17 @@ pub fn looks_like_env_var(s: &str) -> bool {
 
 fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
     let mut v = vec![
-        working_dir.join(".opencode").join("config.json"),
-        working_dir.join("opencode.json"),
+        working_dir.join(".opencoder").join("config.json"),
+        working_dir.join("opencoder.json"),
     ];
     if let Some(home) = dirs::home_dir() {
         // ~/.opencoder/ (this binary's own config home) — highest-priority global,
         // so `opencoder` runs directly from any directory with no project config.
         v.push(home.join(".opencoder").join("config.json"));
-        v.push(home.join(".opencoder").join("opencode.json"));
-        v.push(home.join(".opencode").join("config.json"));
+        v.push(home.join(".opencoder").join("opencoder.json"));
     }
     if let Some(cfg) = dirs::config_dir() {
-        v.push(cfg.join("opencode").join("config.json"));
+        v.push(cfg.join("opencoder").join("config.json"));
     }
     v
 }

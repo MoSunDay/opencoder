@@ -72,7 +72,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     let store: Arc<dyn Store> = {
         let data_dir = data_dir_for(&workdir);
         tokio::fs::create_dir_all(&data_dir).await.ok();
-        Arc::new(LibsqlStore::open(data_dir.join("opencode.db")).await?)
+        Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?)
     };
 
     let session = SessionState::new(
@@ -204,7 +204,13 @@ async fn run_app(
                         view.context_used,
                         subagent_sys,
                     ),
-                    _ => (&chat, agent_name.clone(), agent_name.clone(), chat.context_used, sys_tokens),
+                    _ => (
+                        &chat,
+                        agent_name.clone(),
+                        agent_name.clone(),
+                        chat.context_used,
+                        sys_tokens,
+                    ),
                 }
             } else {
                 (
@@ -787,7 +793,9 @@ async fn run_app(
     Ok(())
 }
 
-pub(crate) use crate::app_helpers::{data_dir_for, mk_input, push_user, start_turn, sys_tokens_for, worker_dead};
+pub(crate) use crate::app_helpers::{
+    data_dir_for, mk_input, push_user, start_turn, sys_tokens_for, worker_dead,
+};
 
 #[cfg(test)]
 #[path = "app_tests.rs"]

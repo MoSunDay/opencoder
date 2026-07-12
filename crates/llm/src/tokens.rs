@@ -1,4 +1,4 @@
-//! Cheap token estimator. Matches opencode's heuristic (`length / 4`) closely
+//! Cheap token estimator. Matches opencoder's heuristic (`length / 4`) closely
 //! enough to drive compaction thresholds without calling the model — so
 //! compaction can fire on the very first round before any `usage` is reported.
 

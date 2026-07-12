@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use opencode_core::{resolve_agent, ContentBlock, Config, Message, Role};
+use opencode_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencode_llm::MockChatClient;
 use opencode_session::{plan_handoff, SessionState};
 
@@ -124,7 +124,10 @@ async fn handoff_does_not_touch_store() {
     session.store = Some(store.clone());
     session.record(Message::user("u1", "build a thing")).await;
     session
-        .record(assistant_with_text("a1", "## Plan\n1. step one\n2. step two"))
+        .record(assistant_with_text(
+            "a1",
+            "## Plan\n1. step one\n2. step two",
+        ))
         .await;
 
     let before = store.load_messages(&session.id).await.unwrap();
@@ -145,7 +148,10 @@ async fn handoff_does_not_touch_store() {
         "durable store must be unchanged after handoff (jsonl preserved)"
     );
     assert_eq!(after[0].id, "u1");
-    assert!(after[1].text().contains("## Plan"), "plan text preserved in store");
+    assert!(
+        after[1].text().contains("## Plan"),
+        "plan text preserved in store"
+    );
 }
 
 #[test]

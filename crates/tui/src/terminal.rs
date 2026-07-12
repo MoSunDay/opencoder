@@ -150,7 +150,10 @@ mod tests {
         let mut got = String::new();
         write_restore(&mut got).unwrap();
 
-        assert!(got.contains(&want_pop), "missing pop-kitty sequence: {got:?}");
+        assert!(
+            got.contains(&want_pop),
+            "missing pop-kitty sequence: {got:?}"
+        );
         assert!(
             got.contains(&want_mouse),
             "missing disable-mouse sequence: {got:?}"

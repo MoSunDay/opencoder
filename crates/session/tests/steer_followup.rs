@@ -1,6 +1,6 @@
 //! P2 functional tests for the steer/queue drain semantics.
 //!
-//! Contracts (mirroring opencode's two-tier delivery model):
+//! Contracts (mirroring opencoder's two-tier delivery model):
 //! - steer_promotes_at_turn_boundary: a steer admitted during a run is
 //!   appended to history at the next turn boundary
 //! - multiple_steers_one_boundary_promoted_once: N steers at one boundary are

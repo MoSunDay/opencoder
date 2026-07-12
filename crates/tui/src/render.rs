@@ -161,7 +161,14 @@ pub(crate) fn render(
             }
         }
         ci += 1;
-        render_composer(f, chunks[ci], input, follow, composer_scroll, &mut hits.jump_btn);
+        render_composer(
+            f,
+            chunks[ci],
+            input,
+            follow,
+            composer_scroll,
+            &mut hits.jump_btn,
+        );
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
@@ -200,7 +207,12 @@ pub(crate) fn render(
             let w = chip_w.min(avail);
             let row = composer_area.y;
             let x = composer_area.x + composer_area.width.saturating_sub(w).saturating_sub(1);
-            let chip_rect = Rect { x, y: row, width: w, height: 1 };
+            let chip_rect = Rect {
+                x,
+                y: row,
+                width: w,
+                height: 1,
+            };
             f.render_widget(Clear, chip_rect);
             // Plan/act flash is themed to match the agent chip: Yellow for
             // read-only plan mode, Cyan for act (issue #6 — was Magenta, which
@@ -218,7 +230,14 @@ pub(crate) fn render(
                 chip_rect,
             );
         }
-        place_cursor(f, composer_area, input, cursor_idx, composer_inner_w, composer_scroll);
+        place_cursor(
+            f,
+            composer_area,
+            input,
+            cursor_idx,
+            composer_inner_w,
+            composer_scroll,
+        );
     })?;
     Ok(())
 }

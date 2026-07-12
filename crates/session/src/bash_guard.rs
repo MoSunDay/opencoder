@@ -284,10 +284,7 @@ mod tests {
         ));
         // All redirects blocked uniformly — 2>&1 and /dev/null are redundant
         // (the bash tool captures stdout/stderr separately).
-        assert!(matches!(
-            classify("cmd 2>&1"),
-            BashVerdict::WriteBlocked(_)
-        ));
+        assert!(matches!(classify("cmd 2>&1"), BashVerdict::WriteBlocked(_)));
         assert!(matches!(
             classify("cmd 2>/dev/null"),
             BashVerdict::WriteBlocked(_)

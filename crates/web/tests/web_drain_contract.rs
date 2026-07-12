@@ -286,12 +286,12 @@ async fn events_subscriber_before_prompt_receives_live() {
 }
 
 /// POST /prompt must surface a config-load failure as a structured 500 instead
-/// of admitting a prompt it cannot run. Uses a malformed opencode.json so the
+/// of admitting a prompt it cannot run. Uses a malformed opencoder.json so the
 /// error is deterministic and independent of any ambient API key env var.
 #[tokio::test]
 async fn post_prompt_returns_500_on_malformed_config() {
     let dir = tempfile::TempDir::new().unwrap();
-    std::fs::write(dir.path().join("opencode.json"), "{ not valid json").unwrap();
+    std::fs::write(dir.path().join("opencoder.json"), "{ not valid json").unwrap();
     let state = state_with_workdir(dir.path().to_path_buf()).await;
 
     let resp = opencode_web::api::post_prompt(

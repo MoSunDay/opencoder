@@ -132,7 +132,10 @@ impl ChatView {
                 });
             }
             SessionEvent::ToolEnd {
-                id, output, is_error, ..
+                id,
+                output,
+                is_error,
+                ..
             } => {
                 self.finalize_assistant();
                 let color = if *is_error {

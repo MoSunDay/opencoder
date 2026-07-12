@@ -768,11 +768,7 @@ async fn list_sessions_excludes_subagents_by_default() {
 #[tokio::test]
 async fn concurrent_writers_reproduce_busy() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(
-        LibsqlStore::open(dir.path().join("busy.db"))
-            .await
-            .unwrap(),
-    );
+    let store = Arc::new(LibsqlStore::open(dir.path().join("busy.db")).await.unwrap());
     const W: u32 = 8;
     const N: u32 = 50;
     for w in 0..W {
@@ -798,15 +794,17 @@ async fn concurrent_writers_reproduce_busy() {
     for h in handles {
         h.await.unwrap();
     }
-    let errs = errs.lock().unwrap();
     let total = W * N;
-    eprintln!(
-        "== concurrent_writers_reproduce_busy: {}/{} writes failed ==",
-        errs.len(),
-        total
-    );
-    for e in errs.iter() {
-        eprintln!("WRITE_ERR {e}");
+    {
+        let errs = errs.lock().unwrap();
+        eprintln!(
+            "== concurrent_writers_reproduce_busy: {}/{} writes failed ==",
+            errs.len(),
+            total
+        );
+        for e in errs.iter() {
+            eprintln!("WRITE_ERR {e}");
+        }
     }
     let landed = store.load_messages("child0").await.unwrap().len();
     eprintln!("child0 landed messages: {landed}/{N}");
@@ -915,9 +913,7 @@ async fn extreme_concurrent_writers() {
                 let payload = "x".repeat(512);
                 let m = Message::user(format!("u{w}-{k}"), payload);
                 if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k}] {e:#}"));
+                    errs.lock().unwrap().push(format!("[w{w} k{k}] {e:#}"));
                 }
             }
         }));
@@ -959,16 +955,18 @@ async fn two_stores_same_file_concurrent_writers() {
     let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let mut handles = Vec::new();
     for w in 0..W {
-        let s = if w % 2 == 0 { store_a.clone() } else { store_b.clone() };
+        let s = if w % 2 == 0 {
+            store_a.clone()
+        } else {
+            store_b.clone()
+        };
         let errs = errs.clone();
         handles.push(tokio::spawn(async move {
             let sid = format!("c{w}");
             for k in 0..N {
                 let m = Message::user(format!("u{w}-{k}"), format!("b{w}-{k}"));
                 if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k}] {e:#}"));
+                    errs.lock().unwrap().push(format!("[w{w} k{k}] {e:#}"));
                 }
             }
         }));

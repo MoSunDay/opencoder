@@ -2,11 +2,16 @@
 //! and restored when switching back, so chat history, scroll position, and
 //! running status survive a session round-trip.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use opencode_core::{ContentBlock, Message, Role};
-use ratatui::style::{Color, Modifier, Style};
+use opencode_session::SessionEvent;
+use opencode_store::{Store, SubagentStatus, SubagentTaskRecord};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::chat::ChatView;
+use crate::chat::{short, ChatBlock, ChatView};
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -75,9 +80,174 @@ impl SessionUiState {
 }
 
 /// Build a fresh `ChatView` for a resumed session by replaying stored messages
-/// as styled markers (user: / say: headers). Used when restoring a session
+/// as styled markers (user: / say: headers) and reconstructing subagent blocks
+/// from persisted `subagent_tasks` records. Used when restoring a session
 /// that has no prior UI snapshot.
-pub fn replay_into_chat(agent_name: &str, messages: &[Message]) -> ChatView {
+pub async fn replay_into_chat(
+    agent_name: &str,
+    messages: &[Message],
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) -> ChatView {
+    let mut chat = ChatView {
+        agent: agent_name.into(),
+        ..Default::default()
+    };
+
+    // Load subagent tasks and group by parent_message_id so they can be
+    // interleaved after the corresponding assistant message block.
+    let tasks = store
+        .list_subagent_tasks(session_id)
+        .await
+        .unwrap_or_default();
+    let mut tasks_by_parent: HashMap<String, Vec<SubagentTaskRecord>> = HashMap::new();
+    let mut orphan_tasks: Vec<SubagentTaskRecord> = Vec::new();
+    for task in tasks {
+        match &task.parent_message_id {
+            Some(mid) => {
+                tasks_by_parent.entry(mid.clone()).or_default().push(task);
+            }
+            None => {
+                orphan_tasks.push(task);
+            }
+        }
+    }
+    for group in tasks_by_parent.values_mut() {
+        group.sort_by_key(|t| t.started_at);
+    }
+    orphan_tasks.sort_by_key(|t| t.started_at);
+
+    for msg in messages {
+        let text: String = msg
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        if text.is_empty() {
+            continue;
+        }
+        match msg.role {
+            Role::User => {
+                chat.push_marker(Line::from(Span::styled(
+                    "user:",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )));
+                let rendered = crate::markdown::render(&text);
+                if !rendered.is_empty() {
+                    chat.blocks.push(ChatBlock::Marker(rendered));
+                }
+                chat.push_marker(Line::from(""));
+            }
+            Role::Assistant => {
+                // Use a finalized `Assistant` block so `flatten()` adds the
+                // "say:" header + indent and the text is markdown-rendered,
+                // matching the live streaming path.
+                chat.blocks.push(ChatBlock::Assistant {
+                    raw: text.clone(),
+                    rendered: crate::markdown::render(&text),
+                    done: true,
+                });
+                // Interleave subagent blocks whose parent_message_id matches
+                // this assistant message.
+                if let Some(task_list) = tasks_by_parent.remove(&msg.id) {
+                    for task in task_list {
+                        let block = build_subagent_block(&task, store).await;
+                        chat.blocks.push(block);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Append orphan tasks (no parent_message_id) at the end.
+    for task in orphan_tasks {
+        let block = build_subagent_block(&task, store).await;
+        chat.blocks.push(block);
+    }
+
+    chat
+}
+
+/// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,
+/// including rebuilding the child `ChatView` from stored events.
+async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<dyn Store>) -> ChatBlock {
+    let (done, ok, summary) = match task.status {
+        SubagentStatus::Completed => (
+            true,
+            task.ok.unwrap_or(true),
+            task.result.clone().unwrap_or_default(),
+        ),
+        SubagentStatus::Failed => (true, false, task.result.clone().unwrap_or_default()),
+        SubagentStatus::Running => {
+            // Interrupted during resume — display as done/failed with a marker.
+            (true, false, "(interrupted)".to_string())
+        }
+    };
+
+    let view = reconstruct_child_view(&task.child_session_id, &task.agent, store).await;
+
+    ChatBlock::Subagent {
+        id: task.task_id.clone(),
+        child_session_id: task.child_session_id.clone(),
+        kind: task.agent.clone(),
+        prompt: short(&task.prompt, 90),
+        view,
+        done,
+        ok,
+        summary,
+    }
+}
+
+/// Rebuild a child `ChatView` from persisted events (primary) or messages
+/// (fallback) under the child session id.
+async fn reconstruct_child_view(
+    child_session_id: &str,
+    agent_name: &str,
+    store: &Arc<dyn Store>,
+) -> ChatView {
+    // Primary: replay persisted events.
+    let events = store
+        .events_after(child_session_id, 0)
+        .await
+        .unwrap_or_default();
+    if !events.is_empty() {
+        let mut view = ChatView {
+            agent: agent_name.into(),
+            ..Default::default()
+        };
+        for rec in &events {
+            if let Some(ev) = deserialize_event(&rec.payload) {
+                view.apply(&ev);
+            }
+        }
+        return view;
+    }
+
+    // Fallback: replay messages.
+    let messages = store
+        .load_messages(child_session_id)
+        .await
+        .unwrap_or_default();
+    replay_messages(agent_name, &messages)
+}
+
+/// Deserialize a `SessionEvent` from a stored event payload.
+/// Child events are double-encoded: `Value::String(json_string)`.
+fn deserialize_event(payload: &serde_json::Value) -> Option<SessionEvent> {
+    match payload {
+        serde_json::Value::String(s) => serde_json::from_str::<SessionEvent>(s).ok(),
+        other => serde_json::from_value::<SessionEvent>(other.clone()).ok(),
+    }
+}
+
+/// Text-only message replay (no subagent reconstruction). Used as a fallback
+/// for child views without persisted events, and by tests.
+fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
     let mut chat = ChatView {
         agent: agent_name.into(),
         ..Default::default()
@@ -98,19 +268,21 @@ pub fn replay_into_chat(agent_name: &str, messages: &[Message]) -> ChatView {
         match msg.role {
             Role::User => {
                 chat.push_marker(Line::from(Span::styled(
-                    format!("user: {text}"),
+                    "user:",
                     Style::default().add_modifier(Modifier::BOLD),
                 )));
+                let rendered = crate::markdown::render(&text);
+                if !rendered.is_empty() {
+                    chat.blocks.push(ChatBlock::Marker(rendered));
+                }
                 chat.push_marker(Line::from(""));
             }
             Role::Assistant => {
-                chat.push_marker(Line::from(Span::styled(
-                    "say:",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                )));
-                chat.push_marker(Line::from(format!("    {text}")));
+                chat.blocks.push(ChatBlock::Assistant {
+                    raw: text.clone(),
+                    rendered: crate::markdown::render(&text),
+                    done: true,
+                });
             }
             _ => {}
         }
@@ -206,5 +378,45 @@ mod tests {
         assert_eq!(snap.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn replay_renders_plan_handoff_as_markdown() {
+        // Simulate the synthetic user message produced by plan_handoff::handoff:
+        // the plan markdown is stuffed into a Role::User message.
+        let msg = Message::user("u1", "## Plan\n1. do X\n2. do Y");
+        let chat = replay_messages("act", &[msg]);
+        let lines = chat.flatten();
+        let joined: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.clone()))
+            .collect();
+        // Headings are rendered as styled text -- the raw "##" markers must
+        // not survive into the flattened output.
+        assert!(
+            !joined.contains("##"),
+            "heading must be rendered, not raw; got: {joined}"
+        );
+        assert!(
+            joined.contains("Plan"),
+            "plan text must be present; got: {joined}"
+        );
+    }
+
+    #[test]
+    fn replay_renders_assistant_as_markdown_block() {
+        let mut msg = Message::assistant("a1");
+        msg.blocks.push(ContentBlock::text("Here is **bold** text."));
+        let chat = replay_messages("act", &[msg]);
+        // The replay must produce a finalized Assistant block (markdown-rendered)
+        // rather than a plain Marker, so flatten() emits the "say:" header and
+        // rendered lines exactly like the live path.
+        assert!(
+            chat.blocks
+                .iter()
+                .any(|b| matches!(b, ChatBlock::Assistant { done: true, .. })),
+            "assistant replay must produce a finalized Assistant block; got: {:?}",
+            chat.blocks
+        );
     }
 }

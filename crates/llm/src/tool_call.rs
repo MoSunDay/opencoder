@@ -9,6 +9,7 @@ pub struct PartialTool {
     pub id: String,
     pub name: String,
     pub arguments: String,
+    pub started: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -32,9 +33,7 @@ impl ToolAccumulator {
         arguments: Option<&str>,
     ) -> Vec<LlmEvent> {
         let mut events = Vec::new();
-        let existed = self.tools.contains_key(&index);
         let entry = self.tools.entry(index).or_default();
-        let mut just_started = false;
         if let Some(i) = id {
             if entry.id.is_empty() {
                 entry.id = i.to_string();
@@ -45,13 +44,13 @@ impl ToolAccumulator {
                 entry.name = n.to_string();
             }
         }
-        if !existed {
-            just_started = true;
-        }
         if let Some(a) = arguments {
             entry.arguments.push_str(a);
         }
-        if just_started && !entry.id.is_empty() && !entry.name.is_empty() {
+        // Emit ToolCallStart once both id and name are available, even if
+        // they arrived in different deltas.
+        if !entry.started && !entry.id.is_empty() && !entry.name.is_empty() {
+            entry.started = true;
             events.push(LlmEvent::ToolCallStart {
                 index,
                 id: entry.id.clone(),
@@ -145,5 +144,41 @@ mod tests {
         let calls = acc.finish_all().unwrap();
         assert_eq!(calls.len(), 1);
         assert!(calls[0].input.as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn apply_emits_start_when_id_name_arrive_late() {
+        let mut acc = ToolAccumulator::default();
+        // First delta: arguments only, no id/name
+        let evs1 = acc.apply(0, None, None, Some("{\"cmd\":"));
+        assert!(evs1.iter().all(|e| !matches!(e, LlmEvent::ToolCallStart { .. })));
+        // Second delta: id and name arrive
+        let evs2 = acc.apply(0, Some("call_1"), Some("bash"), None);
+        assert!(evs2.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { id, name, .. } if id == "call_1" && name == "bash")));
+    }
+
+    #[test]
+    fn apply_emits_start_when_id_and_name_arrive_in_separate_calls() {
+        let mut acc = ToolAccumulator::default();
+        // First delta: only id
+        let evs1 = acc.apply(0, Some("call_1"), None, None);
+        assert!(evs1.is_empty(), "no events when only id is present");
+        // Second delta: name arrives
+        let evs2 = acc.apply(0, None, Some("bash"), None);
+        assert!(
+            evs2.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { id, name, .. } if id == "call_1" && name == "bash")),
+            "ToolCallStart should be emitted once name arrives"
+        );
+    }
+
+    #[test]
+    fn apply_does_not_emit_duplicate_start() {
+        let mut acc = ToolAccumulator::default();
+        acc.apply(0, Some("call_1"), Some("bash"), Some("{}"));
+        let evs = acc.apply(0, Some("call_1"), Some("bash"), Some("{}"));
+        assert!(
+            !evs.iter().any(|e| matches!(e, LlmEvent::ToolCallStart { .. })),
+            "ToolCallStart must not be emitted twice"
+        );
     }
 }

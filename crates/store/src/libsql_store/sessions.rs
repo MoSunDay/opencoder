@@ -61,6 +61,11 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
             args.push(id.into());
         }
     }
+    if !filter.include_subagents {
+        where_clauses.push(
+            "NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)".into(),
+        );
+    }
 
     let mut sql = String::from(
         "SELECT s.id, s.title, s.agent, s.model, s.created_at, s.updated_at, \
@@ -131,6 +136,17 @@ pub async fn delete(conn: &Connection, id: &str) -> Result<()> {
     conn.execute("DELETE FROM sessions WHERE id = ?", params![id])
         .await?;
     Ok(())
+}
+
+/// Delete all sessions except `keep_id`. Child rows (messages, inputs, events,
+/// subagent_tasks) are removed by their `ON DELETE CASCADE` foreign keys.
+/// Returns the count of deleted session rows.
+pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
+    let affected = conn
+        .execute("DELETE FROM sessions WHERE id != ?", params![keep_id])
+        .await
+        .context("clear other sessions")?;
+    Ok(affected as u64)
 }
 
 fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {

@@ -17,6 +17,7 @@ Commit: (working-tree, pre-initial-commit)
 - 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`/`EventKind`/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。
 
 ## 主流程
+- session 生命周期：`create_session` / `get_session` / `list_sessions`（`SessionFilter`：workdir_hash / search / cursor 分页）/ `update_session`（`SessionPatch` 局部更新）/ `delete_session`。`clear_other_sessions(keep)` 单条 `DELETE FROM sessions WHERE id != keep` 批量清理（保留当前会话），子表经 `ON DELETE CASCADE` 外键级联删除，返回删除条数。
 - 写消息：`append_message` / `append_messages`（事务，all-or-nothing）。
 - 输入提升：`admit_input`（计算单调 admitted_seq）→ `pending_inputs` 查询 → `promote_inputs`（按 admitted_seq 截止批量标记）/ `claim_next_queue`（原子返回 `(seq, SessionInput)` + 标记单条 queue，供 runner drain idle 消费；seq 随 `QueueConsumed` 事件回传前端收缩镜像）。`delete_input`（带 `promoted_seq IS NULL` 守卫，不删已提升行）/ `swap_input_order`（交换两行 admitted_seq，无 UNIQUE 约束可直接交换）供 TUI 队列面板删除/重排未消费的 follow-up。
 - 事件回放：`append_event` → `events_after(seq)` 供 SSE replay。

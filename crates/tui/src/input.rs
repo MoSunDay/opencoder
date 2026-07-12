@@ -48,8 +48,16 @@ pub fn spawn_input_pump() -> (mpsc::Receiver<Event>, thread::JoinHandle<()>) {
         }
         // Bounded poll: returns within POLL_TIMEOUT regardless of whether an
         // event arrived (crossterm backs this with `filedescriptor::poll` +
-        // non-blocking reads). `false`/err → loop and re-check `is_closed()`.
-        if !event::poll(POLL_TIMEOUT).unwrap_or(false) {
+        // non-blocking reads). `false` → loop and re-check `is_closed()`;
+        // `Err` (e.g. stdin closed / TTY lost) → break to avoid a busy-spin.
+        let ready = match event::poll(POLL_TIMEOUT) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("input: poll failed, exiting input thread: {e}");
+                break;
+            }
+        };
+        if !ready {
             continue;
         }
         // `read()` is safe here (not unbounded): the successful `poll()` above

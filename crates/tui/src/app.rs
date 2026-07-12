@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,9 +8,9 @@ use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use opencode_core::{resolve_agent, Config};
 use opencode_llm::{estimate, ChatClient, ChatStream};
 use opencode_session::{SessionEvent, SessionState};
-use opencode_store::{Delivery, LibsqlStore, SessionInput, Store};
+use opencode_store::{Delivery, LibsqlStore, Store};
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use tokio::sync::mpsc;
@@ -26,7 +26,10 @@ use crate::queue_panel;
 use crate::render::{in_rect, render, MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::TerminalGuard;
-use crate::worker::{gate_compact, process_cmd, rebind_session, CompactGate, UiCmd, UiEvent};
+use crate::worker::{
+    gate_clear_all, gate_compact, process_cmd, rebind_session, ClearAllGate, CompactGate, UiCmd,
+    UiEvent,
+};
 use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
@@ -133,6 +136,7 @@ async fn run_app(
     let mut hist_idx: Option<usize> = None;
     let mut local_queue: VecDeque<String> = VecDeque::new();
     let mut running = false;
+    let mut cancelled = false;
     let mut show_help = false;
     let mut scroll: u16 = 0;
     let mut follow = true;
@@ -153,6 +157,10 @@ async fn run_app(
     let mut subagent_focus: Option<usize> = None;
     let mut parent_scroll: u16 = 0;
     let mut parent_follow: bool = true;
+    // Active mouse text-selection in the body (absolute content-row range), or
+    // None. Kept in absolute rows so it tracks the text while the viewport
+    // scrolls. Cleared on copy (mouse-up) and on subagent ctx-switch.
+    let mut selection: Option<crate::selection::SelRange> = None;
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
@@ -182,7 +190,9 @@ async fn run_app(
         let status = chat.status.clone();
         // When viewing a subagent's perspective, swap in its child ChatView,
         // back-title, and its own context stats (instead of the parent's).
-        let (display_chat, display_agent, display_ctx, display_sys) =
+        // The body title keeps the "Esc back" hint; the status bar uses the
+        // short subagent kind so it renders the same layout as the parent.
+        let (display_chat, display_title, display_status_agent, display_ctx, display_sys) =
             if let Some(idx) = subagent_focus {
                 match chat.blocks.get(idx) {
                     Some(crate::chat::ChatBlock::Subagent {
@@ -190,13 +200,20 @@ async fn run_app(
                     }) => (
                         view as &crate::chat::ChatView,
                         format!("\u{2190} [Esc] back | \u{2937}sub [{kind}] {prompt}"),
+                        kind.clone(),
                         view.context_used,
                         subagent_sys,
                     ),
-                    _ => (&chat, agent_name.clone(), chat.context_used, sys_tokens),
+                    _ => (&chat, agent_name.clone(), agent_name.clone(), chat.context_used, sys_tokens),
                 }
             } else {
-                (&chat, agent_name.clone(), chat.context_used, sys_tokens)
+                (
+                    &chat,
+                    agent_name.clone(),
+                    agent_name.clone(),
+                    chat.context_used,
+                    sys_tokens,
+                )
             };
         // Compose status-bar model label with reasoning-effort badge (e.g.
         // "glm-5.2 \u{00b7}high") so the active thinking depth is visible.
@@ -210,7 +227,8 @@ async fn run_app(
             display_chat,
             &input,
             cursor_idx,
-            &display_agent,
+            &display_title,
+            &display_status_agent,
             running,
             show_help,
             display_ctx,
@@ -224,21 +242,20 @@ async fn run_app(
             &mut scroll,
             follow,
             anim_tick,
-            mode_flash
-                .as_ref()
-                .and_then(|(t, s)| {
-                    if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
-                        Some(t.as_str())
-                    } else {
-                        None
-                    }
-                }),
+            mode_flash.as_ref().and_then(|(t, s)| {
+                if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
+                    Some(t.as_str())
+                } else {
+                    None
+                }
+            }),
             active_skill.as_deref(),
             skill_menu.as_ref(),
             task_picker.as_ref(),
             command_menu.as_ref(),
             model_menu.as_ref(),
             &mut hits,
+            selection,
         )?;
 
         tokio::select! {
@@ -317,7 +334,7 @@ async fn run_app(
                                     } else {
                                         // Fresh state for a new or resumed session.
                                         if let crate::task::TaskPick::Resume(_) = pick {
-                                            chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages);
+                                            chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages, &store, &new_session_id).await;
                                         } else {
                                             chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
                                         }
@@ -339,6 +356,47 @@ async fn run_app(
                                     );
                                 }
                                 TaskOutcome::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                                TaskOutcome::ClearAll { keep_session_id } => {
+                                    // Refuse while a turn / subagent is in flight: a running
+                                    // subagent's child session is still being written to, and
+                                    // clearing would FK-violate its next append. Retry at idle.
+                                    match gate_clear_all(running) {
+                                        ClearAllGate::SkipRunning => {
+                                            if let Some(p) = task_picker.as_mut() {
+                                                p.reset_confirmation();
+                                            }
+                                            chat.push_marker(Line::from(Span::styled(
+                                                "[task] clear busy \u{2014} retry when idle (subagents still running)",
+                                                Style::default().fg(Color::Yellow),
+                                            )));
+                                        }
+                                        ClearAllGate::Run => {
+                                            let before = task_picker.as_ref().map(|p| p.deletable_count()).unwrap_or(0);
+                                            match store.clear_other_sessions(&keep_session_id).await {
+                                                Ok(n) => {
+                                                    let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
+                                                        .await.unwrap_or_default();
+                                                    if let Some(p) = task_picker.as_mut() {
+                                                        p.reset_sessions(sessions);
+                                                    }
+                                                    chat.push_marker(Line::from(Span::styled(
+                                                        format!("[/task] cleared {n} of {before} task(s)"),
+                                                        Style::default().fg(Color::Green),
+                                                    )));
+                                                }
+                                                Err(e) => {
+                                                    if let Some(p) = task_picker.as_mut() {
+                                                        p.reset_confirmation();
+                                                    }
+                                                    chat.push_marker(Line::from(Span::styled(
+                                                        format!("[/task] clear failed: {e:#}"),
+                                                        Style::default().fg(Color::Red),
+                                                    )));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 TaskOutcome::Idle => {}
                             }
                             continue;
@@ -394,7 +452,7 @@ async fn run_app(
                                 CommandOutcome::Dispatch(SlashAction::Task) => {
                                     let sessions = store.list_sessions(&opencode_store::SessionFilter::default())
                                         .await.unwrap_or_default();
-                                    task_picker = Some(TaskPicker::new(sessions));
+                                    task_picker = Some(TaskPicker::new(sessions, session_id.clone()));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Model) => {
                                     model_menu = Some(ModelMenu::new(&config));
@@ -410,6 +468,7 @@ async fn run_app(
                                             }
                                             running = true;
                                             follow = true;
+                                            chat.status.clear();
                                         }
                                         CompactGate::SkipRunning => {
                                             chat.push_marker(Line::from(Span::styled(
@@ -428,6 +487,7 @@ async fn run_app(
                             subagent_focus = None;
                             scroll = parent_scroll;
                             follow = parent_follow;
+                            selection = None;
                             last_esc = None;
                             continue;
                         }
@@ -461,6 +521,7 @@ async fn run_app(
                                     }
                                     running = true;
                                     follow = true;
+                                    chat.status.clear();
                                 }
                             }
                             KeyAction::Steer(text) => {
@@ -489,6 +550,7 @@ async fn run_app(
                                     }
                                     running = true;
                                     follow = true;
+                                    chat.status.clear();
                                 } else {
                                     let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
                                 }
@@ -512,6 +574,7 @@ async fn run_app(
                                 chat.push_marker(Line::from(Span::styled(
                                     "[interrupted] stopping…", Style::default().fg(Color::Yellow))));
                                 running = false;
+                                cancelled = true;
                                 follow = true;
                             }
                             KeyAction::OpenCommand => {
@@ -524,15 +587,18 @@ async fn run_app(
                     Event::Mouse(m) => {
                         match m.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
+                                let mut consumed = false;
                                 if let Some(r) = hits.jump_btn {
                                     if in_rect(r, m.column, m.row) {
                                         follow = true;
+                                        consumed = true;
                                     }
                                 }
                                 for btn in &hits.queue_btns {
                                     if !in_rect(btn.rect, m.column, m.row) {
                                         continue;
                                     }
+                                    consumed = true;
                                     match queue_panel::plan(&queue_items, btn.seq, btn.action) {
                                         queue_panel::QueueEffect::Delete(seq) => {
                                             if store.delete_input(seq).await.is_ok() {
@@ -550,9 +616,26 @@ async fn run_app(
                                 }
                                 // Click on a Thinking-block header toggles its
                                 // collapse state (default collapsed → expand).
+                                // When viewing a subagent's perspective, toggle
+                                // the CHILD view (the hit-rects are computed
+                                // from the displayed child ChatView, so the
+                                // block_idx refers to its blocks, not the
+                                // parent's — toggling the parent here was the
+                                // bug that made thinking unopenable in a
+                                // subagent view).
                                 for btn in &hits.thinking_btns {
                                     if in_rect(btn.rect, m.column, m.row) {
-                                        chat.toggle_thinking_at(btn.block_idx);
+                                        if let Some(idx) = subagent_focus {
+                                            if let Some(crate::chat::ChatBlock::Subagent {
+                                                view, ..
+                                            }) = chat.blocks.get_mut(idx)
+                                            {
+                                                view.toggle_thinking_at(btn.block_idx);
+                                            }
+                                        } else {
+                                            chat.toggle_thinking_at(btn.block_idx);
+                                        }
+                                        consumed = true;
                                         break;
                                     }
                                 }
@@ -567,13 +650,48 @@ async fn run_app(
                                         scroll = 0;
                                         follow = true;
                                         subagent_focus = Some(btn.block_idx);
+                                        selection = None;
                                         // Cache subagent's system-prompt
                                         // token estimate once on entry.
                                         if let Some(crate::chat::ChatBlock::Subagent { kind, .. }) = chat.blocks.get(btn.block_idx) {
                                             subagent_sys = sys_tokens_for(kind, &workdir, None);
                                         }
+                                        consumed = true;
                                         break;
                                     }
+                                }
+                                // Nothing clicked: begin a text-selection drag
+                                // inside the body. Stored as an absolute content
+                                // row so it stays anchored while scrolling.
+                                if !consumed {
+                                    if let Some(r) = hits.body {
+                                        if let Some(abs) =
+                                            crate::selection::abs_row_at(r, m.row, scroll)
+                                        {
+                                            selection = Some((abs, abs));
+                                        }
+                                    }
+                                }
+                            }
+                            MouseEventKind::Drag(MouseButton::Left) => {
+                                if let (Some((anchor, _)), Some(r)) = (selection, hits.body) {
+                                    if let Some(abs) =
+                                        crate::selection::abs_row_at(r, m.row, scroll)
+                                    {
+                                        selection = Some((anchor, abs));
+                                    }
+                                }
+                            }
+                            MouseEventKind::Up(MouseButton::Left) => {
+                                if let Some(sel) = selection {
+                                    let viewed: &ChatView = match subagent_focus
+                                        .and_then(|idx| chat.blocks.get(idx))
+                                    {
+                                        Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
+                                        _ => &chat,
+                                    };
+                                    crate::selection::finish_copy(viewed, hits.body, sel);
+                                    selection = None;
                                 }
                             }
                             MouseEventKind::ScrollUp => {
@@ -606,12 +724,19 @@ async fn run_app(
                     _ => {}
                 }
             }
-            Some(ev) = evt_rx.recv() => {
+            maybe_ev = evt_rx.recv() => {
+                let ev = match maybe_ev {
+                    Some(ev) => ev,
+                    None => {
+                        worker_dead(&mut chat);
+                        break;
+                    }
+                };
                 match ev {
                     UiEvent::Session(sev) => {
                         if let SessionEvent::TranscriptReset(msgs) = &sev {
                             let agent = chat.agent.clone();
-                            chat = crate::session_ui::replay_into_chat(&agent, msgs);
+                            chat = crate::session_ui::replay_into_chat(&agent, msgs, &store, &session_id).await;
                         } else {
                             chat.apply(&sev);
                         }
@@ -619,13 +744,24 @@ async fn run_app(
                             queue_items.retain(|(s, _)| s != seq);
                         }
                         if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
-                            running = false;
-                            steer_items.clear();
-                            queue_items.clear();
+                            if cancelled {
+                                // Stale event from a cancelled turn — consume without
+                                // affecting running or clearing items belonging to a
+                                // potentially-new turn.
+                                cancelled = false;
+                            } else {
+                                running = false;
+                                steer_items.clear();
+                                queue_items.clear();
+                            }
                         }
                     }
                     UiEvent::TurnDone => {
-                        running = false;
+                        if cancelled {
+                            cancelled = false;
+                        } else {
+                            running = false;
+                        }
                         if let Some(next) = local_queue.pop_front() {
                             push_user(&mut chat, &mut history, &mut hist_idx, &next);
                             if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(next)).await {
@@ -633,6 +769,7 @@ async fn run_app(
                                 break;
                             }
                             running = true;
+                            chat.status.clear();
                         }
                     }
                 }
@@ -650,93 +787,7 @@ async fn run_app(
     Ok(())
 }
 
-fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
-    SessionInput {
-        id: opencode_session::runner::new_id(),
-        session_id: session_id.to_string(),
-        delivery,
-        prompt: prompt.to_string(),
-        admitted_seq: 0,
-        promoted_seq: None,
-    }
-}
-
-/// Begin a new worker turn with a fresh, uncancelled cancellation token.
-///
-/// The loop's `cancel` handle and the worker's `sess.cancel` must point at the
-/// same token so double-Esc still targets the live turn. Refreshing on every
-/// turn start is what unblocks submission after a prior double-Esc abort —
-/// without it `sess.cancel` stays permanently cancelled and `run_loop`'s
-/// top-of-loop `is_cancelled()` check rejects every subsequent prompt. FIFO
-/// ordering on the single-consumer command channel guarantees the worker
-/// applies `ResetCancel` before processing the work command.
-///
-/// Returns `false` if the command channel is closed — i.e. the worker task has
-/// died (panic or unexpected exit). The caller treats this as fatal: pushes a
-/// marker and breaks. Because input collection runs on its own thread, the UI
-/// stays interactive (Ctrl+C/D still work) so the user exits cleanly instead
-/// of facing a wedged spinner.
-async fn start_turn(
-    cmd_tx: &mpsc::Sender<UiCmd>,
-    cancel: &mut CancellationToken,
-    cmd: UiCmd,
-) -> bool {
-    let fresh = CancellationToken::new();
-    *cancel = fresh.clone();
-    if cmd_tx.send(UiCmd::ResetCancel(fresh)).await.is_err() {
-        return false;
-    }
-    cmd_tx.send(cmd).await.is_ok()
-}
-
-/// Record that the worker task is gone and the session can no longer progress.
-/// Called at every turn-start site when `start_turn` reports the worker dead;
-/// the caller then breaks the main loop.
-fn worker_dead(chat: &mut ChatView) {
-    chat.push_marker(Line::from(Span::styled(
-        "[worker stopped] session engine exited unexpectedly — please restart",
-        Style::default().fg(Color::Red),
-    )));
-}
-
-/// Estimated tokens of the system prompt that will accompany every request:
-/// `agent.prompt + environment block + active skill`. Tracked separately from
-/// `ChatView::context_used` (which sums the streamed transcript and resets on
-/// compaction) so the context meter reflects the real request size.
-pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {
-    let agent = match resolve_agent(agent_name) {
-        Some(a) => a,
-        None => return 0,
-    };
-    let text = opencode_session::prompt::build_system(&agent, workdir, skill).text();
-    estimate(&text) as u64
-}
-
-fn push_user(
-    chat: &mut ChatView,
-    history: &mut Vec<String>,
-    hist_idx: &mut Option<usize>,
-    text: &str,
-) {
-    history.push(text.to_string());
-    *hist_idx = None;
-    chat.push_marker(Line::from(Span::styled(
-        format!("user: {text}"),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    chat.push_marker(Line::from(""));
-}
-
-fn data_dir_for(workdir: &Path) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    workdir.hash(&mut h);
-    let digest = h.finish();
-    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencode");
-    base.push(format!("{digest:x}"));
-    base
-}
+pub(crate) use crate::app_helpers::{data_dir_for, mk_input, push_user, start_turn, sys_tokens_for, worker_dead};
 
 #[cfg(test)]
 #[path = "app_tests.rs"]

@@ -17,4 +17,5 @@ Keybindings:
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
   Ctrl+U           scroll up
 Mouse:            scroll wheel to scroll transcript; click arrow to follow
+                  drag in the body to select text and copy it to the clipboard (OSC52)
 ";

@@ -5,7 +5,14 @@ use opencode_cli::{init_logging, Cli, Command};
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_logging(cli.verbose);
+
+    // The TUI runs in the alternate screen + raw mode, so any log line written
+    // to stdout/stderr overlays the interface as garbage. Route TUI logs to a
+    // file instead; headless commands keep logging on stdout.
+    let is_tui = matches!(cli.command, Some(Command::Tui))
+        || (cli.command.is_none() && cli.prompt.is_empty());
+    let log_sink = if is_tui { opencode_cli::tui_log_path() } else { None };
+    init_logging(cli.verbose, log_sink.as_deref());
 
     match &cli.command {
         Some(Command::Run { prompt }) => {

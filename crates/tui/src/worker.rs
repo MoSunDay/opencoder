@@ -78,6 +78,24 @@ pub fn gate_compact(running: bool) -> CompactGate {
     }
 }
 
+/// Gate for the `/task` "Clear all" destructive action. A turn in flight
+/// (`running == true`) means a subagent may still be writing to its child
+/// session — clearing then would yank that row out from under it (FK
+/// violation on the next append). Refuse until idle (all subagents returned).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClearAllGate {
+    Run,
+    SkipRunning,
+}
+
+pub fn gate_clear_all(running: bool) -> ClearAllGate {
+    if running {
+        ClearAllGate::SkipRunning
+    } else {
+        ClearAllGate::Run
+    }
+}
+
 /// Process one UI command against a session. Returns `true` when the worker
 /// loop should break (Quit).
 pub async fn process_cmd(
@@ -95,7 +113,7 @@ pub async fn process_cmd(
             if let Err(e) = res {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
             }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
+            let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(&name) {
@@ -108,6 +126,15 @@ pub async fn process_cmd(
                 sess.agent = a;
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
             }
+            // Plan→act handoff: clear the transcript so the act agent starts
+            // from only the final plan, not the full read-only planning noise.
+            // Mirrors compaction — in-memory mutation + TranscriptReset so the
+            // UI rebuilds clean; the append-only store keeps the raw history.
+            if opencode_session::plan_handoff::handoff(sess) {
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
+                    sess.messages.clone(),
+                )));
+            }
             let tx = evt_tx.clone();
             let res = run_session(sess, String::new(), move |sev| {
                 let _ = tx.try_send(UiEvent::Session(sev));
@@ -116,11 +143,15 @@ pub async fn process_cmd(
             if let Err(e) = res {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
             }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
+            let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::Compact => {
             let registry = opencode_session::tools::registry();
-            match opencode_session::compaction::compact(sess, &registry).await {
+            let tx = evt_tx.clone();
+            let mut emit = move |sev: SessionEvent| {
+                let _ = tx.try_send(UiEvent::Session(sev));
+            };
+            match opencode_session::compaction::compact(sess, &registry, &mut emit).await {
                 Ok(Some(summary)) => {
                     let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
                         sess.messages.clone(),
@@ -134,7 +165,7 @@ pub async fn process_cmd(
                     ))));
                 }
             }
-            let _ = evt_tx.try_send(UiEvent::TurnDone);
+            let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SetSkill(body) => {
             sess.skill_prompt = body;
@@ -166,6 +197,18 @@ mod tests {
     #[test]
     fn gate_compact_rejects_when_running() {
         assert_eq!(gate_compact(true), CompactGate::SkipRunning);
+    }
+
+    #[test]
+    fn gate_clear_all_runs_when_idle() {
+        // Idle == all subagents returned → clear is allowed.
+        assert_eq!(gate_clear_all(false), ClearAllGate::Run);
+    }
+
+    #[test]
+    fn gate_clear_all_rejects_when_running() {
+        // A turn/subagent in flight must not be cleared (child session live).
+        assert_eq!(gate_clear_all(true), ClearAllGate::SkipRunning);
     }
 
     // Regression guard for F1: after a `/task` session switch the loop's active

@@ -79,13 +79,10 @@ impl Tool for BashTool {
         }
         combined.push_str(&format!("\n[exit code: {code}]"));
         let is_error = code != 0;
-        if is_error {
-            Ok(ToolOutput::err(combined))
-        } else {
-            Ok(opencode_core::tool::truncate_output(
-                combined,
-                ctx.max_output,
-            ))
-        }
+        Ok(opencode_core::tool::truncate_output_with_error(
+            combined,
+            ctx.max_output,
+            is_error,
+        ))
     }
 }

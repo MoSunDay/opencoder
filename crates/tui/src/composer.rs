@@ -95,8 +95,11 @@ pub fn backspace(text: &str, idx: usize) -> Option<(String, usize)> {
     Some((s, idx - 1))
 }
 
-/// Compute (row, col) display position from a char index in multi-line text.
-pub fn cursor_row_col(input: &str, char_idx: usize) -> (usize, usize) {
+/// Compute (row, col) display position from a char index in multi-line text,
+/// accounting for both explicit newlines and soft-wrapping at `width` display
+/// columns. `width` is the usable text width (excluding borders/prompt).
+pub fn cursor_row_col(input: &str, char_idx: usize, width: u16) -> (usize, usize) {
+    let w = (width as usize).max(1);
     let mut row = 0usize;
     let mut col = 0usize;
     for (i, ch) in input.chars().enumerate() {
@@ -107,7 +110,12 @@ pub fn cursor_row_col(input: &str, char_idx: usize) -> (usize, usize) {
             row += 1;
             col = 0;
         } else {
-            col += char_width(ch);
+            let cw = char_width(ch);
+            if col + cw > w && col > 0 {
+                row += 1;
+                col = 0;
+            }
+            col += cw;
         }
     }
     (row, col)
@@ -234,19 +242,65 @@ mod tests {
 
     #[test]
     fn cursor_row_col_single_line() {
-        assert_eq!(cursor_row_col("hello", 0), (0, 0));
-        assert_eq!(cursor_row_col("hello", 3), (0, 3));
-        assert_eq!(cursor_row_col("hello", 5), (0, 5));
+        assert_eq!(cursor_row_col("hello", 0, 80), (0, 0));
+        assert_eq!(cursor_row_col("hello", 3, 80), (0, 3));
+        assert_eq!(cursor_row_col("hello", 5, 80), (0, 5));
     }
 
     #[test]
     fn cursor_row_col_multi_line() {
         let input = "abc\ndef\nghi";
-        assert_eq!(cursor_row_col(input, 0), (0, 0));
-        assert_eq!(cursor_row_col(input, 3), (0, 3)); // before \n
-        assert_eq!(cursor_row_col(input, 4), (1, 0)); // start of line 2
-        assert_eq!(cursor_row_col(input, 7), (1, 3)); // before second \n
-        assert_eq!(cursor_row_col(input, 8), (2, 0)); // start of line 3
+        assert_eq!(cursor_row_col(input, 0, 80), (0, 0));
+        assert_eq!(cursor_row_col(input, 3, 80), (0, 3)); // before \n
+        assert_eq!(cursor_row_col(input, 4, 80), (1, 0)); // start of line 2
+        assert_eq!(cursor_row_col(input, 7, 80), (1, 3)); // before second \n
+        assert_eq!(cursor_row_col(input, 8, 80), (2, 0)); // start of line 3
+    }
+
+    #[test]
+    fn cursor_row_col_soft_wrap() {
+        // width 5: 5 chars per row; cursor past 5 wraps to next row.
+        assert_eq!(cursor_row_col("aaaaaa", 4, 5), (0, 4));
+        assert_eq!(cursor_row_col("aaaaaa", 5, 5), (0, 5));
+        assert_eq!(cursor_row_col("aaaaaa", 6, 5), (1, 1));
+    }
+
+    #[test]
+    fn cursor_row_col_soft_wrap_edge_cases() {
+        // 1. CJK wide chars (each width 2) cause a soft-wrap mid-text at
+        //    width 5: 你好你好 = 8 display cols → wraps after 2 chars (4 cols)
+        //    since the 3rd char (你, width 2) would exceed col 5.
+        assert_eq!(cursor_row_col("你好你好", 0, 5), (0, 0));
+        assert_eq!(cursor_row_col("你好你好", 1, 5), (0, 2));
+        assert_eq!(cursor_row_col("你好你好", 2, 5), (0, 4));
+        assert_eq!(cursor_row_col("你好你好", 3, 5), (1, 2));
+        assert_eq!(cursor_row_col("你好你好", 4, 5), (1, 4));
+
+        // 2. Minimum width = 1: every char occupies its own row after the first.
+        assert_eq!(cursor_row_col("abc", 0, 1), (0, 0));
+        assert_eq!(cursor_row_col("abc", 1, 1), (0, 1));
+        assert_eq!(cursor_row_col("abc", 2, 1), (1, 1));
+        assert_eq!(cursor_row_col("abc", 3, 1), (2, 1));
+
+        // 3. Empty input: loop never executes regardless of char_idx.
+        assert_eq!(cursor_row_col("", 0, 80), (0, 0));
+        assert_eq!(cursor_row_col("", 5, 80), (0, 0));
+
+        // 4. CJK chars exactly fill the width, then an explicit newline resets.
+        //    你好 = 4 cols, exactly fills width 4 (no soft-wrap since 4 > 4 is
+        //    false), then '\n' moves to the next row.
+        assert_eq!(cursor_row_col("你好\nabc", 0, 4), (0, 0));
+        assert_eq!(cursor_row_col("你好\nabc", 1, 4), (0, 2));
+        assert_eq!(cursor_row_col("你好\nabc", 2, 4), (0, 4));
+        assert_eq!(cursor_row_col("你好\nabc", 3, 4), (1, 0));
+        assert_eq!(cursor_row_col("你好\nabc", 4, 4), (1, 1));
+
+        // 5. Cursor at char_idx 0 is always (0, 0) on any input.
+        assert_eq!(cursor_row_col("hello\nworld", 0, 80), (0, 0));
+        assert_eq!(cursor_row_col("你好", 0, 80), (0, 0));
+
+        // 6. char_idx beyond end of input: the loop processes every char.
+        assert_eq!(cursor_row_col("ab", 100, 80), (0, 2));
     }
 
     #[test]
@@ -254,10 +308,10 @@ mod tests {
         let input = "aaaa\nbbbb\ncccc";
         // Index 2 = row 0 col 2 (display). Move down → row 1 col 2 = index 7.
         let idx = move_cursor_vertical(input, 2, 1);
-        assert_eq!(cursor_row_col(input, idx), (1, 2));
+        assert_eq!(cursor_row_col(input, idx, 80), (1, 2));
         // Index 7 = row 1 col 2. Move up → row 0 col 2 = index 2.
         let idx = move_cursor_vertical(input, 7, -1);
-        assert_eq!(cursor_row_col(input, idx), (0, 2));
+        assert_eq!(cursor_row_col(input, idx, 80), (0, 2));
         // Can't move up from row 0
         assert_eq!(move_cursor_vertical(input, 2, -1), 2);
         // Can't move down from last row

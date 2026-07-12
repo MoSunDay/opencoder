@@ -41,21 +41,31 @@ impl TerminalGuard {
                 | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
             let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
         }
-        execute!(
+        if let Err(e) = execute!(
             stdout,
             EnterAlternateScreen,
             SetCursorStyle::SteadyBar,
             EnableMouseCapture
-        )?;
+        ) {
+            let _ = disable_raw_mode();
+            return Err(e.into());
+        }
 
         // Restore the terminal *before* the previous (default) hook prints the
         // panic, so the message/backtrace lands in a sane terminal. Chained to
         // the prior hook so host-installed hooks still run. The body delegates
         // to `hook_body` so the "restore-then-chain" ordering is unit-testable
         // without constructing a real `PanicInfo`.
+        let main_thread = std::thread::current().id();
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            Self::hook_body(&Self::restore, &prev, info);
+            if std::thread::current().id() == main_thread {
+                Self::hook_body(&Self::restore, &prev, info);
+            } else {
+                // Worker thread panic: chain to the previous hook without
+                // restoring the terminal (main loop may still be rendering).
+                prev(info);
+            }
         }));
 
         Ok(TerminalGuard)

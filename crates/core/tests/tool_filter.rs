@@ -1,6 +1,9 @@
 //! Core misc tests — ToolFilter::allows + truncate_output.
 
-use opencode_core::{tool::truncate_output, ToolFilter, ToolOutput};
+use opencode_core::{
+    tool::{truncate_output, truncate_output_with_error},
+    ToolFilter, ToolOutput,
+};
 
 #[test]
 fn tool_filter_all_allows_everything() {
@@ -49,4 +52,26 @@ fn tool_output_ok_and_err_constructors() {
     let err = ToolOutput::err("failure");
     assert!(err.is_error);
     assert_eq!(err.content, "failure");
+}
+
+#[test]
+fn truncate_output_with_error_preserves_error_flag() {
+    let long = "x".repeat(10_000);
+    let out = truncate_output_with_error(long, 100, true);
+    assert!(out.is_error, "is_error must be preserved when truncating error output");
+    assert!(out.content.contains("truncated"), "truncation marker must be present");
+}
+
+#[test]
+fn truncate_output_with_error_preserves_ok_flag() {
+    let long = "x".repeat(10_000);
+    let out = truncate_output_with_error(long, 100, false);
+    assert!(!out.is_error, "is_error must remain false for non-error output");
+}
+
+#[test]
+fn truncate_output_with_error_no_truncation_when_under_max() {
+    let out = truncate_output_with_error("short".to_string(), 100, true);
+    assert!(out.is_error);
+    assert_eq!(out.content, "short");
 }

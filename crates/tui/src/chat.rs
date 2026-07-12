@@ -29,7 +29,7 @@ pub enum ChatBlock {
         done: bool,
     },
     /// Collapsible reasoning/thinking block with dimmed italic styling.
-    Thinking { text: String, collapsed: bool },
+    Thinking { text: String, collapsed: bool, sealed: bool },
     /// Tool invocation: header line + truncated output lines.
     Tool {
         header: Line<'static>,
@@ -254,7 +254,19 @@ impl ChatView {
     }
 
     /// Render the current assistant block's raw text as markdown (idempotent).
+    /// Also seals a trailing unsealed Thinking block so its tokens are counted
+    /// exactly once at the turn boundary (covers reasoning-only turns).
     pub fn finalize_assistant(&mut self) {
+        // Reasoning → non-text transition: count a trailing unsealed Thinking
+        // block once. Mutually exclusive with the Assistant branch below since
+        // `last_mut()` is either a Thinking or an Assistant.
+        if let Some(ChatBlock::Thinking { text, sealed, .. }) = self.blocks.last_mut() {
+            if !*sealed {
+                self.context_used += estimate(text) as u64;
+                *sealed = true;
+            }
+        }
+        // Assistant text finalization: render markdown + count once.
         if let Some(ChatBlock::Assistant {
             raw,
             rendered,
@@ -262,6 +274,7 @@ impl ChatView {
         }) = self.blocks.last_mut()
         {
             if !*done {
+                self.context_used += estimate(raw) as u64;
                 *rendered = crate::markdown::render(raw);
                 *done = true;
             }
@@ -280,10 +293,13 @@ impl ChatView {
     /// Child subagent tokens are excluded — each child ChatView tracks its own
     /// subtree via its own `apply` (events route through `SubagentChild`).
     fn track_context(&mut self, ev: &SessionEvent) {
+        // Note: TextDelta/ReasoningDelta are intentionally NOT counted here.
+        // Counting per-delta made the bottom ctx% bar jump on every token.
+        // Instead they are counted once at turn boundaries via
+        // `finalize_assistant` (and `ensure_assistant_open` for the
+        // reasoning → text transition). The discrete events below are kept
+        // immediate since they are low-frequency and not part of streaming.
         match ev {
-            SessionEvent::TextDelta(t) | SessionEvent::ReasoningDelta(t) => {
-                self.context_used += estimate(t) as u64;
-            }
             SessionEvent::ToolStart { input, .. } => {
                 self.context_used += estimate(&input.to_string()) as u64;
             }
@@ -329,7 +345,7 @@ impl ChatView {
                         raw.split('\n').count()
                     };
                 }
-                ChatBlock::Thinking { text, collapsed } => {
+                ChatBlock::Thinking { text, collapsed, .. } => {
                     out.push(ThinkingHeader {
                         block_idx,
                         header_line_idx: line_idx,
@@ -375,7 +391,7 @@ impl ChatView {
                         raw.split('\n').count()
                     };
                 }
-                ChatBlock::Thinking { text, collapsed } => {
+                ChatBlock::Thinking { text, collapsed, .. } => {
                     line_idx += 1;
                     if !collapsed {
                         line_idx += text.lines().count();
@@ -437,7 +453,7 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Thinking { text, collapsed } => {
+                ChatBlock::Thinking { text, collapsed, .. } => {
                     let count = text.lines().count().max(1);
                     if *collapsed {
                         out.push(Line::from(Span::styled(
@@ -573,6 +589,14 @@ impl ChatView {
             self.blocks.last(),
             Some(ChatBlock::Assistant { done: false, .. })
         ) {
+            // Seal a trailing unsealed Thinking block so its tokens are counted
+            // exactly once before it stops being the last block.
+            if let Some(ChatBlock::Thinking { text, sealed, .. }) = self.blocks.last_mut() {
+                if !*sealed {
+                    self.context_used += estimate(text) as u64;
+                    *sealed = true;
+                }
+            }
             self.blocks.push(ChatBlock::Assistant {
                 raw: String::new(),
                 rendered: Vec::new(),
@@ -582,10 +606,14 @@ impl ChatView {
     }
 
     fn ensure_thinking_open(&mut self) {
-        if !matches!(self.blocks.last(), Some(ChatBlock::Thinking { .. })) {
+        if !matches!(
+            self.blocks.last(),
+            Some(ChatBlock::Thinking { sealed: false, .. })
+        ) {
             self.blocks.push(ChatBlock::Thinking {
                 text: String::new(),
                 collapsed: true,
+                sealed: false,
             });
         }
     }
@@ -626,3 +654,7 @@ pub fn block_text(view: &ChatView) -> String {
 #[cfg(test)]
 #[path = "chat_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "subagent_tests.rs"]
+mod subagent_tests;

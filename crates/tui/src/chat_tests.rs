@@ -195,60 +195,54 @@
     }
 
     #[test]
-    fn subagent_events_render() {
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta("parent asks subagent".into()));
-        v.apply(&SessionEvent::SubagentStart {
-            id: "s1".into(),
-            kind: "explore".into(),
-            prompt: "search".into(),
-            child_session_id: "sub-1".into(),
-        });
-        assert!(block_text(&v).contains("subagent"));
-        assert!(block_text(&v).contains("explore"));
-        assert_eq!(v.subagents_total, 1);
-        assert_eq!(v.subagents_running, 1);
-
-        // Child events routed into the subagent block's view.
-        let parent_ctx = v.context_used;
-        assert!(parent_ctx > 0, "precondition: parent has its own tokens");
-        v.apply(&SessionEvent::SubagentChild {
-            id: "s1".into(),
-            ev: Box::new(SessionEvent::TextDelta("child output".into())),
-        });
-        assert_eq!(v.context_used, parent_ctx, "parent must not include child tokens");
-        // No inline expansion — child output is always hidden in the parent.
-        assert!(!block_text(&v).contains("child output"));
-        // Child view itself contains the output (visible via ctx-switch).
-        if let Some(ChatBlock::Subagent { view, .. }) = v
-            .blocks
-            .iter()
-            .find(|b| matches!(b, ChatBlock::Subagent { .. }))
-        {
-            assert!(block_text(view).contains("child output"));
-            // Child view tracks its own context.
-            assert!(view.context_used > 0);
-        } else {
-            panic!("expected a Subagent block");
-        }
-
-        // SubagentEnd marks done and decrements running; summary shows on header.
-        v.apply(&SessionEvent::SubagentEnd {
-            id: "s1".into(),
-            ok: true,
-            summary: "found it".into(),
-        });
-        assert_eq!(v.subagents_running, 0);
-        assert_eq!(v.subagents_total, 1);
-        assert!(block_text(&v).contains("found it"));
-        assert_eq!(v.context_used, parent_ctx + estimate("found it") as u64);
-    }
-
-    #[test]
     fn error_renders() {
         let mut v = ChatView::default();
         v.apply(&SessionEvent::Error("broke".into()));
         assert!(block_text(&v).contains("broke"));
+    }
+
+
+    #[test]
+    fn ctx_accumulates_once_at_turn_end_not_per_delta() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta("hello ".into()));
+        v.apply(&SessionEvent::TextDelta("world".into()));
+        // Streaming: no per-delta accumulation, so ctx stays at zero and the
+        // bottom ctx% bar does not jump on every token.
+        assert_eq!(v.context_used, 0, "no accumulation during streaming");
+        v.apply(&SessionEvent::Done);
+        // Turn boundary: the full assistant text is counted exactly once.
+        assert_eq!(v.context_used, estimate("hello world") as u64);
+        // Finalizing again must not double-count (idempotent `done` guard).
+        v.finalize_assistant();
+        assert_eq!(v.context_used, estimate("hello world") as u64);
+    }
+
+    #[test]
+    fn ctx_counts_reasoning_once_at_finalize() {
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::ReasoningDelta("think ".into()));
+        v.apply(&SessionEvent::ReasoningDelta("more".into()));
+        assert_eq!(v.context_used, 0, "reasoning not counted while streaming");
+        // Reasoning -> text transition seals the thinking block and counts it
+        // once, before the assistant text is counted.
+        v.apply(&SessionEvent::TextDelta("answer".into()));
+        assert_eq!(
+            v.context_used,
+            estimate("think more") as u64,
+            "reasoning counted once on transition; answer not yet counted"
+        );
+        v.apply(&SessionEvent::Done);
+        assert_eq!(
+            v.context_used,
+            estimate("think more") as u64 + estimate("answer") as u64
+        );
+        // Re-finalizing must not double-count.
+        v.finalize_assistant();
+        assert_eq!(
+            v.context_used,
+            estimate("think more") as u64 + estimate("answer") as u64
+        );
     }
 
     #[test]

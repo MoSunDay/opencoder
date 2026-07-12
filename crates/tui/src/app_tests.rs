@@ -944,18 +944,15 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     let workdir = std::path::PathBuf::from("/tmp");
 
     let (clean, unresolved) = with_home(dir.path(), || {
-        let rt = tokio::runtime::Handle::current();
-        tokio::task::block_in_place(|| {
-            rt.block_on(crate::app_helpers::apply_skill_tokens(
-                "hello {$alpha} world",
-                &mut active_skill,
-                &mut active_skill_body,
-                &mut sys_tokens,
-                "act",
-                &workdir,
-                &skill_handle,
-            ))
-        })
+        crate::app_helpers::apply_skill_tokens(
+            "hello {$alpha} world",
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            &workdir,
+            &skill_handle,
+        )
     });
 
     // Token stripped from clean text; name not unresolved.
@@ -987,18 +984,15 @@ async fn apply_skill_tokens_reports_unknown_skill() {
     let workdir = std::path::PathBuf::from("/tmp");
 
     let (clean, unresolved) = with_home(dir.path(), || {
-        let rt = tokio::runtime::Handle::current();
-        tokio::task::block_in_place(|| {
-            rt.block_on(crate::app_helpers::apply_skill_tokens(
-                "go {$ghost} now",
-                &mut active_skill,
-                &mut active_skill_body,
-                &mut sys_tokens,
-                "act",
-                &workdir,
-                &skill_handle,
-            ))
-        })
+        crate::app_helpers::apply_skill_tokens(
+            "go {$ghost} now",
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            &workdir,
+            &skill_handle,
+        )
     });
 
     assert_eq!(clean, "go  now");
@@ -1027,18 +1021,15 @@ async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
     let workdir = std::path::PathBuf::from("/tmp");
 
     let (clean, unresolved) = with_home(dir.path(), || {
-        let rt = tokio::runtime::Handle::current();
-        tokio::task::block_in_place(|| {
-            rt.block_on(crate::app_helpers::apply_skill_tokens(
-                "plain text no tokens",
-                &mut active_skill,
-                &mut active_skill_body,
-                &mut sys_tokens,
-                "act",
-                &workdir,
-                &skill_handle,
-            ))
-        })
+        crate::app_helpers::apply_skill_tokens(
+            "plain text no tokens",
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            &workdir,
+            &skill_handle,
+        )
     });
 
     // No tokens -> text unchanged, nothing unresolved, sticky skill preserved.

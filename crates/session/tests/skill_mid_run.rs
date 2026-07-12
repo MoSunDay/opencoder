@@ -93,7 +93,7 @@ async fn seed_session(store: &Arc<dyn Store>) {
 #[tokio::test]
 async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
     let store = mem_store().await;
-    let mock = Arc::new(
+    let mock: Arc<MockChatClient> = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn(1)])
             .push_script(vec![done_turn("done")]),
@@ -190,7 +190,7 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
 #[tokio::test]
 async fn skill_set_mid_run_appears_in_queue_followup_turn() {
     let store = mem_store().await;
-    let mock = Arc::new(
+    let mock: Arc<MockChatClient> = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn(1)])
             .push_script(vec![done_turn("d1")])
@@ -307,4 +307,68 @@ async fn with_skill_builder_sets_skill() {
     let s = SessionState::new("ws", agent, config(), mock, dir.path().to_path_buf())
         .with_skill("BUILDER-SKILL".into());
     assert_eq!(s.skill_prompt_cloned().as_deref(), Some("BUILDER-SKILL"));
+}
+
+/// Skill-only submit: when the prompt is empty but a skill is active, the
+/// runner must still execute a turn (drain mode) so the model reads the
+/// skill body from the system prompt and acts on it.
+///
+/// Flow:
+/// 1. Skill is set on the session via `set_skill` (mirrors TUI
+///    `apply_skill_tokens` writing to the shared `Arc<Mutex>`).
+/// 2. `run` is called with an empty prompt — no user message is recorded.
+/// 3. `run_one_llm_call` reads `skill_prompt_cloned()` → finds the skill.
+/// 4. Turn: done (no tool calls) → idle → no queue → Done.
+#[tokio::test]
+async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
+    let store = mem_store().await;
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("skill executed")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut s = SessionState::new(
+        "skill-only-submit",
+        agent,
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone());
+
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "skill-only-submit".into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+        })
+        .await
+        .unwrap();
+
+    // Set the skill before the run.
+    s.set_skill(Some("DO-THE-THING".into()));
+
+    // Empty prompt — drain mode: no user message, but a turn must still fire.
+    run(&mut s, String::new(), |_| {}).await.unwrap();
+
+    let requests = mock.requests();
+    assert_eq!(
+        requests.len(),
+        1,
+        "empty-prompt skill submit must trigger exactly one LLM call, got {}",
+        requests.len()
+    );
+
+    let system = system_content(&requests[0]);
+    assert!(
+        system.contains("DO-THE-THING"),
+        "system prompt must contain the skill body: {system}"
+    );
 }

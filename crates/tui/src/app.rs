@@ -535,15 +535,31 @@ async fn run_app(
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                ).await;
+                                );
                                 let clean = clean.trim().to_string();
                                 if clean.is_empty() {
-                                    // Skill-only submit: the skill was set above;
-                                    // show a marker but start no LLM turn.
                                     if active_skill.is_some() {
                                         chat.push_marker(Line::from(Span::styled(
                                             format!("[skill: {}]", active_skill.as_deref().unwrap_or("")),
                                             Style::default().fg(Color::Yellow))));
+                                        if !running {
+                                            // Skill-only submit: start a drain-mode turn
+                                            // (empty prompt) so the model reads the injected
+                                            // skill body and acts on it immediately.
+                                            if !start_turn(
+                                                &cmd_tx,
+                                                &mut cancel,
+                                                UiCmd::Prompt(String::new()),
+                                            )
+                                            .await
+                                            {
+                                                worker_dead(&mut chat);
+                                                break;
+                                            }
+                                            running = true;
+                                            follow = true;
+                                            chat.status.clear();
+                                        }
                                     }
                                 } else if running {
                                     if let Ok(seq) = store
@@ -569,7 +585,7 @@ async fn run_app(
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                ).await;
+                                );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await;
@@ -583,7 +599,7 @@ async fn run_app(
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                ).await;
+                                );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, clean)).await {

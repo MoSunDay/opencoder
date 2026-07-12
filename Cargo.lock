@@ -1447,6 +1447,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "dirs",
+ "libc",
  "opencode-core",
  "opencode-llm",
  "opencode-session",

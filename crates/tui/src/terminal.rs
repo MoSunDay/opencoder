@@ -13,6 +13,8 @@
 //! *before* the default hook prints, so a backtrace is readable in the restored
 //! terminal rather than buried in the alternate screen.
 
+use std::fmt;
+
 use anyhow::Result;
 
 use crossterm::cursor::SetCursorStyle;
@@ -48,11 +50,12 @@ impl TerminalGuard {
 
         // Restore the terminal *before* the previous (default) hook prints the
         // panic, so the message/backtrace lands in a sane terminal. Chained to
-        // the prior hook so host-installed hooks still run.
+        // the prior hook so host-installed hooks still run. The body delegates
+        // to `hook_body` so the "restore-then-chain" ordering is unit-testable
+        // without constructing a real `PanicInfo`.
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            Self::restore();
-            prev(info);
+            Self::hook_body(&Self::restore, &prev, info);
         }));
 
         Ok(TerminalGuard)
@@ -62,11 +65,23 @@ impl TerminalGuard {
     /// own errors so it is safe to invoke from a panic hook and from `Drop`.
     pub(crate) fn restore() {
         let _ = disable_raw_mode();
-        {
-            use crossterm::event::PopKeyboardEnhancementFlags;
-            let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
-        }
-        let _ = execute!(std::io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let mut buf = String::new();
+        let _ = write_restore(&mut buf);
+        let mut out = std::io::stdout();
+        let _ = out.write_all(buf.as_bytes());
+        let _ = out.flush();
+    }
+
+    /// The panic-hook body in isolation: restore the terminal first, then chain
+    /// to the previous hook. Generic over the info type `I` so the ordering is
+    /// unit-testable with a stand-in (`()`) instead of a real `PanicInfo`.
+    fn hook_body<R, P, I>(restore: &R, prev: &P, info: &I)
+    where
+        R: Fn() + ?Sized,
+        P: Fn(&I) + ?Sized,
+    {
+        restore();
+        prev(info);
     }
 }
 
@@ -75,6 +90,21 @@ impl Drop for TerminalGuard {
         Self::restore();
     }
 }
+
+/// Write the ANSI restoration sequences (pop Kitty enhancement, disable mouse
+/// capture, leave the alternate screen) to `w`. Single source of truth for what
+/// `TerminalGuard::restore` emits — factored out so the exact payload is
+/// unit-testable without a real TTY. Targets the unix ANSI path.
+fn write_restore<W: fmt::Write>(w: &mut W) -> fmt::Result {
+    use crossterm::event::PopKeyboardEnhancementFlags;
+    use crossterm::Command;
+    PopKeyboardEnhancementFlags.write_ansi(w)?;
+    DisableMouseCapture.write_ansi(w)?;
+    LeaveAlternateScreen.write_ansi(w)?;
+    Ok(())
+}
+
+use std::io::Write;
 
 #[cfg(test)]
 mod tests {
@@ -87,5 +117,55 @@ mod tests {
     fn restore_is_idempotent_without_a_tty() {
         TerminalGuard::restore();
         TerminalGuard::restore();
+    }
+
+    /// The restoration payload must carry the three sequences that reverse the
+    /// TUI-mode setup: pop Kitty keyboard enhancement, disable mouse capture,
+    /// leave the alternate screen. A missing one leaves the terminal partly
+    /// bricked (e.g. mouse still captured, or stuck in alt-screen) — exactly
+    /// the "frozen terminal" symptom this guard exists to prevent.
+    #[test]
+    fn write_restore_emits_all_three_sequences() {
+        use crossterm::event::PopKeyboardEnhancementFlags;
+        use crossterm::Command;
+
+        // Independent references for each expected sequence.
+        let mut want_pop = String::new();
+        let _ = PopKeyboardEnhancementFlags.write_ansi(&mut want_pop);
+        let mut want_mouse = String::new();
+        let _ = DisableMouseCapture.write_ansi(&mut want_mouse);
+        let mut want_alt = String::new();
+        let _ = LeaveAlternateScreen.write_ansi(&mut want_alt);
+
+        let mut got = String::new();
+        write_restore(&mut got).unwrap();
+
+        assert!(got.contains(&want_pop), "missing pop-kitty sequence: {got:?}");
+        assert!(
+            got.contains(&want_mouse),
+            "missing disable-mouse sequence: {got:?}"
+        );
+        assert!(
+            got.contains(&want_alt),
+            "missing leave-alt-screen sequence: {got:?}"
+        );
+    }
+
+    /// The panic hook must restore the terminal *before* chaining to the
+    /// previous (default) hook — otherwise the backtrace prints inside the
+    /// alternate screen and is unreadable. Verified with stand-in closures.
+    #[test]
+    fn hook_body_restores_before_chaining_to_prev() {
+        let order = std::cell::RefCell::new(Vec::<&str>::new());
+        {
+            let restore = || order.borrow_mut().push("restore");
+            let prev = |_: &()| order.borrow_mut().push("prev");
+            TerminalGuard::hook_body(&restore, &prev, &());
+        }
+        assert_eq!(
+            order.into_inner(),
+            vec!["restore", "prev"],
+            "restore must precede the chained prev hook"
+        );
     }
 }

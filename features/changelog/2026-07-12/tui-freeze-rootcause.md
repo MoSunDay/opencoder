@@ -44,8 +44,11 @@ Commit: (working-tree, pre-initial-commit)
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
+| **核心命题：单按 Esc 在有界时间内被投递（冻死失败模式结构消失的直接证据）** | `lone_esc_is_delivered_within_bound` | `crates/tui/tests/input_pty.rs`（新增，pty 表征） |
 | 输入采集线程 receiver drop 即在超时内退出（关闭契约） | `pump_exits_when_receiver_dropped` | `crates/tui/src/input.rs`（新增） |
 | 终端恢复幂等、无 TTY 也不 panic | `restore_is_idempotent_without_a_tty` | `crates/tui/src/terminal.rs`（新增） |
+| `write_restore` 依序发出全部三条恢复序列（raw→Kitty→鼠标） | `write_restore_emits_all_three_sequences` | `crates/tui/src/terminal.rs`（新增） |
+| panic hook 先恢复终端再链到原 hook（backtrace 落在已恢复终端） | `hook_body_restores_before_chaining_to_prev` | `crates/tui/src/terminal.rs`（新增） |
 | worker 死亡：start_turn 在通道关闭时返 false | `start_turn_reports_false_when_worker_is_dead` | `crates/tui/src/app_tests.rs`（新增） |
 | worker_dead 推可见 marker | `worker_dead_pushes_a_marker` | `crates/tui/src/app_tests.rs`（新增） |
 | 双击 Esc 硬中止仍即时（既有回归） | `cancel_hard_aborts_a_running_tool` | `crates/session/tests/hard_abort.rs` |
@@ -53,10 +56,16 @@ Commit: (working-tree, pre-initial-commit)
 | cancel-token 刷新（双击 Esc 后可提交，既有回归） | `reset_cancel_replaces_with_fresh_uncancelled_token` | `crates/tui/src/worker.rs` |
 | Kitty Ctrl+C/Ctrl+D 退出（既有回归） | `kitty_ctrl_c_quits` / `kitty_ctrl_d_quits` | `crates/tui/src/app_tests.rs` |
 
-- 全量回归：`cargo test --workspace` → **306 passed / 0 failed**
-  （tui: 119 unit + 2 端到端集成；余为 cli/core/llm/session/store/web）
+### pty 表征测试（核心命题的直接证据）
+
+`lone_esc_is_delivered_within_bound`（`crates/tui/tests/input_pty.rs`）用 `openpty`+`dup2(slave, fd 0)` 造一个伪终端，push Kitty 键盘增强，向 master 写单个 `\x1b`（Esc），断言 `spawn_input_pump` 的 receiver 在 **2 s** 内收到 `Event::Key(Esc)`。
+- 该测试**直接**验证"单按 Esc 不再可能无限挂死"这一核心命题——在真实 tty 语义下、在 crossterm 0.28 的 `poll`/`read` 路径上、有界时间内投递成功。
+- 实现注意：pump 线程须 detach（不 `join`）——fd teardown 与 crossterm 的 mio 注册交互会令 `join` 误挂；线程靠 `is_closed()` 自退，无需 join。
+
+- 全量回归：`cargo test --workspace` → **310 passed / 0 failed**
+  （tui: 121 unit + 1 pty 表征 + 2 并发 subagent 端到端；余为 cli/core/llm/session/store/web）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → **零警告**
-- 行数：`input.rs` 88 ≤ 400；`terminal.rs` 91 ≤ 400；`app.rs` 743 ≤ 800
+- 行数：`input.rs` 88 ≤ 400；`terminal.rs` 171 ≤ 400；`app.rs` 766 ≤ 800；`input_pty.rs` 101 ≤ 400
 
 ## 为什么这版不是补丁
 

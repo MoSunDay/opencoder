@@ -256,8 +256,7 @@ pub fn copy_osc52(text: &str) {
 /// Minimal RFC-4648 base64 encoder (standard alphabet, `=` padding). Vendored
 /// to avoid pulling in a dependency for the one place clipboard copy needs it.
 fn base64_encode(input: &[u8]) -> String {
-    const T: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;

@@ -90,6 +90,13 @@ impl SessionUiState {
 fn replay_one(chat: &mut ChatView, msg: &Message) {
     match msg.role {
         Role::User => {
+            // Synthetic user messages (steer/queue promotions, plan->act
+            // handoff, compaction summaries) are internal — don't render them
+            // as visible `user:` blocks during resume/replay, matching how the
+            // live event stream and compaction layer treat them.
+            if msg.synthetic {
+                return;
+            }
             let text: String = msg
                 .blocks
                 .iter()
@@ -400,6 +407,37 @@ mod tests {
         assert_eq!(snap.active_skill, skill);
         assert_eq!(snap.active_skill_body, skill_body);
         assert_eq!(snap.agent_name, "act");
+    }
+
+    fn make_user(id: &str, text: &str, synthetic: bool) -> Message {
+        let mut m = Message::user(id, text);
+        m.synthetic = synthetic;
+        m
+    }
+
+    #[test]
+    fn replay_skips_synthetic_user_messages() {
+        // Synthetic user messages (steer/queue promotion, plan->act handoff,
+        // compaction summary) must NOT appear as visible `user:` blocks on
+        // resume/replay — only real typed prompts should.
+        let msgs = vec![
+            make_user("u1", "real prompt", false),
+            make_user("u2", "[synthetic steer body]", true),
+            make_user("u3", "another real prompt", false),
+        ];
+        let chat = replay_messages("act", &msgs);
+        let flat = chat.flatten();
+        let joined: String = flat
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .map(|s| s.content.clone())
+            .collect::<String>();
+        assert!(joined.contains("real prompt"));
+        assert!(joined.contains("another real prompt"));
+        assert!(
+            !joined.contains("synthetic steer body"),
+            "synthetic user message leaked into replay: {joined}"
+        );
     }
 
     #[test]

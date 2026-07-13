@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use opencoder_core::{resolve_agent, Config};
+use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
@@ -316,7 +316,8 @@ async fn with_skill_builder_sets_skill() {
 /// Flow:
 /// 1. Skill is set on the session via `set_skill` (mirrors TUI
 ///    `apply_skill_tokens` writing to the shared `Arc<Mutex>`).
-/// 2. `run` is called with an empty prompt — no user message is recorded.
+/// 2. `run` is called with an empty prompt — a synthetic trigger user
+///    message is injected so the model records a user turn.
 /// 3. `run_one_llm_call` reads `skill_prompt_cloned()` → finds the skill.
 /// 4. Turn: done (no tool calls) → idle → no queue → Done.
 #[tokio::test]
@@ -355,7 +356,8 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
     // Set the skill before the run.
     s.set_skill(Some("DO-THE-THING".into()));
 
-    // Empty prompt — drain mode: no user message, but a turn must still fire.
+    // Empty prompt with an active skill: a synthetic trigger user message is
+    // injected so the model records a user turn and acts on the skill body.
     run(&mut s, String::new(), |_| {}).await.unwrap();
 
     let requests = mock.requests();
@@ -370,5 +372,88 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
     assert!(
         system.contains("DO-THE-THING"),
         "system prompt must contain the skill body: {system}"
+    );
+
+    // A synthetic trigger user message must be recorded for skill-only submits
+    // so the model acts on the skill body rather than seeing it passively.
+    assert!(
+        s.messages.iter().any(|m| {
+            m.role == Role::User && m.text().contains("active skill is now in effect")
+        }),
+        "expected a user-role trigger message after skill-only submit"
+    );
+}
+
+/// Skill-only submit records the synthetic trigger as the final user turn.
+///
+/// After a skill-only submit, the last recorded message must be the synthetic
+/// trigger (user-role, `synthetic == true`) — verifying the model acts on it
+/// as the most recent turn, rather than only seeing the skill body passively
+/// in the system prompt.
+#[tokio::test]
+async fn skill_only_empty_prompt_records_user_trigger_message() {
+    let store = mem_store().await;
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("skill executed")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut s = SessionState::new(
+        "skill-only-trigger",
+        agent,
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone());
+
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "skill-only-trigger".into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+        })
+        .await
+        .unwrap();
+
+    // Set the skill before the run.
+    s.set_skill(Some("MY-SKILL-BODY".into()));
+
+    // Empty prompt with an active skill: a synthetic trigger user message is
+    // injected so the model records a user turn.
+    run(&mut s, String::new(), |_| {}).await.unwrap();
+
+    // The recorded transcript is [user trigger (synthetic), assistant
+    // response]: the last *user*-role message must be the synthetic trigger
+    // — i.e. the trigger is the most recent user turn the model acted on.
+    let last_user = s
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::User)
+        .expect("expected a recorded user message");
+    assert!(
+        last_user.synthetic,
+        "the last user message must be the synthetic trigger"
+    );
+    assert!(
+        last_user.text().contains("active skill is now in effect"),
+        "the trigger text must reference the active skill: {}",
+        last_user.text()
+    );
+
+    // The model must have acted on the trigger: the final recorded message is
+    // an assistant response following the trigger.
+    assert_eq!(
+        s.messages.last().unwrap().role,
+        Role::Assistant,
+        "the final message must be the assistant response acting on the trigger"
     );
 }

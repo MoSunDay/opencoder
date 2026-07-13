@@ -121,12 +121,23 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // An empty prompt means "drain mode": don't push a synthetic user message —
-    // the web drain relies on admitted steers/queues being claimed at turn
-    // boundaries to supply the actual user input.
+    // A non-empty prompt records a real user message. An empty prompt means
+    // "drain mode": the web drain relies on admitted steers/queues being
+    // claimed at turn boundaries to supply the actual user input, and the web
+    // has no skill support (`skill_prompt` is `None`). But for skill-only
+    // submits (empty prompt with an active skill), inject a synthetic trigger
+    // message so the model records a user turn and acts on the skill body in
+    // the system prompt instead of treating it passively.
     if !user_text.trim().is_empty() {
         let user = Message::user(new_id(), user_text);
         session.record(user).await;
+    } else if session.skill_prompt_cloned().is_some() {
+        let mut msg = Message::user(
+            new_id(),
+            "The active skill is now in effect. Begin executing it now.",
+        );
+        msg.synthetic = true;
+        session.record(msg).await;
     }
     run_loop(session, registry, &mut on_event).await
 }

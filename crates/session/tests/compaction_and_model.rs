@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use opencoder_core::{resolve_agent, Config, Message};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{compaction::should_compact, run, SessionState};
 
@@ -49,6 +49,35 @@ async fn session_with(
 fn big_user_message(id: &str, chars: usize) -> Message {
     let text: String = "a".repeat(chars);
     Message::user(id, text)
+}
+
+/// An assistant message carrying a tool-use block (simulates a tool-call turn).
+fn assistant_with_tool(id: &str, tool_id: &str) -> Message {
+    let mut m = Message::assistant(id);
+    m.blocks.push(ContentBlock::ToolUse {
+        id: tool_id.into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo hi"}),
+    });
+    m
+}
+
+/// A tool-result message (simulates the tool execution result).
+fn tool_result(id: &str, tool_id: &str, content: &str) -> Message {
+    Message {
+        id: id.into(),
+        role: Role::Tool,
+        blocks: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_id.into(),
+            content: content.into(),
+            is_error: false,
+        }],
+        model: None,
+        agent: None,
+        usage: MessageUsage::default(),
+        created_at: 0,
+        synthetic: false,
+    }
 }
 
 #[tokio::test]
@@ -201,5 +230,75 @@ async fn reported_tokens_uses_input_only_not_total() {
     assert!(
         should_compact(&s),
         "must trigger when input_tokens exceeds budget"
+    );
+}
+
+#[tokio::test]
+async fn compaction_fires_in_tool_intensive_single_user_session() {
+    // Regression: with the old split_index (only real user messages counted as
+    // turn boundaries), a single-user session with many tool roundtrips could
+    // never compact — the big transcript kept growing until the provider
+    // rejected it for context length. With the fix, assistant-after-tool is a
+    // turn boundary, so compaction fires and the head (incl. the original task)
+    // gets summarized.
+    let mut config = base_config();
+    config.context_limit = Some(2_000);
+    config.compaction.reserved = 100; // usable = 1900
+    config.compaction.context_threshold = 10_000; // usable binds
+    config.compaction.tail_turns = 2;
+
+    // Mock: call 1 = compaction summary, call 2 = regular turn (done, no tools).
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done_event("SUMMARY")])
+            .with_default(vec![done_event("ok")]),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir, mut s) = session_with(config, client).await;
+
+    // Simulate a tool-intensive single-user session that has grown large:
+    //   user(big) → assistant(tool) → tool → assistant(tool) → tool
+    s.messages.push(big_user_message("u1", 8_000));
+    s.messages.push(assistant_with_tool("a1", "call_1"));
+    s.messages.push(tool_result("t1", "call_1", "result 1"));
+    s.messages.push(assistant_with_tool("a2", "call_2"));
+    s.messages.push(tool_result("t2", "call_2", "result 2"));
+
+    // Snapshot the total character footprint BEFORE run adds its own messages.
+    let chars_before: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    // Compaction must have fired: the big user message (8000 chars) was
+    // replaced by a short summary, so the footprint must shrink dramatically.
+    let chars_after: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+    assert!(
+        chars_after < chars_before / 2,
+        "transcript footprint must shrink by >50% after compaction (was {}, now {})",
+        chars_before,
+        chars_after
+    );
+    // First message is the synthetic summary.
+    assert!(
+        s.messages[0].synthetic,
+        "first message must be the synthetic compaction summary"
+    );
+    assert!(
+        s.messages[0]
+            .text()
+            .starts_with("[Conversation summary so far]"),
+        "first message must carry the compaction-summary prefix"
+    );
+    // The big user message is gone (summarized into the head).
+    assert!(
+        !s.messages.iter().any(|m| m.id == "u1"),
+        "the big user message must have been summarized away"
+    );
+    // At least one compaction LLM call happened (the summary call).
+    let reqs = mock.requests();
+    assert!(
+        reqs.len() >= 2,
+        "need >=2 calls (summary + turn), got {}",
+        reqs.len()
     );
 }

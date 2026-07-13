@@ -93,6 +93,7 @@ pub(crate) fn render(
     model_menu: Option<&ModelMenu>,
     hits: &mut MouseHits,
     selection: Option<crate::selection::SelRange>,
+    copy_status: Option<&str>,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -166,6 +167,8 @@ pub(crate) fn render(
             follow,
             composer_scroll,
             &mut hits.jump_btn,
+            inner_w,
+            prompt_w,
         );
         let composer_area = chunks[ci];
         ci += 1;
@@ -197,35 +200,11 @@ pub(crate) fn render(
             crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
         }
         if let Some(text) = mode_flash {
-            let pad = 1u16;
-            let text_w = text.chars().count() as u16;
-            let chip_w = text_w + pad * 2;
-            let avail = composer_area.width.saturating_sub(2);
-            let w = chip_w.min(avail);
-            let row = composer_area.y;
-            let x = composer_area.x + composer_area.width.saturating_sub(w).saturating_sub(1);
-            let chip_rect = Rect {
-                x,
-                y: row,
-                width: w,
-                height: 1,
-            };
-            f.render_widget(Clear, chip_rect);
-            // Plan/act flash is themed to match the agent chip: Yellow for
-            // read-only plan mode, Cyan for act (issue #6 — was Magenta, which
-            // clashed with the Cyan-themed UI).
             let is_plan = text.contains("plan");
-            let bg = mode_flash_bg(is_plan);
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!(" {text} "),
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(bg)
-                        .add_modifier(Modifier::BOLD),
-                ))),
-                chip_rect,
-            );
+            render_status_chip(f, composer_area, text, mode_flash_bg(is_plan));
+        }
+        if let Some(text) = copy_status {
+            render_status_chip(f, composer_area, text, Color::Green);
         }
         place_cursor(
             f,
@@ -452,6 +431,7 @@ fn record_subagent_hits(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_composer(
     f: &mut Frame,
     area: Rect,
@@ -459,14 +439,23 @@ fn render_composer(
     follow: bool,
     scroll: u16,
     jump_btn: &mut Option<Rect>,
+    inner_w: u16,
+    prompt_w: u16,
 ) {
     let block = Block::default().borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Pre-split the input into visual rows using the SAME `wrap_rows` model the
+    // cursor math derives from, then render each row as an explicit `Line`
+    // WITHOUT ratatui's own `.wrap()`. This is the fix for cursor misalignment
+    // after soft-wrapping: previously the renderer used ratatui word-wrap while
+    // the cursor math used greedy char-wrap, so wrapped points diverged.
+    let rows = composer::wrap_rows(input, inner_w, prompt_w);
+    let chars: Vec<char> = input.chars().collect();
     let mut lines: Vec<Line> = Vec::new();
-    for (i, segment) in input.split('\n').enumerate() {
+    for (ri, vr) in rows.iter().enumerate() {
         let mut spans: Vec<Span> = Vec::new();
-        if i == 0 {
+        if ri == 0 {
             spans.push(Span::styled(
                 "\u{276f} ",
                 Style::default()
@@ -474,13 +463,12 @@ fn render_composer(
                     .add_modifier(Modifier::BOLD),
             ));
         }
-        spans.push(Span::raw(segment.to_string()));
+        let text: String = chars[vr.start..vr.end].iter().collect();
+        spans.push(Span::raw(text));
         lines.push(Line::from(spans));
     }
     f.render_widget(
-        Paragraph::new(Text::from(lines))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
+        Paragraph::new(Text::from(lines)).scroll((scroll, 0)),
         inner,
     );
 
@@ -523,6 +511,36 @@ pub(crate) fn agent_chip_fg(agent: &str) -> Color {
     } else {
         Color::Cyan
     }
+}
+
+/// Render a 1-row chip (status bubble) at the top-right of the composer area.
+/// Shared by the mode-flash and copy-status overlays so both use identical
+/// positioning and layout. `bg` controls the background colour.
+fn render_status_chip(f: &mut Frame, composer_area: Rect, text: &str, bg: Color) {
+    let pad = 1u16;
+    let text_w = composer::str_width(text) as u16;
+    let chip_w = text_w.saturating_add(pad.saturating_mul(2));
+    let avail = composer_area.width.saturating_sub(2);
+    let w = chip_w.min(avail);
+    let row = composer_area.y;
+    let x = composer_area.x + composer_area.width.saturating_sub(w).saturating_sub(1);
+    let chip_rect = Rect {
+        x,
+        y: row,
+        width: w,
+        height: 1,
+    };
+    f.render_widget(Clear, chip_rect);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!(" {text} "),
+            Style::default()
+                .fg(Color::Black)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ))),
+        chip_rect,
+    );
 }
 
 /// Background color of the plan/act mode-flash chip (issue #6): Yellow for

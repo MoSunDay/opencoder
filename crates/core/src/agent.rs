@@ -136,7 +136,7 @@ pub fn base_prompt_build() -> String {
 }
 
 const PLAN_SUFFIX: &str = "\
-PLAN mode (read-only): no edits/writes; mutating bash (redirects, rm, mv, git push, pip install, ...) is intercepted. \
+PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
 Output an actionable plan the user reviews before switching to act mode; ask clarifying questions first if anything is ambiguous -- do not assume intent. \
 The plan MUST have these sections: Goal / TODO / Verify / Risks / Align.";

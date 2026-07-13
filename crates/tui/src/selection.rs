@@ -24,6 +24,37 @@ use std::time::Duration;
 /// `None` means no active selection. Absolute rows are `screen_row + scroll`.
 pub type SelRange = (u16, u16);
 
+/// Report of a clipboard copy attempt, for building visible UI feedback.
+/// `lines`/`chars` describe how much text was copied; `osc52` indicates
+/// whether the OSC52 escape was sent; `local_tool` names the local
+/// clipboard command that succeeded (e.g. `"xclip"`), if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyReport {
+    /// Number of logical lines in the copied text.
+    pub lines: usize,
+    /// Number of characters in the copied text.
+    pub chars: usize,
+    /// Whether OSC52 was sent (always true when text is non-empty).
+    pub osc52: bool,
+    /// The local clipboard tool that succeeded, if any.
+    pub local_tool: Option<&'static str>,
+}
+
+impl CopyReport {
+    /// Build a user-facing status message from this report.
+    pub fn status_message(&self) -> String {
+        match self.local_tool {
+            Some(tool) => format!(
+                "\u{1f4cb} Copied {} line(s) (OSC52 + {})",
+                self.lines, tool
+            ),
+            None => {
+                "\u{26a0} No clipboard tool found \u{2014} OSC52 only".to_string()
+            }
+        }
+    }
+}
+
 /// Normalise a selection to `(lo, hi)` inclusive.
 pub fn sel_range(s: SelRange) -> (u16, u16) {
     (s.0.min(s.1), s.0.max(s.1))
@@ -46,16 +77,19 @@ pub fn abs_row_at(body: Rect, row: u16, scroll: u16) -> Option<u16> {
 /// On mouse-up: extract the selected text from the *viewed* chat and copy it to
 /// the clipboard. A bare click (anchor == active) copies nothing. `body` is the
 /// body's outer rect (used to derive the wrap width); pass `None` if unknown.
-pub fn finish_copy(viewed: &ChatView, body: Option<Rect>, sel: SelRange) {
+/// Returns `None` for a bare click or empty selection; otherwise a [`CopyReport`]
+/// describing the copy for UI feedback.
+pub fn finish_copy(viewed: &ChatView, body: Option<Rect>, sel: SelRange) -> Option<CopyReport> {
     let (lo, hi) = sel_range(sel);
     if lo == hi {
-        return; // bare click — no drag, no copy
+        return None; // bare click — no drag, no copy
     }
     let text_w = body.map(|r| r.width.saturating_sub(3)).unwrap_or(0);
     let text = extract_text(viewed, text_w, sel);
-    if !text.trim().is_empty() {
-        copy_to_clipboard(&text);
+    if text.trim().is_empty() {
+        return None;
     }
+    Some(copy_to_clipboard(&text))
 }
 
 /// Number of screen rows a wrapped logical line occupies at width `w`,
@@ -150,41 +184,52 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u16, sel: Option
 /// freezing the TUI. [`try_spawn`] enforces its own timeout so the background
 /// thread always terminates. Errors are swallowed: a clipboard failure must
 /// never crash the UI.
-pub fn copy_to_clipboard(text: &str) {
+pub fn copy_to_clipboard(text: &str) -> CopyReport {
     copy_osc52(text);
-    let text = text.to_string();
-    std::thread::spawn(move || {
-        copy_local(&text);
-    });
+    let local_tool = copy_local(text);
+    CopyReport {
+        lines: text.lines().count(),
+        chars: text.chars().count(),
+        osc52: true,
+        local_tool,
+    }
 }
 
 /// Copy `text` via a platform-native clipboard command, trying each candidate
-/// in turn and stopping at the first that exits successfully. Returns without
-/// error if no command is available (the caller still has OSC52 as a backend).
-fn copy_local(text: &str) {
+/// in turn and stopping at the first that exits successfully. Returns the name
+/// of the tool that succeeded, or `None` if no command is available or all
+/// failed (the caller still has OSC52 as a backend).
+fn copy_local(text: &str) -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
-        let _ = try_spawn("pbcopy", &[], text);
+        if try_spawn("pbcopy", &[], text).is_some() {
+            return Some("pbcopy");
+        }
     }
     #[cfg(target_os = "linux")]
     {
         if try_spawn("wl-copy", &[], text).is_some() {
-            return;
+            return Some("wl-copy");
         }
         if try_spawn("xclip", &["-selection", "clipboard"], text).is_some() {
-            return;
+            return Some("xclip");
         }
-        let _ = try_spawn("xsel", &["--clipboard", "--input"], text);
+        if try_spawn("xsel", &["--clipboard", "--input"], text).is_some() {
+            return Some("xsel");
+        }
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = try_spawn("clip.exe", &[], text);
+        if try_spawn("clip.exe", &[], text).is_some() {
+            return Some("clip.exe");
+        }
     }
     // Platforms without a known local clipboard command: OSC52 is the only path.
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = text;
     }
+    None
 }
 
 /// Maximum time to wait for a single local clipboard command before giving up
@@ -404,5 +449,48 @@ mod tests {
             elapsed < std::time::Duration::from_secs(20),
             "timed-out command should return well under 30 s, took {elapsed:?}"
         );
+    }
+
+    #[test]
+    fn copy_report_status_with_local_tool() {
+        let report = CopyReport {
+            lines: 3,
+            chars: 42,
+            osc52: true,
+            local_tool: Some("xclip"),
+        };
+        assert!(report.status_message().contains("3 line"));
+        assert!(report.status_message().contains("xclip"));
+        assert!(!report.status_message().contains("No clipboard"));
+    }
+
+    #[test]
+    fn copy_report_status_without_local_tool() {
+        let report = CopyReport {
+            lines: 1,
+            chars: 5,
+            osc52: true,
+            local_tool: None,
+        };
+        let msg = report.status_message();
+        assert!(msg.contains("No clipboard tool"));
+        assert!(msg.contains("OSC52 only"));
+    }
+
+    #[test]
+    fn finish_copy_returns_none_for_bare_click() {
+        let v = view_from_lines(&["hello", "world"]);
+        assert!(finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (3, 3)).is_none());
+    }
+
+    #[test]
+    fn finish_copy_returns_report_for_drag() {
+        let v = view_from_lines(&["hello", "world"]);
+        let report = finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (0, 1));
+        assert!(report.is_some());
+        let r = report.unwrap();
+        assert_eq!(r.lines, 2);
+        assert!(r.chars > 0);
+        assert!(r.osc52);
     }
 }

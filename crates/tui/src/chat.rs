@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::composer;
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
 
@@ -685,13 +686,11 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
     }
 }
 
+/// Truncate `s` to at most `n` *display columns* (not characters), appending
+/// an ellipsis when trimmed. Uses composer's width-aware truncation so CJK /
+/// emoji text no longer overflows its visual budget.
 pub(crate) fn short(s: &str, n: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() <= n {
-        t.to_string()
-    } else {
-        format!("{}...", t.chars().take(n).collect::<String>())
-    }
+    composer::truncate_to_width(s.trim(), n)
 }
 
 /// Read the concatenated text content of all blocks (for testing).

@@ -52,10 +52,10 @@ pub fn spawn_input_pump() -> (mpsc::Receiver<Event>, thread::JoinHandle<()>) {
         // `Err` (e.g. stdin closed / TTY lost) → break to avoid a busy-spin.
         let ready = match event::poll(POLL_TIMEOUT) {
             Ok(v) => v,
-            Err(e) => {
-                eprintln!("input: poll failed, exiting input thread: {e}");
-                break;
-            }
+            // Silently exit on poll failure (e.g. TTY lost): writing to stderr
+            // while the alt screen is active corrupts the display. Mirrors the
+            // silent `break` already used for `event::read()` errors below.
+            Err(_) => break,
         };
         if !ready {
             continue;

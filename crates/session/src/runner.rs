@@ -358,7 +358,7 @@ async fn run_one_llm_call(
         .filter(|(name, _)| session.agent.tools.allows(name))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let tool_schemas = schema_for(&allowed);
+    let tool_schemas = schema_for(&allowed, session.agent.kind);
 
     let req = ChatRequest {
         model: session.model.clone(),

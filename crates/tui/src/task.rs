@@ -1,5 +1,6 @@
 //! `/task` session picker — switch between or create new conversations.
 
+use crate::composer;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_store::SessionListItem;
 use ratatui::layout::Rect;
@@ -273,13 +274,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     f.render_stateful_widget(list, popup, &mut state);
 }
 
+/// Truncate a session-list preview to 40 *display columns*.
 fn short_preview(s: &str) -> String {
-    let t = s.trim();
-    if t.chars().count() <= 40 {
-        t.to_string()
-    } else {
-        format!("{}...", t.chars().take(40).collect::<String>())
-    }
+    composer::truncate_to_width(s.trim(), 40)
 }
 
 #[cfg(test)]

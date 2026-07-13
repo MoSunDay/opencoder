@@ -633,3 +633,25 @@ fn last_thinking_collapsed_false_when_last_block_not_thinking() {
     view.apply(&SessionEvent::TextDelta("answer".into()));
     assert!(!view.last_thinking_collapsed());
 }
+
+#[test]
+fn short_truncates_by_display_width_not_char_count() {
+    // Ten CJK characters = 20 terminal columns. A budget of 10 must be
+    // interpreted as 10 columns, so the result never exceeds 10 columns.
+    // With the old char-count logic this returned 10 chars (20 cols) + "...".
+    let wide = "你好世界测试你好世界";
+    let out = short(wide, 10);
+    assert!(
+        composer::str_width(&out) <= 10,
+        "short() must fit in 10 columns; got {out:?} ({} cols)",
+        composer::str_width(&out)
+    );
+    assert!(out.ends_with('…'), "truncated output should end with ellipsis; got {out:?}");
+
+    // Short strings are returned unchanged.
+    assert_eq!(short("hi", 10), "hi");
+    // Long ASCII is also bounded to the display-width budget.
+    let long_ascii = short("abcdefghijklmnopqrstuvwxyz", 10);
+    assert!(composer::str_width(&long_ascii) <= 10);
+    assert!(long_ascii.ends_with('…'));
+}

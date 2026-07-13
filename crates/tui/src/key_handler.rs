@@ -43,6 +43,8 @@ pub(crate) fn handle_key(
     last_esc: &mut Option<Instant>,
     skill_menu: &mut Option<SkillMenu>,
     active_skill: Option<&str>,
+    inner_w: u16,
+    prompt_w: u16,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -202,7 +204,7 @@ pub(crate) fn handle_key(
         }
         KeyCode::Up => {
             if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, -1);
+                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, -1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, -1);
             }
@@ -210,7 +212,7 @@ pub(crate) fn handle_key(
         }
         KeyCode::Down => {
             if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, 1);
+                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, 1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, 1);
             }

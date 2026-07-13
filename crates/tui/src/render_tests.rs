@@ -186,6 +186,8 @@ fn composer_renders_prompt_and_multiline_text() {
                 true,
                 0,
                 &mut jump_btn,
+                38, // inner_w: 40 - 2 borders
+                2,  // prompt_w: "❯ "
             );
         })
         .unwrap();
@@ -232,6 +234,8 @@ fn composer_jump_label_when_not_following() {
                 false,
                 0,
                 &mut jump_btn,
+                38, // inner_w: 40 - 2 borders
+                2,  // prompt_w: "❯ "
             );
         })
         .unwrap();
@@ -316,6 +320,45 @@ fn place_cursor_with_scroll() {
     // cursor_row_col("line1\nline2\nline3", 12, 80, 2) = (2, 0)
     // row>0 → x = 0+1+0 = 1, y = 5+1+2-1 = 7.
     terminal.backend_mut().assert_cursor_position((1, 7));
+}
+
+/// Cross-check (Fix #4): text with a space so WORD-wrap diverges from the
+/// old greedy char-wrap. The rendered buffer must show the word-wrap
+/// ("ab " on the first content row, "cdefgh" wrapped to the next), AND the
+/// cursor computed by `place_cursor` must land on the same visual row.
+#[test]
+fn composer_word_wrap_renders_and_cursor_aligns() {
+    // composer width 12 -> inner_w=8 (after borders), prompt_w=2 -> first_w=6.
+    let backend = TestBackend::new(12, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let input = "ab cdefgh";
+    terminal
+        .draw(|f| {
+            let mut jump_btn: Option<Rect> = None;
+            render_composer(f, Rect::new(0, 0, 12, 6), input, true, 0, &mut jump_btn, 8, 2);
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let r1 = row_text(buf, 1, 12);
+    let r2 = row_text(buf, 2, 12);
+    // Word-wrap broke at the space: "ab " (with prompt) on row 1, "cdefgh" on
+    // row 2. Greedy char-wrap would have put "ab cdef" on row 1 and "gh" on
+    // row 2 — which is exactly the misalignment this fixes.
+    assert!(r1.contains("ab"), "row1 should start with prompt+ab: {r1}");
+    assert!(
+        !r1.contains("cdefgh"),
+        "cdefgh must NOT stay on the first content row: {r1}"
+    );
+    assert!(r2.contains("cdefgh"), "cdefgh must wrap to row 2: {r2}");
+
+    // Cursor at char_idx 5 ('e') is on visual row 1: cursor_row_col gives
+    // (1, 2), so x = border + col = 1 + 2 = 3, y = border + row = 1 + 1 = 2.
+    terminal
+        .draw(|f| {
+            place_cursor(f, Rect::new(0, 0, 12, 6), input, 5, 8, 2, 0);
+        })
+        .unwrap();
+    terminal.backend_mut().assert_cursor_position((3, 2));
 }
 
 /// Issue #6: the `[agent]` status chip is Yellow in plan mode and Cyan
@@ -425,4 +468,26 @@ fn header_line_indices_aligned_with_flatten_while_withheld() {
             txt,
         );
     }
+}
+
+#[test]
+fn status_chip_width_accounts_for_wide_emoji() {
+    // Two emoji = 4 display columns but only 2 chars. With the old
+    // chars().count() the chip rectangle was 2 columns too narrow, so the
+    // second emoji was clipped out of the render entirely.
+    let backend = TestBackend::new(60, 1);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let text = "📋🎉";
+    terminal
+        .draw(|f| {
+            let area = Rect::new(0, 0, 60, 1);
+            render_status_chip(f, area, text, Color::Green);
+        })
+        .unwrap();
+    let row = row_text(terminal.backend().buffer(), 0, 60);
+    assert!(row.contains('📋'), "first emoji missing; got: {row}");
+    assert!(
+        row.contains('🎉'),
+        "second emoji was clipped — chip width did not account for wide chars; got: {row}"
+    );
 }

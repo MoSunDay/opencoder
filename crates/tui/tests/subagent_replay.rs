@@ -357,3 +357,109 @@ async fn replay_shows_interrupted_for_running_subagent() {
         assert_eq!(summary, "(interrupted)");
     }
 }
+
+/// Regression test for the stale-snapshot bug: when a subagent completes in
+/// the store *after* the first replay, a second `replay_into_chat` call must
+/// reflect the updated status, summary, and done flag. This mirrors the
+/// `/task` switch-back path where the TUI now always replays from store
+/// instead of reusing a cached snapshot.
+#[tokio::test]
+async fn replay_refreshes_status_after_subagent_completes() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "parent").await;
+    make_session(&store, "child-refresh").await;
+
+    let user_msg = Message::user("u1", "do it");
+    let mut asst_msg = Message::assistant("a1");
+    asst_msg.blocks.push(ContentBlock::text("delegating"));
+    store.append_message("parent", &user_msg).await.unwrap();
+    store.append_message("parent", &asst_msg).await.unwrap();
+
+    // Subagent starts in Running status.
+    store
+        .create_subagent_task(&running_task(
+            "task-refresh",
+            "parent",
+            "child-refresh",
+            "a1",
+            "build",
+            "run tests and build",
+            1100,
+        ))
+        .await
+        .unwrap();
+
+    // Seed child events.
+    store
+        .append_event(&child_event(
+            "child-refresh",
+            &SessionEvent::TextDelta("working on it".into()),
+            EventKind::TextDelta,
+            2000,
+        ))
+        .await
+        .unwrap();
+
+    let messages = store.load_messages("parent").await.unwrap();
+    let store_arc: Arc<dyn Store> = store.clone();
+
+    // First replay — subagent is still Running → shows "(interrupted)".
+    let chat1 = replay_into_chat("act", &messages, &store_arc, "parent").await;
+    {
+        let sub = chat1
+            .blocks
+            .iter()
+            .find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "task-refresh"))
+            .expect("should have the subagent block");
+        if let ChatBlock::Subagent {
+            done, ok, summary, ..
+        } = sub
+        {
+            assert!(*done, "running subagent should display as done (interrupted)");
+            assert!(!*ok, "running subagent should display as failed");
+            assert_eq!(summary, "(interrupted)");
+        }
+    }
+
+    // Subagent completes in the store *after* the first replay.
+    store
+        .complete_subagent_task("task-refresh", "all 42 tests passed", true)
+        .await
+        .unwrap();
+    store
+        .append_event(&child_event(
+            "child-refresh",
+            &SessionEvent::Done,
+            EventKind::Done,
+            2001,
+        ))
+        .await
+        .unwrap();
+
+    // Second replay — must reflect the updated Completed status.
+    let messages2 = store.load_messages("parent").await.unwrap();
+    let chat2 = replay_into_chat("act", &messages2, &store_arc, "parent").await;
+    {
+        let sub = chat2
+            .blocks
+            .iter()
+            .find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "task-refresh"))
+            .expect("should still have the subagent block");
+        if let ChatBlock::Subagent {
+            done,
+            ok,
+            summary,
+            view,
+            ..
+        } = sub
+        {
+            assert!(*done, "completed subagent should be done");
+            assert!(*ok, "completed subagent should be ok");
+            assert_eq!(summary, "all 42 tests passed");
+            assert!(
+                !view.blocks.is_empty(),
+                "child view should have blocks from events"
+            );
+        }
+    }
+}

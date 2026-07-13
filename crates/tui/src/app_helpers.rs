@@ -269,7 +269,23 @@ pub(crate) async fn handle_mouse(
     queue_items: &mut Vec<(i64, String)>,
     session_id: &str,
     store: &dyn Store,
+    copy_msg: &mut Option<String>,
 ) {
+    // Shift+drag bypass: when Shift is held during a left-button Down or Drag,
+    // return immediately so the terminal can perform its own native selection
+    // (which works even when OSC52 is blocked by tmux/screen or the terminal).
+    // Also clear any in-progress app-layer selection so the overlay doesn't
+    // linger. Up events are NOT bypassed so a non-Shift drag that started
+    // normally still completes its copy.
+    if m.modifiers.contains(KeyModifiers::SHIFT)
+        && matches!(
+            m.kind,
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
+        )
+    {
+        *selection = None;
+        return;
+    }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             let mut consumed = false;
@@ -371,7 +387,9 @@ pub(crate) async fn handle_mouse(
                     Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
                     _ => &*chat,
                 };
-                crate::selection::finish_copy(viewed, hits.body, sel);
+                if let Some(report) = crate::selection::finish_copy(viewed, hits.body, sel) {
+                    *copy_msg = Some(report.status_message());
+                }
                 *selection = None;
             }
         }

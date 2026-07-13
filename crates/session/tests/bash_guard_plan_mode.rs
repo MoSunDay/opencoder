@@ -145,6 +145,42 @@ async fn act_mode_is_not_guarded() {
     }
 }
 
+#[tokio::test]
+async fn plan_mode_allows_devnull_redirect() {
+    // A read-only redirect to /dev/null (common with find/grep) must pass.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn("find . -name '*.rs' 2>/dev/null | head")])
+            .push_script(vec![done_turn()]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new("guard-devnull", agent, config(), mock, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut session, "list rust files".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(
+            !*is_error,
+            "devnull redirect must succeed, output: {output}"
+        );
+        assert!(
+            !output.contains("Blocked in plan mode"),
+            "devnull redirect must not be blocked, got: {output}"
+        );
+    }
+}
+
 fn ev_name(e: &SessionEvent) -> &'static str {
     match e {
         SessionEvent::TextDelta(_) => "TextDelta",

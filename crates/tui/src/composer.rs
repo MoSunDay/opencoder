@@ -17,23 +17,39 @@ pub fn cursor_column(input: &str, char_idx: usize) -> u16 {
     col.min(u16::MAX as usize) as u16
 }
 
-/// Display width of a char (1 for most, 2 for wide CJK/fullwidth, 0 for
-/// combining marks). Avoids pulling in the unicode-width crate for the TUI.
+/// Display width of a char (0 for zero-width, 1 for most, 2 for wide
+/// CJK/fullwidth/emoji). Approximates Unicode East Asian Width without
+/// pulling in the unicode-width crate for the TUI.
 pub fn char_width(ch: char) -> usize {
     let cp = ch as u32;
-    // Zero-width: combining marks (general purpose) — approximate range.
-    if cp == 0 {
+    // --- Zero-width: NUL, combining marks, joiners, variation selectors ---
+    if cp == 0
+        || (0x0300..=0x036F).contains(&cp) // combining diacritical marks
+        || (0x200B..=0x200D).contains(&cp) // ZWSP, ZWNJ, ZWJ
+        || (0xFE00..=0xFE0F).contains(&cp) // variation selectors
+        || cp == 0xFEFF                    // BOM / zero-width no-break space
+    {
         return 0;
     }
-    // CJK ranges (approximate, covers common Hanzi/Kana/Hangul) → wide.
-    if (0x1100..=0x115F).contains(&cp)
-        || (0x2E80..=0xA4CF).contains(&cp)
-        || (0xAC00..=0xD7A3).contains(&cp)
-        || (0xF900..=0xFAFF).contains(&cp)
-        || (0xFE30..=0xFE4F).contains(&cp)
-        || (0xFF00..=0xFF60).contains(&cp)
-        || (0xFFE0..=0xFFE6).contains(&cp)
-        || (0x1F300..=0x1FAFF).contains(&cp)
+    // --- Wide (2 columns): CJK, fullwidth, and common emoji ranges ---
+    if (0x1100..=0x115F).contains(&cp) // Hangul Jamo
+        || (0x231A..=0x231B).contains(&cp) // watch, hourglass
+        || (0x23E9..=0x23F3).contains(&cp) // media control emoji
+        || (0x25FD..=0x25FE).contains(&cp) // small squares
+        || (0x2614..=0x2615).contains(&cp) // umbrella, hot beverage
+        || (0x2648..=0x2653).contains(&cp) // zodiac signs
+        || (0x267F..=0x26FA).contains(&cp) // misc transport/symbols
+        || (0x2702..=0x27B0).contains(&cp) // dingbats
+        || (0x2934..=0x2935).contains(&cp) // arrows
+        || (0x2B05..=0x2B55).contains(&cp) // arrows, geometric shapes
+        || (0x2E80..=0xA4CF).contains(&cp) // CJK radicals -> Yi
+        || (0xAC00..=0xD7A3).contains(&cp) // Hangul syllables
+        || (0xF900..=0xFAFF).contains(&cp) // CJK compat ideographs
+        || (0xFE30..=0xFE4F).contains(&cp) // CJK compat forms
+        || (0xFF00..=0xFF60).contains(&cp) // fullwidth forms
+        || (0xFFE0..=0xFFE6).contains(&cp) // fullwidth signs
+        || (0x1F300..=0x1FAFF).contains(&cp) // emoji & symbols (SMP)
+        || (0x20000..=0x3FFFD).contains(&cp) // CJK extension B and beyond
     {
         return 2;
     }
@@ -157,106 +173,159 @@ fn is_word_whitespace(ch: char) -> bool {
     ch.is_whitespace() && ch != '\n'
 }
 
-/// Compute (row, col) display position from a char index in multi-line text,
-/// accounting for both explicit newlines and soft-wrapping. The first visual
-/// row is narrower because the prompt prefix (`prompt_w` columns) occupies its
-/// leading columns; subsequent visual rows use the full `inner_w`.
-pub fn cursor_row_col(input: &str, char_idx: usize, inner_w: u16, prompt_w: u16) -> (usize, usize) {
+/// A single visual (wrapped) row of the composer input. `start`..`end` is a
+/// half-open char-index range; a row resulting from an explicit '\n' excludes
+/// the newline (it only triggers the break).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisualRow {
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Split `input` into visual rows using word-boundary wrapping. The first
+/// visual row is narrowed by `prompt_w` (the `❯ ` prefix occupies its leading
+/// columns); every other row uses the full `inner_w`. Explicit '\n' always
+/// starts a new row.
+///
+/// This is the **single source of truth** for composer wrapping: both
+/// `render_composer` (which builds explicit `Line`s from these rows and
+/// disables ratatui's own `Wrap`) and the cursor math derive from it, so the
+/// rendered glyphs and the cursor position can never diverge.
+pub fn wrap_rows(input: &str, inner_w: u16, prompt_w: u16) -> Vec<VisualRow> {
     let first_w = (inner_w.saturating_sub(prompt_w) as usize).max(1);
     let rest_w = (inner_w as usize).max(1);
-    let mut row = 0usize;
+    let chars: Vec<char> = input.chars().collect();
+    let n = chars.len();
+    let mut rows: Vec<VisualRow> = Vec::new();
+    if n == 0 {
+        rows.push(VisualRow { start: 0, end: 0 });
+        return rows;
+    }
+    let mut row_start = 0usize;
     let mut col = 0usize;
-    for (i, ch) in input.chars().enumerate() {
-        if i >= char_idx {
-            break;
-        }
+    // Char index just past the last wrappable whitespace on the current row.
+    let mut last_break = 0usize;
+    let mut row_idx = 0usize; // global visual row index (0 uses first_w)
+    let mut i = 0usize;
+    while i < n {
+        let ch = chars[i];
         if ch == '\n' {
-            row += 1;
+            rows.push(VisualRow { start: row_start, end: i });
+            row_idx += 1;
+            i += 1;
+            row_start = i;
             col = 0;
-        } else {
-            let cw = char_width(ch);
-            let w = if row == 0 { first_w } else { rest_w };
-            if col + cw > w && col > 0 {
-                row += 1;
-                col = 0;
+            last_break = i;
+            continue;
+        }
+        let cw = char_width(ch);
+        let w = if row_idx == 0 { first_w } else { rest_w };
+        if col + cw > w && col > 0 {
+            // Overflow: prefer breaking at the last whitespace boundary so
+            // whole words move to the next row; fall back to a mid-word break
+            // (long word / no spaces). Re-evaluate the moved chars on the new
+            // row by rewinding `i` to the break point.
+            if last_break > row_start {
+                rows.push(VisualRow { start: row_start, end: last_break });
+                row_start = last_break;
+                i = last_break;
+            } else {
+                rows.push(VisualRow { start: row_start, end: i });
+                row_start = i;
             }
-            col += cw;
+            row_idx += 1;
+            col = 0;
+            last_break = row_start;
+            continue;
+        }
+        col += cw;
+        i += 1;
+        // A space/tab is a wrap candidate: a break may happen right after it.
+        if ch == ' ' || ch == '\t' {
+            last_break = i;
         }
     }
+    rows.push(VisualRow { start: row_start, end: n });
+    rows
+}
+
+/// Compute (row, col) display position from a char index, using the same
+/// `wrap_rows` model as the renderer. The cursor at a row boundary (char index
+/// equal to a row's `end`) belongs to that row's tail rather than the next
+/// row's head, matching greedy-wrap cursor semantics.
+pub fn cursor_row_col(input: &str, char_idx: usize, inner_w: u16, prompt_w: u16) -> (usize, usize) {
+    let rows = wrap_rows(input, inner_w, prompt_w);
+    let total = input.chars().count();
+    let char_idx = char_idx.min(total);
+    let mut row = 0usize;
+    for (r, vr) in rows.iter().enumerate() {
+        if vr.start <= char_idx && char_idx <= vr.end {
+            row = r;
+            break;
+        }
+    }
+    let start = rows[row].start;
+    let col: usize = input
+        .chars()
+        .skip(start)
+        .take(char_idx.saturating_sub(start))
+        .map(char_width)
+        .sum();
     (row, col)
 }
 
-/// Move cursor up/down by one visual row in multi-line text.
-/// Returns the original index if already at the top/bottom row.
-pub fn move_cursor_vertical(input: &str, char_idx: usize, direction: i32) -> usize {
+/// Move the cursor up/down by one visual (wrapped) row, preserving the display
+/// column. Uses `wrap_rows` so movement correctly crosses soft-wrapped rows,
+/// not just explicit newlines. Returns the original index if already at the
+/// top/bottom visual row.
+pub fn move_cursor_vertical(
+    input: &str,
+    char_idx: usize,
+    direction: i32,
+    inner_w: u16,
+    prompt_w: u16,
+) -> usize {
     if input.is_empty() {
         return char_idx;
     }
-    let mut line_starts: Vec<usize> = vec![0];
-    for (i, ch) in input.chars().enumerate() {
-        if ch == '\n' {
-            line_starts.push(i + 1);
+    let rows = wrap_rows(input, inner_w, prompt_w);
+    let total = input.chars().count();
+    let char_idx = char_idx.min(total);
+    let chars: Vec<char> = input.chars().collect();
+    // Find the current visual row (same rule as cursor_row_col).
+    let mut cur = 0usize;
+    for (r, vr) in rows.iter().enumerate() {
+        if vr.start <= char_idx && char_idx <= vr.end {
+            cur = r;
+            break;
         }
     }
-    let row = line_starts
-        .iter()
-        .rev()
-        .position(|&s| s <= char_idx)
-        .map(|r| line_starts.len() - 1 - r)
-        .unwrap_or(0);
-    let line_start = line_starts[row];
-    let col: usize = input
-        .chars()
-        .skip(line_start)
-        .take(char_idx.saturating_sub(line_start))
-        .map(char_width)
-        .sum();
-    let target_row = row as i32 + direction;
-    if target_row < 0 || target_row as usize >= line_starts.len() {
+    let cur_start = rows[cur].start;
+    let col: usize = chars[cur_start..char_idx].iter().map(|c| char_width(*c)).sum();
+    let target = cur as i32 + direction;
+    if target < 0 || target as usize >= rows.len() {
         return char_idx;
     }
-    let target_row = target_row as usize;
-    let target_start = line_starts[target_row];
-    let target_end = if target_row + 1 < line_starts.len() {
-        line_starts[target_row + 1].saturating_sub(1)
-    } else {
-        input.chars().count()
-    };
+    let trow = rows[target as usize];
+    // Walk the target row forward accumulating width until we pass `col`,
+    // landing on the closest char boundary.
     let mut actual = 0usize;
-    let mut idx = target_start;
-    for (i, ch) in input.chars().enumerate().skip(target_start) {
-        if i >= target_end {
+    let mut idx = trow.start;
+    for (j, &ch) in chars[trow.start..trow.end].iter().enumerate().map(|(i, c)| (trow.start + i, c)) {
+        let cw = char_width(ch);
+        if actual + cw > col {
             break;
         }
-        if actual + char_width(ch) > col {
-            break;
-        }
-        actual += char_width(ch);
-        idx = i + 1;
+        actual += cw;
+        idx = j + 1;
     }
     idx
 }
 
-/// Count how many display rows the input occupies. The first logical line's
-/// first visual row is narrowed by `prompt_w`; all other visual rows use the
-/// full `inner_w`.
+/// Count how many visual rows the input occupies. Derived from `wrap_rows`
+/// so it matches the renderer exactly.
 pub fn display_rows(input: &str, inner_w: u16, prompt_w: u16) -> u16 {
-    let first_w = (inner_w.saturating_sub(prompt_w) as usize).max(1);
-    let rest_w = (inner_w as usize).max(1);
-    let mut rows = 0usize;
-    for (i, line) in input.split('\n').enumerate() {
-        let lw: usize = line.chars().map(char_width).sum();
-        if i == 0 {
-            if lw <= first_w {
-                rows += 1;
-            } else {
-                rows += 1 + (lw - first_w).div_ceil(rest_w);
-            }
-        } else {
-            rows += if lw == 0 { 1 } else { lw.div_ceil(rest_w) };
-        }
-    }
-    (rows as u16).max(1)
+    (wrap_rows(input, inner_w, prompt_w).len() as u16).max(1)
 }
 
 /// Insert a newline at the cursor index.
@@ -383,15 +452,15 @@ mod tests {
     fn move_cursor_up_down() {
         let input = "aaaa\nbbbb\ncccc";
         // Index 2 = row 0 col 2 (display). Move down → row 1 col 2 = index 7.
-        let idx = move_cursor_vertical(input, 2, 1);
+        let idx = move_cursor_vertical(input, 2, 1, 80, 0);
         assert_eq!(cursor_row_col(input, idx, 80, 0), (1, 2));
         // Index 7 = row 1 col 2. Move up → row 0 col 2 = index 2.
-        let idx = move_cursor_vertical(input, 7, -1);
+        let idx = move_cursor_vertical(input, 7, -1, 80, 0);
         assert_eq!(cursor_row_col(input, idx, 80, 0), (0, 2));
         // Can't move up from row 0
-        assert_eq!(move_cursor_vertical(input, 2, -1), 2);
+        assert_eq!(move_cursor_vertical(input, 2, -1, 80, 0), 2);
         // Can't move down from last row
-        assert_eq!(move_cursor_vertical(input, 10, 1), 10);
+        assert_eq!(move_cursor_vertical(input, 10, 1, 80, 0), 10);
     }
 
     #[test]
@@ -402,6 +471,125 @@ mod tests {
         let (s, i) = insert_newline("", 0);
         assert_eq!(s, "\n");
         assert_eq!(i, 1);
+    }
+
+    #[test]
+    fn wrap_rows_no_spaces_matches_greedy() {
+        // Without spaces, word-wrap degenerates to greedy char wrap.
+        let rows = wrap_rows("aaaaaa", 5, 0);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 5 });
+        assert_eq!(rows[1], VisualRow { start: 5, end: 6 });
+    }
+
+    #[test]
+    fn wrap_rows_breaks_at_word_boundary() {
+        // "ab cdefgh" at width 5: word wrap moves "cdefgh" down after "ab ".
+        // After the space-break, "cdefgh" has no further spaces so it wraps
+        // greedily: 5 cols per row. This is exactly the case where greedy
+        // char-wrap and word-wrap diverge on the FIRST row boundary.
+        let rows = wrap_rows("ab cdefgh", 5, 0);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 3 });  // "ab "
+        assert_eq!(rows[1], VisualRow { start: 3, end: 8 });  // "cdefg"
+        assert_eq!(rows[2], VisualRow { start: 8, end: 9 });  // "h"
+    }
+
+    #[test]
+    fn wrap_rows_preserves_trailing_space_at_break() {
+        // trim:false semantics: the whitespace before a wrap stays on the
+        // current row.
+        let rows = wrap_rows("abcd ef", 5, 0);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 5 }); // "abcd "
+        assert_eq!(rows[1], VisualRow { start: 5, end: 7 }); // "ef"
+    }
+
+    #[test]
+    fn wrap_rows_explicit_newline() {
+        let rows = wrap_rows("ab
+cd", 80, 0);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 2 });
+        assert_eq!(rows[1], VisualRow { start: 3, end: 5 });
+    }
+
+    #[test]
+    fn wrap_rows_empty_input_single_row() {
+        let rows = wrap_rows("", 80, 2);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 0 });
+    }
+
+    #[test]
+    fn wrap_rows_first_row_narrowed_by_prompt() {
+        // inner_w=5, prompt_w=2: row 0 holds 3 cols, rest hold 5.
+        let rows = wrap_rows("aaaaaaaa", 5, 2);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], VisualRow { start: 0, end: 3 }); // 3 cols on row 0
+        assert_eq!(rows[1], VisualRow { start: 3, end: 8 }); // 5 cols on row 1
+    }
+
+    #[test]
+    fn cursor_row_col_tracks_word_wrap() {
+        // The cursor must land on the SAME visual row the renderer produces.
+        // For "ab cdefgh" width 5, 'e' (char idx 5) is on visual row 1 (after
+        // the word-wrap), at column 2 (after "cd"). Greedy wrap would wrongly
+        // place it on row 0 col 5.
+        assert_eq!(cursor_row_col("ab cdefgh", 5, 5, 0), (1, 2));
+        // Cursor before the wrap, right after the space (char idx 3) is at the
+        // tail of row 0.
+        assert_eq!(cursor_row_col("ab cdefgh", 3, 5, 0), (0, 3));
+    }
+
+    #[test]
+    fn cursor_row_col_cjk_word_wrap() {
+        // CJK + space: "你好 world" at width 6. 你好=4, then ' ' makes 5,
+        // then 'w'(6) fills, 'o' overflows -> wrap. Word wrap keeps "world"
+        // together if it fits on the next row.
+        let rows = wrap_rows("你好 world", 6, 0);
+        // row0: 你好 (4) + space(5) + w(6) -> 'o' overflows, break after w?
+        // last_break is after the space (idx 3). 'w' at idx4 pushes col to 6,
+        // 'o' at idx5 would be col7 > 6 -> wrap at last_break=3 -> row=[0,3).
+        assert_eq!(rows[0], VisualRow { start: 0, end: 3 });
+        // row1: "world" = w o r l d = 5 cols, fits in 6.
+        assert_eq!(rows[1], VisualRow { start: 3, end: 8 });
+    }
+
+    #[test]
+    fn display_rows_counts_word_wrap_rows() {
+        // word-wrap gives 3 rows for this input; greedy would give 2.
+        assert_eq!(display_rows("ab cdefgh", 5, 0), 3);
+        assert_eq!(display_rows("ab cdefgh", 5, 2), 3);
+    }
+
+    #[test]
+    fn move_cursor_vertical_crosses_soft_wrap() {
+        // Multi-line input that ALSO soft-wraps. With width 5, line "aaaaa"
+        // is one row; Up/Down must move across visual rows.
+        let input = "aaaaa
+bbbbb";
+        // idx 2 = row 0 col 2. Down -> row 1 col 2.
+        let idx = move_cursor_vertical(input, 2, 1, 80, 0);
+        assert_eq!(cursor_row_col(input, idx, 80, 0), (1, 2));
+        // Back up.
+        let idx = move_cursor_vertical(input, idx, -1, 80, 0);
+        assert_eq!(cursor_row_col(input, idx, 80, 0), (0, 2));
+    }
+
+    #[test]
+    fn move_cursor_vertical_within_soft_wrap() {
+        // "abcdef ghi" width 4: row0="abcd", row1="ef ", row2="ghi".
+        // Wait — word wrap: 'a'1'b'2'c'3'd'4 -> 'e' overflows, no break yet
+        // (last_break=0), mid-word break row=[0,4). row1: 'e'1'f'2' '3
+        // last_break=7. 'g'3'h'4 -> 'i' overflows, break at last_break=7 ->
+        // row=[4,7)="ef ". row2: "ghi".
+        let input = "abcdefghi";
+        let rows = wrap_rows(input, 4, 0);
+        assert_eq!(rows.len(), 3);
+        // idx 1 (col1 row0) -> down -> row1 col1 = idx 5 ('f')
+        let idx = move_cursor_vertical(input, 1, 1, 4, 0);
+        assert_eq!(cursor_row_col(input, idx, 4, 0).0, 1);
     }
 
     #[test]
@@ -541,5 +729,34 @@ mod tests {
         let (s2, i2) = delete_word_back(&s1, i1).unwrap();
         assert_eq!(s2, "");
         assert_eq!(i2, 0);
+    }
+
+    #[test]
+    fn char_width_zero_width_combining_and_joiners() {
+        assert_eq!(char_width('\u{0300}'), 0); // combining grave accent
+        assert_eq!(char_width('\u{200B}'), 0); // ZWSP
+        assert_eq!(char_width('\u{200C}'), 0); // ZWNJ
+        assert_eq!(char_width('\u{200D}'), 0); // ZWJ
+        assert_eq!(char_width('\u{FE0F}'), 0); // variation selector-16
+        assert_eq!(char_width('\u{FEFF}'), 0); // BOM / zero-width no-break space
+        // A combining mark adds no display width to its base char.
+        assert_eq!(str_width("e\u{0300}"), 1); // decomposed e-grave = 1 column
+        assert_eq!(str_width("a\u{0308}b"), 2); // a + combining diaeresis + b
+    }
+
+    #[test]
+    fn char_width_extended_wide_emoji_ranges() {
+        assert_eq!(char_width('⌚'), 2); // U+231A watch
+        assert_eq!(char_width('⏩'), 2); // U+23E9 fast-forward
+        assert_eq!(char_width('\u{25FD}'), 2); // U+25FD white medium small square
+        assert_eq!(char_width('☔'), 2); // U+2614 umbrella with rain
+        assert_eq!(char_width('♑'), 2); // U+2651 capricorn (zodiac)
+        assert_eq!(char_width('♿'), 2); // U+267F wheelchair
+        assert_eq!(char_width('✂'), 2); // U+2702 scissors
+        assert_eq!(char_width('\u{2934}'), 2); // U+2934 arrow pointing rightwards
+        assert_eq!(char_width('⭐'), 2); // U+2B50 star
+        assert_eq!(char_width('⬅'), 2); // U+2B05 left arrow
+        assert_eq!(char_width('📋'), 2); // U+1F4CB clipboard (existing range)
+        assert_eq!(char_width('\u{20000}'), 2); // CJK extension B (plane 2)
     }
 }

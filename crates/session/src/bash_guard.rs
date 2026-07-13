@@ -5,8 +5,8 @@
 //! each command as read-only or potentially-mutating and block the latter.
 //!
 //! The classifier is heuristic: it parses the command string for known
-//! write patterns (redirects, mutating commands, package managers, git writes,
-//! in-place editors). False positives are acceptable (over-blocking in plan
+//! write patterns (file-writing redirects, mutating commands, package managers,
+//! git writes, in-place editors). False positives are acceptable (over-blocking in plan
 //! mode is safe); false negatives are the risk we minimize by covering the
 //! common patterns.
 
@@ -90,12 +90,11 @@ pub fn classify(command: &str) -> BashVerdict {
         return BashVerdict::ReadOnly;
     }
 
-    // Check for redirect operators anywhere in the command (>, >>, &>).
-    // All redirects are blocked — over-blocking is safe in plan mode, and the
-    // bash tool captures stdout/stderr separately so 2>&1 / 2>/dev/null are
-    // redundant anyway.
-    if has_redirect(trimmed) {
-        return BashVerdict::WriteBlocked("redirect operator (>/>>)".into());
+    // Check for file-writing redirect operators anywhere in the command.
+    // Read-only redirects (/dev/null, fd merges like 2>&1) are allowed; only
+    // redirects that write to a real file are blocked.
+    if let Some(reason) = has_unsafe_redirect(trimmed) {
+        return BashVerdict::WriteBlocked(reason);
     }
 
     // Split into segments by &&, ;, |, and check each.
@@ -108,22 +107,85 @@ pub fn classify(command: &str) -> BashVerdict {
     BashVerdict::ReadOnly
 }
 
-/// Detect redirect operators: `>`, `>>`, `&>`, and fd-redirect variants
-/// (`2>`, `1>&2`, etc.). All are blocked uniformly — the bash tool already
-/// captures stdout and stderr as separate streams, so output redirects like
-/// `2>&1` or `2>/dev/null` are redundant and need not be allowed.
-fn has_redirect(cmd: &str) -> bool {
+/// Detect *unsafe* redirect operators — those that write to a real file.
+///
+/// Read-only redirects are allowed: discarding output to `/dev/null` and
+/// merging file descriptors (`2>&1`, `1>&2`) don't modify the filesystem.
+/// File-writing redirects (`> file`, `>> file`, `2> file`) are blocked.
+///
+/// Scans the entire command string (before compound-command splitting) so a
+/// dangerous redirect in any segment is caught.
+fn has_unsafe_redirect(cmd: &str) -> Option<String> {
     let chars: Vec<char> = cmd.chars().collect();
-    for i in 0..chars.len() {
-        let c = chars[i];
-        if c == '>' {
-            return true;
-        }
-        if c == '&' && i + 1 < chars.len() && chars[i + 1] == '>' {
-            return true;
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+        if let Some(op_len) = match_redirect_op(&chars, i) {
+            let target_start = i + op_len;
+            let (ts, te) = read_redirect_target(&chars, target_start);
+            let target: String = chars[ts..te].iter().collect();
+            if !is_safe_redirect_target(&target) {
+                return Some("redirect operator (>/>>)".into());
+            }
+            i = te;
+        } else {
+            i += 1;
         }
     }
-    false
+    None
+}
+
+/// Try to match a redirect operator at position `i`.
+/// Returns the operator length (chars consumed) on success.
+fn match_redirect_op(chars: &[char], i: usize) -> Option<usize> {
+    let n = chars.len();
+    let c = chars[i];
+    // &> / &>> (redirect both stdout and stderr to a file)
+    if c == '&' && i + 1 < n && chars[i + 1] == '>' {
+        return Some(if i + 2 < n && chars[i + 2] == '>' { 3 } else { 2 });
+    }
+    // [12]>> / [12]> (fd-prefixed redirect)
+    if (c == '1' || c == '2') && i + 1 < n && chars[i + 1] == '>' {
+        return Some(if i + 2 < n && chars[i + 2] == '>' { 3 } else { 2 });
+    }
+    // >> / > (bare redirect)
+    if c == '>' {
+        return Some(if i + 1 < n && chars[i + 1] == '>' { 2 } else { 1 });
+    }
+    None
+}
+
+/// Read the target token following a redirect operator, starting at `start`.
+/// Skips leading whitespace; reads until a separator (whitespace, `;`, `|`,
+/// or `&&`). Returns `(token_start, token_end)`.
+fn read_redirect_target(chars: &[char], start: usize) -> (usize, usize) {
+    let n = chars.len();
+    let mut i = start;
+    while i < n && (chars[i] == ' ' || chars[i] == '\t') {
+        i += 1;
+    }
+    let ts = i;
+    while i < n {
+        let c = chars[i];
+        if c == ' ' || c == '\t' || c == ';' || c == '|' {
+            break;
+        }
+        if c == '&' && i + 1 < n && chars[i + 1] == '&' {
+            break;
+        }
+        i += 1;
+    }
+    (ts, i)
+}
+
+/// Whether a redirect target is read-only (doesn't write a file).
+fn is_safe_redirect_target(target: &str) -> bool {
+    // fd merge (&N): duplicate to an existing file descriptor.
+    if let Some(rest) = target.strip_prefix('&') {
+        return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+    }
+    // /dev/null discards output — read-only.
+    target == "/dev/null"
 }
 
 /// Split a command string into individual segments by shell separators
@@ -265,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn redirects_blocked() {
+    fn file_write_redirects_blocked() {
         assert!(matches!(
             classify("echo x > file"),
             BashVerdict::WriteBlocked(_)
@@ -282,23 +344,64 @@ mod tests {
             classify("echo x 2> file"),
             BashVerdict::WriteBlocked(_)
         ));
-        // All redirects blocked uniformly — 2>&1 and /dev/null are redundant
-        // (the bash tool captures stdout/stderr separately).
-        assert!(matches!(classify("cmd 2>&1"), BashVerdict::WriteBlocked(_)));
+        // No-space variants still blocked.
         assert!(matches!(
-            classify("cmd 2>/dev/null"),
+            classify("echo x >file"),
             BashVerdict::WriteBlocked(_)
         ));
         assert!(matches!(
-            classify("cmd > /dev/null"),
+            classify("cmd 2>>file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        // /dev/null with trailing path chars is NOT /dev/null.
+        assert!(matches!(
+            classify("cmd > /dev/null/sneaky"),
             BashVerdict::WriteBlocked(_)
         ));
         assert!(matches!(
-            classify("cmd &>/dev/null"),
+            classify("cmd 2>/dev/nullx"),
             BashVerdict::WriteBlocked(_)
         ));
+        // A real file redirect mixed with /dev/null is still blocked.
         assert!(matches!(
+            classify("echo x > file >/dev/null"),
+            BashVerdict::WriteBlocked(_)
+        ));
+    }
+
+    #[test]
+    fn devnull_and_fd_merge_redirects_allowed() {
+        // Discarding output to /dev/null is read-only.
+        assert_eq!(classify("cmd >/dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd > /dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd 2>/dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd &>/dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd 1>/dev/null"), BashVerdict::ReadOnly);
+        // fd merges (dup2) don't write files.
+        assert_eq!(classify("cmd 2>&1"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd 1>&2"), BashVerdict::ReadOnly);
+        assert_eq!(classify("cmd >&1"), BashVerdict::ReadOnly);
+        // In a pipeline — the pipe splits segments, both read-only.
+        assert_eq!(
             classify("grep foo file 2>&1 | head"),
+            BashVerdict::ReadOnly
+        );
+        // Multiple /dev/null redirects are fine.
+        assert_eq!(
+            classify("cmd >/dev/null 2>/dev/null"),
+            BashVerdict::ReadOnly
+        );
+    }
+
+    #[test]
+    fn redirect_bypass_in_compound_blocked() {
+        // /dev/null is allowed but the trailing rm segment is blocked.
+        assert!(matches!(
+            classify("cmd 2>&1; rm -rf x"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("cmd >/dev/null && rm file"),
             BashVerdict::WriteBlocked(_)
         ));
     }

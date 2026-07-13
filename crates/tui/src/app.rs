@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,6 +31,9 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
+/// Maximum render rate (~30 FPS). Events are processed immediately but the
+/// screen is redrawn at most this often, decoupling CPU from token rate.
+const FRAME_MS: u64 = 32;
 /// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
 const MODE_FLASH_TICKS: u32 = 5;
 
@@ -133,7 +135,6 @@ async fn run_app(
     let mut cursor_idx: usize = 0;
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut local_queue: VecDeque<String> = VecDeque::new();
     let mut running = false;
     let mut cancelled = false;
     let mut show_help = false;
@@ -161,6 +162,11 @@ async fn run_app(
     // None. Kept in absolute rows so it tracks the text while the viewport
     // scrolls. Cleared on copy (mouse-up) and on subagent ctx-switch.
     let mut selection: Option<crate::selection::SelRange> = None;
+    // Transient copy-feedback message shown for ~2s after a mouse-drag copy,
+    // stamped with the instant it was set for timeout-based expiry. Uses
+    // `Instant` rather than `anim_tick` because the latter only advances while
+    // `running` is true, so a copy during idle would never expire.
+    let mut copy_status: Option<(String, Instant)> = None;
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
@@ -185,7 +191,17 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
+    // Frame-rate limiter: caps redraws at ~30 FPS regardless of token arrival
+    // rate. `Skip` prevents burst-fire catch-up after a stall.
+    let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
+    frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut skip_next_render = false;
+    // `dirty` = state changed since the last render. `render_pending` = a
+    // frame-tick boundary authorized a render. A redraw happens only when
+    // BOTH are true, so no matter how fast tokens arrive the screen refreshes
+    // at most ~30 times/sec.
+    let mut dirty = true;
+    let mut render_pending = true;
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
@@ -229,7 +245,8 @@ async fn run_app(
             _ => model_label.clone(),
         };
         let mut hits = MouseHits::default();
-        if !skip_next_render {
+        if dirty && render_pending {
+            if !skip_next_render {
             render(
                 terminal,
                 display_chat,
@@ -263,8 +280,18 @@ async fn run_app(
                 model_menu.as_ref(),
                 &mut hits,
                 selection,
+                copy_status.as_ref().and_then(|(msg, t)| {
+                    if t.elapsed() < Duration::from_secs(2) {
+                        Some(msg.as_str())
+                    } else {
+                        None
+                    }
+                }),
             )?;
+            }
+            dirty = false;
         }
+        render_pending = false;
         skip_next_render = false;
 
         tokio::select! {
@@ -278,8 +305,10 @@ async fn run_app(
                         break;
                     }
                 };
+                dirty = true;
                 match ev {
                     Event::Key(k) => {
+                        copy_status = None;
                         // Task picker modal: intercept all keys while open.
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
@@ -331,8 +360,32 @@ async fn run_app(
                                     ));
                                     // Restore or create the target session's UI state.
                                     let restored = session_states.remove(&new_session_id);
+                                    // Always rebuild the chat transcript from the
+                                    // store on switch-back. A cached snapshot can
+                                    // be stale -- background subagents may have
+                                    // progressed or completed while the session
+                                    // was dormant, so replaying from store
+                                    // ensures the latest state is shown.
+                                    chat = match &pick {
+                                        crate::task::TaskPick::Resume(_) => {
+                                            crate::session_ui::replay_into_chat(
+                                                &agent_name_for_tokens,
+                                                &resumed_messages,
+                                                &store,
+                                                &new_session_id,
+                                            )
+                                            .await
+                                        }
+                                        crate::task::TaskPick::New => {
+                                            ChatView {
+                                                agent: agent_name_for_tokens.clone(),
+                                                ..Default::default()
+                                            }
+                                        }
+                                    };
+                                    // Restore UI interaction state from cache,
+                                    // or initialise fresh for a new session.
                                     if let Some(st) = restored {
-                                        chat = st.chat;
                                         history = st.history;
                                         scroll = st.scroll;
                                         follow = st.follow;
@@ -341,19 +394,20 @@ async fn run_app(
                                         queue_items = st.queue_items;
                                         active_skill = st.active_skill;
                                         active_skill_body = st.active_skill_body;
-                                        running = false; // worker was killed on switch
                                     } else {
-                                        // Fresh state for a new or resumed session.
-                                        if let crate::task::TaskPick::Resume(_) = pick {
-                                            chat = crate::session_ui::replay_into_chat(&agent_name_for_tokens, &resumed_messages, &store, &new_session_id).await;
-                                        } else {
-                                            chat = ChatView { agent: agent_name_for_tokens.clone(), ..Default::default() };
-                                        }
-                                        scroll = 0; follow = true;
-                                        sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
-                                        steer_items.clear(); queue_items.clear();
-                                        active_skill = None; active_skill_body = None; running = false;
+                                        scroll = 0;
+                                        follow = true;
+                                        sys_tokens = sys_tokens_for(
+                                            &agent_name_for_tokens,
+                                            &workdir_for_tokens,
+                                            None,
+                                        );
+                                        steer_items.clear();
+                                        queue_items.clear();
+                                        active_skill = None;
+                                        active_skill_body = None;
                                     }
+                                    running = false; // chat rebuilt from store on switch-back
                                     input.clear(); cursor_idx = 0; hist_idx = None;
                                     rebind_session(
                                         &mut cmd_tx,
@@ -530,6 +584,14 @@ async fn run_app(
                             &mut last_esc,
                             &mut skill_menu,
                             active_skill.as_deref(),
+                            // Composer wrap geometry: matches the values used by `render`
+                            // (inner_w = term width - 2 borders, prompt_w = 2 for the `❯ ` prefix)
+                            // so Up/Down cursor movement tracks the rendered wrapped rows.
+                            terminal
+                                .size()
+                                .map(|r| r.width.saturating_sub(2))
+                                .unwrap_or(78),
+                            2,
                         ) {
                             KeyAction::Submit(text) => {
                                 let (clean, _unresolved) = resolve_and_warn(
@@ -543,15 +605,14 @@ async fn run_app(
                                             format!("[skill: {}]", active_skill.as_deref().unwrap_or("")),
                                             Style::default().fg(Color::Yellow))));
                                         if !running {
-                                            // Skill-only submit: start a drain-mode turn
-                                            // (empty prompt) so the model reads the injected
-                                            // skill body and acts on it immediately.
-                                            if !start_turn(
-                                                &cmd_tx,
-                                                &mut cancel,
-                                                UiCmd::Prompt(String::new()),
-                                            )
-                                            .await
+                                            // Skill-only submit: send a trigger prompt naming the active
+                                            // skill so the model records a user turn and begins acting on
+                                            // the skill body injected into the system prompt.
+                                            let skill_name = active_skill.as_deref().unwrap_or("");
+                                            let trigger = format!(
+                                                "The `{skill_name}` skill is now active. Begin executing its instructions immediately."
+                                            );
+                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger)).await
                                             {
                                                 worker_dead(&mut chat);
                                                 break;
@@ -590,8 +651,10 @@ async fn run_app(
                                 if !clean.is_empty() {
                                     let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await;
                                     steer_items.push(clean.to_string());
-                                    chat.push_marker(Line::from(Span::styled(
-                                        format!("\u{21b3} steer: {clean}"), Style::default().fg(Color::Blue))));
+                                    // Do NOT echo into the main transcript /
+                                    // execution area. Steer input is surfaced
+                                    // only in the side queue panel + status bar
+                                    // badge, consistent with queued inputs.
                                 }
                                 follow = true;
                             }
@@ -653,11 +716,30 @@ async fn run_app(
                             KeyAction::OpenCommand => {
                                 command_menu = Some(CommandMenu::new());
                             }
-                            KeyAction::Quit => { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
+                            KeyAction::Quit => {
+                                // Hard exit (Ctrl+C/Ctrl+D): interrupt any
+                                // in-flight turn so the worker stops promptly.
+                                // Without this the worker is blocked inside
+                                // `run_session` and cannot read the UiCmd::Quit
+                                // until the turn naturally ends (up to the
+                                // 30-min timeout), freezing the terminal on the
+                                // alt-screen. Cancelling the shared token makes
+                                // the runner's select! arms return immediately.
+                                if running {
+                                    cancel.cancel();
+                                    chat.push_marker(Line::from(Span::styled(
+                                        "[exiting…]",
+                                        Style::default().fg(Color::Yellow),
+                                    )));
+                                }
+                                let _ = cmd_tx.send(UiCmd::Quit).await;
+                                break;
+                            }
                             KeyAction::None => {}
                         }
                     }
                     Event::Mouse(m) => {
+                        let mut copy_msg: Option<String> = None;
                         handle_mouse(
                             m,
                             &hits,
@@ -673,8 +755,12 @@ async fn run_app(
                             &mut queue_items,
                             &session_id,
                             store.as_ref(),
+                            &mut copy_msg,
                         )
                         .await;
+                        if let Some(msg) = copy_msg {
+                            copy_status = Some((msg, Instant::now()));
+                        }
                     }
                     _ => {}
                 }
@@ -687,63 +773,72 @@ async fn run_app(
                         break;
                     }
                 };
-                match ev {
-                    UiEvent::Session(sev) => {
-                        if let SessionEvent::TranscriptReset(msgs) = &sev {
-                            let agent = chat.agent.clone();
-                            chat = crate::session_ui::replay_into_chat(&agent, msgs, &store, &session_id).await;
-                        } else {
-                            chat.apply(&sev);
-                            if matches!(sev, SessionEvent::ReasoningDelta(_))
-                                && chat.last_thinking_collapsed()
-                            {
-                                skip_next_render = true;
+                // Drain all queued events to coalesce token bursts into one
+                // batch — process them all now, render at most once next frame.
+                let mut events = vec![ev];
+                while let Ok(ev) = evt_rx.try_recv() {
+                    events.push(ev);
+                }
+                for ev in events {
+                    skip_next_render = false;
+                    match ev {
+                        UiEvent::Session(sev) => {
+                            if let SessionEvent::TranscriptReset(msgs) = &sev {
+                                let agent = chat.agent.clone();
+                                chat = crate::session_ui::replay_into_chat(&agent, msgs, &store, &session_id).await;
+                            } else {
+                                chat.apply(&sev);
+                                if matches!(sev, SessionEvent::ReasoningDelta(_))
+                                    && chat.last_thinking_collapsed()
+                                {
+                                    skip_next_render = true;
+                                }
+                            }
+                            if let SessionEvent::QueueConsumed { seq } = &sev {
+                                queue_items.retain(|(s, _)| s != seq);
+                            }
+                            if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
+                                if cancelled {
+                                    // Stale event from a cancelled turn — consume without
+                                    // affecting running or clearing items belonging to a
+                                    // potentially-new turn.
+                                    cancelled = false;
+                                } else {
+                                    running = false;
+                                    steer_items.clear();
+                                    queue_items.clear();
+                                }
                             }
                         }
-                        if let SessionEvent::QueueConsumed { seq } = &sev {
-                            queue_items.retain(|(s, _)| s != seq);
-                        }
-                        if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
+                        UiEvent::TurnDone => {
                             if cancelled {
-                                // Stale event from a cancelled turn — consume without
-                                // affecting running or clearing items belonging to a
-                                // potentially-new turn.
                                 cancelled = false;
                             } else {
                                 running = false;
-                                steer_items.clear();
-                                queue_items.clear();
                             }
-                        }
-                    }
-                    UiEvent::TurnDone => {
-                        if cancelled {
-                            cancelled = false;
-                        } else {
-                            running = false;
-                        }
-                        if let Some(next) = local_queue.pop_front() {
-                            push_user(&mut chat, &mut history, &mut hist_idx, &next);
-                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(next)).await {
-                                worker_dead(&mut chat);
-                                break;
-                            }
-                            running = true;
-                            chat.status.clear();
                         }
                     }
                 }
+                dirty = true;
             }
             _ = anim_ticker.tick() => {
                 if running {
                     anim_tick = anim_tick.wrapping_add(1);
+                    dirty = true;
                 }
+            }
+            _ = frame_ticker.tick() => {
+                render_pending = true;
             }
         }
     }
 
     drop(cmd_tx);
-    let _ = worker.await;
+    // The cancel issued on Quit should make the worker finish promptly. As a
+    // last-resort guard against a tool/subagent that ignores cancellation,
+    // bound the wait so the terminal is restored (TerminalGuard::drop leaves
+    // the alt-screen) instead of freezing indefinitely on a blocked worker.
+    let _ = tokio::time::timeout(Duration::from_secs(5), worker).await;
     Ok(())
 }
 

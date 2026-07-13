@@ -94,16 +94,32 @@ pub async fn compact(
 }
 
 fn split_index(messages: &[Message], tail_turns: usize) -> usize {
-    let user_idx: Vec<usize> = messages
+    // Collect indices of "turn starts" — natural conversation boundaries that
+    // delimit summarizable work cycles. A message is a turn start when it is:
+    //   - the first message (index 0), or
+    //   - a real (non-synthetic) user message, or
+    //   - an assistant message that follows a tool message (the model's fresh
+    //     response after consuming tool results — a new cycle within a single
+    //     user request, common in tool-intensive coding sessions).
+    //
+    // This generalization ensures compaction fires for single-user tasks that
+    // accumulate many tool roundtrips — the most common coding-agent shape —
+    // without changing the split point for classic multi-user sessions (where
+    // every turn start is already a real user message, so the set is identical).
+    let turn_starts: Vec<usize> = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| m.role == Role::User && !m.synthetic)
+        .filter(|(i, m)| {
+            *i == 0
+                || (m.role == Role::User && !m.synthetic)
+                || (m.role == Role::Assistant && *i > 0 && messages[i - 1].role == Role::Tool)
+        })
         .map(|(i, _)| i)
         .collect();
-    if user_idx.len() <= tail_turns {
+    if turn_starts.len() <= tail_turns {
         return 0;
     }
-    user_idx[user_idx.len() - tail_turns]
+    turn_starts[turn_starts.len() - tail_turns]
 }
 
 async fn summarize(
@@ -162,4 +178,110 @@ fn compaction_message(summary: String) -> Message {
     );
     m.synthetic = true;
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_core::{ContentBlock, MessageUsage};
+
+    fn tool_msg(id: &str, tool_use_id: &str) -> Message {
+        Message {
+            id: id.into(),
+            role: Role::Tool,
+            blocks: vec![ContentBlock::ToolResult {
+                tool_use_id: tool_use_id.into(),
+                content: "x".into(),
+                is_error: false,
+            }],
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: 0,
+            synthetic: false,
+        }
+    }
+
+    fn assistant_with_tool(id: &str) -> Message {
+        let mut m = Message::assistant(id);
+        m.blocks.push(ContentBlock::ToolUse {
+            id: "tc".into(),
+            name: "bash".into(),
+            input: serde_json::json!({}),
+        });
+        m
+    }
+
+    #[test]
+    fn split_index_assistant_after_tool_is_turn_boundary() {
+        // Single user task with 3 tool roundtrips — common coding-agent shape.
+        // With the old code this would return 0 (only 1 real user message).
+        let msgs = vec![
+            Message::user("u1", "task"),
+            assistant_with_tool("a1"),
+            tool_msg("t1", "tc"),
+            assistant_with_tool("a2"),
+            tool_msg("t2", "tc"),
+            assistant_with_tool("a3"),
+            tool_msg("t3", "tc"),
+            Message::assistant("a4"),
+        ];
+        // turn_starts = [0, 3, 5, 7], tail=2 → split = turn_starts[2] = 5
+        let split = split_index(&msgs, 2);
+        assert!(
+            split > 0,
+            "tool-intensive single-user session must be splittable, got split={split}"
+        );
+        assert_eq!(split, 5);
+    }
+
+    #[test]
+    fn split_index_multi_user_unchanged() {
+        // Classic multi-user session — split point must not change.
+        let msgs = vec![
+            Message::user("u1", "first task"),
+            Message::assistant("a1"),
+            Message::user("u2", "second task"),
+            Message::assistant("a2"),
+            Message::user("u3", "third task"),
+            Message::assistant("a3"),
+        ];
+        // turn_starts = [0, 2, 4] (all real user messages)
+        // tail=2 → split = turn_starts[1] = 2
+        assert_eq!(split_index(&msgs, 2), 2);
+        // tail=1 → split = turn_starts[2] = 4
+        assert_eq!(split_index(&msgs, 1), 4);
+    }
+
+    #[test]
+    fn split_index_returns_zero_when_too_few_turns() {
+        // Single user + one tool roundtrip → turn_starts=[0, 3], tail=2 → 0.
+        let msgs = vec![
+            Message::user("u1", "task"),
+            assistant_with_tool("a1"),
+            tool_msg("t1", "tc"),
+            Message::assistant("a2"),
+        ];
+        assert_eq!(split_index(&msgs, 2), 0);
+    }
+
+    #[test]
+    fn split_index_mixed_user_and_tool_turns() {
+        // A session with both real user turns and tool roundtrips.
+        let msgs = vec![
+            Message::user("u1", "task1"),
+            assistant_with_tool("a1"),
+            tool_msg("t1", "tc"),
+            assistant_with_tool("a2"),
+            tool_msg("t2", "tc"),
+            Message::user("u2", "task2"),
+            assistant_with_tool("a3"),
+            tool_msg("t3", "tc"),
+            Message::assistant("a4"),
+        ];
+        // turn_starts = [0, 3, 5, 8], tail=2 → split = turn_starts[2] = 5
+        assert_eq!(split_index(&msgs, 2), 5);
+        // tail=1 → split = turn_starts[3] = 8
+        assert_eq!(split_index(&msgs, 1), 8);
+    }
 }

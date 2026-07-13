@@ -38,6 +38,8 @@ fn run_handle(
         &mut last_esc,
         &mut skill_menu,
         None,
+        80,
+        2,
     )
 }
 
@@ -70,6 +72,8 @@ fn run_handle_menu(
         &mut last_esc,
         skill_menu,
         active_skill,
+        80,
+        2,
     )
 }
 

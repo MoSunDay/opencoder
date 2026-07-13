@@ -31,9 +31,9 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
-/// Maximum render rate (~30 FPS). Events are processed immediately but the
+/// Maximum render rate (10 FPS). Events are processed immediately but the
 /// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 32;
+const FRAME_MS: u64 = 100;
 /// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
 const MODE_FLASH_TICKS: u32 = 5;
 
@@ -191,7 +191,7 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at ~30 FPS regardless of token arrival
+    // Frame-rate limiter: caps redraws at 10 FPS regardless of token arrival
     // rate. `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -199,7 +199,7 @@ async fn run_app(
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most ~30 times/sec.
+    // at most 10 times/sec.
     let mut dirty = true;
     let mut render_pending = true;
     loop {

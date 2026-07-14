@@ -302,3 +302,90 @@ async fn compaction_fires_in_tool_intensive_single_user_session() {
         reqs.len()
     );
 }
+
+#[tokio::test]
+async fn compaction_fires_with_real_default_config() {
+    // End-to-end proof that compaction triggers and actually executes under the
+    // REAL default config (no overrides): context_limit=128_000, threshold=80_000,
+    // reserved=20_000, tail_turns=2. budget = min(80_000, 128_000 - 20_000) = 80_000.
+    // Three 200k-char user messages (~150k tokens) vastly exceed that budget.
+    let config = base_config(); // Config::default() except model for the test
+    let (_dir, mut s) = session_with(config, client_with_default_done("unused")).await;
+
+    // Assert the real defaults (no compaction field was overridden).
+    assert_eq!(s.config.context_limit(), 128_000, "default context window");
+    assert_eq!(s.config.compaction.context_threshold, 80_000, "default threshold");
+    assert_eq!(s.config.compaction.reserved, 20_000, "default reserved");
+    assert_eq!(s.config.compaction.tail_turns, 2, "default tail_turns");
+    let budget = s
+        .config
+        .compaction
+        .context_threshold
+        .min(s.config.context_limit().saturating_sub(s.config.compaction.reserved));
+    assert_eq!(budget, 80_000, "budget = min(threshold, limit - reserved)");
+
+    // ~150k estimated tokens — well above the 80k budget.
+    s.messages.push(big_user_message("u1", 200_000));
+    s.messages.push(big_user_message("u2", 200_000));
+    s.messages.push(big_user_message("u3", 200_000));
+
+    // Layer 1: the trigger must fire BEFORE any run() call.
+    assert!(should_compact(&s), "150k estimated tokens must trip the 80k budget");
+
+    // Rebuild the session with a real mock script: summary call, then a
+    // tool-less done so the loop terminates after one turn.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done_event("SUMMARY")])
+            .with_default(vec![done_event("done")]),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir2, mut s) = session_with(base_config(), client).await;
+    s.messages.push(big_user_message("u1", 200_000));
+    s.messages.push(big_user_message("u2", 200_000));
+    s.messages.push(big_user_message("u3", 200_000));
+
+    let chars_before: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+
+    // run() adds a 4th user turn ("go"): u1,u2,u3,go -> 4 turns, tail_turns=2
+    // -> split_index=2 -> u1+u2 get summarized, u3 retained.
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    // Layer 2: compaction actually executed end-to-end.
+    let chars_after: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+    assert!(
+        chars_after < chars_before / 2,
+        "footprint must shrink >50% (was {}, now {})",
+        chars_before,
+        chars_after
+    );
+    assert!(
+        s.messages[0].synthetic,
+        "first message must be the synthetic compaction summary"
+    );
+    assert!(
+        s.messages[0]
+            .text()
+            .starts_with("[Conversation summary so far]"),
+        "first message must carry the compaction-summary prefix"
+    );
+    assert!(
+        !s.messages.iter().any(|m| m.id == "u1"),
+        "u1 must have been summarized away"
+    );
+    assert!(
+        !s.messages.iter().any(|m| m.id == "u2"),
+        "u2 must have been summarized away"
+    );
+    assert!(
+        s.messages.iter().any(|m| m.id == "u3"),
+        "u3 must be retained (within the tail)"
+    );
+
+    let reqs = mock.requests();
+    assert!(
+        reqs.len() >= 2,
+        "need >=2 calls (summary + turn), got {}",
+        reqs.len()
+    );
+}

@@ -117,6 +117,7 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
     // between turn 1 and turn 2 — guaranteeing a second LLM call.
     store
         .admit_input(&SessionInput {
+            seq: None,
             id: "steer-1".into(),
             session_id: "skill-mid-run".into(),
             delivery: Delivery::Steer,
@@ -227,6 +228,7 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
     // Admit a queue follow-up BEFORE the run.
     store
         .admit_input(&SessionInput {
+            seq: None,
             id: "q-1".into(),
             session_id: "skill-queue".into(),
             delivery: Delivery::Queue,

@@ -28,6 +28,7 @@ pub struct TuiOpts {
     pub model: Option<String>,
     pub agent: Option<String>,
     pub workdir: Option<PathBuf>,
+    pub session: Option<String>,
 }
 
 impl TuiOpts {
@@ -36,7 +37,13 @@ impl TuiOpts {
             model,
             agent,
             workdir,
+            session: None,
         }
+    }
+
+    pub fn with_session(mut self, session: Option<String>) -> Self {
+        self.session = session;
+        self
     }
 }
 

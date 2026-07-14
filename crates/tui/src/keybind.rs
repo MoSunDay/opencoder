@@ -22,4 +22,5 @@ Keybindings:
 Mouse:            scroll wheel to scroll transcript; click arrow to follow
                   drag in the body to select text and copy it to the clipboard (OSC52)
                   SHIFT+drag = terminal-native selection (fallback when OSC52 is blocked)
+                  steer panel: \u{2715} delete, > submit now (interrupt & promote)
 ";

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Context, Result};
 use opencoder_core::{resolve_agent, Agent, Config, Message};
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::Store;
+use opencoder_store::{Store, SubagentStatus};
 
 use crate::SessionState;
 
@@ -35,7 +35,37 @@ pub async fn resume(
         .or_else(|| resolve_agent("act"))
         .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
 
-    let messages: Vec<Message> = store.load_messages(id).await?;
+    let mut messages: Vec<Message> = store.load_messages(id).await?;
+
+    // Reconcile subagent tasks stuck in Running state — the process was
+    // interrupted mid-subagent. Mark them as Failed with an interrupted marker.
+    let tasks = store.list_subagent_tasks(id).await.unwrap_or_default();
+    for task in &tasks {
+        if task.status == SubagentStatus::Running {
+            tracing::warn!(task_id = %task.task_id, "marking stuck Running subagent as Failed on resume");
+            let _ = store
+                .complete_subagent_task(&task.task_id, "(interrupted)", false)
+                .await;
+        }
+    }
+
+    // If compaction was persisted, trim the summarized head and prepend
+    // the summary message so the resumed transcript matches the pre-exit state.
+    if let Some(skip) = meta.summary_seq {
+        if skip > 0 {
+            let skip = skip as usize;
+            if skip < messages.len() {
+                messages = messages[skip..].to_vec();
+            } else {
+                messages = Vec::new();
+            }
+        }
+        if let Some(summary_text) = &meta.summary {
+            let summary_msg = crate::compaction::compaction_message(summary_text.clone());
+            messages.insert(0, summary_msg);
+        }
+    }
+
     let n = messages.len();
     let model = config.model_id().to_string();
 
@@ -53,6 +83,8 @@ pub async fn resume(
         persisted_count: n,
         session_created: true,
         cancel: None,
+        summary: meta.summary,
+        summary_seq: meta.summary_seq,
     };
     let _ = &mut s;
     Ok(s)

@@ -830,6 +830,7 @@ async fn mixed_concurrent_writes_with_immediate_tx() {
         make_session(&store, &sid, w as i64).await;
         for k in 0..ITERS {
             let inp = SessionInput {
+                seq: None,
                 id: format!("in-{w}-{k}"),
                 session_id: sid.clone(),
                 delivery: Delivery::Queue,

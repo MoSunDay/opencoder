@@ -84,3 +84,71 @@ fn truncate_output_with_error_no_truncation_when_under_max() {
     assert!(out.is_error);
     assert_eq!(out.content, "short");
 }
+
+#[test]
+fn truncate_output_line_limit_truncates() {
+    let content: String = (0..1000).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+    let out = truncate_output(content.clone(), 100_000);
+    assert!(!out.is_error);
+    assert!(
+        out.content.contains("[output truncated"),
+        "should contain truncation marker"
+    );
+    assert!(
+        out.content.contains("1000 lines"),
+        "should report original line count"
+    );
+    // Resulting line count should be at most 801 (800 lines + truncation notice line)
+    assert!(
+        out.content.lines().count() <= 802,
+        "truncated output should have at most ~800 lines + notice"
+    );
+}
+
+#[test]
+fn truncate_output_byte_limit_truncates() {
+    let content = "x".repeat(10_000);
+    let out = truncate_output(content.clone(), 100_000);
+    assert!(
+        out.content.contains("[output truncated"),
+        "should contain truncation marker"
+    );
+    assert!(
+        out.content.contains("10000 bytes"),
+        "should report original byte count"
+    );
+}
+
+#[test]
+fn truncate_output_both_limits_exceeded() {
+    let content: String = (0..2000)
+        .map(|i| format!("line {i} with some padding text here"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let out = truncate_output_with_error(content.clone(), 100_000, false);
+    assert!(
+        out.content.contains("2000 lines"),
+        "should report original line count"
+    );
+    assert!(
+        out.content.contains("bytes"),
+        "should also report byte count since content is large"
+    );
+}
+
+#[test]
+fn truncate_output_under_both_limits_passes_through() {
+    let content = "hello\nworld\nthis is short";
+    let out = truncate_output(content.to_string(), 4096);
+    assert_eq!(out.content, content);
+}
+
+#[test]
+fn truncate_output_does_not_split_multibyte_chars() {
+    // Each of these is a 3-byte UTF-8 char; create content well over 4096 bytes.
+    let content = "世".repeat(2000); // 6000 bytes
+    let out = truncate_output(content, 4096);
+    assert!(out.content.contains("truncated"));
+    // The truncated prefix should still be valid UTF-8 (no panic means valid).
+    assert!(out.content.starts_with("世"));
+}

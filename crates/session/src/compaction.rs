@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use opencoder_core::{Message, Role, ToolArc};
+use opencoder_core::{message::now_ms, Message, Role, ToolArc};
 use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
+use opencoder_store::SessionPatch;
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
 use crate::runner::SessionEvent;
@@ -89,6 +90,32 @@ pub async fn compact(
     let summary_msg = compaction_message(summary.clone());
     let tail_msgs: Vec<Message> = session.messages[split..].to_vec();
     session.messages = vec![summary_msg].into_iter().chain(tail_msgs).collect();
+
+    // Persist compaction summary to the store so resume can reconstruct
+    // the compacted transcript instead of reloading the full history.
+    if let Some(store) = &session.store {
+        let prev_skip = session.summary_seq.unwrap_or(0);
+        // The head in the in-memory list is messages[0..split].
+        // If there was a previous compaction, the first message is the old
+        // summary (not in the store), so the number of STORE messages in
+        // the head is split-1. Otherwise all split head messages are in
+        // the store.
+        let head_store_msgs = if prev_skip > 0 { split - 1 } else { split };
+        let new_skip = prev_skip + head_store_msgs as i64;
+        let _ = store
+            .update_session(
+                &session.id,
+                &SessionPatch {
+                    summary: Some(summary.clone()),
+                    summary_seq: Some(new_skip),
+                    updated_at: Some(now_ms()),
+                    ..Default::default()
+                },
+            )
+            .await;
+        session.after_compaction(summary.clone(), new_skip);
+    }
+
     on_event(SessionEvent::Status(String::new()));
     Ok(Some(summary))
 }
@@ -171,7 +198,7 @@ async fn summarize(
     Ok(text)
 }
 
-fn compaction_message(summary: String) -> Message {
+pub(crate) fn compaction_message(summary: String) -> Message {
     let mut m = Message::user(
         crate::runner::new_id(),
         format!("[Conversation summary so far]\n{summary}"),

@@ -181,6 +181,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         subagent_tasks::list(&conn, parent_session_id).await
     }
+    async fn get_subagent_task(&self, task_id: &str) -> Result<Option<SubagentTaskRecord>> {
+        let conn = self.conn().await?;
+        subagent_tasks::get_by_task_id(&conn, task_id).await
+    }
 
     async fn import_messages(
         &self,

@@ -116,7 +116,7 @@ fn status_bar_omits_branding() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
+                f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
             );
         })
         .unwrap();
@@ -131,10 +131,6 @@ fn status_bar_omits_branding() {
         row.contains("[act]"),
         "agent chip should appear; got: {row}"
     );
-    assert!(
-        row.contains("ctx"),
-        "context indicator should appear; got: {row}"
-    );
 }
 
 /// While running, the status bar shows the status text plus the first braille
@@ -147,7 +143,7 @@ fn status_bar_running_shows_spinner_and_status() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
+                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
             );
         })
         .unwrap();
@@ -181,7 +177,7 @@ fn status_bar_has_no_skill_badge() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
+                f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
             );
         })
         .unwrap();
@@ -223,6 +219,74 @@ fn queue_panel_renders_steer_and_queue_rows() {
     );
 }
 
+/// Steer rows register two hit-rects (Delete + Submit); queue rows register
+/// three (Up + Down + Delete). Steer rows are now clickable (seq: Some).
+#[test]
+fn queue_panel_registers_correct_btns_for_steer_and_queue() {
+    use crate::queue_panel::{QueueBtn, QueueBtnAction};
+    let backend = TestBackend::new(80, 5);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let steers: Vec<(i64, String)> = vec![(10, "fix bug".into())];
+    let queues: Vec<(i64, String)> = vec![(20, "run lint".into())];
+    let mut btns: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, &steers, &queues, &mut btns);
+        })
+        .unwrap();
+
+    // Steer row (seq=10) should have Delete + Submit.
+    let steer_btns: Vec<_> = btns.iter().filter(|b| b.seq == 10).collect();
+    assert_eq!(steer_btns.len(), 2, "steer row should have 2 buttons");
+    assert!(
+        steer_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Delete),
+        "steer row must have a Delete button"
+    );
+    assert!(
+        steer_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Submit),
+        "steer row must have a Submit button"
+    );
+    // Steer row must NOT have Up or Down.
+    assert!(
+        !steer_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Up || b.action == QueueBtnAction::Down),
+        "steer row must not have Up/Down buttons"
+    );
+
+    // Queue row (seq=20) should have Up + Down + Delete.
+    let queue_btns: Vec<_> = btns.iter().filter(|b| b.seq == 20).collect();
+    assert_eq!(queue_btns.len(), 3, "queue row should have 3 buttons");
+    assert!(
+        queue_btns.iter().any(|b| b.action == QueueBtnAction::Up),
+        "queue row must have an Up button"
+    );
+    assert!(
+        queue_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Down),
+        "queue row must have a Down button"
+    );
+    assert!(
+        queue_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Delete),
+        "queue row must have a Delete button"
+    );
+    // Queue row must NOT have Submit.
+    assert!(
+        !queue_btns
+            .iter()
+            .any(|b| b.action == QueueBtnAction::Submit),
+        "queue row must not have a Submit button"
+    );
+}
+
 // ----- Guard (B): composer rendering with multi-line input -----
 
 
@@ -235,14 +299,11 @@ fn composer_renders_prompt_and_multiline_text() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            let mut jump_btn: Option<Rect> = None;
             render_composer(
                 f,
                 Rect::new(0, 0, 40, 5),
                 "hello\nworld",
-                true,
                 0,
-                &mut jump_btn,
                 38, // inner_w: 40 - 2 borders
                 2,  // prompt_w: "❯ "
             );
@@ -254,7 +315,6 @@ fn composer_renders_prompt_and_multiline_text() {
     assert_eq!(buf[(1, 1)].symbol(), "\u{276f}", "prompt glyph at (1,1)");
     let row1 = row_text(buf, 1, 40);
     let row2 = row_text(buf, 2, 40);
-    let row0 = row_text(buf, 0, 40);
     assert!(
         row1.contains('\u{276f}'),
         "prompt should appear on row 1; got: {row1}"
@@ -267,44 +327,96 @@ fn composer_renders_prompt_and_multiline_text() {
         row2.contains("world"),
         "world should appear on row 2; got: {row2}"
     );
-    // Follow label "跟随中…" — wide-char spacer cells insert spaces, so
-    // check for the constituent chars individually.
-    assert!(
-        row0.contains('跟') && row0.contains('随'),
-        "follow label should appear on row 0; got: {row0}"
-    );
 }
 
-/// When not following, the composer shows a `↓` jump label on the top border
-/// and exports its hit rect via `jump_btn`.
+/// When not following, the body's bottom-border row shows the `⬇` (U+2B07)
+/// follow indicator and exports its hit rect via `jump_btn`.
 #[test]
-fn composer_jump_label_when_not_following() {
+fn body_follow_indicator_when_not_following() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello".into()));
+    v.apply(&SessionEvent::Done);
+
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut jump_btn: Option<Rect> = None;
+    let mut body_out: Option<Rect> = None;
+    let mut scroll = 0u16;
     terminal
         .draw(|f| {
-            render_composer(
+            render_body(
                 f,
-                Rect::new(0, 0, 40, 5),
-                "hello\nworld",
+                f.area(),
+                &v,
+                "test",
+                &mut scroll,
                 false,
                 0,
+                &mut body_out,
                 &mut jump_btn,
-                38, // inner_w: 40 - 2 borders
-                2,  // prompt_w: "❯ "
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
             );
         })
         .unwrap();
 
-    let row0 = row_text(terminal.backend().buffer(), 0, 40);
+    // Bottom border row is the last row of the area.
+    let area = terminal.backend().buffer().area;
+    let bottom_row = area.bottom() - 1;
+    let row = row_text(terminal.backend().buffer(), bottom_row, area.width);
     assert!(
-        row0.contains('\u{2193}'),
-        "jump arrow should appear on row 0; got: {row0}"
+        row.contains('\u{2b07}'),
+        "follow arrow ⬇ should appear on bottom border; got: {row}"
     );
     assert!(
         jump_btn.is_some(),
         "jump_btn should be set to a rect when not following"
+    );
+}
+
+/// When following, the body's bottom-border row shows the "跟随中…" label
+/// and `jump_btn` is `None` (no clickable target while already at the bottom).
+#[test]
+fn body_follow_label_when_following() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello".into()));
+    v.apply(&SessionEvent::Done);
+
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut jump_btn: Option<Rect> = None;
+    let mut body_out: Option<Rect> = None;
+    let mut scroll = 0u16;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                "test",
+                &mut scroll,
+                true,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+            );
+        })
+        .unwrap();
+
+    let area = terminal.backend().buffer().area;
+    let bottom_row = area.bottom() - 1;
+    let row = row_text(terminal.backend().buffer(), bottom_row, area.width);
+    assert!(
+        row.contains('跟') && row.contains('随'),
+        "follow label should appear on bottom border; got: {row}"
+    );
+    assert!(
+        jump_btn.is_none(),
+        "jump_btn should be None when following"
     );
 }
 
@@ -391,8 +503,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
     let input = "ab cdefgh";
     terminal
         .draw(|f| {
-            let mut jump_btn: Option<Rect> = None;
-            render_composer(f, Rect::new(0, 0, 12, 6), input, true, 0, &mut jump_btn, 8, 2);
+            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2);
         })
         .unwrap();
     let buf = terminal.backend().buffer();
@@ -547,4 +658,51 @@ fn status_chip_width_accounts_for_wide_emoji() {
         row.contains('🎉'),
         "second emoji was clipped — chip width did not account for wide chars; got: {row}"
     );
+}
+
+/// The status bar shows a ctx% indicator at the end.
+#[test]
+fn status_bar_shows_ctx_percent() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000);
+        })
+        .unwrap();
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(row.contains("ctx"), "status bar should show ctx; got: {row}");
+    assert!(row.contains('%'), "status bar should show percent; got: {row}");
+    assert!(
+        row.contains("5K"),
+        "should show compact used tokens; got: {row}"
+    );
+    assert!(
+        row.contains("200K"),
+        "should show compact limit tokens; got: {row}"
+    );
+}
+
+/// High context usage renders the ctx% indicator in red.
+#[test]
+fn status_bar_ctx_red_at_high_usage() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, false, "", 0, 0, "glm-4.6", "act", 0, 180000, 200000);
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row = row_text(buf, 0, 120);
+    // Find the "ctx" text position and check its color is Red.
+    assert!(row.contains("ctx"), "ctx should appear; got: {row}");
+    // Find the column where "ctx" starts.
+    let ctx_col = row.find("ctx").expect("ctx should be present");
+    // The span starts 3 chars before "ctx" (the " | " prefix), so the styled
+    // span starts at ctx_col - 3. Check a cell within the ctx text.
+    let cell = buf.cell((ctx_col as u16, 0)).expect("cell at ctx");
+    assert_eq!(cell.fg, Color::Red, "high usage should be red; got: {row}");
 }

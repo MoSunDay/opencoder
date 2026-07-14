@@ -35,6 +35,7 @@ async fn inputs_steer_and_queue_promotion_semantics() {
 
     let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
         SessionInput {
+            seq: None,
             id: format!("in-{seq}"),
             session_id: "s".into(),
             delivery,
@@ -93,6 +94,7 @@ async fn swap_input_order_changes_drain_order() {
 
     let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
         SessionInput {
+            seq: None,
             id: format!("in-{seq}"),
             session_id: "s".into(),
             delivery,
@@ -152,6 +154,7 @@ async fn delete_input_removes_pending_and_preserves_order() {
 
     let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
         SessionInput {
+            seq: None,
             id: format!("in-{seq}"),
             session_id: "s".into(),
             delivery,
@@ -205,6 +208,7 @@ async fn delete_input_preserves_already_promoted_audit_row() {
 
     let admit = |seq: i64, delivery: Delivery, prompt: &str| -> SessionInput {
         SessionInput {
+            seq: None,
             id: format!("in-{seq}"),
             session_id: "s".into(),
             delivery,
@@ -253,6 +257,7 @@ async fn claim_next_queue_returns_seq_marks_promoted_and_idempotent_delete() {
 
     let admit = |seq: i64, prompt: &str| -> SessionInput {
         SessionInput {
+            seq: None,
             id: format!("in-{seq}"),
             session_id: "s".into(),
             delivery: Delivery::Queue,

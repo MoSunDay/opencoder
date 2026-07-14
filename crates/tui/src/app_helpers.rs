@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use opencoder_core::{discover_skills, resolve_agent};
 use opencoder_llm::estimate;
@@ -23,6 +23,9 @@ use crate::render::{in_rect, MouseHits};
 use crate::selection::SelRange;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::widgets::{Paragraph, Wrap};
+
+/// Maximum interval (ms) between two left-clicks to count as a double-click.
+const DBL_CLICK_MS: u64 = 400;
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
 /// subagent view, and Ctrl+L collapses all thinking blocks / exits a
@@ -74,6 +77,7 @@ pub(crate) fn pre_key_intercept(
 
 pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
     SessionInput {
+        seq: None,
         id: opencoder_session::runner::new_id(),
         session_id: session_id.to_string(),
         delivery,
@@ -248,9 +252,20 @@ pub(crate) fn data_dir_for(workdir: &Path) -> PathBuf {
     base
 }
 
+/// Outcome of a mouse event: `None` for normal handling (all effects are side
+/// effects on the caller's locals), or `SteerSubmit` when the user clicked the
+/// `>` submit-now button on a steer row, signalling the caller to interrupt the
+/// current turn and restart the drain loop to promote pending steers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum MouseOutcome {
+    None,
+    SteerSubmit,
+}
+
 /// Mouse-event handler extracted from `app.rs`'s main event loop. Owns all the
-/// state it touches via mutable references, so it returns nothing — every effect
-/// is a side effect on the caller's locals. `async` because the queue-panel
+/// state it touches via mutable references, so most effects are side effects on
+/// the caller's locals; the exception is `SteerSubmit` which the caller must
+/// handle by restarting the drain loop. `async` because the queue-panel
 /// delete/swap paths call through the `Store` trait (`delete_input` /
 /// `swap_input_order`).
 #[allow(clippy::too_many_arguments)]
@@ -266,11 +281,14 @@ pub(crate) async fn handle_mouse(
     parent_follow: &mut bool,
     subagent_sys: &mut u64,
     workdir: &Path,
+    steer_items: &mut Vec<(i64, String)>,
     queue_items: &mut Vec<(i64, String)>,
     session_id: &str,
     store: &dyn Store,
     copy_msg: &mut Option<String>,
-) {
+    last_click: &mut Option<Instant>,
+    dbl_click: &mut bool,
+) -> MouseOutcome {
     // Shift+drag bypass: when Shift is held during a left-button Down or Drag,
     // return immediately so the terminal can perform its own native selection
     // (which works even when OSC52 is blocked by tmux/screen or the terminal).
@@ -284,26 +302,62 @@ pub(crate) async fn handle_mouse(
         )
     {
         *selection = None;
-        return;
+        return MouseOutcome::None;
     }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let mut consumed = false;
+            // Follow button: highest-priority check — MUST precede double-click
+            // detection so a quick succession of body-click + arrow-click does
+            // not have the arrow-click swallowed by the 400 ms dbl-click guard.
             if let Some(r) = hits.jump_btn {
                 if in_rect(r, m.column, m.row) {
                     *follow = true;
-                    consumed = true;
+                    *selection = None;
+                    *dbl_click = false;
+                    *last_click = Some(Instant::now());
+                    return MouseOutcome::None; // deterministic jump to bottom
                 }
             }
+
+            // ── Double-click detection ──
+            // If this click follows a previous one within DBL_CLICK_MS, treat
+            // it as the second half of a double-click: select the current line
+            // and flag the selection so finish_copy copies it even though lo==hi.
+            let now = Instant::now();
+            let is_dbl = last_click
+                .map(|t| now.duration_since(t) < Duration::from_millis(DBL_CLICK_MS))
+                .unwrap_or(false);
+            *last_click = Some(now);
+
+            if is_dbl {
+                *dbl_click = true;
+                if let Some(r) = hits.body {
+                    if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
+                        *selection = Some((abs, abs));
+                    }
+                }
+                return MouseOutcome::None; // skip button-hit detection, go straight to selection mode
+            }
+            *dbl_click = false;
+
+            let mut consumed = false;
             for btn in &hits.queue_btns {
                 if !in_rect(btn.rect, m.column, m.row) {
                     continue;
                 }
                 consumed = true;
+                // Submit-now on a steer row: signal the caller to interrupt
+                // and restart the drain loop. No store mutation needed — the
+                // steers are promoted by `claim_steers()` at the top of the
+                // next `run_loop` iteration.
+                if btn.action == queue_panel::QueueBtnAction::Submit {
+                    return MouseOutcome::SteerSubmit;
+                }
                 match queue_panel::plan(queue_items, btn.seq, btn.action) {
                     queue_panel::QueueEffect::Delete(seq) => {
                         if store.delete_input(seq).await.is_ok() {
                             queue_items.retain(|(s, _)| *s != seq);
+                            steer_items.retain(|(s, _)| *s != seq);
                         }
                     }
                     queue_panel::QueueEffect::Swap(a, b) => {
@@ -387,11 +441,14 @@ pub(crate) async fn handle_mouse(
                     Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
                     _ => &*chat,
                 };
-                if let Some(report) = crate::selection::finish_copy(viewed, hits.body, sel) {
+                if let Some(report) =
+                    crate::selection::finish_copy(viewed, hits.body, sel, *dbl_click)
+                {
                     *copy_msg = Some(report.status_message());
                 }
                 *selection = None;
             }
+            *dbl_click = false;
         }
         MouseEventKind::ScrollUp => {
             if let Some(r) = hits.body {
@@ -432,6 +489,7 @@ pub(crate) async fn handle_mouse(
         }
         _ => {}
     }
+    MouseOutcome::None
 }
 
 #[cfg(test)]
@@ -537,6 +595,12 @@ mod tests {
         ) -> anyhow::Result<Vec<SubagentTaskRecord>> {
             unimplemented!()
         }
+        async fn get_subagent_task(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Option<SubagentTaskRecord>> {
+            unimplemented!()
+        }
     }
 
     /// Parent whose own content is short but wraps a subagent whose CHILD view
@@ -620,8 +684,11 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
+        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
 
         handle_mouse(
             scroll_down(),
@@ -635,10 +702,13 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
+            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
             &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
         )
         .await;
 
@@ -671,8 +741,11 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
+        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
 
         handle_mouse(
             scroll_down(),
@@ -686,16 +759,382 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
+            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
             &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
         )
         .await;
 
         assert!(
             follow,
             "short parent legitimately pins to bottom immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn dbl_click_selects_line_and_copies_on_release() {
+        // Build a chat view with 5 marker lines (abs rows 0-4).
+        let mut chat = ChatView::default();
+        for &l in &["line one", "line two", "line three", "line four", "line five"] {
+            chat.push_marker(Line::from(l.to_string()));
+        }
+
+        // Body rect: inner_y=1, inner_h=10, so screen row 5 maps to abs row 4.
+        let body = Rect::new(0, 0, 80, 12);
+        let hits = empty_hits(body);
+
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = true;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let mut steer_items: Vec<(i64, String)> = vec![];
+        let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
+        let store = StubStore;
+
+        let mk_down = |row| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 10,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        // First click — should NOT set dbl_click.
+        handle_mouse(
+            mk_down(5),
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(!dbl_click, "first click should not be a double-click");
+
+        // Second click immediately — should set dbl_click and selection.
+        handle_mouse(
+            mk_down(5),
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(dbl_click, "second click should be detected as double-click");
+        assert!(selection.is_some(), "selection should be set on dbl-click");
+
+        // Mouse up — should copy (force=true via dbl_click).
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse(
+            up,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(copy_msg.is_some(), "double-click should copy on release");
+        assert!(selection.is_none(), "selection cleared after release");
+        assert!(!dbl_click, "dbl_click reset after release");
+    }
+
+    #[tokio::test]
+    async fn submit_btn_returns_steer_submit() {
+        let mut chat = ChatView::default();
+        let body = Rect::new(0, 0, 80, 12);
+
+        // Build a MouseHits with a Submit button for steer seq=10 at (77, 0).
+        let mut hits = empty_hits(body);
+        hits.queue_btns.push(queue_panel::QueueBtn {
+            seq: 10,
+            action: queue_panel::QueueBtnAction::Submit,
+            rect: Rect::new(77, 0, 1, 1),
+        });
+
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = true;
+        let mut subagent_sys = 0u64;
+        let mut steer_items: Vec<(i64, String)> = vec![(10, "redirect".into())];
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let store = StubStore;
+        let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
+
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 77,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        let outcome = handle_mouse(
+            down,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            MouseOutcome::SteerSubmit,
+            "clicking Submit on a steer row must return SteerSubmit"
+        );
+        // Steer item must NOT be removed — promotion happens in the drain loop.
+        assert_eq!(steer_items.len(), 1, "steer item should remain until drain");
+    }
+
+    #[tokio::test]
+    async fn single_click_does_not_copy_on_release() {
+        let mut chat = ChatView::default();
+        for &l in &["line one", "line two", "line three", "line four", "line five"] {
+            chat.push_marker(Line::from(l.to_string()));
+        }
+
+        let body = Rect::new(0, 0, 80, 12);
+        let hits = empty_hits(body);
+
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = true;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let mut steer_items: Vec<(i64, String)> = vec![];
+        let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
+        let store = StubStore;
+
+        let down = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse(
+            down,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(!dbl_click);
+
+        let up = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse(
+            up,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(copy_msg.is_none(), "single click should not copy");
+    }
+
+    /// Regression: clicking the follow/jump button immediately after a body
+    /// click must still work. Previously the `jump_btn` check sat AFTER the
+    /// double-click guard, so the second click (within 400 ms) was swallowed
+    /// by `is_dbl` and the early `return`, making the follow button
+    /// unreliable.
+    #[tokio::test]
+    async fn jump_btn_click_works_after_recent_body_click() {
+        let mut chat = ChatView::default();
+        chat.push_marker(Line::from("some text"));
+
+        let body = Rect::new(0, 0, 80, 12);
+        // jump_btn sits on the body's bottom-border row, right-aligned.
+        let jump_btn_rect = Rect::new(74, 11, 6, 1);
+        let hits = MouseHits {
+            jump_btn: Some(jump_btn_rect),
+            body: Some(body),
+            queue_btns: Vec::new(),
+            thinking_btns: Vec::new(),
+            subagent_btns: Vec::new(),
+        };
+
+        let mut scroll = 0u16;
+        let mut follow = false;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = false;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let mut steer_items: Vec<(i64, String)> = vec![];
+        let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
+        let store = StubStore;
+
+        // First click: hits the body interior (row 5, well inside body).
+        let body_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse(
+            body_click,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(last_click.is_some(), "body click should set last_click");
+        assert!(!follow, "body click should not set follow");
+
+        // Second click immediately after (< 400 ms): hits the jump button.
+        // Under the old code this was swallowed by the double-click guard.
+        let jump_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 76,
+            row: 11,
+            modifiers: KeyModifiers::NONE,
+        };
+        handle_mouse(
+            jump_click,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert!(
+            follow,
+            "jump button click must set follow=true even right after a body click"
         );
     }
 }

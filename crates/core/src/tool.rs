@@ -58,22 +58,60 @@ pub fn schema_of(tool: &dyn Tool) -> ToolSchema {
 
 pub type ToolArc = Arc<dyn Tool>;
 
+/// Maximum number of output lines before truncation.
+pub const MAX_OUTPUT_LINES: usize = 800;
+
+/// Maximum output size in bytes before truncation.
+pub const MAX_OUTPUT_BYTES: usize = 4096;
+
+/// Truncate tool output to at most [`MAX_OUTPUT_LINES`] lines and
+/// `max` bytes (capped by [`MAX_OUTPUT_BYTES`]). When either limit is
+/// exceeded the output is cut and a truncation notice is appended.
 pub fn truncate_output(content: String, max: usize) -> ToolOutput {
     truncate_output_with_error(content, max, false)
 }
 
-/// Like `truncate_output` but preserves the `is_error` flag.
+/// Like [`truncate_output`] but preserves the `is_error` flag.
 pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -> ToolOutput {
-    if content.len() <= max {
-        ToolOutput { content, is_error }
+    let max_bytes = max.min(MAX_OUTPUT_BYTES);
+    let total_lines = content.lines().count();
+    let total_bytes = content.len();
+
+    let over_lines = total_lines > MAX_OUTPUT_LINES;
+    let over_bytes = total_bytes > max_bytes;
+
+    if !over_lines && !over_bytes {
+        return ToolOutput { content, is_error };
+    }
+
+    // Apply line limit first, then byte limit.
+    let mut result: String = if over_lines {
+        content.lines().take(MAX_OUTPUT_LINES).collect::<Vec<_>>().join("\n")
     } else {
-        let preview: String = content.chars().take(max.min(2000)).collect();
-        ToolOutput {
-            content: format!(
-                "{preview}\n\n...[output truncated, total {total} bytes]",
-                total = content.chars().count()
-            ),
-            is_error,
+        content
+    };
+
+    if result.len() > max_bytes {
+        let mut end = max_bytes;
+        while end > 0 && !result.is_char_boundary(end) {
+            end -= 1;
         }
+        result.truncate(end);
+    }
+
+    let mut parts = Vec::new();
+    if over_lines {
+        parts.push(format!("{total_lines} lines"));
+    }
+    if over_bytes {
+        parts.push(format!("{total_bytes} bytes"));
+    }
+
+    ToolOutput {
+        content: format!(
+            "{result}\n\n[output truncated, original {}]",
+            parts.join(", ")
+        ),
+        is_error,
     }
 }

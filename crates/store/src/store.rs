@@ -73,6 +73,10 @@ pub trait Store: Send + Sync {
     /// List all subagent tasks for a given parent session.
     async fn list_subagent_tasks(&self, parent_session_id: &str)
         -> Result<Vec<SubagentTaskRecord>>;
+    /// Look up a single subagent task by its `task_id`. Returns `None` if no
+    /// task matches. Used by `--session <task_id>` to resolve the parent
+    /// session for resume.
+    async fn get_subagent_task(&self, task_id: &str) -> Result<Option<SubagentTaskRecord>>;
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         let seqs = self.append_messages(session_id, msgs).await?;

@@ -96,6 +96,8 @@ impl Delivery {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seq: Option<i64>,
     pub id: String,
     pub session_id: String,
     pub delivery: Delivery,

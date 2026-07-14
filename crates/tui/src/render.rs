@@ -17,7 +17,7 @@ use crate::composer;
 use crate::fmt as fmtmod;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
-use crate::queue_panel::{btn_x_offsets, QueueBtn, QueueBtnAction};
+use crate::queue_panel::{btn_x_offsets, steer_btn_x_offsets, QueueBtn, QueueBtnAction};
 use crate::task::TaskPicker;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -138,6 +138,7 @@ pub(crate) fn render(
             follow,
             anim_tick,
             &mut hits.body,
+            &mut hits.jump_btn,
             &mut hits.thinking_btns,
             &mut hits.subagent_btns,
             selection,
@@ -163,9 +164,7 @@ pub(crate) fn render(
             f,
             chunks[ci],
             input,
-            follow,
             composer_scroll,
-            &mut hits.jump_btn,
             inner_w,
             prompt_w,
         );
@@ -180,9 +179,9 @@ pub(crate) fn render(
             queue_items.len() as u32,
             model,
             agent,
+            anim_tick,
             context_used + sys_tokens,
             context_limit,
-            anim_tick,
         );
 
         if show_help {
@@ -227,6 +226,7 @@ fn render_body(
     follow: bool,
     anim_tick: u32,
     body_out: &mut Option<Rect>,
+    jump_btn: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
     selection: Option<crate::selection::SelRange>,
@@ -236,7 +236,8 @@ fn render_body(
         .borders(Borders::ALL)
         .title(format!(" {} ", title));
     let inner = block.inner(area);
-    let visible_h = inner.height as usize;
+    let ctx_h = if inner.height > 1 { 1u16 } else { 0u16 };
+    let visible_h = (inner.height as usize).saturating_sub(ctx_h as usize);
     let text_w = inner.width.saturating_sub(1);
     let lines = chat.flatten_with(anim_tick);
     let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
@@ -277,17 +278,50 @@ fn render_body(
 
     f.render_widget(block, area);
     let text_area = Rect {
+        height: visible_h as u16,
         width: text_w,
         ..inner
     };
     f.render_widget(para.scroll((scroll_y, 0)), text_area);
 
     if total_rows > visible_h {
-        draw_scrollbar(f, inner, total_rows, visible_h, scroll_y as usize);
+        let scroll_area = Rect {
+            height: visible_h as u16,
+            ..inner
+        };
+        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y as usize);
     }
 
     // Selection highlight — drawn last so it sits on top of the text.
     crate::selection::render_overlay(f, text_area, scroll_y, selection);
+
+    // Follow indicator on the body's bottom-border row, right-aligned.
+    let (label, style) = if follow {
+        (
+            " \u{8ddf}\u{968f}\u{4e2d}\u{2026} ",
+            Style::default().fg(Color::Cyan),
+        )
+    } else {
+        (
+            "  \u{2b07}  ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    let disp_w: u16 = label.chars().map(composer::char_width).sum::<usize>() as u16;
+    let lbl_w = disp_w.min(area.width);
+    let lbl_rect = Rect::new(
+        area.right().saturating_sub(1).saturating_sub(lbl_w),
+        area.bottom().saturating_sub(1),
+        lbl_w,
+        1,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(label, style)])),
+        lbl_rect,
+    );
+    *jump_btn = if follow { None } else { Some(lbl_rect) };
 }
 
 /// Manual scrollbar with correct thumb positioning even when content barely
@@ -429,14 +463,11 @@ fn record_subagent_hits(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_composer(
     f: &mut Frame,
     area: Rect,
     input: &str,
-    follow: bool,
     scroll: u16,
-    jump_btn: &mut Option<Rect>,
     inner_w: u16,
     prompt_w: u16,
 ) {
@@ -469,33 +500,6 @@ fn render_composer(
         Paragraph::new(Text::from(lines)).scroll((scroll, 0)),
         inner,
     );
-
-    let (label, style) = if follow {
-        (
-            "\u{8ddf}\u{968f}\u{4e2d}\u{2026}",
-            Style::default().fg(Color::Cyan),
-        )
-    } else {
-        (
-            "\u{2193}",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-    };
-    let disp_w: u16 = label.chars().map(composer::char_width).sum::<usize>() as u16;
-    let lbl_w = disp_w.saturating_add(2).min(area.width);
-    let lbl_rect = Rect::new(
-        area.right().saturating_sub(1).saturating_sub(lbl_w),
-        area.y,
-        lbl_w,
-        1,
-    );
-    f.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(label, style)])),
-        lbl_rect,
-    );
-    *jump_btn = if follow { None } else { Some(lbl_rect) };
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -561,19 +565,10 @@ fn render_status(
     queue_count: u32,
     model: &str,
     agent: &str,
+    anim_tick: u32,
     used: u64,
     limit: u64,
-    anim_tick: u32,
 ) {
-    let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
-    let ctx_color = if pct >= 85 {
-        Color::Red
-    } else if pct >= 60 {
-        Color::Yellow
-    } else {
-        Color::Green
-    };
-
     let mut spans = vec![
         Span::raw(" "),
         Span::styled(model.to_string(), Style::default().fg(Color::White)),
@@ -585,15 +580,6 @@ fn render_status(
             Style::default().fg(agent_chip_fg(agent)),
         ),
         Span::raw("  "),
-        Span::styled(
-            format!(
-                "ctx {}% ({}/{})",
-                pct,
-                fmtmod::format_tokens_compact(used),
-                fmtmod::format_tokens_compact(limit)
-            ),
-            Style::default().fg(ctx_color),
-        ),
     ];
 
     if running {
@@ -621,6 +607,26 @@ fn render_status(
             Style::default().fg(Color::Yellow),
         ));
     }
+    // ctx% indicator — right-aligned at the end of the status bar.
+    {
+        let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
+        let color = if pct >= 85 {
+            Color::Red
+        } else if pct >= 60 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+        spans.push(Span::styled(
+            format!(
+                " | ctx {}% ({}/{})",
+                pct,
+                fmtmod::format_tokens_compact(used),
+                fmtmod::format_tokens_compact(limit)
+            ),
+            Style::default().fg(color),
+        ));
+    }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -636,14 +642,16 @@ fn render_queue_panel(
         text: &'a str,
         color: Color,
         seq: Option<i64>,
+        is_steer: bool,
     }
     let mut entries: Vec<E> = Vec::new();
-    for (_seq, s) in steer_items {
+    for (seq, s) in steer_items {
         entries.push(E {
             prefix: "\u{21b3} steer",
             text: s.as_str(),
             color: Color::Blue,
-            seq: None,
+            seq: Some(*seq),
+            is_steer: true,
         });
     }
     for (seq, q) in queue_items {
@@ -652,6 +660,7 @@ fn render_queue_panel(
             text: q.as_str(),
             color: Color::Yellow,
             seq: Some(*seq),
+            is_steer: false,
         });
     }
     let total = entries.len();
@@ -677,11 +686,13 @@ fn render_queue_panel(
             Style::default().fg(Color::DarkGray),
         )));
     }
-    // Clickable queue rows reserve a 6-column trailing control strip
-    // (" \u{25b2} \u{25bc} \u{2715}"); steer rows and very narrow terminals
-    // render without controls. Each control glyph gets a 1-cell hit rect.
-    let btn_w = 6usize;
+    // Clickable rows reserve a trailing control strip. Queue rows use a
+    // 6-column strip (" \u{25b2} \u{25bc} \u{2715}": up/down/delete); steer
+    // rows use a 4-column strip (" \u{2715} >": delete/submit). Very narrow
+    // terminals render without controls. Each control glyph gets a 1-cell
+    // hit rect.
     for e in visible {
+        let btn_w = if e.is_steer { 4usize } else { 6usize };
         let clickable = e.seq.is_some() && avail_w > btn_w + 4;
         let cap = if clickable {
             avail_w.saturating_sub(btn_w)
@@ -696,32 +707,51 @@ fn render_queue_panel(
             let seq = e.seq.unwrap();
             let y = area.y + lines.len() as u16;
             // Right-align the control strip: pad the head out to `cap` so the
-            // glyphs land at the right edge and stay aligned with the hit rects
-            // (which `btn_x_offsets` computes from the same right-edge layout).
+            // glyphs land at the right edge and stay aligned with the hit rects.
             let pad = cap.saturating_sub(head_len);
             if pad > 0 {
                 spans.push(Span::raw(" ".repeat(pad)));
             }
-            spans.push(Span::styled(
-                " \u{25b2} \u{25bc} \u{2715}".to_string(),
-                Style::default().fg(Color::DarkGray),
-            ));
-            let [up_x, down_x, del_x] = btn_x_offsets(area.width);
-            btns.push(QueueBtn {
-                seq,
-                action: QueueBtnAction::Up,
-                rect: Rect::new(area.x + up_x, y, 1, 1),
-            });
-            btns.push(QueueBtn {
-                seq,
-                action: QueueBtnAction::Down,
-                rect: Rect::new(area.x + down_x, y, 1, 1),
-            });
-            btns.push(QueueBtn {
-                seq,
-                action: QueueBtnAction::Delete,
-                rect: Rect::new(area.x + del_x, y, 1, 1),
-            });
+            if e.is_steer {
+                // Steer row: " ✕ >" — delete + submit-now.
+                spans.push(Span::styled(
+                    " \u{2715} >".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                let [del_x, sub_x] = steer_btn_x_offsets(area.width);
+                btns.push(QueueBtn {
+                    seq,
+                    action: QueueBtnAction::Delete,
+                    rect: Rect::new(area.x + del_x, y, 1, 1),
+                });
+                btns.push(QueueBtn {
+                    seq,
+                    action: QueueBtnAction::Submit,
+                    rect: Rect::new(area.x + sub_x, y, 1, 1),
+                });
+            } else {
+                // Queue row: " ▲ ▼ ✕" — up/down/delete.
+                spans.push(Span::styled(
+                    " \u{25b2} \u{25bc} \u{2715}".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                let [up_x, down_x, del_x] = btn_x_offsets(area.width);
+                btns.push(QueueBtn {
+                    seq,
+                    action: QueueBtnAction::Up,
+                    rect: Rect::new(area.x + up_x, y, 1, 1),
+                });
+                btns.push(QueueBtn {
+                    seq,
+                    action: QueueBtnAction::Down,
+                    rect: Rect::new(area.x + down_x, y, 1, 1),
+                });
+                btns.push(QueueBtn {
+                    seq,
+                    action: QueueBtnAction::Delete,
+                    rect: Rect::new(area.x + del_x, y, 1, 1),
+                });
+            }
         }
         lines.push(Line::from(spans));
     }

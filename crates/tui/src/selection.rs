@@ -79,9 +79,14 @@ pub fn abs_row_at(body: Rect, row: u16, scroll: u16) -> Option<u16> {
 /// body's outer rect (used to derive the wrap width); pass `None` if unknown.
 /// Returns `None` for a bare click or empty selection; otherwise a [`CopyReport`]
 /// describing the copy for UI feedback.
-pub fn finish_copy(viewed: &ChatView, body: Option<Rect>, sel: SelRange) -> Option<CopyReport> {
+pub fn finish_copy(
+    viewed: &ChatView,
+    body: Option<Rect>,
+    sel: SelRange,
+    force: bool,
+) -> Option<CopyReport> {
     let (lo, hi) = sel_range(sel);
-    if lo == hi {
+    if lo == hi && !force {
         return None; // bare click — no drag, no copy
     }
     let text_w = body.map(|r| r.width.saturating_sub(3)).unwrap_or(0);
@@ -480,17 +485,28 @@ mod tests {
     #[test]
     fn finish_copy_returns_none_for_bare_click() {
         let v = view_from_lines(&["hello", "world"]);
-        assert!(finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (3, 3)).is_none());
+        assert!(finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (3, 3), false).is_none());
     }
 
     #[test]
     fn finish_copy_returns_report_for_drag() {
         let v = view_from_lines(&["hello", "world"]);
-        let report = finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (0, 1));
+        let report = finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (0, 1), false);
         assert!(report.is_some());
         let r = report.unwrap();
         assert_eq!(r.lines, 2);
         assert!(r.chars > 0);
         assert!(r.osc52);
+    }
+
+    #[test]
+    fn finish_copy_with_force_copies_single_line() {
+        let v = view_from_lines(&["hello", "world"]);
+        // With force=true a single-line selection (lo == hi) is still copied.
+        let report = finish_copy(&v, Some(Rect::new(0, 0, 80, 10)), (1, 1), true);
+        assert!(report.is_some());
+        let r = report.unwrap();
+        assert_eq!(r.lines, 1);
+        assert!(r.chars > 0);
     }
 }

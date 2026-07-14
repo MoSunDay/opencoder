@@ -80,7 +80,7 @@ pub enum SessionEvent {
     Error(String),
 }
 
-const MAX_OUTPUT: usize = 20_000;
+const MAX_OUTPUT: usize = 4096;
 const DOOM_THRESHOLD: usize = 3;
 
 /// Shared event sink for concurrent tool dispatch. Wraps the borrowed `FnMut`

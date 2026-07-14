@@ -139,6 +139,9 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
             }
             for b in &msg.blocks {
                 if let ContentBlock::ToolUse { id, name, input } = b {
+                    if name == "task" {
+                        continue;
+                    }
                     chat.blocks.push(ChatBlock::Tool {
                         id: id.clone(),
                         header: Line::from(vec![
@@ -184,14 +187,21 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                         }) {
                         o.extend(out);
                     } else {
-                        chat.blocks.push(ChatBlock::Tool {
-                            id: tool_use_id.clone(),
-                            header: Line::from(Span::styled(
-                                "\u{25b8} (output)",
-                                Style::default().fg(Color::Cyan),
-                            )),
-                            output: out,
+                        // Skip fallback for "task" tools — their output is
+                        // shown via the Subagent block, not a Tool block.
+                        let has_subagent = chat.blocks.iter().any(|b| {
+                            matches!(b, ChatBlock::Subagent { id: bid, .. } if bid == tool_use_id)
                         });
+                        if !has_subagent {
+                            chat.blocks.push(ChatBlock::Tool {
+                                id: tool_use_id.clone(),
+                                header: Line::from(Span::styled(
+                                    "\u{25b8} (output)",
+                                    Style::default().fg(Color::Cyan),
+                                )),
+                                output: out,
+                            });
+                        }
                     }
                 }
             }
@@ -317,10 +327,14 @@ async fn reconstruct_child_view(
     }
 
     // Fallback: replay messages.
+    tracing::debug!(child_session_id, "no persisted events for subagent child, falling back to messages");
     let messages = store
         .load_messages(child_session_id)
         .await
         .unwrap_or_default();
+    if messages.is_empty() {
+        tracing::debug!(child_session_id, "no events or messages for subagent child session");
+    }
     replay_messages(agent_name, &messages)
 }
 
@@ -328,8 +342,12 @@ async fn reconstruct_child_view(
 /// Child events are double-encoded: `Value::String(json_string)`.
 fn deserialize_event(payload: &serde_json::Value) -> Option<SessionEvent> {
     match payload {
-        serde_json::Value::String(s) => serde_json::from_str::<SessionEvent>(s).ok(),
-        other => serde_json::from_value::<SessionEvent>(other.clone()).ok(),
+        serde_json::Value::String(s) => serde_json::from_str::<SessionEvent>(s)
+            .map_err(|e| tracing::warn!(error = %e, "failed to deserialize string event payload"))
+            .ok(),
+        other => serde_json::from_value::<SessionEvent>(other.clone())
+            .map_err(|e| tracing::warn!(error = %e, "failed to deserialize json event payload"))
+            .ok(),
     }
 }
 

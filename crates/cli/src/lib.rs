@@ -24,7 +24,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub workdir: Option<PathBuf>,
     /// Resume a specific session by id.
-    #[arg(long, global = true)]
+    #[arg(short, long, global = true)]
     pub session: Option<String>,
     /// Resume the most recent session for this workdir.
     #[arg(long, global = true, default_value_t = false)]

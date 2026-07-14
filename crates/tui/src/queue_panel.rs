@@ -10,6 +10,7 @@ pub(crate) enum QueueBtnAction {
     Up,
     Down,
     Delete,
+    Submit,
 }
 
 /// One mouse hit-target exported by the renderer for the event loop to test
@@ -53,6 +54,10 @@ pub(crate) fn plan(items: &[(i64, String)], seq: i64, action: QueueBtnAction) ->
                 QueueEffect::Swap(seq, items[i + 1].0)
             }
         }
+        // Submit is handled directly in `handle_mouse` (it returns
+        // `MouseOutcome::SteerSubmit` without consulting `plan`), but the
+        // arm must exist for exhaustive matching.
+        QueueBtnAction::Submit => QueueEffect::None,
     }
 }
 
@@ -75,6 +80,16 @@ pub(crate) fn apply_swap(items: &mut [(i64, String)], a: i64, b: i64) {
 /// invoke this for clickable rows (`width > 10`), so the subtraction is safe.
 pub(crate) fn btn_x_offsets(width: u16) -> [u16; 3] {
     [width - 5, width - 3, width - 1]
+}
+
+/// X-column offsets (relative to the panel's left edge) of the two steer-row
+/// control glyphs for a panel of the given width. The 4-wide trailing strip
+/// `" \u{2715} >"` occupies the last 4 columns, so delete sits at `width-3`
+/// and submit at `width-1`. Mirrors `btn_x_offsets` but for the shorter
+/// steer-row control strip. Callers must only invoke this for clickable rows
+/// (`width > 8`), so the subtraction is safe.
+pub(crate) fn steer_btn_x_offsets(width: u16) -> [u16; 2] {
+    [width - 3, width - 1]
 }
 
 #[cfg(test)]
@@ -147,5 +162,18 @@ mod tests {
         assert_eq!(btn_x_offsets(40), [35, 37, 39]);
         // Minimum clickable width is 11 (avail_w > btn_w + 4).
         assert_eq!(btn_x_offsets(11), [6, 8, 10]);
+    }
+
+    #[test]
+    fn steer_btn_x_offsets_pin_glyphs_to_right_edge() {
+        // Glyphs occupy the last 4 cols: " ✕ >" → del at -3, submit at -1.
+        assert_eq!(steer_btn_x_offsets(80), [77, 79]);
+        assert_eq!(steer_btn_x_offsets(40), [37, 39]);
+        assert_eq!(steer_btn_x_offsets(11), [8, 10]);
+    }
+
+    #[test]
+    fn submit_action_is_noop_in_plan() {
+        assert_eq!(plan(&items(), 20, QueueBtnAction::Submit), QueueEffect::None);
     }
 }

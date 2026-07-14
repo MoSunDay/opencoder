@@ -113,6 +113,7 @@ async fn seed_session_id(store: &Arc<dyn Store>, id: &str) {
 async fn admit_steer(store: &Arc<dyn Store>, session_id: &str, id: &str, prompt: &str) -> i64 {
     store
         .admit_input(&SessionInput {
+            seq: None,
             id: id.into(),
             session_id: session_id.into(),
             delivery: Delivery::Steer,
@@ -145,6 +146,7 @@ async fn steer_promotes_at_turn_boundary() {
     seed_session(&store).await;
     store
         .admit_input(&SessionInput {
+            seq: None,
             id: "in-1".into(),
             session_id: "drain-sess".into(),
             delivery: Delivery::Steer,
@@ -191,6 +193,7 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
         seed_session(&store).await;
         store
             .admit_input(&SessionInput {
+                seq: None,
                 id: format!("ms-{i}"),
                 session_id: "drain-sess".into(),
                 delivery: Delivery::Steer,
@@ -228,6 +231,7 @@ async fn queue_only_promotes_at_idle_exactly_one_per_cycle() {
         seed_session(&store).await;
         store
             .admit_input(&SessionInput {
+                seq: None,
                 id: format!("q-{i}"),
                 session_id: "drain-sess".into(),
                 delivery: Delivery::Queue,
@@ -267,6 +271,7 @@ async fn durable_pending_input_survives_until_drain() {
     seed_session(&store).await;
     store
         .admit_input(&SessionInput {
+            seq: None,
             id: "p-1".into(),
             session_id: "drain-sess".into(),
             delivery: Delivery::Steer,

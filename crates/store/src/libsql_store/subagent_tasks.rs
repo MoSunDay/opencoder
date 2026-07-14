@@ -15,6 +15,10 @@ const SELECT_BY_PARENT: &str = "\
 SELECT task_id, parent_session_id, child_session_id, parent_message_id, agent, prompt, result, status, ok, started_at, completed_at \
 FROM subagent_tasks WHERE parent_session_id = ?1 ORDER BY seq ASC";
 
+const SELECT_BY_TASK_ID: &str = "\
+SELECT task_id, parent_session_id, child_session_id, parent_message_id, agent, prompt, result, status, ok, started_at, completed_at \
+FROM subagent_tasks WHERE task_id = ?1 LIMIT 1";
+
 pub async fn create(conn: &Connection, rec: &SubagentTaskRecord) -> Result<()> {
     let parent_msg: Option<&str> = rec.parent_message_id.as_deref();
     conn.execute(
@@ -75,4 +79,33 @@ pub async fn list(conn: &Connection, parent_session_id: &str) -> Result<Vec<Suba
         });
     }
     Ok(out)
+}
+
+pub async fn get_by_task_id(conn: &Connection, task_id: &str) -> Result<Option<SubagentTaskRecord>> {
+    let stmt = conn
+        .prepare(SELECT_BY_TASK_ID)
+        .await
+        .context("prepare subagent_tasks select by task_id")?;
+    let mut rows = stmt
+        .query(params![task_id])
+        .await
+        .context("query subagent_tasks by task_id")?;
+    if let Some(row) = rows.next().await? {
+        let status_str: String = row.get(7)?;
+        Ok(Some(SubagentTaskRecord {
+            task_id: row.get(0)?,
+            parent_session_id: row.get(1)?,
+            child_session_id: row.get(2)?,
+            parent_message_id: row.get(3)?,
+            agent: row.get(4)?,
+            prompt: row.get(5)?,
+            result: row.get(6)?,
+            status: SubagentStatus::parse(&status_str),
+            ok: row.get::<Option<i64>>(8)?.map(|v| v != 0),
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+        }))
+    } else {
+        Ok(None)
+    }
 }

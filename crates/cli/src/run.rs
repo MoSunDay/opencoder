@@ -82,8 +82,22 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
 }
 
 /// Resolve which session id to resume, honoring --session, then --continue.
+///
+/// When `--session <id>` is given, the ID is first tried as a session ID.
+/// If no session matches, it is tried as a subagent `task_id` — if found,
+/// the parent session is returned so the full parent context is resumed.
 async fn pick_resume_id(cli: &Cli, store: Option<&dyn Store>) -> Result<Option<String>> {
     if let Some(id) = &cli.session {
+        if let Some(s) = store {
+            // Try as a session ID first.
+            if s.get_session(id).await?.is_none() {
+                // Not a session — try as a subagent task_id to find the
+                // parent session that owns it.
+                if let Some(task) = s.get_subagent_task(id).await? {
+                    return Ok(Some(task.parent_session_id));
+                }
+            }
+        }
         return Ok(Some(id.clone()));
     }
     if cli.continue_ {
@@ -159,6 +173,9 @@ fn print_event(ev: &SessionEvent) {
         }
         SessionEvent::ReasoningDelta(_) => {}
         SessionEvent::ToolStart { name, input, .. } => {
+            if name == "task" {
+                return;
+            }
             eprintln!(
                 "\n\x1b[36m\u{25b8} {name}\x1b[0m {}",
                 summarize_input(input)
@@ -284,5 +301,104 @@ mod tests {
     fn indent_first_pads_each_line() {
         let s = "line1\nline2";
         assert_eq!(indent_first(s, 2), "  line1\n  line2");
+    }
+
+    #[tokio::test]
+    async fn pick_resume_id_resolves_task_id_to_parent_session() {
+        use clap::Parser;
+        use opencoder_store::{
+            LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
+        };
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+
+        // Create a parent session.
+        let parent_id = "parent-sess";
+        store
+            .create_session(&SessionMeta {
+                id: parent_id.into(),
+                title: Some("parent".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: None,
+                created_at: 0,
+                updated_at: 0,
+                summary: None,
+                summary_seq: None,
+            })
+            .await
+            .unwrap();
+
+        // Create a child session (required by FK constraint on subagent_tasks).
+        store
+            .create_session(&SessionMeta {
+                id: "sub-sess-001".into(),
+                title: None,
+                agent: None,
+                model: None,
+                workdir_hash: None,
+                created_at: 0,
+                updated_at: 0,
+                summary: None,
+                summary_seq: None,
+            })
+            .await
+            .unwrap();
+
+        // Create a subagent task whose task_id should resolve to the parent.
+        let task_id = "task-001";
+        store
+            .create_subagent_task(&SubagentTaskRecord {
+                task_id: task_id.into(),
+                parent_session_id: parent_id.into(),
+                child_session_id: "sub-sess-001".into(),
+                parent_message_id: Some("msg-42".into()),
+                agent: "explore".into(),
+                prompt: "find all TODO comments".into(),
+                result: None,
+                status: SubagentStatus::Running,
+                ok: None,
+                started_at: 1000,
+                completed_at: None,
+            })
+            .await
+            .unwrap();
+
+        // `--session <task_id>` should resolve to the parent session id.
+        let cli = Cli::parse_from(["opencoder", "--session", task_id]);
+        let resolved =
+            pick_resume_id(&cli, Some(&store as &dyn Store)).await.unwrap();
+        assert_eq!(resolved.as_deref(), Some(parent_id));
+    }
+
+    #[tokio::test]
+    async fn pick_resume_id_returns_real_session_as_is() {
+        use clap::Parser;
+        use opencoder_store::{LibsqlStore, SessionMeta, Store};
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+
+        // Create a real session.
+        let session_id = "real-sess";
+        store
+            .create_session(&SessionMeta {
+                id: session_id.into(),
+                title: None,
+                agent: None,
+                model: None,
+                workdir_hash: None,
+                created_at: 0,
+                updated_at: 0,
+                summary: None,
+                summary_seq: None,
+            })
+            .await
+            .unwrap();
+
+        // `--session <session_id>` should be returned unchanged.
+        let cli = Cli::parse_from(["opencoder", "--session", session_id]);
+        let resolved =
+            pick_resume_id(&cli, Some(&store as &dyn Store)).await.unwrap();
+        assert_eq!(resolved.as_deref(), Some(session_id));
     }
 }

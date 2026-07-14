@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
 
 fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {
     opencoder_tui::TuiOpts::new(cli.model.clone(), cli.agent.clone(), cli.workdir.clone())
+        .with_session(cli.session.clone())
 }
 
 fn join(parts: Vec<String>) -> String {

@@ -228,6 +228,7 @@ async fn last_input_seq_in_tx(tx: &libsql::Transaction) -> Result<i64> {
 fn row_to_input(r: &libsql::Row) -> Result<SessionInput> {
     let delivery_s: String = r.get(3)?;
     Ok(SessionInput {
+        seq: Some(r.get(0)?),
         id: r.get(1)?,
         session_id: r.get(2)?,
         delivery: Delivery::parse(&delivery_s).unwrap_or_default(),
@@ -238,9 +239,10 @@ fn row_to_input(r: &libsql::Row) -> Result<SessionInput> {
 }
 
 /// Row layout for the claim query: seq, id, session_id, delivery, prompt, admitted_seq, promoted_seq.
-fn row_to_input_full(r: &libsql::Row, _seq: i64) -> Result<SessionInput> {
+fn row_to_input_full(r: &libsql::Row, seq: i64) -> Result<SessionInput> {
     let delivery_s: String = r.get(3)?;
     Ok(SessionInput {
+        seq: Some(seq),
         id: r.get(1)?,
         session_id: r.get(2)?,
         delivery: Delivery::parse(&delivery_s).unwrap_or_default(),

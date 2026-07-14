@@ -24,10 +24,25 @@ pub struct ChatClient {
     api_key: String,
 }
 
+/// Default per-read idle timeout (5 minutes). A read that stalls for this
+/// long without receiving any bytes is aborted; a stream that keeps
+/// delivering data resets the timer on every chunk and is never interrupted.
+pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(300);
+
 impl ChatClient {
     pub fn new(base_url: &str, api_key: &str) -> Result<Self> {
+        Self::new_with_read_timeout(base_url, api_key, DEFAULT_READ_TIMEOUT)
+    }
+
+    /// Construct a client with a custom per-read idle timeout. Useful for
+    /// tests that need a short stall window.
+    pub fn new_with_read_timeout(
+        base_url: &str,
+        api_key: &str,
+        read_timeout: Duration,
+    ) -> Result<Self> {
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(1800))
+            .read_timeout(read_timeout)
             .connect_timeout(Duration::from_secs(30))
             .build()
             .context("build http client")?;
@@ -405,6 +420,14 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard: the default read timeout must stay at 300 s (5 min).
+    /// Accidentally changing it (e.g. to 30 s) would break long-running
+    /// streaming turns from models that pause between chunks.
+    #[test]
+    fn default_read_timeout_is_300s() {
+        assert_eq!(DEFAULT_READ_TIMEOUT, Duration::from_secs(300));
+    }
 
     #[test]
     fn retryable_status_whitelist() {

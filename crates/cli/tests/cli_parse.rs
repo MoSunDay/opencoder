@@ -37,6 +37,12 @@ fn session_flag_sets_id() {
 }
 
 #[test]
+fn session_short_flag_sets_id() {
+    let cli = parse(&["opencoder", "-s", "abc123"]);
+    assert_eq!(cli.session.as_deref(), Some("abc123"));
+}
+
+#[test]
 fn continue_and_fork_flags() {
     let cli = parse(&["opencoder", "--continue", "--fork"]);
     assert!(cli.continue_);

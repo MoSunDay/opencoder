@@ -31,9 +31,9 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
-/// Maximum render rate (3 FPS). Events are processed immediately but the
+/// Maximum render rate (1 FPS). Events are processed immediately but the
 /// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 333;
+const FRAME_MS: u64 = 1000;
 /// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
 const MODE_FLASH_TICKS: u32 = 5;
 
@@ -57,17 +57,6 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         &config.provider.base_url,
         &config.api_key()?,
     )?);
-    let agent_name = opts
-        .agent
-        .clone()
-        .unwrap_or_else(|| config.agent.default.clone());
-    let agent = resolve_agent(&agent_name)
-        .or_else(|| resolve_agent("act"))
-        .context("agent")?;
-
-    let session_id = opencoder_session::runner::new_id();
-    let context_limit = config.context_limit();
-    let model_label = config.model_id().to_string();
 
     let store: Arc<dyn Store> = {
         let data_dir = data_dir_for(&workdir);
@@ -75,14 +64,48 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?)
     };
 
-    let session = SessionState::new(
-        session_id.clone(),
-        agent,
-        config.clone(),
-        client.clone(),
-        workdir.clone(),
-    )
-    .with_store(store.clone());
+    // Resume an existing session if --session was given, otherwise start fresh.
+    let session = if let Some(id) = &opts.session {
+        // Try as a session ID first; if not found, try as a subagent
+        // task_id to resolve the parent session.
+        let effective_id = if store.get_session(id).await?.is_none() {
+            if let Some(task) = store.get_subagent_task(id).await? {
+                task.parent_session_id
+            } else {
+                id.clone()
+            }
+        } else {
+            id.clone()
+        };
+        opencoder_session::resume::resume(
+            store.clone(),
+            &effective_id,
+            config.clone(),
+            client.clone(),
+            workdir.clone(),
+        )
+        .await?
+    } else {
+        let agent_name = opts
+            .agent
+            .clone()
+            .unwrap_or_else(|| config.agent.default.clone());
+        let agent = resolve_agent(&agent_name)
+            .or_else(|| resolve_agent("act"))
+            .context("agent")?;
+        SessionState::new(
+            opencoder_session::runner::new_id(),
+            agent,
+            config.clone(),
+            client.clone(),
+            workdir.clone(),
+        )
+        .with_store(store.clone())
+    };
+
+    let session_id = session.id.clone();
+    let context_limit = session.config.context_limit();
+    let model_label = session.model.clone();
 
     // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
     // hook it installs — restore raw/alt-screen/mouse/kitty state on ANY exit
@@ -137,6 +160,7 @@ async fn run_app(
     let mut hist_idx: Option<usize> = None;
     let mut running = false;
     let mut cancelled = false;
+    let mut drain_pending = false;
     let mut show_help = false;
     let mut scroll: u16 = 0;
     let mut follow = true;
@@ -167,6 +191,11 @@ async fn run_app(
     // `Instant` rather than `anim_tick` because the latter only advances while
     // `running` is true, so a copy during idle would never expire.
     let mut copy_status: Option<(String, Instant)> = None;
+    // Double-click detection: timestamp of the last left-click and whether the
+    // current selection originated from a double-click (forces copy even for a
+    // single-line / lo==hi selection).
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click: bool = false;
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
@@ -191,7 +220,7 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at 3 FPS regardless of token arrival
+    // Frame-rate limiter: caps redraws at 1 FPS regardless of token arrival
     // rate. `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -199,7 +228,7 @@ async fn run_app(
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most 3 times/sec.
+    // at most 1 time/sec.
     let mut dirty = true;
     let mut render_pending = true;
     loop {
@@ -314,26 +343,34 @@ async fn run_app(
                                 TaskOutcome::Pick(pick) => {
                                     // Perform session switch.
                                     let _ = cmd_tx.send(UiCmd::Quit).await;
-                                    let new_session_id = match &pick {
+                                    let new_session = match &pick {
                                         crate::task::TaskPick::New => {
-                                            opencoder_session::runner::new_id()
+                                            let new_session_id = opencoder_session::runner::new_id();
+                                            let new_agent = resolve_agent("act").context("agent")?;
+                                            let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());
+                                            let mut sess = SessionState::new(
+                                                new_session_id,
+                                                new_agent,
+                                                new_config,
+                                                client.clone(),
+                                                workdir.clone(),
+                                            ).with_store(store.clone());
+                                            sess.model = model_label.clone();
+                                            sess
                                         }
-                                        crate::task::TaskPick::Resume(id) => id.clone(),
+                                        crate::task::TaskPick::Resume(id) => {
+                                            let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());
+                                            opencoder_session::resume::resume(
+                                                store.clone(),
+                                                id,
+                                                new_config,
+                                                client.clone(),
+                                                workdir.clone(),
+                                            ).await?
+                                        }
                                     };
-                                    let new_agent = resolve_agent("act").context("agent")?;
-                                    let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());                                        let mut new_session = SessionState::new(
-                                        new_session_id.clone(),
-                                        new_agent,
-                                        new_config,
-                                        client.clone(),
-                                        workdir.clone(),
-                                    ).with_store(store.clone());
-                                    new_session.model = model_label.clone();
-                                    if let crate::task::TaskPick::Resume(ref id) = pick {
-                                        if let Ok(msgs) = store.load_messages(id).await {
-                                            new_session.messages = msgs;
-                                        }
-                                    }
+                                    let new_session_id = new_session.id.clone();
+                                    model_label = new_session.model.clone();
                                     let new_cancel = CancellationToken::new();
                                     let new_session = new_session.with_cancel(new_cancel.clone());
                                     let new_skill_handle = new_session.skill_prompt.clone();
@@ -401,8 +438,20 @@ async fn run_app(
                                             &workdir_for_tokens,
                                             None,
                                         );
-                                        steer_items.clear();
-                                        queue_items.clear();
+                                        steer_items = store
+                                            .pending_inputs(&new_session_id, Delivery::Steer)
+                                            .await
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .map(|si| (si.seq.unwrap_or(0), si.prompt))
+                                            .collect();
+                                        queue_items = store
+                                            .pending_inputs(&new_session_id, Delivery::Queue)
+                                            .await
+                                            .unwrap_or_default()
+                                            .into_iter()
+                                            .map(|si| (si.seq.unwrap_or(0), si.prompt))
+                                            .collect();
                                         active_skill = None;
                                         active_skill_body = None;
                                     }
@@ -745,7 +794,7 @@ async fn run_app(
                     }
                     Event::Mouse(m) => {
                         let mut copy_msg: Option<String> = None;
-                        handle_mouse(
+                        let outcome = handle_mouse(
                             m,
                             &hits,
                             &mut scroll,
@@ -757,14 +806,33 @@ async fn run_app(
                             &mut parent_follow,
                             &mut subagent_sys,
                             &workdir,
+                            &mut steer_items,
                             &mut queue_items,
                             &session_id,
                             store.as_ref(),
                             &mut copy_msg,
+                            &mut last_click,
+                            &mut dbl_click,
                         )
                         .await;
                         if let Some(msg) = copy_msg {
                             copy_status = Some((msg, Instant::now()));
+                        }
+                        if outcome == MouseOutcome::SteerSubmit {
+                            if running {
+                                cancel.cancel();
+                                chat.push_marker(Line::from(Span::styled(
+                                    "[interrupted] resuming\u{2026}",
+                                    Style::default().fg(Color::Yellow),
+                                )));
+                                cancelled = true;
+                                drain_pending = true;
+                            } else {
+                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new()))
+                                    .await;
+                                running = true;
+                            }
+                            follow = true;
                         }
                     }
                     _ => {}
@@ -811,7 +879,7 @@ async fn run_app(
                                     // affecting running or clearing items belonging to a
                                     // potentially-new turn.
                                     cancelled = false;
-                                } else {
+                                } else if !drain_pending {
                                     running = false;
                                     steer_items.clear();
                                     queue_items.clear();
@@ -819,7 +887,16 @@ async fn run_app(
                             }
                         }
                         UiEvent::TurnDone => {
-                            if cancelled {
+                            if drain_pending {
+                                // The cancelled turn has finished draining — restart
+                                // the drain loop to promote pending steers.
+                                drain_pending = false;
+                                cancelled = false;
+                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new()))
+                                    .await;
+                                running = true;
+                                follow = true;
+                            } else if cancelled {
                                 cancelled = false;
                             } else {
                                 running = false;
@@ -851,8 +928,8 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    data_dir_for, handle_mouse, mk_input, pre_key_intercept, push_user, resolve_and_warn,
-    start_turn, sys_tokens_for, worker_dead,
+    data_dir_for, handle_mouse, mk_input, MouseOutcome, pre_key_intercept, push_user,
+    resolve_and_warn, start_turn, sys_tokens_for, worker_dead,
 };
 
 #[cfg(test)]

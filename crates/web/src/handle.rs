@@ -210,6 +210,7 @@ pub async fn admit_and_drain(
     config: Config,
 ) -> Result<i64> {
     let input = SessionInput {
+        seq: None,
         id: uuid::Uuid::new_v4().to_string(),
         session_id: session_id.to_string(),
         delivery,

@@ -39,6 +39,12 @@ pub struct SessionState {
     /// Optional cancellation token. The run loop checks it at each turn
     /// boundary and stops cleanly when cancelled (web interrupt support).
     pub cancel: Option<CancellationToken>,
+    /// Compaction summary text, persisted to the store so resume can
+    /// reconstruct the compacted transcript.
+    pub summary: Option<String>,
+    /// Number of messages in the store that have been summarized (skipped
+    /// on resume). `None` means no compaction has occurred.
+    pub summary_seq: Option<i64>,
 }
 
 impl SessionState {
@@ -64,6 +70,8 @@ impl SessionState {
             persisted_count: 0,
             session_created: false,
             cancel: None,
+            summary: None,
+            summary_seq: None,
         }
     }
 
@@ -138,8 +146,8 @@ impl SessionState {
                 workdir_hash: None,
                 created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
                 updated_at: now,
-                summary: None,
-                summary_seq: None,
+                summary: self.summary.clone(),
+                summary_seq: self.summary_seq,
             };
             store.create_session(&meta).await?;
             self.session_created = true;
@@ -147,6 +155,15 @@ impl SessionState {
         store.append_message(&self.id, msg).await?;
         self.persisted_count = self.messages.len();
         Ok(())
+    }
+
+    /// Update bookkeeping after compaction. Sets the summary metadata and
+    /// adjusts `persisted_count` so subsequent `record()` calls don't try to
+    /// re-append already-persisted tail messages.
+    pub fn after_compaction(&mut self, summary: String, summary_seq: i64) {
+        self.summary = Some(summary);
+        self.summary_seq = Some(summary_seq);
+        self.persisted_count = self.messages.len();
     }
 }
 

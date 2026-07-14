@@ -122,6 +122,9 @@ impl ChatView {
                 }
             }
             SessionEvent::ToolStart { id, name, input } => {
+                if name == "task" {
+                    return;
+                }
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Tool {
                     id: id.clone(),
@@ -139,10 +142,14 @@ impl ChatView {
             }
             SessionEvent::ToolEnd {
                 id,
+                name,
                 output,
                 is_error,
                 ..
             } => {
+                if name == "task" {
+                    return;
+                }
                 self.finalize_assistant();
                 let color = if *is_error {
                     Color::Red

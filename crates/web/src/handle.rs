@@ -100,6 +100,11 @@ impl SseEvt {
                 serde_json::json!({ "id": id, "event": ev }),
                 EventKind::Step,
             ),
+            SessionEvent::PlanHandoff(plan) => (
+                "plan_handoff".to_string(),
+                serde_json::json!({ "plan": plan }),
+                EventKind::Step,
+            ),
             SessionEvent::TranscriptReset(_) => (
                 "transcript_reset".to_string(),
                 serde_json::json!({}),

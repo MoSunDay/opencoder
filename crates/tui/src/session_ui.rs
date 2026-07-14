@@ -24,7 +24,7 @@ pub struct SessionUiState {
     pub scroll: u16,
     pub follow: bool,
     pub sys_tokens: u64,
-    pub steer_items: Vec<String>,
+    pub steer_items: Vec<(i64, String)>,
     pub queue_items: Vec<(i64, String)>,
     pub active_skill: Option<String>,
     pub active_skill_body: Option<String>,
@@ -62,7 +62,7 @@ impl SessionUiState {
         scroll: u16,
         follow: bool,
         sys_tokens: u64,
-        steer_items: &[String],
+        steer_items: &[(i64, String)],
         queue_items: &[(i64, String)],
         active_skill: &Option<String>,
         active_skill_body: &Option<String>,
@@ -380,7 +380,7 @@ mod tests {
         let history = vec!["msg1".into(), "msg2".into()];
         let skill = Some("code-review".into());
         let skill_body = Some("review every change carefully".into());
-        let steers = vec!["fix bug".into(), "add tests".into(), "refactor".into()];
+        let steers = vec![(10_i64, "fix bug".into()), (11, "add tests".into()), (12, "refactor".into())];
         let queues = vec![(1_i64, "run lint".into())];
 
         let snap = SessionUiState::snapshot(
@@ -453,7 +453,7 @@ mod tests {
     fn roundtrip_snapshot_then_compare() {
         // Simulate: snapshot → (logically "store") → compare against fresh values.
         let chat = sample_chat();
-        let steers = vec!["s1".into()];
+        let steers = vec![(7_i64, "s1".into())];
         let queues = vec![(1_i64, "q1".into()), (2_i64, "q2".into())];
         let snap = SessionUiState::snapshot(
             true,

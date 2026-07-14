@@ -116,7 +116,7 @@ fn status_bar_omits_branding() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0, None,
+                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
             );
         })
         .unwrap();
@@ -147,7 +147,7 @@ fn status_bar_running_shows_spinner_and_status() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 5000, 200000, 0, None,
+                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
             );
         })
         .unwrap();
@@ -167,7 +167,64 @@ fn status_bar_running_shows_spinner_and_status() {
     );
 }
 
+
+// ----- Guard: skill badge removed from status bar -----
+
+/// The status bar must NOT render a `skill:` badge (removed per user request
+/// — the skill is no longer surfaced in the bottom bar; only the echoed text
+/// in the body carries the {$name} token verbatim).
+#[test]
+fn status_bar_has_no_skill_badge() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(
+                f, area, false, "", 0, 0, "glm-4.6", "act", 5000, 200000, 0,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        !row.contains("skill:"),
+        "status bar must not contain skill badge; got: {row}"
+    );
+}
+
+/// The queue panel renders steer items with the `↳ steer` prefix and queue
+/// items with `[queued]`, and caps display at 3 rows.
+#[test]
+fn queue_panel_renders_steer_and_queue_rows() {
+    use crate::queue_panel::QueueBtn;
+    let backend = TestBackend::new(80, 5);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let steers: Vec<(i64, String)> = vec![(1, "fix bug".into())];
+    let queues: Vec<(i64, String)> = vec![(2, "run lint".into())];
+    let mut btns: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, &steers, &queues, &mut btns);
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let row0 = row_text(buf, 0, 80);
+    let row1 = row_text(buf, 1, 80);
+    assert!(
+        row0.contains("steer") && row0.contains("fix bug"),
+        "steer row missing: {row0}"
+    );
+    assert!(
+        row1.contains("queued") && row1.contains("run lint"),
+        "queue row missing: {row1}"
+    );
+}
+
 // ----- Guard (B): composer rendering with multi-line input -----
+
 
 /// The composer renders a `❯ ` prompt on the first line, the first input
 /// segment after it, subsequent lines without a prompt, and a follow label

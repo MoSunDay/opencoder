@@ -55,7 +55,7 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     ];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::SwitchAndStart("act".into()), &mut session, &tx).await;
+    let quit = process_cmd(UiCmd::SwitchAndStart("act".into(), "".into()), &mut session, &tx).await;
     assert!(!quit, "SwitchAndStart must not signal quit");
 
     let mut events: Vec<UiEvent> = Vec::new();
@@ -90,6 +90,24 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     assert!(
         !reset_body.contains("explore the codebase first"),
         "earlier planning chatter must be dropped, got: {reset_body}"
+    );
+
+    // (2b) PlanHandoff event emitted — carries the raw plan markdown for the
+    //      display layer to render as a visible card.
+    let handoff_plan = events
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::Session(SessionEvent::PlanHandoff(p)) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("PlanHandoff must be emitted");
+    assert!(
+        handoff_plan.contains("## Plan\n1. do X\n2. do Y"),
+        "PlanHandoff must carry the final plan text, got: {handoff_plan}"
+    );
+    assert!(
+        !handoff_plan.contains("explore the codebase first"),
+        "PlanHandoff must not contain planning chatter"
     );
 
     // (3) The live transcript was rebuilt on the clean slate: the handoff
@@ -173,7 +191,7 @@ async fn switch_and_start_without_plan_falls_back_gracefully() {
     session.messages = vec![Message::user("u1", "just talking, no plan yet")];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::SwitchAndStart("act".into()), &mut session, &tx).await;
+    let _ = process_cmd(UiCmd::SwitchAndStart("act".into(), "".into()), &mut session, &tx).await;
 
     let mut events: Vec<UiEvent> = Vec::new();
     while let Ok(ev) = rx.try_recv() {
@@ -185,10 +203,97 @@ async fn switch_and_start_without_plan_falls_back_gracefully() {
             .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_)))),
         "no TranscriptReset when there is no plan to hand off"
     );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, UiEvent::Session(SessionEvent::PlanHandoff(_)))),
+        "no PlanHandoff when there is no plan to hand off"
+    );
     // handoff was a no-op, so the original user message is still the seed
     // (the act turn's response is appended after it).
     assert_eq!(
         session.messages[0].id, "u1",
         "original transcript must be untouched when no plan found"
     );
+}
+
+#[tokio::test]
+async fn switch_and_start_appends_input_to_plan_handoff() {
+    // Plan-mode input left in the box must be appended to the plan in the
+    // handoff message and reach the act agent's LLM request.
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![text_done("starting now")]));
+    let dir = tempfile::tempdir().unwrap();
+    let plan_agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new(
+        "handoff-extra",
+        plan_agent,
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock.clone(),
+        dir.path().to_path_buf(),
+    );
+    session.messages = vec![
+        Message::user("u1", "implement feature X"),
+        assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
+    ];
+
+    let extra = "Don't forget to add tests for the new module.";
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
+    let _ = process_cmd(
+        UiCmd::SwitchAndStart("act".into(), extra.into()),
+        &mut session,
+        &tx,
+    )
+    .await;
+
+    let mut events: Vec<UiEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        events.push(ev);
+    }
+
+    // The TranscriptReset message must carry BOTH the plan and the extra input.
+    let reset_body = events
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::Session(SessionEvent::TranscriptReset(msgs)) => Some(msgs[0].text()),
+            _ => None,
+        })
+        .expect("TranscriptReset must be emitted");
+    assert!(
+        reset_body.contains("## Plan\n1. do X\n2. do Y"),
+        "reset must carry the plan, got: {reset_body}"
+    );
+    assert!(
+        reset_body.contains(extra),
+        "reset must carry the appended input, got: {reset_body}"
+    );
+
+    // And the act LLM request must receive it too.
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1);
+    let user_msgs: Vec<&serde_json::Value> = requests[0]
+        .messages
+        .iter()
+        .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+        .collect();
+    assert_eq!(user_msgs.len(), 1, "one handoff user message");
+    let content = user_msgs[0]
+        .get("content")
+        .and_then(|v| v.as_str())
+        .expect("content");
+    assert!(
+        content.contains("## Plan\n1. do X\n2. do Y"),
+        "act request must include the plan, got: {content}"
+    );
+    assert!(
+        content.contains(extra),
+        "act request must include the appended input, got: {content}"
+    );
+    // extra must follow the plan.
+    let plan_pos = content.find("## Plan").unwrap();
+    let extra_pos = content.find(extra).unwrap();
+    assert!(plan_pos < extra_pos, "input must follow the plan in the request");
 }

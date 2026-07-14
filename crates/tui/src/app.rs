@@ -31,9 +31,9 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner.
 const ANIM_TICK_MS: u64 = 300;
-/// Maximum render rate (10 FPS). Events are processed immediately but the
+/// Maximum render rate (3 FPS). Events are processed immediately but the
 /// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 100;
+const FRAME_MS: u64 = 333;
 /// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
 const MODE_FLASH_TICKS: u32 = 5;
 
@@ -144,7 +144,7 @@ async fn run_app(
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
-    let mut steer_items: Vec<String> = Vec::new();
+    let mut steer_items: Vec<(i64, String)> = Vec::new();
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
@@ -191,7 +191,7 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at 10 FPS regardless of token arrival
+    // Frame-rate limiter: caps redraws at 3 FPS regardless of token arrival
     // rate. `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -199,7 +199,7 @@ async fn run_app(
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most 10 times/sec.
+    // at most 3 times/sec.
     let mut dirty = true;
     let mut render_pending = true;
     loop {
@@ -273,7 +273,6 @@ async fn run_app(
                         None
                     }
                 }),
-                active_skill.as_deref(),
                 skill_menu.as_ref(),
                 task_picker.as_ref(),
                 command_menu.as_ref(),
@@ -601,9 +600,9 @@ async fn run_app(
                                 let clean = clean.trim().to_string();
                                 if clean.is_empty() {
                                     if active_skill.is_some() {
-                                        chat.push_marker(Line::from(Span::styled(
-                                            format!("[skill: {}]", active_skill.as_deref().unwrap_or("")),
-                                            Style::default().fg(Color::Yellow))));
+                                        if !text.is_empty() {
+                                            push_user(&mut chat, &mut history, &mut hist_idx, &text);
+                                        }
                                         if !running {
                                             // Skill-only submit: send a trigger prompt naming the active
                                             // skill so the model records a user turn and begins acting on
@@ -630,7 +629,7 @@ async fn run_app(
                                         queue_items.push((seq, clean.clone()));
                                     }
                                 } else {
-                                    push_user(&mut chat, &mut history, &mut hist_idx, &clean);
+                                    push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean)).await
                                     {
@@ -649,8 +648,9 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    let _ = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await;
-                                    steer_items.push(clean.to_string());
+                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await {
+                                        steer_items.push((seq, clean.to_string()));
+                                    }
                                     // Do NOT echo into the main transcript /
                                     // execution area. Steer input is surfaced
                                     // only in the side queue panel + status bar
@@ -676,7 +676,12 @@ async fn run_app(
                                 let plan_to_act = chat.agent == "plan" && name == "act" && !running;
                                 sys_tokens = sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
                                 if plan_to_act && !chat.blocks.is_empty() {
-                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name))
+                                    // Carry any text the user left in the
+                                    // input box into the handoff so it is
+                                    // appended to the plan and submitted.
+                                    let extra = std::mem::take(&mut input);
+                                    cursor_idx = 0;
+                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name, extra))
                                         .await
                                     {
                                         worker_dead(&mut chat);
@@ -796,6 +801,9 @@ async fn run_app(
                             }
                             if let SessionEvent::QueueConsumed { seq } = &sev {
                                 queue_items.retain(|(s, _)| s != seq);
+                            }
+                            if let SessionEvent::SteerConsumed { seq } = &sev {
+                                steer_items.retain(|(s, _)| s != seq);
                             }
                             if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                                 if cancelled {

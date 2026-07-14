@@ -54,9 +54,9 @@ async fn handoff_keeps_only_final_plan() {
         assistant_with_text("a2", "## Plan\n1. do X\n2. do Y"),
     ];
 
-    let reset = plan_handoff::handoff(&mut session);
+    let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset, "handoff should reset when a plan is present");
+    assert!(reset.is_some(), "handoff should reset when a plan is present");
     assert_eq!(
         session.messages.len(),
         1,
@@ -85,9 +85,9 @@ async fn handoff_noop_without_plan() {
     let mut session = empty_session();
     session.messages = vec![Message::user("u1", "hello")];
 
-    let reset = plan_handoff::handoff(&mut session);
+    let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(!reset, "handoff must be a no-op with no assistant plan");
+    assert!(reset.is_none(), "handoff must be a no-op with no assistant plan");
     assert_eq!(session.messages.len(), 1, "messages must be unchanged");
     assert_eq!(session.messages[0].id, "u1");
 }
@@ -102,9 +102,10 @@ async fn handoff_skips_empty_assistant_turns() {
         assistant_with_text("a2", "Final plan: ship it"),
     ];
 
-    let reset = plan_handoff::handoff(&mut session);
+    let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset);
+    assert!(reset.is_some());
+    assert_eq!(reset.as_deref(), Some("Final plan: ship it"));
     let body = session.messages[0].text();
     assert!(
         body.contains("Final plan: ship it"),
@@ -133,9 +134,9 @@ async fn handoff_does_not_touch_store() {
     let before = store.load_messages(&session.id).await.unwrap();
     assert_eq!(before.len(), 2, "two messages persisted before handoff");
 
-    let reset = plan_handoff::handoff(&mut session);
+    let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset, "handoff should reset when a plan is present");
+    assert!(reset.is_some(), "handoff should reset when a plan is present");
     assert_eq!(
         session.messages.len(),
         1,
@@ -154,6 +155,65 @@ async fn handoff_does_not_touch_store() {
     );
 }
 
+
+#[tokio::test]
+async fn handoff_appends_extra_input_to_plan() {
+    let mut session = empty_session();
+    session.messages = vec![
+        Message::user("u1", "build a foo"),
+        assistant_with_text("a1", "## Plan
+1. do X
+2. do Y"),
+    ];
+
+    let reset = plan_handoff::handoff(
+        &mut session,
+        "Also remember to add a README before finishing.",
+    );
+
+    assert!(reset.is_some());
+    assert_eq!(session.messages.len(), 1);
+    let body = session.messages[0].text();
+    assert!(
+        body.contains("## Plan
+1. do X
+2. do Y"),
+        "plan must be present, got: {body}"
+    );
+    assert!(
+        body.contains("Also remember to add a README before finishing."),
+        "extra input must be appended after the plan, got: {body}"
+    );
+    // extra must come AFTER the plan, not before.
+    let plan_pos = body.find("## Plan").unwrap();
+    let extra_pos = body.find("Also remember").unwrap();
+    assert!(
+        plan_pos < extra_pos,
+        "extra input must follow the plan text"
+    );
+}
+
+#[tokio::test]
+async fn handoff_ignores_whitespace_only_extra() {
+    let mut session = empty_session();
+    session.messages = vec![
+        Message::user("u1", "build a foo"),
+        assistant_with_text("a1", "## Plan
+1. do X"),
+    ];
+
+    let reset = plan_handoff::handoff(&mut session, "   
+	  ");
+
+    assert!(reset.is_some());
+    let body = session.messages[0].text();
+    assert!(
+        !body.ends_with("   
+	  "),
+        "whitespace-only extra must not be appended, got: {body}"
+    );
+}
+
 #[test]
 fn final_plan_text_picks_newest_nonempty_assistant() {
     let msgs = vec![
@@ -169,4 +229,77 @@ fn final_plan_text_picks_newest_nonempty_assistant() {
 fn final_plan_text_none_when_no_assistant() {
     let msgs = vec![Message::user("u1", "hi")];
     assert_eq!(plan_handoff::final_plan_text(&msgs), None);
+}
+
+#[tokio::test]
+async fn handoff_display_excludes_directive_prefix() {
+    // The returned display text is what the user sees in the Plan card — it
+    // must contain the plan but NOT the LLM directive prefix.
+    let mut session = empty_session();
+    session.messages = vec![
+        Message::user("u1", "build a foo"),
+        assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
+    ];
+
+    let display = plan_handoff::handoff(&mut session, "").unwrap();
+
+    // Display must contain the plan text itself.
+    assert!(
+        display.contains("## Plan\n1. do X\n2. do Y"),
+        "display must contain the plan text, got: {display}"
+    );
+    // Display must NOT contain the directive prefix meant for the LLM.
+    assert!(
+        !display.contains("Planning phase complete"),
+        "display must not contain the LLM directive prefix, got: {display}"
+    );
+    assert!(
+        !display.contains("Execute it now"),
+        "display must not contain the LLM directive prefix, got: {display}"
+    );
+
+    // Cross-check: the LLM body DOES contain the directive prefix.
+    let body = session.messages[0].text();
+    assert!(
+        body.contains("Planning phase complete"),
+        "LLM body must contain the directive prefix"
+    );
+}
+
+#[tokio::test]
+async fn handoff_display_includes_extra() {
+    // When extra input is provided, it must appear in the returned display
+    // text (so the user sees it in the card), positioned after the plan.
+    let mut session = empty_session();
+    session.messages = vec![
+        Message::user("u1", "build a foo"),
+        assistant_with_text("a1", "## Plan\n1. do X"),
+    ];
+
+    let display = plan_handoff::handoff(
+        &mut session,
+        "Don't forget to add tests for the new module.",
+    )
+    .unwrap();
+
+    assert!(
+        display.contains("## Plan\n1. do X"),
+        "display must contain the plan text, got: {display}"
+    );
+    assert!(
+        display.contains("Don't forget to add tests for the new module."),
+        "display must contain the extra input, got: {display}"
+    );
+    // Extra must follow the plan.
+    let plan_pos = display.find("## Plan").unwrap();
+    let extra_pos = display.find("Don't forget").unwrap();
+    assert!(
+        plan_pos < extra_pos,
+        "extra input must follow the plan in display text"
+    );
+    // And no directive prefix.
+    assert!(
+        !display.contains("Planning phase complete"),
+        "display must not contain the directive prefix"
+    );
 }

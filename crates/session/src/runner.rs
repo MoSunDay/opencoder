@@ -60,6 +60,10 @@ pub enum SessionEvent {
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<opencoder_core::Message>),
+    /// Emitted after plan→act handoff. Carries the plan text (markdown) for the
+    /// display layer to render as a read-only card. Paired with a preceding
+    /// TranscriptReset that rebuilds the clean view.
+    PlanHandoff(String),
     /// A queued follow-up was consumed (drained) at an idle boundary. Carries
     /// the consumed input's row seq so the TUI can drop it from its pending
     /// mirror instead of leaving a stale `[queued]` row until `Done`.

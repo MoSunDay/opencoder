@@ -15,7 +15,9 @@ pub enum UiCmd {
     /// Switch agent then immediately start a turn without recording a new user
     /// message. Used for the plan->act manual transition: the system prompt
     /// changes to act and the model reads the plan from conversation history.
-    SwitchAndStart(String),
+    /// The second field carries any text left in the plan-mode input box; it
+    /// is appended to the plan during the handoff so it is submitted too.
+    SwitchAndStart(String, String),
     /// Manually trigger conversation compaction.
     Compact,
     SetSkill(Option<String>),
@@ -121,7 +123,7 @@ pub async fn process_cmd(
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
             }
         }
-        UiCmd::SwitchAndStart(name) => {
+        UiCmd::SwitchAndStart(name, extra) => {
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
@@ -130,10 +132,11 @@ pub async fn process_cmd(
             // from only the final plan, not the full read-only planning noise.
             // Mirrors compaction — in-memory mutation + TranscriptReset so the
             // UI rebuilds clean; the append-only store keeps the raw history.
-            if opencoder_session::plan_handoff::handoff(sess) {
+            if let Some(plan_display) = opencoder_session::plan_handoff::handoff(sess, &extra) {
                 let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
                     sess.messages.clone(),
                 )));
+                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::PlanHandoff(plan_display)));
             }
             let tx = evt_tx.clone();
             let res = run_session(sess, String::new(), move |sev| {

@@ -655,3 +655,109 @@ fn short_truncates_by_display_width_not_char_count() {
     assert!(composer::str_width(&long_ascii) <= 10);
     assert!(long_ascii.ends_with('…'));
 }
+
+#[test]
+fn plan_handoff_creates_plan_card() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::PlanHandoff("## Plan\n1. do X\n2. do Y".into()));
+
+    // A Plan block is pushed.
+    assert!(
+        v.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Plan { .. })),
+        "PlanHandoff must create a Plan block"
+    );
+
+    // The card renders with a header and the markdown content.
+    let flat = v.flatten();
+    let text: String = flat.iter().flat_map(|l| l.spans.iter().map(|s| s.content.to_string())).collect();
+    assert!(text.contains("plan"), "plan header must be present");
+    assert!(text.contains("Plan"), "plan heading text must be present");
+    assert!(text.contains("do X"), "plan content must be present");
+    assert!(
+        !text.contains("## Plan"),
+        "heading markup must be rendered, not raw"
+    );
+}
+
+#[test]
+fn plan_handoff_finalizes_pending_assistant() {
+    // An in-progress assistant block must be finalized before the Plan card
+    // is pushed, so the plan appears as a separate block.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("partial response".into()));
+    v.apply(&SessionEvent::PlanHandoff("## Plan".into()));
+
+    let assistant_count = v
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, ChatBlock::Assistant { .. }))
+        .count();
+    assert_eq!(assistant_count, 1, "assistant block must be finalized");
+    assert!(
+        v.blocks
+            .last()
+            .map(|b| matches!(b, ChatBlock::Plan { .. }))
+            .unwrap_or(false),
+        "Plan block must be last"
+    );
+}
+
+#[test]
+fn plan_card_line_count_matches_flatten() {
+    // Verify thinking_headers/subagent_headers line counting stays aligned
+    // when a Plan block precedes a Thinking block.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::PlanHandoff("line one\nline two".into()));
+    v.apply(&SessionEvent::ReasoningDelta("think".into()));
+
+    let flat = v.flatten();
+    let headers = v.thinking_headers();
+    assert_eq!(headers.len(), 1, "one thinking header expected");
+    let line = &flat[headers[0].header_line_idx];
+    assert!(
+        line.spans.iter().any(|s| s.content.contains("Thinking")),
+        "thinking header must point at the correct line"
+    );
+}
+
+#[test]
+fn plan_card_flatten_structure() {
+    use ratatui::style::{Color, Modifier};
+
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::PlanHandoff("## Goal\nShip it".into()));
+
+    let flat = v.flatten();
+
+    // Line 0: Yellow bold header "── plan ──".
+    let header = &flat[0];
+    assert!(
+        header.spans.iter().any(|s| s.content.contains("plan")),
+        "first line must be the plan header, got: {:?}",
+        header.spans
+    );
+    // Verify the Yellow + Bold styling on the header span.
+    assert!(
+        header.spans.iter().any(|s| {
+            s.style.fg == Some(Color::Yellow)
+                && s.style.add_modifier.contains(Modifier::BOLD)
+        }),
+        "plan header must be Yellow + Bold"
+    );
+
+    // Body lines are indented (start with 2 spaces).
+    let body_line = &flat[1];
+    assert!(
+        body_line.spans.first().map(|s| s.content.starts_with("  ")).unwrap_or(false),
+        "body lines must be indented by 2 spaces, got: {:?}",
+        body_line.spans
+    );
+
+    // Trailing blank line after the body.
+    assert!(
+        flat.last().map(|l| l.spans.is_empty()).unwrap_or(false),
+        "Plan card must end with a trailing blank line"
+    );
+}

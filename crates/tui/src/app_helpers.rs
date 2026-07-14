@@ -406,7 +406,20 @@ pub(crate) async fn handle_mouse(
                 if in_rect(r, m.column, m.row) {
                     let visible_h = r.height.saturating_sub(2) as usize;
                     let inner_w = r.width.saturating_sub(3);
-                    let total_rows = Paragraph::new(chat.flatten())
+                    // When a subagent perspective is focused, the scrollbar
+                    // and max-rows must reflect the CHILD view's content, not
+                    // the parent's. Using `chat.flatten()` (the parent) here
+                    // made `follow` trip early/late whenever parent and child
+                    // had different lengths — breaking wheel-scroll inside a
+                    // subagent view. This mirrors the resolution the MouseUp
+                    // copy path already performs below.
+                    let viewed: &ChatView = match (*subagent_focus)
+                        .and_then(|idx| chat.blocks.get(idx))
+                    {
+                        Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
+                        _ => &*chat,
+                    };
+                    let total_rows = Paragraph::new(viewed.flatten())
                         .wrap(Wrap { trim: false })
                         .line_count(inner_w);
                     let max_rows = total_rows.saturating_sub(visible_h);
@@ -418,5 +431,271 @@ pub(crate) async fn handle_mouse(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression tests for the mouse wheel-scroll handler, focusing on the
+    //! bug where `ScrollDown` computed `max_rows` from the PARENT chat even
+    //! while a subagent perspective was focused — pinning to the bottom and
+    //! making the child body un-scrollable.
+    use super::*;
+    use async_trait::async_trait;
+    use opencoder_core::Message;
+    use opencoder_session::SessionEvent;
+    use opencoder_store::{
+        SessionEventRecord, SessionFilter, SessionListItem, SessionMeta, SessionPatch,
+        SubagentTaskRecord,
+    };
+    use ratatui::layout::Rect;
+
+    /// `Store` whose every method panics. The `ScrollDown` branch of
+    /// `handle_mouse` never touches the store, so passing a reference is safe;
+    /// if a method were ever invoked it would fail loudly.
+    struct StubStore;
+
+    #[async_trait]
+    impl Store for StubStore {
+        fn backend_name(&self) -> &'static str {
+            "stub"
+        }
+        async fn create_session(&self, _: &SessionMeta) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn get_session(&self, _: &str) -> anyhow::Result<Option<SessionMeta>> {
+            unimplemented!()
+        }
+        async fn list_sessions(&self, _: &SessionFilter) -> anyhow::Result<Vec<SessionListItem>> {
+            unimplemented!()
+        }
+        async fn update_session(&self, _: &str, _: &SessionPatch) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn delete_session(&self, _: &str) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn clear_other_sessions(&self, _: &str) -> anyhow::Result<u64> {
+            unimplemented!()
+        }
+        async fn append_message(&self, _: &str, _: &Message) -> anyhow::Result<i64> {
+            unimplemented!()
+        }
+        async fn append_messages(&self, _: &str, _: &[Message]) -> anyhow::Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn load_messages(&self, _: &str) -> anyhow::Result<Vec<Message>> {
+            unimplemented!()
+        }
+        async fn last_message_seq(&self, _: &str) -> anyhow::Result<i64> {
+            unimplemented!()
+        }
+        async fn admit_input(&self, _: &SessionInput) -> anyhow::Result<i64> {
+            unimplemented!()
+        }
+        async fn pending_inputs(&self, _: &str, _: Delivery) -> anyhow::Result<Vec<SessionInput>> {
+            unimplemented!()
+        }
+        async fn promote_inputs(
+            &self,
+            _: &str,
+            _: i64,
+            _: Delivery,
+        ) -> anyhow::Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn promote_next_queued(&self, _: &str) -> anyhow::Result<Option<i64>> {
+            unimplemented!()
+        }
+        async fn claim_next_queue(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Option<(i64, SessionInput)>> {
+            unimplemented!()
+        }
+        async fn delete_input(&self, _: i64) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn swap_input_order(&self, _: &str, _: i64, _: i64) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn append_event(&self, _: &SessionEventRecord) -> anyhow::Result<i64> {
+            unimplemented!()
+        }
+        async fn events_after(&self, _: &str, _: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
+            unimplemented!()
+        }
+        async fn create_subagent_task(&self, _: &SubagentTaskRecord) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn complete_subagent_task(&self, _: &str, _: &str, _: bool) -> anyhow::Result<()> {
+            unimplemented!()
+        }
+        async fn list_subagent_tasks(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Vec<SubagentTaskRecord>> {
+            unimplemented!()
+        }
+    }
+
+    /// Parent whose own content is short but wraps a subagent whose CHILD view
+    /// is long. Left unfinalized so `flatten` emits the raw lines verbatim
+    /// (row count independent of the markdown renderer).
+    fn parent_with_long_subagent() -> ChatView {
+        let mut chat = ChatView::default();
+        chat.apply(&SessionEvent::TextDelta("parent preamble".into()));
+        chat.apply(&SessionEvent::Done);
+        chat.apply(&SessionEvent::SubagentStart {
+            id: "s1".into(),
+            kind: "explore".into(),
+            prompt: "find it".into(),
+            child_session_id: "c1".into(),
+        });
+        let child_text = (0..40)
+            .map(|i| format!("child output line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        chat.apply(&SessionEvent::SubagentChild {
+            id: "s1".into(),
+            ev: Box::new(SessionEvent::TextDelta(child_text)),
+        });
+        chat
+    }
+
+    fn empty_hits(body: Rect) -> MouseHits {
+        MouseHits {
+            jump_btn: None,
+            body: Some(body),
+            queue_btns: Vec::new(),
+            thinking_btns: Vec::new(),
+            subagent_btns: Vec::new(),
+        }
+    }
+
+    fn scroll_down() -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 40,
+            row: 6,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// The regression: with a subagent focused, one wheel-down must NOT pin to
+    /// the bottom even though the PARENT fits in the viewport (which, under the
+    /// old parent-based `max_rows`, saturated to 0 and tripped `follow`).
+    #[tokio::test]
+    async fn scrolldown_in_subagent_view_uses_child_content() {
+        let mut chat = parent_with_long_subagent();
+        let sub_idx = chat
+            .blocks
+            .iter()
+            .position(|b| matches!(b, crate::chat::ChatBlock::Subagent { .. }))
+            .expect("a Subagent block exists");
+
+        let parent_rows = chat.flatten().len();
+        let child_rows = match &chat.blocks[sub_idx] {
+            crate::chat::ChatBlock::Subagent { view, .. } => view.flatten().len(),
+            _ => unreachable!(),
+        };
+        let body = Rect::new(0, 0, 80, 12); // visible_h = 10, inner_w = 77
+        let visible_h = body.height as usize - 2;
+        assert!(
+            child_rows > parent_rows && child_rows > visible_h,
+            "precondition: child ({child_rows}) longer than parent ({parent_rows}) and viewport ({visible_h})"
+        );
+        // Parent must fit in the viewport — that is what made the old math trip.
+        assert!(
+            parent_rows < visible_h,
+            "precondition: parent ({parent_rows}) fits viewport ({visible_h})"
+        );
+
+        let hits = empty_hits(body);
+        let mut scroll = 0u16;
+        let mut follow = false;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus = Some(sub_idx);
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = false;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = Vec::new();
+        let store = StubStore;
+        let mut copy_msg: Option<String> = None;
+
+        handle_mouse(
+            scroll_down(),
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+        )
+        .await;
+
+        assert_eq!(scroll, 3, "scroll advanced by one notch");
+        assert!(
+            !follow,
+            "follow must NOT trip: the child still has content below the fold"
+        );
+    }
+
+    /// Mirror case: with NO subagent focused, the parent view drives `max_rows`.
+    /// Here the short parent fits the viewport, so the first wheel-down
+    /// legitimately pins to the bottom.
+    #[tokio::test]
+    async fn scrolldown_uses_parent_when_no_subagent_focused() {
+        let mut chat = parent_with_long_subagent();
+        let body = Rect::new(0, 0, 80, 12);
+        let visible_h = body.height as usize - 2;
+        assert!(
+            chat.flatten().len() < visible_h,
+            "precondition: parent fits viewport"
+        );
+
+        let hits = empty_hits(body);
+        let mut scroll = 0u16;
+        let mut follow = false;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = false;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = Vec::new();
+        let store = StubStore;
+        let mut copy_msg: Option<String> = None;
+
+        handle_mouse(
+            scroll_down(),
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+        )
+        .await;
+
+        assert!(
+            follow,
+            "short parent legitimately pins to bottom immediately"
+        );
     }
 }

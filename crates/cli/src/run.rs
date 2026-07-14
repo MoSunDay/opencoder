@@ -196,6 +196,9 @@ fn print_event(ev: &SessionEvent) {
             let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
             eprintln!("\x1b[34m  {mark} {summary}\x1b[0m");
         }
+        SessionEvent::PlanHandoff(plan) => {
+            eprintln!("\n\x1b[33m\u{2500}\u{2500} plan \u{2500}\u{2500}\x1b[0m\n{plan}\n");
+        }
         SessionEvent::TranscriptReset(_) => {}
         SessionEvent::QueueConsumed { .. } => {}
         SessionEvent::SteerConsumed { .. } => {}

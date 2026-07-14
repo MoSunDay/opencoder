@@ -55,6 +55,11 @@ pub enum ChatBlock {
         ok: bool,
         summary: String,
     },
+    /// Read-only plan card shown after plan→act handoff. The finalized plan,
+    /// rendered as markdown. Not interactive — purely informational context.
+    Plan {
+        rendered: Vec<Line<'static>>,
+    },
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -257,6 +262,13 @@ impl ChatView {
                         Style::default().fg(Color::Red),
                     ))]));
             }
+            SessionEvent::PlanHandoff(plan) => {
+                self.finalize_assistant();
+                let rendered = crate::markdown::render(plan);
+                if !rendered.is_empty() {
+                    self.blocks.push(ChatBlock::Plan { rendered });
+                }
+            }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { .. } => {}
@@ -340,6 +352,9 @@ impl ChatView {
             SessionEvent::Compaction(c) => {
                 self.context_used = estimate(c) as u64;
             }
+            SessionEvent::PlanHandoff(plan) => {
+                self.context_used += estimate(plan) as u64;
+            }
             _ => {}
         }
     }
@@ -393,6 +408,9 @@ impl ChatView {
                 ChatBlock::Subagent { .. } => {
                     line_idx += 1; // header only — no inline expansion
                 }
+                ChatBlock::Plan { rendered } => {
+                    line_idx += 1 + rendered.len() + 1;
+                }
             }
         }
         out
@@ -438,6 +456,9 @@ impl ChatView {
                         header_line_idx: line_idx,
                     });
                     line_idx += 1; // header only — no inline expansion
+                }
+                ChatBlock::Plan { rendered } => {
+                    line_idx += 1 + rendered.len() + 1;
                 }
             }
         }
@@ -514,6 +535,19 @@ impl ChatView {
                 ChatBlock::Tool { header, output, .. } => {
                     out.push(header.clone());
                     out.extend(output.iter().cloned());
+                    out.push(Line::from(""));
+                }
+                ChatBlock::Plan { rendered } => {
+                    out.push(Line::from(Span::styled(
+                        "\u{2500}\u{2500} plan \u{2500}\u{2500}",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )));
+                    let indent = Span::raw("  ");
+                    for l in rendered.iter() {
+                        let mut spans = vec![indent.clone()];
+                        spans.extend(l.spans.iter().cloned());
+                        out.push(Line::from(spans));
+                    }
                     out.push(Line::from(""));
                 }
                 ChatBlock::Subagent {

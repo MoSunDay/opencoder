@@ -23,25 +23,39 @@ Execute it now in act mode: make the described changes, run builds/tests, and \
 verify. Do not re-plan; proceed directly with implementation.\n\n";
 
 /// Reset the transcript for a plan→act handoff: keep only the final plan,
-/// repackaged as a single synthetic user instruction.
+/// repackaged as a single synthetic user instruction. `extra` (any text the
+/// user left in the plan-mode input box) is appended to the plan when
+/// non-empty, so it is submitted as part of the same directive.
 ///
 /// The "final plan" is the last assistant message carrying non-empty text —
 /// per the plan agent prompt that is where the actionable plan lives. Returns
-/// `true` when a reset happened, `false` when no plan could be found (the
-/// caller should then leave the transcript untouched and fall back to current
-/// behavior).
+/// `Some(display_text)` when a reset happened (the display text is the plan +
+/// optional extra, suitable for rendering in the UI, WITHOUT the LLM directive
+/// prefix); returns `None` when no plan could be found (the caller should leave
+/// the transcript untouched).
 ///
 /// The durable store is NOT modified: it stays append-only so the full raw
 /// transcript is preserved for audit, exactly like compaction.
-pub fn handoff(session: &mut SessionState) -> bool {
-    let Some(plan) = final_plan_text(&session.messages) else {
-        return false;
-    };
+pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
+    let plan = final_plan_text(&session.messages)?;
 
-    let mut msg = Message::user(new_id(), format!("{HANDOFF_PREFIX}{plan}"));
+    // Display text for the UI plan card: the plan plus any text the user
+    // left in the plan-mode input box. This is what the user sees — NOT the
+    // LLM directive prefix.
+    let mut display = plan.clone();
+    let extra = extra.trim();
+    if !extra.is_empty() {
+        display.push_str("\n\n");
+        display.push_str(extra);
+    }
+
+    // LLM body: the directive prefix followed by the same plan + extra.
+    let body = format!("{HANDOFF_PREFIX}{display}");
+    let mut msg = Message::user(new_id(), body);
     msg.synthetic = true;
     session.messages = vec![msg];
-    true
+
+    Some(display)
 }
 
 /// Extract the final plan: the newest assistant message with non-empty text.

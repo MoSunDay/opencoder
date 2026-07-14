@@ -80,13 +80,12 @@ pub(crate) fn render(
     context_limit: u64,
     model: &str,
     status: &str,
-    steer_items: &[String],
+    steer_items: &[(i64, String)],
     queue_items: &[(i64, String)],
     scroll: &mut u16,
     follow: bool,
     anim_tick: u32,
     mode_flash: Option<&str>,
-    active_skill: Option<&str>,
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
@@ -184,7 +183,6 @@ pub(crate) fn render(
             context_used + sys_tokens,
             context_limit,
             anim_tick,
-            active_skill,
         );
 
         if show_help {
@@ -566,7 +564,6 @@ fn render_status(
     used: u64,
     limit: u64,
     anim_tick: u32,
-    active_skill: Option<&str>,
 ) {
     let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
     let ctx_color = if pct >= 85 {
@@ -599,16 +596,6 @@ fn render_status(
         ),
     ];
 
-    if let Some(name) = active_skill {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("skill:{name}"),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
     if running {
         let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
         spans.push(Span::raw("  "));
@@ -640,7 +627,7 @@ fn render_status(
 fn render_queue_panel(
     f: &mut Frame,
     area: Rect,
-    steer_items: &[String],
+    steer_items: &[(i64, String)],
     queue_items: &[(i64, String)],
     btns: &mut Vec<QueueBtn>,
 ) {
@@ -651,7 +638,7 @@ fn render_queue_panel(
         seq: Option<i64>,
     }
     let mut entries: Vec<E> = Vec::new();
-    for s in steer_items {
+    for (_seq, s) in steer_items {
         entries.push(E {
             prefix: "\u{21b3} steer",
             text: s.as_str(),

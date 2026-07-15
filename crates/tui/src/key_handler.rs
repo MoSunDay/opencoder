@@ -22,6 +22,7 @@ pub(crate) enum KeyAction {
     Steer(String),
     Queue(String),
     SwitchAgent(String),
+    SwitchAgentNoClear(String),
     Cancel,
     SetSkill(Option<(String, String)>),
     OpenCommand,
@@ -161,6 +162,16 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::Tab => {
+            // Chord: "t" + Tab switches act <-> plan WITHOUT the plan->act
+            // handoff / TranscriptReset cleanup (unlike Shift+Tab which
+            // preserves only the final plan). The full transcript is kept.
+            if input.trim() == "t" {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                let next = if agent == "plan" { "act" } else { "plan" };
+                return KeyAction::SwitchAgentNoClear(next.into());
+            }
             // Tab = follow-up (queue) when running; normal submit when idle.
             if input.trim().is_empty() {
                 return KeyAction::None;

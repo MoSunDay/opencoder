@@ -341,7 +341,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 1, "schema_version must be 1 after bootstrap");
+    assert_eq!(v, 2, "schema_version must be 2 after bootstrap");
 }
 
 #[tokio::test]
@@ -455,6 +455,7 @@ async fn events_append_and_after_replay() {
                 payload: serde_json::json!({"i": i}),
                 ts: i as i64,
                 seq: None,
+                sse_kind: None,
             })
             .await
             .unwrap();
@@ -861,6 +862,7 @@ async fn mixed_concurrent_writes_with_immediate_tx() {
                     payload: serde_json::Value::String(format!("ev-{w}-{k}")),
                     ts: k as i64,
                     seq: None,
+                    sse_kind: None,
                 };
                 if let Err(e) = s.append_event(&rec).await {
                     errs.lock()
@@ -998,4 +1000,110 @@ fn meta_for(id: &str) -> SessionMeta {
         summary: None,
         summary_seq: None,
     }
+}
+
+#[tokio::test]
+async fn schema_migration_v1_to_v2_adds_sse_kind() {
+    use libsql::Builder;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate.db");
+
+    // Phase 1: manually create a v1-style database (no sse_kind column).
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "CREATE TABLE sessions (\
+               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
+               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, summary TEXT, summary_seq INTEGER)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE session_events (\
+               seq INTEGER PRIMARY KEY AUTOINCREMENT,\
+               session_id TEXT NOT NULL,\
+               type TEXT NOT NULL, payload_json TEXT NOT NULL,\
+               ts INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s1', 1, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_events (session_id, type, payload_json, ts) \
+             VALUES ('s1', 'text_delta', '{}', 100)",
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Phase 2: reopen — triggers bootstrap → migrate from v1 to v2.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+
+    // Old event record: sse_kind is None (column added by migration, was NULL).
+    let events = store.events_after("s1", 0).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].sse_kind, None,
+        "old v1 events should have sse_kind=None"
+    );
+
+    // Schema version bumped to 2.
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare("SELECT version FROM schema_version LIMIT 1")
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let r = rows.next().await.unwrap().unwrap();
+        let v: i64 = r.get(0).unwrap();
+        assert_eq!(v, 2, "schema version must be 2 after migration");
+    }
+
+    // New events can be stored with sse_kind and read back.
+    use opencoder_store::EventKind;
+    store
+        .append_event(&opencoder_store::SessionEventRecord {
+            session_id: "s1".into(),
+            kind: EventKind::Step,
+            payload: serde_json::json!({"status": "ok"}),
+            ts: 200,
+            seq: None,
+            sse_kind: Some("status".into()),
+        })
+        .await
+        .unwrap();
+
+    let events2 = store.events_after("s1", 0).await.unwrap();
+    assert_eq!(events2.len(), 2);
+    assert_eq!(events2[1].sse_kind.as_deref(), Some("status"));
+
+    // Idempotent: reopening again does not re-run migration or error.
+    drop(store);
+    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let conn = store2.conn().await.unwrap();
+    let stmt = conn
+        .prepare("SELECT version FROM schema_version LIMIT 1")
+        .await
+        .unwrap();
+    let mut rows = stmt.query(()).await.unwrap();
+    let r = rows.next().await.unwrap().unwrap();
+    let v: i64 = r.get(0).unwrap();
+    assert_eq!(v, 2, "schema version stays 2 after idempotent re-open");
 }

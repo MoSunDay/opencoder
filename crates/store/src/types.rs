@@ -132,6 +132,11 @@ pub struct SessionEventRecord {
     pub ts: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
+    /// Granular SSE event-name string preserved for lossless replay.
+    /// Older records (pre-migration) lack this; callers fall back to
+    /// `event_kind_str(kind)` when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sse_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

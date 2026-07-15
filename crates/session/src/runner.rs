@@ -80,6 +80,89 @@ pub enum SessionEvent {
     Error(String),
 }
 
+impl SessionEvent {
+    /// The granular SSE event-name string for this variant.
+    /// Single source of truth shared by the web layer (live broadcast +
+    /// replay) and the TUI (persistence), so a session driven by either
+    /// surface replays identically.
+    pub fn sse_kind(&self) -> &'static str {
+        match self {
+            SessionEvent::TextDelta(_) => "text_delta",
+            SessionEvent::ReasoningDelta(_) => "reasoning_delta",
+            SessionEvent::ToolStart { .. } => "tool_start",
+            SessionEvent::ToolEnd { .. } => "tool_end",
+            SessionEvent::AgentSwitch(_) => "agent_switched",
+            SessionEvent::Compaction(_) => "compaction",
+            SessionEvent::Status(_) => "status",
+            SessionEvent::Done => "done",
+            SessionEvent::Error(_) => "error",
+            SessionEvent::SubagentStart { .. } => "subagent_start",
+            SessionEvent::SubagentEnd { .. } => "subagent_end",
+            SessionEvent::SubagentChild { .. } => "subagent_child",
+            SessionEvent::PlanHandoff(_) => "plan_handoff",
+            SessionEvent::TranscriptReset(_) => "transcript_reset",
+            SessionEvent::QueueConsumed { .. } => "queue_consumed",
+            SessionEvent::SteerConsumed { .. } => "steer_consumed",
+        }
+    }
+
+    /// The structured JSON payload for this variant, matching the SSE wire
+    /// format. Both web and TUI use this for persistence so the replayed
+    /// payload shape is identical to the live broadcast.
+    pub fn sse_data(&self) -> serde_json::Value {
+        match self {
+            SessionEvent::TextDelta(t) => serde_json::json!({ "text": t }),
+            SessionEvent::ReasoningDelta(r) => serde_json::json!({ "text": r }),
+            SessionEvent::ToolStart { id, name, input } => {
+                serde_json::json!({ "id": id, "name": name, "input": input })
+            }
+            SessionEvent::ToolEnd { id, name, output, is_error } => {
+                serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error })
+            }
+            SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
+            SessionEvent::Compaction(s) => serde_json::json!({ "summary": s }),
+            SessionEvent::Status(s) => serde_json::json!({ "status": s }),
+            SessionEvent::Done => serde_json::json!({}),
+            SessionEvent::Error(e) => serde_json::json!({ "error": e }),
+            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => {
+                serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id })
+            }
+            SessionEvent::SubagentEnd { id, ok, summary } => {
+                serde_json::json!({ "id": id, "ok": ok, "summary": summary })
+            }
+            SessionEvent::SubagentChild { id, ev } => {
+                serde_json::json!({ "id": id, "event": ev })
+            }
+            SessionEvent::PlanHandoff(plan) => serde_json::json!({ "plan": plan }),
+            SessionEvent::TranscriptReset(_) => serde_json::json!({}),
+            SessionEvent::QueueConsumed { seq } => serde_json::json!({ "seq": seq }),
+            SessionEvent::SteerConsumed { seq } => serde_json::json!({ "seq": seq }),
+        }
+    }
+
+    /// Coarse [`EventKind`] category for backward-compatible DB `type` column.
+    pub fn coarse_kind(&self) -> EventKind {
+        match self {
+            SessionEvent::TextDelta(_) => EventKind::TextDelta,
+            SessionEvent::ReasoningDelta(_) => EventKind::TextDelta,
+            SessionEvent::ToolStart { .. } => EventKind::ToolStart,
+            SessionEvent::ToolEnd { .. } => EventKind::ToolEnd,
+            SessionEvent::AgentSwitch(_) => EventKind::AgentSwitched,
+            SessionEvent::Compaction(_) => EventKind::Compaction,
+            SessionEvent::Status(_) => EventKind::Step,
+            SessionEvent::Done => EventKind::Done,
+            SessionEvent::Error(_) => EventKind::Error,
+            SessionEvent::SubagentStart { .. }
+            | SessionEvent::SubagentEnd { .. }
+            | SessionEvent::SubagentChild { .. }
+            | SessionEvent::PlanHandoff(_)
+            | SessionEvent::QueueConsumed { .. }
+            | SessionEvent::SteerConsumed { .. } => EventKind::Step,
+            SessionEvent::TranscriptReset(_) => EventKind::Compaction,
+        }
+    }
+}
+
 const MAX_OUTPUT: usize = 4096;
 const DOOM_THRESHOLD: usize = 3;
 
@@ -617,22 +700,13 @@ async fn run_subagent(
             // events if the process exited before the spawned task completed.
             // Buffering + ordered flush keeps seq aligned with emission order.
             if has_store {
-                let kind_str = match &cev {
-                    SessionEvent::TextDelta(_) => "text_delta",
-                    SessionEvent::ReasoningDelta(_) => "reasoning_delta",
-                    SessionEvent::ToolStart { .. } => "tool_start",
-                    SessionEvent::ToolEnd { .. } => "tool_end",
-                    SessionEvent::Done => "done",
-                    SessionEvent::Error(_) => "error",
-                    _ => "other",
-                };
-                let payload = serde_json::to_string(&cev).unwrap_or_default();
                 let rec = SessionEventRecord {
                     session_id: child_id_for_cb.clone(),
-                    kind: event_kind_from_str(kind_str),
-                    payload: serde_json::Value::String(payload),
+                    kind: cev.coarse_kind(),
+                    payload: serde_json::to_value(&cev).unwrap_or(serde_json::Value::Null),
                     ts: now_ms(),
                     seq: None,
+                    sse_kind: Some(cev.sse_kind().to_string()),
                 };
                 pending_records_clone.lock().unwrap().push(rec);
             }
@@ -700,18 +774,6 @@ async fn run_subagent(
         ToolOutput::ok(text)
     } else {
         ToolOutput::err("subagent failed")
-    }
-}
-
-fn event_kind_from_str(s: &str) -> EventKind {
-    match s {
-        "text_delta" => EventKind::TextDelta,
-        "reasoning_delta" => EventKind::TextDelta,
-        "tool_start" => EventKind::ToolStart,
-        "tool_end" => EventKind::ToolEnd,
-        "done" => EventKind::Done,
-        "error" => EventKind::Error,
-        _ => EventKind::Step,
     }
 }
 

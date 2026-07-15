@@ -373,6 +373,7 @@ fn body_follow_indicator_when_not_following() {
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
     let mut scroll = 0u16;
     terminal
@@ -387,6 +388,7 @@ fn body_follow_indicator_when_not_following() {
                 0,
                 &mut body_out,
                 &mut jump_btn,
+                &mut top_btn,
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
@@ -419,6 +421,7 @@ fn body_follow_label_when_following() {
     let backend = TestBackend::new(40, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
     let mut scroll = 0u16;
     terminal
@@ -433,6 +436,7 @@ fn body_follow_label_when_following() {
                 0,
                 &mut body_out,
                 &mut jump_btn,
+                &mut top_btn,
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
@@ -451,6 +455,99 @@ fn body_follow_label_when_following() {
         jump_btn.is_none(),
         "jump_btn should be None when following"
     );
+}
+
+/// When scrolled past the top, the body's top-border row shows the `⬆`
+/// (U+2B06) jump-to-top indicator and exports its hit rect via `top_btn`.
+/// Unlike the bottom indicator it carries no "跟随中"-style label.
+#[test]
+fn body_top_arrow_when_scrolled_down() {
+    let mut v = ChatView::default();
+    // Plenty of lines so the content overflows a 40x10 window.
+    let body = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
+    v.apply(&SessionEvent::TextDelta(body));
+    v.apply(&SessionEvent::Done);
+
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
+    let mut body_out: Option<Rect> = None;
+    let mut scroll = 5u16;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                "test",
+                &mut scroll,
+                false,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut top_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+            );
+        })
+        .unwrap();
+
+    let area = terminal.backend().buffer().area;
+    let top_row = row_text(terminal.backend().buffer(), area.y, area.width);
+    assert!(
+        top_row.contains('\u{2b06}'),
+        "jump-to-top arrow ⬆ should appear on top border; got: {top_row}"
+    );
+    assert!(
+        top_btn.is_some(),
+        "top_btn should be set to a rect when scrolled past the top"
+    );
+}
+
+/// At the very top (scroll 0) no jump-to-top arrow is shown and `top_btn` is
+/// `None` — nothing to scroll up to.
+#[test]
+fn body_no_top_arrow_when_at_top() {
+    let mut v = ChatView::default();
+    let body = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
+    v.apply(&SessionEvent::TextDelta(body));
+    v.apply(&SessionEvent::Done);
+
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
+    let mut body_out: Option<Rect> = None;
+    let mut scroll = 0u16;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                "test",
+                &mut scroll,
+                false,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut top_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+            );
+        })
+        .unwrap();
+
+    let area = terminal.backend().buffer().area;
+    let top_row = row_text(terminal.backend().buffer(), area.y, area.width);
+    assert!(
+        !top_row.contains('\u{2b06}'),
+        "no jump-to-top arrow when at the top; got: {top_row}"
+    );
+    assert!(top_btn.is_none(), "top_btn should be None when at the top");
 }
 
 // ----- Guard (B): cursor placement with multi-line + soft-wrap input -----

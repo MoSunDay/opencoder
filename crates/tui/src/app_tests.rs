@@ -205,6 +205,83 @@ fn tab_while_idle_submits() {
 }
 
 #[test]
+fn t_then_tab_in_act_mode_switches_without_clear() {
+    // The "t" + Tab chord: input box holds exactly "t" when Tab is pressed.
+    // In act mode this switches to plan WITHOUT the plan->act handoff /
+    // TranscriptReset cleanup (unlike Shift+Tab).
+    let mut input = String::from("t");
+    let mut idx = 1;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(
+        matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "plan"),
+        "t+Tab in act mode should switch to plan without clear"
+    );
+    // Input must be consumed.
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn t_then_tab_in_plan_mode_switches_without_clear() {
+    // The chord works in both directions: plan -> act, again skipping the
+    // handoff that Shift+Tab would trigger.
+    let mut input = String::from("t");
+    let mut idx = 1;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        false,
+        "plan",
+    );
+    assert!(
+        matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "act"),
+        "t+Tab in plan mode should switch to act without clear"
+    );
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn t_then_tab_does_not_fire_on_longer_input() {
+    // "test" + Tab must NOT trigger the chord — it should submit normally.
+    let mut input = String::from("test");
+    let mut idx = 4;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(
+        matches!(action, KeyAction::Submit(ref t) if t == "test"),
+        "longer input must submit normally, not trigger the chord"
+    );
+}
+
+#[test]
+fn empty_input_tab_still_none() {
+    // Empty input + Tab remains a no-op (no chord, no submit).
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+}
+
+#[test]
 fn shift_tab_toggles_plan_act() {
     // BackTab = Shift+Tab, the primary mode-switch key (codex-cli style).
     let mut input = String::new();

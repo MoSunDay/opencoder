@@ -13,8 +13,8 @@ Commit: (working-tree, pre-initial-commit)
 ## 关键抽象
 - `Store` trait（`src/store.rs`）：async_trait，dyn 兼容。这是「切换其它 Rust SQLite 实现」的唯一接缝——换后端只需新实现 trait，上层零改动。
 - `LibsqlStore`（`src/libsql_store/mod.rs`）：持有**单个** Connection（`db.connect()` 一次），每个 op clone。libsql 的 `:memory:` 每次 connect 返回独立空库，故必须缓存连接共享——这是正确性关键。
-- schema（`src/libsql_store/schema.rs`）：6 表 + 5 索引 + `schema_version`。bootstrap 幂等；`PRAGMA journal_mode=WAL` 等 per-connection 应用（注意该 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"）。`subagent_tasks` 表记录父子 agent 关系（task_id/parent/child session_id/prompt/result/status）。
-- 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`/`EventKind`/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。
+- schema（`src/libsql_store/schema.rs`）：6 表 + 5 索引 + `schema_version`（当前 v2）。bootstrap 幂等：先 CREATE TABLE IF NOT EXISTS 全表，再读已存版本做**增量迁移**（`migrate(from)`：v2 加 `session_events.sse_kind TEXT`，nullable 故旧行仍合法）；新库（version None）已含全量 schema 故跳过迁移，仅写版本号。`PRAGMA journal_mode=WAL` 等 per-connection 应用（注意该 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"）。`subagent_tasks` 表记录父子 agent 关系（task_id/parent/child session_id/prompt/result/status）。
+- 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`（含 `sse_kind: Option<String>`——细粒度 SSE 事件名，replay 优先取它、`None` 时回退 `event_kind_str(coarse)`）/`EventKind`（12 变体，粗粒度，仅作 DB `type` 列与回退）/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。
 
 ## 主流程
 - session 生命周期：`create_session` / `get_session` / `list_sessions`（`SessionFilter`：workdir_hash / search / cursor 分页）/ `update_session`（`SessionPatch` 局部更新）/ `delete_session`。`clear_other_sessions(keep)` 单条 `DELETE FROM sessions WHERE id != keep` 批量清理（保留当前会话），子表经 `ON DELETE CASCADE` 外键级联删除，返回删除条数。

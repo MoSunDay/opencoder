@@ -7,7 +7,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 
 ## 边界与非目标
 - 不直接调 Store CRUD（经 worker `UiCmd` 通道）；不持有 SessionState（worker 持有）。
-- 非目标：TUI 不是 Web 替代品——无 SSE replay，仅 live event 流。
+- 非目标：TUI 不是 Web 替代品——app 内无 SSE replay，仅 live event 流；但 **worker 持有 `Option<Arc<dyn Store>>`**，每个 SessionEvent 经 `worker::persist_event`（fire-and-forget spawn）写入 `session_events`（含 `sse_kind`），故 web/SSE 客户端可回放 TUI 驱动的会话（TUI 自身不在 app 内回放）。
 
 ## 关键抽象
 - `ChatView`（`src/chat.rs`）：`blocks: Vec<ChatBlock>` + `agent/status/subagents_running/subagents_total/context_used`。`apply(&SessionEvent)` 逐事件更新——核心接缝；内部 `track_context` 只累加本 view transcript token（不递归 SubagentChild——父 view 的 context_used 仅含自身，子 view 独立维护自身子树）。app.rs 不再有独立 `context_used` 变量——直接读写 `chat.context_used`。 `last_thinking_collapsed()` 返回末尾块是否为折叠 Thinking——供 app.rs 在 `ReasoningDelta` 流式写入时跳过逐 delta 全量重绘（折叠态无可见变化，300ms anim_ticker 仍周期刷新 spinner + 行数计数）。
@@ -27,14 +27,14 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - **render**：`display_chat` / `display_agent` / `display_ctx` / `display_sys` = subagent_focus 时取子 ChatView 及其 `context_used` + 缓存的 `subagent_sys`（进入时 `sys_tokens_for(kind, workdir, None)` 算一次），否则取 `&chat` + `chat.context_used` / `sys_tokens`。`display_agent` = focus 时 `← [Esc] back | ⇲sub [kind] prompt`。
 - **Session 事件**：`chat.apply(&sev)` 内部调 `track_context` 更新 `chat.context_used`（只计本 view token，SubagentChild 不计入父），SubagentChild 路由到子 block view（子 view 的 apply 独立更新自身 context_used）；TranscriptReset 重建 ChatView（context_used 归零）。
 - **subagent ctx 切换**：`subagent_focus: Option<usize>` 状态。进入时保存 `parent_scroll/parent_follow`，退出时恢复。Esc 优先拦截（在 handle_key 之前）。
-- **输入模式**：Enter = steer（运行中）/ submit（idle）；Tab = followup（运行中）/ submit（idle）；Shift+Tab 切 plan/act。
+- **输入模式**：Enter = steer（运行中）/ submit（idle）；Tab = followup（运行中）/ submit（idle）；Shift+Tab 切 plan/act（触发 plan→act handoff，清空 transcript 只留最终计划）；**t+Tab** 切 plan/act 但**不清空** transcript（`KeyAction::SwitchAgentNoClear`——输入框恰为 `t` 时按 Tab，保留完整上下文）。
 - **中止与续跑**：双击 Esc 硬中止（`KeyAction::Cancel` → `cancel.cancel()`，`run_app` 即刻 `running=false`）。每个新 turn 由 `start_turn` 先发 `UiCmd::ResetCancel(新 token)` 再发工作命令（mpsc FIFO，4 个派发点：Submit idle / SwitchAndStart / Compact / TurnDone 续跑），刷新 worker 的 `sess.cancel`——否则 token 永久取消会使 `run_loop` 顶部 `is_cancelled()` 永真、后续提交被静默丢弃。`start_turn` 返回 `bool`：`false` = 命令通道关闭（worker 已死，panic 或意外退出），派发点收到 `false` 时 `worker_dead()` 推 `[worker stopped]` marker 并 break。输入采集在独立 OS 线程，worker 死后 UI 仍响应 Ctrl+C/D，用户可干净退出而非面对冻死 spinner。
 - **弹窗锚点**：`/` 命令面板（`command.rs`）与 `/model` 配置（`model_menu/`）以 composer 顶边 `y` 为底锚渲染下拉浮层（非屏幕居中）。`/model` 内 Enter = 确认当前值并推进下一字段，连续 Enter 到 `[Save]` 提交；`↑/↓` 在文本字段间导航、在 Reasoning/Threshold 上改值。`/task` 会话选择器（`task.rs`）为屏幕居中模态：`+ New task` + 历史 session 列表（当前会话标 `(current)`），底部红色 `✕ Clear all N task(s)` destructive 行——选中 Enter 进入红色两步确认态（再 Enter 触发 `TaskOutcome::ClearAll`；app 层经 `gate_clear_all(running)` 守卫：`running==true` 即 turn/subagent 飞行中时拒绝并推黄色 busy marker，idle 后才调 `Store::clear_other_sessions` 删除除当前会话外的全部会话并刷新列表；Esc 取消确认、确认态锁定 ↑/↓、Ctrl+C/D 仍即时退出）。
 
 ## 依赖与接口
 - 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencoder-session、opencoder-core、opencoder-store、opencoder-llm（estimate）。
 - 被依赖：binary crate（`src/main.rs` → `opencoder_tui::run_tui`）。
-- worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。
+- worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAgentNoClear,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。worker 对每条 SessionEvent（含 AgentSwitch/TranscriptReset/Compaction 等控制事件）调 `persist_event` 写 store，与 web drain 路径一致，保证 TUI 会话可被 web 回放。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。
 
 ## 相关模块
 - [agents/session](../session/index.md) — SessionEvent 来源。

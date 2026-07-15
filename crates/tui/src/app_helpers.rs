@@ -319,6 +319,19 @@ pub(crate) async fn handle_mouse(
                 }
             }
 
+            // Top-jump button: scroll back to the very first row. Sits next to
+            // the jump_btn check and likewise precedes dbl-click detection.
+            if let Some(r) = hits.top_btn {
+                if in_rect(r, m.column, m.row) {
+                    *scroll = 0;
+                    *follow = false;
+                    *selection = None;
+                    *dbl_click = false;
+                    *last_click = Some(Instant::now());
+                    return MouseOutcome::None; // jump to top
+                }
+            }
+
             // ── Double-click detection ──
             // If this click follows a previous one within DBL_CLICK_MS, treat
             // it as the second half of a double-click: select the current line
@@ -630,6 +643,7 @@ mod tests {
     fn empty_hits(body: Rect) -> MouseHits {
         MouseHits {
             jump_btn: None,
+            top_btn: None,
             body: Some(body),
             queue_btns: Vec::new(),
             thinking_btns: Vec::new(),
@@ -1052,6 +1066,7 @@ mod tests {
         let jump_btn_rect = Rect::new(74, 11, 6, 1);
         let hits = MouseHits {
             jump_btn: Some(jump_btn_rect),
+            top_btn: None,
             body: Some(body),
             queue_btns: Vec::new(),
             thinking_btns: Vec::new(),

@@ -50,6 +50,7 @@ fn child_event(
         payload: serde_json::Value::String(serde_json::to_string(ev).unwrap()),
         ts,
         seq: None,
+        sse_kind: None,
     }
 }
 

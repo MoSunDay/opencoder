@@ -249,7 +249,10 @@ pub async fn get_events(
             records
                 .into_iter()
                 .map(|r| SseEvt {
-                    kind: event_kind_str(r.kind).to_string(),
+                    kind: r
+                        .sse_kind
+                        .clone()
+                        .unwrap_or_else(|| event_kind_str(r.kind).to_string()),
                     data: r.payload,
                     ts: r.ts,
                     seq: r.seq,

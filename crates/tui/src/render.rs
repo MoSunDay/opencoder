@@ -36,6 +36,7 @@ const SPINNER: [&str; 10] = [
 #[derive(Default)]
 pub(crate) struct MouseHits {
     pub jump_btn: Option<Rect>,
+    pub top_btn: Option<Rect>,
     pub body: Option<Rect>,
     pub queue_btns: Vec<QueueBtn>,
     /// Clickable Thinking-block header rows; clicking toggles collapse.
@@ -139,6 +140,7 @@ pub(crate) fn render(
             anim_tick,
             &mut hits.body,
             &mut hits.jump_btn,
+            &mut hits.top_btn,
             &mut hits.thinking_btns,
             &mut hits.subagent_btns,
             selection,
@@ -225,6 +227,7 @@ fn render_body(
     anim_tick: u32,
     body_out: &mut Option<Rect>,
     jump_btn: &mut Option<Rect>,
+    top_btn: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
     selection: Option<crate::selection::SelRange>,
@@ -319,6 +322,33 @@ fn render_body(
         lbl_rect,
     );
     *jump_btn = if follow { None } else { Some(lbl_rect) };
+
+    // Top-jump arrow on the body's top-border row, right-aligned. Shown only
+    // when scrolled past the top (there is somewhere to scroll up to). Unlike
+    // the bottom follow/jump indicator this carries no label — click to jump
+    // straight to the very first row.
+    if scroll_y > 0 {
+        let top_label = "  \u{2b06}  ";
+        let top_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let top_w: u16 = top_label
+            .chars()
+            .map(composer::char_width)
+            .sum::<usize>() as u16;
+        let top_w = top_w.min(area.width);
+        let top_rect = Rect::new(
+            area.right().saturating_sub(1).saturating_sub(top_w),
+            area.y,
+            top_w,
+            1,
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(top_label, top_style)])),
+            top_rect,
+        );
+        *top_btn = Some(top_rect);
+    }
 }
 
 /// Manual scrollbar with correct thumb positioning even when content barely

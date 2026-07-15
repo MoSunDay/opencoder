@@ -3,6 +3,7 @@ Keybindings:
   Shift+Tab        switch mode act <--> plan  (Alt+Tab / Ctrl+T fallback)
   Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
+  t+Tab           switch mode act <--> plan (keep context, no handoff reset)
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                pick skill anywhere -> {$name}; loaded on submit
   /                slash command picker: /task (sessions), /model (config), /compact (compress history)

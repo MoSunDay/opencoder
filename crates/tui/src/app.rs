@@ -776,6 +776,16 @@ async fn run_app(
                                     let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
                                 }
                             }
+                            KeyAction::SwitchAgentNoClear(name) => {
+                                // t+Tab chord: switch agent mode but skip the
+                                // plan->act handoff / TranscriptReset — the
+                                // transcript is preserved in full, unlike
+                                // Shift+Tab which collapses to the final plan.
+                                mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+                                sys_tokens =
+                                    sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
+                                let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                            }
                             KeyAction::SetSkill(opt) => {
                                 match opt {
                                     Some((name, body)) => {

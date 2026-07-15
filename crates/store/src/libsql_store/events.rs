@@ -4,8 +4,8 @@ use libsql::{params, Connection};
 use crate::types::{EventKind, SessionEventRecord};
 
 const INSERT_EVENT: &str = "\
-INSERT INTO session_events (session_id, type, payload_json, ts)
-VALUES (?, ?, ?, ?)";
+INSERT INTO session_events (session_id, type, payload_json, sse_kind, ts)
+VALUES (?, ?, ?, ?, ?)";
 
 pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64> {
     let payload_json = serde_json::to_string(&event.payload).context("serialize event payload")?;
@@ -15,6 +15,7 @@ pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64
             event.session_id.as_str(),
             kind_str(event.kind),
             payload_json,
+            event.sse_kind.as_deref(),
             event.ts
         ],
     )
@@ -37,7 +38,7 @@ pub async fn after(
     after_seq: i64,
 ) -> Result<Vec<SessionEventRecord>> {
     let stmt = conn
-        .prepare("SELECT seq, type, payload_json, ts FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq ASC")
+        .prepare("SELECT seq, type, payload_json, sse_kind, ts FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq ASC")
         .await?;
     let mut rows = stmt.query(params![session_id, after_seq]).await?;
     let mut out = Vec::new();
@@ -45,7 +46,8 @@ pub async fn after(
         let seq: i64 = r.get(0)?;
         let kind_s: String = r.get(1)?;
         let payload_json: String = r.get(2)?;
-        let ts: i64 = r.get(3)?;
+        let sse_kind: Option<String> = r.get(3)?;
+        let ts: i64 = r.get(4)?;
         let payload: serde_json::Value =
             serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
         out.push(SessionEventRecord {
@@ -54,6 +56,7 @@ pub async fn after(
             payload,
             ts,
             seq: Some(seq),
+            sse_kind,
         });
     }
     Ok(out)

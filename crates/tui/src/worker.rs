@@ -3,9 +3,10 @@
 
 use std::sync::Arc;
 
-use opencoder_core::{resolve_agent, Config};
+use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
 use opencoder_session::{run as run_session, SessionEvent, SessionState};
+use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -98,6 +99,25 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
+/// Fire-and-forget persist a parent-session event to the store so web/SSE
+/// clients can replay sessions driven by the TUI. Mirrors the web drain path.
+fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &SessionEvent) {
+    if let Some(store) = store {
+        let rec = SessionEventRecord {
+            session_id: session_id.to_string(),
+            kind: sev.coarse_kind(),
+            payload: sev.sse_data(),
+            ts: now_ms(),
+            seq: None,
+            sse_kind: Some(sev.sse_kind().to_string()),
+        };
+        let store = Arc::clone(store);
+        tokio::spawn(async move {
+            let _ = store.append_event(&rec).await;
+        });
+    }
+}
+
 /// Process one UI command against a session. Returns `true` when the worker
 /// loop should break (Quit).
 pub async fn process_cmd(
@@ -108,64 +128,85 @@ pub async fn process_cmd(
     match cmd {
         UiCmd::Prompt(prompt) => {
             let tx = evt_tx.clone();
+            let store = sess.store.clone();
+            let sid = sess.id.clone();
             let res = run_session(sess, prompt, move |sev| {
+                persist_event(&store, &sid, &sev);
                 let _ = tx.try_send(UiEvent::Session(sev));
             })
             .await;
             if let Err(e) = res {
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
+                let ev = SessionEvent::Error(format!("{e:#}"));
+                persist_event(&sess.store, &sess.id, &ev);
+                let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
+                let ev = SessionEvent::AgentSwitch(name);
+                persist_event(&sess.store, &sess.id, &ev);
+                let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
         }
         UiCmd::SwitchAndStart(name, extra) => {
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::AgentSwitch(name)));
+                let ev = SessionEvent::AgentSwitch(name);
+                persist_event(&sess.store, &sess.id, &ev);
+                let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
             // Plan→act handoff: clear the transcript so the act agent starts
             // from only the final plan, not the full read-only planning noise.
             // Mirrors compaction — in-memory mutation + TranscriptReset so the
             // UI rebuilds clean; the append-only store keeps the raw history.
             if let Some(plan_display) = opencoder_session::plan_handoff::handoff(sess, &extra) {
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
-                    sess.messages.clone(),
-                )));
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::PlanHandoff(plan_display)));
+                let ev = SessionEvent::TranscriptReset(sess.messages.clone());
+                persist_event(&sess.store, &sess.id, &ev);
+                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                let ev2 = SessionEvent::PlanHandoff(plan_display);
+                persist_event(&sess.store, &sess.id, &ev2);
+                let _ = evt_tx.try_send(UiEvent::Session(ev2));
             }
             let tx = evt_tx.clone();
+            let store = sess.store.clone();
+            let sid = sess.id.clone();
             let res = run_session(sess, String::new(), move |sev| {
+                persist_event(&store, &sid, &sev);
                 let _ = tx.try_send(UiEvent::Session(sev));
             })
             .await;
             if let Err(e) = res {
-                let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!("{e:#}"))));
+                let ev = SessionEvent::Error(format!("{e:#}"));
+                persist_event(&sess.store, &sess.id, &ev);
+                let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::Compact => {
             let registry = opencoder_session::tools::registry();
             let tx = evt_tx.clone();
+            let store = sess.store.clone();
+            let sid = sess.id.clone();
             let mut emit = move |sev: SessionEvent| {
+                persist_event(&store, &sid, &sev);
                 let _ = tx.try_send(UiEvent::Session(sev));
             };
             match opencoder_session::compaction::compact(sess, &registry, &mut emit).await {
                 Ok(Some(summary)) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::TranscriptReset(
-                        sess.messages.clone(),
-                    )));
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Compaction(summary)));
+                    let ev = SessionEvent::TranscriptReset(sess.messages.clone());
+                    persist_event(&sess.store, &sess.id, &ev);
+                    let _ = evt_tx.try_send(UiEvent::Session(ev));
+                    let ev2 = SessionEvent::Compaction(summary);
+                    persist_event(&sess.store, &sess.id, &ev2);
+                    let _ = evt_tx.try_send(UiEvent::Session(ev2));
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    let _ = evt_tx.try_send(UiEvent::Session(SessionEvent::Error(format!(
-                        "compaction failed: {e:#}"
-                    ))));
+                    let ev = SessionEvent::Error(format!("compaction failed: {e:#}"));
+                    persist_event(&sess.store, &sess.id, &ev);
+                    let _ = evt_tx.try_send(UiEvent::Session(ev));
                 }
             }
             let _ = evt_tx.send(UiEvent::TurnDone).await;

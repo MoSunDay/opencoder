@@ -197,6 +197,7 @@ async fn sse_replays_persisted_events_then_live() {
                 payload: serde_json::json!({ "i": i }),
                 ts: i as i64,
                 seq: None,
+                sse_kind: None,
             })
             .await
             .unwrap();

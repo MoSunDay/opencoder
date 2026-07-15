@@ -33,102 +33,14 @@ pub struct SseEvt {
 impl SseEvt {
     pub fn from_session_event(_session_id: &str, ev: &SessionEvent) -> (Self, EventKind) {
         let ts = opencoder_core::message::now_ms();
-        let (kind, data, event_kind) = match ev {
-            SessionEvent::TextDelta(t) => (
-                "text_delta".to_string(),
-                serde_json::json!({ "text": t }),
-                EventKind::TextDelta,
-            ),
-            SessionEvent::ToolStart { id, name, input } => (
-                "tool_start".to_string(),
-                serde_json::json!({ "id": id, "name": name, "input": input }),
-                EventKind::ToolStart,
-            ),
-            SessionEvent::ToolEnd {
-                id,
-                name,
-                output,
-                is_error,
-            } => (
-                "tool_end".to_string(),
-                serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error }),
-                EventKind::ToolEnd,
-            ),
-            SessionEvent::AgentSwitch(a) => (
-                "agent_switched".to_string(),
-                serde_json::json!({ "agent": a }),
-                EventKind::AgentSwitched,
-            ),
-            SessionEvent::Compaction(s) => (
-                "compaction".to_string(),
-                serde_json::json!({ "summary": s }),
-                EventKind::Compaction,
-            ),
-            SessionEvent::Status(s) => (
-                "status".to_string(),
-                serde_json::json!({ "status": s }),
-                EventKind::Step,
-            ),
-            SessionEvent::Done => ("done".to_string(), serde_json::json!({}), EventKind::Done),
-            SessionEvent::Error(e) => (
-                "error".to_string(),
-                serde_json::json!({ "error": e }),
-                EventKind::Error,
-            ),
-            SessionEvent::ReasoningDelta(r) => (
-                "reasoning_delta".to_string(),
-                serde_json::json!({ "text": r }),
-                EventKind::TextDelta,
-            ),
-            SessionEvent::SubagentStart {
-                id,
-                kind,
-                prompt,
-                child_session_id,
-            } => (
-                "subagent_start".to_string(),
-                serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id }),
-                EventKind::Step,
-            ),
-            SessionEvent::SubagentEnd { id, ok, summary } => (
-                "subagent_end".to_string(),
-                serde_json::json!({ "id": id, "ok": ok, "summary": summary }),
-                EventKind::Step,
-            ),
-            SessionEvent::SubagentChild { id, ev } => (
-                "subagent_child".to_string(),
-                serde_json::json!({ "id": id, "event": ev }),
-                EventKind::Step,
-            ),
-            SessionEvent::PlanHandoff(plan) => (
-                "plan_handoff".to_string(),
-                serde_json::json!({ "plan": plan }),
-                EventKind::Step,
-            ),
-            SessionEvent::TranscriptReset(_) => (
-                "transcript_reset".to_string(),
-                serde_json::json!({}),
-                EventKind::Compaction,
-            ),
-            SessionEvent::QueueConsumed { seq } => (
-                "queue_consumed".to_string(),
-                serde_json::json!({ "seq": seq }),
-                EventKind::Step,
-            ),
-            SessionEvent::SteerConsumed { seq } => (
-                "steer_consumed".to_string(),
-                serde_json::json!({ "seq": seq }),
-                EventKind::Step,
-            ),
-        };
         (
             SseEvt {
-                kind,
-                data,
+                kind: ev.sse_kind().to_string(),
+                data: ev.sse_data(),
                 ts,
                 seq: None,
             },
-            event_kind,
+            ev.coarse_kind(),
         )
     }
 }
@@ -326,6 +238,7 @@ async fn drain_to_completion(
             payload: sse.data.clone(),
             ts: sse.ts,
             seq: None,
+            sse_kind: Some(sse.kind.clone()),
         };
         let s2 = store_for_evt.clone();
         let r2 = rec;

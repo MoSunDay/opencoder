@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS session_events (
   session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   type         TEXT NOT NULL,
   payload_json TEXT NOT NULL,
+  sse_kind     TEXT,
   ts           INTEGER NOT NULL
 )";
 const CREATE_SUBAGENT_TASKS: &str = "\
@@ -105,7 +106,8 @@ pub async fn apply_connection_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Create all tables if absent and record schema version. Idempotent.
+/// Create all tables if absent, run incremental migrations, and record the
+/// schema version. Idempotent: safe on fresh and existing databases.
 pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
     conn.execute(CREATE_SESSIONS, ()).await?;
@@ -118,11 +120,37 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_INDEX_EV, ()).await?;
     conn.execute(CREATE_INDEX_SA_PARENT, ()).await?;
     conn.execute(CREATE_INDEX_SA_CHILD, ()).await?;
-    set_version(conn, SCHEMA_VERSION).await?;
+
+    // Incremental migrations: only run when upgrading from a prior version.
+    // Fresh databases (version None) already have the full schema from the
+    // CREATE TABLE statements above, so migrations are skipped for them.
+    let current = current_version(conn).await?;
+    if let Some(prev) = current {
+        if prev < SCHEMA_VERSION {
+            migrate(conn, prev).await?;
+            set_version(conn, SCHEMA_VERSION).await?;
+        }
+    } else {
+        set_version(conn, SCHEMA_VERSION).await?;
+    }
     Ok(())
 }
 
-#[allow(dead_code)]
+/// Run incremental schema migrations from `from` up to the current version.
+async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 2 {
+        // v2: add sse_kind column to session_events for lossless event-kind
+        // replay. The column is nullable so existing rows stay valid.
+        conn.execute(
+            "ALTER TABLE session_events ADD COLUMN sse_kind TEXT",
+            (),
+        )
+        .await
+        .context("migrate v2: add sse_kind column")?;
+    }
+    Ok(())
+}
+
 pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
     let stmt = conn
         .prepare("SELECT version FROM schema_version LIMIT 1")

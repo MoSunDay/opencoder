@@ -247,7 +247,8 @@ fn subagent_events_render() {
         ev: Box::new(SessionEvent::TextDelta("child output".into())),
     });
     // Finalize the child's assistant block so its tokens are counted
-    // (counted at finalization, not per-delta, to keep ctx% bar stable).
+    // (counted at finalization, not per-delta, to keep the status bar's
+    // ctx% indicator stable).
     v.apply(&SessionEvent::SubagentChild {
         id: "s1".into(),
         ev: Box::new(SessionEvent::Done),

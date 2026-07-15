@@ -29,19 +29,27 @@ use crate::worker::{
 };
 use crate::TuiOpts;
 
-/// Animation tick rate for the running spinner.
-const ANIM_TICK_MS: u64 = 300;
-/// Maximum render rate (1 FPS). Events are processed immediately but the
+/// Animation tick rate for the running spinner (10 FPS).
+const ANIM_TICK_MS: u64 = 100;
+/// Maximum render rate (10 FPS). Events are processed immediately but the
 /// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 1000;
-/// How long the plan/act switch flash stays visible, in anim ticks (~300ms each).
-const MODE_FLASH_TICKS: u32 = 5;
+const FRAME_MS: u64 = 100;
+/// How long the plan/act switch flash stays visible, in anim ticks (~100ms each).
+const MODE_FLASH_TICKS: u32 = 15;
+/// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
+/// at this cadence (5 FPS), decoupling text layout from the fast spinner.
+const BODY_REFRESH_MS: u64 = 200;
 
 /// Whether a transient flash started at `start` is still visible at `now`,
 /// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
 /// stays correct across the u32 wraparound of `anim_tick`.
 pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
     now.wrapping_sub(start) < ticks
+}
+
+/// Copy-paste-ready command to resume a session by id.
+pub(crate) fn resume_hint(id: &str) -> String {
+    format!("resume with: opencoder -s {id}")
 }
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
@@ -117,7 +125,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Term::new(backend)?;
 
-    run_app(
+    let final_id = run_app(
         &mut terminal,
         session,
         store,
@@ -128,7 +136,13 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         config,
         client,
     )
-    .await
+    .await?;
+
+    // Restore the real terminal *before* printing so the hint lands on the
+    // actual screen instead of being swallowed by the alt-screen buffer.
+    drop(_guard);
+    eprintln!("\n\x1b[2m{}\x1b[0m", resume_hint(&final_id));
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -142,7 +156,7 @@ async fn run_app(
     workdir: PathBuf,
     mut config: Config,
     mut client: Arc<dyn ChatStream>,
-) -> Result<()> {
+) -> Result<String> {
     // Wire a cancellation token into the session so double-Esc can hard-abort
     // the running turn (mid-stream / mid-tool). The UI keeps a clone to signal.
     // `mut`: reassigned by `rebind_session` on every `/task` session switch.
@@ -220,17 +234,26 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at 1 FPS regardless of token arrival
+    // Frame-rate limiter: caps redraws at 10 FPS regardless of token arrival
     // rate. `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 5 FPS.
+    // `Skip` prevents burst-fire catch-up after a stall.
+    let mut body_ticker = tokio::time::interval(Duration::from_millis(BODY_REFRESH_MS));
+    body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut skip_next_render = false;
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most 1 time/sec.
+    // at most 10 times/sec.
     let mut dirty = true;
     let mut render_pending = true;
+    // Body cache: a cloned snapshot of the active ChatView, rebuilt at 5 FPS.
+    // The spinner (driven by real-time anim_tick) still animates at full frame
+    // rate; only the text layout in render_body is throttled.
+    let mut body_refresh_pending = true;
+    let mut display_chat_cached: Option<ChatView> = None;
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
@@ -274,11 +297,21 @@ async fn run_app(
             _ => model_label.clone(),
         };
         let mut hits = MouseHits::default();
+        // Refresh the body cache at BODY_REFRESH_MS cadence (5 FPS). Between
+        // refreshes the spinner still animates at full frame rate because it is
+        // driven by the real-time anim_tick, not the cached blocks.
+        if dirty && (body_refresh_pending || display_chat_cached.is_none()) {
+            display_chat_cached = Some(display_chat.clone());
+            body_refresh_pending = false;
+        }
+        let render_chat = display_chat_cached
+            .as_ref()
+            .unwrap_or(display_chat);
         if dirty && render_pending {
             if !skip_next_render {
             render(
                 terminal,
-                display_chat,
+                render_chat,
                 &input,
                 cursor_idx,
                 &display_title,
@@ -887,6 +920,14 @@ async fn run_app(
                             }
                         }
                         UiEvent::TurnDone => {
+                            // Safety net: SessionEvent::Done (which triggers
+                            // finalize_assistant -> markdown::render) is sent via
+                            // try_send and may be dropped during token bursts.
+                            // TurnDone is sent via blocking send().await so it
+                            // always arrives. finalize_assistant is idempotent
+                            // (the `!*done` guard), so re-calling when Done was
+                            // already processed is a no-op.
+                            chat.finalize_assistant();
                             if drain_pending {
                                 // The cancelled turn has finished draining — restart
                                 // the drain loop to promote pending steers.
@@ -915,6 +956,9 @@ async fn run_app(
             _ = frame_ticker.tick() => {
                 render_pending = true;
             }
+            _ = body_ticker.tick() => {
+                body_refresh_pending = true;
+            }
         }
     }
 
@@ -924,7 +968,7 @@ async fn run_app(
     // bound the wait so the terminal is restored (TerminalGuard::drop leaves
     // the alt-screen) instead of freezing indefinitely on a blocked worker.
     let _ = tokio::time::timeout(Duration::from_secs(5), worker).await;
-    Ok(())
+    Ok(session_id)
 }
 
 pub(crate) use crate::app_helpers::{

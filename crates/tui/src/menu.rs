@@ -33,15 +33,9 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
         Some(m) => m,
         None => return MenuOutcome::Idle,
     };
-    // Quit still works from inside the modal; other Ctrl combos are ignored.
+    // Quit (Ctrl+D) still works from inside the modal; other Ctrl combos are ignored.
     if k.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(
-            k.code,
-            KeyCode::Char('c')
-                | KeyCode::Char('d')
-                | KeyCode::Char('\u{3}')
-                | KeyCode::Char('\u{4}')
-        ) {
+        if matches!(k.code, KeyCode::Char('d') | KeyCode::Char('\u{4}')) {
             *menu = None;
             return MenuOutcome::Quit;
         }

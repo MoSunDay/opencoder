@@ -75,14 +75,10 @@ pub(crate) fn handle_key(
 
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
-            // Ctrl+C / Ctrl+D quit. Under Kitty keyboard protocol
-            // (DISAMBIGUATE_ESCAPE_CODES) crossterm reports these as the raw
-            // control chars `\u{3}` (ETX) / `\u{4}` (EOT) with the CONTROL
-            // modifier set, so match those too.
-            KeyCode::Char('c')
-            | KeyCode::Char('d')
-            | KeyCode::Char('\u{3}')
-            | KeyCode::Char('\u{4}') => return KeyAction::Quit,
+            // Ctrl+D quits. Under Kitty keyboard protocol
+            // (DISAMBIGUATE_ESCAPE_CODES) crossterm reports this as the raw
+            // control char `\u{4}` (EOT) with the CONTROL modifier set.
+            KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
             // Fallback mode switch for terminals that swallow Alt+Tab.
             KeyCode::Char('t') => {
                 let next = if agent == "plan" { "act" } else { "plan" };
@@ -251,11 +247,16 @@ pub(crate) fn handle_key(
             KeyAction::None
         }
         KeyCode::Char(c) => {
-            // Fallback quit for terminals/crossterm configs that deliver Ctrl+C
-            // (ETX, 0x03) and Ctrl+D (EOT, 0x04) as raw control chars without the
-            // CONTROL modifier flag (the Ctrl-block match above would miss them).
-            if c == '\u{3}' || c == '\u{4}' {
+            // Fallback quit for terminals/crossterm configs that deliver Ctrl+D
+            // (EOT, 0x04) as a raw control char without the CONTROL modifier
+            // flag (the Ctrl-block match above would miss it).
+            if c == '\u{4}' {
                 return KeyAction::Quit;
+            }
+            // Swallow raw ETX (Ctrl+C, 0x03) so it is not inserted as a literal
+            // control char into the input buffer.
+            if c == '\u{3}' {
+                return KeyAction::None;
             }
             if c == '$' {
                 *skill_menu = Some(SkillMenu::new(discover_skills(), active_skill.is_some()));

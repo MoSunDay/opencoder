@@ -108,6 +108,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     _assert_game_artifact(c, sid, e1_log, snake_py, "snake.py")
     # sid is consumed by E2/E5/E8; capture whether the run produced a usable session.
     c.check("captured SNAKE session id", sid is not None)
+    c.soft("resume hint printed", "opencoder -s" in e1_log, "no resume hint in log")
 
     # ---- E2: --continue resumes SAME session AND loads prior context ----
     print("== E2: --continue resumes same session and loads prior context ==")

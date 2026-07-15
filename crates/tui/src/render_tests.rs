@@ -116,7 +116,7 @@ fn status_bar_omits_branding() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
+                f, area, false, "", "glm-4.6", "act", 0, 0, 200000,
             );
         })
         .unwrap();
@@ -143,7 +143,7 @@ fn status_bar_running_shows_spinner_and_status() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, true, "thinking", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
+                f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000,
             );
         })
         .unwrap();
@@ -177,7 +177,7 @@ fn status_bar_has_no_skill_badge() {
         .draw(|f| {
             let area = f.area();
             render_status(
-                f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000,
+                f, area, false, "", "glm-4.6", "act", 0, 0, 200000,
             );
         })
         .unwrap();
@@ -186,6 +186,39 @@ fn status_bar_has_no_skill_badge() {
     assert!(
         !row.contains("skill:"),
         "status bar must not contain skill badge; got: {row}"
+    );
+}
+
+// ----- Guard: steer/queue counters removed from status bar; ctx% present -----
+
+/// The status bar no longer carries the steer/queue counters but DOES show the
+/// ctx% indicator (moved from the body's reserved bottom row into the status
+/// bar). Guards against accidental re-introduction of steer/queue.
+#[test]
+fn status_bar_has_no_steer_queue_or_ctx() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(
+                f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        !row.contains("steer:"),
+        "status bar must not show steer counter; got: {row}"
+    );
+    assert!(
+        !row.contains("queue:"),
+        "status bar must not show queue counter; got: {row}"
+    );
+    assert!(
+        row.contains("ctx"),
+        "status bar should show ctx indicator; got: {row}"
     );
 }
 
@@ -660,17 +693,18 @@ fn status_chip_width_accounts_for_wide_emoji() {
     );
 }
 
-/// The status bar shows a ctx% indicator at the end.
 #[test]
 fn status_bar_shows_ctx_percent() {
     let backend = TestBackend::new(120, 3);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            let area = f.area();
-            render_status(f, area, false, "", 0, 0, "glm-4.6", "act", 0, 5000, 200000);
+            render_status(
+                f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000,
+            );
         })
         .unwrap();
+
     let row = row_text(terminal.backend().buffer(), 0, 120);
     assert!(row.contains("ctx"), "status bar should show ctx; got: {row}");
     assert!(row.contains('%'), "status bar should show percent; got: {row}");
@@ -684,25 +718,25 @@ fn status_bar_shows_ctx_percent() {
     );
 }
 
-/// High context usage renders the ctx% indicator in red.
+/// High context usage renders the status bar ctx% indicator in red.
 #[test]
 fn status_bar_ctx_red_at_high_usage() {
     let backend = TestBackend::new(120, 3);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            let area = f.area();
-            render_status(f, area, false, "", 0, 0, "glm-4.6", "act", 0, 180000, 200000);
+            render_status(
+                f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000,
+            );
         })
         .unwrap();
+
     let buf = terminal.backend().buffer();
-    let row = row_text(buf, 0, 120);
-    // Find the "ctx" text position and check its color is Red.
-    assert!(row.contains("ctx"), "ctx should appear; got: {row}");
-    // Find the column where "ctx" starts.
+    let area = buf.area;
+    let row = row_text(buf, 0, area.width);
     let ctx_col = row.find("ctx").expect("ctx should be present");
-    // The span starts 3 chars before "ctx" (the " | " prefix), so the styled
-    // span starts at ctx_col - 3. Check a cell within the ctx text.
-    let cell = buf.cell((ctx_col as u16, 0)).expect("cell at ctx");
+    let cell = buf
+        .cell((ctx_col as u16, 0))
+        .expect("cell at ctx");
     assert_eq!(cell.fg, Color::Red, "high usage should be red; got: {row}");
 }

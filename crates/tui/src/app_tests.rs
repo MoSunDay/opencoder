@@ -1,6 +1,6 @@
 //! Tests for app::handle_key — split into a separate file to keep app.rs ≤800 lines.
 
-use crate::app::{flash_visible, handle_key, KeyAction};
+use crate::app::{flash_visible, handle_key, resume_hint, KeyAction};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use std::time::Instant;
 
@@ -75,6 +75,14 @@ fn run_handle_menu(
         80,
         2,
     )
+}
+
+#[test]
+fn resume_hint_is_copyable_command() {
+    assert_eq!(
+        resume_hint("01ABC"),
+        "resume with: opencoder -s 01ABC"
+    );
 }
 
 #[test]
@@ -350,7 +358,7 @@ fn left_right_move_cursor() {
 }
 
 #[test]
-fn ctrl_c_quits() {
+fn ctrl_c_does_not_quit() {
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle(
@@ -360,7 +368,10 @@ fn ctrl_c_quits() {
         false,
         "act",
     );
-    assert!(matches!(action, KeyAction::Quit));
+    assert!(
+        !matches!(action, KeyAction::Quit),
+        "Ctrl+C must not quit anymore"
+    );
 }
 
 #[test]
@@ -397,7 +408,9 @@ fn raw_eot_quits() {
 }
 
 #[test]
-fn raw_etx_quits() {
+fn raw_etx_does_not_quit() {
+    // Ctrl+C (ETX, 0x03) no longer quits — it is swallowed so the raw control
+    // char is not inserted into the input buffer.
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle(
@@ -408,8 +421,8 @@ fn raw_etx_quits() {
         "act",
     );
     assert!(
-        matches!(action, KeyAction::Quit),
-        "raw ETX (Ctrl+C) must quit"
+        !matches!(action, KeyAction::Quit),
+        "raw ETX (Ctrl+C) must not quit"
     );
 }
 
@@ -431,8 +444,8 @@ fn kitty_ctrl_d_quits() {
 }
 
 #[test]
-fn kitty_ctrl_c_quits() {
-    // Same Kitty-protocol path for Ctrl+C (Char('\u{3}') + CONTROL).
+fn kitty_ctrl_c_does_not_quit() {
+    // Kitty-protocol path for Ctrl+C (Char('\u{3}') + CONTROL) no longer quits.
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle(
@@ -442,7 +455,10 @@ fn kitty_ctrl_c_quits() {
         false,
         "act",
     );
-    assert!(matches!(action, KeyAction::Quit), "Kitty Ctrl+C must quit");
+    assert!(
+        !matches!(action, KeyAction::Quit),
+        "Kitty Ctrl+C must not quit"
+    );
 }
 
 #[test]
@@ -1048,3 +1064,4 @@ async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
         "skill_handle must be untouched when no tokens present"
     );
 }
+

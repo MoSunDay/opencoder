@@ -220,10 +220,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(
             k.code,
-            KeyCode::Char('c')
-                | KeyCode::Char('d')
-                | KeyCode::Char('\u{3}')
-                | KeyCode::Char('\u{4}')
+            KeyCode::Char('d') | KeyCode::Char('\u{4}')
         ) {
             *menu = None;
             return ModelOutcome::Quit;

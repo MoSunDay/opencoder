@@ -116,6 +116,34 @@ fn done_renders_markdown() {
             assert!(*done, "assistant should be finalized after Done");
         }
     }
+    // Verify markdown was actually rendered (not just the done flag): the H1
+    // heading and **bold** carry Modifier::BOLD, which plain-text streaming
+    // (done=false) never applies. Exclude the "say:" header which is always
+    // bold regardless of rendering state.
+    let has_md_bold = v.flatten().iter().any(|line| {
+        line.spans.iter().any(|s| {
+            s.style.add_modifier.contains(ratatui::style::Modifier::BOLD)
+                && (s.content.contains("Title") || s.content.contains("bold"))
+        })
+    });
+    assert!(
+        has_md_bold,
+        "flattened output should contain markdown-rendered BOLD spans after Done"
+    );
+}
+
+#[test]
+fn finalize_assistant_idempotent() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello **world**".into()));
+    v.apply(&SessionEvent::Done);
+    // Capture full state after the first finalize (Done triggers it).
+    let before = v.clone();
+    let ctx = v.context_used;
+    // Finalize again — must be a complete no-op.
+    v.finalize_assistant();
+    assert_eq!(v, before, "second finalize_assistant must not change state");
+    assert_eq!(v.context_used, ctx, "context_used must not double-count");
 }
 
 #[test]
@@ -205,7 +233,7 @@ fn ctx_accumulates_once_at_turn_end_not_per_delta() {
     v.apply(&SessionEvent::TextDelta("hello ".into()));
     v.apply(&SessionEvent::TextDelta("world".into()));
     // Streaming: no per-delta accumulation, so ctx stays at zero and the
-    // bottom ctx% bar does not jump on every token.
+    // status bar's ctx% indicator does not jump on every token.
     assert_eq!(v.context_used, 0, "no accumulation during streaming");
     v.apply(&SessionEvent::Done);
     // Turn boundary: the full assistant text is counted exactly once.

@@ -341,7 +341,8 @@ impl ChatView {
     /// subtree via its own `apply` (events route through `SubagentChild`).
     fn track_context(&mut self, ev: &SessionEvent) {
         // Note: TextDelta/ReasoningDelta are intentionally NOT counted here.
-        // Counting per-delta made the bottom ctx% bar jump on every token.
+        // Counting per-delta made the status bar's ctx% indicator jump on
+        // every token.
         // Instead they are counted once at turn boundaries via
         // `finalize_assistant` (and `ensure_assistant_open` for the
         // reasoning → text transition). The discrete events below are kept

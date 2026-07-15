@@ -148,7 +148,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
 
 /// Handle one keystroke against an open command menu. When the menu is closed
 /// (Esc, or a dispatch) the `Option` is set to `None` so the caller drops modal
-/// mode. `Ctrl+C` / `Ctrl+D` propagate as `None` (caller decides quit).
+/// mode. `Ctrl+D` propagates as `None` (caller decides quit).
 pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (CommandOutcome, bool) {
     let m = match menu.as_mut() {
         Some(m) => m,
@@ -157,10 +157,7 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(
             k.code,
-            KeyCode::Char('c')
-                | KeyCode::Char('d')
-                | KeyCode::Char('\u{3}')
-                | KeyCode::Char('\u{4}')
+            KeyCode::Char('d') | KeyCode::Char('\u{4}')
         ) {
             let quit = true;
             *menu = None;

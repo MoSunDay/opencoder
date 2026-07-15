@@ -78,6 +78,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     generate_title(&session).await;
 
     eprintln!("\n\x1b[2m[session {}]\x1b[0m", session.id);
+    eprintln!("\x1b[2m{}\x1b[0m", resume_hint(&session.id));
     Ok(())
 }
 
@@ -162,6 +163,11 @@ fn resolve_workdir(cli: &Cli) -> Result<PathBuf> {
 
 fn print_prompt_header(_session: &SessionState, prompt: &str) {
     eprintln!("\n\x1b[1muser\x1b[0m: {}\n", prompt.trim_end());
+}
+
+/// Copy-paste-ready command to resume a session by id.
+fn resume_hint(id: &str) -> String {
+    format!("resume with: opencoder -s {id}")
 }
 
 fn print_event(ev: &SessionEvent) {
@@ -301,6 +307,14 @@ mod tests {
     fn indent_first_pads_each_line() {
         let s = "line1\nline2";
         assert_eq!(indent_first(s, 2), "  line1\n  line2");
+    }
+
+    #[test]
+    fn resume_hint_is_copyable_command() {
+        assert_eq!(
+            resume_hint("01ABC"),
+            "resume with: opencoder -s 01ABC"
+        );
     }
 
     #[tokio::test]

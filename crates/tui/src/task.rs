@@ -122,10 +122,7 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
     };
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
-            KeyCode::Char('c')
-            | KeyCode::Char('d')
-            | KeyCode::Char('\u{3}')
-            | KeyCode::Char('\u{4}') => return TaskOutcome::Quit,
+            KeyCode::Char('d') | KeyCode::Char('\u{4}') => return TaskOutcome::Quit,
             _ => return TaskOutcome::Idle,
         }
     }
@@ -393,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_quits_even_during_confirmation() {
+    fn ctrl_c_does_not_quit_during_confirmation() {
         let mut picker = picker_with(vec!["cur", "old"], "cur");
         for _ in 0..3 {
             handle_task_key(&mut picker, key(KeyCode::Down));
@@ -403,6 +400,9 @@ mod tests {
             &mut picker,
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         );
-        assert!(matches!(out, TaskOutcome::Quit));
+        assert!(
+            !matches!(out, TaskOutcome::Quit),
+            "Ctrl+C must not quit the task picker"
+        );
     }
 }

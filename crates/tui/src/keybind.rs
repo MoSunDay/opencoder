@@ -8,14 +8,12 @@ Keybindings:
   /                slash command picker: /task (sessions), /model (config), /compact (compress history)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
-  Ctrl+C / Ctrl+D  quit
+  Ctrl+D           quit
   Ctrl+H           toggle this help
+  Ctrl+W           delete word before cursor (backward-kill-word)
   Ctrl+N / Ctrl+P  next / previous history
-  Up / Down        cursor vertical (multi-line) / history (single-line)
-  Left / Right     move cursor
   Home / End       cursor to start / end
   Ctrl+A / Ctrl+E  cursor to start / end (same as Home / End)
-  Ctrl+W           delete word before cursor (backward-kill-word)
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
   Ctrl+U           scroll up
   Ctrl+L           collapse all thinking / exit subagent view / clear input

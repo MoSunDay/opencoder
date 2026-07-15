@@ -175,8 +175,6 @@ pub(crate) fn render(
             chunks[ci],
             running,
             status,
-            steer_items.len() as u32,
-            queue_items.len() as u32,
             model,
             agent,
             anim_tick,
@@ -236,8 +234,7 @@ fn render_body(
         .borders(Borders::ALL)
         .title(format!(" {} ", title));
     let inner = block.inner(area);
-    let ctx_h = if inner.height > 1 { 1u16 } else { 0u16 };
-    let visible_h = (inner.height as usize).saturating_sub(ctx_h as usize);
+    let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
     let lines = chat.flatten_with(anim_tick);
     let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
@@ -561,8 +558,6 @@ fn render_status(
     area: Rect,
     running: bool,
     status: &str,
-    steer_count: u32,
-    queue_count: u32,
     model: &str,
     agent: &str,
     anim_tick: u32,
@@ -579,54 +574,41 @@ fn render_status(
             format!("[{agent}]"),
             Style::default().fg(agent_chip_fg(agent)),
         ),
-        Span::raw("  "),
     ];
+
+    // Context-window usage indicator, placed right after the agent chip.
+    let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
+    let ctx_color = if pct >= 85 {
+        Color::Red
+    } else if pct >= 60 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+    spans.push(Span::styled(
+        format!(
+            " ctx {}% ({}/{})",
+            pct,
+            fmtmod::format_tokens_compact(used),
+            fmtmod::format_tokens_compact(limit)
+        ),
+        Style::default().fg(ctx_color),
+    ));
+    spans.push(Span::raw("  "));
 
     if running {
         let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
-        spans.push(Span::raw("  "));
         spans.push(Span::styled(
             format!("{spin} {status}"),
             Style::default().fg(Color::Yellow),
         ));
     } else if !status.is_empty() {
         spans.push(Span::styled(
-            format!("  | {status}"),
+            format!("| {status}"),
             Style::default().fg(Color::DarkGray),
         ));
     }
-    if steer_count > 0 {
-        spans.push(Span::styled(
-            format!(" | \u{21b3}steer:{steer_count}"),
-            Style::default().fg(Color::Blue),
-        ));
-    }
-    if queue_count > 0 {
-        spans.push(Span::styled(
-            format!(" | queue:{queue_count}"),
-            Style::default().fg(Color::Yellow),
-        ));
-    }
-    // ctx% indicator — right-aligned at the end of the status bar.
-    {
-        let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
-        let color = if pct >= 85 {
-            Color::Red
-        } else if pct >= 60 {
-            Color::Yellow
-        } else {
-            Color::Green
-        };
-        spans.push(Span::styled(
-            format!(
-                " | ctx {}% ({}/{})",
-                pct,
-                fmtmod::format_tokens_compact(used),
-                fmtmod::format_tokens_compact(limit)
-            ),
-            Style::default().fg(color),
-        ));
-    }
+
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 

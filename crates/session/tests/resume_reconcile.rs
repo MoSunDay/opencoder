@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use opencoder_core::{Config, Message};
+use opencoder_core::{Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::resume;
 use opencoder_store::{
@@ -326,4 +326,159 @@ async fn resume_without_compaction_loads_full_history() {
     );
     assert!(resumed.summary.is_none(), "summary must be None");
     assert!(resumed.summary_seq.is_none(), "summary_seq must be None");
+}
+
+fn assistant_with_tool_use(id: &str, tool_use_id: &str, name: &str) -> Message {
+    let mut m = Message::assistant(id);
+    m.blocks.push(ContentBlock::ToolUse {
+        id: tool_use_id.into(),
+        name: name.into(),
+        input: serde_json::json!({}),
+    });
+    m
+}
+
+/// A hard-interrupt can leave an assistant tool_use with NO matching
+/// tool_result. Resume must synthesize an error tool_result (persisted + in
+/// memory) so the next LLM call doesn't get HTTP 400 for an unmatched id.
+#[tokio::test]
+async fn resume_synthesizes_error_result_for_dangling_tool_use() {
+    let store = mem_store().await;
+    store
+        .create_session(&session_meta("dangling-sess", "act"))
+        .await
+        .unwrap();
+
+    // user + assistant carrying an UNANSWERED tool_use.
+    store
+        .append_message("dangling-sess", &Message::user("u1", "do a thing"))
+        .await
+        .unwrap();
+    store
+        .append_message(
+            "dangling-sess",
+            &assistant_with_tool_use("a1", "call_dangling", "bash"),
+        )
+        .await
+        .unwrap();
+
+    let resumed = resume(
+        store.clone(),
+        "dangling-sess",
+        config("m"),
+        client_done("x") as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    )
+    .await
+    .unwrap();
+
+    // 3 messages: user, assistant(tool_use), synthetic tool_result.
+    assert_eq!(resumed.messages.len(), 3, "expected a synthetic tool result");
+    let tool_msg = &resumed.messages[2];
+    assert_eq!(tool_msg.role, Role::Tool, "synthesized msg must be Role::Tool");
+    assert!(tool_msg.synthetic, "synthesized msg must be flagged synthetic");
+    let result = tool_msg.blocks.iter().find_map(|b| match b {
+        ContentBlock::ToolResult {
+            tool_use_id,
+            is_error,
+            content,
+            ..
+        } => Some((tool_use_id.as_str(), *is_error, content.as_str())),
+        _ => None,
+    });
+    let (id, is_error, _content) = result.expect("must contain a ToolResult for the dangling call");
+    assert_eq!(id, "call_dangling", "must match the dangling tool_use id");
+    assert!(is_error, "synthesized result must be an error");
+
+    // Persisted too: a fresh load must include the synthetic message.
+    let reloaded = store.load_messages("dangling-sess").await.unwrap();
+    assert!(
+        reloaded.iter().any(|m| {
+            m.role == Role::Tool
+                && m.blocks.iter().any(|b| {
+                    matches!(
+                        b,
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            is_error,
+                            ..
+                        } if tool_use_id == "call_dangling" && *is_error
+                    )
+                })
+        }),
+        "synthetic error result must be persisted to the store"
+    );
+}
+
+/// When the assistant tool_use already has a matching tool_result, resume
+/// must NOT inject a duplicate synthetic result.
+#[tokio::test]
+async fn resume_does_not_inject_when_tool_result_already_present() {
+    let store = mem_store().await;
+    store
+        .create_session(&session_meta("paired-sess", "act"))
+        .await
+        .unwrap();
+
+    // user + assistant(tool_use) + a real tool_result message (paired).
+    store
+        .append_message("paired-sess", &Message::user("u1", "do a thing"))
+        .await
+        .unwrap();
+    store
+        .append_message(
+            "paired-sess",
+            &assistant_with_tool_use("a1", "call_paired", "bash"),
+        )
+        .await
+        .unwrap();
+    let mut tool_msg = Message {
+        id: "t1".into(),
+        role: Role::Tool,
+        blocks: vec![ContentBlock::ToolResult {
+            tool_use_id: "call_paired".into(),
+            content: "ran fine".into(),
+            is_error: false,
+        }],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let _ = &mut tool_msg; // keep field-order explicit above
+    store.append_message("paired-sess", &tool_msg).await.unwrap();
+
+    let resumed = resume(
+        store.clone(),
+        "paired-sess",
+        config("m"),
+        client_done("x") as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    )
+    .await
+    .unwrap();
+
+    // Exactly the 3 original messages -- no synthetic injected.
+    assert_eq!(
+        resumed.messages.len(),
+        3,
+        "no synthetic message should be injected when the call is already answered"
+    );
+    assert!(
+        !resumed.messages.iter().any(|m| {
+            m.synthetic
+                && m.blocks.iter().any(|b| {
+                    matches!(
+                        b,
+                        ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == "call_paired"
+                    )
+                })
+        }),
+        "must not inject a duplicate synthetic result"
+    );
+
+    // And the store row count is unchanged (no new row appended).
+    let reloaded = store.load_messages("paired-sess").await.unwrap();
+    assert_eq!(reloaded.len(), 3, "store must not gain a synthetic row");
 }

@@ -31,14 +31,14 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
-/// Maximum render rate (10 FPS). Events are processed immediately but the
+/// Maximum render rate (30 FPS). Events are processed immediately but the
 /// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 100;
+const FRAME_MS: u64 = 33;
 /// How long the plan/act switch flash stays visible, in anim ticks (~100ms each).
 const MODE_FLASH_TICKS: u32 = 15;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
-/// at this cadence (5 FPS), decoupling text layout from the fast spinner.
-const BODY_REFRESH_MS: u64 = 200;
+/// at this cadence (3 FPS), decoupling text layout from the fast spinner.
+const BODY_REFRESH_MS: u64 = 333;
 
 /// Whether a transient flash started at `start` is still visible at `now`,
 /// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
@@ -234,11 +234,11 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at 10 FPS regardless of token arrival
+    // Frame-rate limiter: caps redraws at 30 FPS regardless of token arrival
     // rate. `Skip` prevents burst-fire catch-up after a stall.
     let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 5 FPS.
+    // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 3 FPS.
     // `Skip` prevents burst-fire catch-up after a stall.
     let mut body_ticker = tokio::time::interval(Duration::from_millis(BODY_REFRESH_MS));
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -246,10 +246,10 @@ async fn run_app(
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most 10 times/sec.
+    // at most 30 times/sec.
     let mut dirty = true;
     let mut render_pending = true;
-    // Body cache: a cloned snapshot of the active ChatView, rebuilt at 5 FPS.
+    // Body cache: a cloned snapshot of the active ChatView, rebuilt at 3 FPS.
     // The spinner (driven by real-time anim_tick) still animates at full frame
     // rate; only the text layout in render_body is throttled.
     let mut body_refresh_pending = true;
@@ -297,7 +297,7 @@ async fn run_app(
             _ => model_label.clone(),
         };
         let mut hits = MouseHits::default();
-        // Refresh the body cache at BODY_REFRESH_MS cadence (5 FPS). Between
+        // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
         // refreshes the spinner still animates at full frame rate because it is
         // driven by the real-time anim_tick, not the cached blocks.
         if dirty && (body_refresh_pending || display_chat_cached.is_none()) {

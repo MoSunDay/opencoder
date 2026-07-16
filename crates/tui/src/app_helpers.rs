@@ -466,7 +466,7 @@ pub(crate) async fn handle_mouse(
         MouseEventKind::ScrollUp => {
             if let Some(r) = hits.body {
                 if in_rect(r, m.column, m.row) {
-                    *scroll = scroll.saturating_sub(3);
+                    *scroll = scroll.saturating_sub(8);
                     *follow = false;
                 }
             }
@@ -1151,5 +1151,70 @@ mod tests {
             follow,
             "jump button click must set follow=true even right after a body click"
         );
+    }
+
+    /// Wheel-up now advances 8 lines per notch (was 3) so scrolling back up
+    /// through a long transcript feels responsive. Down is unchanged at 3.
+    #[tokio::test]
+    async fn scrollup_advances_faster_than_default() {
+        // Build a long-enough ChatView so content clearly exceeds the small
+        // viewport (visible_h = body.height - 2 = 10).
+        let mut chat = ChatView::default();
+        for n in 0..30u32 {
+            chat.push_marker(Line::from(format!("marker line {n}")));
+        }
+
+        let body = Rect::new(0, 0, 80, 12);
+        let hits = empty_hits(body);
+
+        let scroll_up = || MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 40,
+            row: 6,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        // `scroll` is the top-anchored line offset (0 == top); scroll-up moves
+        // toward the top via `saturating_sub`. Start part-way down so a single
+        // notch lands on a value that proves the 8-line step: the new step
+        // yields 16 - 8 = 8, whereas the old 3-step would have left 16 - 3 = 13.
+        let mut scroll = 16u16;
+        let mut follow = true;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = false;
+        let mut subagent_sys = 0u64;
+        let mut queue_items: Vec<(i64, String)> = vec![];
+        let mut steer_items: Vec<(i64, String)> = vec![];
+        let mut copy_msg: Option<String> = None;
+        let mut last_click: Option<Instant> = None;
+        let mut dbl_click = false;
+        let store = StubStore;
+
+        handle_mouse(
+            scroll_up(),
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+
+        assert_eq!(scroll, 8, "one wheel-up notch now moves 8 lines (was 3)");
+        assert!(!follow, "scrolling up must detach from the tail");
     }
 }

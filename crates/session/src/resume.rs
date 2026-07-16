@@ -1,11 +1,12 @@
 //! Session recovery: reconstruct a `SessionState` from a durable store, and
 //! cheap background title generation (uses `small_model`).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
-use opencoder_core::{resolve_agent, Agent, Config, Message};
+use opencoder_core::{resolve_agent, Agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{Store, SubagentStatus};
 
@@ -64,6 +65,56 @@ pub async fn resume(
             let summary_msg = crate::compaction::compaction_message(summary_text.clone());
             messages.insert(0, summary_msg);
         }
+    }
+
+    // Reconcile dangling tool_use blocks. If the process was hard-interrupted
+    // after the assistant requested tool calls but before the matching
+    // tool_result messages were persisted, the transcript holds unmatched
+    // `tool_use` ids -- which most OpenAI-compatible providers reject with
+    // HTTP 400 on the next call. Synthesize error results for every dangling
+    // call, persist them, and append them so history stays well-formed.
+    let answered: HashSet<&str> = messages
+        .iter()
+        .flat_map(|m| m.blocks.iter())
+        .filter_map(|b| match b {
+            ContentBlock::ToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    let dangling: Vec<ContentBlock> = messages
+        .iter()
+        .flat_map(|m| m.blocks.iter())
+        .filter_map(|b| match b {
+            ContentBlock::ToolUse { id, .. } if !answered.contains(id.as_str()) => {
+                Some(ContentBlock::ToolResult {
+                    tool_use_id: id.clone(),
+                    content: "session interrupted: tool result missing".to_string(),
+                    is_error: true,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    if !dangling.is_empty() {
+        let n_dangling = dangling.len();
+        let synthetic = Message {
+            id: crate::runner::new_id(),
+            role: Role::Tool,
+            blocks: dangling,
+            model: None,
+            agent: None,
+            usage: opencoder_core::MessageUsage::default(),
+            created_at: opencoder_core::message::now_ms(),
+            synthetic: true,
+        };
+        tracing::warn!(
+            session_id = id,
+            count = n_dangling,
+            "synthesizing error tool_result for dangling tool_use on resume"
+        );
+        // Persist so a subsequent resume sees a well-formed transcript.
+        let _ = store.append_message(id, &synthetic).await;
+        messages.push(synthetic);
     }
 
     let n = messages.len();

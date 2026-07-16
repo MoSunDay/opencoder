@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
-DEFAULT_BIN = os.path.join(os.getcwd(), "target", "debug", "opencoder")
+DEFAULT_BIN = "/data/caches/opencoder-target/release/opencoder"
 AUTH_PATH = os.path.expanduser("~/.local/share/opencoder/auth.json")
 
 # Tool markers emitted by the headless event printer (see cli/src/run.rs).

@@ -28,7 +28,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 
 ## e2e 测试套件
 - 入口：`scripts/e2e-glm.sh [binary]` 或 `python3 scripts/e2e_glm.py [binary]`。Flag：`--skip-web`（跳过 serve/HTTP 场景）、`--only {cli,web}`。
-- binary 解析：CLI 参数 → `OPENCODER_BIN` 环境变量 → `target/debug/opencoder`。
+- binary 解析：CLI 参数 → `OPENCODER_BIN` 环境变量 → `/data/caches/opencoder-target/release/opencoder`。
 - 鉴权：`ZHIPU_API_KEY` 环境变量，或 `~/.local/share/opencoder/auth.json`。
 - 观测面：`opencoder session show <id> --json`（`build_session_json`）返回 `{meta, messages, subagent_tasks}`——messages 含全部 ContentBlock（Text/Reasoning/ToolUse/ToolResult），e2e 据此做深度断言而不耦合存储内部。headless 事件 marker（`▸`/`[context compacted]`/`subagent [`/`[session <id>]`）是日志断言来源。
 - 断言模型：HARD = 确定性 store/契约断言（fork 拷贝完整性、bundle 往返、resume 上下文加载、plan 只读、session list/delete、config show JSON）；SOFT = 模型配合相关（工具调用 marker、压缩摘要内容、subagent 派发、reasoning_content 持久化），模型不配合时记 skip 而非 fail。

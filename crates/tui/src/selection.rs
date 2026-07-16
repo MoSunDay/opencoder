@@ -48,11 +48,32 @@ impl CopyReport {
                 "\u{1f4cb} Copied {} line(s) (OSC52 + {})",
                 self.lines, tool
             ),
-            None => {
-                "\u{26a0} No clipboard tool found \u{2014} OSC52 only".to_string()
-            }
+            None => osc52_only_message(self.lines, under_tmux()),
         }
     }
+}
+
+/// Build the status message for the OSC52-only case — no local clipboard tool
+/// was available, so the copy relied entirely on the OSC52 escape sequence.
+///
+/// OSC52 *was* sent successfully, so this is informational, not a warning.
+/// When running under tmux we append a hint, because tmux silently drops OSC52
+/// sequences unless `set -g set-clipboard on` is configured. The factored
+/// `under_tmux` flag is a parameter so the message logic is fully testable
+/// without touching the real environment.
+fn osc52_only_message(lines: usize, under_tmux: bool) -> String {
+    let base = format!("\u{1f4cb} Copied {} line(s) via OSC52", lines);
+    if under_tmux {
+        format!("{} \u{2014} no paste? tmux: set -g set-clipboard on", base)
+    } else {
+        base
+    }
+}
+
+/// Whether we appear to be running inside tmux (the `TMUX` environment
+/// variable is set by tmux for every pane).
+fn under_tmux() -> bool {
+    std::env::var_os("TMUX").is_some()
 }
 
 /// Normalise a selection to `(lo, hi)` inclusive.
@@ -478,8 +499,31 @@ mod tests {
             local_tool: None,
         };
         let msg = report.status_message();
-        assert!(msg.contains("No clipboard tool"));
-        assert!(msg.contains("OSC52 only"));
+        // OSC52 was sent — the message must NOT look like a failure.
+        assert!(msg.contains("OSC52"));
+        assert!(!msg.contains("\u{26a0}")); // no warning emoji
+        assert!(!msg.contains("No clipboard tool"));
+    }
+
+    #[test]
+    fn osc52_only_message_includes_line_count_and_no_warning() {
+        let msg = osc52_only_message(7, false);
+        assert!(msg.contains("7 line(s)"));
+        assert!(msg.contains("OSC52"));
+        // No warning glyph: OSC52 was actually sent.
+        assert!(!msg.contains("\u{26a0}"));
+        // No tmux hint when not under tmux.
+        assert!(!msg.contains("tmux"));
+    }
+
+    #[test]
+    fn osc52_only_message_adds_tmux_hint() {
+        let msg = osc52_only_message(1, true);
+        assert!(msg.contains("OSC52"));
+        assert!(msg.contains("set-clipboard"));
+        assert!(msg.contains("tmux"));
+        // Still no warning glyph.
+        assert!(!msg.contains("\u{26a0}"));
     }
 
     #[test]

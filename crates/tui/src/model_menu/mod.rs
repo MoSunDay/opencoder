@@ -8,7 +8,8 @@
 //! - reasoning_effort (4-way cycle: off / low / medium / high)
 //! - compaction.context_threshold (raw token count)
 //!
-//! Navigation: `Tab` / `Shift+Tab` (or `\u{2191}`/`\u{2193}`) move focus;
+//! Navigation: `Tab` / `Shift+Tab` (or `\u{2191}`/`\u{2193}`) move focus between options;
+//! `\u{2190}`/`\u{2192}` change the value of the focused option;
 //! `Enter` on `Save` commits, on `Cancel` aborts; `Esc` cancels. The menu
 //! owns no I/O — it returns a [`state::ModelPatch`] and the caller persists it.
 
@@ -150,6 +151,18 @@ mod tests {
     fn enter() -> crossterm::event::KeyEvent {
         crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::empty())
     }
+    fn up() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::empty())
+    }
+    fn down() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(KeyCode::Down, KeyModifiers::empty())
+    }
+    fn left() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(KeyCode::Left, KeyModifiers::empty())
+    }
+    fn right() -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent::new(KeyCode::Right, KeyModifiers::empty())
+    }
 
     // Enter on a text field confirms the value and advances focus to the next
     // field — the core "fill → Enter → next" flow requested for the form.
@@ -219,5 +232,99 @@ mod tests {
             "Enter on Save must commit"
         );
         assert!(menu_opt.is_none(), "menu must close after save");
+    }
+
+    // Up/Down always move focus, never change values.
+    #[test]
+    fn up_down_always_move_focus() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let m = menu_opt.as_mut().unwrap();
+        m.focus = Field::Reasoning;
+        let before = m.reasoning;
+        super::handle_model_key(&mut menu_opt, up());
+        let m = menu_opt.as_ref().unwrap();
+        assert_eq!(m.focus, Field::ApiKey, "Up on Reasoning moves to ApiKey");
+        assert_eq!(m.reasoning, before, "Up must not change reasoning value");
+
+        let m = menu_opt.as_mut().unwrap();
+        m.focus = Field::Reasoning;
+        super::handle_model_key(&mut menu_opt, down());
+        let m = menu_opt.as_ref().unwrap();
+        assert_eq!(
+            m.focus,
+            Field::InterleavedThinking,
+            "Down on Reasoning moves to InterleavedThinking"
+        );
+        assert_eq!(m.reasoning, before, "Down must not change reasoning value");
+    }
+
+    // Left/Right always change values, never move focus.
+    #[test]
+    fn left_right_change_values_on_options() {
+        // Reasoning: Left=prev, Right=next
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Reasoning;
+        let before = menu_opt.as_ref().unwrap().reasoning;
+        super::handle_model_key(&mut menu_opt, right());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().reasoning,
+            before.next(),
+            "Right advances reasoning"
+        );
+        assert_eq!(
+            menu_opt.as_ref().unwrap().focus,
+            Field::Reasoning,
+            "Right must not move focus"
+        );
+
+        super::handle_model_key(&mut menu_opt, left());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().reasoning,
+            before,
+            "Left returns reasoning to original"
+        );
+
+        // Threshold: Right increases, Left decreases
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let t0 = menu_opt.as_ref().unwrap().threshold;
+        menu_opt.as_mut().unwrap().focus = Field::Threshold;
+        super::handle_model_key(&mut menu_opt, right());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().threshold,
+            t0 + 1000,
+            "Right increases threshold by 1k"
+        );
+        super::handle_model_key(&mut menu_opt, left());
+        super::handle_model_key(&mut menu_opt, left());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().threshold,
+            t0.saturating_sub(1000),
+            "Left decreases threshold by 1k"
+        );
+    }
+
+    // Interleave: Left/Right toggle, focus stays put.
+    #[test]
+    fn left_right_toggle_interleave() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let before = menu_opt.as_ref().unwrap().interleaved_thinking;
+        menu_opt.as_mut().unwrap().focus = Field::InterleavedThinking;
+        super::handle_model_key(&mut menu_opt, right());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().interleaved_thinking,
+            !before,
+            "Right toggles interleave"
+        );
+        assert_eq!(
+            menu_opt.as_ref().unwrap().focus,
+            Field::InterleavedThinking,
+            "Right must not move focus"
+        );
+        super::handle_model_key(&mut menu_opt, left());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().interleaved_thinking,
+            before,
+            "Left toggles interleave back"
+        );
     }
 }

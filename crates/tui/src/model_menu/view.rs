@@ -24,7 +24,7 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
 
     let title = match &menu.error {
         Some(e) => format!(" /model \u{2014} ERROR: {e} "),
-        None => " /model \u{2014} \u{2191}/\u{2193} field, Enter=confirm/next, [Save] commits, Esc cancel ".to_string(),
+        None => " /model \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} change value, Enter=next, [Save] commits, Esc cancel ".to_string(),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -101,7 +101,7 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
             "ctx threshold:",
             threshold_hint.as_str(),
             menu.focus == Field::Threshold,
-            "digits/\u{2191}\u{2193} \u{00b1}1k, Enter=next",
+            "digits/\u{2190}\u{2192} \u{00b1}1k, Enter=next",
         ),
         Line::from(""),
         button_line(menu),

@@ -242,35 +242,27 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
             ModelOutcome::Idle
         }
         KeyCode::Up => {
-            match m.focus {
-                Field::Reasoning => m.reasoning = m.reasoning.prev(),
-                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
-                Field::Threshold => m.adjust_threshold(1000),
-                _ => m.focus = m.focus.prev(),
-            }
+            m.focus = m.focus.prev();
             ModelOutcome::Idle
         }
         KeyCode::Down => {
-            match m.focus {
-                Field::Reasoning => m.toggle_reasoning(),
-                Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
-                Field::Threshold => m.adjust_threshold(-1000),
-                _ => m.focus = m.focus.next(),
-            }
+            m.focus = m.focus.next();
             ModelOutcome::Idle
         }
-        KeyCode::Left if matches!(m.focus, Field::Reasoning | Field::InterleavedThinking) => {
+        KeyCode::Left => {
             match m.focus {
                 Field::Reasoning => m.reasoning = m.reasoning.prev(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                Field::Threshold => m.adjust_threshold(-1000),
                 _ => {}
             }
             ModelOutcome::Idle
         }
-        KeyCode::Right if matches!(m.focus, Field::Reasoning | Field::InterleavedThinking) => {
+        KeyCode::Right => {
             match m.focus {
                 Field::Reasoning => m.toggle_reasoning(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                Field::Threshold => m.adjust_threshold(1000),
                 _ => {}
             }
             ModelOutcome::Idle

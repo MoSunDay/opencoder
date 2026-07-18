@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
-    generate_title, resume as resume_session, run_once, SessionEvent, SessionState,
+    generate_title, resume_and_replay as resume_session, run_once, SessionEvent, SessionState,
 };
 use opencoder_store::{SessionFilter, Store};
 

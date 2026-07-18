@@ -2,13 +2,15 @@
 //! cheap background title generation (uses `small_model`).
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
-use opencoder_core::{resolve_agent, Agent, Config, ContentBlock, Message, Role};
+use opencoder_core::{
+    message::now_ms, resolve_agent, Agent, Config, ContentBlock, Message, MessageUsage, Role,
+};
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Store, SubagentStatus};
+use opencoder_store::{SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord};
 
 use crate::SessionState;
 
@@ -139,6 +141,160 @@ pub async fn resume(
     };
     let _ = &mut s;
     Ok(s)
+}
+
+/// Replay subagent tasks stuck in `Running` for `id`, then resume the parent.
+///
+/// When a parent session is hard-interrupted mid-subagent, the task row is
+/// left `Running` and the parent's transcript holds an unanswered `task`
+/// `tool_use`. This resumes each such child from its persisted transcript,
+/// runs it to completion with an empty prompt ("continue"), backfills the
+/// resulting `tool_result` into the parent, and marks the task complete.
+///
+/// Children hold no `task` tool (see `agent.rs`), so a child can never
+/// dispatch a grandchild — there is exactly one level and no recursion is
+/// needed. The low-level [`resume`] is left untouched: by the time it runs,
+/// no task is `Running` and every `task` `tool_use` is answered, so its
+/// stuck-task and dangling-`tool_use` reconciliation paths are inert.
+pub async fn resume_and_replay(
+    store: Arc<dyn Store>,
+    id: &str,
+    config: Config,
+    client: Arc<dyn ChatStream>,
+    working_dir: PathBuf,
+) -> Result<SessionState> {
+    let running: Vec<SubagentTaskRecord> = store
+        .list_subagent_tasks(id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.status == SubagentStatus::Running)
+        .collect();
+
+    // Replay each Running child, collecting results to backfill in ONE Tool
+    // message -- mirrors run_loop, which batches a turn's tool results into a
+    // single tool message. `list_subagent_tasks` returns rows in `seq` order,
+    // so results land deterministically in dispatch order.
+    let mut backfill: Vec<ContentBlock> = Vec::with_capacity(running.len());
+    for task in &running {
+        let outcome = replay_child(store.clone(), task, &config, &client, &working_dir).await;
+        let (text, ok) = match outcome {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    task_id = %task.task_id,
+                    child = %task.child_session_id,
+                    error = %e,
+                    "subagent replay failed; backfilling an error result"
+                );
+                (format!("subagent resume failed: {e:#}"), false)
+            }
+        };
+        let _ = store
+            .complete_subagent_task(&task.task_id, &text, ok)
+            .await;
+        backfill.push(ContentBlock::ToolResult {
+            tool_use_id: task.task_id.clone(),
+            content: text,
+            is_error: !ok,
+        });
+    }
+
+    // Backfill the tool_results BEFORE resuming, so resume() sees every task
+    // `tool_use` as answered and does not synthesize error results for them
+    // via its dangling-`tool_use` reconciliation.
+    if !backfill.is_empty() {
+        let tool_msg = Message {
+            id: crate::runner::new_id(),
+            role: Role::Tool,
+            blocks: backfill,
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: now_ms(),
+            synthetic: false,
+        };
+        if let Err(e) = store.append_message(id, &tool_msg).await {
+            tracing::warn!(
+                session_id = id,
+                error = %e,
+                "failed to backfill replayed tool_results; falling back to plain resume"
+            );
+        }
+    }
+
+    // All tasks are now complete and the task `tool_use` ids are answered, so
+    // resume() reconstructs the parent cleanly.
+    resume(store, id, config, client, working_dir).await
+}
+
+/// Resume a single child task and run it to completion with an empty prompt
+/// ("continue"). The child's continuation messages and events are persisted to
+/// its own session, mirroring `run_subagent`. Returns `(result_text, ok)`.
+async fn replay_child(
+    store: Arc<dyn Store>,
+    task: &SubagentTaskRecord,
+    config: &Config,
+    client: &Arc<dyn ChatStream>,
+    working_dir: &Path,
+) -> Result<(String, bool)> {
+    // Children never carry subagent tasks of their own (no `task` tool), so
+    // resume()'s stuck-task path is a no-op here; its dangling-`tool_use`
+    // reconciliation correctly patches a child interrupted mid-tool-call.
+    let mut child = resume(
+        store.clone(),
+        &task.child_session_id,
+        config.clone(),
+        client.clone(),
+        working_dir.to_path_buf(),
+    )
+    .await?;
+
+    // Buffer child continuation events and persist them in emission order so
+    // the child transcript + event stream stay reconstructable (same pattern
+    // as `run_subagent`).
+    let child_id = task.child_session_id.clone();
+    let pending: Arc<Mutex<Vec<SessionEventRecord>>> = Arc::new(Mutex::new(Vec::new()));
+    let pending_cb = Arc::clone(&pending);
+    let registry = crate::tools::registry();
+    let res = crate::runner::run_with_registry(
+        &mut child,
+        String::new(),
+        &registry,
+        move |cev| {
+            let rec = SessionEventRecord {
+                session_id: child_id.clone(),
+                kind: cev.coarse_kind(),
+                payload: serde_json::to_value(&cev).unwrap_or(serde_json::Value::Null),
+                ts: now_ms(),
+                seq: None,
+                sse_kind: Some(cev.sse_kind().to_string()),
+            };
+            pending_cb.lock().unwrap().push(rec);
+        },
+    )
+    .await;
+
+    let records = pending
+        .lock()
+        .unwrap()
+        .drain(..)
+        .collect::<Vec<_>>();
+    for rec in &records {
+        if let Err(e) = store.append_event(rec).await {
+            tracing::warn!(error = %e, "replay: failed to persist child event");
+        }
+    }
+
+    let ok = res.is_ok();
+    let text = child
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == Role::Assistant)
+        .map(|m| m.text())
+        .unwrap_or_default();
+    Ok((text, ok))
 }
 
 /// Generate a short title from the first user/assistant exchange, using the

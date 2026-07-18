@@ -3,7 +3,7 @@
 use std::io::Stdout;
 
 use anyhow::Result;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -67,8 +67,8 @@ pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render(
-    terminal: &mut Term,
+pub(crate) fn render<B: Backend>(
+    terminal: &mut Terminal<B>,
     chat: &ChatView,
     input: &str,
     cursor_idx: usize,

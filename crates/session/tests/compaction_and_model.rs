@@ -1,7 +1,8 @@
 //! P1 functional tests for compaction + model selection behavior.
 //! All driven by MockChatClient — zero network, fully deterministic.
 
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, MessageUsage, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
@@ -82,6 +83,7 @@ fn tool_result(id: &str, tool_id: &str, content: &str) -> Message {
 
 #[tokio::test]
 async fn compaction_triggers_by_token_estimate_without_any_reported_usage() {
+    let _home = ScopedHome::new();
     // Small window so a single large message trips the estimate-based trigger
     // on round 1, even though last_usage is zero (no provider call yet).
     let mut config = base_config();
@@ -101,6 +103,7 @@ async fn compaction_triggers_by_token_estimate_without_any_reported_usage() {
 
 #[tokio::test]
 async fn reserved_budget_actually_shrinks_usable_window() {
+    let _home = ScopedHome::new();
     fn mk(reserved: u64) -> bool {
         let mut config = base_config();
         config.context_limit = Some(2_000);
@@ -123,6 +126,7 @@ async fn reserved_budget_actually_shrinks_usable_window() {
 
 #[tokio::test]
 async fn small_model_is_used_for_compaction_summary_call() {
+    let _home = ScopedHome::new();
     let mut config = base_config();
     config.small_model = Some("cheap/mini".into());
     // Force compaction to fire & have room to summarize.
@@ -160,6 +164,7 @@ async fn small_model_is_used_for_compaction_summary_call() {
 
 #[tokio::test]
 async fn model_switch_takes_effect_on_next_request_body() {
+    let _home = ScopedHome::new();
     let mock = Arc::new(MockChatClient::new().with_default(vec![done_event("ok")]));
     let client: Arc<dyn ChatStream> = mock.clone();
     let (_dir, mut s) = session_with(base_config(), client).await;
@@ -199,6 +204,7 @@ async fn compaction_disabled_does_not_trigger() {
 
 #[tokio::test]
 async fn reported_tokens_uses_input_only_not_total() {
+    let _home = ScopedHome::new();
     let mut config = base_config();
     config.context_limit = Some(10_000);
     config.compaction.context_threshold = 10_000; // larger than usable → usable binds
@@ -235,6 +241,7 @@ async fn reported_tokens_uses_input_only_not_total() {
 
 #[tokio::test]
 async fn compaction_fires_in_tool_intensive_single_user_session() {
+    let _home = ScopedHome::new();
     // Regression: with the old split_index (only real user messages counted as
     // turn boundaries), a single-user session with many tool roundtrips could
     // never compact — the big transcript kept growing until the provider
@@ -305,6 +312,7 @@ async fn compaction_fires_in_tool_intensive_single_user_session() {
 
 #[tokio::test]
 async fn compaction_fires_with_real_default_config() {
+    let _home = ScopedHome::new();
     // End-to-end proof that compaction triggers and actually executes under the
     // REAL default config (no overrides): context_limit=128_000, threshold=80_000,
     // reserved=20_000, tail_turns=2. budget = min(80_000, 128_000 - 20_000) = 80_000.
@@ -388,4 +396,107 @@ async fn compaction_fires_with_real_default_config() {
         "need >=2 calls (summary + turn), got {}",
         reqs.len()
     );
+}
+
+/// Serialize HOME-sensitive tests within this binary.
+static COMPACT_HOME_MUTEX: Mutex<()> = Mutex::new(());
+
+fn with_home<R>(home: &Path, f: impl FnOnce() -> R) -> R {
+    let _guard = COMPACT_HOME_MUTEX.lock().unwrap();
+    let old = std::env::var_os("HOME");
+    std::env::set_var("HOME", home);
+    let r = f();
+    match old {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    r
+}
+
+/// RAII guard that pins `HOME` to a clean empty temp dir and serializes
+/// against `with_home` (and the differential global-file test) via
+/// `COMPACT_HOME_MUTEX`. Drop restores the previous `HOME`.
+///
+/// Required for the async tests below, whose bodies `.await` and therefore
+/// cannot be wrapped by `with_home` (a sync closure). `should_compact` reads
+/// the global `~/.opencode/AGENTS.md` through `HOME`, so any test that calls
+/// `should_compact` (directly or via `run`) must hold this guard to stay
+/// deterministic — immune both to the differential test's `HOME` mutation and
+/// to a real global file on the host. Pinning to a clean dir (not just
+/// locking) preserves the original "no global file" semantics.
+struct ScopedHome {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl ScopedHome {
+    fn new() -> ScopedHome {
+        let guard = COMPACT_HOME_MUTEX.lock().unwrap();
+        let prev = std::env::var_os("HOME");
+        let dir = tempfile::TempDir::new().unwrap();
+        std::env::set_var("HOME", dir.path());
+        ScopedHome {
+            _guard: guard,
+            _dir: dir,
+            prev,
+        }
+    }
+}
+
+impl Drop for ScopedHome {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+}
+
+#[test]
+fn global_agents_md_excluded_from_compaction_budget() {
+    // A large global ~/.opencode/AGENTS.md must NOT affect the compaction
+    // decision. We prove this differentially: `should_compact` must return
+    // the same value whether or not the global file is present. The transcript
+    // is sized so that, IF the global file were counted, the estimate would
+    // jump far over the 1800-token budget and trip compaction.
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    // 100k chars ≈ 25k tokens — far above the 1800 budget if it were counted.
+    std::fs::write(
+        home.path().join(".opencode").join("AGENTS.md"),
+        "g".repeat(100_000),
+    )
+    .unwrap();
+
+    let mut config = base_config();
+    config.context_limit = Some(2_000);
+    config.compaction.reserved = 200;
+    config.compaction.context_threshold = 10_000; // usable(1800) binds as budget
+
+    let global_path = home.path().join(".opencode").join("AGENTS.md");
+
+    with_home(home.path(), || {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = resolve_agent("act").unwrap();
+        let client: Arc<dyn ChatStream> = client_with_default_done("ok");
+        let mut s = SessionState::new("g", agent, config.clone(), client, dir.path().to_path_buf());
+        // ~1400 estimated transcript tokens — under the 1800 budget.
+        s.messages.push(big_user_message("u1", 5_500));
+
+        // With the global file present: excluded → must NOT trip.
+        let with_global = should_compact(&s);
+        // Remove the global file and re-evaluate on the same session.
+        std::fs::remove_file(&global_path).unwrap();
+        let without_global = should_compact(&s);
+
+        assert!(
+            !with_global,
+            "global agents.md must be excluded so the budget is not blown"
+        );
+        assert_eq!(
+            with_global, without_global,
+            "global agents.md must not change the compaction decision"
+        );
+    });
 }

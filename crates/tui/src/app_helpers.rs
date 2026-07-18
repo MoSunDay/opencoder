@@ -129,13 +129,22 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 /// `agent.prompt + environment block + active skill`. Tracked separately from
 /// `ChatView::context_used` (which sums the streamed transcript and resets on
 /// compaction) so the context meter reflects the real request size.
+///
+/// The ambient global `~/.opencode/AGENTS.md` is excluded from this count so
+/// the context meter at startup (and throughout the session) is not inflated
+/// by an always-on global instructions file. The global content still ships
+/// in the system prompt; only the accounting omits it.
 pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {
     let agent = match resolve_agent(agent_name) {
         Some(a) => a,
         None => return 0,
     };
     let text = opencoder_session::prompt::build_system(&agent, workdir, skill).text();
-    estimate(&text) as u64
+    let mut tokens = estimate(&text) as u64;
+    if let Some(global) = opencoder_session::prompt::global_instructions_text(workdir) {
+        tokens = tokens.saturating_sub(estimate(&global) as u64);
+    }
+    tokens
 }
 
 /// Resolve inline `{$name}` skill tokens in `text`: strip them from the
@@ -332,27 +341,17 @@ pub(crate) async fn handle_mouse(
                 }
             }
 
-            // ── Double-click detection ──
-            // If this click follows a previous one within DBL_CLICK_MS, treat
-            // it as the second half of a double-click: select the current line
-            // and flag the selection so finish_copy copies it even though lo==hi.
+            // ── Button-hit detection (BEFORE the dbl-click guard) ──
+            // Queue / Thinking / Subagent affordances must respond on the
+            // FIRST click. The 400 ms double-click window further down is meant
+            // ONLY for selecting a line of body text, so it must NOT swallow a
+            // header/button click that lands within 400 ms of a previous click.
+            // That was the bug that made Thinking expansion probabilistic: the
+            // second of two quick clicks — or any click soon after a body click
+            // — hit the dbl-click early-return and never reached the toggle
+            // loop. jump_btn/top_btn already precede the guard for the same
+            // reason; queue/thinking/subagent now do too.
             let now = Instant::now();
-            let is_dbl = last_click
-                .map(|t| now.duration_since(t) < Duration::from_millis(DBL_CLICK_MS))
-                .unwrap_or(false);
-            *last_click = Some(now);
-
-            if is_dbl {
-                *dbl_click = true;
-                if let Some(r) = hits.body {
-                    if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
-                        *selection = Some((abs, abs));
-                    }
-                }
-                return MouseOutcome::None; // skip button-hit detection, go straight to selection mode
-            }
-            *dbl_click = false;
-
             let mut consumed = false;
             for btn in &hits.queue_btns {
                 if !in_rect(btn.rect, m.column, m.row) {
@@ -429,14 +428,42 @@ pub(crate) async fn handle_mouse(
                     break;
                 }
             }
-            // Nothing clicked: begin a text-selection drag
-            // inside the body. Stored as an absolute content
-            // row so it stays anchored while scrolling.
-            if !consumed {
+            if consumed {
+                // A button/header consumed this click: finalize exactly like
+                // jump_btn does so the next click's dbl-click window starts
+                // fresh from here (a toggle click must not count as the first
+                // half of a body-text double-click).
+                *last_click = Some(now);
+                *dbl_click = false;
+                return MouseOutcome::None;
+            }
+
+            // ── Double-click detection (body text only) ──
+            // If this click follows a previous one within DBL_CLICK_MS, treat
+            // it as the second half of a double-click: select the current line
+            // and flag the selection so finish_copy copies it even though lo==hi.
+            let is_dbl = last_click
+                .map(|t| now.duration_since(t) < Duration::from_millis(DBL_CLICK_MS))
+                .unwrap_or(false);
+            *last_click = Some(now);
+
+            if is_dbl {
+                *dbl_click = true;
                 if let Some(r) = hits.body {
                     if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
                         *selection = Some((abs, abs));
                     }
+                }
+                return MouseOutcome::None; // go straight to selection mode
+            }
+            *dbl_click = false;
+
+            // No button hit and not a double-click: begin a text-selection
+            // drag inside the body. Stored as an absolute content row so it
+            // stays anchored while scrolling.
+            if let Some(r) = hits.body {
+                if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
+                    *selection = Some((abs, abs));
                 }
             }
         }
@@ -1216,5 +1243,97 @@ mod tests {
 
         assert_eq!(scroll, 8, "one wheel-up notch now moves 8 lines (was 3)");
         assert!(!follow, "scrolling up must detach from the tail");
+    }
+
+    /// Regression: clicking a Thinking-block header must toggle on the FIRST
+    /// click even when it lands within the 400 ms double-click window of a
+    /// previous click. Previously the thinking-toggle loop sat AFTER the
+    /// dbl-click guard, so any header click within 400 ms of a prior click was
+    /// swallowed by the guard's early `return` (selecting a line instead) and
+    /// the toggle never ran — making expansion probabilistic. The fix moves
+    /// queue/thinking/subagent button-hit detection ahead of the guard, the
+    /// same fix jump_btn/top_btn already had.
+    #[tokio::test]
+    async fn thinking_header_toggles_even_right_after_another_click() {
+        let mut chat = ChatView::default();
+        chat.apply(&SessionEvent::ReasoningDelta("secret reasoning here".into()));
+        chat.apply(&SessionEvent::TextDelta("answer".into()));
+        chat.apply(&SessionEvent::Done);
+        // Collapsed by default: the reasoning content must NOT be visible yet.
+        assert!(
+            !chat
+                .flatten()
+                .iter()
+                .any(|l| l.spans.iter().any(|s| s.content.contains("secret reasoning"))),
+            "precondition: thinking must start collapsed"
+        );
+
+        let body = Rect::new(0, 0, 80, 12);
+        let header_rect = Rect::new(1, 1, 78, 1);
+        let hits = MouseHits {
+            jump_btn: None,
+            top_btn: None,
+            body: Some(body),
+            queue_btns: Vec::new(),
+            thinking_btns: vec![crate::render::ThinkingBtn {
+                block_idx: 0,
+                rect: header_rect,
+            }],
+            subagent_btns: Vec::new(),
+        };
+
+        let mut scroll = 0u16;
+        let mut follow = false;
+        let mut selection: Option<SelRange> = None;
+        let mut subagent_focus: Option<usize> = None;
+        let mut parent_scroll = 0u16;
+        let mut parent_follow = false;
+        let mut subagent_sys = 0u64;
+        let mut steer_items: Vec<(i64, String)> = Vec::new();
+        let mut queue_items: Vec<(i64, String)> = Vec::new();
+        let store = StubStore;
+        let mut copy_msg: Option<String> = None;
+        // A click ~50 ms ago — squarely inside the 400 ms dbl-click window.
+        // On the buggy code this trips `is_dbl` and the toggle is skipped.
+        let mut last_click: Option<Instant> = Some(Instant::now());
+        let mut dbl_click = false;
+
+        let outcome = handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: header_rect.x,
+                row: header_rect.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut parent_scroll,
+            &mut parent_follow,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut steer_items,
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
+        )
+        .await;
+        assert_eq!(outcome, MouseOutcome::None);
+        assert!(
+            chat.flatten()
+                .iter()
+                .any(|l| l.spans.iter().any(|s| s.content.contains("secret reasoning"))),
+            "thinking must be expanded after the header click"
+        );
+        assert!(
+            !dbl_click,
+            "a header toggle must not be flagged as a double-click"
+        );
     }
 }

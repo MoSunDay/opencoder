@@ -254,6 +254,15 @@ async fn run_app(
     // rate; only the text layout in render_body is throttled.
     let mut body_refresh_pending = true;
     let mut display_chat_cached: Option<ChatView> = None;
+    // Persisted across loop iterations: always equals the LAST rendered
+    // layout (== what is on screen). The event loop forwards `&hits` to
+    // `handle_mouse` on the SAME iteration a click arrives, and a click
+    // sets `dirty=true` so `hits` refreshes next frame. Declaring this
+    // INSIDE the loop resets it to `MouseHits::default()` every turn; when
+    // no render runs (idle state, `dirty=false`) the rects are empty and
+    // EVERY arrow click is silently dropped. Keep this OUTSIDE `loop {}`.
+    let mut hits = MouseHits::default();
+
     loop {
         let agent_name = chat.agent.clone();
         let status = chat.status.clone();
@@ -296,7 +305,6 @@ async fn run_app(
             Some(e) if !e.trim().is_empty() => format!("{model_label} \u{00b7}{e}"),
             _ => model_label.clone(),
         };
-        let mut hits = MouseHits::default();
         // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
         // refreshes the spinner still animates at full frame rate because it is
         // driven by the real-time anim_tick, not the cached blocks.
@@ -877,6 +885,14 @@ async fn run_app(
                             }
                             follow = true;
                         }
+                    }
+                    Event::Resize(_, _) => {
+                        // The input arm above already set `dirty=true`, so the
+                        // next frame re-renders and refreshes the persisted
+                        // `hits`. Also tell ratatui the size changed so its diff
+                        // buffer matches the new layout (prevents glitches and
+                        // keeps the persisted hit-rects valid after resize).
+                        let _ = terminal.autoresize();
                     }
                     _ => {}
                 }

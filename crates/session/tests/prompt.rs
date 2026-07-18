@@ -4,6 +4,7 @@
 use opencoder_core::resolve_agent;
 use opencoder_session::prompt::{
     build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
+    global_instructions_text,
 };
 use std::sync::Mutex;
 
@@ -249,5 +250,64 @@ fn project_instructions_appears_before_environment() {
         let instr_pos = text.find("## Project instructions").unwrap();
         let env_pos = text.find("# Environment").unwrap();
         assert!(instr_pos < env_pos);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// global_instructions_text tests (global agents.md excluded from ctx tokens)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn global_instructions_returns_global_agents_md_content() {
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::write(
+        home.path().join(".opencode").join("AGENTS.md"),
+        "Global baseline rule.",
+    )
+    .unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+
+    with_home(home.path(), || {
+        let got = global_instructions_text(working.path());
+        assert_eq!(got.as_deref(), Some("Global baseline rule."));
+    });
+}
+
+#[test]
+fn global_instructions_none_when_no_global_file() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    // A local working-dir agents.md must NOT be mistaken for the global one.
+    std::fs::write(working.path().join("AGENTS.md"), "Local only.").unwrap();
+
+    with_home(home.path(), || {
+        assert_eq!(global_instructions_text(working.path()), None);
+    });
+}
+
+#[test]
+fn global_instructions_none_when_global_file_empty() {
+    let home = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::write(home.path().join(".opencode").join("AGENTS.md"), "   \n\n  ").unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+
+    with_home(home.path(), || {
+        assert_eq!(global_instructions_text(working.path()), None);
+    });
+}
+
+#[test]
+fn global_instructions_ignores_git_root_and_working_dir_files() {
+    // Only the home/.opencode file is "global"; git-root and working-dir
+    // agents.md files are local and must never be reported here.
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir_all(working.path().join(".git")).unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "Working rule.").unwrap();
+
+    with_home(home.path(), || {
+        assert_eq!(global_instructions_text(working.path()), None);
     });
 }

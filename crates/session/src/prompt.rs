@@ -76,6 +76,42 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
     }
 }
 
+/// Load ONLY the global `~/.opencode/AGENTS.md` instructions — the ambient,
+/// always-on baseline file. Unlike `load_instructions` (which merges global,
+/// git-root, and working-dir files into the system prompt), this returns just
+/// the global portion so callers can exclude it from the per-session
+/// context-token accounting.
+///
+/// The global file still ships in the system prompt (see `build_system`); only
+/// its token *budget* is treated as "free" baseline context, so a large global
+/// instructions file does not consume the conversation window or inflate the
+/// TUI context meter.
+///
+/// Returns the trimmed content, or `None` when the file is absent, unreadable,
+/// empty, or when the global dir coincides with `working_dir` (in that last
+/// case the same content is loaded/counted as a local instruction).
+pub fn global_instructions_text(working_dir: &Path) -> Option<String> {
+    let home = dirs::home_dir()?;
+    let dir = home.join(".opencode");
+    // When the global dir is the working dir, the same file is loaded as a
+    // local instruction and must stay counted — bail out so we never subtract.
+    let canon = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    let wd_canon = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
+    if canon == wd_canon {
+        return None;
+    }
+    let path = find_agents_md(&dir)?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 /// Case-insensitive search for an `AGENTS.md` file inside `dir`.
 fn find_agents_md(dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;

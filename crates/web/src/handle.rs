@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use opencoder_core::Config;
 use opencoder_llm::ChatStream;
-use opencoder_session::{resume as resume_session, run, SessionEvent};
+use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
 use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, Store};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex};

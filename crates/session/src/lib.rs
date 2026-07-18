@@ -6,7 +6,7 @@ pub mod resume;
 pub mod runner;
 pub mod tools;
 
-pub use resume::{generate_title, resume};
+pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, SessionEvent};
 
 use std::path::PathBuf;

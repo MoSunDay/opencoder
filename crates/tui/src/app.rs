@@ -85,7 +85,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         } else {
             id.clone()
         };
-        opencoder_session::resume::resume(
+        opencoder_session::resume::resume_and_replay(
             store.clone(),
             &effective_id,
             config.clone(),
@@ -393,7 +393,7 @@ async fn run_app(
                                         }
                                         crate::task::TaskPick::Resume(id) => {
                                             let new_config = Config::load(&workdir).unwrap_or_else(|_| config.clone());
-                                            opencoder_session::resume::resume(
+                                            opencoder_session::resume::resume_and_replay(
                                                 store.clone(),
                                                 id,
                                                 new_config,

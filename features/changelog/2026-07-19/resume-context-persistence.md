@@ -38,7 +38,7 @@
 
 ### Gap C — 增量 subagent 事件持久
 
-`crates/session/src/runner.rs::run_subagent`（~L766-828）与 `crates/session/src/resume.rs::replay_child`：旧 buffer+tail-flush 换成 `tokio::sync::mpsc::channel` + 单 flusher task，串行 `append_event` 保序消费。`on_event` 回调是 sync `FnMut`，故用 channel 解耦 async `append_event`。`flusher.await` 在返回前完成，保证子事件在父 `run(...)` 返回瞬间即持久（**无需 sleep**）；中断/出错时保留已 flush 的部分进度。
+`crates/session/src/runner.rs::run_subagent`（~L766-828）与 `crates/session/src/resume.rs::replay_child`：旧 buffer+tail-flush 换成 `tokio::sync::mpsc::channel` + 单 flusher task，串行 `append_event` 保序消费。`on_event` 回调是 sync `FnMut`，故用 channel 解耦 async `append_event`。`flusher.await` 在返回前完成，保证子事件在父 `run(...)` 返回瞬间即持久（**无需 sleep**）。旧的 `subagent_persists_child_events_to_store` 测试中的冗余 `sleep(200ms)` 已删除（flusher 设计下无需，同一路径已被更强断言的 `subagent_child_events_persisted_before_return` 覆盖）；中断/出错时保留已 flush 的部分进度。
 
 ### Gap D — Headless resume 子代理摘要
 
@@ -54,8 +54,9 @@
 | Gap B — 无技能 resume → None | `resume_without_skill_has_none` | `crates/session/tests/skill_resume.rs` |
 | Gap C — 子事件在 `run` 返回瞬间即持久（无 sleep）、seq 严格升序唯一 | `subagent_child_events_persisted_before_return` | `crates/session/tests/subagent.rs` |
 | Gap D — resume 子代理摘要格式（done/total 计数、✔/✘/… 字形、prompt 截断、空→None） | `format_resume_summary_lists_subagents` | `crates/cli/src/run.rs`（lib 单测） |
+| Schema v2→v3 迁移（`migrate(conn,2)` 仅跑 `if from<3` 分支，加 handoff/skill 三列，旧行 nullable） | `schema_migration_v2_to_v3_adds_handoff_and_skill` | `crates/store/tests/store_integration.rs` |
 
-- 全量回归：`cargo test --workspace` → **678 passed / 0 failed**（基线 672，+6 新增）
+- 全量回归：`cargo test --workspace` → **679 passed / 0 failed**（基线 672，+7 新增）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
 

@@ -396,9 +396,9 @@ async fn subagent_persists_child_events_to_store() {
     assert_eq!(tasks.len(), 1);
     let child_id = &tasks[0].child_session_id;
 
-    // Child events must be persisted to session_events (fire-and-forget, so
-    // give the detached spawns a moment to flush).
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // Child events must be durable before `run` returns: run_subagent awaits
+    // the mpsc flusher on every completion path (Ok/Err/soft-cancel), so no
+    // sleep is needed here.
     let events = store.events_after(child_id, 0).await.unwrap();
     assert!(
         !events.is_empty(),

@@ -160,17 +160,36 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 
 ### 同一需求：贪吃蛇
 
-以「用 Rust 实现一个贪吃蛇游戏」为例，两者接受任务的入口一致：
+以「用 Rust + crossterm 实现终端贪吃蛇」为对照任务，两者入口一致：
 
 ```bash
-# opencode（Node SEA，~197 MB RSS）
-opencode run "用 Rust + crossterm 实现一个终端贪吃蛇游戏，方向键控制，碰撞结束"
+# opencode（Node SEA）
+opencode run --model zhipuai-coding-plan/glm-5.2 "实现终端贪吃蛇..."
 
-# opencoder（Rust 原生，~5.4 MB RSS）
-opencoder run "用 Rust + crossterm 实现一个终端贪吃蛇游戏，方向键控制，碰撞结束"
+# opencoder（Rust 原生）
+opencoder run "实现终端贪吃蛇..."
 ```
 
-任务执行流程等价：plan/act 双模式 → 工具调用（文件写入 + bash 编译）→ 验证。运行期 OpenCoder 通过 subagent（`explore` 调查 / `build` 实现）拆解，并以 `cargo test` 回归。可恢复性：`opencoder --continue` 从 libsql 重建中断的贪吃蛇实现会话，无需重跑。
+**实测对比（2026-07-19，同机同模型 glm-5.2，隔离工作目录，各 0.5 s 采样全程）：**
+
+| 指标 | opencode `1.17.8` | opencoder `0.1.0` |
+| --- | --- | --- |
+| 任务完成耗时（wall） | 125.7 s | **79.0 s** |
+| **CPU 平均利用率（全程）** | **65.6 %**（持续高占用） | **~0 %**（事件驱动，等待 LLM 时空闲） |
+| CPU 活跃期平均（仅工作样本） | 71.4 % | 63.6 % |
+| CPU 峰值 | **1954.7 %**（V8 GC/JIT 瞬时 ≈20 核） | 229.3 %（cargo 并行编译） |
+| CPU p95 | 164.7 % | 100.1 % |
+| **Agent 进程 RSS 均值** | **496.5 MB** | **13.7 MB**（≈ **36×** 差距） |
+| Agent 进程 RSS 峰值 | 656.6 MB | 14.0 MB |
+| 整树 RSS 峰值（含 cargo 编译） | 1017.9 MB | 635.8 MB |
+| 结果 | 编译通过，302 行 | 编译通过，295 行 |
+
+> **口径说明：**
+> - **Agent 进程 RSS** 排除 cargo/rustc 子进程（仅取进程数 ≤ 2 的样本），反映 agent 运行时本身 —— 这才是两者架构差异的体现。
+> - **整树 RSS 峰值** 含编译 crossterm 等依赖的 rustc 内存，两者该项同源、由 cargo 主导，不代表 agent 差异。
+> - opencode `run` 自带 V8 运行时，全程维持高 CPU/RSS；opencoder 编译为原生异步运行时，等待 provider 回包时 CPU 降到 ~0，仅在解析 token / 执行工具（文件写入、cargo）时短暂占用。
+> - **wall-time 受 LLM 采样随机性影响**（同模型不同会话），仅作参考，不宜当稳态结论；**CPU 利用率与 RSS 才是运行时基线的稳定差异**。
+> - opencode 另有一个常驻 server daemon（≈285 MB）未计入上表（`run` 一次性调用未复用它）；如长期 server 模式运行，opencode 的常驻开销更高。
 
 ---
 

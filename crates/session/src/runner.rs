@@ -522,7 +522,10 @@ async fn run_one_llm_call(
 
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
-        .filter(|(name, _)| session.agent.tools.allows(name))
+        .filter(|(name, _)| {
+            session.agent.tools.allows(name)
+                && session.config.capabilities.tool_enabled(name)
+        })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     let tool_schemas = schema_for(&allowed, session.agent.kind);
@@ -629,6 +632,7 @@ async fn execute_call(
         agent: session.agent.name.clone(),
         working_dir: session.working_dir.clone(),
         max_output: MAX_OUTPUT,
+        proxy: session.config.network.proxy.clone(),
     };
     match registry.get(&tc.name) {
         Some(tool) => {
@@ -664,19 +668,19 @@ async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
-    // Plan mode may only spawn read-only 'explore' subagents. Any other type
-    // (including 'build') is rejected as "unknown" so the model is never told
-    // that 'build' exists.
-    if parent.agent.kind == AgentKind::Plan && kind != "explore" {
+    // Plan mode may only spawn read-only subagents: 'explore' (filesystem) and
+    // 'tools' (browser fetch/search + computer-use are read-only w.r.t. the
+    // repo). 'build' stays rejected so the model is never told it exists.
+    if parent.agent.kind == AgentKind::Plan && !matches!(kind.as_str(), "explore" | "tools") {
         return ToolOutput::err(format!(
-            "Unknown subagent_type '{kind}'. Valid option: 'explore' (read-only)."
+            "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only) or 'tools' (browser/computer-use)."
         ));
     }
     let agent = match resolve_agent(&kind) {
         Some(a) => a,
         None => {
             return ToolOutput::err(format!(
-                "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only) or 'build' (full tools)."
+                "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only), 'build' (full tools), or 'tools' (browser/computer-use)."
             ));
         }
     };

@@ -131,9 +131,9 @@ fn project_instructions_from_working_dir_only() {
 #[test]
 fn project_instructions_from_global_and_working_dir() {
     let home = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
     std::fs::write(
-        home.path().join(".opencode").join("AGENTS.md"),
+        home.path().join(".opencoder").join("AGENTS.md"),
         "Global rule.",
     )
     .unwrap();
@@ -260,9 +260,9 @@ fn project_instructions_appears_before_environment() {
 #[test]
 fn global_instructions_returns_global_agents_md_content() {
     let home = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
     std::fs::write(
-        home.path().join(".opencode").join("AGENTS.md"),
+        home.path().join(".opencoder").join("AGENTS.md"),
         "Global baseline rule.",
     )
     .unwrap();
@@ -289,8 +289,8 @@ fn global_instructions_none_when_no_global_file() {
 #[test]
 fn global_instructions_none_when_global_file_empty() {
     let home = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
-    std::fs::write(home.path().join(".opencode").join("AGENTS.md"), "   \n\n  ").unwrap();
+    std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
+    std::fs::write(home.path().join(".opencoder").join("AGENTS.md"), "   \n\n  ").unwrap();
     let working = tempfile::TempDir::new().unwrap();
 
     with_home(home.path(), || {
@@ -300,7 +300,7 @@ fn global_instructions_none_when_global_file_empty() {
 
 #[test]
 fn global_instructions_ignores_git_root_and_working_dir_files() {
-    // Only the home/.opencode file is "global"; git-root and working-dir
+    // Only the home/.opencoder file is "global"; git-root and working-dir
     // agents.md files are local and must never be reported here.
     let home = tempfile::TempDir::new().unwrap();
     let working = tempfile::TempDir::new().unwrap();

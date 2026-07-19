@@ -23,7 +23,7 @@ pub enum UiCmd {
     Compact,
     SetSkill(Option<String>),
     /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
-    ReloadConfig(Config),
+    ReloadConfig(Box<Config>),
     /// Swap the session's cancellation token for a fresh, uncancelled one.
     /// Sent before every turn-starting command so a prior double-Esc abort
     /// doesn't leave `sess.cancel` permanently cancelled (which would make
@@ -216,8 +216,8 @@ pub async fn process_cmd(
         }
         UiCmd::ReloadConfig(new_cfg) => {
             let api_key = new_cfg.api_key().unwrap_or_default();
-            if let Ok(new_client) = ChatClient::new(&new_cfg.provider.base_url, &api_key) {
-                sess.apply_config_reload(new_cfg, Arc::new(new_client));
+            if let Ok(new_client) = ChatClient::new(&new_cfg.provider.base_url, &api_key, new_cfg.network.proxy.as_deref()) {
+                sess.apply_config_reload(*new_cfg, Arc::new(new_client));
             }
         }
         UiCmd::ResetCancel(c) => {

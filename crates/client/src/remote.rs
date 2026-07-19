@@ -25,11 +25,11 @@ pub struct Remote {
 
 impl Remote {
     pub fn new(base_url: &str, token: &str) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .read_timeout(READ_TIMEOUT)
-            .connect_timeout(Duration::from_secs(30))
-            .build()
-            .context("build http client")?;
+        // Proxy-aware client with loopback bypass: a configured/env proxy is
+        // honored for remote hosts, but localhost (and the test server bound
+        // to 127.0.0.1) always connects directly so proxy env vars don't
+        // break local connections.
+        let http = opencoder_core::net::build_http_client_with_read_timeout(None, READ_TIMEOUT)?;
         Ok(Remote {
             base_url: base_url.trim_end_matches('/').to_string(),
             token: token.to_string(),

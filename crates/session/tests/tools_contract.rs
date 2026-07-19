@@ -4,7 +4,9 @@
 use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
-use opencoder_session::tools::{edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool};
+use opencoder_session::tools::{
+    bash::BashTool, edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool,
+};
 use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {
@@ -14,6 +16,7 @@ fn ctx(dir: &Path) -> ToolContext {
         agent: "act".into(),
         working_dir: dir.to_path_buf(),
         max_output: 4096,
+        proxy: None,
     }
 }
 
@@ -141,4 +144,141 @@ async fn ls_tool_lists_directory() {
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("file1.txt"));
     assert!(out.content.contains("subdir/"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_captures_stdout_via_pipe() {
+    // Per rules/01-mandatory-tests.md: the captured-pipe contract for the bash
+    // tool. Output must come back through ToolOutput, not leak to the terminal.
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let out = BashTool
+        .execute(json!({"command": "echo hello-from-bash"}), &c)
+        .await
+        .unwrap();
+    assert!(!out.is_error, "unexpected error: {out:?}");
+    assert!(out.content.contains("hello-from-bash"), "stdout missing: {out:?}");
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_captures_stderr_via_pipe() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let out = BashTool
+        .execute(json!({"command": "echo oops 1>&2"}), &c)
+        .await
+        .unwrap();
+    assert!(out.content.contains("oops"), "stderr missing: {out:?}");
+    assert!(out.content.contains("[stderr]"), "stderr marker missing: {out:?}");
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_detaches_controlling_terminal() {
+    // Regression for "bash output lands in the input area": the child must run
+    // in its own session (setsid) so it cannot write to /dev/tty and corrupt the
+    // TUI composer. Signal: the bash process is a session leader, i.e. its
+    // session id (sid) equals its pid. Without setsid the sid would be the
+    // parent (test runner) session and the two would differ.
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let out = BashTool
+        .execute(
+            json!({"command": "ps -o pid=,sid= -p \"$$\" | tr -s ' '"}),
+            &c,
+        )
+        .await
+        .unwrap();
+    let nums: Vec<u64> = out
+        .content
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    assert_eq!(nums.len(), 2, "expected 'pid sid', got: {out:?}");
+    assert_eq!(
+        nums[0], nums[1],
+        "child is NOT a session leader — setsid() not applied: {out:?}"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_kills_process_group_on_timeout() {
+    // Regression: on timeout the bash tool must kill the *entire* child process
+    // group, not only the direct bash child. Otherwise grandchildren (builds,
+    // servers, test runners, backgrounded jobs) survive as orphans. We spawn a
+    // grandchild that beats a heartbeat file, time the tool out, then verify the
+    // heartbeat stops growing — proving the grandchild died with the group.
+    //
+    // Non-interactive `bash -lc` keeps job control OFF, so the backgrounded
+    // pipeline stays in bash's process group → `kill(-pgid, SIGKILL)` reaches it.
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let heartbeat = dir.path().join("heartbeat");
+    let pidfile = dir.path().join("gpid");
+    let command = format!(
+        "sh -c 'echo $$ > {pid}; while true; do echo x >> {hb}; sleep 0.2; done' & sleep 30",
+        pid = pidfile.display(),
+        hb = heartbeat.display(),
+    );
+
+    let out = BashTool
+        .execute(json!({"command": command, "timeout": 1}), &c)
+        .await
+        .unwrap();
+    assert!(out.is_error);
+    assert!(out.content.contains("timed out"), "unexpected: {out:?}");
+
+    // The grandchild should have produced a heartbeat during the 1s window.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(heartbeat.exists(), "grandchild never ran — test setup invalid");
+
+    // Sample the heartbeat twice; if the grandchild is dead the file is static.
+    let s1 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let s2 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
+    assert_eq!(
+        s1, s2,
+        "grandchild kept writing ({} -> {} bytes): process-group kill failed",
+        s1, s2
+    );
+
+    // Cleanup: if a buggy build left the grandchild alive, kill it so the test
+    // never leaks a runaway process.
+    if let Ok(txt) = std::fs::read_to_string(&pidfile) {
+        if let Ok(pid) = txt.trim().parse::<i32>() {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_returns_partial_output_on_timeout() {
+    // On timeout the tool must surface whatever the command printed before it
+    // hung — that output is usually the only clue to *why* it hung (the failing
+    // test, the blocking syscall, the last build step). Discarding it (the old
+    // behavior) forces the agent to blindly retry. We print a unique marker to
+    // stdout, then block forever; after a 1s timeout the partial marker must be
+    // present in the returned (error) output.
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let out = BashTool
+        .execute(
+            json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 30", "timeout": 1}),
+            &c,
+        )
+        .await
+        .unwrap();
+    assert!(out.is_error, "expected error on timeout: {out:?}");
+    assert!(
+        out.content.contains("timed out"),
+        "missing timeout banner: {out:?}"
+    );
+    assert!(
+        out.content.contains("PARTIAL-MARKER-9f3a"),
+        "partial output discarded (should be surfaced): {out:?}"
+    );
 }

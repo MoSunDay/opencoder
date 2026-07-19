@@ -247,6 +247,18 @@ opencoder/
 └── src/main.rs    # 二进制入口
 ```
 
+## 🙏 致谢
+
+本项目的可选能力站在以下优秀项目的肩膀上：
+
+| 项目 | 贡献方式 |
+| --- | --- |
+| [obscura](https://github.com/h4ckf0r0day/obscura) | 底层浏览器引擎依赖（feature-gated `browser`）：基于 deno_core / V8 的无头渲染，驱动 `web_fetch` / `web_search` 的 JS 执行与反爬。 |
+| [agent-browser](https://github.com/h4ckf0r0day/agent-browser) | `crates/session/src/tools/web_read.rs` 的内容提取算法参考：markdown Accept 协商、`.md` 回退、`llms.txt` / `llms-full.txt` 祖先爬取、可读正文抽取。 |
+| [cua](https://github.com/h4ckf0r0day/cua) | `crates/core/src/computer_use.rs` 的 computer-use 循环参考：perceive → act 闭环被提炼为原生的 `ComputerUseExecutor` trait + `ComputerUseLoop`。 |
+
+以上三者均为独立实现：obscura 作为 rev-pinned git 依赖接入；agent-browser 与 cua 的算法/思路被移植 / 蒸馏为纯 Rust（未引入其源码依赖）。
+
 ## 📄 License
 
 [MIT](LICENSE)

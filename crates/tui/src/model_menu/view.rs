@@ -14,7 +14,7 @@ use super::state::{Field, ModelMenu};
 /// bottom edge sits just above it, so the form floats over the transcript like
 /// a dropdown instead of covering the screen center.
 pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &ModelMenu) {
-    let want_h = 18u16;
+    let want_h = 20u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -108,6 +108,26 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
             format!("{} FPS", menu.fps).as_str(),
             menu.focus == Field::Fps,
             "1-30, digits/\u{2190}\u{2192} \u{00b1}1, higher = more CPU (10 = smooth)",
+        ),
+        field(
+            "browser:",
+            format!(
+                "[ {} ]",
+                if menu.capabilities_browser { "on" } else { "off" }
+            )
+            .as_str(),
+            menu.focus == Field::Browser,
+            "\u{2190}/\u{2192}/Space toggle (web_fetch/web_search), Enter=next",
+        ),
+        field(
+            "computer_use:",
+            format!(
+                "[ {} ]",
+                if menu.capabilities_computer_use { "on" } else { "off" }
+            )
+            .as_str(),
+            menu.focus == Field::ComputerUse,
+            "\u{2190}/\u{2192}/Space toggle, Enter=next",
         ),
         Line::from(""),
         button_line(menu),

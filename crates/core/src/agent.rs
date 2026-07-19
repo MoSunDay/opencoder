@@ -97,6 +97,17 @@ pub fn builtin_agents() -> Vec<Agent> {
             ]),
         },
         Agent {
+            name: "tools".into(),
+            kind: AgentKind::Subagent,
+            mode: AgentMode::Subagent,
+            description: "Umbrella subagent for optional capabilities: browser (web_fetch, web_search) and computer_use, plus read-only filesystem tools (read, glob, grep, ls). Use for web research or computer-use tasks.".into(),
+            prompt: base_prompt_tools(),
+            tools: ToolFilter::Allow(vec![
+                "web_fetch".into(), "web_search".into(), "computer_use".into(),
+                "read".into(), "glob".into(), "grep".into(), "ls".into(),
+            ]),
+        },
+        Agent {
             name: "command".into(),
             kind: AgentKind::Command,
             mode: AgentMode::Primary,
@@ -135,6 +146,16 @@ pub fn base_prompt_build() -> String {
         .to_string()
 }
 
+pub fn base_prompt_tools() -> String {
+    "You are the tools subagent: the home of optional capabilities — browser (web_fetch, web_search) \
+     and computer-use (computer_use) — plus read-only filesystem tools (read, glob, grep, ls). \
+     Complete the specific task delegated to you. Browser and computer-use tools are only present when \
+     the user has enabled the corresponding capability, so fall back to read-only investigation if a \
+     tool is unavailable. Do not ask questions; infer reasonable defaults and proceed. \
+     After finishing, briefly state what you did and return any fetched content or action trace."
+        .to_string()
+}
+
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
@@ -148,6 +169,7 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 - Default to doing the work without asking questions. Infer missing details by reading the codebase and following existing conventions.
 - You have two tools: bash (for terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
 - For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
+- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.
 - Run tool calls in parallel when none needs the other's output; otherwise run sequentially.
 - You MAY emit multiple `task` blocks in a single response. Independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
 - Keep responses concise and friendly. Do not dump large files; reference paths only.
@@ -195,5 +217,23 @@ mod tests {
             plan.contains("'explore' (read-only)"),
             "plan prompt must still advertise 'explore', got: {plan}"
         );
+    }
+
+    /// The `tools` umbrella subagent must resolve and carry exactly the
+    /// capability + read-only filesystem tools (browser/computer-use are
+    /// runtime-gated by config + the `browser` cargo feature).
+    #[test]
+    fn tools_subagent_is_registered_with_capability_tools() {
+        let tools_agent = resolve_agent("tools").expect("tools subagent registered");
+        assert_eq!(tools_agent.mode, AgentMode::Subagent);
+        for required in ["web_fetch", "web_search", "computer_use", "read", "glob", "grep", "ls"] {
+            assert!(
+                tools_agent.tools.allows(required),
+                "tools subagent must allow '{required}'"
+            );
+        }
+        // tools is plan-visible: act and plan prompts both advertise it.
+        assert!(base_prompt_act().contains("'tools' subagent"));
+        assert!(base_prompt_plan().contains("'tools' subagent"));
     }
 }

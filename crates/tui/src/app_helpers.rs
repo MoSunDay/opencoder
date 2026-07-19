@@ -216,7 +216,7 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 /// `ChatView::context_used` (which sums the streamed transcript and resets on
 /// compaction) so the context meter reflects the real request size.
 ///
-/// The ambient global `~/.opencode/AGENTS.md` is excluded from this count so
+/// The ambient global `~/.opencoder/AGENTS.md` is excluded from this count so
 /// the context meter at startup (and throughout the session) is not inflated
 /// by an always-on global instructions file. The global content still ships
 /// in the system prompt; only the accounting omits it.

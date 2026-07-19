@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Pulls the obscura headless-browser engine (V8 + BoringSSL, heavy first build).
+# When off, the browser tools are absent from the registry and the default
+# workspace build stays light. Stealth is compiled out by default (lighter,
+# fewer native deps); enable it here only when anti-crawl is required.
+browser = ["dep:obscura"]
+
 [dependencies]
 opencoder-core.workspace = true
 opencoder-llm.workspace = true
@@ -22,7 +29,17 @@ chrono.workspace = true
 dirs.workspace = true
 glob.workspace = true
 regex.workspace = true
+libc = "0.2"
 ulid.workspace = true
+# Content-extraction (ported from agent-browser read.rs) — light, always-on so
+# the extraction logic is unit-tested in the default build.
+url = "2"
+scraper = "0.20"
+html2text = "0.13"
+# Bottom-layer browser engine. Optional + feature-gated so the default build
+# never touches V8. Pinned to an exact rev: obscura ships no semver and tracking
+# main would break at random.
+obscura = { git = "https://github.com/h4ckf0r0day/obscura.git", rev = "b2e4bb49a7723619527fd0cbb9f2c2acbc58f851", default-features = false, features = ["api"], optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

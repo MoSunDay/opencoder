@@ -5,25 +5,46 @@ use opencoder_core::{AgentKind, ToolArc};
 use serde_json::Value;
 
 pub mod bash;
+pub mod computer_use;
 pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod ls;
 pub mod read;
 pub mod task;
+pub mod web_read;
 pub mod write;
 
+#[cfg(feature = "browser")]
+pub mod web_fetch;
+#[cfg(feature = "browser")]
+pub mod web_search;
+
 pub fn registry() -> HashMap<String, ToolArc> {
-    let all: Vec<ToolArc> = vec![
-        Arc::new(bash::BashTool) as ToolArc,
-        Arc::new(read::ReadTool) as ToolArc,
-        Arc::new(write::WriteTool) as ToolArc,
-        Arc::new(edit::EditTool) as ToolArc,
-        Arc::new(glob::GlobTool) as ToolArc,
-        Arc::new(grep::GrepTool) as ToolArc,
-        Arc::new(ls::ListTool) as ToolArc,
-        Arc::new(task::TaskTool) as ToolArc,
-    ];
+    let all: Vec<ToolArc> = {
+        // `mut` only used under the `browser` feature; allow when feature is off.
+        #[allow(unused_mut)]
+        let mut v: Vec<ToolArc> = vec![
+            Arc::new(bash::BashTool) as ToolArc,
+            Arc::new(read::ReadTool) as ToolArc,
+            Arc::new(write::WriteTool) as ToolArc,
+            Arc::new(edit::EditTool) as ToolArc,
+            Arc::new(glob::GlobTool) as ToolArc,
+            Arc::new(grep::GrepTool) as ToolArc,
+            Arc::new(ls::ListTool) as ToolArc,
+            Arc::new(task::TaskTool) as ToolArc,
+            Arc::new(computer_use::ComputerUseTool) as ToolArc,
+        ];
+        // Browser tools are heavy (obscura + V8): only compiled with the
+        // `browser` feature. Runtime visibility is additionally gated by
+        // `capabilities.browser` in the runner's schema filter.
+        #[cfg(feature = "browser")]
+        v.extend([
+            Arc::new(web_fetch::WebFetchTool) as ToolArc,
+            Arc::new(web_search::WebSearchTool) as ToolArc,
+        ]);
+        v
+    };
     all.into_iter().map(|t| (t.name().to_string(), t)).collect()
 }
 

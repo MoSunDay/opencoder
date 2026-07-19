@@ -15,6 +15,8 @@ pub struct ModelPatch {
     pub interleaved_thinking: Option<bool>,
     pub context_threshold: u64,
     pub fps: u32,
+    pub capabilities_browser: bool,
+    pub capabilities_computer_use: bool,
 }
 
 impl ModelPatch {
@@ -46,6 +48,10 @@ impl ModelPatch {
                 "context_threshold": self.context_threshold,
             },
             "fps": self.fps,
+            "capabilities": {
+                "browser": self.capabilities_browser,
+                "computer_use": self.capabilities_computer_use,
+            },
         })
     }
 }
@@ -109,12 +115,14 @@ pub enum Field {
     InterleavedThinking,
     Threshold,
     Fps,
+    Browser,
+    ComputerUse,
     Save,
     Cancel,
 }
 
 impl Field {
-    const ORDER: [Field; 9] = [
+    const ORDER: [Field; 11] = [
         Field::Model,
         Field::BaseUrl,
         Field::ApiKey,
@@ -122,6 +130,8 @@ impl Field {
         Field::InterleavedThinking,
         Field::Threshold,
         Field::Fps,
+        Field::Browser,
+        Field::ComputerUse,
         Field::Save,
         Field::Cancel,
     ];
@@ -155,6 +165,8 @@ pub struct ModelMenu {
     pub interleaved_thinking: bool,
     pub threshold: u64,
     pub fps: u32,
+    pub capabilities_browser: bool,
+    pub capabilities_computer_use: bool,
     pub focus: Field,
     pub error: Option<String>,
 }
@@ -172,6 +184,8 @@ impl ModelMenu {
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
             threshold: config.compaction.context_threshold,
             fps: config.tui_fps(),
+            capabilities_browser: config.capabilities.browser,
+            capabilities_computer_use: config.capabilities.computer_use,
             focus: Field::Model,
             error: None,
         }
@@ -218,6 +232,8 @@ impl ModelMenu {
             interleaved_thinking: Some(self.interleaved_thinking),
             context_threshold: self.threshold,
             fps: self.fps,
+            capabilities_browser: self.capabilities_browser,
+            capabilities_computer_use: self.capabilities_computer_use,
         }
     }
 }
@@ -264,6 +280,8 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
             match m.focus {
                 Field::Reasoning => m.reasoning = m.reasoning.prev(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                Field::Browser => m.capabilities_browser = !m.capabilities_browser,
+                Field::ComputerUse => m.capabilities_computer_use = !m.capabilities_computer_use,
                 Field::Threshold => m.adjust_threshold(-1000),
                 Field::Fps => m.adjust_fps(-1),
                 _ => {}
@@ -274,6 +292,8 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
             match m.focus {
                 Field::Reasoning => m.toggle_reasoning(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
+                Field::Browser => m.capabilities_browser = !m.capabilities_browser,
+                Field::ComputerUse => m.capabilities_computer_use = !m.capabilities_computer_use,
                 Field::Threshold => m.adjust_threshold(1000),
                 Field::Fps => m.adjust_fps(1),
                 _ => {}
@@ -348,6 +368,10 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::Reasoning if c == ' ' => m.toggle_reasoning(),
                 Field::InterleavedThinking if c == ' ' => {
                     m.interleaved_thinking = !m.interleaved_thinking
+                }
+                Field::Browser if c == ' ' => m.capabilities_browser = !m.capabilities_browser,
+                Field::ComputerUse if c == ' ' => {
+                    m.capabilities_computer_use = !m.capabilities_computer_use
                 }
                 _ => {}
             }

@@ -32,7 +32,7 @@ pub fn build_system(
 
 /// Load and concatenate project instruction files (AGENTS.md) from up to
 /// three locations, in increasing priority:
-///   1. Global:    `~/.opencode/AGENTS.md`
+///   1. Global:    `~/.opencoder/AGENTS.md`
 ///   2. Git root:  `<git_root>/AGENTS.md` (found by walking up from working_dir)
 ///   3. Working:   `<working_dir>/AGENTS.md`
 ///
@@ -45,7 +45,7 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
 
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".opencode"));
+        candidates.push(home.join(".opencoder"));
     }
     if let Some(root) = find_git_root(working_dir) {
         candidates.push(root);
@@ -76,7 +76,7 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
     }
 }
 
-/// Load ONLY the global `~/.opencode/AGENTS.md` instructions — the ambient,
+/// Load ONLY the global `~/.opencoder/AGENTS.md` instructions — the ambient,
 /// always-on baseline file. Unlike `load_instructions` (which merges global,
 /// git-root, and working-dir files into the system prompt), this returns just
 /// the global portion so callers can exclude it from the per-session
@@ -92,7 +92,7 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
 /// case the same content is loaded/counted as a local instruction).
 pub fn global_instructions_text(working_dir: &Path) -> Option<String> {
     let home = dirs::home_dir()?;
-    let dir = home.join(".opencode");
+    let dir = home.join(".opencoder");
     // When the global dir is the working dir, the same file is loaded as a
     // local instruction and must stay counted — bail out so we never subtract.
     let canon = dir.canonicalize().unwrap_or_else(|_| dir.clone());

@@ -11,7 +11,7 @@ impl Tool for TaskTool {
         "task"
     }
     fn description(&self) -> &str {
-        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), or \"build\" for implementation work (read/write/edit/bash/glob/grep/ls)."
+        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), \"build\" for implementation work (read/write/edit/bash/glob/grep/ls), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities plus read-only filesystem tools."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
@@ -23,7 +23,7 @@ impl Tool for TaskTool {
             "prompt".into(),
             json::prop_str("Full instructions for the subagent."),
         );
-        props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only) or \"build\" (full tools). Defaults to \"explore\"."));
+        props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only), \"build\" (full tools), or \"tools\" (browser + computer-use). Defaults to \"explore\"."));
         json::object_schema(Value::Object(props), &["description", "prompt"])
     }
 
@@ -40,7 +40,7 @@ impl Tool for TaskTool {
 /// only the read-only `explore` subagent. This mirrors [`TaskTool::description`]
 /// minus the `build` clause.
 pub fn description_plan() -> &'static str {
-    "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash)."
+    "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities."
 }
 
 /// Parameter schema of the `task` tool as exposed to the model while in **plan mode**.
@@ -57,6 +57,6 @@ pub fn parameters_plan() -> Value {
         "prompt".into(),
         json::prop_str("Full instructions for the subagent."),
     );
-    props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only). Defaults to \"explore\"."));
+    props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only) or \"tools\" (browser + computer-use). Defaults to \"explore\"."));
     json::object_schema(Value::Object(props), &["description", "prompt"])
 }

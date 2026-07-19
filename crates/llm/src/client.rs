@@ -30,22 +30,24 @@ pub struct ChatClient {
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(300);
 
 impl ChatClient {
-    pub fn new(base_url: &str, api_key: &str) -> Result<Self> {
-        Self::new_with_read_timeout(base_url, api_key, DEFAULT_READ_TIMEOUT)
+    /// Construct a client. `proxy` is an optional explicit proxy URL (e.g.
+    /// `socks5://host:port`); when `None`, the proxy is resolved from
+    /// `OPENCODER_PROXY` / `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`. Loopback
+    /// hosts always bypass the proxy.
+    pub fn new(base_url: &str, api_key: &str, proxy: Option<&str>) -> Result<Self> {
+        Self::new_with_read_timeout(base_url, api_key, DEFAULT_READ_TIMEOUT, proxy)
     }
 
     /// Construct a client with a custom per-read idle timeout. Useful for
-    /// tests that need a short stall window.
+    /// tests that need a short stall window. See [`Self::new`] for proxy
+    /// semantics.
     pub fn new_with_read_timeout(
         base_url: &str,
         api_key: &str,
         read_timeout: Duration,
+        proxy: Option<&str>,
     ) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .read_timeout(read_timeout)
-            .connect_timeout(Duration::from_secs(30))
-            .build()
-            .context("build http client")?;
+        let http = opencoder_core::net::build_http_client_with_read_timeout(proxy, read_timeout)?;
         Ok(ChatClient {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),

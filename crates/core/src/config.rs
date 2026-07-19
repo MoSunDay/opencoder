@@ -42,6 +42,15 @@ pub struct Config {
     /// values raise CPU usage; 10 is already smooth. `None` = default (10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<u32>,
+    /// Outbound proxy for LLM + browser traffic. Accepts `socks5://`,
+    /// `socks5h://`, `http://`, `https://`. The effective value also honors
+    /// `OPENCODER_PROXY` / `ALL_PROXY` env vars (see `net::effective_proxy`).
+    #[serde(default)]
+    pub network: NetworkConfig,
+    /// Capability toggles gating the optional browser + computer-use tools and
+    /// the `tools` umbrella subagent. Both default to off.
+    #[serde(default)]
+    pub capabilities: CapabilitiesConfig,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -123,6 +132,41 @@ fn default_reserved() -> u64 {
     20_000
 }
 
+/// Networking options for outbound LLM + browser traffic.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NetworkConfig {
+    /// Proxy URL (`socks5://`, `socks5h://`, `http://`, `https://`). `None`
+    /// means a direct connection (subject to env-var fallback at use time).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
+}
+
+/// Capability switches. Each gates a family of optional tools so the model only
+/// sees (and the registry only activates) capabilities the user has opted into.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CapabilitiesConfig {
+    /// Enable `web_fetch` / `web_search` + the `tools` subagent's browser tools.
+    /// Requires the `browser` cargo feature at compile time.
+    #[serde(default)]
+    pub browser: bool,
+    /// Enable the `computer_use` tool + the `tools` subagent's computer-use tool.
+    #[serde(default)]
+    pub computer_use: bool,
+}
+
+impl CapabilitiesConfig {
+    /// Whether a given tool name is enabled by the capability switches.
+    /// Capability-gated tools (`web_fetch`/`web_search`, `computer_use`) return
+    /// `false` unless their switch is on; every other tool is always enabled.
+    pub fn tool_enabled(&self, name: &str) -> bool {
+        match name {
+            "web_fetch" | "web_search" => self.browser,
+            "computer_use" => self.computer_use,
+            _ => true,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -136,6 +180,8 @@ impl Default for Config {
             reasoning_effort: None,
             interleaved_thinking: Some(true),
             fps: None,
+            network: NetworkConfig::default(),
+            capabilities: CapabilitiesConfig::default(),
         }
     }
 }
@@ -286,6 +332,20 @@ fn has_editable_key(root: &serde_json::Value) -> bool {
     {
         return true;
     }
+    if obj
+        .get("network")
+        .and_then(|v| v.as_object())
+        .is_some_and(|n| n.contains_key("proxy"))
+    {
+        return true;
+    }
+    if obj
+        .get("capabilities")
+        .and_then(|v| v.as_object())
+        .is_some_and(|c| c.contains_key("browser") || c.contains_key("computer_use"))
+    {
+        return true;
+    }
     false
 }
 
@@ -368,6 +428,19 @@ fn apply_env(cfg: &mut Config) {
             cfg.context_limit = Some(n);
         }
     }
+    // Proxy overlay: explicit OPENCODER_PROXY wins, then ALL_PROXY. Only set
+    // when the user has not already configured `network.proxy` directly.
+    if cfg.network.proxy.is_none() {
+        for var in ["OPENCODER_PROXY", "ALL_PROXY"] {
+            if let Ok(v) = std::env::var(var) {
+                let t = v.trim();
+                if !t.is_empty() {
+                    cfg.network.proxy = Some(t.to_string());
+                    break;
+                }
+            }
+        }
+    }
 }
 
 fn merge_into(cfg: &mut Config, value: serde_json::Value) {
@@ -426,6 +499,20 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
             if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
                 cfg.agent.default = d.to_string();
+            }
+        }
+        if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
+            if let Some(p) = n.get("proxy").and_then(|v| v.as_str()) {
+                let t = p.trim();
+                cfg.network.proxy = if t.is_empty() { None } else { Some(t.to_string()) };
+            }
+        }
+        if let Some(c) = obj.get("capabilities").and_then(|v| v.as_object()) {
+            if let Some(b) = c.get("browser").and_then(|v| v.as_bool()) {
+                cfg.capabilities.browser = b;
+            }
+            if let Some(b) = c.get("computer_use").and_then(|v| v.as_bool()) {
+                cfg.capabilities.computer_use = b;
             }
         }
     }

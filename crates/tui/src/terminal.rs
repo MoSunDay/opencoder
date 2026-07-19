@@ -18,7 +18,9 @@ use std::fmt;
 use anyhow::Result;
 
 use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -30,7 +32,8 @@ pub struct TerminalGuard;
 
 impl TerminalGuard {
     /// Put the terminal into TUI mode (raw + alt-screen + cursor style + mouse
-    /// capture + Kitty keyboard enhancement) and install the panic hook.
+    /// capture + Kitty keyboard enhancement + bracketed paste) and install the
+    /// panic hook.
     pub fn enter() -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = std::io::stdout();
@@ -45,7 +48,8 @@ impl TerminalGuard {
             stdout,
             EnterAlternateScreen,
             SetCursorStyle::SteadyBar,
-            EnableMouseCapture
+            EnableMouseCapture,
+            EnableBracketedPaste,
         ) {
             let _ = disable_raw_mode();
             return Err(e.into());
@@ -102,14 +106,16 @@ impl Drop for TerminalGuard {
 }
 
 /// Write the ANSI restoration sequences (pop Kitty enhancement, disable mouse
-/// capture, leave the alternate screen) to `w`. Single source of truth for what
-/// `TerminalGuard::restore` emits — factored out so the exact payload is
-/// unit-testable without a real TTY. Targets the unix ANSI path.
+/// capture, disable bracketed paste, leave the alternate screen) to `w`. Single
+/// source of truth for what `TerminalGuard::restore` emits — factored out so
+/// the exact payload is unit-testable without a real TTY. Targets the unix ANSI
+/// path.
 fn write_restore<W: fmt::Write>(w: &mut W) -> fmt::Result {
     use crossterm::event::PopKeyboardEnhancementFlags;
     use crossterm::Command;
     PopKeyboardEnhancementFlags.write_ansi(w)?;
     DisableMouseCapture.write_ansi(w)?;
+    DisableBracketedPaste.write_ansi(w)?;
     LeaveAlternateScreen.write_ansi(w)?;
     Ok(())
 }
@@ -129,13 +135,14 @@ mod tests {
         TerminalGuard::restore();
     }
 
-    /// The restoration payload must carry the three sequences that reverse the
+    /// The restoration payload must carry the four sequences that reverse the
     /// TUI-mode setup: pop Kitty keyboard enhancement, disable mouse capture,
-    /// leave the alternate screen. A missing one leaves the terminal partly
-    /// bricked (e.g. mouse still captured, or stuck in alt-screen) — exactly
-    /// the "frozen terminal" symptom this guard exists to prevent.
+    /// disable bracketed paste, leave the alternate screen. A missing one
+    /// leaves the terminal partly bricked (e.g. mouse still captured, or stuck
+    /// in alt-screen) — exactly the "frozen terminal" symptom this guard
+    /// exists to prevent.
     #[test]
-    fn write_restore_emits_all_three_sequences() {
+    fn write_restore_emits_all_restoration_sequences() {
         use crossterm::event::PopKeyboardEnhancementFlags;
         use crossterm::Command;
 
@@ -144,6 +151,8 @@ mod tests {
         let _ = PopKeyboardEnhancementFlags.write_ansi(&mut want_pop);
         let mut want_mouse = String::new();
         let _ = DisableMouseCapture.write_ansi(&mut want_mouse);
+        let mut want_paste = String::new();
+        let _ = DisableBracketedPaste.write_ansi(&mut want_paste);
         let mut want_alt = String::new();
         let _ = LeaveAlternateScreen.write_ansi(&mut want_alt);
 
@@ -157,6 +166,10 @@ mod tests {
         assert!(
             got.contains(&want_mouse),
             "missing disable-mouse sequence: {got:?}"
+        );
+        assert!(
+            got.contains(&want_paste),
+            "missing disable-bracketed-paste sequence: {got:?}"
         );
         assert!(
             got.contains(&want_alt),

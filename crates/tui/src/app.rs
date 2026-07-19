@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::composer;
 use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
@@ -818,6 +819,15 @@ async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 cancel.cancel();
+                                // Double-Esc hard-abort: also drop any pending
+                                // steer/queue inputs so they don't resurface on
+                                // resume. delete_input is idempotent.
+                                clear_pending_inputs(
+                                    store.as_ref(),
+                                    &mut steer_items,
+                                    &mut queue_items,
+                                )
+                                .await;
                                 chat.push_marker(Line::from(Span::styled(
                                     "[interrupted] stopping…", Style::default().fg(Color::Yellow))));
                                 running = false;
@@ -895,6 +905,17 @@ async fn run_app(
                         // buffer matches the new layout (prevents glitches and
                         // keeps the persisted hit-rects valid after resize).
                         let _ = terminal.autoresize();
+                    }
+                    Event::Paste(pasted) => {
+                        // Dragging a file into the terminal (or any clipboard
+                        // paste) arrives as one atomic payload. If it resolves
+                        // to an existing file, echo its full absolute path;
+                        // otherwise insert the text verbatim.
+                        let payload = paste_payload(&pasted, &workdir);
+                        let (new_input, new_idx) =
+                            composer::insert_str(&input, cursor_idx, &payload);
+                        input = new_input;
+                        cursor_idx = new_idx;
                     }
                     _ => {}
                 }
@@ -1000,8 +1021,8 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    data_dir_for, handle_mouse, mk_input, MouseOutcome, pre_key_intercept, push_user,
-    resolve_and_warn, start_turn, sys_tokens_for, worker_dead,
+    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, MouseOutcome, paste_payload,
+    pre_key_intercept, push_user, resolve_and_warn, start_turn, sys_tokens_for, worker_dead,
 };
 
 #[cfg(test)]

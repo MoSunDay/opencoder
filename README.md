@@ -154,7 +154,23 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 冷启动峰值 RSS | **~197 MiB**（195–199 MB） | **~5.4 MiB**（5.2–5.6 MB） | opencode 高 **35×** |
 | 冷启动耗时 | **~0.78 s** | **~6 ms** | opencode 慢 **~125×** |
 | 协议 | OpenAI 兼容 + ACP + MCP | OpenAI 兼容 + 子代理（explore/build） | — |
-| 会话存储 | 文件 + 数据库 | libsql 嵌入（WAL） | — |
+| 会话存储 | SQLite（WAL）+ Drizzle ORM | libsql（SQLite 兼容，WAL）+ 自写 `Store` trait | 均为 SQLite；见下方[存储对比](#-存储) |
+
+### 🗄️ 存储
+
+两者**底层都是 SQLite**，落盘均为标准 `.db` + `.db-wal` + `.db-shm`（WAL 模式），差异在驱动层与表模型：
+
+| 维度 | opencode `1.17.8` | opencoder `0.1.0` |
+| --- | --- | --- |
+| 数据库 | SQLite（bun 内嵌） | libsql `0.9.30`（SQLite 兼容，`core` + `libsql-sys`） |
+| 访问层 | Drizzle ORM（JS，运行时迁移 `migration` 表） | 手写 SQL + `Store` trait（`crates/store/src/store.rs`） |
+| 驱动语言 | JS/V8 ↔ SQLite C ABI | Rust ↔ libsql C ABI（零拷贝绑定） |
+| WAL PRAGMA | `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `cache_size=-64000`, `foreign_keys=ON` | `journal_mode=WAL`（同样的并发模型） |
+| 表（核心） | `session` / `message` / `step` / `agent` / `tool_use` / `snapshot` / `checkpoint` / `event` / `subagent` | `sessions` / `messages` / `session_inputs` / `session_events` / `subagent_tasks` / `schema_version` |
+| 迁移 | Drizzle migration（运行时比对 `migration` 表 + `meta/_journal.json`） | `schema_version` 单值 + `CREATE TABLE IF NOT EXISTS` 幂等建表 |
+| 库文件命名 | `opencode.db`（按 channel 可变，如 `opencode-dev.db`） | 由 workdir 决定（每 workdir 一个库） |
+
+> 两者的 WAL 并发模型等价（多读一写、读不阻塞写），存储吞吐差异主要来自驱动层 —— opencode 经 Drizzle ORM + V8 跨语言，opencoder 直连 libsql C 绑定且无 ORM 转换层。
 
 > 说明：端到端任务表现受 LLM 主导（首轮 token 延迟为 provider RTT），同一模型下两者任务能力等价；**差异集中在运行时基线** —— 内存占用、启动延迟、分发体积。对受约束环境（CI runner、容器、弱机）与多实例部署（按进程计的 RSS 直接决定并发密度），opencoder 的低开销优势可被直接摊销。
 

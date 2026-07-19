@@ -150,7 +150,7 @@ pub struct SearchResult {
 pub fn parse_ddg_results(html: &str, limit: usize) -> Vec<SearchResult> {
     use scraper::{Html, Selector};
     let doc = Html::parse_document(html);
-    let result_sel = Selector::parse(".result").unwrap_or_else(|e| panic!("bad sel: {e:?}"));
+    let result_sel = Selector::parse(".result").unwrap();
     let link_sel = Selector::parse(".result__a").unwrap();
     let snip_sel = Selector::parse(".result__snippet").unwrap();
     let mut out = Vec::new();

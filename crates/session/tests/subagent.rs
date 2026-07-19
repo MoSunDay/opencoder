@@ -265,6 +265,9 @@ async fn subagent_persists_parent_child_to_store() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -354,6 +357,9 @@ async fn subagent_persists_child_events_to_store() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -456,6 +462,84 @@ async fn subagent_rejects_unknown_type() {
             .iter()
             .any(|e| matches!(e, SessionEvent::SubagentStart { .. })),
         "must not start a subagent for an unknown type"
+    );
+}
+
+#[tokio::test]
+async fn subagent_child_events_persisted_before_return() {
+    // Gap C: child events are persisted INCREMENTALLY via an mpsc flusher that
+    // is awaited before run_subagent returns, so they are durable the instant
+    // `run` completes — no delay/sleep needed (unlike the old detached-spawn
+    // design), and an interruption mid-subagent leaves partial progress behind.
+    let store = mem_store().await;
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "sub-ev2".into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+        })
+        .await
+        .unwrap();
+
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![task_turn("do work")])
+            .push_script(vec![LlmEvent::Completed {
+                text: "child working".into(),
+                tool_calls: vec![CompletedToolCall {
+                    id: "child-tool-2".into(),
+                    name: "bash".into(),
+                    input: serde_json::json!({"command": "echo hello"}),
+                }],
+                usage: Some(Usage {
+                    input_tokens: 5,
+                    output_tokens: 1,
+                    total_tokens: 6,
+                }),
+            }])
+            .push_script(vec![text_done("child finished")])
+            .push_script(vec![text_done("parent done")]),
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session =
+        SessionState::new("sub-ev2", agent, config(), mock, dir.path().to_path_buf())
+            .with_store(store.clone());
+
+    run(&mut session, "delegate".into(), |_| {}).await.unwrap();
+
+    let tasks = store.list_subagent_tasks("sub-ev2").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    let child_id = &tasks[0].child_session_id;
+
+    // NO sleep: events must already be durable before `run` returned.
+    let events = store.events_after(child_id, 0).await.unwrap();
+    assert!(
+        !events.is_empty(),
+        "expected child events persisted for {child_id} immediately after run"
+    );
+
+    // Single ordered consumer -> DB seq strictly ascending.
+    let seqs: Vec<i64> = events.iter().filter_map(|e| e.seq).collect();
+    let mut sorted = seqs.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        seqs, sorted,
+        "child events must persist in emission order (seq ascending)"
+    );
+    assert!(
+        seqs.iter().collect::<std::collections::HashSet<_>>().len() == seqs.len(),
+        "seq values must be unique"
     );
 }
 

@@ -91,6 +91,12 @@
 | `loop_stops_when_closure_returns_none` | 决策闭包返回 `None`（无更多动作）即停 |
 | `loop_respects_max_steps` | 步数预算耗尽返回 `MaxStepsReached` |
 
+### `crates/core/src/agent.rs`（1 单测）
+
+| 测试 | 验证不变式 |
+|------|-----------|
+| `tools_subagent_is_registered_with_capability_tools` | `tools` 子 agent 解析成功且为 `Subagent` 模式；携带 `web_fetch`/`web_search`/`computer_use`/`read`/`glob`/`grep`/`ls`；act 与 plan prompt 均广告 `'tools' subagent` |
+
 ### `crates/session/src/tools/web_read.rs`（14 单测）
 
 | 测试 | 验证不变式 |
@@ -138,4 +144,4 @@
 | `cargo test --workspace` | **664 passed / 0 failed，跨 57 个 binary** |
 | 代理环回旁路 | 设 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY=http://127.0.0.1:9` 且**不设** `NO_PROXY`：`stream_timeout`（2/2）+ web 契约测试（15/15）全过——localhost 流量绕过 bogus 代理，未截断 |
 
-> 本次新增测试合计 29 项（net 6 + computer_use 3 + web_read 14 + capabilities_and_tools 4 + model_menu 2）。`cargo test --workspace` 的 664 计数含 bash 修复迭代（见同目录 `bash-tool-detach-controlling-terminal.md`）的新增项，故非纯本次 delta。
+> 本次新增测试合计 30 项（net 6 + computer_use 3 + web_read 14 + capabilities_and_tools 4 + model_menu 2 + core/agent 1）。`cargo test --workspace` 的 664 计数含 bash 修复迭代（见同目录 `bash-tool-detach-controlling-terminal.md`）的新增项，故非纯本次 delta。

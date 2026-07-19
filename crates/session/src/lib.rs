@@ -45,6 +45,14 @@ pub struct SessionState {
     /// Number of messages in the store that have been summarized (skipped
     /// on resume). `None` means no compaction has occurred.
     pub summary_seq: Option<i64>,
+    /// Plan→act handoff boundary: number of store messages predating the
+    /// handoff (the plan-mode history). On resume these are trimmed and the
+    /// handoff plan instruction is re-attached. `None` = no handoff occurred.
+    pub handoff_seq: Option<i64>,
+    /// Display text of the handoff plan (plan + optional extra). Used to
+    /// reconstruct the synthetic plan instruction on resume and to render the
+    /// plan card.
+    pub handoff_plan: Option<String>,
 }
 
 impl SessionState {
@@ -72,6 +80,8 @@ impl SessionState {
             cancel: None,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
         }
     }
 
@@ -148,6 +158,9 @@ impl SessionState {
                 updated_at: now,
                 summary: self.summary.clone(),
                 summary_seq: self.summary_seq,
+                handoff_seq: self.handoff_seq,
+                handoff_plan: self.handoff_plan.clone(),
+                skill: self.skill_prompt_cloned(),
             };
             store.create_session(&meta).await?;
             self.session_created = true;
@@ -163,6 +176,18 @@ impl SessionState {
     pub fn after_compaction(&mut self, summary: String, summary_seq: i64) {
         self.summary = Some(summary);
         self.summary_seq = Some(summary_seq);
+        self.persisted_count = self.messages.len();
+    }
+
+    /// Update bookkeeping after a plan→act handoff. Records the handoff
+    /// boundary (so resume can trim the plan-mode history) and clears any
+    /// compaction state — handoff is the dominant reset, replacing the whole
+    /// transcript.
+    pub fn after_handoff(&mut self, handoff_seq: i64, handoff_plan: String) {
+        self.handoff_seq = Some(handoff_seq);
+        self.handoff_plan = Some(handoff_plan);
+        self.summary = None;
+        self.summary_seq = None;
         self.persisted_count = self.messages.len();
     }
 }

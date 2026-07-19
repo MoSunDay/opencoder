@@ -70,6 +70,8 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         }
     }
 
+    print_resume_summary(&session).await;
+
     print_prompt_header(&session, &prompt);
     let prompt_owned = prompt.clone();
     opencoder_session::run(&mut session, prompt_owned, |ev| print_event(&ev)).await?;
@@ -134,6 +136,9 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
         updated_at: now,
         summary: meta.summary.clone(),
         summary_seq: meta.summary_seq,
+        handoff_seq: meta.handoff_seq,
+        handoff_plan: meta.handoff_plan.clone(),
+        skill: meta.skill.clone(),
     };
     store.create_session(&forked).await?;
     if !messages.is_empty() {
@@ -159,6 +164,63 @@ fn resolve_workdir(cli: &Cli) -> Result<PathBuf> {
         return Ok(w.clone());
     }
     std::env::current_dir().context("get current dir")
+}
+
+/// Format a one-line summary of a resumed session's subagent tasks (Gap D).
+/// Returns `None` when there are no tasks (e.g. a fresh session) so the caller
+/// can skip printing. Pure / synchronous so it is directly unit-testable.
+pub(crate) fn format_resume_summary(
+    tasks: &[opencoder_store::SubagentTaskRecord],
+) -> Option<String> {
+    if tasks.is_empty() {
+        return None;
+    }
+    use opencoder_store::SubagentStatus;
+    let total = tasks.len();
+    let done = tasks
+        .iter()
+        .filter(|t| t.status != SubagentStatus::Running)
+        .count();
+    let details: Vec<String> = tasks
+        .iter()
+        .map(|t| {
+            let mark = match t.status {
+                SubagentStatus::Completed => {
+                    if t.ok == Some(false) {
+                        "\u{2718}"
+                    } else {
+                        "\u{2714}"
+                    }
+                }
+                SubagentStatus::Failed => "\u{2718}",
+                SubagentStatus::Running => "\u{2026}",
+            };
+            format!("{mark} {}", truncate(&t.prompt, 40))
+        })
+        .collect();
+    Some(format!(
+        "\u{2937} resumed session: {done}/{total} subagents done \u{2014} {}",
+        details.join(", ")
+    ))
+}
+
+/// Print a one-line summary of the resumed session's subagent tasks so a
+/// headless `opencode -s` user can see prior dispatches and their outcomes
+/// (otherwise resume shows nothing about restored subagent context). Mirrors
+/// the live `SubagentStart`/`SubagentEnd` glyph style. No-op when there are no
+/// subagent tasks (e.g. a fresh session).
+async fn print_resume_summary(session: &SessionState) {
+    let store = match &session.store {
+        Some(s) => s,
+        None => return,
+    };
+    let tasks = match store.list_subagent_tasks(&session.id).await {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    if let Some(line) = format_resume_summary(&tasks) {
+        eprintln!("\x1b[34m{line}\x1b[0m");
+    }
 }
 
 fn print_prompt_header(_session: &SessionState, prompt: &str) {
@@ -317,6 +379,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn format_resume_summary_lists_subagents() {
+        use opencoder_store::{SubagentStatus, SubagentTaskRecord};
+        fn task(
+            id: &str,
+            agent: &str,
+            prompt: &str,
+            status: SubagentStatus,
+            ok: Option<bool>,
+        ) -> SubagentTaskRecord {
+            SubagentTaskRecord {
+                task_id: id.into(),
+                parent_session_id: "p".into(),
+                child_session_id: format!("c-{id}"),
+                parent_message_id: None,
+                agent: agent.into(),
+                prompt: prompt.into(),
+                result: None,
+                status,
+                ok,
+                started_at: 0,
+                completed_at: Some(1),
+            }
+        }
+        // Empty -> None.
+        assert!(format_resume_summary(&[]).is_none());
+
+        let tasks = vec![
+            task("t1", "explore", "find all TODO comments", SubagentStatus::Completed, Some(true)),
+            task("t2", "build", "fix the bug in module foo bar baz qux", SubagentStatus::Failed, Some(false)),
+        ];
+        let s = format_resume_summary(&tasks).expect("non-empty -> Some");
+        assert!(s.contains("2/2 subagents done"), "got: {s}");
+        assert!(s.contains('\u{2714}'), "completed mark (✔) present: {s}");
+        assert!(s.contains('\u{2718}'), "failed mark (✘) present: {s}");
+        assert!(s.contains("find all TODO comments"), "explore prompt present: {s}");
+        assert!(s.contains("fix the bug in module foo bar baz qux"), "build prompt present: {s}");
+
+        // A Running task counts toward total but not done.
+        let running = vec![task("r", "explore", "still going", SubagentStatus::Running, None)];
+        let s = format_resume_summary(&running).expect("Some");
+        assert!(s.contains("0/1 subagents done"), "running not counted as done: {s}");
+        assert!(s.contains('\u{2026}'), "running mark (…) present: {s}");
+    }
+
     #[tokio::test]
     async fn pick_resume_id_resolves_task_id_to_parent_session() {
         use clap::Parser;
@@ -339,6 +446,9 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
             })
             .await
             .unwrap();
@@ -355,6 +465,9 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
             })
             .await
             .unwrap();
@@ -405,6 +518,9 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
             })
             .await
             .unwrap();

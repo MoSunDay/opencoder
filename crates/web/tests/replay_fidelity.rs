@@ -77,6 +77,9 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             updated_at: 1,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

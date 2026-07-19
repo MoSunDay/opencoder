@@ -268,6 +268,9 @@ async fn fork_does_not_mutate_parent() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

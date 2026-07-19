@@ -24,6 +24,9 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         updated_at: now,
         summary: None,
         summary_seq: None,
+        handoff_seq: None,
+        handoff_plan: None,
+        skill: None,
     };
     store.create_session(&meta).await.unwrap();
 }

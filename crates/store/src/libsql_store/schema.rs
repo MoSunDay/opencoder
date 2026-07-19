@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   summary      TEXT,
-  summary_seq  INTEGER
+  summary_seq  INTEGER,
+  handoff_seq  INTEGER,
+  handoff_plan TEXT,
+  skill        TEXT
 )";
 const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (
@@ -147,6 +150,20 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         )
         .await
         .context("migrate v2: add sse_kind column")?;
+    }
+    if from < 3 {
+        // v3: plan→act handoff boundary + active skill on sessions, so resume
+        // can reconstruct the post-handoff focused transcript and the active
+        // skill across restarts. All nullable so existing rows stay valid.
+        conn.execute("ALTER TABLE sessions ADD COLUMN handoff_seq INTEGER", ())
+            .await
+            .context("migrate v3: add handoff_seq column")?;
+        conn.execute("ALTER TABLE sessions ADD COLUMN handoff_plan TEXT", ())
+            .await
+            .context("migrate v3: add handoff_plan column")?;
+        conn.execute("ALTER TABLE sessions ADD COLUMN skill TEXT", ())
+            .await
+            .context("migrate v3: add skill column")?;
     }
     Ok(())
 }

@@ -86,6 +86,9 @@ async fn seed_session(store: &Arc<dyn Store>) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -104,6 +107,9 @@ async fn seed_session_id(store: &Arc<dyn Store>, id: &str) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

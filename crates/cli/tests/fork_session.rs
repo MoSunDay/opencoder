@@ -26,6 +26,9 @@ async fn seed(store: &Arc<dyn Store>, id: &str) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

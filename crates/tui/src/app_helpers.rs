@@ -75,6 +75,75 @@ pub(crate) fn pre_key_intercept(
     false
 }
 
+/// Decide what text to insert into the composer for a bracketed-paste event.
+///
+/// Decide what text to insert into the composer for a bracketed-paste event.
+///
+/// Dragging a file into the terminal delivers its path atomically — sometimes
+/// with a trailing newline, surrounding quotes, a `file://` URI prefix, or
+/// backslash-escaped spaces (terminals that quote paths containing spaces).
+/// When the payload resolves to an existing file — absolute, or relative to
+/// `workdir` (so a drag-pasted bare filename like `src/main.rs` also works) —
+/// we echo its canonical absolute path; otherwise the raw text is returned
+/// unchanged so ordinary text pastes keep working. Only payloads that point at
+/// a real file on disk are rewritten, so a pasted word that is not a file is
+/// never surprising.
+pub(crate) fn paste_payload(payload: &str, workdir: &Path) -> String {
+    // Drop a single trailing newline that many terminals append to pastes.
+    let trimmed = payload
+        .strip_suffix('\n')
+        .or_else(|| payload.strip_suffix('\r'))
+        .unwrap_or(payload);
+
+    // Only single-line, non-empty payloads can be a file path.
+    if trimmed.is_empty() || trimmed.contains('\n') || trimmed.contains('\r') {
+        return payload.to_string();
+    }
+
+    // Strip surrounding single/double quotes and a possible `file://` scheme.
+    let mut candidate = trimmed.trim_matches(|c| c == '\'' || c == '"');
+    if let Some(rest) = candidate.strip_prefix("file://") {
+        candidate = rest;
+    }
+
+    if let Some(full) = resolve_existing_path(candidate, workdir) {
+        full.to_string_lossy().into_owned()
+    } else {
+        payload.to_string()
+    }
+}
+
+/// If `candidate` points at an existing file, return its canonical absolute
+/// form. Absolute paths are resolved directly; relative paths are resolved
+/// against `workdir` (so a drag-pasted relative filename resolves to its full
+/// path). Falls back to un-escaping backslash-escaped spaces that some
+/// terminals insert when pasting paths containing spaces.
+fn resolve_existing_path(candidate: &str, workdir: &Path) -> Option<PathBuf> {
+    use std::borrow::Cow;
+    let path = Path::new(candidate);
+    let base: Cow<Path> = if path.is_absolute() {
+        Cow::Borrowed(path)
+    } else {
+        Cow::Owned(workdir.join(candidate))
+    };
+    if let Ok(full) = base.canonicalize() {
+        return Some(full);
+    }
+    // Some terminals escape spaces as "\ "; retry with them un-escaped.
+    let unescaped: String = candidate.replace("\\ ", " ");
+    if unescaped != candidate {
+        let base2: std::path::PathBuf = if Path::new(&unescaped).is_absolute() {
+            Path::new(&unescaped).to_path_buf()
+        } else {
+            workdir.join(&unescaped)
+        };
+        if let Ok(full) = base2.canonicalize() {
+            return Some(full);
+        }
+    }
+    None
+}
+
 pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
     SessionInput {
         seq: None,
@@ -85,6 +154,23 @@ pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> Se
         admitted_seq: 0,
         promoted_seq: None,
     }
+}
+
+/// Drop every pending steer/queue input from the store and reset both
+/// in-memory mirrors. Used on double-Esc hard-abort (`KeyAction::Cancel`)
+/// so buffered inputs don't resurface on resume. `delete_input` only
+/// touches rows whose `promoted_seq IS NULL`, so fanning out over both
+/// mirrors is safe even if the runner already promoted/consumed some.
+pub(crate) async fn clear_pending_inputs(
+    store: &dyn Store,
+    steer_items: &mut Vec<(i64, String)>,
+    queue_items: &mut Vec<(i64, String)>,
+) {
+    for (seq, _) in steer_items.iter().chain(queue_items.iter()) {
+        let _ = store.delete_input(*seq).await;
+    }
+    steer_items.clear();
+    queue_items.clear();
 }
 
 /// Begin a new worker turn with a fresh, uncancelled cancellation token.
@@ -547,6 +633,71 @@ mod tests {
         SubagentTaskRecord,
     };
     use ratatui::layout::Rect;
+
+    #[test]
+    fn paste_existing_absolute_file_echoes_full_path() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let raw = tmp.path().to_string_lossy().into_owned();
+        let expected = tmp.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        // Absolute paths ignore workdir.
+        assert_eq!(paste_payload(&raw, Path::new("/")), expected);
+    }
+
+    #[test]
+    fn paste_existing_file_with_trailing_newline_echoes_full_path() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let raw = tmp.path().to_string_lossy().into_owned();
+        let expected = tmp.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(paste_payload(&format!("{raw}\n"), Path::new("/")), expected);
+    }
+
+    #[test]
+    fn paste_quoted_absolute_file_echoes_full_path() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let raw = tmp.path().to_string_lossy().into_owned();
+        let expected = tmp.path().canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(paste_payload(&format!("'{raw}'"), Path::new("/")), expected);
+        assert_eq!(paste_payload(&format!("{raw}\""), Path::new("/")), expected);
+    }
+
+    #[test]
+    fn paste_existing_relative_file_resolves_against_workdir() {
+        // A drag-pasted bare relative filename resolves to its full absolute
+        // path when it exists relative to the session workdir.
+        let dir = tempfile::tempdir().unwrap();
+        let rel = "src/main.rs";
+        let abs = dir.path().join(rel);
+        std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        std::fs::write(&abs, "fn main(){}").unwrap();
+        let expected = abs.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(paste_payload(rel, dir.path()), expected);
+    }
+
+    #[test]
+    fn paste_nonexistent_absolute_path_returned_verbatim() {
+        let raw = "/this/does/not/exist/xyz";
+        assert_eq!(paste_payload(raw, Path::new("/")), raw);
+    }
+
+    #[test]
+    fn paste_multiline_text_returned_verbatim() {
+        let raw = "first line\nsecond line\n";
+        assert_eq!(paste_payload(raw, Path::new("/")), raw);
+    }
+
+    #[test]
+    fn paste_empty_returned_verbatim() {
+        assert_eq!(paste_payload("", Path::new("/")), "");
+        assert_eq!(paste_payload("\n", Path::new("/")), "\n");
+    }
+
+    #[test]
+    fn paste_non_file_text_returned_verbatim() {
+        // A plain word that is not an existing file relative to workdir is
+        // never rewritten, so ordinary text pastes are never surprising.
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(paste_payload("hello world", dir.path()), "hello world");
+    }
 
     /// `Store` whose every method panics. The `ScrollDown` branch of
     /// `handle_mouse` never touches the store, so passing a reference is safe;
@@ -1337,6 +1488,43 @@ mod tests {
         assert!(
             !dbl_click,
             "a header toggle must not be flagged as a double-click"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
+        use opencoder_store::LibsqlStore;
+        let store = LibsqlStore::open_memory().await.unwrap();
+        let sid = "s1";
+        store
+            .create_session(&SessionMeta {
+                id: sid.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let s_seq = store
+            .admit_input(&mk_input(sid, Delivery::Steer, "steer-1"))
+            .await
+            .unwrap();
+        let q_seq = store
+            .admit_input(&mk_input(sid, Delivery::Queue, "queue-1"))
+            .await
+            .unwrap();
+        let mut steer_items = vec![(s_seq, String::from("steer-1"))];
+        let mut queue_items = vec![(q_seq, String::from("queue-1"))];
+
+        clear_pending_inputs(&store, &mut steer_items, &mut queue_items).await;
+
+        assert!(steer_items.is_empty(), "steer mirror cleared");
+        assert!(queue_items.is_empty(), "queue mirror cleared");
+        assert!(
+            store.pending_inputs(sid, Delivery::Steer).await.unwrap().is_empty(),
+            "steer rows deleted from store"
+        );
+        assert!(
+            store.pending_inputs(sid, Delivery::Queue).await.unwrap().is_empty(),
+            "queue rows deleted from store"
         );
     }
 }

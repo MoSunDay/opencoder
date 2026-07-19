@@ -1142,3 +1142,62 @@ async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
     );
 }
 
+#[test]
+fn double_esc_while_running_cancels() {
+    // Two Esc presses within ESC_CANCEL_WINDOW_MS while running should produce
+    // KeyAction::Cancel (hard-abort). The first press records the timestamp;
+    // the second, falling inside the window, returns Cancel.
+    let history: Vec<String> = vec![];
+    let mut input = String::from("draft");
+    let mut idx = 5;
+    let mut hist_idx = None;
+    let mut show_help = false;
+    let mut scroll = 0u16;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let esc = key(KeyCode::Esc, KeyModifiers::NONE);
+
+    let first = handle_key(
+        esc,
+        &mut input,
+        &mut idx,
+        &history,
+        &mut hist_idx,
+        true,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        None,
+        80,
+        2,
+    );
+    assert!(matches!(first, KeyAction::None), "first esc is a soft clear");
+    assert!(last_esc.is_some(), "first esc records the timestamp");
+
+    let second = handle_key(
+        esc,
+        &mut input,
+        &mut idx,
+        &history,
+        &mut hist_idx,
+        true,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        None,
+        80,
+        2,
+    );
+    assert!(
+        matches!(second, KeyAction::Cancel),
+        "double esc within the window must hard-abort"
+    );
+}
+

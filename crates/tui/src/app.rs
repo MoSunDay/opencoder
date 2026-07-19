@@ -802,6 +802,7 @@ async fn run_app(
                                 let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
                             }
                             KeyAction::SetSkill(opt) => {
+                                let skill_body = opt.as_ref().map(|(_, body)| body.clone());
                                 match opt {
                                     Some((name, body)) => {
                                         active_skill = Some(name.clone());
@@ -816,6 +817,20 @@ async fn run_app(
                                         *skill_handle.lock().unwrap() = None;
                                     }
                                 }
+                                // Persist the active skill so it survives
+                                // resume/restart (best-effort; the in-memory
+                                // mutex write above keeps the in-flight turn
+                                // immediate).
+                                let _ = store
+                                    .update_session(
+                                        &session_id,
+                                        &opencoder_store::SessionPatch {
+                                            skill: skill_body,
+                                            updated_at: Some(opencoder_core::message::now_ms()),
+                                            ..Default::default()
+                                        },
+                                    )
+                                    .await;
                             }
                             KeyAction::Cancel => {
                                 cancel.cancel();

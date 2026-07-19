@@ -52,9 +52,23 @@ pub async fn resume(
         }
     }
 
-    // If compaction was persisted, trim the summarized head and prepend
-    // the summary message so the resumed transcript matches the pre-exit state.
-    if let Some(skip) = meta.summary_seq {
+    // Plan→act handoff (dominant reset) and compaction are mutually exclusive
+    // on resume: when a handoff boundary was persisted, trim the plan-mode
+    // history and re-attach the synthetic plan instruction; otherwise apply a
+    // persisted compaction trim. Handoff wins because it replaces the whole
+    // transcript, so any stale compaction metadata from plan mode is moot.
+    if let Some(hs) = meta.handoff_seq {
+        if let Some(plan_display) = &meta.handoff_plan {
+            let hs = hs as usize;
+            if hs < messages.len() {
+                messages = messages[hs..].to_vec();
+            } else {
+                messages = Vec::new();
+            }
+            let plan_msg = crate::plan_handoff::handoff_message(plan_display);
+            messages.insert(0, plan_msg);
+        }
+    } else if let Some(skip) = meta.summary_seq {
         if skip > 0 {
             let skip = skip as usize;
             if skip < messages.len() {
@@ -132,12 +146,14 @@ pub async fn resume(
         client,
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
-        skill_prompt: Arc::new(Mutex::new(None)),
+        skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
         persisted_count: n,
         session_created: true,
         cancel: None,
         summary: meta.summary,
         summary_seq: meta.summary_seq,
+        handoff_seq: meta.handoff_seq,
+        handoff_plan: meta.handoff_plan.clone(),
     };
     let _ = &mut s;
     Ok(s)
@@ -250,12 +266,19 @@ async fn replay_child(
     )
     .await?;
 
-    // Buffer child continuation events and persist them in emission order so
-    // the child transcript + event stream stay reconstructable (same pattern
-    // as `run_subagent`).
+    // Incremental child-event persistence (same ordered-flusher pattern as
+    // `run_subagent`): events reach the DB as they are produced so a second
+    // interruption still leaves partial child progress reconstructable.
     let child_id = task.child_session_id.clone();
-    let pending: Arc<Mutex<Vec<SessionEventRecord>>> = Arc::new(Mutex::new(Vec::new()));
-    let pending_cb = Arc::clone(&pending);
+    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<SessionEventRecord>(256);
+    let flush_store = store.clone();
+    let flusher = tokio::spawn(async move {
+        while let Some(rec) = ev_rx.recv().await {
+            if let Err(e) = flush_store.append_event(&rec).await {
+                tracing::warn!(error = %e, "replay: failed to persist child event");
+            }
+        }
+    });
     let registry = crate::tools::registry();
     let res = crate::runner::run_with_registry(
         &mut child,
@@ -270,21 +293,15 @@ async fn replay_child(
                 seq: None,
                 sse_kind: Some(cev.sse_kind().to_string()),
             };
-            pending_cb.lock().unwrap().push(rec);
+            if let Err(e) = ev_tx.try_send(rec) {
+                tracing::warn!(error = %e, "replay: child event channel full/closed, dropping event");
+            }
         },
     )
     .await;
-
-    let records = pending
-        .lock()
-        .unwrap()
-        .drain(..)
-        .collect::<Vec<_>>();
-    for rec in &records {
-        if let Err(e) = store.append_event(rec).await {
-            tracing::warn!(error = %e, "replay: failed to persist child event");
-        }
-    }
+    // The callback owned `ev_tx`; once `run_with_registry` returns the closure
+    // is dropped, closing the channel so the flusher drains and exits.
+    let _ = flusher.await;
 
     let ok = res.is_ok();
     let text = child

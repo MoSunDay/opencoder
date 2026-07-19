@@ -76,6 +76,9 @@ async fn seed_session(store: &Arc<dyn Store>) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -221,6 +224,9 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -351,6 +357,9 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();
@@ -421,6 +430,9 @@ async fn skill_only_empty_prompt_records_user_trigger_message() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

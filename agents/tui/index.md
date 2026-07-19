@@ -34,7 +34,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 ## 依赖与接口
 - 依赖：ratatui 0.29、crossterm（不再启用 `event-stream` feature——输入采集改专用线程 poll/read）、tokio、opencoder-session、opencoder-core、opencoder-store、opencoder-llm（estimate）。
 - 被依赖：binary crate（`src/main.rs` → `opencoder_tui::run_tui`）。
-- worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAgentNoClear,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。worker 对每条 SessionEvent（含 AgentSwitch/TranscriptReset/Compaction 等控制事件）调 `persist_event` 写 store，与 web drain 路径一致，保证 TUI 会话可被 web 回放。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。
+- worker 通道：`UiCmd::{Prompt,SwitchAgent,SwitchAgentNoClear,SwitchAndStart,Compact,SetSkill,ReloadConfig,ResetCancel,Quit}` → `UiEvent::{Session(SessionEvent),TurnDone}`。worker 对每条 SessionEvent（含 AgentSwitch/TranscriptReset/Compaction 等控制事件）调 `persist_event` 写 store，与 web drain 路径一致，保证 TUI 会话可被 web 回放。`ResetCancel(CancellationToken)` 在每个 turn 开始前由 `start_turn` 发出，把 `sess.cancel` 换成未取消的新 token（loop 的 `cancel` 句柄同步重指），保证双击 Esc 中止后仍可提交。**跨重启上下文持久**：`SetSkill` 与 `SwitchAndStart` 经 `SessionPatch` 落库（`skill` / `handoff_seq` / `handoff_plan`），`KeyAction::SetSkill` 在 app 层 best-effort 持久化技能，故技能与 plan→act 移交边界跨重启保留。`session_ui::replay_into_chat` 从 `meta.handoff_plan` 推入 `ChatBlock::Plan`，resume 时展示移交 plan 卡片。
 
 ## 相关模块
 - [agents/session](../session/index.md) — SessionEvent 来源。

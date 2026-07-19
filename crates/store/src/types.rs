@@ -20,6 +20,12 @@ pub struct SessionMeta {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -34,6 +40,12 @@ pub struct SessionPatch {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
 }

@@ -4,8 +4,8 @@ use libsql::{params, params_from_iter, Connection, Value};
 use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
@@ -20,6 +20,9 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
             meta.updated_at,
             meta.summary.as_deref(),
             meta.summary_seq,
+            meta.handoff_seq,
+            meta.handoff_plan.as_deref(),
+            meta.skill.as_deref(),
         ],
     )
     .await
@@ -29,7 +32,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq FROM sessions WHERE id = ?")
+        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -119,6 +122,18 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("summary_seq = ?");
         args.push(v.into());
     }
+    if let Some(v) = patch.handoff_seq {
+        sets.push("handoff_seq = ?");
+        args.push(v.into());
+    }
+    if let Some(v) = &patch.handoff_plan {
+        sets.push("handoff_plan = ?");
+        args.push(v.clone().into());
+    }
+    if let Some(v) = &patch.skill {
+        sets.push("skill = ?");
+        args.push(v.clone().into());
+    }
     if let Some(v) = patch.updated_at {
         sets.push("updated_at = ?");
         args.push(v.into());
@@ -160,6 +175,9 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
         updated_at: r.get::<i64>(6)?,
         summary: r.get::<Option<String>>(7)?,
         summary_seq: r.get::<Option<i64>>(8)?,
+        handoff_seq: r.get::<Option<i64>>(9)?,
+        handoff_plan: r.get::<Option<String>>(10)?,
+        skill: r.get::<Option<String>>(11)?,
     })
 }
 

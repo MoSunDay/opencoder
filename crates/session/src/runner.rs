@@ -723,6 +723,9 @@ async fn run_subagent(
                 updated_at: now_ms(),
                 summary: None,
                 summary_seq: None,
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
             })
             .await;
         // Mark the child session as already created so persist() doesn't
@@ -760,18 +763,33 @@ async fn run_subagent(
     let parent_sink = Arc::clone(sink);
     let call_id_for_cb = call_id.clone();
     let has_store = child_store.is_some();
-    let pending_records: Arc<Mutex<Vec<SessionEventRecord>>> = Arc::new(Mutex::new(Vec::new()));
-    let pending_records_clone = Arc::clone(&pending_records);
+    // Incremental child-event persistence: a single flusher task drains an
+    // mpsc channel and awaits `append_event` per record in emission order (one
+    // consumer → DB seq stays aligned with emission order). Events reach the DB
+    // as they are produced, so a hard interruption mid-subagent leaves partial
+    // progress persisted (reconstruct_child_view reads events_after(child, 0))
+    // instead of losing everything. The flusher is awaited before return so a
+    // normal completion flushes 100% of buffered events.
+    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<SessionEventRecord>(256);
+    let flush_store = child_store.clone();
+    let flusher = tokio::spawn(async move {
+        while let Some(rec) = ev_rx.recv().await {
+            if let Some(store) = &flush_store {
+                if let Err(e) = store.append_event(&rec).await {
+                    tracing::warn!(error = %e, "subagent: failed to persist child event");
+                }
+            }
+        }
+    });
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
         registry,
         move |cev| {
-            // Buffer child events for ordered persistence after the run.
-            // Previously each event was persisted via a detached tokio::spawn,
-            // which made DB seq ordering non-deterministic and could lose
-            // events if the process exited before the spawned task completed.
-            // Buffering + ordered flush keeps seq aligned with emission order.
+            // Incremental persist: push to the ordered flusher channel. The
+            // callback is sync (cannot await), so try_send; a full/closed
+            // channel is logged and the single event dropped rather than
+            // blocking the run.
             if has_store {
                 let rec = SessionEventRecord {
                     session_id: child_id_for_cb.clone(),
@@ -781,7 +799,9 @@ async fn run_subagent(
                     seq: None,
                     sse_kind: Some(cev.sse_kind().to_string()),
                 };
-                pending_records_clone.lock().unwrap().push(rec);
+                if let Err(e) = ev_tx.try_send(rec) {
+                    tracing::warn!(error = %e, "subagent: child event channel full/closed, dropping event");
+                }
             }
             match &cev {
                 SessionEvent::ToolStart { .. } => *tool_count += 1,
@@ -801,20 +821,11 @@ async fn run_subagent(
     ))
     .await;
 
-    // Flush buffered child events in emission order so DB seq matches the
-    // order events were produced by the subagent.
-    if let Some(ref store) = child_store {
-        let records = pending_records
-            .lock()
-            .unwrap()
-            .drain(..)
-            .collect::<Vec<_>>();
-        for rec in &records {
-            if let Err(e) = store.append_event(rec).await {
-                tracing::warn!(error = %e, "subagent: failed to persist child event");
-            }
-        }
-    }
+    // The callback owned `ev_tx`; once `run_with_registry` returns the closure
+    // is dropped, closing the channel so the flusher drains remaining events
+    // and exits. Await it so this function returns only after every event is
+    // durably persisted.
+    let _ = flusher.await;
 
     let ok = res.is_ok();
     let text = child

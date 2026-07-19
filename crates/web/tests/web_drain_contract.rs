@@ -60,6 +60,9 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
         })
         .await
         .unwrap();

@@ -58,7 +58,12 @@ pub fn registry() -> HashMap<String, ToolArc> {
 /// plan-mode read-only contract at the *schema* layer, before any runtime guard
 /// ever fires.
 pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Value> {
-    tools
+    // Build (name, schema) pairs, then sort by name. A bare `.values().collect()`
+    // would inherit `HashMap`'s randomized iteration order (Rust reseeds
+    // `RandomState` per process), making the `tools` array in every ChatRequest
+    // differ run-to-run: non-reproducible requests and order-sensitive tool
+    // selection by the model. Sorting pins the order regardless of hash seed.
+    let mut entries: Vec<(String, Value)> = tools
         .values()
         .map(|t| {
             let name = t.name();
@@ -67,16 +72,19 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
             } else {
                 (t.description(), t.parameters())
             };
-            serde_json::json!({
+            let schema = serde_json::json!({
                 "type": "function",
                 "function": {
                     "name": name,
                     "description": description,
                     "parameters": opencoder_llm::schema::sanitize_tool_schema(&parameters),
                 }
-            })
+            });
+            (name.to_string(), schema)
         })
-        .collect()
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.into_iter().map(|(_, v)| v).collect()
 }
 
 #[cfg(test)]
@@ -167,5 +175,30 @@ mod tests {
             .find(|v| v["function"]["name"] == "read")
             .expect("read schema present")["function"];
         assert!(!func["description"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn schema_for_is_deterministically_ordered() {
+        // The full tool registry is a `HashMap`, whose iteration order is
+        // randomized per process (Rust reseeds `RandomState`). The `tools`
+        // array sent in every ChatRequest must NOT depend on that hash seed,
+        // otherwise requests are non-reproducible run-to-run (resumed sessions
+        // would send tools in a different order than the original). Assert a
+        // stable, sorted order. On the old unsorted code this assertion failed
+        // ~randomly per process run.
+        let tools = registry();
+        for kind in [AgentKind::Act, AgentKind::Plan] {
+            let schemas = schema_for(&tools, kind);
+            let names: Vec<&str> = schemas
+                .iter()
+                .map(|v| v["function"]["name"].as_str().unwrap())
+                .collect();
+            let mut sorted = names.clone();
+            sorted.sort();
+            assert_eq!(
+                names, sorted,
+                "tool schemas must be sorted by name for deterministic requests ({kind:?}); got {names:?}"
+            );
+        }
     }
 }

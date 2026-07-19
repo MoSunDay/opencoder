@@ -39,6 +39,15 @@ verify. Do not re-plan; proceed directly with implementation.\n\n";
 pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
     let plan = final_plan_text(&session.messages)?;
 
+    // Total store messages that predate the handoff (the plan-mode history to
+    // trim on resume). Mirrors compaction's head_store_msgs accounting: if a
+    // prior compaction left a synthetic summary at the head, that message is
+    // NOT in the store, so the store count is summary_seq + (messages.len()-1).
+    let prior_skip = session.summary_seq.unwrap_or(0) as usize;
+    let has_prior_summary = session.summary_seq.is_some();
+    let store_msg_count =
+        prior_skip + session.messages.len() - if has_prior_summary { 1 } else { 0 };
+
     // Display text for the UI plan card: the plan plus any text the user
     // left in the plan-mode input box. This is what the user sees — NOT the
     // LLM directive prefix.
@@ -49,13 +58,23 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
         display.push_str(extra);
     }
 
-    // LLM body: the directive prefix followed by the same plan + extra.
+    let msg = handoff_message(&display);
+    session.messages = vec![msg];
+    // Record the boundary so resume can reconstruct this focused transcript.
+    session.after_handoff(store_msg_count as i64, display.clone());
+
+    Some(display)
+}
+
+/// Build the synthetic plan→act handoff instruction message from the display
+/// text (plan + optional extra). The LLM body is the directive prefix followed
+/// by the display text. Exposed so `resume` can reconstruct the exact same
+/// message without duplicating the prefix.
+pub fn handoff_message(display: &str) -> Message {
     let body = format!("{HANDOFF_PREFIX}{display}");
     let mut msg = Message::user(new_id(), body);
     msg.synthetic = true;
-    session.messages = vec![msg];
-
-    Some(display)
+    msg
 }
 
 /// Extract the final plan: the newest assistant message with non-empty text.

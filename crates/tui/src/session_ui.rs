@@ -221,6 +221,19 @@ pub async fn replay_into_chat(
         ..Default::default()
     };
 
+    // If a plan→act handoff was persisted, render the plan card at the top so
+    // the resumed/switched-back view shows the same focused plan context the
+    // user had before exit (the synthetic handoff message itself is skipped by
+    // replay_one, so the card is the only representation).
+    if let Ok(Some(meta)) = store.get_session(session_id).await {
+        if let Some(plan) = &meta.handoff_plan {
+            let rendered = crate::markdown::render(plan);
+            if !rendered.is_empty() {
+                chat.blocks.push(ChatBlock::Plan { rendered });
+            }
+        }
+    }
+
     // Load subagent tasks and group by parent_message_id so they can be
     // interleaved after the corresponding assistant message block.
     let tasks = store

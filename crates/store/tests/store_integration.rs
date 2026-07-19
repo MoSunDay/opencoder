@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, SessionPatch, Store};
 use tempfile::TempDir;
 
 fn conv(seed: &str, n: usize) -> Vec<Message> {
@@ -59,6 +59,9 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         updated_at: now,
         summary: None,
         summary_seq: None,
+        handoff_seq: None,
+        handoff_plan: None,
+        skill: None,
     };
     store.create_session(&meta).await.unwrap();
 }
@@ -341,7 +344,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 2, "schema_version must be 2 after bootstrap");
+    assert_eq!(v, 3, "schema_version must be 3 after bootstrap");
 }
 
 #[tokio::test]
@@ -620,6 +623,9 @@ async fn bundle_export_import_roundtrip() {
         updated_at: 2000,
         summary: None,
         summary_seq: None,
+        handoff_seq: None,
+        handoff_plan: None,
+        skill: None,
     };
     store.create_session(&parent_meta).await.unwrap();
     let msgs = conv("parent", 4);
@@ -636,6 +642,9 @@ async fn bundle_export_import_roundtrip() {
         updated_at: 2100,
         summary: None,
         summary_seq: None,
+        handoff_seq: None,
+        handoff_plan: None,
+        skill: None,
     };
     store.create_session(&child_meta).await.unwrap();
     let child_msgs = conv("child", 2);
@@ -999,6 +1008,9 @@ fn meta_for(id: &str) -> SessionMeta {
         updated_at: 1,
         summary: None,
         summary_seq: None,
+        handoff_seq: None,
+        handoff_plan: None,
+        skill: None,
     }
 }
 
@@ -1073,7 +1085,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 2, "schema version must be 2 after migration");
+        assert_eq!(v, 3, "schema version must be 3 after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -1105,5 +1117,57 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 2, "schema version stays 2 after idempotent re-open");
+    assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
+}
+
+#[tokio::test]
+async fn session_handoff_and_skill_fields_round_trip() {
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let id = "rt-session";
+    store
+        .create_session(&SessionMeta {
+            id: id.into(),
+            title: None,
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+        })
+        .await
+        .unwrap();
+
+    // Initially null.
+    let m0 = store.get_session(id).await.unwrap().unwrap();
+    assert!(m0.handoff_seq.is_none());
+    assert!(m0.handoff_plan.is_none());
+    assert!(m0.skill.is_none());
+
+    // Persist via SessionPatch.
+    store
+        .update_session(
+            id,
+            &SessionPatch {
+                handoff_seq: Some(7),
+                handoff_plan: Some("## Plan\n1. x".into()),
+                skill: Some("be terse".into()),
+                updated_at: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let m1 = store.get_session(id).await.unwrap().unwrap();
+    assert_eq!(m1.handoff_seq, Some(7));
+    assert_eq!(m1.handoff_plan.as_deref(), Some("## Plan\n1. x"));
+    assert_eq!(m1.skill.as_deref(), Some("be terse"));
+    // Untouched fields preserved.
+    assert_eq!(m1.agent.as_deref(), Some("act"));
+    assert!(m1.summary_seq.is_none());
 }

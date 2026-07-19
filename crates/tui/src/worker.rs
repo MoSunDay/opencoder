@@ -162,6 +162,21 @@ pub async fn process_cmd(
             // Mirrors compaction — in-memory mutation + TranscriptReset so the
             // UI rebuilds clean; the append-only store keeps the raw history.
             if let Some(plan_display) = opencoder_session::plan_handoff::handoff(sess, &extra) {
+                // Persist the handoff boundary so resume reconstructs the
+                // focused post-handoff transcript (mirrors compaction).
+                if let Some(store) = &sess.store {
+                    let _ = store
+                        .update_session(
+                            &sess.id,
+                            &opencoder_store::SessionPatch {
+                                handoff_seq: sess.handoff_seq,
+                                handoff_plan: sess.handoff_plan.clone(),
+                                updated_at: Some(now_ms()),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                }
                 let ev = SessionEvent::TranscriptReset(sess.messages.clone());
                 persist_event(&sess.store, &sess.id, &ev);
                 let _ = evt_tx.try_send(UiEvent::Session(ev));

@@ -51,7 +51,7 @@ futures = "0.3"
 async-trait = "0.1"
 libsql = { version = "0.9.30", default-features = false, features = ["core", "libsql-sys", "parser", "serde"] }
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "socks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

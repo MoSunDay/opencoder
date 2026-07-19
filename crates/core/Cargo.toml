@@ -13,7 +13,9 @@ async-trait.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 dirs.workspace = true
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

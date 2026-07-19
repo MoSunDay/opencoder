@@ -99,6 +99,8 @@ mod tests {
             interleaved_thinking: None,
             context_threshold: 1000,
             fps: 10,
+            capabilities_browser: false,
+            capabilities_computer_use: false,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::json!("{MY_KEY}"));
@@ -116,6 +118,8 @@ mod tests {
             interleaved_thinking: None,
             context_threshold: 1000,
             fps: 10,
+            capabilities_browser: false,
+            capabilities_computer_use: false,
         };
         let v = p.to_json();
         let provider_has_key = v
@@ -140,6 +144,8 @@ mod tests {
             interleaved_thinking: None,
             context_threshold: 1000,
             fps: 10,
+            capabilities_browser: false,
+            capabilities_computer_use: false,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::Value::Null);
@@ -216,6 +222,8 @@ mod tests {
             Field::InterleavedThinking,
             Field::Threshold,
             Field::Fps,
+            Field::Browser,
+            Field::ComputerUse,
             Field::Save,
         ];
         // starts on Model
@@ -436,8 +444,63 @@ mod tests {
             interleaved_thinking: None,
             context_threshold: 1000,
             fps: 25,
+            capabilities_browser: true,
+            capabilities_computer_use: false,
         };
         let v = p.to_json();
         assert_eq!(v["fps"], serde_json::json!(25));
+        assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
+        assert_eq!(v["capabilities"]["computer_use"], serde_json::json!(false));
+    }
+
+    // Capabilities init from config: a config with browser+computer_use on
+    // must be reflected in ModelMenu::new and round-trip through build_patch.
+    #[test]
+    fn model_menu_inits_capabilities_from_config() {
+        let mut c = cfg();
+        c.capabilities.browser = true;
+        c.capabilities.computer_use = true;
+        let m = ModelMenu::new(&c);
+        assert!(m.capabilities_browser, "browser capability read from config");
+        assert!(m.capabilities_computer_use, "computer_use capability read from config");
+        let patch = m.build_patch();
+        assert!(patch.capabilities_browser);
+        assert!(patch.capabilities_computer_use);
+        // Defaults (browser off) must also round-trip to the patch JSON.
+        let m0 = ModelMenu::new(&cfg());
+        let v = m0.build_patch().to_json();
+        assert_eq!(v["capabilities"]["browser"], serde_json::json!(false));
+        assert_eq!(v["capabilities"]["computer_use"], serde_json::json!(false));
+    }
+
+    // Space and Left/Right toggle the browser capability checkbox, focus stays.
+    #[test]
+    fn toggling_browser_capability_checkbox() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let before = menu_opt.as_ref().unwrap().capabilities_browser;
+        menu_opt.as_mut().unwrap().focus = Field::Browser;
+        super::handle_model_key(&mut menu_opt, key(' '));
+        assert_eq!(
+            menu_opt.as_ref().unwrap().capabilities_browser,
+            !before,
+            "Space toggles browser capability"
+        );
+        assert_eq!(
+            menu_opt.as_ref().unwrap().focus,
+            Field::Browser,
+            "toggling must not move focus"
+        );
+        super::handle_model_key(&mut menu_opt, right());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().capabilities_browser,
+            before,
+            "Right toggles browser back"
+        );
+        super::handle_model_key(&mut menu_opt, left());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().capabilities_browser,
+            !before,
+            "Left toggles browser again"
+        );
     }
 }

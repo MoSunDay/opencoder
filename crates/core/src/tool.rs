@@ -10,6 +10,10 @@ pub struct ToolContext {
     pub agent: String,
     pub working_dir: std::path::PathBuf,
     pub max_output: usize,
+    /// Outbound proxy URL for capability tools (browser/computer-use). Carries
+    /// `config.network.proxy` from the session so tools honor the configured
+    /// proxy; env fallbacks are applied at use time via `effective_proxy`.
+    pub proxy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -114,8 +114,10 @@ async fn reserved_budget_actually_shrinks_usable_window() {
         let agent = resolve_agent("act").unwrap();
         let client: Arc<dyn ChatStream> = client_with_default_done("ok");
         let mut s = SessionState::new("x", agent, config, client, dir.path().to_path_buf());
-        // ~1400 estimated tokens
-        s.messages.push(big_user_message("u1", 5_500));
+        // ~1125 estimated transcript tokens. With the act system-prompt
+        // footprint (~425 tokens) the total sits under usable=1800 but well
+        // over usable=900, so reserved is the sole discriminant.
+        s.messages.push(big_user_message("u1", 4_500));
         should_compact(&s)
     }
     // reserved=200 → usable=1800 → 1400 < 1800 → no compact
@@ -419,7 +421,7 @@ fn with_home<R>(home: &Path, f: impl FnOnce() -> R) -> R {
 ///
 /// Required for the async tests below, whose bodies `.await` and therefore
 /// cannot be wrapped by `with_home` (a sync closure). `should_compact` reads
-/// the global `~/.opencode/AGENTS.md` through `HOME`, so any test that calls
+/// the global `~/.opencoder/AGENTS.md` through `HOME`, so any test that calls
 /// `should_compact` (directly or via `run`) must hold this guard to stay
 /// deterministic — immune both to the differential test's `HOME` mutation and
 /// to a real global file on the host. Pinning to a clean dir (not just
@@ -455,16 +457,16 @@ impl Drop for ScopedHome {
 
 #[test]
 fn global_agents_md_excluded_from_compaction_budget() {
-    // A large global ~/.opencode/AGENTS.md must NOT affect the compaction
+    // A large global ~/.opencoder/AGENTS.md must NOT affect the compaction
     // decision. We prove this differentially: `should_compact` must return
     // the same value whether or not the global file is present. The transcript
     // is sized so that, IF the global file were counted, the estimate would
     // jump far over the 1800-token budget and trip compaction.
     let home = tempfile::TempDir::new().unwrap();
-    std::fs::create_dir_all(home.path().join(".opencode")).unwrap();
+    std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
     // 100k chars ≈ 25k tokens — far above the 1800 budget if it were counted.
     std::fs::write(
-        home.path().join(".opencode").join("AGENTS.md"),
+        home.path().join(".opencoder").join("AGENTS.md"),
         "g".repeat(100_000),
     )
     .unwrap();
@@ -474,15 +476,17 @@ fn global_agents_md_excluded_from_compaction_budget() {
     config.compaction.reserved = 200;
     config.compaction.context_threshold = 10_000; // usable(1800) binds as budget
 
-    let global_path = home.path().join(".opencode").join("AGENTS.md");
+    let global_path = home.path().join(".opencoder").join("AGENTS.md");
 
     with_home(home.path(), || {
         let dir = tempfile::tempdir().unwrap();
         let agent = resolve_agent("act").unwrap();
         let client: Arc<dyn ChatStream> = client_with_default_done("ok");
         let mut s = SessionState::new("g", agent, config.clone(), client, dir.path().to_path_buf());
-        // ~1400 estimated transcript tokens — under the 1800 budget.
-        s.messages.push(big_user_message("u1", 5_500));
+        // ~1125 estimated transcript tokens — comfortably under the 1800 budget
+        // with headroom for the (act) system prompt. The 100k-char global file
+        // (~25k tokens) would still blow the budget if it were ever counted.
+        s.messages.push(big_user_message("u1", 4_500));
 
         // With the global file present: excluded → must NOT trip.
         let with_global = should_compact(&s);

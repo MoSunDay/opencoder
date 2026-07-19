@@ -62,6 +62,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
         &config.provider.base_url,
         &config.api_key()?,
+        config.network.proxy.as_deref(),
     )?);
 
     let store: Arc<dyn Store> = {
@@ -576,7 +577,7 @@ async fn run_app(
                                                     // `/task` new sessions pick up the new endpoint
                                                     // (the worker only swaps its own sess.client).
                                                     let api_key = reloaded.api_key().unwrap_or_default();
-                                                    if let Ok(new_client) = opencoder_llm::ChatClient::new(&reloaded.provider.base_url, &api_key) {
+                                                    if let Ok(new_client) = opencoder_llm::ChatClient::new(&reloaded.provider.base_url, &api_key, reloaded.network.proxy.as_deref()) {
                                                         client = Arc::new(new_client);
                                                     }
                                                     config = reloaded.clone();
@@ -588,7 +589,7 @@ async fn run_app(
                                                         frame_ticker = tokio::time::interval(Duration::from_millis(frame_ms));
                                                         frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                                                     }
-                                                    let _ = cmd_tx.send(UiCmd::ReloadConfig(reloaded)).await;
+                                                    let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
                                                     chat.push_marker(Line::from(Span::styled(
                                                         format!("[/config] saved \u{2192} {}", path.display()),
                                                         Style::default().fg(Color::Green))));

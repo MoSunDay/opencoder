@@ -36,7 +36,7 @@ pub fn should_compact(session: &SessionState) -> bool {
 
 /// Estimated tokens of the conversation about to be sent (system + messages).
 ///
-/// The ambient global `~/.opencode/AGENTS.md` is excluded: it still ships in
+/// The ambient global `~/.opencoder/AGENTS.md` is excluded: it still ships in
 /// the system prompt but is treated as free baseline context that does not
 /// count against the session's compaction budget.
 fn estimated_tokens(session: &SessionState) -> u64 {
@@ -60,7 +60,7 @@ fn estimate(s: &str) -> usize {
 /// (not `total_tokens`) so output-heavy turns don't prematurely trip the
 /// input budget.
 ///
-/// The global `~/.opencode/AGENTS.md` footprint is subtracted so this
+/// The global `~/.opencoder/AGENTS.md` footprint is subtracted so this
 /// authoritative signal stays consistent with the estimate path (which also
 /// excludes the global file) — otherwise a large global file would re-enter
 /// the budget here and trip compaction early. The default config leaves a

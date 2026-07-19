@@ -113,7 +113,7 @@ async fn continuous_stream_not_interrupted_by_read_timeout() {
     });
 
     let client =
-        ChatClient::new_with_read_timeout(&base_url, "test-key", read_timeout).unwrap();
+        ChatClient::new_with_read_timeout(&base_url, "test-key", read_timeout, None).unwrap();
     let mut rx = client.chat_stream(make_request()).unwrap();
 
     let events = drain(&mut rx).await;
@@ -175,7 +175,7 @@ async fn stalled_stream_interrupted_by_read_timeout() {
     });
 
     let client =
-        ChatClient::new_with_read_timeout(&base_url, "test-key", read_timeout).unwrap();
+        ChatClient::new_with_read_timeout(&base_url, "test-key", read_timeout, None).unwrap();
     let mut rx = client.chat_stream(make_request()).unwrap();
 
     let start = Instant::now();

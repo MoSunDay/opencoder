@@ -43,3 +43,6 @@ __pycache__/
 .cargo
 .opencode
 .opencoder
+
+# Cloned external reference repos (obscura / agent-browser / cua)
+reference/

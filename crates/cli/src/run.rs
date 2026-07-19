@@ -23,7 +23,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     }
     let api_key = config.api_key()?;
     let client: Arc<dyn ChatStream> =
-        Arc::new(ChatClient::new(&config.provider.base_url, &api_key)?);
+        Arc::new(ChatClient::new(&config.provider.base_url, &api_key, config.network.proxy.as_deref())?);
     let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
         .await
         .ok()

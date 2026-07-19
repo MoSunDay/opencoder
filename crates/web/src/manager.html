@@ -41,31 +41,56 @@
 <script>
 let cur=null, busy=false;
 const $=s=>document.querySelector(s);
-async function refresh(){const r=await fetch('/api/sessions');const xs=await r.json();
+// --- bearer token: ?token= on first visit -> localStorage, then reused ---
+function tok(){
+  // 1. explicit ?token= in the URL wins (first visit / bookmarked link)
+  const p=new URLSearchParams(location.search);
+  if(p.get('token')){localStorage.setItem('openc_token',p.get('token'));return p.get('token');}
+  // 2. remembered token
+  return localStorage.getItem('openc_token')||'';
+}
+const TOKEN=tok();
+// headers that carry auth for fetch(); EventSource can't set headers so it
+// appends ?token= instead (see openStream()).
+function authHeaders(extra){return Object.assign({'Authorization':'Bearer '+TOKEN},extra||{});}
+function withToken(url){
+  if(!TOKEN) return url;
+  const sep=url.indexOf('?')>=0?'&':'?';
+  return url+sep+'token='+encodeURIComponent(TOKEN);
+}
+async function refresh(){const r=await fetch('/api/sessions',{headers:authHeaders()});if(!r.ok){return;}const xs=await r.json();
   $('#list').innerHTML='';xs.forEach(x=>{const d=document.createElement('div');d.className='sess'+(x.id===cur?' active':'');d.textContent=x.preview||x.id;d.onclick=()=>openSess(x.id);$('#list').appendChild(d);});}
-async function newSession(){const r=await fetch('/api/sessions',{method:'POST'});const j=await r.json();cur=j.id;await refresh();openSess(cur);}
+async function newSession(){const r=await fetch('/api/sessions',{method:'POST',headers:authHeaders()});const j=await r.json();cur=j.id;await refresh();openSess(cur);}
 async function openSess(id){cur=id;$('#curid').textContent=id;await refresh();await load();}
-async function load(){const r=await fetch('/api/sessions/'+cur);const j=await r.json();render(j.messages||[]);}
-function render(msgs){const log=$('#log');log.innerHTML='';if(!msgs.length){log.innerHTML='<p style="color:var(--mut)">empty — send a message below.</p>';return;}
+async function load(){const r=await fetch('/api/sessions/'+cur,{headers:authHeaders()});const j=await r.json();render(j.messages||[]);}
+function render(msgs){const log=$('#log');log.innerHTML='';if(!msgs.length){log.innerHTML='<p style="color:var(--mut)">empty \u2014 send a message below.</p>';return;}
   msgs.forEach(m=>{const div=document.createElement('div');div.className='m '+m.role;
-    const role=document.createElement('div');role.className='r';role.textContent=m.role+(m.synthetic?' · synthetic':'')+(m.agent?(' · '+m.agent):'');
+    const role=document.createElement('div');role.className='r';role.textContent=m.role+(m.synthetic?' \u00b7 synthetic':'')+(m.agent?(' \u00b7 '+m.agent):'');
     div.appendChild(role);(m.blocks||[]).forEach(b=>{const e=document.createElement('div');
       if(b.kind==='text'){e.className='b';e.textContent=b.text;}
-      else if(b.kind==='tool_use'){e.className='tool';e.textContent='▸ '+b.name+'  '+JSON.stringify(b.input);}
+      else if(b.kind==='tool_use'){e.className='tool';e.textContent='\u25b8 '+b.name+'  '+JSON.stringify(b.input);}
       else if(b.kind==='tool_result'){e.className='tool';const o=document.createElement('div');o.className='o';o.textContent=(b.is_error?'[error] ':'')+b.content;e.appendChild(o);}
       else if(b.kind==='reasoning'){e.className='think';
         const lines=(b.text||'').split('\n').length;
         const th=document.createElement('div');th.className='th';
-        th.textContent='💭 Thinking ('+lines+' lines) [↓ expand]';
+        th.textContent='\ud83d\udcad Thinking ('+lines+' lines) [\u2193 expand]';
         const tb=document.createElement('div');tb.className='tb';tb.textContent=b.text;tb.style.display='none';
-        th.onclick=()=>{const open=tb.style.display!=='none';tb.style.display=open?'block':'none';th.textContent=open?('💭 Thinking ('+lines+' lines) [↓ expand]'):'💭 Thinking [↑ collapse]';};
+        th.onclick=()=>{const open=tb.style.display!=='none';tb.style.display=open?'block':'none';th.textContent=open?('\ud83d\udcad Thinking ('+lines+' lines) [\u2193 expand]'):'\ud83d\udcad Thinking [\u2191 collapse]';};
         e.appendChild(th);e.appendChild(tb);}
       else{return;}div.appendChild(e);});
     log.appendChild(div);});log.scrollTop=log.scrollHeight;}
+let es=null;
+function openStream(){
+  if(es){es.close();}
+  es=new EventSource(withToken('/api/sessions/'+cur+'/events'));
+  es.addEventListener('done',()=>{busy=false;$('#send').disabled=false;load();});
+  es.addEventListener('error',()=>{busy=false;$('#send').disabled=false;});
+  es.onmessage=()=>{ /* deltas stream live; refresh transcript on done */ };
+}
 async function send(){if(!cur){await newSession();}if(busy)return;const t=$('#msg').value.trim();if(!t)return;busy=true;$('#send').disabled=true;$('#msg').value='';
   const u=document.createElement('div');u.className='m user';u.innerHTML='<div class="r">user</div><div class="b"></div>';u.querySelector('.b').textContent=t;$('#log').appendChild(u);$('#log').scrollTop=$('#log').scrollHeight;
-  try{const r=await fetch('/api/sessions/'+cur+'/prompt',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:t,agent:$('#mode').textContent})});
-    const j=await r.json();await load();if(!j.ok&&j.error){alert(j.error);}}catch(e){alert(e);}finally{busy=false;$('#send').disabled=false;}}
+  try{const r=await fetch('/api/sessions/'+cur+'/prompt',{method:'POST',headers:authHeaders({'content-type':'application/json'}),body:JSON.stringify({prompt:t,agent:$('#mode').textContent})});
+    const j=await r.json();if(!j.ok&&j.error){alert(j.error);}openStream();}catch(e){alert(e);}finally{busy=false;$('#send').disabled=false;}}
 $('#mode').onclick=()=>{$('#mode').textContent=$('#mode').textContent==='act'?'plan':'act';};
 $('#msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();send();}});
 refresh();

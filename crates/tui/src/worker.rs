@@ -22,7 +22,7 @@ pub enum UiCmd {
     /// Manually trigger conversation compaction.
     Compact,
     SetSkill(Option<String>),
-    /// Hot-reload config at the next turn boundary. Sent by the `/model` menu.
+    /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
     ReloadConfig(Config),
     /// Swap the session's cancellation token for a fresh, uncancelled one.
     /// Sent before every turn-starting command so a prior double-Esc abort

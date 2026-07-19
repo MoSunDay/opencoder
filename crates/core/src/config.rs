@@ -38,6 +38,10 @@ pub struct Config {
         skip_serializing_if = "is_none_interleaved"
     )]
     pub interleaved_thinking: Option<bool>,
+    /// TUI render frame rate (FPS), clamped to 1..=30 at runtime. Higher
+    /// values raise CPU usage; 10 is already smooth. `None` = default (10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fps: Option<u32>,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -131,6 +135,7 @@ impl Default for Config {
             max_tokens: None,
             reasoning_effort: None,
             interleaved_thinking: Some(true),
+            fps: None,
         }
     }
 }
@@ -194,6 +199,16 @@ impl Config {
             .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
     }
 
+    /// Effective TUI frame rate (FPS), clamped to 1..=30. `None` -> 10.
+    pub fn tui_fps(&self) -> u32 {
+        self.fps.unwrap_or(10).clamp(1, 30)
+    }
+
+    /// Frame interval in milliseconds derived from [`tui_fps`](Self::tui_fps).
+    pub fn tui_frame_ms(&self) -> u64 {
+        1000 / self.tui_fps() as u64
+    }
+
     /// Pick the file to persist config edits to. Rule (project-first, global
     /// fallback): the first existing candidate that already holds any of the
     /// editable keys; if none, create the project-local `./opencoder.json`.
@@ -253,6 +268,7 @@ fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("reasoning_effort")
         || obj.contains_key("interleaved_thinking")
         || obj.contains_key("context_limit")
+        || obj.contains_key("fps")
     {
         return true;
     }
@@ -378,6 +394,9 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(it) = obj.get("interleaved_thinking").and_then(|v| v.as_bool()) {
             cfg.interleaved_thinking = Some(it);
+        }
+        if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
+            cfg.fps = Some(fps.clamp(1, 30) as u32);
         }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {

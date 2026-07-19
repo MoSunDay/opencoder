@@ -29,8 +29,25 @@ async fn main() -> Result<()> {
             require(&p)?;
             opencoder_cli::run::run_headless(&cli, p).await
         }
-        Some(Command::Serve { host, port, web }) => {
-            opencoder_cli::serve::serve_run(&cli, host.clone(), *port, *web).await
+        Some(Command::Server { host, port, web, token }) => {
+            opencoder_cli::server::server_run(&cli, host.clone(), *port, *web, token.clone()).await
+        }
+        Some(Command::Client { remote, token, session, continue_, prompt }) => {
+            let parts = if prompt.is_empty() {
+                cli.prompt.clone()
+            } else {
+                prompt.clone()
+            };
+            let p = join(parts);
+            require(&p)?;
+            opencoder_cli::client::client_run(
+                remote.clone(),
+                token.clone(),
+                session.clone(),
+                *continue_,
+                p,
+            )
+            .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
         Some(Command::Config { sub }) => {

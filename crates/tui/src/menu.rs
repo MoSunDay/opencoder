@@ -46,7 +46,7 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
         KeyCode::Down => m.move_down(),
         KeyCode::Backspace => m.on_backspace(),
         KeyCode::Char(c) => m.on_char(c),
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Tab => {
             if m.is_clear_selected() {
                 *menu = None;
                 return MenuOutcome::Pick(None);
@@ -246,7 +246,7 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     f.render_widget(Clear, popup);
 
     let block = Block::default().borders(Borders::ALL).title(
-        " Select skill (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel) ",
+        " Select skill (\u{2191}/\u{2193} move, type to filter, Enter/Tab=confirm, Esc=cancel) ",
     );
 
     let skill_rows: Vec<ListItem> = menu
@@ -334,7 +334,7 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Skills (\u{2191}/\u{2193} select, type to filter, Enter=confirm) ");
+        .title(" Skills (\u{2191}/\u{2193} select, type to filter, Enter/Tab=confirm) ");
 
     let skill_rows: Vec<ListItem> = menu
         .rows
@@ -551,5 +551,54 @@ mod tests {
             names
         );
         assert!(!names.contains(&"build"), "build should NOT match 'epr'");
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    #[test]
+    fn enter_picks_highlighted_skill_and_closes_menu() {
+        let mut menu = Some(menu_of(&["alpha", "beta"]));
+        let outcome = handle_menu_key(&mut menu, key(KeyCode::Enter));
+        match outcome {
+            MenuOutcome::Pick(Some((name, body))) => {
+                assert_eq!(name, "alpha");
+                assert_eq!(body, "body of alpha");
+            }
+            _ => panic!("Enter should confirm the highlighted skill"),
+        }
+        assert!(menu.is_none(), "menu must close after a pick");
+    }
+
+    #[test]
+    fn tab_picks_highlighted_skill_like_enter() {
+        let mut menu = Some(menu_of(&["alpha", "beta"]));
+        // move down first so a non-default item is highlighted; Tab must pick it.
+        let m = menu.as_mut().unwrap();
+        m.move_down();
+        let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
+        match outcome {
+            MenuOutcome::Pick(Some((name, _))) => assert_eq!(name, "beta"),
+            _ => panic!("Tab should confirm the highlighted skill"),
+        }
+        assert!(menu.is_none(), "menu must close on Tab pick");
+    }
+
+    #[test]
+    fn tab_picks_clear_row_like_enter() {
+        let mut menu = Some(SkillMenu::new(vec![sk("alpha", "a")], true));
+        // clear row is first and selected by default.
+        let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
+        assert!(matches!(outcome, MenuOutcome::Pick(None)));
+        assert!(menu.is_none());
+    }
+
+    #[test]
+    fn tab_on_empty_menu_just_closes() {
+        let mut menu = Some(SkillMenu::new(vec![], false));
+        let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
+        assert!(matches!(outcome, MenuOutcome::Idle));
+        assert!(menu.is_none());
     }
 }

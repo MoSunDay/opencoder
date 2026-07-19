@@ -1,10 +1,10 @@
-//! State + key handling for the `/model` modal. See [`crate::model_menu`] docs.
+//! State + key handling for the `/config` modal. See [`crate::model_menu`] docs.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::looks_like_env_var;
 use opencoder_core::Config;
 
-/// Editable subset of config produced by the `/model` menu. `api_key: None`
+/// Editable subset of config produced by the `/config` menu. `api_key: None`
 /// means "leave the existing value untouched"; `Some(v)` replaces it.
 #[derive(Debug, Clone)]
 pub struct ModelPatch {
@@ -14,6 +14,7 @@ pub struct ModelPatch {
     pub reasoning_effort: Option<String>,
     pub interleaved_thinking: Option<bool>,
     pub context_threshold: u64,
+    pub fps: u32,
 }
 
 impl ModelPatch {
@@ -44,6 +45,7 @@ impl ModelPatch {
             "compaction": {
                 "context_threshold": self.context_threshold,
             },
+            "fps": self.fps,
         })
     }
 }
@@ -106,18 +108,20 @@ pub enum Field {
     Reasoning,
     InterleavedThinking,
     Threshold,
+    Fps,
     Save,
     Cancel,
 }
 
 impl Field {
-    const ORDER: [Field; 8] = [
+    const ORDER: [Field; 9] = [
         Field::Model,
         Field::BaseUrl,
         Field::ApiKey,
         Field::Reasoning,
         Field::InterleavedThinking,
         Field::Threshold,
+        Field::Fps,
         Field::Save,
         Field::Cancel,
     ];
@@ -131,7 +135,7 @@ impl Field {
     }
 }
 
-/// Outcome of a keystroke while the `/model` modal is open.
+/// Outcome of a keystroke while the `/config` modal is open.
 pub enum ModelOutcome {
     Idle,
     Save(ModelPatch),
@@ -150,6 +154,7 @@ pub struct ModelMenu {
     pub reasoning: Reasoning,
     pub interleaved_thinking: bool,
     pub threshold: u64,
+    pub fps: u32,
     pub focus: Field,
     pub error: Option<String>,
 }
@@ -166,6 +171,7 @@ impl ModelMenu {
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
             threshold: config.compaction.context_threshold,
+            fps: config.tui_fps(),
             focus: Field::Model,
             error: None,
         }
@@ -199,6 +205,10 @@ impl ModelMenu {
         self.threshold = next.max(1000) as u64;
     }
 
+    fn adjust_fps(&mut self, delta: i32) {
+        self.fps = (self.fps as i32 + delta).clamp(1, 30) as u32;
+    }
+
     pub(crate) fn build_patch(&self) -> ModelPatch {
         ModelPatch {
             model: self.model.clone(),
@@ -207,11 +217,12 @@ impl ModelMenu {
             reasoning_effort: self.reasoning.to_option(),
             interleaved_thinking: Some(self.interleaved_thinking),
             context_threshold: self.threshold,
+            fps: self.fps,
         }
     }
 }
 
-/// Handle one keystroke against an open `/model` modal.
+/// Handle one keystroke against an open `/config` modal.
 pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutcome {
     let m = match menu.as_mut() {
         Some(m) => m,
@@ -254,6 +265,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::Reasoning => m.reasoning = m.reasoning.prev(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Threshold => m.adjust_threshold(-1000),
+                Field::Fps => m.adjust_fps(-1),
                 _ => {}
             }
             ModelOutcome::Idle
@@ -263,6 +275,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::Reasoning => m.toggle_reasoning(),
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Threshold => m.adjust_threshold(1000),
+                Field::Fps => m.adjust_fps(1),
                 _ => {}
             }
             ModelOutcome::Idle
@@ -317,6 +330,18 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                         s.push(c);
                         if let Ok(n) = s.parse::<u64>() {
                             m.threshold = n;
+                        }
+                    }
+                }
+                Field::Fps => {
+                    if c.is_ascii_digit() {
+                        let mut s = m.fps.to_string();
+                        if s == "0" {
+                            s.clear();
+                        }
+                        s.push(c);
+                        if let Ok(n) = s.parse::<u32>() {
+                            m.fps = n.clamp(1, 30);
                         }
                     }
                 }

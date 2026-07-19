@@ -1,12 +1,13 @@
-//! `/model` configuration modal for the TUI.
+//! `/config` configuration modal for the TUI.
 //!
-//! A form overlay (modeled on `menu.rs`) that edits five fields and persists
+//! A form overlay (modeled on `menu.rs`) that edits six fields and persists
 //! them to `opencoder.json` via [`opencoder_core::Config::save`]:
 //! - model id
 //! - provider base_url
 //! - provider api_key (masked display; editing replaces the value)
 //! - reasoning_effort (4-way cycle: off / low / medium / high)
 //! - compaction.context_threshold (raw token count)
+//! - fps - TUI 渲染帧率（1-30，默认 10）
 //!
 //! Navigation: `Tab` / `Shift+Tab` (or `\u{2191}`/`\u{2193}`) move focus between options;
 //! `\u{2190}`/`\u{2192}` change the value of the focused option;
@@ -97,6 +98,7 @@ mod tests {
             reasoning_effort: None,
             interleaved_thinking: None,
             context_threshold: 1000,
+            fps: 10,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::json!("{MY_KEY}"));
@@ -113,6 +115,7 @@ mod tests {
             reasoning_effort: Some("high".into()),
             interleaved_thinking: None,
             context_threshold: 1000,
+            fps: 10,
         };
         let v = p.to_json();
         let provider_has_key = v
@@ -136,6 +139,7 @@ mod tests {
             reasoning_effort: None,
             interleaved_thinking: None,
             context_threshold: 1000,
+            fps: 10,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::Value::Null);
@@ -211,6 +215,7 @@ mod tests {
             Field::Reasoning,
             Field::InterleavedThinking,
             Field::Threshold,
+            Field::Fps,
             Field::Save,
         ];
         // starts on Model
@@ -326,5 +331,113 @@ mod tests {
             before,
             "Left toggles interleave back"
         );
+    }
+
+    // Default Config -> fps defaults to 10 (Config::tui_fps clamps None -> 10).
+    #[test]
+    fn menu_defaults_fps_to_ten() {
+        let m = ModelMenu::new(&cfg());
+        assert_eq!(m.fps, 10, "default config has no fps -> tui_fps() = 10");
+        let patch = m.build_patch();
+        assert_eq!(patch.fps, 10);
+    }
+
+    // Fps: Left/Right change by ±1, clamped to 1..=30, focus stays put.
+    #[test]
+    fn left_right_change_fps_by_one() {
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        let f0 = menu_opt.as_ref().unwrap().fps;
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        super::handle_model_key(&mut menu_opt, right());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().fps,
+            f0 + 1,
+            "Right increases fps by 1"
+        );
+        assert_eq!(
+            menu_opt.as_ref().unwrap().focus,
+            Field::Fps,
+            "Right must not move focus"
+        );
+        super::handle_model_key(&mut menu_opt, left());
+        super::handle_model_key(&mut menu_opt, left());
+        assert_eq!(
+            menu_opt.as_ref().unwrap().fps,
+            f0.saturating_sub(1),
+            "Left decreases fps by 1"
+        );
+
+        // Clamp at the lower bound (1): spam Left from fps=1, must stay 1.
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        menu_opt.as_mut().unwrap().fps = 1;
+        for _ in 0..5 {
+            super::handle_model_key(&mut menu_opt, left());
+        }
+        assert_eq!(menu_opt.as_ref().unwrap().fps, 1, "fps clamps to 1");
+
+        // Clamp at the upper bound (30): spam Right from fps=30, must stay 30.
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        menu_opt.as_mut().unwrap().fps = 30;
+        for _ in 0..5 {
+            super::handle_model_key(&mut menu_opt, right());
+        }
+        assert_eq!(menu_opt.as_ref().unwrap().fps, 30, "fps clamps to 30");
+    }
+
+    // Fps: typing digits appends to the current value's string form (mirrors
+    // the Threshold field's behavior), then clamps to 1..=30.
+    #[test]
+    fn typing_digits_sets_fps() {
+        // From a single-digit starting value, appending one digit yields a
+        // two-digit number that stays inside the range.
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        menu_opt.as_mut().unwrap().fps = 2;
+        super::handle_model_key(&mut menu_opt, key('4'));
+        assert_eq!(
+            menu_opt.as_ref().unwrap().fps,
+            24,
+            "from fps=2, typing '4' yields 24"
+        );
+
+        // From fps=9, typing '9' yields 99, which clamps down to 30.
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        menu_opt.as_mut().unwrap().fps = 9;
+        super::handle_model_key(&mut menu_opt, key('9'));
+        assert_eq!(
+            menu_opt.as_ref().unwrap().fps,
+            30,
+            "99 clamps to 30"
+        );
+
+        // Non-digit characters are ignored on the Fps field.
+        let mut menu_opt: Option<ModelMenu> = Some(ModelMenu::new(&cfg()));
+        menu_opt.as_mut().unwrap().focus = Field::Fps;
+        menu_opt.as_mut().unwrap().fps = 15;
+        super::handle_model_key(&mut menu_opt, key('x'));
+        assert_eq!(
+            menu_opt.as_ref().unwrap().fps,
+            15,
+            "non-digit chars do not change fps"
+        );
+    }
+
+    // The fps field is serialized into the patch JSON under the top-level "fps".
+    #[test]
+    fn patch_serializes_fps() {
+        let p = ModelPatch {
+            model: "m".into(),
+            base_url: "u".into(),
+            api_key: None,
+            reasoning_effort: None,
+            interleaved_thinking: None,
+            context_threshold: 1000,
+            fps: 25,
+        };
+        let v = p.to_json();
+        assert_eq!(v["fps"], serde_json::json!(25));
     }
 }

@@ -140,7 +140,80 @@ impl SessionEvent {
         }
     }
 
-    /// Coarse [`EventKind`] category for backward-compatible DB `type` column.
+    /// Reconstruct a `SessionEvent` from an SSE event-name (`sse_kind`) and its
+    /// payload (`sse_data`). This is the inverse of `sse_kind()` + `sse_data()`,
+    /// letting a remote client (`opencode client`) rebuild the structured event
+    /// stream from a server's `/events` SSE wire format.
+    ///
+    /// Returns `None` for an unrecognized `kind`. `TranscriptReset` carries no
+    /// messages on the wire (its payload is `{}`), so it is returned as an empty
+    /// marker — callers that need the rebuilt transcript must re-fetch
+    /// `/messages`. `SubagentChild` deserializes its nested `event` as the enum
+    /// (not the SSE form), matching how `sse_data` serializes it.
+    pub fn from_sse(kind: &str, data: serde_json::Value) -> Option<Self> {
+        Some(match kind {
+            "text_delta" => SessionEvent::TextDelta(data.get("text")?.as_str()?.to_string()),
+            "reasoning_delta" => {
+                SessionEvent::ReasoningDelta(data.get("text")?.as_str()?.to_string())
+            }
+            "tool_start" => SessionEvent::ToolStart {
+                id: data.get("id")?.as_str()?.to_string(),
+                name: data.get("name")?.as_str()?.to_string(),
+                input: data.get("input")?.clone(),
+            },
+            "tool_end" => SessionEvent::ToolEnd {
+                id: data.get("id")?.as_str()?.to_string(),
+                name: data.get("name")?.as_str()?.to_string(),
+                output: data.get("output")?.as_str()?.to_string(),
+                is_error: data.get("is_error")?.as_bool().unwrap_or(false),
+            },
+            "agent_switched" => {
+                SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string())
+            }
+            "compaction" => {
+                SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string())
+            }
+            "status" => SessionEvent::Status(data.get("status")?.as_str()?.to_string()),
+            "subagent_start" => SessionEvent::SubagentStart {
+                id: data.get("id")?.as_str()?.to_string(),
+                kind: data.get("kind")?.as_str()?.to_string(),
+                prompt: data.get("prompt")?.as_str()?.to_string(),
+                child_session_id: data.get("child_session_id")?.as_str()?.to_string(),
+            },
+            "subagent_end" => SessionEvent::SubagentEnd {
+                id: data.get("id")?.as_str()?.to_string(),
+                ok: data.get("ok")?.as_bool().unwrap_or(false),
+                summary: data.get("summary")?.as_str()?.to_string(),
+            },
+            "subagent_child" => {
+                let ev: SessionEvent =
+                    serde_json::from_value(data.get("event")?.clone()).ok()?;
+                SessionEvent::SubagentChild {
+                    id: data.get("id")?.as_str()?.to_string(),
+                    ev: Box::new(ev),
+                }
+            }
+            "plan_handoff" => {
+                SessionEvent::PlanHandoff(data.get("plan")?.as_str()?.to_string())
+            }
+            "transcript_reset" => {
+                // Wire payload is `{}`; the rebuilt message list is intentionally
+                // empty (see method doc). Callers re-fetch /messages if needed.
+                SessionEvent::TranscriptReset(Vec::new())
+            }
+            "queue_consumed" => SessionEvent::QueueConsumed {
+                seq: data.get("seq")?.as_i64().unwrap_or(0),
+            },
+            "steer_consumed" => SessionEvent::SteerConsumed {
+                seq: data.get("seq")?.as_i64().unwrap_or(0),
+            },
+            "done" => SessionEvent::Done,
+            "error" => SessionEvent::Error(data.get("error")?.as_str()?.to_string()),
+            _ => return None,
+        })
+    }
+
+    /// Coarse [`EventKind`] for backward-compatible DB `type` column.
     pub fn coarse_kind(&self) -> EventKind {
         match self {
             SessionEvent::TextDelta(_) => EventKind::TextDelta,
@@ -255,10 +328,6 @@ async fn run_loop(
                 session.record(m).await;
                 on_event(SessionEvent::SteerConsumed { seq: *seq });
             }
-            on_event(SessionEvent::Status(format!(
-                "steer promoted ({} new input(s))",
-                steer_prompts.len()
-            )));
         }
 
         if compaction::should_compact(session) {
@@ -866,4 +935,94 @@ pub async fn run_once(
     let mut session = SessionState::new(new_id(), agent, config, client, working_dir);
     run(&mut session, prompt, on_event).await?;
     Ok(session)
+}
+
+#[cfg(test)]
+mod from_sse_tests {
+    use super::*;
+
+    /// `from_sse` is the exact inverse of `sse_kind()` + `sse_data()` for every
+    /// variant EXCEPT `TranscriptReset`, whose payload is `{}` on the wire
+    /// (the rebuilt message list cannot be carried over SSE and must be
+    /// re-fetched). Pin both the roundtrip and that documented lossiness.
+    #[test]
+    fn from_sse_roundtrips_all_variants() {
+        let cases: Vec<SessionEvent> = vec![
+            SessionEvent::TextDelta("hi".into()),
+            SessionEvent::ReasoningDelta("think".into()),
+            SessionEvent::ToolStart {
+                id: "t1".into(),
+                name: "bash".into(),
+                input: serde_json::json!({"command": "ls"}),
+            },
+            SessionEvent::ToolEnd {
+                id: "t1".into(),
+                name: "bash".into(),
+                output: "done".into(),
+                is_error: false,
+            },
+            SessionEvent::ToolEnd {
+                id: "t2".into(),
+                name: "bash".into(),
+                output: "boom".into(),
+                is_error: true,
+            },
+            SessionEvent::AgentSwitch("plan".into()),
+            SessionEvent::Compaction("summary".into()),
+            SessionEvent::Status("running".into()),
+            SessionEvent::SubagentStart {
+                id: "s1".into(),
+                kind: "explore".into(),
+                prompt: "find x".into(),
+                child_session_id: "child-1".into(),
+            },
+            SessionEvent::SubagentEnd {
+                id: "s1".into(),
+                ok: true,
+                summary: "found".into(),
+            },
+            SessionEvent::SubagentChild {
+                id: "s1".into(),
+                ev: Box::new(SessionEvent::TextDelta("child text".into())),
+            },
+            SessionEvent::PlanHandoff("# plan".into()),
+            SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
+            SessionEvent::QueueConsumed { seq: 7 },
+            SessionEvent::SteerConsumed { seq: 9 },
+            SessionEvent::Done,
+            SessionEvent::Error("kaboom".into()),
+        ];
+        let mut kinds: Vec<&str> = cases.iter().map(|e| e.sse_kind()).collect();
+        kinds.sort();
+        kinds.dedup();
+        assert_eq!(kinds.len(), 16, "expected all 16 unique kinds, got {kinds:?}");
+
+        for ev in &cases {
+            let kind = ev.sse_kind();
+            let data = ev.sse_data();
+            let back = SessionEvent::from_sse(kind, data.clone())
+                .unwrap_or_else(|| panic!("from_sse returned None for kind={kind} data={data}"));
+            if matches!(ev, SessionEvent::TranscriptReset(_)) {
+                // documented lossiness: no messages on the wire
+                assert!(matches!(back, SessionEvent::TranscriptReset(ref v) if v.is_empty()));
+            } else {
+                assert_eq!(
+                    serde_json::to_string(&back).unwrap(),
+                    serde_json::to_string(ev).unwrap(),
+                    "roundtrip mismatch for kind={kind}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_sse_unknown_kind_is_none() {
+        assert!(SessionEvent::from_sse("no_such_kind", serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn from_sse_missing_field_is_none() {
+        // tool_start without the required `name` field
+        assert!(SessionEvent::from_sse("tool_start", serde_json::json!({"id":"x"})).is_none());
+    }
 }

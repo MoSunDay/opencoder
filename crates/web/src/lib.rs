@@ -1,4 +1,5 @@
 pub mod api;
+pub mod auth;
 pub mod handle;
 pub mod html;
 
@@ -15,9 +16,20 @@ pub struct AppState {
     pub store: Arc<dyn Store>,
     pub workdir: std::path::PathBuf,
     pub handles: HandleMap,
+    /// Optional injected client. When set (tests), the prompt path uses it
+    /// instead of building a real `ChatClient` from config — enabling
+    /// deterministic end-to-end tests against a `MockChatClient`. `None` in
+    /// production (the server always owns the LLM gateway).
+    pub client_override: Option<Arc<dyn opencoder_llm::ChatStream>>,
 }
 
-pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::PathBuf) -> Result<()> {
+pub async fn serve(
+    host: String,
+    port: u16,
+    _web: bool,
+    workdir: std::path::PathBuf,
+    token: String,
+) -> Result<()> {
     let data_dir = data_dir_for(&workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?);
@@ -26,9 +38,24 @@ pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::Path
         store,
         workdir: workdir.clone(),
         handles: handle::new_handle_map(),
+        client_override: None,
     });
 
-    let app = Router::new()
+    let app = build_app(state, Some(token));
+
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
+    let addr = listener.local_addr()?;
+    tracing::info!("opencoder server listening on http://{addr}");
+    println!("opencoder server listening on http://{addr}");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// Build the application router. `token = Some(t)` enables bearer-token auth on
+/// every route (production); `token = None` skips the middleware (used by tests
+/// that build their own router with an injected `MockChatClient`).
+pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
+    let mut app = Router::new()
         .route("/", get(html::index))
         .route(
             "/api/sessions",
@@ -38,18 +65,16 @@ pub async fn serve(host: String, port: u16, _web: bool, workdir: std::path::Path
         .route("/api/sessions/:id/messages", get(api::get_messages))
         .route("/api/sessions/:id/prompt", post(api::post_prompt))
         .route("/api/sessions/:id/events", get(api::get_events))
+        .route("/api/sessions/:id/seq", get(api::get_event_seq))
         .route("/api/sessions/:id/agent", post(api::post_agent))
         .route("/api/sessions/:id/model", post(api::post_model))
         .route("/api/sessions/:id/interrupt", post(api::post_interrupt))
         .route("/api/health", get(api::health))
         .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
-    let addr = listener.local_addr()?;
-    tracing::info!("opencoder web/server listening on http://{addr}");
-    println!("opencoder web/server listening on http://{addr}");
-    axum::serve(listener, app).await?;
-    Ok(())
+    if let Some(t) = token {
+        app = app.layer(axum::middleware::from_fn_with_state(t, auth::require_token));
+    }
+    app
 }
 
 pub fn data_dir_for(workdir: &std::path::Path) -> std::path::PathBuf {

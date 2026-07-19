@@ -22,8 +22,8 @@ use ratatui::Frame;
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
     (
-        "/model",
-        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值",
+        "/config",
+        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率",
     ),
     (
         "/compact",
@@ -35,7 +35,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashAction {
     Task,
-    Model,
+    Config,
     Compact,
 }
 
@@ -125,13 +125,13 @@ impl CommandMenu {
 
 /// Map a committed command string (with or without leading `/`) to an action.
 /// Used both by the popup's `Enter` and by free-text parse on the composer
-/// (so `/model<Enter>` works even without ever opening the popup).
+/// (so `/config<Enter>` works even without ever opening the popup).
 pub fn parse(input: &str) -> Option<SlashAction> {
     let t = input.trim();
     let bare = t.strip_prefix('/')?;
     match bare {
         "" | "t" | "task" => Some(SlashAction::Task),
-        "m" | "model" => Some(SlashAction::Model),
+        "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
         _ => None,
     }
@@ -140,7 +140,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
 fn dispatch(name: &str) -> Option<SlashAction> {
     match name {
         "/task" => Some(SlashAction::Task),
-        "/model" => Some(SlashAction::Model),
+        "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
         _ => None,
     }
@@ -293,8 +293,8 @@ mod tests {
 
     #[test]
     fn parse_known_commands() {
-        assert_eq!(parse("/model"), Some(SlashAction::Model));
-        assert_eq!(parse("/m"), Some(SlashAction::Model));
+        assert_eq!(parse("/config"), Some(SlashAction::Config));
+        assert_eq!(parse("/cfg"), Some(SlashAction::Config));
         assert_eq!(parse("/task"), Some(SlashAction::Task));
         assert_eq!(parse("/t"), Some(SlashAction::Task));
         assert_eq!(parse("/compact"), Some(SlashAction::Compact));
@@ -302,7 +302,7 @@ mod tests {
         assert_eq!(parse("/"), Some(SlashAction::Task));
         assert_eq!(parse("/unknown"), None);
         assert_eq!(parse("hello"), None);
-        assert_eq!(parse(" /model "), Some(SlashAction::Model));
+        assert_eq!(parse(" /config "), Some(SlashAction::Config));
     }
 
     #[test]
@@ -312,11 +312,11 @@ mod tests {
             m.visible_count() >= 3,
             "all commands visible with empty query"
         );
-        for c in "model".chars() {
+        for c in "config".chars() {
             m.on_char(c);
         }
-        assert_eq!(m.visible_count(), 1, "only /model matches 'model'");
-        assert_eq!(m.selected_action(), Some(SlashAction::Model));
+        assert_eq!(m.visible_count(), 1, "only /config matches 'config'");
+        assert_eq!(m.selected_action(), Some(SlashAction::Config));
     }
 
     #[test]

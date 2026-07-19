@@ -174,8 +174,11 @@ OpenCoder 与 [sst/opencode](https://github.com/sst/opencode)（TypeScript / Nod
 | 二进制大小 | **159 MiB**（166,885,504 B） | **11.1 MiB**（11,644,304 B） | opencode 大 **14.3×** |
 | 冷启动峰值 RSS | **~197 MiB**（195–199 MB） | **~5.4 MiB**（5.2–5.6 MB） | opencode 高 **35×** |
 | 冷启动耗时 | **~0.78 s** | **~6 ms** | opencode 慢 **~125×** |
+| 冷启 token 开销 | **~13 k tok** | **~0.4 k tok** | opencode 高 **~32×** |
 | 协议 | OpenAI 兼容 + ACP + MCP | OpenAI 兼容 + 子代理（explore/build） | — |
 | 会话存储 | SQLite（WAL）+ Drizzle ORM | libsql（SQLite 兼容，WAL）+ 自写 `Store` trait | 均为 SQLite；见下方[存储对比](#-存储) |
+
+> **冷启 token 开销**口径：取各 agent 首次发给 LLM 的请求体，计数其中的 `system` 消息 + `tools` 数组（首轮固定开销，发生在任何用户输入之前），用 `cl100k_base` BPE 计 token；与上表其余 `--help` 运行时基线指标独立测量。这一项是每一轮对话都重复支付的固定成本。
 
 ### 🗄️ 存储
 

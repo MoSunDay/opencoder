@@ -174,8 +174,11 @@ OpenCoder and [sst/opencode](https://github.com/sst/opencode) (a TypeScript / No
 | Binary size | **159 MiB** (166,885,504 B) | **11.1 MiB** (11,644,304 B) | opencode is **14.3×** larger |
 | Cold-start peak RSS | **~197 MiB** (195–199 MB) | **~5.4 MiB** (5.2–5.6 MB) | opencode is **35×** higher |
 | Cold-start time | **~0.78 s** | **~6 ms** | opencode is **~125×** slower |
+| Cold-start token overhead | **~13k tok** | **~0.4k tok** | opencode **~32×** higher |
 | Protocol | OpenAI-compatible + ACP + MCP | OpenAI-compatible + subagents (explore/build) | — |
 | Session storage | SQLite (WAL) + Drizzle ORM | libsql (SQLite-compatible, WAL) + hand-written `Store` trait | Both SQLite; see [storage comparison](#-storage) below |
+
+> **Cold-start token overhead** methodology: take each agent's first request body sent to the LLM, count tokens in the `system` message + the `tools` array (the fixed first-turn cost, incurred before any user input) with the `cl100k_base` BPE. Measured independently from the other `--help` runtime-baseline rows above. This is a fixed cost re-paid on every conversation turn.
 
 ### 🗄️ Storage
 

@@ -67,6 +67,10 @@ pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
+    /// Pending steer inputs mirrored from the store, owned by this view so the
+    /// `SteerConsumed` handler can resolve seq -> prompt text and drop the row
+    /// in one place. The single source of truth for steer display state.
+    pub steer_items: Vec<(i64, String)>,
     /// Number of subagents currently in flight (SubagentStart seen, no matching
     /// SubagentEnd yet). Surfaced in the status bar as a live "running" badge so
     /// concurrent dispatch is visible.
@@ -278,8 +282,36 @@ impl ChatView {
             }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
-            SessionEvent::SteerConsumed { .. } => {}
+            SessionEvent::SteerConsumed { seq } => {
+                // A steered input was promoted at the turn boundary. Resolve
+                // seq -> prompt text, embed a `steer: {prompt}` marker so the
+                // user sees WHEN the steer actually intervened (distinct from
+                // the submit-time echo in the queue panel), then drop the row.
+                // Clone the text first to release the shared borrow before the
+                // mutable `push_marker`/`retain` calls below.
+                if let Some(prompt) = self
+                    .steer_items
+                    .iter()
+                    .find(|(s, _)| s == seq)
+                    .map(|(_, p)| p.clone())
+                {
+                    self.push_marker(Line::from(Span::styled(
+                        format!("steer: {prompt}"),
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    )));
+                    self.push_marker(Line::from(""));
+                }
+                self.steer_items.retain(|(s, _)| s != seq);
+            }
         }
+    }
+
+    /// Begin a new turn. The single owner of the turn-start invariant: any
+    /// transient presentation status (e.g. an `[interrupted] ...` marker set on
+    /// the previous turn) must be cleared so it does not leak into the status
+    /// bar of the freshly-started turn. The transcript blocks are untouched.
+    pub fn begin_turn(&mut self) {
+        self.status.clear();
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new

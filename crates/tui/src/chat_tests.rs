@@ -789,3 +789,58 @@ fn plan_card_flatten_structure() {
         "Plan card must end with a trailing blank line"
     );
 }
+
+#[test]
+fn begin_turn_clears_status() {
+    // A transient status set on the previous turn (e.g. an interrupted marker
+    // surfaced via SessionEvent::Status) must be cleared at the start of the
+    // next turn so it does not leak into the status bar.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::Status("interrupted".into()));
+    assert_eq!(v.status, "interrupted");
+    v.begin_turn();
+    assert!(v.status.is_empty(), "begin_turn must clear transient status");
+}
+
+#[test]
+fn begin_turn_preserves_transcript() {
+    // The turn-start invariant only clears presentation status — the
+    // transcript blocks must be untouched.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello world".into()));
+    v.apply(&SessionEvent::Status("interrupted".into()));
+    let before = block_text(&v);
+    v.begin_turn();
+    assert_eq!(block_text(&v), before, "transcript blocks must survive begin_turn");
+    assert!(v.status.is_empty());
+}
+
+#[test]
+fn steer_consumed_pushes_marker_and_drops_entry() {
+    // When a steer is promoted at the turn boundary, the view embeds a
+    // `steer: {prompt}` marker into the transcript (so the user sees WHEN it
+    // took effect) and drops the pending entry by seq.
+    let mut v = ChatView::default();
+    v.steer_items.push((7, "use python".into()));
+    v.apply(&SessionEvent::SteerConsumed { seq: 7 });
+    assert!(
+        block_text(&v).contains("steer: use python"),
+        "SteerConsumed must embed a steer marker with the prompt text"
+    );
+    assert!(
+        v.steer_items.is_empty(),
+        "SteerConsumed must drop the consumed entry from steer_items"
+    );
+}
+
+#[test]
+fn steer_consumed_unknown_seq_is_noop() {
+    // A SteerConsumed whose seq does not match any pending entry must be a
+    // no-op: no marker is pushed and the existing entries are retained.
+    let mut v = ChatView::default();
+    v.steer_items.push((7, "use python".into()));
+    let before = block_text(&v);
+    v.apply(&SessionEvent::SteerConsumed { seq: 999 });
+    assert_eq!(block_text(&v), before, "unknown seq must not push a marker");
+    assert_eq!(v.steer_items.len(), 1, "unknown seq must retain all entries");
+}

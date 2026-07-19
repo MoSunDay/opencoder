@@ -907,7 +907,6 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut parent_scroll = 0u16;
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
-        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let mut queue_items: Vec<(i64, String)> = Vec::new();
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<std::time::Instant> = None;
@@ -929,7 +928,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut parent_follow,
             &mut subagent_sys,
             std::path::Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s1",
             store.as_ref(),
@@ -988,7 +986,6 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut parent_scroll = 0u16;
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
-        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let mut queue_items: Vec<(i64, String)> = Vec::new();
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<std::time::Instant> = None;
@@ -1010,7 +1007,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut parent_follow,
             &mut subagent_sys,
             std::path::Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s1",
             store.as_ref(),

@@ -24,7 +24,6 @@ pub struct SessionUiState {
     pub scroll: u16,
     pub follow: bool,
     pub sys_tokens: u64,
-    pub steer_items: Vec<(i64, String)>,
     pub queue_items: Vec<(i64, String)>,
     pub active_skill: Option<String>,
     pub active_skill_body: Option<String>,
@@ -44,7 +43,6 @@ impl SessionUiState {
             scroll: 0,
             follow: true,
             sys_tokens,
-            steer_items: Vec::new(),
             queue_items: Vec::new(),
             active_skill: None,
             active_skill_body: None,
@@ -62,7 +60,6 @@ impl SessionUiState {
         scroll: u16,
         follow: bool,
         sys_tokens: u64,
-        steer_items: &[(i64, String)],
         queue_items: &[(i64, String)],
         active_skill: &Option<String>,
         active_skill_body: &Option<String>,
@@ -74,7 +71,6 @@ impl SessionUiState {
             scroll,
             follow,
             sys_tokens,
-            steer_items: steer_items.to_vec(),
             queue_items: queue_items.to_vec(),
             active_skill: active_skill.clone(),
             active_skill_body: active_skill_body.clone(),
@@ -386,7 +382,7 @@ mod tests {
         assert!(st.follow);
         assert_eq!(st.scroll, 0);
         assert_eq!(st.sys_tokens, 5000);
-        assert!(st.steer_items.is_empty());
+        assert!(st.chat.steer_items.is_empty());
         assert!(st.queue_items.is_empty());
         assert!(st.active_skill.is_none());
         assert!(st.history.is_empty());
@@ -394,12 +390,13 @@ mod tests {
 
     #[test]
     fn snapshot_captures_all_fields() {
-        let chat = sample_chat();
+        let mut chat = sample_chat();
         let history = vec!["msg1".into(), "msg2".into()];
         let skill = Some("code-review".into());
         let skill_body = Some("review every change carefully".into());
         let steers = vec![(10_i64, "fix bug".into()), (11, "add tests".into()), (12, "refactor".into())];
         let queues = vec![(1_i64, "run lint".into())];
+        chat.steer_items = steers.clone();
 
         let snap = SessionUiState::snapshot(
             true,
@@ -408,7 +405,6 @@ mod tests {
             42,
             false,
             12000,
-            &steers,
             &queues,
             &skill,
             &skill_body,
@@ -420,7 +416,7 @@ mod tests {
         assert_eq!(snap.scroll, 42);
         assert!(!snap.follow);
         assert_eq!(snap.sys_tokens, 12000);
-        assert_eq!(snap.steer_items, steers);
+        assert_eq!(snap.chat.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill, skill);
         assert_eq!(snap.active_skill_body, skill_body);
@@ -462,7 +458,7 @@ mod tests {
     fn snapshot_is_independent_of_source() {
         // Mutating the source chat after snapshot must not affect the snapshot.
         let mut chat = sample_chat();
-        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &[], &None, &None);
+        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &None, &None);
         chat.push_marker(ratatui::text::Line::from("new line"));
         assert_ne!(snap.chat, chat, "snapshot must be a deep copy");
     }
@@ -470,9 +466,10 @@ mod tests {
     #[test]
     fn roundtrip_snapshot_then_compare() {
         // Simulate: snapshot → (logically "store") → compare against fresh values.
-        let chat = sample_chat();
+        let mut chat = sample_chat();
         let steers = vec![(7_i64, "s1".into())];
         let queues = vec![(1_i64, "q1".into()), (2_i64, "q2".into())];
+        chat.steer_items = steers.clone();
         let snap = SessionUiState::snapshot(
             true,
             &chat,
@@ -480,7 +477,6 @@ mod tests {
             10,
             false,
             200,
-            &steers,
             &queues,
             &Some("s".into()),
             &Some("body-of-s".into()),
@@ -492,7 +488,7 @@ mod tests {
         assert_eq!(snap.scroll, 10);
         assert!(!snap.follow);
         assert_eq!(snap.sys_tokens, 200);
-        assert_eq!(snap.steer_items, steers);
+        assert_eq!(snap.chat.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
         assert_eq!(snap.active_skill.as_deref(), Some("s"));
         assert_eq!(snap.active_skill_body.as_deref(), Some("body-of-s"));

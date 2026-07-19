@@ -376,7 +376,6 @@ pub(crate) async fn handle_mouse(
     parent_follow: &mut bool,
     subagent_sys: &mut u64,
     workdir: &Path,
-    steer_items: &mut Vec<(i64, String)>,
     queue_items: &mut Vec<(i64, String)>,
     session_id: &str,
     store: &dyn Store,
@@ -455,7 +454,7 @@ pub(crate) async fn handle_mouse(
                     queue_panel::QueueEffect::Delete(seq) => {
                         if store.delete_input(seq).await.is_ok() {
                             queue_items.retain(|(s, _)| *s != seq);
-                            steer_items.retain(|(s, _)| *s != seq);
+                            chat.steer_items.retain(|(s, _)| *s != seq);
                         }
                     }
                     queue_panel::QueueEffect::Swap(a, b) => {
@@ -879,7 +878,6 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
-        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
@@ -897,7 +895,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -936,7 +933,6 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
-        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
@@ -954,7 +950,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -990,7 +985,6 @@ mod tests {
         let mut parent_follow = true;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = vec![];
-        let mut steer_items: Vec<(i64, String)> = vec![];
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
         let mut dbl_click = false;
@@ -1016,7 +1010,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1040,7 +1033,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1071,7 +1063,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1105,7 +1096,7 @@ mod tests {
         let mut parent_scroll = 0u16;
         let mut parent_follow = true;
         let mut subagent_sys = 0u64;
-        let mut steer_items: Vec<(i64, String)> = vec![(10, "redirect".into())];
+        chat.steer_items = vec![(10, "redirect".into())];
         let mut queue_items: Vec<(i64, String)> = vec![];
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
@@ -1130,7 +1121,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1146,7 +1136,7 @@ mod tests {
             "clicking Submit on a steer row must return SteerSubmit"
         );
         // Steer item must NOT be removed — promotion happens in the drain loop.
-        assert_eq!(steer_items.len(), 1, "steer item should remain until drain");
+        assert_eq!(chat.steer_items.len(), 1, "steer item should remain until drain");
     }
 
     #[tokio::test]
@@ -1167,7 +1157,6 @@ mod tests {
         let mut parent_follow = true;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = vec![];
-        let mut steer_items: Vec<(i64, String)> = vec![];
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
         let mut dbl_click = false;
@@ -1191,7 +1180,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1220,7 +1208,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1262,7 +1249,6 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = vec![];
-        let mut steer_items: Vec<(i64, String)> = vec![];
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
         let mut dbl_click = false;
@@ -1287,7 +1273,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1319,7 +1304,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1367,7 +1351,6 @@ mod tests {
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = vec![];
-        let mut steer_items: Vec<(i64, String)> = vec![];
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<Instant> = None;
         let mut dbl_click = false;
@@ -1385,7 +1368,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,
@@ -1443,7 +1425,6 @@ mod tests {
         let mut parent_scroll = 0u16;
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
-        let mut steer_items: Vec<(i64, String)> = Vec::new();
         let mut queue_items: Vec<(i64, String)> = Vec::new();
         let store = StubStore;
         let mut copy_msg: Option<String> = None;
@@ -1469,7 +1450,6 @@ mod tests {
             &mut parent_follow,
             &mut subagent_sys,
             Path::new("."),
-            &mut steer_items,
             &mut queue_items,
             "s",
             &store,

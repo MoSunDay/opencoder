@@ -180,7 +180,6 @@ async fn run_app(
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
-    let mut steer_items: Vec<(i64, String)> = Vec::new();
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
@@ -330,7 +329,7 @@ async fn run_app(
                 context_limit,
                 &status_model,
                 &status,
-                &steer_items,
+                &chat.steer_items,
                 &queue_items,
                 &mut scroll,
                 follow,
@@ -432,7 +431,7 @@ async fn run_app(
                                     });
                                     // Save current session's UI state before switching.
                                     session_states.insert(session_id.clone(), crate::session_ui::SessionUiState::snapshot(
-                                        running, &chat, &history, scroll, follow, sys_tokens, &steer_items, &queue_items, &active_skill, &active_skill_body,
+                                        running, &chat, &history, scroll, follow, sys_tokens, &queue_items, &active_skill, &active_skill_body,
                                     ));
                                     // Restore or create the target session's UI state.
                                     let restored = session_states.remove(&new_session_id);
@@ -466,7 +465,7 @@ async fn run_app(
                                         scroll = st.scroll;
                                         follow = st.follow;
                                         sys_tokens = st.sys_tokens;
-                                        steer_items = st.steer_items;
+                                        chat.steer_items = st.chat.steer_items.clone();
                                         queue_items = st.queue_items;
                                         active_skill = st.active_skill;
                                         active_skill_body = st.active_skill_body;
@@ -478,7 +477,7 @@ async fn run_app(
                                             &workdir_for_tokens,
                                             None,
                                         );
-                                        steer_items = store
+                                        chat.steer_items = store
                                             .pending_inputs(&new_session_id, Delivery::Steer)
                                             .await
                                             .unwrap_or_default()
@@ -637,7 +636,7 @@ async fn run_app(
                                             }
                                             running = true;
                                             follow = true;
-                                            chat.status.clear();
+                                            chat.begin_turn();
                                         }
                                         CompactGate::SkipRunning => {
                                             chat.push_marker(Line::from(Span::styled(
@@ -715,7 +714,7 @@ async fn run_app(
                                             }
                                             running = true;
                                             follow = true;
-                                            chat.status.clear();
+                                            chat.begin_turn();
                                         }
                                     }
                                 } else if running {
@@ -735,7 +734,7 @@ async fn run_app(
                                     }
                                     running = true;
                                     follow = true;
-                                    chat.status.clear();
+                                    chat.begin_turn();
                                 }
                             }
                             KeyAction::Steer(text) => {
@@ -746,7 +745,7 @@ async fn run_app(
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await {
-                                        steer_items.push((seq, clean.to_string()));
+                                        chat.steer_items.push((seq, clean.to_string()));
                                     }
                                     // Do NOT echo into the main transcript /
                                     // execution area. Steer input is surfaced
@@ -786,7 +785,7 @@ async fn run_app(
                                     }
                                     running = true;
                                     follow = true;
-                                    chat.status.clear();
+                                    chat.begin_turn();
                                 } else {
                                     let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
                                 }
@@ -824,7 +823,7 @@ async fn run_app(
                                 // resume. delete_input is idempotent.
                                 clear_pending_inputs(
                                     store.as_ref(),
-                                    &mut steer_items,
+                                    &mut chat.steer_items,
                                     &mut queue_items,
                                 )
                                 .await;
@@ -873,7 +872,6 @@ async fn run_app(
                             &mut parent_follow,
                             &mut subagent_sys,
                             &workdir,
-                            &mut steer_items,
                             &mut queue_items,
                             &session_id,
                             store.as_ref(),
@@ -894,6 +892,7 @@ async fn run_app(
                                 start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new()))
                                     .await;
                                 running = true;
+                                chat.begin_turn();
                             }
                             follow = true;
                         }
@@ -952,9 +951,6 @@ async fn run_app(
                             if let SessionEvent::QueueConsumed { seq } = &sev {
                                 queue_items.retain(|(s, _)| s != seq);
                             }
-                            if let SessionEvent::SteerConsumed { seq } = &sev {
-                                steer_items.retain(|(s, _)| s != seq);
-                            }
                             if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                                 if cancelled {
                                     // Stale event from a cancelled turn — consume without
@@ -963,7 +959,7 @@ async fn run_app(
                                     cancelled = false;
                                 } else if !drain_pending {
                                     running = false;
-                                    steer_items.clear();
+                                    chat.steer_items.clear();
                                     queue_items.clear();
                                 }
                             }
@@ -986,6 +982,7 @@ async fn run_app(
                                     .await;
                                 running = true;
                                 follow = true;
+                                chat.begin_turn();
                             } else if cancelled {
                                 cancelled = false;
                             } else {

@@ -176,4 +176,4 @@ opencoder/
 
 ## 📄 License
 
-[MIT](Cargo.toml)
+[MIT](LICENSE)

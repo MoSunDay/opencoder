@@ -181,6 +181,88 @@ async fn plan_mode_allows_devnull_redirect() {
     }
 }
 
+#[tokio::test]
+async fn plan_mode_allows_subshell_fd_merge() {
+    // `(cmd 2>&1)` and brace groups used to be blocked because the trailing
+    // `)` was folded into the redirect target. These are read-only and must
+    // run in plan mode.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn("(echo hi 2>&1) | head")])
+            .push_script(vec![done_turn()]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new(
+        "guard-fdmerge",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "run subshell".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd { is_error, output, .. } = tool_end.unwrap() {
+        assert!(
+            !*is_error,
+            "fd-merge in subshell must succeed, output: {output}"
+        );
+        assert!(
+            !output.contains("Blocked in plan mode"),
+            "fd-merge in subshell must not be blocked, got: {output}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn plan_mode_allows_tee_to_devnull() {
+    // `tee /dev/null` discards its copy and is read-only; it must not be
+    // blocked in plan mode. `tee <realfile>` is still blocked (covered by the
+    // unit tests in bash_guard).
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn("echo hi | tee /dev/null")])
+            .push_script(vec![done_turn()]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new(
+        "guard-tee",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "tee to devnull".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd { is_error, output, .. } = tool_end.unwrap() {
+        assert!(
+            !*is_error,
+            "tee /dev/null must succeed, output: {output}"
+        );
+        assert!(
+            !output.contains("Blocked in plan mode"),
+            "tee /dev/null must not be blocked, got: {output}"
+        );
+    }
+}
+
 fn ev_name(e: &SessionEvent) -> &'static str {
     match e {
         SessionEvent::TextDelta(_) => "TextDelta",

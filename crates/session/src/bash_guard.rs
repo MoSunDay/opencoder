@@ -47,7 +47,6 @@ const MUTATING_COMMANDS: &[&str] = &[
     "reboot",
     "poweroff",
     "halt",
-    "tee",
 ];
 
 /// Git subcommands that write state.
@@ -165,9 +164,32 @@ fn read_redirect_target(chars: &[char], start: usize) -> (usize, usize) {
         i += 1;
     }
     let ts = i;
+    // fd-merge form (`&N`, e.g. `2>&1`): capture exactly the `&` plus the
+    // following ASCII digits. A trailing shell metacharacter (`)`, `}`, ...)
+    // must NOT be folded into the target — otherwise `(echo 2>&1)` is read as
+    // the target `&1)` and misclassified as a write.
+    if i < n && chars[i] == '&' {
+        i += 1; // consume `&`
+        while i < n && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        return (ts, i);
+    }
+    // Path form: read until a shell delimiter. Besides whitespace and the
+    // compound separators, also stop at shell grouping / quoting / comment
+    // metacharacters so a redirect immediately before `)`, `}`, `]`, `#`
+    // terminates cleanly (e.g. `>/dev/null)`, `2>file}`).
     while i < n {
         let c = chars[i];
-        if c == ' ' || c == '\t' || c == ';' || c == '|' {
+        if c == ' '
+            || c == '\t'
+            || c == ';'
+            || c == '|'
+            || c == ')'
+            || c == '}'
+            || c == ']'
+            || c == '#'
+        {
             break;
         }
         if c == '&' && i + 1 < n && chars[i + 1] == '&' {
@@ -246,6 +268,19 @@ fn classify_segment(segment: &str) -> Option<String> {
     // Check mutating commands
     if MUTATING_COMMANDS.contains(&cmd_base) {
         return Some(format!("mutating command: {cmd_base}"));
+    }
+
+    // `tee` is conditionally mutating: it duplicates stdin to its file
+    // arguments. Writing to `/dev/null` (or no file argument at all) is
+    // read-only; any other path argument is a real write and is blocked.
+    if cmd_base == "tee" {
+        let writes_real_file = cmd_words[1..]
+            .iter()
+            .any(|w| !w.starts_with('-') && *w != "/dev/null");
+        if writes_real_file {
+            return Some("tee (writes to file)".into());
+        }
+        return None;
     }
 
     // Check git writes
@@ -557,5 +592,61 @@ mod tests {
             }
             BashVerdict::ReadOnly => panic!("rm should be blocked"),
         }
+    }
+
+    #[test]
+    fn fd_merge_before_shell_metachars_allowed() {
+        // Regression: `2>&1` immediately followed by `)`/`}`/`]` used to be
+        // misread as target `&1)` and blocked. All read-only.
+        assert_eq!(classify("(echo hi 2>&1)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("{ ls 2>&1; }"), BashVerdict::ReadOnly);
+        assert_eq!(classify("(make 2>&1)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("(echo hi 1>&2)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("(echo hi >&2)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("make 2>&1)"), BashVerdict::ReadOnly);
+        // /dev/null before a closing metachar is read-only too.
+        assert_eq!(classify("(cmd >/dev/null)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("{ cmd 2>/dev/null; }"), BashVerdict::ReadOnly);
+        assert_eq!(classify("[ cmd 2>/dev/null ]"), BashVerdict::ReadOnly);
+    }
+
+    #[test]
+    fn real_file_redirect_before_metachar_still_blocked() {
+        // Genuine file writes right before `)`/`}` must still be blocked —
+        // the boundary fix must not over-loosen.
+        assert!(matches!(classify("(echo x > file)"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(classify("{ echo x 2> err.log; }"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(classify("(echo x >> log)"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(classify("(echo x &> all.out)"), BashVerdict::WriteBlocked(_)));
+    }
+
+    #[test]
+    fn subshell_and_brace_group_read_only() {
+        assert_eq!(classify("(echo hi)"), BashVerdict::ReadOnly);
+        assert_eq!(classify("{ ls -la; }"), BashVerdict::ReadOnly);
+        assert_eq!(classify("(git status)"), BashVerdict::ReadOnly);
+    }
+
+    #[test]
+    fn tee_to_devnull_or_bare_allowed() {
+        // tee writing to /dev/null (or nowhere) is read-only.
+        assert_eq!(classify("echo x | tee /dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("echo x | tee"), BashVerdict::ReadOnly);
+        assert_eq!(classify("tee -a /dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("echo x | tee -a /dev/null"), BashVerdict::ReadOnly);
+        assert_eq!(classify("sudo tee /dev/null"), BashVerdict::ReadOnly);
+    }
+
+    #[test]
+    fn tee_to_real_file_blocked() {
+        // tee writing to any non-/dev/null path is a real write.
+        assert!(matches!(classify("echo x | tee file"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(classify("tee -a f.log"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(classify("echo x | tee a b"), BashVerdict::WriteBlocked(_)));
+        // One /dev/null plus one real file is still a write.
+        assert!(matches!(
+            classify("echo x | tee /dev/null file"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 }

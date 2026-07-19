@@ -186,26 +186,28 @@ opencode run --model zhipuai-coding-plan/glm-5.2 "实现终端贪吃蛇..."
 opencoder run "实现终端贪吃蛇..."
 ```
 
-**实测对比（2026-07-19，同机同模型 glm-5.2，隔离工作目录，各 0.5 s 采样全程）：**
+**实测对比（2026-07-19，同机同模型 glm-5.2，隔离工作目录，0.5 s 全程采样）：**
+**口径：以下全部为 agent 主进程本身的数据，已排除 cargo/rustc 编译子进程。**
 
-| 指标 | opencode `1.17.8` | opencoder `0.1.0` |
-| --- | --- | --- |
-| 任务完成耗时（wall） | 125.7 s | **79.0 s** |
-| **CPU 平均利用率（全程）** | **65.6 %**（持续高占用） | **~0 %**（事件驱动，等待 LLM 时空闲） |
-| CPU 活跃期平均（仅工作样本） | 71.4 % | 63.6 % |
-| CPU 峰值 | **1954.7 %**（V8 GC/JIT 瞬时 ≈20 核） | 229.3 %（cargo 并行编译） |
-| CPU p95 | 164.7 % | 100.1 % |
-| **Agent 进程 RSS 均值** | **496.5 MB** | **13.7 MB**（≈ **36×** 差距） |
-| Agent 进程 RSS 峰值 | 656.6 MB | 14.0 MB |
-| 整树 RSS 峰值（含 cargo 编译） | 1017.9 MB | 635.8 MB |
-| 结果 | 编译通过，302 行 | 编译通过，295 行 |
+| 指标 | opencode `1.17.8` | opencoder `0.1.0` | 差异 |
+| --- | --- | --- | --- |
+| 任务完成耗时（wall） | 172.3 s | 112.2 s | LLM 采样噪声大，仅参考 |
+| **CPU 平均利用率（全程）** | **54.4 %**（持续高占用） | **0.13 %**（事件驱动，等 LLM 时空闲） | opencode 高 **~419×** |
+| CPU 中位数（p50） | **40.9 %**（一半时间 ≥40 %） | **0.0 %**（一半时间完全 0） | 本质差异 |
+| CPU p95 | 109.6 % | 1.9 % | opencode 高 **~58×** |
+| CPU 峰值 | 2631.6 %（V8 GC/JIT，瞬时 ≈26 核） | 3.7 % | — |
+| **Agent 进程 RSS 均值** | **451.6 MB** | **11.8 MB** | opencode 高 **~38×** |
+| Agent 进程 RSS 峰值 | 557.5 MB | 12.1 MB | opencode 高 **~46×** |
+| 结果 | 编译通过，242 行 | 编译通过，351 行 | — |
 
-> **口径说明：**
-> - **Agent 进程 RSS** 排除 cargo/rustc 子进程（仅取进程数 ≤ 2 的样本），反映 agent 运行时本身 —— 这才是两者架构差异的体现。
-> - **整树 RSS 峰值** 含编译 crossterm 等依赖的 rustc 内存，两者该项同源、由 cargo 主导，不代表 agent 差异。
-> - opencode `run` 自带 V8 运行时，全程维持高 CPU/RSS；opencoder 编译为原生异步运行时，等待 provider 回包时 CPU 降到 ~0，仅在解析 token / 执行工具（文件写入、cargo）时短暂占用。
-> - **wall-time 受 LLM 采样随机性影响**（同模型不同会话），仅作参考，不宜当稳态结论；**CPU 利用率与 RSS 才是运行时基线的稳定差异**。
-> - opencode 另有一个常驻 server daemon（≈285 MB）未计入上表（`run` 一次性调用未复用它）；如长期 server 模式运行，opencode 的常驻开销更高。
+> **关键：opencode 的高 CPU 与编译无关。** 同一任务下 opencode 的「agent 主进程」与「含 cargo 的整树」CPU 几乎相等（均值 54.4 % vs 55.1 %），说明持续高占用全部来自 V8 运行时本身，而非 cargo/rustc 编译。opencoder 则相反 —— agent 主进程峰值仅 3.7 %，整树峰值 142.6 % 的尖峰才是 cargo 编译贡献的；排除编译后，agent 在等待 provider 回包时 CPU 长期为 0。
+
+> **口径与可信度说明：**
+> - **所有 CPU/RSS 数字均为 agent 主进程本身**，已排除 cargo/rustc 编译子进程（仅取进程树根节点）。这是两者运行时架构差异的真实体现。
+> - **wall-time 受 LLM 采样随机性影响**：本次 opencode 172.3 s、opencoder 112.2 s，但与前一轮（125.7 s / 79.0 s）方向相反，故仅作参考，**不宜当稳态结论**；CPU 利用率与 RSS 才是运行时基线的稳定差异。
+> - opencode `run` 自带 V8 运行时，维持常驻高 CPU/RSS；opencoder 编译为原生异步运行时，等待回包时 CPU 降到 ~0，仅在解析 token / 执行工具时短暂占用。
+> - opencode 另有常驻 server daemon（≈285 MB）未计入；如长期 server 模式，其常驻开销更高。
+> - 原始 CSV 证据见 [`docs/bench/opencode-vs-opencoder-2026-07-19/`](docs/bench/opencode-vs-opencoder-2026-07-19/)。
 
 ---
 

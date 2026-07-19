@@ -31,9 +31,6 @@ use crate::TuiOpts;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
-/// Maximum render rate (30 FPS). Events are processed immediately but the
-/// screen is redrawn at most this often, decoupling CPU from token rate.
-const FRAME_MS: u64 = 33;
 /// How long the plan/act switch flash stays visible, in anim ticks (~100ms each).
 const MODE_FLASH_TICKS: u32 = 15;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
@@ -234,9 +231,10 @@ async fn run_app(
     // 150ms, so this loop can never be starved of input.
     let (mut input_rx, _input_handle) = spawn_input_pump();
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
-    // Frame-rate limiter: caps redraws at 30 FPS regardless of token arrival
-    // rate. `Skip` prevents burst-fire catch-up after a stall.
-    let mut frame_ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
+    // Frame-rate limiter: redraw cadence is decided by the `/config` fps
+    // (default 10 FPS). `Skip` prevents burst-fire catch-up after a stall.
+    let mut frame_ms = config.tui_frame_ms();
+    let mut frame_ticker = tokio::time::interval(Duration::from_millis(frame_ms));
     frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Body cache refresh ticker: rebuilds the cached ChatView snapshot at 3 FPS.
     // `Skip` prevents burst-fire catch-up after a stall.
@@ -246,7 +244,7 @@ async fn run_app(
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
     // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most 30 times/sec.
+    // at most at the rate set by `/config` fps (default 10).
     let mut dirty = true;
     let mut render_pending = true;
     // Body cache: a cloned snapshot of the active ChatView, rebuilt at 3 FPS.
@@ -563,7 +561,7 @@ async fn run_app(
                             }
                             continue;
                         }
-                        // `/model` modal: intercept all keys while open.
+                        // `/config` modal: intercept all keys while open.
                         if model_menu.is_some() {
                             match handle_model_key(&mut model_menu, k) {
                                 ModelOutcome::Save(patch) => {
@@ -582,21 +580,29 @@ async fn run_app(
                                                         client = Arc::new(new_client);
                                                     }
                                                     config = reloaded.clone();
+                                                    // Apply a new TUI frame rate immediately: rebuild the frame
+                                                    // interval so the just-saved fps takes effect without restart.
+                                                    let new_frame_ms = reloaded.tui_frame_ms();
+                                                    if new_frame_ms != frame_ms {
+                                                        frame_ms = new_frame_ms;
+                                                        frame_ticker = tokio::time::interval(Duration::from_millis(frame_ms));
+                                                        frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                                    }
                                                     let _ = cmd_tx.send(UiCmd::ReloadConfig(reloaded)).await;
                                                     chat.push_marker(Line::from(Span::styled(
-                                                        format!("[/model] saved \u{2192} {}", path.display()),
+                                                        format!("[/config] saved \u{2192} {}", path.display()),
                                                         Style::default().fg(Color::Green))));
                                                 }
                                                 Err(e) => {
                                                     chat.push_marker(Line::from(Span::styled(
-                                                        format!("[/model] reload failed: {e:#}"),
+                                                        format!("[/config] reload failed: {e:#}"),
                                                         Style::default().fg(Color::Red))));
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             chat.push_marker(Line::from(Span::styled(
-                                                format!("[/model] save failed: {e:#}"),
+                                                format!("[/config] save failed: {e:#}"),
                                                 Style::default().fg(Color::Red))));
                                         }
                                     }
@@ -616,7 +622,7 @@ async fn run_app(
                                         .await.unwrap_or_default();
                                     task_picker = Some(TaskPicker::new(sessions, session_id.clone()));
                                 }
-                                CommandOutcome::Dispatch(SlashAction::Model) => {
+                                CommandOutcome::Dispatch(SlashAction::Config) => {
                                     model_menu = Some(ModelMenu::new(&config));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Compact) => {
@@ -872,10 +878,6 @@ async fn run_app(
                         if outcome == MouseOutcome::SteerSubmit {
                             if running {
                                 cancel.cancel();
-                                chat.push_marker(Line::from(Span::styled(
-                                    "[interrupted] resuming\u{2026}",
-                                    Style::default().fg(Color::Yellow),
-                                )));
                                 cancelled = true;
                                 drain_pending = true;
                             } else {

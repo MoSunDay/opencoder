@@ -1,5 +1,6 @@
+pub mod client;
 pub mod run;
-pub mod serve;
+pub mod server;
 pub mod session_cmd;
 
 use std::path::{Path, PathBuf};
@@ -34,8 +35,6 @@ pub struct Cli {
     pub fork: bool,
     #[arg(long, global = true, default_value_t = false)]
     pub verbose: bool,
-    #[arg(long, global = true, default_value_t = false)]
-    pub serve: bool,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub prompt: Vec<String>,
 }
@@ -49,14 +48,38 @@ pub enum Command {
     },
     /// Start the interactive TUI.
     Tui,
-    /// Start the HTTP/JSON API server with the web session manager.
-    Serve {
+    /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),
+    /// protected by a bearer token. (`serve` is accepted as an alias.)
+    #[command(alias = "serve")]
+    Server {
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
         #[arg(long, default_value_t = 0)]
         port: u16,
         #[arg(long, default_value_t = true)]
         web: bool,
+        /// Bearer token for API auth. Defaults to OPENCODER_SERVER_TOKEN, then
+        /// an auto-generated token printed to stderr.
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Thin remote client: submit a prompt to a server and stream the result.
+    /// Stores nothing locally and calls no LLM.
+    Client {
+        /// Server base URL (e.g. http://127.0.0.1:8080).
+        #[arg(long)]
+        remote: String,
+        /// Bearer token. Defaults to OPENCODER_SERVER_TOKEN.
+        #[arg(long)]
+        token: Option<String>,
+        /// Resume a specific remote session by id.
+        #[arg(short, long)]
+        session: Option<String>,
+        /// Resume the most recent remote session.
+        #[arg(long, default_value_t = false)]
+        continue_: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        prompt: Vec<String>,
     },
     /// Print the resolved configuration (defaults < env < project file merged).
     Config {

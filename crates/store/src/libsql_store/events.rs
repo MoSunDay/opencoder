@@ -32,6 +32,18 @@ pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64
     }
 }
 
+pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {
+    let stmt = conn
+        .prepare("SELECT MAX(seq) FROM session_events WHERE session_id = ?")
+        .await?;
+    let mut rows = stmt.query(params![session_id]).await?;
+    if let Some(r) = rows.next().await? {
+        Ok(r.get::<Option<i64>>(0)?.unwrap_or(0))
+    } else {
+        Ok(0)
+    }
+}
+
 pub async fn after(
     conn: &Connection,
     session_id: &str,

@@ -4,6 +4,7 @@ pub mod error;
 pub mod json;
 pub mod message;
 pub mod skill;
+pub mod sse;
 pub mod tool;
 
 pub use agent::{builtin_agents, resolve_agent, Agent, AgentKind, AgentMode, ToolFilter};
@@ -13,4 +14,5 @@ pub use config::{
 pub use error::{CoreError, Result};
 pub use message::{ContentBlock, Message, MessageUsage, Role};
 pub use skill::{discover as discover_skills, skills_dir, Skill};
+pub use sse::SseEvt;
 pub use tool::{Tool, ToolArc, ToolContext, ToolOutput, ToolSchema};

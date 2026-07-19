@@ -15,34 +15,29 @@ use opencoder_core::Config;
 use opencoder_llm::ChatStream;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
 use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, Store};
-use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-/// A single SSE event delivered to subscribers (and persisted for replay).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SseEvt {
-    pub kind: String,
-    pub data: serde_json::Value,
-    pub ts: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seq: Option<i64>,
-}
+/// Shared SSE envelope (re-exported from `opencoder-core` so the server and a
+/// remote client agree on the wire shape). Construct live via
+/// [`sse_from_session_event`].
+pub use opencoder_core::SseEvt;
 
-impl SseEvt {
-    pub fn from_session_event(_session_id: &str, ev: &SessionEvent) -> (Self, EventKind) {
-        let ts = opencoder_core::message::now_ms();
-        (
-            SseEvt {
-                kind: ev.sse_kind().to_string(),
-                data: ev.sse_data(),
-                ts,
-                seq: None,
-            },
-            ev.coarse_kind(),
-        )
-    }
+/// Build the wire SSE event + coarse DB kind from a session event. `SseEvt`
+/// lives in `opencoder-core` (no dep on session/store), so this conversion is a
+/// free function here where both layers are visible.
+pub fn sse_from_session_event(_session_id: &str, ev: &SessionEvent) -> (SseEvt, EventKind) {
+    let ts = opencoder_core::message::now_ms();
+    (
+        SseEvt {
+            kind: ev.sse_kind().to_string(),
+            data: ev.sse_data(),
+            ts,
+            seq: None,
+        },
+        ev.coarse_kind(),
+    )
 }
 
 /// Per-session runtime state shared across HTTP requests, SSE subscribers, and
@@ -228,7 +223,7 @@ async fn drain_to_completion(
     let store_for_evt = store.clone();
     let sid = session_id.to_string();
     let result = run(&mut session, String::new(), |ev| {
-        let (sse, kind) = SseEvt::from_session_event(&sid, &ev);
+        let (sse, kind) = sse_from_session_event(&sid, &ev);
         // broadcast (ignore lagging subscribers)
         let _ = tx.send(sse.clone());
         // persist for replay

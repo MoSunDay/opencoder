@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use opencoder_session::SessionEvent;
 use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
-use opencoder_web::handle::SseEvt;
+use opencoder_web::handle::sse_from_session_event;
 
 /// Build all 16 SessionEvent variants (one representative of each).
 fn all_variants() -> Vec<SessionEvent> {
@@ -87,7 +87,7 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
     // For each variant: compute the live kind, persist with sse_kind, read back.
     for (i, ev) in variants.iter().enumerate() {
         // Simulate the live broadcast path: from_session_event.
-        let (sse, _coarse) = SseEvt::from_session_event(sid, ev);
+        let (sse, _coarse) = sse_from_session_event(sid, ev);
         let _live_kind = sse.kind.clone();
 
         // Persist the record exactly as the web drain does.

@@ -96,7 +96,8 @@ fn session_subcommands() {
 }
 
 #[test]
-fn serve_subcommand() {
+fn server_subcommand_and_serve_alias() {
+    // `serve` is kept as a backward-compat alias for `server`.
     let cli = parse(&[
         "opencoder",
         "serve",
@@ -106,10 +107,78 @@ fn serve_subcommand() {
         "127.0.0.1",
     ]);
     match cli.command {
-        Some(Command::Serve { port, host, .. }) => {
+        Some(Command::Server { port, host, .. }) => {
             assert_eq!(port, 9090);
             assert_eq!(host, "127.0.0.1");
         }
-        _ => panic!("expected Serve"),
+        _ => panic!("expected Server"),
+    }
+
+    // The canonical name works too, and accepts --token.
+    let cli2 = parse(&[
+        "opencoder",
+        "server",
+        "--port",
+        "1",
+        "--token",
+        "abc",
+    ]);
+    match cli2.command {
+        Some(Command::Server { token, .. }) => {
+            assert_eq!(token.as_deref(), Some("abc"));
+        }
+        _ => panic!("expected Server"),
+    }
+}
+
+#[test]
+fn client_subcommand_parses() {
+    use opencoder_cli::Command;
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://127.0.0.1:8080",
+        "--token",
+        "TKN",
+        "do",
+        "the thing",
+    ]);
+    match cli.command {
+        Some(Command::Client {
+            remote,
+            token,
+            session,
+            continue_,
+            prompt,
+        }) => {
+            assert_eq!(remote, "http://127.0.0.1:8080");
+            assert_eq!(token.as_deref(), Some("TKN"));
+            assert!(session.is_none());
+            assert!(!continue_);
+            assert_eq!(prompt, vec!["do".to_string(), "the thing".to_string()]);
+        }
+        _ => panic!("expected Client"),
+    }
+
+    // --session + --continue are accepted too
+    let cli2 = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--session",
+        "01ABC",
+        "--continue",
+        "hi",
+    ]);
+    match cli2.command {
+        Some(Command::Client {
+            session, continue_, ..
+        }) => {
+            assert_eq!(session.as_deref(), Some("01ABC"));
+            assert!(continue_);
+        }
+        _ => panic!("expected Client"),
     }
 }

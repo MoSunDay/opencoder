@@ -303,7 +303,7 @@ fn render_body(
         )
     } else {
         (
-            "  \u{2b07}  ",
+            "    \u{2b07}    ",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -328,7 +328,7 @@ fn render_body(
     // the bottom follow/jump indicator this carries no label — click to jump
     // straight to the very first row.
     if scroll_y > 0 {
-        let top_label = "  \u{2b06}  ";
+        let top_label = "    \u{2b06}    ";
         let top_style = Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD);

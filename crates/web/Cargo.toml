@@ -25,6 +25,8 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+opencoder-client.workspace = true
+opencoder-llm.workspace = true
 reqwest = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 uuid = { workspace = true }

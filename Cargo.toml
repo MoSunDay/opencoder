@@ -7,6 +7,7 @@ members = [
     "crates/session",
     "crates/tui",
     "crates/web",
+    "crates/client",
     "crates/cli",
 ]
 
@@ -40,6 +41,7 @@ opencoder-store  = { path = "crates/store" }
 opencoder-session = { path = "crates/session" }
 opencoder-tui    = { path = "crates/tui" }
 opencoder-web    = { path = "crates/web" }
+opencoder-client  = { path = "crates/client" }
 opencoder-cli    = { path = "crates/cli" }
 
 tokio = { version = "1", features = ["full"] }

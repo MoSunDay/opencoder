@@ -1367,6 +1367,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
+ "opencoder-client",
  "opencoder-core",
  "opencoder-llm",
  "opencoder-session",
@@ -1376,6 +1377,22 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ulid",
+]
+
+[[package]]
+name = "opencoder-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "opencoder-core",
+ "opencoder-session",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1483,6 +1500,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
+ "opencoder-client",
  "opencoder-core",
  "opencoder-llm",
  "opencoder-session",

@@ -623,6 +623,9 @@ mod tests {
         async fn events_after(&self, _: &str, _: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
             unimplemented!()
         }
+        async fn last_event_seq(&self, _: &str) -> anyhow::Result<i64> {
+            unimplemented!()
+        }
         async fn create_subagent_task(&self, _: &SubagentTaskRecord) -> anyhow::Result<()> {
             unimplemented!()
         }

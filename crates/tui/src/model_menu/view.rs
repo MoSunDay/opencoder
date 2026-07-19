@@ -1,4 +1,4 @@
-//! Rendering for the `/model` modal. State lives in [`super::state`].
+//! Rendering for the `/config` modal. State lives in [`super::state`].
 
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -8,13 +8,13 @@ use ratatui::Frame;
 
 use super::state::{Field, ModelMenu};
 
-/// Draw the `/model` modal as a dropdown overlay anchored above the composer.
+/// Draw the `/config` modal as a dropdown overlay anchored above the composer.
 ///
 /// `composer_top` is the screen row of the composer's top border; the popup's
 /// bottom edge sits just above it, so the form floats over the transcript like
 /// a dropdown instead of covering the screen center.
 pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &ModelMenu) {
-    let want_h = 17u16;
+    let want_h = 18u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -23,8 +23,8 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
     f.render_widget(Clear, popup);
 
     let title = match &menu.error {
-        Some(e) => format!(" /model \u{2014} ERROR: {e} "),
-        None => " /model \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} change value, Enter=next, [Save] commits, Esc cancel ".to_string(),
+        Some(e) => format!(" /config \u{2014} ERROR: {e} "),
+        None => " /config \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} change value, Enter=next, [Save] commits, Esc cancel ".to_string(),
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -102,6 +102,12 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
             threshold_hint.as_str(),
             menu.focus == Field::Threshold,
             "digits/\u{2190}\u{2192} \u{00b1}1k, Enter=next",
+        ),
+        field(
+            "fps:",
+            format!("{} FPS", menu.fps).as_str(),
+            menu.focus == Field::Fps,
+            "1-30, digits/\u{2190}\u{2192} \u{00b1}1, higher = more CPU (10 = smooth)",
         ),
         Line::from(""),
         button_line(menu),

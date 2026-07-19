@@ -165,6 +165,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         events::after(&conn, session_id, after_seq).await
     }
+    async fn last_event_seq(&self, session_id: &str) -> Result<i64> {
+        let conn = self.conn().await?;
+        events::last_seq(&conn, session_id).await
+    }
 
     async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()> {
         let conn = self.conn().await?;

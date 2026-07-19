@@ -170,7 +170,7 @@ fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
 }
 
-fn print_event(ev: &SessionEvent) {
+pub(crate) fn print_event(ev: &SessionEvent) {
     match ev {
         SessionEvent::TextDelta(t) => {
             print!("{t}");

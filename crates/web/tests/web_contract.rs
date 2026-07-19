@@ -31,6 +31,7 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir();
     let state = Arc::new(opencoder_web::AppState {
+        client_override: None,
         store: store.clone(),
         workdir: workdir.clone(),
         handles: opencoder_web::handle::new_handle_map(),

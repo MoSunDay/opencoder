@@ -39,6 +39,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
 async fn state_with_workdir(workdir: std::path::PathBuf) -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     Arc::new(opencoder_web::AppState {
+        client_override: None,
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),

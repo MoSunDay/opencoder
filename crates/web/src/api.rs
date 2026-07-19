@@ -116,13 +116,20 @@ pub async fn post_prompt(
     if let Some(a) = &body.agent {
         config.agent.default = a.clone();
     }
-    let api_key = match config.api_key() {
-        Ok(k) => k,
-        Err(e) => return error_500(format!("api_key: {e:#}")),
-    };
-    let client: Arc<dyn ChatStream> = match ChatClient::new(&config.provider.base_url, &api_key) {
-        Ok(c) => Arc::new(c),
-        Err(e) => return error_500(format!("client: {e:#}")),
+    // Use an injected client when present (tests), otherwise build a real
+    // `ChatClient` from config + the resolved API key (production).
+    let client: Arc<dyn ChatStream> = match state.client_override.clone() {
+        Some(c) => c,
+        None => {
+            let api_key = match config.api_key() {
+                Ok(k) => k,
+                Err(e) => return error_500(format!("api_key: {e:#}")),
+            };
+            match ChatClient::new(&config.provider.base_url, &api_key) {
+                Ok(c) => Arc::new(c),
+                Err(e) => return error_500(format!("client: {e:#}")),
+            }
+        }
     };
     let delivery = body
         .delivery
@@ -280,6 +287,17 @@ pub async fn get_events(
 
 pub async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
+}
+
+/// Highest persisted event seq for a session (0 if none). A remote client uses
+/// this to snapshot before posting a prompt so it only streams the events
+/// produced by its own turn.
+pub async fn get_event_seq(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let seq = state.store.last_event_seq(&id).await.unwrap_or(0);
+    Json(json!({ "id": id, "seq": seq }))
 }
 
 fn error_500(msg: String) -> Response {

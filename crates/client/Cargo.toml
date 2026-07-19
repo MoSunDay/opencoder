@@ -1,0 +1,19 @@
+[package]
+name = "opencoder-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+opencoder-core.workspace = true
+opencoder-session.workspace = true
+tokio.workspace = true
+reqwest = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

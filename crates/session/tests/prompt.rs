@@ -1,7 +1,7 @@
 //! Prompt construction tests — verifies build_system, environment_block,
 //! and compaction prompts produce correct content.
 
-use opencoder_core::resolve_agent;
+use opencoder_core::{resolve_agent, CapabilitiesConfig};
 use opencoder_session::prompt::{
     build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
     global_instructions_text,
@@ -12,7 +12,7 @@ use std::sync::Mutex;
 fn build_system_includes_agent_prompt_and_environment() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp/project");
-    let msg = build_system(&agent, dir, None);
+    let msg = build_system(&agent, dir, None, &CapabilitiesConfig::default());
     let text = msg.text();
     // Agent base prompt is included
     assert!(!text.is_empty());
@@ -25,7 +25,7 @@ fn build_system_includes_agent_prompt_and_environment() {
 fn build_system_appends_skill_when_provided() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp");
-    let msg = build_system(&agent, dir, Some("Always use tabs for indentation."));
+    let msg = build_system(&agent, dir, Some("Always use tabs for indentation."), &CapabilitiesConfig::default());
     let text = msg.text();
     assert!(text.contains("Active skill"));
     assert!(text.contains("Always use tabs"));
@@ -35,7 +35,7 @@ fn build_system_appends_skill_when_provided() {
 fn build_system_omits_skill_section_when_empty() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp");
-    let msg = build_system(&agent, dir, Some("   "));
+    let msg = build_system(&agent, dir, Some("   "), &CapabilitiesConfig::default());
     let text = msg.text();
     assert!(!text.contains("Active skill"));
 }
@@ -121,7 +121,7 @@ fn project_instructions_from_working_dir_only() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Use Rust 2021 edition."));
@@ -143,7 +143,7 @@ fn project_instructions_from_global_and_working_dir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Global rule."));
@@ -168,7 +168,7 @@ fn project_instructions_from_git_root_when_in_subdir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, &subdir, None);
+        let msg = build_system(&agent, &subdir, None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Repo-wide rule."));
@@ -182,7 +182,7 @@ fn project_instructions_absent_when_no_agents_md() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(!text.contains("## Project instructions"));
     });
@@ -196,7 +196,7 @@ fn project_instructions_case_insensitive_lowercase() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Lowercase filename."));
@@ -211,7 +211,7 @@ fn project_instructions_case_insensitive_uppercase_ext() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Uppercase ext."));
@@ -228,7 +228,7 @@ fn project_instructions_dedup_when_git_root_is_working_dir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, repo.path(), None);
+        let msg = build_system(&agent, repo.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         // The content must appear exactly once (dedup: git root == working dir)
@@ -245,7 +245,7 @@ fn project_instructions_appears_before_environment() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, &CapabilitiesConfig::default());
         let text = msg.text();
         let instr_pos = text.find("## Project instructions").unwrap();
         let env_pos = text.find("# Environment").unwrap();

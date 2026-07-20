@@ -184,9 +184,44 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 - After finishing, briefly state what you did and the key files, and suggest logical next steps (tests, build, commit).
 ";
 
+/// The single BASE_PROMPT line that advertises the `tools` umbrella subagent.
+/// Stripped from the system prompt when the `tools_subagent` capability is off
+/// so the model is never told the `tools` subagent exists. Mirrors the inline
+/// `.replace()` strategy of [`base_prompt_plan`].
+pub const TOOLS_SUBAGENT_AD: &str =
+    "- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.";
+
+/// Remove the `tools` subagent advertisement line (including its trailing
+/// newline) from a base prompt. A no-op when the ad is already absent.
+pub fn strip_tools_subagent_ad(base: &str) -> String {
+    base.replace(&format!("{TOOLS_SUBAGENT_AD}\n"), "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Guards `strip_tools_subagent_ad`: if BASE_PROMPT's wording drifts so the
+    /// replace target disappears, this fails loudly. Also asserts the strip
+    /// actually removes the 'tools' advertisement while leaving 'explore' intact.
+    #[test]
+    fn strip_tools_subagent_ad_removes_the_advertisement() {
+        assert!(
+            base_prompt_act().contains(TOOLS_SUBAGENT_AD),
+            "BASE_PROMPT no longer contains the TOOLS_SUBAGENT_AD substring              {TOOLS_SUBAGENT_AD:?}. Update the constant."
+        );
+        let stripped = strip_tools_subagent_ad(&base_prompt_act());
+        assert!(
+            !stripped.contains("'tools' subagent"),
+            "stripped prompt must not advertise the 'tools' subagent, got: {stripped}"
+        );
+        assert!(
+            stripped.contains("'explore' (read-only)"),
+            "stripping must leave 'explore' intact, got: {stripped}"
+        );
+        // Idempotent: stripping an already-stripped prompt is a no-op.
+        assert_eq!(strip_tools_subagent_ad(&stripped), stripped);
+    }
 
     /// Guards the `.replace()` in `base_prompt_plan()`: if BASE_PROMPT's wording
     /// ever drifts so the replace becomes a no-op, the build subagent advertisement

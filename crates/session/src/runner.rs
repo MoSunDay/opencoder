@@ -515,6 +515,7 @@ async fn run_one_llm_call(
         &session.agent,
         &session.working_dir,
         session.skill_prompt_cloned().as_deref(),
+        &session.config.capabilities,
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
@@ -528,7 +529,7 @@ async fn run_one_llm_call(
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let tool_schemas = schema_for(&allowed, session.agent.kind);
+    let tool_schemas = schema_for(&allowed, session.agent.kind, &session.config.capabilities);
 
     let req = ChatRequest {
         model: session.model.clone(),
@@ -648,6 +649,28 @@ async fn execute_call(
     }
 }
 
+
+/// Build the "Valid options" list for a subagent_type rejection error, gated
+/// by agent kind and the `tools_subagent` capability. Plan mode omits 'build';
+/// a disabled capability omits 'tools'.
+fn valid_subagent_options(plan: bool, tools_on: bool) -> String {
+    let mut parts: Vec<&str> = vec!["'explore' (read-only)"];
+    if !plan {
+        parts.push("'build' (full tools)");
+    }
+    if tools_on {
+        parts.push("'tools' (browser/computer-use)");
+    }
+    match parts.len() {
+        1 => parts[0].to_string(),
+        2 => format!("{} or {}", parts[0], parts[1]),
+        _ => {
+            let (last, rest) = parts.split_last().unwrap();
+            format!("{}, or {}", rest.join(", "), last)
+        }
+    }
+}
+
 async fn run_subagent(
     input: Value,
     call_id: String,
@@ -668,19 +691,33 @@ async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
-    // Plan mode may only spawn read-only subagents: 'explore' (filesystem) and
-    // 'tools' (browser fetch/search + computer-use are read-only w.r.t. the
-    // repo). 'build' stays rejected so the model is never told it exists.
-    if parent.agent.kind == AgentKind::Plan && !matches!(kind.as_str(), "explore" | "tools") {
+    let plan = parent.agent.kind == AgentKind::Plan;
+    let tools_on = parent.config.capabilities.tools_subagent_enabled();
+    // 'tools' umbrella subagent requires its capability switch. Reject before
+    // the plan/act classification so the error never advertises 'tools' when
+    // the capability is disabled.
+    if kind == "tools" && !tools_on {
         return ToolOutput::err(format!(
-            "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only) or 'tools' (browser/computer-use)."
+            "Unknown subagent_type '{kind}'. Valid options: {}",
+            valid_subagent_options(plan, tools_on)
+        ));
+    }
+    // Plan mode may only spawn read-only subagents: 'explore' (filesystem) and,
+    // when enabled, 'tools' (browser fetch/search + computer-use are read-only
+    // w.r.t. the repo). 'build' stays rejected so the model is never told it
+    // exists.
+    if plan && !matches!(kind.as_str(), "explore" | "tools") {
+        return ToolOutput::err(format!(
+            "Unknown subagent_type '{kind}'. Valid options: {}",
+            valid_subagent_options(plan, tools_on)
         ));
     }
     let agent = match resolve_agent(&kind) {
         Some(a) => a,
         None => {
             return ToolOutput::err(format!(
-                "Unknown subagent_type '{kind}'. Valid options: 'explore' (read-only), 'build' (full tools), or 'tools' (browser/computer-use)."
+                "Unknown subagent_type '{kind}'. Valid options: {}",
+                valid_subagent_options(plan, tools_on)
             ));
         }
     };
@@ -770,17 +807,12 @@ async fn run_subagent(
     // progress persisted (reconstruct_child_view reads events_after(child, 0))
     // instead of losing everything. The flusher is awaited before return so a
     // normal completion flushes 100% of buffered events.
-    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<SessionEventRecord>(256);
+    let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEventRecord>();
     let flush_store = child_store.clone();
-    let flusher = tokio::spawn(async move {
-        while let Some(rec) = ev_rx.recv().await {
-            if let Some(store) = &flush_store {
-                if let Err(e) = store.append_event(&rec).await {
-                    tracing::warn!(error = %e, "subagent: failed to persist child event");
-                }
-            }
-        }
-    });
+    // Batched, lossless drain shared with the TUI/web surfaces: deltas are
+    // coalesced into one transactional append_events; non-delta events flush
+    // pending deltas first; channel close triggers a final flush.
+    let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
@@ -799,7 +831,7 @@ async fn run_subagent(
                     seq: None,
                     sse_kind: Some(cev.sse_kind().to_string()),
                 };
-                if let Err(e) = ev_tx.try_send(rec) {
+                if let Err(e) = ev_tx.send(rec) {
                     tracing::warn!(error = %e, "subagent: child event channel full/closed, dropping event");
                 }
             }

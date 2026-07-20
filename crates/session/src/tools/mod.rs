@@ -52,12 +52,20 @@ pub fn registry() -> HashMap<String, ToolArc> {
 /// per-tool schema sanitiser.
 ///
 /// `kind` lets us special-case tools whose schema must change based on the owning
-/// agent's kind. In **plan mode** the `task` tool is rewritten so the model is
-/// never told that the `build` (full-write) subagent exists — see
-/// [`task::description_plan`] / [`task::parameters_plan`]. This keeps the
-/// plan-mode read-only contract at the *schema* layer, before any runtime guard
-/// ever fires.
-pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Value> {
+/// agent's kind, and `caps` adapts the `task` tool to the `tools_subagent`
+/// capability. The `task` tool is rewritten via [`task::description_for`] /
+/// [`task::parameters_for`] so:
+/// - **plan mode** never reveals the `build` (full-write) subagent;
+/// - a disabled `tools_subagent` capability never reveals the `tools` subagent.
+///
+/// This keeps the read-only / capability contracts at the *schema* layer, before
+/// any runtime guard in `run_subagent` ever fires.
+pub fn schema_for(
+    tools: &HashMap<String, ToolArc>,
+    kind: AgentKind,
+    caps: &opencoder_core::CapabilitiesConfig,
+) -> Vec<Value> {
+    let tools_on = caps.tools_subagent_enabled();
     // Build (name, schema) pairs, then sort by name. A bare `.values().collect()`
     // would inherit `HashMap`'s randomized iteration order (Rust reseeds
     // `RandomState` per process), making the `tools` array in every ChatRequest
@@ -67,10 +75,14 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
         .values()
         .map(|t| {
             let name = t.name();
-            let (description, parameters) = if kind == AgentKind::Plan && name == "task" {
-                (task::description_plan(), task::parameters_plan())
+            let (description, parameters) = if name == "task" {
+                let plan = kind == AgentKind::Plan;
+                (
+                    task::description_for(plan, tools_on),
+                    task::parameters_for(plan, tools_on),
+                )
             } else {
-                (t.description(), t.parameters())
+                (t.description().to_string(), t.parameters())
             };
             let schema = serde_json::json!({
                 "type": "function",
@@ -105,10 +117,17 @@ mod tests {
             .expect("task schema present")
     }
 
+    fn caps(tools_on: bool) -> opencoder_core::CapabilitiesConfig {
+        opencoder_core::CapabilitiesConfig {
+            tools_subagent: tools_on,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn plan_mode_task_schema_omits_build() {
         let tools = task_only();
-        let schemas = schema_for(&tools, AgentKind::Plan);
+        let schemas = schema_for(&tools, AgentKind::Plan, &caps(true));
         let func = &task_schema(&schemas)["function"];
 
         let desc = func["description"].as_str().unwrap();
@@ -146,7 +165,7 @@ mod tests {
         // Regression guard: act mode must keep advertising the `build` subagent
         // so the model can delegate implementation work.
         let tools = task_only();
-        let schemas = schema_for(&tools, AgentKind::Act);
+        let schemas = schema_for(&tools, AgentKind::Act, &caps(true));
         let func = &task_schema(&schemas)["function"];
 
         let desc = func["description"].as_str().unwrap();
@@ -169,7 +188,7 @@ mod tests {
         let mut tools = HashMap::new();
         let r = Arc::new(read::ReadTool) as ToolArc;
         tools.insert(r.name().to_string(), r);
-        let schemas = schema_for(&tools, AgentKind::Plan);
+        let schemas = schema_for(&tools, AgentKind::Plan, &caps(false));
         let func = &schemas
             .iter()
             .find(|v| v["function"]["name"] == "read")
@@ -188,7 +207,7 @@ mod tests {
         // ~randomly per process run.
         let tools = registry();
         for kind in [AgentKind::Act, AgentKind::Plan] {
-            let schemas = schema_for(&tools, kind);
+            let schemas = schema_for(&tools, kind, &caps(false));
             let names: Vec<&str> = schemas
                 .iter()
                 .map(|v| v["function"]["name"].as_str().unwrap())
@@ -200,5 +219,58 @@ mod tests {
                 "tool schemas must be sorted by name for deterministic requests ({kind:?}); got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn act_tools_off_schema_omits_tools() {
+        // act + tools_subagent disabled: 'build' and 'explore' advertised, but
+        // 'tools' must be hidden everywhere in the task schema.
+        let tools = task_only();
+        let schemas = schema_for(&tools, AgentKind::Act, &caps(false));
+        let func = &task_schema(&schemas)["function"];
+        let desc = func["description"].as_str().unwrap();
+        assert!(
+            !desc.contains("\"tools\""),
+            "act+tools-off description must not mention 'tools', got: {desc}"
+        );
+        assert!(desc.contains("explore"), "must mention explore: {desc}");
+        assert!(desc.contains("build"), "act must still advertise build: {desc}");
+        let st_desc = func["parameters"]["properties"]["subagent_type"]["description"]
+            .as_str()
+            .unwrap();
+        // Check for the quoted subagent type '"tools"' (not the bare word, which
+        // legitimately appears in '(full tools)' when describing the build agent).
+        assert!(
+            !st_desc.contains("\"tools\""),
+            "act+tools-off subagent_type must not list 'tools', got: {st_desc}"
+        );
+    }
+
+    #[test]
+    fn plan_tools_off_schema_omits_tools() {
+        // plan + tools_subagent disabled: only 'explore' advertised — neither
+        // 'build' (plan-hidden) nor 'tools' (capability-hidden) appear.
+        let tools = task_only();
+        let schemas = schema_for(&tools, AgentKind::Plan, &caps(false));
+        let func = &task_schema(&schemas)["function"];
+        let desc = func["description"].as_str().unwrap();
+        assert!(
+            !desc.contains("\"tools\""),
+            "plan+tools-off description must not mention 'tools', got: {desc}"
+        );
+        assert!(
+            !desc.contains("build"),
+            "plan description must not mention 'build', got: {desc}"
+        );
+        assert!(desc.contains("explore"), "must mention explore: {desc}");
+        let params_str = func["parameters"].to_string();
+        assert!(
+            !params_str.contains("tools"),
+            "plan+tools-off parameters must not contain 'tools', got: {params_str}"
+        );
+        assert!(
+            !params_str.contains("build"),
+            "plan parameters must not contain 'build', got: {params_str}"
+        );
     }
 }

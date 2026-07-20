@@ -11,20 +11,14 @@ impl Tool for TaskTool {
         "task"
     }
     fn description(&self) -> &str {
+        // Canonical full (act + tools-on) description. Schema generation routes
+        // through [`description_for`] / [`parameters_for`] which adapt to the
+        // owning agent's kind and the `tools_subagent` capability; this trait
+        // method is a fallback for any direct `tool.description()` consumer.
         "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), \"build\" for implementation work (read/write/edit/bash/glob/grep/ls), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities plus read-only filesystem tools."
     }
     fn parameters(&self) -> Value {
-        let mut props = serde_json::Map::new();
-        props.insert(
-            "description".into(),
-            json::prop_str("Short (3-5 word) description of the task."),
-        );
-        props.insert(
-            "prompt".into(),
-            json::prop_str("Full instructions for the subagent."),
-        );
-        props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only), \"build\" (full tools), or \"tools\" (browser + computer-use). Defaults to \"explore\"."));
-        json::object_schema(Value::Object(props), &["description", "prompt"])
+        parameters_for(false, true)
     }
 
     async fn execute(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
@@ -34,20 +28,48 @@ impl Tool for TaskTool {
     }
 }
 
-/// Description of the `task` tool as exposed to the model while in **plan mode**.
+/// Description of the `task` tool, parameterised by agent kind and the
+/// `tools_subagent` capability. Four combinations:
+/// - act  + tools-on : `explore`, `build`, `tools`
+/// - act  + tools-off: `explore`, `build`
+/// - plan + tools-on : `explore`, `tools`
+/// - plan + tools-off: `explore`
 ///
-/// Plan mode must never reveal the `build` subagent type to the LLM: it advertises
-/// only the read-only `explore` subagent. This mirrors [`TaskTool::description`]
-/// minus the `build` clause.
-pub fn description_plan() -> &'static str {
-    "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities."
+/// `plan` mode never reveals `build`; a disabled capability never reveals
+/// `tools`. This keeps the read-only / capability contracts at the *schema*
+/// layer, before any runtime guard in `run_subagent` ever fires.
+pub fn description_for(plan: bool, tools_on: bool) -> String {
+    let prefix = "Launch a subagent to handle a delegated task in isolation. \
+                  The subagent has its own message history and tools, and returns a final summary. \
+                  Use subagent_type \"explore\" for read-only codebase investigation \
+                  (read/glob/grep/ls/bash)";
+    let build_clause = if plan {
+        String::new()
+    } else {
+        ", \"build\" for implementation work (read/write/edit/bash/glob/grep/ls)".to_string()
+    };
+    let suffix = if tools_on {
+        ", or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities \
+                     plus read-only filesystem tools."
+    } else {
+        "."
+    };
+    format!("{prefix}{build_clause}{suffix}")
 }
 
-/// Parameter schema of the `task` tool as exposed to the model while in **plan mode**.
-///
-/// Identical to [`TaskTool::parameters`] except the `subagent_type` description only
-/// mentions `explore`, so the model is never told that `build` exists.
-pub fn parameters_plan() -> Value {
+/// Parameter schema of the `task` tool, parameterised identically to
+/// [`description_for`]. The `subagent_type` description only lists the kinds
+/// the model may actually use.
+pub fn parameters_for(plan: bool, tools_on: bool) -> Value {
+    let mut subagent_type_desc = String::from("Agent type: \"explore\" (read-only)");
+    if !plan {
+        subagent_type_desc.push_str(", \"build\" (full tools)");
+    }
+    if tools_on {
+        subagent_type_desc.push_str(", or \"tools\" (browser + computer-use)");
+    }
+    subagent_type_desc.push_str(". Defaults to \"explore\".");
+
     let mut props = serde_json::Map::new();
     props.insert(
         "description".into(),
@@ -57,6 +79,6 @@ pub fn parameters_plan() -> Value {
         "prompt".into(),
         json::prop_str("Full instructions for the subagent."),
     );
-    props.insert("subagent_type".into(), json::prop_str("Agent type: \"explore\" (read-only) or \"tools\" (browser + computer-use). Defaults to \"explore\"."));
+    props.insert("subagent_type".into(), json::prop_str(&subagent_type_desc));
     json::object_schema(Value::Object(props), &["description", "prompt"])
 }

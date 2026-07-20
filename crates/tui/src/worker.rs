@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
-use opencoder_session::{run as run_session, SessionEvent, SessionState};
+use opencoder_session::{run as run_session, spawn_event_flusher, SessionEvent, SessionState};
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -128,18 +128,22 @@ pub async fn process_cmd(
     match cmd {
         UiCmd::Prompt(prompt) => {
             let tx = evt_tx.clone();
-            let store = sess.store.clone();
-            let sid = sess.id.clone();
+            let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
+            let sink_for_run = sink.clone();
             let res = run_session(sess, prompt, move |sev| {
-                persist_event(&store, &sid, &sev);
+                let _ = sink_for_run.push(&sev);
                 let _ = tx.try_send(UiEvent::Session(sev));
             })
             .await;
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
-                persist_event(&sess.store, &sess.id, &ev);
+                let _ = sink.push(&ev);
                 let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
+            // Drop every sender clone so the flusher's channel closes and it
+            // performs a final flush — guaranteeing zero event loss this turn.
+            drop(sink);
+            let _ = flusher.await;
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SwitchAgent(name) => {
@@ -151,10 +155,11 @@ pub async fn process_cmd(
             }
         }
         UiCmd::SwitchAndStart(name, extra) => {
+            let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 let ev = SessionEvent::AgentSwitch(name);
-                persist_event(&sess.store, &sess.id, &ev);
+                let _ = sink.push(&ev);
                 let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
             // Plan→act handoff: clear the transcript so the act agent starts
@@ -178,52 +183,60 @@ pub async fn process_cmd(
                         .await;
                 }
                 let ev = SessionEvent::TranscriptReset(sess.messages.clone());
-                persist_event(&sess.store, &sess.id, &ev);
+                let _ = sink.push(&ev);
                 let _ = evt_tx.try_send(UiEvent::Session(ev));
                 let ev2 = SessionEvent::PlanHandoff(plan_display);
-                persist_event(&sess.store, &sess.id, &ev2);
+                let _ = sink.push(&ev2);
                 let _ = evt_tx.try_send(UiEvent::Session(ev2));
             }
             let tx = evt_tx.clone();
-            let store = sess.store.clone();
-            let sid = sess.id.clone();
+            let sink_for_run = sink.clone();
             let res = run_session(sess, String::new(), move |sev| {
-                persist_event(&store, &sid, &sev);
+                let _ = sink_for_run.push(&sev);
                 let _ = tx.try_send(UiEvent::Session(sev));
             })
             .await;
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
-                persist_event(&sess.store, &sess.id, &ev);
+                let _ = sink.push(&ev);
                 let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
+            drop(sink);
+            let _ = flusher.await;
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::Compact => {
             let registry = opencoder_session::tools::registry();
-            let tx = evt_tx.clone();
-            let store = sess.store.clone();
-            let sid = sess.id.clone();
-            let mut emit = move |sev: SessionEvent| {
-                persist_event(&store, &sid, &sev);
-                let _ = tx.try_send(UiEvent::Session(sev));
+            let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
+            // Scope the emit closure so its sender clone is dropped before we
+            // drop the last sender + await the flusher (final flush).
+            let outcome = {
+                let tx = evt_tx.clone();
+                let sink_for_emit = sink.clone();
+                let mut emit = move |sev: SessionEvent| {
+                    let _ = sink_for_emit.push(&sev);
+                    let _ = tx.try_send(UiEvent::Session(sev));
+                };
+                opencoder_session::compaction::compact(sess, &registry, &mut emit).await
             };
-            match opencoder_session::compaction::compact(sess, &registry, &mut emit).await {
+            match outcome {
                 Ok(Some(summary)) => {
                     let ev = SessionEvent::TranscriptReset(sess.messages.clone());
-                    persist_event(&sess.store, &sess.id, &ev);
+                    let _ = sink.push(&ev);
                     let _ = evt_tx.try_send(UiEvent::Session(ev));
                     let ev2 = SessionEvent::Compaction(summary);
-                    persist_event(&sess.store, &sess.id, &ev2);
+                    let _ = sink.push(&ev2);
                     let _ = evt_tx.try_send(UiEvent::Session(ev2));
                 }
                 Ok(None) => {}
                 Err(e) => {
                     let ev = SessionEvent::Error(format!("compaction failed: {e:#}"));
-                    persist_event(&sess.store, &sess.id, &ev);
+                    let _ = sink.push(&ev);
                     let _ = evt_tx.try_send(UiEvent::Session(ev));
                 }
             }
+            drop(sink);
+            let _ = flusher.await;
             let _ = evt_tx.send(UiEvent::TurnDone).await;
         }
         UiCmd::SetSkill(body) => {

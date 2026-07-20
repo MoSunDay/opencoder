@@ -1,12 +1,18 @@
-use opencoder_core::{message::now_ms, Message};
+use opencoder_core::{message::now_ms, CapabilitiesConfig, Message};
 use std::path::{Path, PathBuf};
 
 pub fn build_system(
     agent: &opencoder_core::Agent,
     working_dir: &Path,
     skill_prompt: Option<&str>,
+    caps: &CapabilitiesConfig,
 ) -> Message {
     let mut text = agent.prompt.clone();
+    // Hide the 'tools' umbrella subagent advertisement when the capability is
+    // off, so the model is never told the `tools` subagent exists.
+    if !caps.tools_subagent_enabled() {
+        text = opencoder_core::strip_tools_subagent_ad(&text);
+    }
 
     if let Some(instructions) = load_instructions(working_dir) {
         text.push_str("\n\n## Project instructions\n");

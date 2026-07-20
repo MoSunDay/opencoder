@@ -48,7 +48,7 @@ pub struct Config {
     #[serde(default)]
     pub network: NetworkConfig,
     /// Capability toggles gating the optional browser + computer-use tools and
-    /// the `tools` umbrella subagent. Both default to off.
+    /// the `tools` umbrella subagent. All three default to off.
     #[serde(default)]
     pub capabilities: CapabilitiesConfig,
 }
@@ -59,6 +59,26 @@ fn default_interleaved_thinking() -> Option<bool> {
 
 fn is_none_interleaved(v: &Option<bool>) -> bool {
     v.is_none()
+}
+
+/// Warn (without rewriting) when the configured `model` looks like a stale or
+/// malformed value that would silently break requests. Only logs — never
+/// mutates the user's config. Catches legacy values such as single-char or
+/// placeholder strings so they are not silently written back to config.json.
+fn warn_if_suspicious_model(model: &str) {
+    if model.is_empty() {
+        return;
+    }
+    let suspicious = match model.split_once('/') {
+        Some((provider, mid)) => provider.len() < 2 || mid.len() < 2,
+        None => model.len() < 3,
+    };
+    if suspicious {
+        tracing::warn!(
+            model = %model,
+            "config `model` looks malformed (expected `provider/model`, e.g. `openai/gpt-4o`); override with --model if this is a stale value"
+        );
+    }
 }
 
 fn default_model() -> String {
@@ -152,6 +172,12 @@ pub struct CapabilitiesConfig {
     /// Enable the `computer_use` tool + the `tools` subagent's computer-use tool.
     #[serde(default)]
     pub computer_use: bool,
+    /// Enable the `tools` umbrella subagent (browser/computer-use delegation).
+    /// When off, the system prompt drops the 'tools' advertisement, the task
+    /// schema omits the 'tools' subagent_type, and `run_subagent` rejects
+    /// `subagent_type: "tools"`.
+    #[serde(default)]
+    pub tools_subagent: bool,
 }
 
 impl CapabilitiesConfig {
@@ -164,6 +190,13 @@ impl CapabilitiesConfig {
             "computer_use" => self.computer_use,
             _ => true,
         }
+    }
+
+    /// Whether the `tools` umbrella subagent is enabled. When false, the system
+    /// prompt drops the 'tools' advertisement, the task schema omits the 'tools'
+    /// subagent_type, and `run_subagent` rejects `subagent_type: "tools"`.
+    pub fn tools_subagent_enabled(&self) -> bool {
+        self.tools_subagent
     }
 }
 
@@ -203,6 +236,7 @@ impl Config {
             }
         }
         apply_env(&mut cfg);
+        warn_if_suspicious_model(&cfg.model);
         Ok(cfg)
     }
     pub fn model_id(&self) -> &str {
@@ -342,7 +376,11 @@ fn has_editable_key(root: &serde_json::Value) -> bool {
     if obj
         .get("capabilities")
         .and_then(|v| v.as_object())
-        .is_some_and(|c| c.contains_key("browser") || c.contains_key("computer_use"))
+        .is_some_and(|c| {
+            c.contains_key("browser")
+                || c.contains_key("computer_use")
+                || c.contains_key("tools_subagent")
+        })
     {
         return true;
     }
@@ -513,6 +551,9 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
             if let Some(b) = c.get("computer_use").and_then(|v| v.as_bool()) {
                 cfg.capabilities.computer_use = b;
+            }
+            if let Some(b) = c.get("tools_subagent").and_then(|v| v.as_bool()) {
+                cfg.capabilities.tools_subagent = b;
             }
         }
     }

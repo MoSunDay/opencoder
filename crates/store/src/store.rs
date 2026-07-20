@@ -57,7 +57,20 @@ pub trait Store: Send + Sync {
     /// unpromoted. Used by the TUI queue panel to reorder follow-ups.
     async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()>;
 
-    async fn append_event(&self, event: &SessionEventRecord) -> Result<i64>;
+    /// Persist a batch of events atomically in a single transaction, returning
+    /// the assigned `seq` for each event in input order. This is the preferred
+    /// write path for high-frequency surfaces: one transaction (and thus one
+    /// fsync at commit) replaces N single inserts. All events in a batch must
+    /// share the same `session_id`.
+    async fn append_events(&self, events: &[SessionEventRecord]) -> Result<Vec<i64>>;
+
+    /// Persist a single event. Default impl delegates to [`append_events`].
+    async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
+        let mut seqs = self
+            .append_events(std::slice::from_ref(event))
+            .await?;
+        Ok(seqs.pop().unwrap_or(0))
+    }
     async fn events_after(
         &self,
         session_id: &str,

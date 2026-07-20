@@ -23,6 +23,7 @@ fn done_turn(text: &str) -> LlmEvent {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            ..Default::default()
         }),
     }
 }
@@ -125,6 +126,7 @@ async fn tools_subagent_is_dispatchable_from_act() {
     let agent = resolve_agent("act").unwrap();
     let mut cfg = base_config();
     cfg.capabilities.computer_use = true;
+    cfg.capabilities.tools_subagent = true;
     let mut s = SessionState::new("dispatch", agent, cfg, client, dir.path().to_path_buf());
 
     let mut events = Vec::new();
@@ -156,27 +158,71 @@ async fn tools_subagent_is_dispatchable_from_act() {
 }
 
 #[tokio::test]
+async fn tools_subagent_rejected_when_capability_disabled() {
+    // Defense-in-depth: even if the model emits a `tools` subagent call while
+    // the capability switch is off, the runtime guard in `run_subagent` must
+    // reject it with an "Unknown subagent_type 'tools'" error whose
+    // valid-options list never advertises 'tools'.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![task_turn("tools")]) // act tries to delegate
+            .push_script(vec![done_turn("final")]), // act recovers
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let cfg = base_config(); // tools_subagent = false (default) -> capability OFF
+    let mut s = SessionState::new("guard-off", agent, cfg, client, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut s, "delegate to tools".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let err_output = events
+        .iter()
+        .find_map(|ev| match ev {
+            SessionEvent::ToolEnd {
+                name, is_error, output, ..
+            } if name == "task" && *is_error => Some(output.clone()),
+            _ => None,
+        })
+        .expect("expected an errored task ToolEnd rejecting the tools subagent");
+
+    assert!(
+        err_output.contains("Unknown subagent_type 'tools'"),
+        "guard must name the rejected type, got: {err_output}"
+    );
+    assert!(
+        !err_output.contains("'tools' (browser"),
+        "valid-options list must not advertise tools when capability off, got: {err_output}"
+    );
+}
+
+#[tokio::test]
 async fn config_save_load_round_trips_capabilities() {
     // The `/config` save path: a ModelPatch.to_json() capabilities object is
     // merged via Config::save and must be read back by Config::load.
     let dir = tempfile::tempdir().unwrap();
     let patch = serde_json::json!({
         "model": "m/g",
-        "capabilities": { "browser": true, "computer_use": true },
+        "capabilities": { "browser": true, "computer_use": true, "tools_subagent": true },
     });
     Config::save(dir.path(), &patch).expect("save patch");
 
     let loaded = Config::load(dir.path()).expect("load");
     assert!(loaded.capabilities.browser, "browser capability round-trips");
     assert!(loaded.capabilities.computer_use, "computer_use capability round-trips");
+    assert!(loaded.capabilities.tools_subagent, "tools_subagent capability round-trips");
 
     // Toggle off and confirm the merge overwrites (not just creates).
     Config::save(
         dir.path(),
-        &serde_json::json!({ "capabilities": { "browser": false, "computer_use": false } }),
+        &serde_json::json!({ "capabilities": { "browser": false, "computer_use": false, "tools_subagent": false } }),
     )
     .expect("save toggle");
     let reloaded = Config::load(dir.path()).expect("reload");
     assert!(!reloaded.capabilities.browser, "browser capability toggles off");
     assert!(!reloaded.capabilities.computer_use, "computer_use toggles off");
+    assert!(!reloaded.capabilities.tools_subagent, "tools_subagent toggles off");
 }

@@ -14,7 +14,7 @@ use anyhow::Result;
 use opencoder_core::Config;
 use opencoder_llm::ChatStream;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
-use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput, Store};
+use opencoder_store::{Delivery, EventKind, SessionInput, Store};
 use tokio::sync::{broadcast, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -220,28 +220,23 @@ async fn drain_to_completion(
     session.cancel = Some(handle.cancel.lock().await.clone());
 
     let tx = handle.tx.clone();
-    let store_for_evt = store.clone();
     let sid = session_id.to_string();
+    // Buffered persistence: a single flusher batches the high-frequency delta
+    // events into one transactional append_events per turn (O(turn) writes
+    // instead of O(tokens)) while losing zero events — structural events flush
+    // pending deltas first, and the awaited flusher guarantees a final flush.
+    let (sink, flusher) =
+        opencoder_session::spawn_event_flusher(Some(store.clone()), session_id.to_string());
     let result = run(&mut session, String::new(), |ev| {
-        let (sse, kind) = sse_from_session_event(&sid, &ev);
+        let (sse, _kind) = sse_from_session_event(&sid, &ev);
         // broadcast (ignore lagging subscribers)
-        let _ = tx.send(sse.clone());
-        // persist for replay
-        let rec = SessionEventRecord {
-            session_id: sid.clone(),
-            kind,
-            payload: sse.data.clone(),
-            ts: sse.ts,
-            seq: None,
-            sse_kind: Some(sse.kind.clone()),
-        };
-        let s2 = store_for_evt.clone();
-        let r2 = rec;
-        tokio::spawn(async move {
-            let _ = s2.append_event(&r2).await;
-        });
+        let _ = tx.send(sse);
+        // enqueue for durable (batched) persistence — never blocks
+        let _ = sink.push(&ev);
     })
     .await;
+    drop(sink);
+    let _ = flusher.await;
 
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");

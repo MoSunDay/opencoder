@@ -20,7 +20,7 @@ Commit: (working-tree, pre-initial-commit)
 - session 生命周期：`create_session` / `get_session` / `list_sessions`（`SessionFilter`：workdir_hash / search / cursor 分页）/ `update_session`（`SessionPatch` 局部更新）/ `delete_session`。`clear_other_sessions(keep)` 单条 `DELETE FROM sessions WHERE id != keep` 批量清理（保留当前会话），子表经 `ON DELETE CASCADE` 外键级联删除，返回删除条数。
 - 写消息：`append_message` / `append_messages`（事务，all-or-nothing）。
 - 输入提升：`admit_input`（计算单调 admitted_seq）→ `pending_inputs` 查询 → `promote_inputs`（按 admitted_seq 截止批量标记）/ `claim_next_queue`（原子返回 `(seq, SessionInput)` + 标记单条 queue，供 runner drain idle 消费；seq 随 `QueueConsumed` 事件回传前端收缩镜像）。`delete_input`（带 `promoted_seq IS NULL` 守卫，不删已提升行）/ `swap_input_order`（交换两行 admitted_seq，无 UNIQUE 约束可直接交换）供 TUI 队列面板删除/重排未消费的 follow-up。
-- 事件回放：`append_event` → `events_after(seq)` 供 SSE replay。
+- 事件回放：`append_events(&[record])`（**批量**，单事务 all-or-nothing，返回 seq 数组；`append_event` 单条默认委托它——批量 INSERT + 单次 `SELECT seq ... LIMIT N` backfill + reverse 还原写入序）→ `events_after(seq)` 供 SSE replay。批量写是高频表面（token delta 流）的首选路径，把 O(tokens) 次 fsync 降到 O(turn)。
 - 迁移：`src/import.rs::import_jsonl_dir` 把旧 `<id>.jsonl` 一次性导入（幂等，已存在的 session 跳过）。
 - **二进制导出/导入**（`src/bundle.rs`）：`SessionBundle` 递归结构（meta + messages + events + inputs + subagents）。自定义 opencoder 二进制格式（magic `OPENCODR` + 版本 + payload）。`export_bundle` 递归收集父子 session 树；`import_bundle` 幂等写入（已存在则跳过）。CLI：`opencoder session export <id> -o <file>`（默认输出 `<id>.opencoder`）/ `opencoder session import <file>`（读取 `.opencoder` 二进制）。不导出 Config（含 API key）。
 

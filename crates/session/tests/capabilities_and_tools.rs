@@ -23,7 +23,6 @@ fn done_turn(text: &str) -> LlmEvent {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
-            ..Default::default()
         }),
     }
 }

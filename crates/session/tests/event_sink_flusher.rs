@@ -144,7 +144,6 @@ async fn token_storm_persists_losslessly_with_oturn_writes() {
             input_tokens: 5,
             output_tokens: 3,
             total_tokens: 8,
-            ..Default::default()
         }),
     });
     let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().push_script(script));

@@ -394,20 +394,49 @@ async fn emit_delta(
 }
 
 fn parse_usage(u: &Value) -> Usage {
+    let input_tokens = u
+        .get("prompt_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+    let output_tokens = u
+        .get("completion_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+    let total_tokens = u
+        .get("total_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+
+    // Prompt-caching accounting. Provider naming is inconsistent, so accept
+    // every known variant and normalize into two fields (see `Usage` docs):
+    //   cache_read:     cache_read_input_tokens | cache_read
+    //                   | prompt_tokens_details.cached_tokens (OpenAI native)
+    //   cache_creation: cache_creation_input_tokens | cache_write
+    let cache_read_tokens = first_u64(u, &["cache_read_input_tokens", "cache_read"])
+        .or_else(|| {
+            u.get("prompt_tokens_details")
+                .and_then(|d| d.get("cached_tokens"))
+                .and_then(|v| v.as_u64())
+        })
+        .unwrap_or_default();
+    let cache_creation_tokens =
+        first_u64(u, &["cache_creation_input_tokens", "cache_write"]).unwrap_or_default();
+
     Usage {
-        input_tokens: u
-            .get("prompt_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default(),
-        output_tokens: u
-            .get("completion_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default(),
-        total_tokens: u
-            .get("total_tokens")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default(),
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
     }
+}
+
+/// Return the first `u64` found under any of `keys` in `obj`, or `None`.
+/// Used by `parse_usage` to collapse provider-specific cache-field aliases
+/// (checked in priority order) into one normalized value.
+fn first_u64(obj: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|k| obj.get(*k).and_then(|v| v.as_u64()))
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -559,5 +588,104 @@ mod tests {
             retry_decision(AttemptOutcome::Success, 3, max),
             RetryDecision::Done
         );
+    }
+
+    // ---- parse_usage: base fields + cache-token normalization ----
+
+    fn usage_json(s: &str) -> Value {
+        serde_json::from_str(s).expect("valid usage json")
+    }
+
+    /// Base OpenAI shape: the three legacy keys map through unchanged and no
+    /// cache info yields zero cache tokens.
+    #[test]
+    fn parse_usage_reads_openai_base_fields() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":100,"completion_tokens":40,"total_tokens":140}"#,
+        ));
+        assert_eq!(u.input_tokens, 100);
+        assert_eq!(u.output_tokens, 40);
+        assert_eq!(u.total_tokens, 140);
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    /// Anthropic / OpenAI-compatible proxies fronting Claude & GLM spell the
+    /// cache fields `cache_read_input_tokens` / `cache_creation_input_tokens`.
+    /// (A single turn with ~105M cache reads is realistic for big contexts.)
+    #[test]
+    fn parse_usage_reads_anthropic_cache_fields() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":2000,"completion_tokens":10,"total_tokens":2010,
+               "cache_read_input_tokens":104857600,
+               "cache_creation_input_tokens":1500}"#,
+        ));
+        assert_eq!(u.cache_read_tokens, 104_857_600);
+        assert_eq!(u.cache_creation_tokens, 1500);
+    }
+
+    /// Some gateways use the shorter `cache_read` / `cache_write` aliases.
+    #[test]
+    fn parse_usage_reads_gateway_cache_aliases() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":50,"completion_tokens":5,"total_tokens":55,
+               "cache_read":8000,"cache_write":2000}"#,
+        ));
+        assert_eq!(u.cache_read_tokens, 8000);
+        assert_eq!(u.cache_creation_tokens, 2000);
+    }
+
+    /// OpenAI native nests cached tokens under `prompt_tokens_details`.
+    #[test]
+    fn parse_usage_reads_openai_nested_cached_tokens() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":300,"completion_tokens":20,"total_tokens":320,
+               "prompt_tokens_details":{"cached_tokens":9000}}"#,
+        ));
+        assert_eq!(u.cache_read_tokens, 9000);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    /// When both the explicit Anthropic key and the short alias are present,
+    /// the explicit one wins (it is checked first) -- deterministic precedence.
+    #[test]
+    fn parse_usage_prefers_explicit_anthropic_key_over_alias() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,
+               "cache_read_input_tokens":7,"cache_read":9}"#,
+        ));
+        assert_eq!(u.cache_read_tokens, 7);
+    }
+
+    /// A usage object with only base fields (legacy / plain OpenAI) yields
+    /// zero cache tokens -- the backward-compat path old rows rely on.
+    #[test]
+    fn parse_usage_missing_cache_fields_default_to_zero() {
+        let u = parse_usage(&usage_json(
+            r#"{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}"#,
+        ));
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    /// Boundary: a totally empty usage object -> all zeros, no panic.
+    #[test]
+    fn parse_usage_empty_object_is_all_zeros() {
+        let u = parse_usage(&usage_json("{}"));
+        assert_eq!(u.input_tokens, 0);
+        assert_eq!(u.output_tokens, 0);
+        assert_eq!(u.total_tokens, 0);
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    /// `first_u64` returns the FIRST present key (precedence) and ignores
+    /// missing keys / non-u64 values.
+    #[test]
+    fn first_u64_returns_first_present_key() {
+        let obj = usage_json(r#"{"a":10,"b":20}"#);
+        assert_eq!(first_u64(&obj, &["a", "b"]), Some(10));
+        assert_eq!(first_u64(&obj, &["b", "a"]), Some(20));
+        assert_eq!(first_u64(&obj, &["missing"]), None);
     }
 }

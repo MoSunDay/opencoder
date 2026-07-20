@@ -1,11 +1,17 @@
 use crate::error::{CoreError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub provider: ProviderConfig,
+    /// Named OpenAI-compatible providers. Each entry is `{base_url, api_key?, model?}`.
+    /// The active provider is selected by the `provider/` prefix of `model`.
+    /// Empty by default; populate via config file. No built-in presets.
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -27,6 +33,16 @@ pub struct Config {
     /// thinking). Edited at runtime via the TUI `/model` menu.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Per-agent prefix-cache salting. `Some(true)` (the default) makes every
+    /// outbound LLM request carry a top-level `cache_salt` body field equal to
+    /// `<agent_name>:<session_id>`, so a vLLM / prefix-cache backend can
+    /// namespace its KV cache per agent/conversation and grow the cached prefix
+    /// across turns within a conversation. `Some(false)` or `None` omits the
+    /// field entirely (no behavior change). The value is stable across an
+    /// agent's turns; subagents derive their own salt from their child session
+    /// id (`sub-<ULID>`), so each subagent run gets an independent namespace.
+    #[serde(default = "default_cache_salt", skip_serializing_if = "Option::is_none")]
+    pub cache_salt: Option<bool>,
     /// Interleaved thinking: when true, the `reasoning_content` produced on
     /// tool-call turns is persisted into the assistant message and sent back
     /// on subsequent requests, letting the model continue its chain-of-thought
@@ -54,6 +70,10 @@ pub struct Config {
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
+    Some(true)
+}
+
+fn default_cache_salt() -> Option<bool> {
     Some(true)
 }
 
@@ -96,6 +116,9 @@ pub struct ProviderConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Default model id for this provider (the part after the `/` prefix).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 fn default_base_url() -> String {
@@ -204,6 +227,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             provider: ProviderConfig::default(),
+            providers: HashMap::new(),
             model: default_model(),
             small_model: None,
             agent: AgentDefaults::default(),
@@ -211,6 +235,7 @@ impl Default for Config {
             context_limit: None,
             max_tokens: None,
             reasoning_effort: None,
+            cache_salt: default_cache_salt(),
             interleaved_thinking: Some(true),
             fps: None,
             network: NetworkConfig::default(),
@@ -271,12 +296,39 @@ impl Config {
         self.small_model_id()
     }
     pub fn api_key(&self) -> Result<String> {
-        self.provider
-            .api_key
-            .clone()
+        self.api_key_for(self.provider_id())
+    }
+
+    /// Look up a named provider in the `providers` registry.
+    pub fn provider_for(&self, name: &str) -> Option<&ProviderConfig> {
+        self.providers.get(name)
+    }
+
+    /// Resolve the base_url for a provider name: `providers[name].base_url`
+    /// if the name is registered, otherwise the legacy `provider.base_url`.
+    pub fn base_url_for(&self, name: &str) -> String {
+        match self.provider_for(name) {
+            Some(p) => p.base_url.clone(),
+            None => self.provider.base_url.clone(),
+        }
+    }
+
+    /// Resolve the api_key for a provider name: `providers[name].api_key` →
+    /// legacy `provider.api_key` → `OPENAI_API_KEY` env var.
+    pub fn api_key_for(&self, name: &str) -> Result<String> {
+        self.provider_for(name)
+            .and_then(|p| p.api_key.clone())
+            .or_else(|| self.provider.api_key.clone())
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
+    }
+
+    /// One-shot endpoint resolution for the current `model`'s provider prefix.
+    /// Returns `(base_url, api_key)` ready for `ChatClient::new`.
+    pub fn resolve_endpoint(&self) -> Result<(String, String)> {
+        let name = self.provider_id();
+        Ok((self.base_url_for(name), self.api_key_for(name)?))
     }
 
     /// Effective TUI frame rate (FPS), clamped to 1..=30. `None` -> 10.
@@ -356,6 +408,13 @@ fn has_editable_key(root: &serde_json::Value) -> bool {
         .get("provider")
         .and_then(|v| v.as_object())
         .is_some_and(|p| p.contains_key("base_url") || p.contains_key("api_key"))
+    {
+        return true;
+    }
+    if obj
+        .get("providers")
+        .and_then(|v| v.as_object())
+        .is_some_and(|p| !p.is_empty())
     {
         return true;
     }
@@ -466,6 +525,13 @@ fn apply_env(cfg: &mut Config) {
             cfg.context_limit = Some(n);
         }
     }
+    if let Ok(raw) = std::env::var("OPENCODER_CACHE_SALT") {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" => cfg.cache_salt = Some(true),
+            "false" | "0" | "no" => cfg.cache_salt = Some(false),
+            _ => {}
+        }
+    }
     // Proxy overlay: explicit OPENCODER_PROXY wins, then ALL_PROXY. Only set
     // when the user has not already configured `network.proxy` directly.
     if cfg.network.proxy.is_none() {
@@ -506,6 +572,9 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(it) = obj.get("interleaved_thinking").and_then(|v| v.as_bool()) {
             cfg.interleaved_thinking = Some(it);
         }
+        if let Some(v) = obj.get("cache_salt").and_then(|v| v.as_bool()) {
+            cfg.cache_salt = Some(v);
+        }
         if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
             cfg.fps = Some(fps.clamp(1, 30) as u32);
         }
@@ -515,6 +584,25 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
             if let Some(k) = p.get("api_key").and_then(|v| v.as_str()) {
                 cfg.provider.api_key = Some(resolve_env(k));
+            }
+        }
+        if let Some(providers) = obj.get("providers").and_then(|v| v.as_object()) {
+            for (name, pv) in providers {
+                if let Some(pcfg) = pv.as_object() {
+                    let entry = cfg
+                        .providers
+                        .entry(name.clone())
+                        .or_default();
+                    if let Some(b) = pcfg.get("base_url").and_then(|v| v.as_str()) {
+                        entry.base_url = b.to_string();
+                    }
+                    if let Some(k) = pcfg.get("api_key").and_then(|v| v.as_str()) {
+                        entry.api_key = Some(resolve_env(k));
+                    }
+                    if let Some(m) = pcfg.get("model").and_then(|v| v.as_str()) {
+                        entry.model = Some(m.to_string());
+                    }
+                }
             }
         }
         if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {

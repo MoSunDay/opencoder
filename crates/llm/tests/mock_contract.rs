@@ -11,6 +11,7 @@ fn req_with(model: &str) -> ChatRequest {
         temperature: None,
         max_tokens: None,
         reasoning_effort: None,
+        cache_salt: None,
     }
 }
 

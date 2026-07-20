@@ -243,9 +243,10 @@ pub async fn process_cmd(
             sess.set_skill(body);
         }
         UiCmd::ReloadConfig(new_cfg) => {
-            let api_key = new_cfg.api_key().unwrap_or_default();
-            if let Ok(new_client) = ChatClient::new(&new_cfg.provider.base_url, &api_key, new_cfg.network.proxy.as_deref()) {
-                sess.apply_config_reload(*new_cfg, Arc::new(new_client));
+            if let Ok((base_url, api_key)) = new_cfg.resolve_endpoint() {
+                if let Ok(new_client) = ChatClient::new(&base_url, &api_key, new_cfg.network.proxy.as_deref()) {
+                    sess.apply_config_reload(*new_cfg, Arc::new(new_client));
+                }
             }
         }
         UiCmd::ResetCancel(c) => {

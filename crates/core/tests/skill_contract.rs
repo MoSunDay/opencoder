@@ -5,7 +5,7 @@
 
 use std::fs;
 
-use opencoder_core::skill::{discover_in, parse_skill};
+use opencoder_core::skill::{discover_in, parse_skill, seed_builtin_skills_in};
 use opencoder_core::{discover_skills, skills_dir, Skill};
 
 fn write(path: &std::path::Path, contents: &str) {
@@ -95,4 +95,43 @@ fn skill_fields_are_complete() {
     assert_eq!(sk.description, "d");
     assert!(sk.body.contains("the body"));
     assert_eq!(sk.source, p);
+}
+
+#[test]
+fn seed_builtin_skills_writes_all_packs_when_gate_absent() {
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let names: Vec<String> = discover_in(root.path())
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    for expected in ["do-and-done", "repo-local-memory", "review", "submit"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "expected seeded skill {expected:?}, got {names:?}"
+        );
+    }
+    // repo-local-memory ships sidecar files alongside SKILL.md.
+    let rlm = root.path().join("repo-local-memory");
+    assert!(rlm.join("EXAMPLES.md").exists());
+    assert!(rlm.join("TEMPLATES.md").exists());
+}
+
+#[test]
+fn seed_builtin_skills_does_not_clobber_existing_files() {
+    let root = tempfile::tempdir().unwrap();
+    // Pre-create one skill dir with user-authored content.
+    let user_file = root.path().join("do-and-done").join("SKILL.md");
+    std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
+    std::fs::write(&user_file, "user-authored\n").unwrap();
+
+    seed_builtin_skills_in(root.path()).expect("seed");
+
+    // Existing user file must be preserved...
+    assert_eq!(
+        std::fs::read_to_string(&user_file).unwrap(),
+        "user-authored\n"
+    );
+    // ...while the other packs are still written.
+    assert!(root.path().join("review").join("SKILL.md").exists());
 }

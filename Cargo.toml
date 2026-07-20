@@ -24,6 +24,7 @@ path = "src/main.rs"
 [dependencies]
 opencoder-cli.workspace = true
 opencoder-tui.workspace = true
+opencoder-core.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

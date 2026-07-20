@@ -24,6 +24,8 @@ pub use computer_use::{
 pub use net::{build_http_client, effective_proxy};
 pub use error::{CoreError, Result};
 pub use message::{ContentBlock, Message, MessageUsage, Role};
-pub use skill::{discover as discover_skills, skills_dir, Skill};
+pub use skill::{
+    discover as discover_skills, seed_builtin_skills, seed_builtin_skills_in, skills_dir, Skill,
+};
 pub use sse::SseEvt;
 pub use tool::{Tool, ToolArc, ToolContext, ToolOutput, ToolSchema};

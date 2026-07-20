@@ -174,6 +174,8 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
                 input_tokens: 10,
                 output_tokens: 5,
                 total_tokens: 15,
+                cache_read_tokens: 104_857_600,
+                cache_creation_tokens: 1_500,
             };
             m.created_at = 2;
             m
@@ -209,6 +211,9 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
     assert_eq!(loaded[1].agent.as_deref(), Some("act"));
     assert_eq!(loaded[1].model.as_deref(), Some("glm-5.2"));
     assert_eq!(loaded[1].usage.total_tokens, 15);
+    // Cache tokens must survive the SQLite JSON round-trip (usage_json column).
+    assert_eq!(loaded[1].usage.cache_read_tokens, 104_857_600);
+    assert_eq!(loaded[1].usage.cache_creation_tokens, 1_500);
     assert_eq!(loaded[1].blocks.len(), 2);
     match &loaded[1].blocks[1] {
         ContentBlock::ToolUse { id, name, input } => {

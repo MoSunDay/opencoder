@@ -21,9 +21,9 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     if let Some(m) = &cli.small_model {
         config.small_model = Some(m.clone());
     }
-    let api_key = config.api_key()?;
+    let (base_url, api_key) = config.resolve_endpoint()?;
     let client: Arc<dyn ChatStream> =
-        Arc::new(ChatClient::new(&config.provider.base_url, &api_key, config.network.proxy.as_deref())?);
+        Arc::new(ChatClient::new(&base_url, &api_key, config.network.proxy.as_deref())?);
     let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
         .await
         .ok()

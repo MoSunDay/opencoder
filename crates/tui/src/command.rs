@@ -21,6 +21,7 @@ use ratatui::Frame;
 /// the default highlight when the popup opens with an empty query.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
+    ("/model", "切换供应商 / 模型 (provider picker)"),
     (
         "/config",
         "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率",
@@ -35,6 +36,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashAction {
     Task,
+    Model,
     Config,
     Compact,
 }
@@ -131,6 +133,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
     let bare = t.strip_prefix('/')?;
     match bare {
         "" | "t" | "task" => Some(SlashAction::Task),
+        "model" | "mdl" => Some(SlashAction::Model),
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
         _ => None,
@@ -140,6 +143,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
 fn dispatch(name: &str) -> Option<SlashAction> {
     match name {
         "/task" => Some(SlashAction::Task),
+        "/model" => Some(SlashAction::Model),
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
         _ => None,

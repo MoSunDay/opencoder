@@ -199,3 +199,56 @@ fn first_user_text(msgs: &[Message]) -> Option<String> {
         .find(|m| m.role == Role::User && !m.synthetic)
         .map(|m| m.text().chars().take(80).collect())
 }
+
+/// Derive the per-agent prefix-cache salt for `session`, or `None` when the
+/// feature is disabled via config. The salt is `<agent_name>:<session_id>` —
+/// stable across an agent's turns within a conversation so a prefix-cache
+/// backend can keep growing the cached prefix turn over turn. Subagents pass
+/// their own child `SessionState` (their `agent.name` is the subagent type and
+/// their `id` is `sub-<ULID>`), so each subagent run gets an independent cache
+/// namespace.
+pub(crate) fn cache_salt_for(session: &SessionState) -> Option<String> {
+    (session.config.cache_salt == Some(true))
+        .then(|| format!("{}:{}", session.agent.name, session.id))
+}
+
+#[cfg(test)]
+mod cache_salt_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    fn make_session(cache_salt: Option<bool>) -> SessionState {
+        // `cache_salt_for` never touches the filesystem, so a plain temp path
+        // (kept alive for the test's duration by the caller) suffices. We use
+        // a stable subdir under the OS temp dir rather than a TempDir so the
+        // SessionState owns a valid PathBuf without juggling drop lifetimes.
+        let working_dir = std::env::temp_dir().join("opencoder-cache-salt-tests");
+        SessionState::new(
+            "sess-123",
+            resolve_agent("act").unwrap(),
+            Config {
+                cache_salt,
+                ..Config::default()
+            },
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            working_dir,
+        )
+    }
+
+    #[test]
+    fn derives_salt_when_enabled() {
+        let s = make_session(Some(true));
+        assert_eq!(cache_salt_for(&s).as_deref(), Some("act:sess-123"));
+    }
+
+    #[test]
+    fn no_salt_when_disabled_or_unset() {
+        let s = make_session(Some(false));
+        assert_eq!(cache_salt_for(&s), None);
+        let s = make_session(None);
+        assert_eq!(cache_salt_for(&s), None);
+    }
+}

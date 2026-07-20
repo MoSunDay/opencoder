@@ -42,11 +42,23 @@ impl ContentBlock {
     }
 }
 
+/// Persisted token usage for one assistant message, stored in the
+/// `messages.usage_json` TEXT column as JSON.
+///
+/// Mirrors the LLM-layer `Usage`. `cache_read_tokens` /
+/// `cache_creation_tokens` carry prompt-cache accounting. `#[serde(default)]`
+/// keeps deserialization of pre-cache-tracking rows (which lack these keys)
+/// working, yielding `0` for old data -- i.e. historical cache usage cannot
+/// be recovered, only tracked from the point this change shipped.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessageUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

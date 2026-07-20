@@ -18,7 +18,8 @@ pub mod state;
 pub mod view;
 
 pub use state::{
-    handle_model_key, mask_key, Field, ModelMenu, ModelOutcome, ModelPatch, Reasoning,
+    handle_model_key, mask_key, Field, ModelMenu, ModelMenuMode, ModelOutcome, ModelPatch,
+    Reasoning,
 };
 pub use view::render_model_popup;
 
@@ -34,6 +35,7 @@ mod tests {
             provider: opencoder_core::ProviderConfig {
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: Some("sk-abcd1234567".to_string()),
+                model: None,
             },
             reasoning_effort: Some("high".to_string()),
             compaction: opencoder_core::CompactionConfig {

@@ -543,6 +543,7 @@ async fn run_one_llm_call(
         temperature: None,
         max_tokens: session.config.max_tokens,
         reasoning_effort: session.config.reasoning_effort.clone(),
+        cache_salt: crate::cache_salt_for(session),
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut completed: Option<(String, Vec<CompletedToolCall>, Option<Usage>)> = None;
@@ -898,6 +899,8 @@ fn core_usage(u: &Usage) -> MessageUsage {
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         total_tokens: u.total_tokens,
+        cache_read_tokens: u.cache_read_tokens,
+        cache_creation_tokens: u.cache_creation_tokens,
     }
 }
 

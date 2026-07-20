@@ -2085,6 +2085,7 @@ dependencies = [
  "anyhow",
  "clap",
  "opencoder-cli",
+ "opencoder-core",
  "opencoder-tui",
  "tokio",
 ]

@@ -24,6 +24,7 @@ fn completed_with_tools(text: &str, tool_calls: Vec<CompletedToolCall>) -> LlmEv
             input_tokens: 10,
             output_tokens: 20,
             total_tokens: 30,
+            ..Default::default()
         }),
     }
 }
@@ -36,6 +37,7 @@ fn completed_no_tools(text: &str) -> LlmEvent {
             input_tokens: 10,
             output_tokens: 20,
             total_tokens: 30,
+            ..Default::default()
         }),
     }
 }

@@ -14,6 +14,12 @@ pub struct ChatRequest {
     /// as a top-level `reasoning_effort` field on the request body. `None`
     /// omits the field so providers that don't support it stay unaffected.
     pub reasoning_effort: Option<String>,
+    /// Per-agent prefix-cache salt. When `Some(non-empty)`, serialized as a
+    /// top-level `"cache_salt"` field on the request body so a vLLM /
+    /// prefix-cache backend can namespace its KV cache per agent and grow the
+    /// cached prefix across turns within a conversation. `None`/empty omits the
+    /// field so backends that don't support it stay unaffected.
+    pub cache_salt: Option<String>,
 }
 
 impl ChatRequest {
@@ -40,6 +46,12 @@ impl ChatRequest {
             let trimmed = e.trim();
             if !trimmed.is_empty() {
                 body["reasoning_effort"] = json!(trimmed);
+            }
+        }
+        if let Some(s) = &self.cache_salt {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                body["cache_salt"] = json!(trimmed);
             }
         }
         body

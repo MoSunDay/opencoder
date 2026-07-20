@@ -50,6 +50,16 @@ pub(crate) fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
 }
 
+/// Resolve the `(base_url, api_key)` pair used to build the LLM client at TUI
+/// startup. Selects the provider whose name matches the `model`'s `provider/`
+/// prefix via `Config::resolve_endpoint`, so a `model` like
+/// `deepseek/deepseek-chat` resolves against `providers["deepseek"]` rather
+/// than the legacy top-level `provider.base_url`. Extracted as a testable seam
+/// for the startup path, which otherwise only runs inside `run`.
+pub(crate) fn startup_endpoint(config: &Config) -> Result<(String, String)> {
+    Ok(config.resolve_endpoint()?)
+}
+
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts
         .workdir
@@ -59,9 +69,10 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }
+    let (base_url, api_key) = startup_endpoint(&config)?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
-        &config.provider.base_url,
-        &config.api_key()?,
+        &base_url,
+        &api_key,
         config.network.proxy.as_deref(),
     )?);
 
@@ -576,9 +587,10 @@ async fn run_app(
                                                     // Rebuild the outer `client` too so subsequent
                                                     // `/task` new sessions pick up the new endpoint
                                                     // (the worker only swaps its own sess.client).
-                                                    let api_key = reloaded.api_key().unwrap_or_default();
-                                                    if let Ok(new_client) = opencoder_llm::ChatClient::new(&reloaded.provider.base_url, &api_key, reloaded.network.proxy.as_deref()) {
-                                                        client = Arc::new(new_client);
+                                                    if let Ok((base_url, api_key)) = reloaded.resolve_endpoint() {
+                                                        if let Ok(new_client) = opencoder_llm::ChatClient::new(&base_url, &api_key, reloaded.network.proxy.as_deref()) {
+                                                            client = Arc::new(new_client);
+                                                        }
                                                     }
                                                     config = reloaded.clone();
                                                     // Apply a new TUI frame rate immediately: rebuild the frame
@@ -622,6 +634,9 @@ async fn run_app(
                                     let sessions = store.list_sessions(&opencoder_store::SessionFilter::default())
                                         .await.unwrap_or_default();
                                     task_picker = Some(TaskPicker::new(sessions, session_id.clone()));
+                                }
+                                CommandOutcome::Dispatch(SlashAction::Model) => {
+                                    model_menu = Some(ModelMenu::new_provider_list(&config));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Config) => {
                                     model_menu = Some(ModelMenu::new(&config));

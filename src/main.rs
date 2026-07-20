@@ -18,6 +18,11 @@ async fn main() -> Result<()> {
     };
     init_logging(cli.verbose, log_sink.as_deref());
 
+    // Seed the built-in skill packs (do-and-done, repo-local-memory, review,
+    // submit) into ~/.opencoder/skills on first run. Idempotent: a no-op once
+    // the `review` skill directory exists.
+    opencoder_core::seed_builtin_skills();
+
     match &cli.command {
         Some(Command::Run { prompt }) => {
             let parts = if prompt.is_empty() {

@@ -68,6 +68,26 @@ pub(crate) fn models_summary(cfg: &Config) -> String {
         cfg.compaction.reserved,
         cfg.compaction.tail_turns,
     ));
+    // List all named providers from the `providers` registry.
+    if cfg.providers.is_empty() {
+        s.push_str("providers    : <none configured — using legacy `provider` field>\n");
+    } else {
+        let active = cfg.provider_id();
+        let mut names: Vec<&String> = cfg.providers.keys().collect();
+        names.sort();
+        for name in names {
+            let p = &cfg.providers[name];
+            let mark = if name == active { "*" } else { " " };
+            let model_id = p
+                .model
+                .as_deref()
+                .unwrap_or("<no default model>");
+            s.push_str(&format!(
+                "provider {mark}   : {} | {} | {}\n",
+                name, p.base_url, model_id
+            ));
+        }
+    }
     s
 }
 
@@ -240,6 +260,55 @@ mod tests {
         assert!(
             s.contains("interleave   : off"),
             "interleaved_thinking=false must render off, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn models_summary_lists_named_providers() {
+        use opencoder_core::ProviderConfig;
+        use std::collections::HashMap;
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "deepseek".to_string(),
+            ProviderConfig {
+                base_url: "https://api.deepseek.com/v1".to_string(),
+                api_key: Some("sk-dk".to_string()),
+                model: Some("deepseek-chat".to_string()),
+            },
+        );
+        providers.insert(
+            "openai".to_string(),
+            ProviderConfig {
+                base_url: "https://api.openai.com/v1".to_string(),
+                api_key: None,
+                model: Some("gpt-4o".to_string()),
+            },
+        );
+        let cfg = Config {
+            model: "deepseek/deepseek-chat".to_string(),
+            providers,
+            ..Default::default()
+        };
+        let s = models_summary(&cfg);
+        // Both providers listed with their base_url and model.
+        assert!(
+            s.contains("provider *   : deepseek | https://api.deepseek.com/v1 | deepseek-chat"),
+            "active provider (deepseek) must be marked with *, got:\n{s}"
+        );
+        assert!(
+            s.contains("provider     : openai | https://api.openai.com/v1 | gpt-4o"),
+            "inactive provider (openai) must be listed without marker, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn models_summary_shows_none_when_no_providers() {
+        let cfg = Config::default();
+        let s = models_summary(&cfg);
+        assert!(
+            s.contains("providers    : <none configured"),
+            "empty providers must show the 'none configured' line, got:\n{s}"
         );
     }
 

@@ -47,6 +47,7 @@ fn bash_turn(n: u32) -> LlmEvent {
             input_tokens: 10 * n as u64,
             output_tokens: 1,
             total_tokens: 10 * n as u64 + 1,
+            ..Default::default()
         }),
     }
 }

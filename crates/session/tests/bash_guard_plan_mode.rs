@@ -32,6 +32,7 @@ fn bash_turn(cmd: &str) -> LlmEvent {
             input_tokens: 5,
             output_tokens: 1,
             total_tokens: 6,
+            ..Default::default()
         }),
     }
 }

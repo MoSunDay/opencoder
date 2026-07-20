@@ -193,6 +193,7 @@ async fn summarize(
         temperature: Some(0.2),
         max_tokens: session.config.compaction.buffer,
         reasoning_effort: None,
+        cache_salt: crate::cache_salt_for(session),
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut text = String::new();

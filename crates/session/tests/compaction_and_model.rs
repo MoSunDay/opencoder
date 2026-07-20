@@ -20,6 +20,7 @@ fn done_event(text: &str) -> LlmEvent {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            ..Default::default()
         }),
     }
 }
@@ -222,6 +223,7 @@ async fn reported_tokens_uses_input_only_not_total() {
         input_tokens: 3_000,
         output_tokens: 9_000,
         total_tokens: 12_000,
+        ..Default::default()
     };
 
     assert!(
@@ -234,6 +236,7 @@ async fn reported_tokens_uses_input_only_not_total() {
         input_tokens: 9_000,
         output_tokens: 0,
         total_tokens: 9_000,
+        ..Default::default()
     };
     assert!(
         should_compact(&s),

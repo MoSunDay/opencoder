@@ -29,6 +29,7 @@ fn req() -> ChatRequest {
         temperature: None,
         max_tokens: None,
         reasoning_effort: None,
+        cache_salt: None,
     }
 }
 
@@ -137,4 +138,82 @@ async fn apply_config_reload_with_same_client_keeps_routing() {
     assert_eq!(sess.model, "d");
     drain(sess.client.chat_stream(req()).unwrap()).await;
     assert_eq!(mock.call_count(), 1);
+}
+
+#[tokio::test]
+async fn switch_provider_in_map_updates_model_and_client() {
+    // When the config's model prefix switches to a different provider in the
+    // `providers` map, apply_config_reload must update sess.model to the new
+    // provider's model_id and route through the new client.
+    use std::collections::HashMap;
+    use opencoder_core::ProviderConfig;
+
+    let agent = resolve_agent("act").unwrap();
+    let mock_a = Arc::new(MockChatClient::new().with_default(done()));
+    let mock_b = Arc::new(MockChatClient::new().with_default(done()));
+
+    // Initial config: deepseek provider active.
+    let mut providers_a = HashMap::new();
+    providers_a.insert(
+        "deepseek".to_string(),
+        ProviderConfig {
+            base_url: "https://api.deepseek.com/v1".to_string(),
+            api_key: Some("dk-key".to_string()),
+            model: Some("deepseek-chat".to_string()),
+        },
+    );
+    let cfg_a = Config {
+        model: "deepseek/deepseek-chat".to_string(),
+        providers: providers_a,
+        ..Config::default()
+    };
+
+    let mut sess = SessionState::new(
+        "s1",
+        agent,
+        cfg_a,
+        mock_a.clone() as Arc<dyn ChatStream>,
+        "/tmp".into(),
+    );
+    assert_eq!(sess.model, "deepseek-chat");
+
+    // Pre-reload call routes through mock_a.
+    drain(sess.client.chat_stream(req()).unwrap()).await;
+    assert_eq!(mock_a.call_count(), 1);
+
+    // New config: openai provider active.
+    let mut providers_b = HashMap::new();
+    providers_b.insert(
+        "deepseek".to_string(),
+        ProviderConfig {
+            base_url: "https://api.deepseek.com/v1".to_string(),
+            api_key: Some("dk-key".to_string()),
+            model: Some("deepseek-chat".to_string()),
+        },
+    );
+    providers_b.insert(
+        "openai".to_string(),
+        ProviderConfig {
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: Some("oai-key".to_string()),
+            model: Some("gpt-4o".to_string()),
+        },
+    );
+    let cfg_b = Config {
+        model: "openai/gpt-4o".to_string(),
+        providers: providers_b,
+        ..Config::default()
+    };
+
+    // Hot-reload: switch to mock_b + new config.
+    sess.apply_config_reload(cfg_b, mock_b.clone() as Arc<dyn ChatStream>);
+
+    // Model updated to the new provider's model_id.
+    assert_eq!(sess.model, "gpt-4o");
+    assert_eq!(sess.config.provider_id(), "openai");
+
+    // Post-reload call routes through mock_b only.
+    drain(sess.client.chat_stream(req()).unwrap()).await;
+    assert_eq!(mock_a.call_count(), 1, "old client must NOT serve after switch");
+    assert_eq!(mock_b.call_count(), 1, "new client must serve after switch");
 }

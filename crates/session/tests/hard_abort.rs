@@ -22,6 +22,7 @@ fn bash_call(cmd: &str) -> LlmEvent {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            ..Default::default()
         }),
     }
 }
@@ -34,6 +35,7 @@ fn done_event() -> LlmEvent {
             input_tokens: 0,
             output_tokens: 0,
             total_tokens: 0,
+            ..Default::default()
         }),
     }
 }

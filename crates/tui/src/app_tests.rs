@@ -1201,3 +1201,55 @@ fn double_esc_while_running_cancels() {
     );
 }
 
+
+#[test]
+fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
+    use opencoder_core::{Config, ProviderConfig};
+    use std::collections::HashMap;
+    let mut providers = HashMap::new();
+    providers.insert(
+        "deepseek".to_string(),
+        ProviderConfig {
+            base_url: "https://api.deepseek.com/v1".to_string(),
+            api_key: Some("dk-key".to_string()),
+            model: None,
+        },
+    );
+    let cfg = Config {
+        model: "deepseek/deepseek-chat".to_string(),
+        // Legacy single-provider field — the value the OLD startup bug picked.
+        // Distinct from providers["deepseek"] so a revert to the raw field is
+        // caught (it would return the openai url + oai-key instead).
+        provider: ProviderConfig {
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: Some("oai-key".to_string()),
+            model: None,
+        },
+        providers,
+        ..Default::default()
+    };
+    let (base_url, api_key) = crate::app::startup_endpoint(&cfg).unwrap();
+    assert_eq!(base_url, "https://api.deepseek.com/v1");
+    assert_eq!(api_key, "dk-key");
+}
+
+#[test]
+fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
+    use opencoder_core::{Config, ProviderConfig};
+    use std::collections::HashMap;
+    // Model prefix "unknown-svc" is not in providers -> fall back to the
+    // legacy top-level provider field (boundary case for the startup seam).
+    let cfg = Config {
+        model: "unknown-svc/model-x".to_string(),
+        provider: ProviderConfig {
+            base_url: "https://legacy.example.com/v1".to_string(),
+            api_key: Some("legacy-key".to_string()),
+            model: None,
+        },
+        providers: HashMap::new(),
+        ..Default::default()
+    };
+    let (base_url, api_key) = crate::app::startup_endpoint(&cfg).unwrap();
+    assert_eq!(base_url, "https://legacy.example.com/v1");
+    assert_eq!(api_key, "legacy-key");
+}

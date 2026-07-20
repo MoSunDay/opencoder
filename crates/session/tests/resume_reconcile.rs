@@ -31,6 +31,7 @@ fn done_event(text: &str) -> LlmEvent {
             input_tokens: 5,
             output_tokens: 3,
             total_tokens: 8,
+            ..Default::default()
         }),
     }
 }

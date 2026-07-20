@@ -33,6 +33,7 @@ fn task_turn(prompt: &str) -> LlmEvent {
             input_tokens: 10,
             output_tokens: 5,
             total_tokens: 15,
+            ..Default::default()
         }),
     }
 }
@@ -58,6 +59,7 @@ fn two_task_turn() -> LlmEvent {
             input_tokens: 10,
             output_tokens: 5,
             total_tokens: 15,
+            ..Default::default()
         }),
     }
 }
@@ -217,6 +219,7 @@ async fn subagent_wraps_child_events_in_subagent_child() {
                     input_tokens: 5,
                     output_tokens: 1,
                     total_tokens: 6,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![text_done("done")]) // child: done
@@ -378,6 +381,7 @@ async fn subagent_persists_child_events_to_store() {
                     input_tokens: 5,
                     output_tokens: 1,
                     total_tokens: 6,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![text_done("child finished")])
@@ -423,6 +427,7 @@ async fn subagent_rejects_unknown_type() {
                     input_tokens: 5,
                     output_tokens: 1,
                     total_tokens: 6,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![text_done("ok")]),
@@ -504,6 +509,7 @@ async fn subagent_child_events_persisted_before_return() {
                     input_tokens: 5,
                     output_tokens: 1,
                     total_tokens: 6,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![text_done("child finished")])

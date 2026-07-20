@@ -58,6 +58,24 @@ impl ModelPatch {
     }
 }
 
+/// Which mode the `/model` or `/config` modal is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelMenuMode {
+    /// Full config edit form (the original `/config` behavior).
+    Edit,
+    /// Provider list selector (`/model`): pick a named provider to switch to.
+    ProviderList,
+}
+
+/// One row in the provider-list selector.
+#[derive(Debug, Clone)]
+pub struct ProviderEntry {
+    pub name: String,
+    pub base_url: String,
+    pub model_id: String,
+    pub active: bool,
+}
+
 /// Reasoning-effort selector state. `Off` serializes to `null` (omit field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reasoning {
@@ -174,6 +192,9 @@ pub struct ModelMenu {
     pub capabilities_tools_subagent: bool,
     pub focus: Field,
     pub error: Option<String>,
+    pub mode: ModelMenuMode,
+    pub provider_entries: Vec<ProviderEntry>,
+    pub provider_selected: usize,
 }
 
 impl ModelMenu {
@@ -181,7 +202,7 @@ impl ModelMenu {
         let original_key = config.provider.api_key.clone().unwrap_or_default();
         ModelMenu {
             model: config.model.clone(),
-            base_url: config.provider.base_url.clone(),
+            base_url: config.base_url_for(config.provider_id()),
             api_key_input: String::new(),
             api_key_original: original_key,
             api_key_edited: false,
@@ -194,6 +215,50 @@ impl ModelMenu {
             capabilities_tools_subagent: config.capabilities.tools_subagent,
             focus: Field::Model,
             error: None,
+            mode: ModelMenuMode::Edit,
+            provider_entries: Vec::new(),
+            provider_selected: 0,
+        }
+    }
+
+    /// Create a provider-list selector seeded from `config.providers`.
+    pub fn new_provider_list(config: &Config) -> Self {
+        let active = config.provider_id();
+        let mut entries: Vec<ProviderEntry> = config
+            .providers
+            .iter()
+            .map(|(name, p)| ProviderEntry {
+                name: name.clone(),
+                base_url: p.base_url.clone(),
+                model_id: p
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| config.model_id().to_string()),
+                active: name == active,
+            })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        let selected = entries.iter().position(|e| e.active).unwrap_or(0);
+
+        let original_key = config.provider.api_key.clone().unwrap_or_default();
+        ModelMenu {
+            model: config.model.clone(),
+            base_url: config.base_url_for(config.provider_id()),
+            api_key_input: String::new(),
+            api_key_original: original_key,
+            api_key_edited: false,
+            reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
+            interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
+            threshold: config.compaction.context_threshold,
+            fps: config.tui_fps(),
+            capabilities_browser: config.capabilities.browser,
+            capabilities_computer_use: config.capabilities.computer_use,
+            capabilities_tools_subagent: config.capabilities.tools_subagent,
+            focus: Field::Model,
+            error: None,
+            mode: ModelMenuMode::ProviderList,
+            provider_entries: entries,
+            provider_selected: selected,
         }
     }
 
@@ -262,6 +327,10 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
         return ModelOutcome::Idle;
     }
     m.error = None;
+    // Provider-list mode: simple up/down/enter/esc navigation.
+    if m.mode == ModelMenuMode::ProviderList {
+        return handle_provider_list_key(menu, k);
+    }
     match k.code {
         KeyCode::Esc => {
             *menu = None;
@@ -438,4 +507,41 @@ pub fn mask_key(key: &str) -> String {
     let head: String = key.chars().take(2).collect();
     let tail: String = key.chars().skip(n.saturating_sub(4)).collect();
     format!("{head}****{tail}")
+}
+
+/// Handle a keystroke in provider-list selection mode.
+fn handle_provider_list_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutcome {
+    let m = match menu.as_mut() {
+        Some(m) => m,
+        None => return ModelOutcome::Idle,
+    };
+    match k.code {
+        KeyCode::Esc => {
+            *menu = None;
+            ModelOutcome::Cancel
+        }
+        KeyCode::Up => {
+            if m.provider_selected > 0 {
+                m.provider_selected -= 1;
+            }
+            ModelOutcome::Idle
+        }
+        KeyCode::Down => {
+            let n = m.provider_entries.len();
+            if n > 0 && m.provider_selected + 1 < n {
+                m.provider_selected += 1;
+            }
+            ModelOutcome::Idle
+        }
+        KeyCode::Enter => {
+            if let Some(entry) = m.provider_entries.get(m.provider_selected).cloned() {
+                m.model = format!("{}/{}", entry.name, entry.model_id);
+                let patch = m.build_patch();
+                *menu = None;
+                return ModelOutcome::Save(patch);
+            }
+            ModelOutcome::Idle
+        }
+        _ => ModelOutcome::Idle,
+    }
 }

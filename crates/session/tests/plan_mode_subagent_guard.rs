@@ -37,6 +37,7 @@ fn build_task_turn() -> LlmEvent {
             input_tokens: 5,
             output_tokens: 1,
             total_tokens: 6,
+            ..Default::default()
         }),
     }
 }
@@ -155,6 +156,7 @@ async fn plan_mode_allows_explore_subagent() {
                     input_tokens: 10,
                     output_tokens: 5,
                     total_tokens: 15,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![done_turn()]) // child done
@@ -208,6 +210,7 @@ async fn act_mode_allows_build_subagent() {
                     input_tokens: 10,
                     output_tokens: 5,
                     total_tokens: 15,
+                    ..Default::default()
                 }),
             }])
             .push_script(vec![done_turn()]) // child (build) done

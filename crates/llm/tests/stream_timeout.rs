@@ -26,6 +26,7 @@ fn make_request() -> ChatRequest {
         temperature: None,
         max_tokens: None,
         reasoning_effort: None,
+        cache_salt: None,
     }
 }
 

@@ -332,6 +332,7 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
         temperature: Some(0.3),
         max_tokens: Some(64),
         reasoning_effort: None,
+        cache_salt: crate::cache_salt_for(session),
     };
     let mut rx = session.client.chat_stream(req).context("title llm call")?;
     let mut text = String::new();

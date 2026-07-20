@@ -66,6 +66,63 @@ fn env_overrides_project_file() {
 }
 
 #[test]
+fn cache_salt_env_override() {
+    // The per-agent prefix-cache salt defaults to Some(true) and is toggled
+    // by OPENCODER_CACHE_SALT. This is the one env knob that controls whether
+    // the outbound request body carries the `cache_salt` field at all, so its
+    // three states (unset/default, false, true) plus override-of-file are
+    // asserted here. Body emission itself is covered by request_body.rs and
+    // cache_salt.rs; this test pins the config->field link they compose with.
+    let _g = ENV_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("opencoder.json"), r#"{"cache_salt":true}"#).unwrap();
+
+    // Unset -> serde default kicks in (Some(true)).
+    std::env::remove_var("OPENCODER_CACHE_SALT");
+    assert_eq!(
+        Config::load(dir.path()).unwrap().cache_salt,
+        Some(true),
+        "unset -> default Some(true)"
+    );
+
+    // =false -> disabled, overriding the file's true.
+    std::env::set_var("OPENCODER_CACHE_SALT", "false");
+    assert_eq!(
+        Config::load(dir.path()).unwrap().cache_salt,
+        Some(false),
+        "OPENCODER_CACHE_SALT=false wins over file"
+    );
+
+    // Truthy aliases also enable.
+    for v in ["1", "yes", "true"] {
+        std::env::set_var("OPENCODER_CACHE_SALT", v);
+        assert_eq!(
+            Config::load(dir.path()).unwrap().cache_salt,
+            Some(true),
+            "OPENCODER_CACHE_SALT={v} -> Some(true)"
+        );
+    }
+    for v in ["0", "no", "false"] {
+        std::env::set_var("OPENCODER_CACHE_SALT", v);
+        assert_eq!(
+            Config::load(dir.path()).unwrap().cache_salt,
+            Some(false),
+            "OPENCODER_CACHE_SALT={v} -> Some(false)"
+        );
+    }
+
+    // Garbage value -> ignored, file's true survives.
+    std::env::set_var("OPENCODER_CACHE_SALT", "maybe");
+    assert_eq!(
+        Config::load(dir.path()).unwrap().cache_salt,
+        Some(true),
+        "unrecognized value is ignored"
+    );
+
+    std::env::remove_var("OPENCODER_CACHE_SALT");
+}
+
+#[test]
 fn braces_api_key_resolves_env_var() {
     let _g = ENV_LOCK.lock().unwrap();
     std::env::set_var("ZHIPU_API_KEY", "secret-value-123");
@@ -319,6 +376,178 @@ fn save_env_var_api_key_roundtrips_through_resolve() {
         cfg.api_key().unwrap(),
         "resolved-secret",
         "{{ENV}} api_key must resolve on reload"
+    );
+}
+
+#[test]
+fn providers_map_resolves_endpoint_by_prefix() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-deepseek-xxx",
+                    "model": "deepseek-chat"
+                },
+                "openai": {
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": "sk-openai-yyy",
+                    "model": "gpt-4o"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // resolve_endpoint picks the provider matching the model prefix.
+    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
+    assert_eq!(base_url, "https://api.deepseek.com/v1");
+    assert_eq!(api_key, "sk-deepseek-xxx");
+}
+
+#[test]
+fn providers_map_base_url_for_and_api_key_for() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1", "api_key": "dk-key" },
+                "openai": { "base_url": "https://api.openai.com/v1", "api_key": "oai-key" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    assert_eq!(cfg.base_url_for("deepseek"), "https://api.deepseek.com/v1");
+    assert_eq!(cfg.api_key_for("deepseek").unwrap(), "dk-key");
+    assert_eq!(cfg.base_url_for("openai"), "https://api.openai.com/v1");
+    assert_eq!(cfg.api_key_for("openai").unwrap(), "oai-key");
+    assert!(cfg.provider_for("nonexistent").is_none());
+}
+
+#[test]
+fn prefix_not_in_providers_falls_back_to_legacy_provider() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "unknown-svc/model-x",
+            "provider": { "base_url": "https://legacy.example.com/v1", "api_key": "legacy-key" },
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1", "api_key": "dk-key" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // "unknown-svc" is not in providers → fall back to legacy provider field.
+    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
+    assert_eq!(base_url, "https://legacy.example.com/v1");
+    assert_eq!(api_key, "legacy-key");
+}
+
+#[test]
+fn provider_api_key_missing_falls_back_to_env() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::set_var("OPENAI_API_KEY", "env-fallback-key");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // No api_key in providers[deepseek], no legacy provider.api_key → env fallback.
+    // (api_key_for reads OPENAI_API_KEY live at call time, so keep it set
+    // through the resolve, then clean up.)
+    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
+    assert_eq!(base_url, "https://api.deepseek.com/v1");
+    assert_eq!(api_key, "env-fallback-key");
+    std::env::remove_var("OPENAI_API_KEY");
+}
+
+#[test]
+fn merge_into_deep_merges_providers_across_files() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    // Simulate two config layers: global provides deepseek base_url, project
+    // adds the api_key + a second provider. Both must survive the merge.
+    let global = _home_guard;
+    let _ = global;
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1" },
+                "openai": { "base_url": "https://api.openai.com/v1", "api_key": "oai-key" }
+            }
+        }"#,
+    )
+    .unwrap();
+    // Write a global config that adds deepseek's api_key (merge, not replace).
+    let home_dir = std::env::var_os("HOME").unwrap();
+    let global_path = std::path::Path::new(&home_dir).join(".opencoder").join("config.json");
+    std::fs::create_dir_all(global_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &global_path,
+        r#"{
+            "providers": {
+                "deepseek": { "api_key": "dk-key-merged" }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // deepseek: base_url from project file, api_key from global file (deep merge).
+    assert_eq!(
+        cfg.providers.get("deepseek").unwrap().base_url,
+        "https://api.deepseek.com/v1"
+    );
+    assert_eq!(
+        cfg.providers.get("deepseek").unwrap().api_key.as_deref(),
+        Some("dk-key-merged")
+    );
+    // openai: only in project file, untouched.
+    assert!(cfg.providers.contains_key("openai"));
+}
+
+#[test]
+fn provider_model_field_round_trips() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(
+        cfg.providers.get("deepseek").unwrap().model.as_deref(),
+        Some("deepseek-chat")
     );
 }
 

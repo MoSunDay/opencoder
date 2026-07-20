@@ -46,6 +46,96 @@ pub fn skills_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(".opencoder").join("skills"))
 }
 
+/// Built-in skills shipped with the binary and embedded at compile time via
+/// [`include_str!`]. Each entry is `(skill_dir, &[(file_name, contents)])`.
+/// Seeded into `~/.opencoder/skills` on first startup so a fresh install ships
+/// the `do-and-done -> review -> submit` workflow plus `repo-local-memory`.
+const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "do-and-done",
+        &[(
+            "SKILL.md",
+            include_str!("../assets/skills/do-and-done/SKILL.md"),
+        )],
+    ),
+    (
+        "repo-local-memory",
+        &[
+            (
+                "SKILL.md",
+                include_str!("../assets/skills/repo-local-memory/SKILL.md"),
+            ),
+            (
+                "EXAMPLES.md",
+                include_str!("../assets/skills/repo-local-memory/EXAMPLES.md"),
+            ),
+            (
+                "TEMPLATES.md",
+                include_str!("../assets/skills/repo-local-memory/TEMPLATES.md"),
+            ),
+        ],
+    ),
+    (
+        "review",
+        &[(
+            "SKILL.md",
+            include_str!("../assets/skills/review/SKILL.md"),
+        )],
+    ),
+    (
+        "submit",
+        &[(
+            "SKILL.md",
+            include_str!("../assets/skills/submit/SKILL.md"),
+        )],
+    ),
+];
+
+/// Skill directory whose presence means "built-ins already seeded". Gating on
+/// `review` means a user deleting any other skill won't trigger a full reseed,
+/// but a truly fresh install (no `review` dir) gets the full default set.
+const SEED_GATE: &str = "review";
+
+/// Seed the built-in skills into `~/.opencoder/skills` if they are missing.
+///
+/// Idempotent and best-effort: if the gate directory (`review`) already exists
+/// we assume the user has their own setup and touch nothing; otherwise we write
+/// every shipped skill, skipping files that already exist so partial user edits
+/// are never clobbered. Errors are logged via `tracing` and never propagated —
+/// seeding must never block startup.
+pub fn seed_builtin_skills() {
+    let root = skills_dir();
+    if root.join(SEED_GATE).exists() {
+        return;
+    }
+    if let Err(e) = seed_builtin_skills_in(&root) {
+        tracing::warn!(
+            "failed to seed built-in skills into {}: {e}",
+            root.display()
+        );
+    }
+}
+
+/// Filesystem-writing core, factored out so tests can target a tempdir.
+///
+/// Always writes every shipped skill (creating its directory), but never
+/// overwrites a file that already exists. The gate check lives in the public
+/// [`seed_builtin_skills`] entry point; this fn is the pure writer.
+pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
+    for (skill_dir, files) in BUILTIN_SKILLS {
+        let dir = root.join(skill_dir);
+        std::fs::create_dir_all(&dir)?;
+        for (name, content) in *files {
+            let path = dir.join(name);
+            if path.exists() {
+                continue;
+            }
+            std::fs::write(&path, content)?;
+        }
+    }
+    Ok(())
+}
+
 /// Scan `~/.opencoder/skills` and return every skill found, sorted by name.
 ///
 /// A missing or unreadable directory is not an error — it yields an empty

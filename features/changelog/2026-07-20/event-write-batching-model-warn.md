@@ -55,8 +55,9 @@
 | 结构事件与 delta 交错保序 | `structural_events_interleave_in_order` | `session/src/event_sink.rs` |
 | 无 store 路径 drain 不 panic | `no_store_drains_without_panic` | `session/src/event_sink.rs` |
 | 端到端：MockChatClient→run→sink→store 无损 + O(turn) | `token_storm_persists_losslessly_with_oturn_writes` | `session/tests/event_sink_flusher.rs` |
+| ReasoningDelta 走同一缓冲路径无损 + O(turn) | `reasoning_deltas_buffered_on_same_path_as_text` | `session/tests/event_sink_flusher.rs` |
 
-- 全量回归：`cargo test --workspace` → 687 passed / 0 failed
+- 全量回归：`cargo test --workspace` → 688 passed / 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - 构建：`cargo build --workspace` → 零错误
 

@@ -185,7 +185,13 @@ async fn token_storm_persists_losslessly_with_oturn_writes() {
     );
 
     // O(turn) writes, not O(tokens): 2000 single-writes would be ~2000 calls.
+    // Lower bound proves batching actually happened (>=2 mid-stream flushes);
+    // upper bound proves it stayed O(turn).
     let calls = store.events_calls.load(Ordering::Relaxed);
+    assert!(
+        calls >= 2,
+        "append_events called only {calls} time(s) for {n} deltas; batching did not occur (expected >= 2 mid-stream flushes)"
+    );
     assert!(
         calls < n / 10,
         "append_events called {calls} times for {n} deltas; expected O(turn) (< {})",
@@ -204,4 +210,79 @@ async fn token_storm_persists_losslessly_with_oturn_writes() {
         msgs.iter().any(|m| m.role == Role::Assistant),
         "assistant message persisted"
     );
+}
+
+// ReasoningDelta shares the exact buffer path as TextDelta (both coarse-map to
+// EventKind::TextDelta), so it must be coalesced identically. Drives a real run
+// with a burst of ReasoningDelta + Completed and asserts zero loss under the
+// distinct `reasoning_delta` sse_kind, monotonic seqs, and O(turn) writes.
+#[tokio::test]
+async fn reasoning_deltas_buffered_on_same_path_as_text() {
+    let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let store: Arc<CountingStore> = Arc::new(CountingStore {
+        inner: inner.clone(),
+        events_calls: Arc::new(AtomicUsize::new(0)),
+    });
+    let dyn_store: Arc<dyn Store> = store.clone();
+
+    let n = 2000usize;
+    let mut script: Vec<LlmEvent> = (0..n)
+        .map(|_| LlmEvent::ReasoningDelta("t".into()))
+        .collect();
+    script.push(LlmEvent::Completed {
+        text: "done".into(),
+        tool_calls: Vec::<CompletedToolCall>::new(),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 3,
+            total_tokens: 8,
+        }),
+    });
+    let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().push_script(script));
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut s = SessionState::new(
+        "reason",
+        agent,
+        config("main/glm-5.2"),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(dyn_store.clone());
+
+    let (sink, flusher) = spawn_event_flusher(Some(dyn_store.clone()), "reason".into());
+    run(&mut s, "think".into(), |ev| {
+        let _ = sink.push(&ev);
+    })
+    .await
+    .unwrap();
+    drop(sink);
+    let _ = flusher.await;
+
+    let all = inner.events_after("reason", 0).await.unwrap();
+
+    // Zero loss under the reasoning-specific sse_kind.
+    let reasoning = all
+        .iter()
+        .filter(|r| r.sse_kind.as_deref() == Some("reasoning_delta"))
+        .count();
+    assert_eq!(
+        reasoning, n,
+        "every ReasoningDelta must be persisted (zero loss), same buffer path as TextDelta"
+    );
+
+    // Coalesced (O(turn)), not per-record.
+    let calls = store.events_calls.load(Ordering::Relaxed);
+    assert!(
+        calls >= 2 && calls < n / 10,
+        "append_events called {calls} times for {n} reasoning deltas; expected batched O(turn) ([2, {}))",
+        n / 10
+    );
+
+    // Order preserved.
+    let seqs: Vec<i64> = all.iter().map(|r| r.seq.unwrap()).collect();
+    let mut sorted = seqs.clone();
+    sorted.sort_unstable();
+    assert_eq!(seqs, sorted, "event seqs must be strictly increasing");
 }

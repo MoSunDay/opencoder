@@ -819,9 +819,9 @@ async fn run_subagent(
         registry,
         move |cev| {
             // Incremental persist: push to the ordered flusher channel. The
-            // callback is sync (cannot await), so try_send; a full/closed
-            // channel is logged and the single event dropped rather than
-            // blocking the run.
+            // callback is sync (cannot await); the channel is unbounded, so
+            // send never blocks and can only fail if the flusher has exited
+            // (closed) — in which case the single event is logged and dropped.
             if has_store {
                 let rec = SessionEventRecord {
                     session_id: child_id_for_cb.clone(),
@@ -832,7 +832,7 @@ async fn run_subagent(
                     sse_kind: Some(cev.sse_kind().to_string()),
                 };
                 if let Err(e) = ev_tx.send(rec) {
-                    tracing::warn!(error = %e, "subagent: child event channel full/closed, dropping event");
+                    tracing::warn!(error = %e, "subagent: child event channel closed, dropping event");
                 }
             }
             match &cev {

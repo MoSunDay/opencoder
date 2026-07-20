@@ -100,8 +100,11 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 }
 
 /// Fire-and-forget persist a parent-session event to the store so web/SSE
-/// clients can replay sessions driven by the TUI. Mirrors the web drain path.
-fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &SessionEvent) {
+/// clients can replay sessions driven by the TUI. Awaited (not fire-and-
+/// forget) so the event is durable before the worker proceeds — no loss on
+/// immediate exit. Used by non-run arms (e.g. SwitchAgent) where no flusher
+/// is active.
+async fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &SessionEvent) {
     if let Some(store) = store {
         let rec = SessionEventRecord {
             session_id: session_id.to_string(),
@@ -111,10 +114,7 @@ fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &Session
             seq: None,
             sse_kind: Some(sev.sse_kind().to_string()),
         };
-        let store = Arc::clone(store);
-        tokio::spawn(async move {
-            let _ = store.append_event(&rec).await;
-        });
+        let _ = store.append_event(&rec).await;
     }
 }
 
@@ -150,7 +150,7 @@ pub async fn process_cmd(
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 let ev = SessionEvent::AgentSwitch(name);
-                persist_event(&sess.store, &sess.id, &ev);
+                persist_event(&sess.store, &sess.id, &ev).await;
                 let _ = evt_tx.try_send(UiEvent::Session(ev));
             }
         }

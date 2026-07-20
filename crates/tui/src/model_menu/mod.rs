@@ -101,6 +101,7 @@ mod tests {
             fps: 10,
             capabilities_browser: false,
             capabilities_computer_use: false,
+            capabilities_tools_subagent: false,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::json!("{MY_KEY}"));
@@ -120,6 +121,7 @@ mod tests {
             fps: 10,
             capabilities_browser: false,
             capabilities_computer_use: false,
+            capabilities_tools_subagent: false,
         };
         let v = p.to_json();
         let provider_has_key = v
@@ -146,6 +148,7 @@ mod tests {
             fps: 10,
             capabilities_browser: false,
             capabilities_computer_use: false,
+            capabilities_tools_subagent: false,
         };
         let v = p.to_json();
         assert_eq!(v["provider"]["api_key"], serde_json::Value::Null);
@@ -224,6 +227,7 @@ mod tests {
             Field::Fps,
             Field::Browser,
             Field::ComputerUse,
+            Field::ToolsSubagent,
             Field::Save,
         ];
         // starts on Model
@@ -446,6 +450,7 @@ mod tests {
             fps: 25,
             capabilities_browser: true,
             capabilities_computer_use: false,
+            capabilities_tools_subagent: false,
         };
         let v = p.to_json();
         assert_eq!(v["fps"], serde_json::json!(25));

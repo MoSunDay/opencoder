@@ -144,9 +144,9 @@ async fn import_bundle_inner(
         store.append_messages(&session_id, &bundle.messages).await?;
     }
 
-    // Insert events.
-    for ev in &bundle.events {
-        store.append_event(ev).await?;
+    // Insert events (single batched transaction).
+    if !bundle.events.is_empty() {
+        store.append_events(&bundle.events).await?;
     }
 
     // Insert pending inputs.

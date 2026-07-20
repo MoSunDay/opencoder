@@ -9,7 +9,10 @@ pub mod skill;
 pub mod sse;
 pub mod tool;
 
-pub use agent::{builtin_agents, resolve_agent, Agent, AgentKind, AgentMode, ToolFilter};
+pub use agent::{
+    builtin_agents, resolve_agent, strip_tools_subagent_ad, Agent, AgentKind, AgentMode,
+    ToolFilter, TOOLS_SUBAGENT_AD,
+};
 pub use config::{
     looks_like_env_var, AgentDefaults, CapabilitiesConfig, CompactionConfig, Config,
     NetworkConfig, ProviderConfig, DEFAULT_CONTEXT_LIMIT,

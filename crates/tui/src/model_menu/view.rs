@@ -14,7 +14,7 @@ use super::state::{Field, ModelMenu};
 /// bottom edge sits just above it, so the form floats over the transcript like
 /// a dropdown instead of covering the screen center.
 pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &ModelMenu) {
-    let want_h = 20u16;
+    let want_h = 21u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -127,6 +127,16 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
             )
             .as_str(),
             menu.focus == Field::ComputerUse,
+            "\u{2190}/\u{2192}/Space toggle, Enter=next",
+        ),
+        field(
+            "tools_subagent:",
+            format!(
+                "[ {} ]",
+                if menu.capabilities_tools_subagent { "on" } else { "off" }
+            )
+            .as_str(),
+            menu.focus == Field::ToolsSubagent,
             "\u{2190}/\u{2192}/Space toggle, Enter=next",
         ),
         Line::from(""),

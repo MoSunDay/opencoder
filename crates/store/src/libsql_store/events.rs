@@ -7,29 +7,54 @@ const INSERT_EVENT: &str = "\
 INSERT INTO session_events (session_id, type, payload_json, sse_kind, ts)
 VALUES (?, ?, ?, ?, ?)";
 
-pub async fn append(conn: &Connection, event: &SessionEventRecord) -> Result<i64> {
-    let payload_json = serde_json::to_string(&event.payload).context("serialize event payload")?;
-    conn.execute(
-        INSERT_EVENT,
-        params![
-            event.session_id.as_str(),
-            kind_str(event.kind),
-            payload_json,
-            event.sse_kind.as_deref(),
-            event.ts
-        ],
-    )
-    .await
-    .context("insert event")?;
-    let stmt = conn
-        .prepare("SELECT MAX(seq) FROM session_events WHERE session_id = ?")
-        .await?;
-    let mut rows = stmt.query(params![event.session_id.as_str()]).await?;
-    if let Some(r) = rows.next().await? {
-        Ok(r.get::<Option<i64>>(0)?.unwrap_or(0))
-    } else {
-        Ok(0)
+/// Persist a batch of events in a single transaction. The seqs assigned to
+/// the just-inserted rows are back-filled with ONE `SELECT` at the end (the N
+/// highest seqs for the session — AUTOINCREMENT assigns contiguous ids inside
+/// the transaction and the write lock prevents concurrent interleave). Returns
+/// the seqs in input (emission) order. All `events` must share `session_id`.
+pub async fn append_many(
+    conn: &Connection,
+    events: &[SessionEventRecord],
+) -> Result<Vec<i64>> {
+    if events.is_empty() {
+        return Ok(Vec::new());
     }
+    let session_id = events[0].session_id.as_str();
+    let tx = conn.transaction().await.context("begin tx")?;
+    for ev in events {
+        let payload_json =
+            serde_json::to_string(&ev.payload).context("serialize event payload")?;
+        tx.execute(
+            INSERT_EVENT,
+            params![
+                ev.session_id.as_str(),
+                kind_str(ev.kind),
+                payload_json,
+                ev.sse_kind.as_deref(),
+                ev.ts
+            ],
+        )
+        .await
+        .context("insert event in tx")?;
+    }
+    // Batch backfill: the rows we just inserted are the top-N seqs for this
+    // session (the tx holds the write lock, so no concurrent writer can slip
+    // in between our inserts and this read). Fetch them newest-first, then
+    // reverse into emission order.
+    let n = events.len() as i64;
+    let stmt = tx
+        .prepare("SELECT seq FROM session_events WHERE session_id = ? ORDER BY seq DESC LIMIT ?")
+        .await?;
+    let mut rows = stmt.query(params![session_id, n]).await?;
+    let mut seqs = Vec::with_capacity(events.len());
+    while let Some(r) = rows.next().await? {
+        seqs.push(r.get::<Option<i64>>(0)?.unwrap_or(0));
+    }
+    drop(rows);
+    drop(stmt);
+    tx.commit().await.context("commit append_many")?;
+    seqs.reverse();
+    Ok(seqs)
 }
 
 pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {

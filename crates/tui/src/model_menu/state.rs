@@ -17,6 +17,7 @@ pub struct ModelPatch {
     pub fps: u32,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
+    pub capabilities_tools_subagent: bool,
 }
 
 impl ModelPatch {
@@ -51,6 +52,7 @@ impl ModelPatch {
             "capabilities": {
                 "browser": self.capabilities_browser,
                 "computer_use": self.capabilities_computer_use,
+                "tools_subagent": self.capabilities_tools_subagent,
             },
         })
     }
@@ -117,12 +119,13 @@ pub enum Field {
     Fps,
     Browser,
     ComputerUse,
+    ToolsSubagent,
     Save,
     Cancel,
 }
 
 impl Field {
-    const ORDER: [Field; 11] = [
+    const ORDER: [Field; 12] = [
         Field::Model,
         Field::BaseUrl,
         Field::ApiKey,
@@ -132,6 +135,7 @@ impl Field {
         Field::Fps,
         Field::Browser,
         Field::ComputerUse,
+        Field::ToolsSubagent,
         Field::Save,
         Field::Cancel,
     ];
@@ -167,6 +171,7 @@ pub struct ModelMenu {
     pub fps: u32,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
+    pub capabilities_tools_subagent: bool,
     pub focus: Field,
     pub error: Option<String>,
 }
@@ -186,6 +191,7 @@ impl ModelMenu {
             fps: config.tui_fps(),
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
+            capabilities_tools_subagent: config.capabilities.tools_subagent,
             focus: Field::Model,
             error: None,
         }
@@ -234,6 +240,7 @@ impl ModelMenu {
             fps: self.fps,
             capabilities_browser: self.capabilities_browser,
             capabilities_computer_use: self.capabilities_computer_use,
+            capabilities_tools_subagent: self.capabilities_tools_subagent,
         }
     }
 }
@@ -282,6 +289,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Browser => m.capabilities_browser = !m.capabilities_browser,
                 Field::ComputerUse => m.capabilities_computer_use = !m.capabilities_computer_use,
+                Field::ToolsSubagent => m.capabilities_tools_subagent = !m.capabilities_tools_subagent,
                 Field::Threshold => m.adjust_threshold(-1000),
                 Field::Fps => m.adjust_fps(-1),
                 _ => {}
@@ -294,6 +302,7 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::InterleavedThinking => m.interleaved_thinking = !m.interleaved_thinking,
                 Field::Browser => m.capabilities_browser = !m.capabilities_browser,
                 Field::ComputerUse => m.capabilities_computer_use = !m.capabilities_computer_use,
+                Field::ToolsSubagent => m.capabilities_tools_subagent = !m.capabilities_tools_subagent,
                 Field::Threshold => m.adjust_threshold(1000),
                 Field::Fps => m.adjust_fps(1),
                 _ => {}
@@ -372,6 +381,9 @@ pub fn handle_model_key(menu: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
                 Field::Browser if c == ' ' => m.capabilities_browser = !m.capabilities_browser,
                 Field::ComputerUse if c == ' ' => {
                     m.capabilities_computer_use = !m.capabilities_computer_use
+                }
+                Field::ToolsSubagent if c == ' ' => {
+                    m.capabilities_tools_subagent = !m.capabilities_tools_subagent
                 }
                 _ => {}
             }

@@ -225,7 +225,13 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         Some(a) => a,
         None => return 0,
     };
-    let text = opencoder_session::prompt::build_system(&agent, workdir, skill).text();
+    let text = opencoder_session::prompt::build_system(
+        &agent,
+        workdir,
+        skill,
+        &opencoder_core::CapabilitiesConfig::default(),
+    )
+    .text();
     let mut tokens = estimate(&text) as u64;
     if let Some(global) = opencoder_session::prompt::global_instructions_text(workdir) {
         tokens = tokens.saturating_sub(estimate(&global) as u64);
@@ -767,7 +773,10 @@ mod tests {
         async fn swap_input_order(&self, _: &str, _: i64, _: i64) -> anyhow::Result<()> {
             unimplemented!()
         }
-        async fn append_event(&self, _: &SessionEventRecord) -> anyhow::Result<i64> {
+        async fn append_events(
+            &self,
+            _: &[SessionEventRecord],
+        ) -> anyhow::Result<Vec<i64>> {
             unimplemented!()
         }
         async fn events_after(&self, _: &str, _: i64) -> anyhow::Result<Vec<SessionEventRecord>> {

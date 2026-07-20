@@ -153,9 +153,9 @@ impl Store for LibsqlStore {
         inputs::swap_input_order(&conn, session_id, seq_a, seq_b).await
     }
 
-    async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
+    async fn append_events(&self, events: &[SessionEventRecord]) -> Result<Vec<i64>> {
         let conn = self.conn().await?;
-        events::append(&conn, event).await
+        events::append_many(&conn, events).await
     }
     async fn events_after(
         &self,

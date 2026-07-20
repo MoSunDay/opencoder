@@ -1,11 +1,13 @@
 pub mod bash_guard;
 pub mod compaction;
+pub mod event_sink;
 pub mod plan_handoff;
 pub mod prompt;
 pub mod resume;
 pub mod runner;
 pub mod tools;
 
+pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, SessionEvent};
 

@@ -270,15 +270,10 @@ async fn replay_child(
     // `run_subagent`): events reach the DB as they are produced so a second
     // interruption still leaves partial child progress reconstructable.
     let child_id = task.child_session_id.clone();
-    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<SessionEventRecord>(256);
-    let flush_store = store.clone();
-    let flusher = tokio::spawn(async move {
-        while let Some(rec) = ev_rx.recv().await {
-            if let Err(e) = flush_store.append_event(&rec).await {
-                tracing::warn!(error = %e, "replay: failed to persist child event");
-            }
-        }
-    });
+    let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEventRecord>();
+    let flush_store = Some(store.clone());
+    // Batched, lossless drain (shared with TUI/web/subagent surfaces).
+    let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
     let registry = crate::tools::registry();
     let res = crate::runner::run_with_registry(
         &mut child,
@@ -293,7 +288,7 @@ async fn replay_child(
                 seq: None,
                 sse_kind: Some(cev.sse_kind().to_string()),
             };
-            if let Err(e) = ev_tx.try_send(rec) {
+            if let Err(e) = ev_tx.send(rec) {
                 tracing::warn!(error = %e, "replay: child event channel full/closed, dropping event");
             }
         },

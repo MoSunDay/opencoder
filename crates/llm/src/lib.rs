@@ -9,7 +9,7 @@ pub mod stream;
 pub mod tokens;
 pub mod tool_call;
 
-pub use client::{ChatClient, ChatParams};
+pub use client::{build_header_map, ChatClient, ChatParams};
 pub use event::{LlmEvent, Usage};
 pub use message::{lower_messages, OpenAIMessage};
 pub use mock::MockChatClient;

@@ -19,6 +19,8 @@ const SELECT_BY_TASK_ID: &str = "\
 SELECT task_id, parent_session_id, child_session_id, parent_message_id, agent, prompt, result, status, ok, started_at, completed_at \
 FROM subagent_tasks WHERE task_id = ?1 LIMIT 1";
 
+const CANCEL: &str = "UPDATE subagent_tasks SET status = ?1, completed_at = ?2 WHERE task_id = ?3";
+
 pub async fn create(conn: &Connection, rec: &SubagentTaskRecord) -> Result<()> {
     let parent_msg: Option<&str> = rec.parent_message_id.as_deref();
     conn.execute(
@@ -49,6 +51,14 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
     conn.execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
         .await
         .context("update subagent_task completion")?;
+    Ok(())
+}
+
+pub async fn cancel(conn: &Connection, task_id: &str) -> Result<()> {
+    let now = opencoder_core::message::now_ms();
+    conn.execute(CANCEL, params![SubagentStatus::Cancelled.as_str(), now, task_id])
+        .await
+        .context("cancel subagent_task")?;
     Ok(())
 }
 

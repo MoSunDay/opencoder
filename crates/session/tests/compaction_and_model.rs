@@ -403,6 +403,74 @@ async fn compaction_fires_with_real_default_config() {
     );
 }
 
+#[tokio::test]
+async fn compaction_fires_when_over_budget_but_few_turns() {
+    let _home = ScopedHome::new();
+    // REGRESSION for the silent no-op bug: an over-budget transcript whose
+    // turn count is <= tail_turns used to bail out of compaction entirely
+    // (split_index returned 0 -> compact() returned Ok(None)), shipping the
+    // full oversized context to the model with no summary produced. The
+    // compaction_split fallback must still compress it.
+    let mut config = base_config();
+    config.context_limit = Some(2_000);
+    config.compaction.reserved = 100;
+    config.compaction.context_threshold = 10_000; // usable (=1900) binds the budget
+    config.compaction.tail_turns = 2; // the transcript below yields only 2 turns
+
+    // A single big turn (~5000 estimated tokens >> 1900 budget). After run()
+    // prepends the "go" prompt the transcript has exactly 2 turn-starts
+    // (u1 at index 0, "go" at index 1) -- i.e. <= tail_turns(2), the exact
+    // shape that used to no-op.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done_event("SUMMARY")]) // compaction summarize call
+            .with_default(vec![done_event("done")]),  // subsequent turn(s)
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir, mut s) = session_with(config, client).await;
+    s.messages.push(big_user_message("u1", 20_000));
+
+    assert_eq!(
+        s.config.compaction.tail_turns, 2,
+        "precondition: tail_turns=2 so a 2-turn transcript hits the fallback"
+    );
+
+    let chars_before: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    // Compaction MUST have executed rather than the old no-op: the big message
+    // is summarized away and a synthetic summary leads the transcript.
+    let chars_after: usize = s.messages.iter().map(|m| m.estimate_chars().len()).sum();
+    assert!(
+        chars_after < chars_before,
+        "compaction must shrink the transcript (was {}, now {})",
+        chars_before,
+        chars_after
+    );
+    assert!(
+        s.messages[0].synthetic,
+        "first message must be the synthetic compaction summary"
+    );
+    assert!(
+        s.messages[0]
+            .text()
+            .starts_with("[Conversation summary so far]"),
+        "first message must carry the compaction-summary prefix"
+    );
+    assert!(
+        !s.messages.iter().any(|m| m.id == "u1"),
+        "the big user message must have been summarized away (was a no-op pre-fix)"
+    );
+
+    // The summarize LLM call happened.
+    let reqs = mock.requests();
+    assert!(
+        reqs.len() >= 2,
+        "need >=2 calls (summary + turn), got {}",
+        reqs.len()
+    );
+}
+
 /// Serialize HOME-sensitive tests within this binary.
 static COMPACT_HOME_MUTEX: Mutex<()> = Mutex::new(());
 

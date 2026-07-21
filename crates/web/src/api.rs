@@ -124,11 +124,11 @@ pub async fn post_prompt(
     let client: Arc<dyn ChatStream> = match state.client_override.clone() {
         Some(c) => c,
         None => {
-            let (base_url, api_key) = match config.resolve_endpoint() {
+            let ep = match config.resolve_endpoint() {
                 Ok(v) => v,
                 Err(e) => return error_500(format!("api_key: {e:#}")),
             };
-            match ChatClient::new(&base_url, &api_key, config.network.proxy.as_deref()) {
+            match ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, config.network.proxy.as_deref()) {
                 Ok(c) => Arc::new(c),
                 Err(e) => return error_500(format!("client: {e:#}")),
             }

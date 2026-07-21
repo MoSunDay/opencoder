@@ -9,6 +9,7 @@ pub mod key_handler;
 pub mod keybind;
 pub mod markdown;
 pub mod menu;
+pub mod cache_salt_menu;
 pub mod model_menu;
 pub mod queue_panel;
 pub mod render;
@@ -25,17 +26,13 @@ use anyhow::Result;
 
 #[derive(Default)]
 pub struct TuiOpts {
-    pub model: Option<String>,
-    pub agent: Option<String>,
     pub workdir: Option<PathBuf>,
     pub session: Option<String>,
 }
 
 impl TuiOpts {
-    pub fn new(model: Option<String>, agent: Option<String>, workdir: Option<PathBuf>) -> Self {
+    pub fn new(workdir: Option<PathBuf>) -> Self {
         TuiOpts {
-            model,
-            agent,
             workdir,
             session: None,
         }

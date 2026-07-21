@@ -101,7 +101,7 @@ pub(crate) fn warn_if_suspicious_model(model: &str) {
     if is_suspicious_model(model) {
         tracing::warn!(
             model = %model,
-            "config `model` looks malformed (expected `provider/model`, e.g. `openai/gpt-4o`); override with --model if this is a stale value"
+            "config `model` looks malformed (expected `provider/model`, e.g. `openai/gpt-4o`); fix the `model` field in your config file or set the matching env var if this is a stale value"
         );
     }
 }
@@ -124,6 +124,29 @@ pub struct ProviderConfig {
     /// Default model id for this provider (the part after the `/` prefix).
     #[serde(default)]
     pub model: Option<String>,
+    /// Extra HTTP headers attached to every request to this provider. A header
+    /// `value` may be a literal string or a `{VAR}` reference resolved from the
+    /// environment at endpoint-resolution time (same convention as `api_key`).
+    #[serde(default)]
+    pub headers: Vec<HttpHeader>,
+}
+
+/// A custom HTTP header applied to provider requests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// Resolved provider endpoint: everything `ChatClient::new` needs to talk to
+/// the model's provider. `headers` are env-resolved name/value pairs; a custom
+/// header sharing a built-in name (e.g. `authorization`, `content-type`)
+/// overrides the built-in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoint {
+    pub base_url: String,
+    pub api_key: String,
+    pub headers: Vec<(String, String)>,
 }
 
 fn default_base_url() -> String {
@@ -330,10 +353,25 @@ impl Config {
     }
 
     /// One-shot endpoint resolution for the current `model`'s provider prefix.
-    /// Returns `(base_url, api_key)` ready for `ChatClient::new`.
-    pub fn resolve_endpoint(&self) -> Result<(String, String)> {
+    /// Returns an [`Endpoint`] ready for `ChatClient::new`. Header `value`s are
+    /// env-resolved (a `{VAR}` reference expands to the env var; anything else
+    /// is used literally). When the provider is not in the `providers` map, the
+    /// legacy top-level `provider` field supplies base_url/api_key/headers.
+    pub fn resolve_endpoint(&self) -> Result<Endpoint> {
         let name = self.provider_id();
-        Ok((self.base_url_for(name), self.api_key_for(name)?))
+        let headers_src = match self.provider_for(name) {
+            Some(p) => &p.headers,
+            None => &self.provider.headers,
+        };
+        let headers: Vec<(String, String)> = headers_src
+            .iter()
+            .map(|h| (h.name.clone(), resolve_env(&h.value)))
+            .collect();
+        Ok(Endpoint {
+            base_url: self.base_url_for(name),
+            api_key: self.api_key_for(name)?,
+            headers,
+        })
     }
 
     /// Effective TUI frame rate (FPS), clamped to 1..=30. `None` -> 10.
@@ -386,6 +424,20 @@ impl Config {
             serde_json::json!({})
         };
         merge_json(&mut root, patch);
+        // Guard: refuse to persist a malformed `model` (e.g. `m/g`). Such a value
+        // would make every downstream request fail silently (`model_id()` resolves
+        // to a single char). Surface the error so the caller shows it to the user
+        // instead of corrupting the config file. See is_suspicious_model for the
+        // predicate.
+        if let Some(model) = root.get("model").and_then(|v| v.as_str()) {
+            if is_suspicious_model(model) {
+                return Err(CoreError::Config(format!(
+                    "refusing to write malformed `model` value `{model}`: expected \
+                     `provider/model` with each side at least 2 chars (e.g. \
+                     `openai/gpt-4o`); edit the `model` field in your config file"
+                )));
+            }
+        }
         let pretty = serde_json::to_string_pretty(&root)?;
         std::fs::write(&target, pretty)?;
         Ok(target)
@@ -606,6 +658,16 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                     }
                     if let Some(m) = pcfg.get("model").and_then(|v| v.as_str()) {
                         entry.model = Some(m.to_string());
+                    }
+                    if let Some(hs) = pcfg.get("headers").and_then(|v| v.as_array()) {
+                        entry.headers = hs
+                            .iter()
+                            .filter_map(|h| {
+                                let name = h.get("name")?.as_str()?.to_string();
+                                let value = h.get("value")?.as_str()?.to_string();
+                                Some(HttpHeader { name, value })
+                            })
+                            .collect();
                     }
                 }
             }

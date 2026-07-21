@@ -81,11 +81,11 @@ pub async fn compact(
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<Option<String>> {
     let tail = session.config.compaction.tail_turns.max(1) as usize;
-    let split = split_index(&session.messages, tail);
-    if split == 0 {
+    let Some(split) = compaction_split(&session.messages, tail) else {
+        // Genuinely nothing to summarize (empty or single-message transcript).
         on_event(SessionEvent::Status("nothing to compact yet".into()));
         return Ok(None);
-    }
+    };
     on_event(SessionEvent::Status("compacting conversation…".into()));
     let head: Vec<Message> = session.messages[..split].to_vec();
 
@@ -139,20 +139,22 @@ pub async fn compact(
     Ok(Some(summary))
 }
 
-fn split_index(messages: &[Message], tail_turns: usize) -> usize {
-    // Collect indices of "turn starts" — natural conversation boundaries that
-    // delimit summarizable work cycles. A message is a turn start when it is:
-    //   - the first message (index 0), or
-    //   - a real (non-synthetic) user message, or
-    //   - an assistant message that follows a tool message (the model's fresh
-    //     response after consuming tool results — a new cycle within a single
-    //     user request, common in tool-intensive coding sessions).
-    //
-    // This generalization ensures compaction fires for single-user tasks that
-    // accumulate many tool roundtrips — the most common coding-agent shape —
-    // without changing the split point for classic multi-user sessions (where
-    // every turn start is already a real user message, so the set is identical).
-    let turn_starts: Vec<usize> = messages
+/// Indices that delimit summarizable conversation turns (used by both the
+/// ideal-turn split and the over-budget fallback).
+///
+/// A message is a turn start when it is:
+///   - the first message (index 0), or
+///   - a real (non-synthetic) user message, or
+///   - an assistant message that follows a tool message (the model's fresh
+///     response after consuming tool results — a new cycle within a single
+///     user request, common in tool-intensive coding sessions).
+///
+/// This generalization ensures compaction fires for single-user tasks that
+/// accumulate many tool roundtrips — the most common coding-agent shape —
+/// without changing the split point for classic multi-user sessions (where
+/// every turn start is already a real user message, so the set is identical).
+fn turn_start_indices(messages: &[Message]) -> Vec<usize> {
+    messages
         .iter()
         .enumerate()
         .filter(|(i, m)| {
@@ -161,11 +163,50 @@ fn split_index(messages: &[Message], tail_turns: usize) -> usize {
                 || (m.role == Role::Assistant && *i > 0 && messages[i - 1].role == Role::Tool)
         })
         .map(|(i, _)| i)
-        .collect();
+        .collect()
+}
+
+/// Ideal split point: keep `tail_turns` recent turns as the tail. Returns 0
+/// when there are too few turns to split while preserving any tail — the
+/// caller (`compact`) applies a progress-guaranteeing fallback via
+/// `compaction_split` in that case.
+#[cfg_attr(not(test), allow(dead_code))]
+fn split_index(messages: &[Message], tail_turns: usize) -> usize {
+    let turn_starts = turn_start_indices(messages);
     if turn_starts.len() <= tail_turns {
         return 0;
     }
     turn_starts[turn_starts.len() - tail_turns]
+}
+
+/// Resolve the head/tail split for compaction. Unlike `split_index` (the
+/// *ideal* turn-aware split, which returns 0 when there are too few turns),
+/// this guarantees forward progress when the transcript is over budget:
+/// instead of bailing out it falls back to summarizing the oldest turn (or,
+/// for a single conversation turn, everything except the most recent message),
+/// so an oversized short-turn conversation is still compressed rather than
+/// shipped to the model verbatim.
+///
+/// Returns `None` only when there is genuinely nothing to summarize — an
+/// empty transcript or a single message.
+fn compaction_split(messages: &[Message], tail_turns: usize) -> Option<usize> {
+    let turn_starts = turn_start_indices(messages);
+    if turn_starts.is_empty() {
+        return None;
+    }
+    // Ideal: keep `tail_turns` recent turns as the tail.
+    if turn_starts.len() > tail_turns {
+        return Some(turn_starts[turn_starts.len() - tail_turns]);
+    }
+    // Fewer turns than tail_turns, but we are over budget (the caller only
+    // invokes compaction when `should_compact` fired). Summarize the oldest
+    // turn and keep every subsequent turn as the tail.
+    if turn_starts.len() >= 2 {
+        return Some(turn_starts[1]);
+    }
+    // A single conversation turn. Keep the most recent message intact and
+    // summarize whatever precedes it (if anything).
+    (messages.len() > 1).then_some(1)
 }
 
 async fn summarize(
@@ -330,5 +371,68 @@ mod tests {
         assert_eq!(split_index(&msgs, 2), 5);
         // tail=1 → split = turn_starts[3] = 8
         assert_eq!(split_index(&msgs, 1), 8);
+    }
+
+    #[test]
+    fn compaction_split_fallback_summarizes_oldest_turn() {
+        // Two turns, tail_turns=2: ideal split_index returns 0 (too few
+        // turns), but the over-budget fallback must still split — summarizing
+        // the first turn and keeping the second.
+        // turn_starts = [0, 2], fallback -> turn_starts[1] = 2.
+        let msgs = vec![
+            Message::user("u1", "first"),
+            Message::assistant("a1"),
+            Message::user("u2", "second"),
+            Message::assistant("a2"),
+        ];
+        assert_eq!(compaction_split(&msgs, 2), Some(2));
+        // head = msgs[..2] (first turn), tail = msgs[2..] (second turn).
+    }
+
+    #[test]
+    fn compaction_split_fallback_two_tool_turns() {
+        // turn_starts = [0, 3], tail_turns=2 -> ideal returns 0; fallback
+        // -> turn_starts[1] = 3 (keep the second turn, summarize the first).
+        let msgs = vec![
+            Message::user("u1", "task"),
+            assistant_with_tool("a1"),
+            tool_msg("t1", "tc"),
+            Message::user("u2", "more"),
+            Message::assistant("a2"),
+        ];
+        assert_eq!(compaction_split(&msgs, 2), Some(3));
+    }
+
+    #[test]
+    fn compaction_split_single_turn_keeps_last_message() {
+        // One turn (turn_starts=[0]), two messages: summarize the first
+        // message, keep the most recent one as the tail.
+        let msgs = vec![Message::user("u1", "big paste"), Message::assistant("a1")];
+        assert_eq!(compaction_split(&msgs, 2), Some(1));
+    }
+
+    #[test]
+    fn compaction_split_single_message_is_no_op() {
+        // A lone message cannot be summarized without destroying the only
+        // context — this is the one genuine no-op.
+        let msgs = vec![Message::user("u1", "big paste")];
+        assert_eq!(compaction_split(&msgs, 2), None);
+        assert_eq!(compaction_split(&[], 2), None);
+    }
+
+    #[test]
+    fn compaction_split_matches_ideal_when_enough_turns() {
+        // Three turns, tail_turns=2 -> ideal path equals split_index.
+        let msgs = vec![
+            Message::user("u1", "a"),
+            Message::assistant("a1"),
+            Message::user("u2", "b"),
+            Message::assistant("a2"),
+            Message::user("u3", "c"),
+            Message::assistant("a3"),
+        ];
+        // turn_starts = [0, 2, 4]; tail=2 -> turn_starts[1] = 2
+        assert_eq!(compaction_split(&msgs, 2), Some(2));
+        assert_eq!(compaction_split(&msgs, 2).unwrap(), split_index(&msgs, 2));
     }
 }

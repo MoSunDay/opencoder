@@ -9,7 +9,7 @@ async fn main() -> Result<()> {
     // The TUI runs in the alternate screen + raw mode, so any log line written
     // to stdout/stderr overlays the interface as garbage. Route TUI logs to a
     // file instead; headless commands keep logging on stdout.
-    let is_tui = matches!(cli.command, Some(Command::Tui))
+    let is_tui = matches!(cli.command, Some(Command::Tui) | Some(Command::Ts { .. }))
         || (cli.command.is_none() && cli.prompt.is_empty());
     let log_sink = if is_tui {
         opencoder_cli::tui_log_path()
@@ -55,6 +55,13 @@ async fn main() -> Result<()> {
             .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
+        Some(Command::Ts { list, resume, new }) => {
+            // If already inside tmux, run the TUI inline (never nest tmux).
+            if opencoder_cli::ts::runs_inline(*list, resume.is_some(), opencoder_cli::ts::inside_tmux()) {
+                return opencoder_tui::run_tui(&opts_from_cli(&cli)).await;
+            }
+            opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *new).await
+        }
         Some(Command::Config { sub }) => {
             opencoder_cli::session_cmd::config_dispatch(&cli, sub).await
         }
@@ -75,7 +82,7 @@ async fn main() -> Result<()> {
 }
 
 fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {
-    opencoder_tui::TuiOpts::new(cli.model.clone(), cli.agent.clone(), cli.workdir.clone())
+    opencoder_tui::TuiOpts::new(cli.workdir.clone())
         .with_session(cli.session.clone())
 }
 
@@ -86,7 +93,7 @@ fn join(parts: Vec<String>) -> String {
 fn require(p: &str) -> Result<()> {
     if p.is_empty() {
         return Err(anyhow::anyhow!(
-            "no prompt provided. Usage: opencoder \"your prompt\"  |  opencoder run \"...\""
+            "no prompt provided. Usage: opencode \"your prompt\"  |  opencode run \"...\""
         ));
     }
     Ok(())

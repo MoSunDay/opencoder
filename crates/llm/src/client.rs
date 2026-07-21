@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -22,6 +23,7 @@ pub struct ChatClient {
     http: reqwest::Client,
     base_url: String,
     api_key: String,
+    headers: Vec<(String, String)>,
 }
 
 /// Default per-read idle timeout (5 minutes). A read that stalls for this
@@ -34,8 +36,13 @@ impl ChatClient {
     /// `socks5://host:port`); when `None`, the proxy is resolved from
     /// `OPENCODER_PROXY` / `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY`. Loopback
     /// hosts always bypass the proxy.
-    pub fn new(base_url: &str, api_key: &str, proxy: Option<&str>) -> Result<Self> {
-        Self::new_with_read_timeout(base_url, api_key, DEFAULT_READ_TIMEOUT, proxy)
+    pub fn new(
+        base_url: &str,
+        api_key: &str,
+        headers: &[(String, String)],
+        proxy: Option<&str>,
+    ) -> Result<Self> {
+        Self::new_with_read_timeout(base_url, api_key, headers, DEFAULT_READ_TIMEOUT, proxy)
     }
 
     /// Construct a client with a custom per-read idle timeout. Useful for
@@ -44,6 +51,7 @@ impl ChatClient {
     pub fn new_with_read_timeout(
         base_url: &str,
         api_key: &str,
+        headers: &[(String, String)],
         read_timeout: Duration,
         proxy: Option<&str>,
     ) -> Result<Self> {
@@ -52,6 +60,7 @@ impl ChatClient {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
+            headers: headers.to_vec(),
         })
     }
 
@@ -61,9 +70,10 @@ impl ChatClient {
         let body = req.to_body();
         let client = self.http.clone();
         let key = self.api_key.clone();
+        let headers = self.headers.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = run_stream(client, url, key, body, tx.clone()).await {
+            if let Err(e) = run_stream(client, url, key, headers, body, tx.clone()).await {
                 let _ = tx
                     .send(LlmEvent::Error(format!("stream failed: {e:#}")))
                     .await;
@@ -86,6 +96,7 @@ async fn run_stream(
     client: reqwest::Client,
     url: String,
     key: String,
+    headers: Vec<(String, String)>,
     body: Value,
     tx: mpsc::Sender<LlmEvent>,
 ) -> Result<()> {
@@ -93,7 +104,7 @@ async fn run_stream(
     // never mid-stream. This guarantees partial streamed output can never be
     // duplicated by a retry (a retry only happens when NO bytes have been
     // emitted to the consumer yet).
-    let resp = connect_with_retry(&client, &url, &key, &body, &tx).await?;
+    let resp = connect_with_retry(&client, &url, &key, &headers, &body, &tx).await?;
 
     let mut stream = resp.bytes_stream();
     let mut decoder = SseDecoder::new();
@@ -223,17 +234,41 @@ async fn send_request(
     client: &reqwest::Client,
     url: &str,
     key: &str,
+    headers: &[(String, String)],
     body: &Value,
 ) -> Result<reqwest::Response> {
+    let header_map = build_header_map(key, headers);
     client
         .post(url)
-        .bearer_auth(key)
-        .header("content-type", "application/json")
-        .header("accept", "text/event-stream")
+        .headers(header_map)
         .json(body)
         .send()
         .await
         .context("send chat request")
+}
+
+/// Build the HTTP header map for a chat request. Built-in headers
+/// (`authorization`, `content-type`, `accept`) are applied first; entries in
+/// `custom` then override any built-in with the same (case-insensitive) name.
+/// Malformed custom entries (invalid header name or value bytes) are silently
+/// skipped so one bad entry can't break the whole stream. Pure and
+/// side-effect-free so the override/merge behavior is unit-testable.
+pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {key}")) {
+        map.insert(AUTHORIZATION, v);
+    }
+    map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    map.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+    for (name, value) in custom {
+        if let (Ok(n), Ok(v)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            map.insert(n, v);
+        }
+    }
+    map
 }
 
 /// Exponential backoff delay (ms) for the given 1-based `attempt`, BEFORE
@@ -264,13 +299,14 @@ async fn connect_with_retry(
     client: &reqwest::Client,
     url: &str,
     key: &str,
+    headers: &[(String, String)],
     body: &Value,
     tx: &mpsc::Sender<LlmEvent>,
 ) -> Result<reqwest::Response> {
     let mut attempt: u8 = 0;
     loop {
         attempt = attempt.saturating_add(1);
-        match send_request(client, url, key, body).await {
+        match send_request(client, url, key, headers, body).await {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {

@@ -602,10 +602,15 @@ async fn subagent_status_parse_and_as_str() {
         SubagentStatus::Completed
     );
     assert_eq!(SubagentStatus::parse("failed"), SubagentStatus::Failed);
+    assert_eq!(
+        SubagentStatus::parse("cancelled"),
+        SubagentStatus::Cancelled
+    );
     assert_eq!(SubagentStatus::parse("bogus"), SubagentStatus::Running);
     assert_eq!(SubagentStatus::Running.as_str(), "running");
     assert_eq!(SubagentStatus::Completed.as_str(), "completed");
     assert_eq!(SubagentStatus::Failed.as_str(), "failed");
+    assert_eq!(SubagentStatus::Cancelled.as_str(), "cancelled");
 }
 
 #[tokio::test]

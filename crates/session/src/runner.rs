@@ -45,10 +45,14 @@ pub enum SessionEvent {
         prompt: String,
         child_session_id: String,
     },
-    /// A subagent finished.
+    /// A subagent finished. `cancelled` is set when the run was interrupted
+    /// (shared cancel token) before producing a real result; the parent
+    /// tool_use is left open in that case to be replayed on the next turn.
     SubagentEnd {
         id: String,
         ok: bool,
+        #[serde(default)]
+        cancelled: bool,
         summary: String,
     },
     /// A child event from a running subagent, tagged with the tool-call id so
@@ -127,8 +131,8 @@ impl SessionEvent {
             SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => {
                 serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id })
             }
-            SessionEvent::SubagentEnd { id, ok, summary } => {
-                serde_json::json!({ "id": id, "ok": ok, "summary": summary })
+            SessionEvent::SubagentEnd { id, ok, cancelled, summary } => {
+                serde_json::json!({ "id": id, "ok": ok, "cancelled": cancelled, "summary": summary })
             }
             SessionEvent::SubagentChild { id, ev } => {
                 serde_json::json!({ "id": id, "event": ev })
@@ -183,6 +187,7 @@ impl SessionEvent {
             "subagent_end" => SessionEvent::SubagentEnd {
                 id: data.get("id")?.as_str()?.to_string(),
                 ok: data.get("ok")?.as_bool().unwrap_or(false),
+                cancelled: data.get("cancelled")?.as_bool().unwrap_or(false),
                 summary: data.get("summary")?.as_str()?.to_string(),
             },
             "subagent_child" => {
@@ -281,6 +286,13 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
+    // Replay any subagent tasks left cancelled from a prior interrupted run
+    // BEFORE the user's new input enters the loop: resume each cancelled child,
+    // run it to completion, backfill the parent tool_result, and flip the task
+    // to Completed. The model then sees [user input + subagent result] together
+    // and the interrupted call is transparently resumed. No-op for children
+    // (they hold no `task` tool, so they have no subagent tasks).
+    crate::resume::replay_cancelled_tasks(session).await;
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
     // claimed at turn boundaries to supply the actual user input, and the web
@@ -491,6 +503,19 @@ async fn run_loop(
                 })
                 .collect()
         };
+        // If interrupted mid-tool-batch, drop the tool message entirely so a
+        // cancelled subagent's `task` tool_use stays dangling (replayed on the
+        // next user turn by run_with_registry). Other interrupted tool_uses are
+        // reconciled to error results by resume()'s dangling-tool_use path.
+        if session
+            .cancel
+            .as_ref()
+            .map(|c| c.is_cancelled())
+            .unwrap_or(false)
+        {
+            on_event(SessionEvent::Status("interrupted".into()));
+            break;
+        }
         let tool_msg = Message {
             id: new_id(),
             role: Role::Tool,
@@ -860,6 +885,32 @@ async fn run_subagent(
     // durably persisted.
     let _ = flusher.await;
 
+    // Detect cancellation: the shared token fired (web interrupt / double-Esc),
+    // so the child broke out of its run loop without a real result. Mark the
+    // task cancelled and leave the parent tool_use open (no tool_result) so the
+    // child can be replayed on the next user turn. run_loop skips recording the
+    // tool message when cancelled, keeping this tool_use dangling.
+    let cancelled = parent
+        .cancel
+        .as_ref()
+        .map(|c| c.is_cancelled())
+        .unwrap_or(false);
+    if cancelled {
+        if let Some(store) = &parent.store {
+            let _ = store.cancel_subagent_task(&call_id).await;
+        }
+        emit(
+            sink,
+            SessionEvent::SubagentEnd {
+                id: call_id.clone(),
+                ok: false,
+                cancelled: true,
+                summary: "(cancelled)".to_string(),
+            },
+        );
+        return ToolOutput::err("cancelled");
+    }
+
     let ok = res.is_ok();
     let text = child
         .messages
@@ -884,6 +935,7 @@ async fn run_subagent(
         SessionEvent::SubagentEnd {
             id: call_id.clone(),
             ok,
+            cancelled: false,
             summary: format!("({} tool calls) {}", child_tools, summary_preview),
         },
     );
@@ -1029,6 +1081,7 @@ mod from_sse_tests {
             SessionEvent::SubagentEnd {
                 id: "s1".into(),
                 ok: true,
+                cancelled: false,
                 summary: "found".into(),
             },
             SessionEvent::SubagentChild {

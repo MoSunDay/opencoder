@@ -28,8 +28,7 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
 
 pub async fn models_dispatch(cli: &Cli) -> Result<()> {
     let workdir = current_workdir(cli)?;
-    let mut cfg = Config::load(&workdir)?;
-    apply_cli_overrides(cli, &mut cfg);
+    let cfg = Config::load(&workdir)?;
     print!("{}", models_summary(&cfg));
     Ok(())
 }
@@ -179,15 +178,6 @@ async fn show_session_json(store: &LibsqlStore, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn apply_cli_overrides(cli: &Cli, cfg: &mut Config) {
-    if let Some(m) = &cli.model {
-        cfg.model = m.clone();
-    }
-    if let Some(m) = &cli.small_model {
-        cfg.small_model = Some(m.clone());
-    }
-}
-
 fn current_workdir(cli: &Cli) -> Result<PathBuf> {
     if let Some(w) = &cli.workdir {
         return Ok(w.clone());
@@ -275,6 +265,7 @@ mod tests {
                 base_url: "https://api.deepseek.com/v1".to_string(),
                 api_key: Some("sk-dk".to_string()),
                 model: Some("deepseek-chat".to_string()),
+                headers: Vec::new(),
             },
         );
         providers.insert(
@@ -283,6 +274,7 @@ mod tests {
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: None,
                 model: Some("gpt-4o".to_string()),
+                headers: Vec::new(),
             },
         );
         let cfg = Config {

@@ -94,6 +94,11 @@ pub trait Store: Send + Sync {
     /// task matches. Used by `--session <task_id>` to resolve the parent
     /// session for resume.
     async fn get_subagent_task(&self, task_id: &str) -> Result<Option<SubagentTaskRecord>>;
+    /// Mark a subagent task as cancelled (interrupted mid-run). Unlike
+    /// `complete_subagent_task`, a cancelled task records no result -- its
+    /// parent `task` tool_use stays open so the child can be replayed on the
+    /// next user turn.
+    async fn cancel_subagent_task(&self, task_id: &str) -> Result<()>;
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         let seqs = self.append_messages(session_id, msgs).await?;

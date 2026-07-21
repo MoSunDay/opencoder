@@ -176,6 +176,9 @@
         ) -> anyhow::Result<Option<SubagentTaskRecord>> {
             unimplemented!()
         }
+        async fn cancel_subagent_task(&self, _: &str) -> anyhow::Result<()> {
+            unimplemented!()
+        }
     }
 
     /// Parent whose own content is short but wraps a subagent whose CHILD view

@@ -79,15 +79,24 @@ Place an `opencoder.json` in the project root or `~/.opencode/` (env vars and CL
 
 ```jsonc
 {
-  "provider": "openai",
-  "model": "glm-4.6",
-  "small_model": "glm-4.5-air",
+  "model": "openai/glm-4.6",
+  "small_model": "openai/glm-4.5-air",
   "context_limit": 128000,
   "max_tokens": 8000,
   "reasoning_effort": "medium",
-  "compaction": { "auto": true, "context_threshold": 0.8 }
+  "compaction": { "auto": true, "context_threshold": 0.8 },
+  "providers": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "{DEEPSEEK_API_KEY}",
+      "model": "deepseek-chat",
+      "headers": [{ "name": "X-Region", "value": "eu" }]
+    }
+  }
 }
 ```
+
+`model` uses the format `"{provider}/{model_id}"`; the provider name matches a key in the `providers` map (falls back to the default `provider` if unmatched). `api_key` and header `value` support `{ENV_VAR}` indirection.
 
 ### Three usage modes
 
@@ -137,10 +146,8 @@ opencoder models                        # List known models
 opencoder session <list|show|delete>    # Session management (show --json is a deep-inspection view)
 
 Global options:
-  -m, --model <MODEL>          Specify the main model
-      --small-model <MODEL>    Specify the small model (title generation, etc.)
-      --agent <explore|build>  Specify the agent type
       --workdir <PATH>         Working directory
+      --prompt-file <PATH>     Custom role prompt (full file text); a bash+subagent preamble is appended
   -s, --session <ID>           Resume a specific session
       --continue               Resume the most recent session in the current workdir
       --fork                   Copy before resuming; the original session is left unchanged

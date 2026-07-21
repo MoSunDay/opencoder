@@ -44,6 +44,7 @@ fn all_variants() -> Vec<SessionEvent> {
         SessionEvent::SubagentEnd {
             id: "s1".into(),
             ok: true,
+            cancelled: false,
             summary: "finished".into(),
         },
         SessionEvent::SubagentChild {

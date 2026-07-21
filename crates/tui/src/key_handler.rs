@@ -24,6 +24,10 @@ pub(crate) enum KeyAction {
     SwitchAgent(String),
     SwitchAgentNoClear(String),
     Cancel,
+    // Kept for the app.rs `KeyAction::SetSkill` plumbing (skill set/clear +
+    // persistence). No longer constructed by the menu after the "clear skill"
+    // row was removed, but the match arm in app.rs still handles it.
+    #[allow(dead_code)]
     SetSkill(Option<(String, String)>),
     OpenCommand,
     Quit,
@@ -43,7 +47,6 @@ pub(crate) fn handle_key(
     follow: &mut bool,
     last_esc: &mut Option<Instant>,
     skill_menu: &mut Option<SkillMenu>,
-    active_skill: Option<&str>,
     inner_w: u16,
     prompt_w: u16,
 ) -> KeyAction {
@@ -55,15 +58,13 @@ pub(crate) fn handle_key(
             // that opened the menu was already consumed). The skill body is
             // resolved and loaded on submit, not here, so picking is cheap and
             // reversible (backspace removes the token).
-            MenuOutcome::Pick(Some((name, _body))) => {
+            MenuOutcome::Pick((name, _body)) => {
                 let token = format!("{{${}}}", name);
                 let (s, i) = composer::insert_str(input, *cursor_idx, &token);
                 *input = s;
                 *cursor_idx = i;
                 KeyAction::None
             }
-            // The "clear skill" row clears immediately (sticky skill unset now).
-            MenuOutcome::Pick(None) => KeyAction::SetSkill(None),
             MenuOutcome::Idle => KeyAction::None,
         };
     }
@@ -270,7 +271,7 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             if c == '$' {
-                *skill_menu = Some(SkillMenu::new(discover_skills(), active_skill.is_some()));
+                *skill_menu = Some(SkillMenu::new(discover_skills()));
                 return KeyAction::None;
             }
             // `/` on empty input opens the slash-command picker. Bare `/` +

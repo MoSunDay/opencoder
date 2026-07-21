@@ -243,8 +243,8 @@ pub async fn process_cmd(
             sess.set_skill(body);
         }
         UiCmd::ReloadConfig(new_cfg) => {
-            if let Ok((base_url, api_key)) = new_cfg.resolve_endpoint() {
-                if let Ok(new_client) = ChatClient::new(&base_url, &api_key, new_cfg.network.proxy.as_deref()) {
+            if let Ok(ep) = new_cfg.resolve_endpoint() {
+                if let Ok(new_client) = ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, new_cfg.network.proxy.as_deref()) {
                     sess.apply_config_reload(*new_cfg, Arc::new(new_client));
                 }
             }

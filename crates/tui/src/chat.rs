@@ -53,6 +53,7 @@ pub enum ChatBlock {
         view: ChatView,
         done: bool,
         ok: bool,
+        cancelled: bool,
         summary: String,
     },
     /// Read-only plan card shown after plan→act handoff. The finalized plan,
@@ -87,10 +88,11 @@ pub struct ChatView {
     /// hit-rects stay aligned. Cleared once all subagents finish (the content
     /// then appears in one shot).
     pub hidden_assistant_idx: Option<usize>,
-    /// Buffered `(id, ok, summary)` for `SubagentEnd` events that arrived while
-    /// other subagents were still running. Applied in a single batch when the
-    /// last sibling finishes, so completion summaries never pop in one-by-one.
-    pub pending_subagent_ends: Vec<(String, bool, String)>,
+    /// Buffered `(id, ok, cancelled, summary)` for `SubagentEnd` events that
+    /// arrived while other subagents were still running. Applied in a single
+    /// batch when the last sibling finishes, so completion summaries never pop
+    /// in one-by-one.
+    pub pending_subagent_ends: Vec<(String, bool, bool, String)>,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.
@@ -225,6 +227,7 @@ impl ChatView {
                     view: ChatView::default(),
                     done: false,
                     ok: false,
+                    cancelled: false,
                     summary: String::new(),
                 });
             }
@@ -238,7 +241,7 @@ impl ChatView {
                     view.apply(ev);
                 }
             }
-            SessionEvent::SubagentEnd { id, ok, summary } => {
+            SessionEvent::SubagentEnd { id, ok, cancelled, summary } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
                 if self.subagents_running > 0 {
@@ -246,12 +249,12 @@ impl ChatView {
                     // summaries surface together when the last one finishes
                     // (issue #5), instead of popping in one-by-one.
                     self.pending_subagent_ends
-                        .push((id.clone(), *ok, summary.clone()));
+                        .push((id.clone(), *ok, *cancelled, summary.clone()));
                 } else {
                     // Last (or only) sibling done — flush buffered ends in
                     // arrival order, apply this one, then reveal the preamble.
                     self.flush_pending_subagent_ends();
-                    self.mark_subagent_done(id, *ok, summary);
+                    self.mark_subagent_done(id, *ok, *cancelled, summary);
                     self.hidden_assistant_idx = None;
                 }
             }
@@ -596,6 +599,7 @@ impl ChatView {
                     view,
                     done,
                     ok,
+                    cancelled,
                     summary,
                     ..
                 } => {
@@ -604,9 +608,11 @@ impl ChatView {
                         .iter()
                         .filter(|b| matches!(b, ChatBlock::Tool { .. }))
                         .count();
-                    // Status badge: animated spinner/check/cross + word. The
-                    // running spinner uses the live anim_tick for motion.
-                    let (mark, mark_color, status_word) = if *done {
+                    // Status badge: animated spinner/check/cross/cancelled +
+                    // word. The running spinner uses the live anim_tick.
+                    let (mark, mark_color, status_word) = if *cancelled {
+                        ("\u{2298}", Color::DarkGray, "cancelled")
+                    } else if *done {
                         if *ok {
                             ("\u{2714}", Color::Green, "done")
                         } else {
@@ -638,7 +644,8 @@ impl ChatView {
                     if *done && !summary.is_empty() {
                         spans.push(Span::styled(
                             format!("  {summary}"),
-                            Style::default().fg(if *ok { Color::DarkGray } else { Color::Red }),
+                            Style::default()
+                                .fg(if *cancelled || *ok { Color::DarkGray } else { Color::Red }),
                         ));
                     }
                     out.push(Line::from(spans));
@@ -665,10 +672,12 @@ impl ChatView {
 
     /// Mark the subagent block matching `id` as done. If no block exists
     /// (defensive), emit a fallback marker so the event stays visible.
-    fn mark_subagent_done(&mut self, id: &str, ok: bool, summary: &str) {
+    /// `cancelled` renders a distinct interrupted badge.
+    fn mark_subagent_done(&mut self, id: &str, ok: bool, cancelled: bool, summary: &str) {
         if let Some(ChatBlock::Subagent {
             done,
             ok: bok,
+            cancelled: bcan,
             summary: smry,
             ..
         }) = self
@@ -679,10 +688,16 @@ impl ChatView {
         {
             *done = true;
             *bok = ok;
+            *bcan = cancelled;
             *smry = summary.to_string();
         } else {
-            let mark = if ok { "\u{2714}" } else { "\u{2718}" };
-            let color = if ok { Color::Green } else { Color::Red };
+            let (mark, color) = if cancelled {
+                ("\u{2298}", Color::DarkGray)
+            } else if ok {
+                ("\u{2714}", Color::Green)
+            } else {
+                ("\u{2718}", Color::Red)
+            };
             self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
                 Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
                 Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
@@ -694,8 +709,8 @@ impl ChatView {
     /// the last sibling finishes, or on Done/Error as a safety flush.
     fn flush_pending_subagent_ends(&mut self) {
         let drained = std::mem::take(&mut self.pending_subagent_ends);
-        for (id, ok, summary) in drained {
-            self.mark_subagent_done(&id, ok, &summary);
+        for (id, ok, cancelled, summary) in drained {
+            self.mark_subagent_done(&id, ok, cancelled, &summary);
         }
     }
 

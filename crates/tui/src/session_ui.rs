@@ -283,16 +283,23 @@ pub async fn replay_into_chat(
 /// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,
 /// including rebuilding the child `ChatView` from stored events.
 async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<dyn Store>) -> ChatBlock {
-    let (done, ok, summary) = match task.status {
+    let (done, ok, cancelled, summary) = match task.status {
         SubagentStatus::Completed => (
             true,
             task.ok.unwrap_or(true),
+            false,
             task.result.clone().unwrap_or_default(),
         ),
-        SubagentStatus::Failed => (true, false, task.result.clone().unwrap_or_default()),
-        SubagentStatus::Running => {
+        SubagentStatus::Failed => (
+            true,
+            false,
+            false,
+            task.result.clone().unwrap_or_default(),
+        ),
+        SubagentStatus::Cancelled => (true, false, true, "(cancelled)".to_string()),
+        SubagentStatus::Running | SubagentStatus::Unknown => {
             // Interrupted during resume — display as done/failed with a marker.
-            (true, false, "(interrupted)".to_string())
+            (true, false, false, "(interrupted)".to_string())
         }
     };
 
@@ -306,6 +313,7 @@ async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<dyn Store>)
         view,
         done,
         ok,
+        cancelled,
         summary,
     }
 }

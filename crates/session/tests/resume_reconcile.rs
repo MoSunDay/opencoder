@@ -64,7 +64,7 @@ fn session_meta(id: &str, agent: &str) -> SessionMeta {
 /// "(interrupted)" result so the transcript reflects reality and the task
 /// isn't silently abandoned.
 #[tokio::test]
-async fn resume_marks_stuck_running_subagent_as_failed() {
+async fn resume_marks_stuck_running_subagent_as_cancelled() {
     let store = mem_store().await;
 
     // Parent + child sessions (child needed for the subagent_tasks FK).
@@ -112,22 +112,22 @@ async fn resume_marks_stuck_running_subagent_as_failed() {
     .await
     .unwrap();
 
-    // The stuck task must now be Failed with "(interrupted)" result.
+    // The stuck task must now be Cancelled (interrupted, replayable on the next
+    // user turn) -- not Failed. A cancelled task records no result/ok so its
+    // parent tool_use stays open for replay.
     let tasks = store.list_subagent_tasks("parent").await.unwrap();
     assert_eq!(tasks.len(), 1, "expected the one subagent task");
     let t = &tasks[0];
     assert_eq!(t.task_id, "task-stuck");
     assert!(
-        matches!(t.status, SubagentStatus::Failed),
-        "stuck Running task must be marked Failed on resume, got {:?}",
+        matches!(t.status, SubagentStatus::Cancelled),
+        "stuck Running task must be marked Cancelled on resume, got {:?}",
         t.status
     );
-    assert_eq!(t.ok, Some(false), "ok must be false");
+    assert_eq!(t.ok, None, "ok must be untouched (None) for a cancelled task");
     assert_eq!(
-        t.result.as_deref(),
-        Some("(interrupted)"),
-        "result must be '(interrupted)', got: {:?}",
-        t.result
+        t.result, None,
+        "result must be untouched (None) for a cancelled task"
     );
     assert!(t.completed_at.is_some(), "completed_at must be set");
 }

@@ -160,6 +160,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: Some("deepseek-chat".to_string()),
+            headers: Vec::new(),
         },
     );
     let cfg_a = Config {
@@ -189,6 +190,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: Some("deepseek-chat".to_string()),
+            headers: Vec::new(),
         },
     );
     providers_b.insert(
@@ -197,6 +199,7 @@ async fn switch_provider_in_map_updates_model_and_client() {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("oai-key".to_string()),
             model: Some("gpt-4o".to_string()),
+            headers: Vec::new(),
         },
     );
     let cfg_b = Config {

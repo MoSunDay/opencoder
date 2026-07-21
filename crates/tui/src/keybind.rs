@@ -6,7 +6,7 @@ Keybindings:
   t+Tab           switch mode act <--> plan (keep context, no handoff reset)
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                pick skill anywhere -> {$name}; loaded on submit
-  /                slash command picker: /task (sessions), /config (model + settings), /compact (compress history)
+  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
   Ctrl+D           quit

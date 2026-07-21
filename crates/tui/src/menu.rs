@@ -1,12 +1,10 @@
 //! Skill-selection popup (`$`) for the TUI composer.
 //!
 //! [`SkillMenu`] holds the picker state: the full skill list, the query the
-//! user has typed, the visible rows (filtered), and the highlighted row. When
-//! a skill is already active the menu prepends a synthetic "clear" row so the
-//! user can un-set the skill. All state transitions go through small methods
-//! so the modal handling in `app.rs` stays a flat `match`. [`render_skill_popup`]
-//! draws the centered overlay, reusing the `Clear` + centered-`Rect` pattern
-//! from the help popup.
+//! user has typed, the visible rows (filtered), and the highlighted row. All
+//! state transitions go through small methods so the modal handling in
+//! `app.rs` stays a flat `match`. [`render_skill_popup`] draws the centered
+//! overlay, reusing the `Clear` + centered-`Rect` pattern from the help popup.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Skill;
@@ -17,12 +15,12 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::Frame;
 
 /// Outcome of a keystroke while the skill menu is open. The caller maps this to
-/// its own `KeyAction`: `Quit` propagates, `Pick(None)` clears the active skill,
-/// `Pick(Some)` activates a skill, and `Idle` leaves the menu open.
+/// its own `KeyAction`: `Quit` propagates, `Pick` activates a skill (inserting a
+/// `{$name}` token), and `Idle` leaves the menu open.
 pub enum MenuOutcome {
     Idle,
     Quit,
-    Pick(Option<(String, String)>),
+    Pick((String, String)),
 }
 
 /// Handle one keystroke against an open skill menu, mutating `menu` in place.
@@ -47,15 +45,11 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
         KeyCode::Backspace => m.on_backspace(),
         KeyCode::Char(c) => m.on_char(c),
         KeyCode::Enter | KeyCode::Tab => {
-            if m.is_clear_selected() {
-                *menu = None;
-                return MenuOutcome::Pick(None);
-            }
             if let Some(s) = m.selected_skill() {
                 let name = s.name.clone();
                 let body = s.body.clone();
                 *menu = None;
-                return MenuOutcome::Pick(Some((name, body)));
+                return MenuOutcome::Pick((name, body));
             }
             // Nothing selectable (empty list) — just close.
             *menu = None;
@@ -68,36 +62,30 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
     MenuOutcome::Idle
 }
 
-/// One display row of the picker. `Clear` un-sets the active skill; `Skill(i)`
-/// references `SkillMenu::skills[i]`.
+/// One display row of the picker. `Skill(i)` references `SkillMenu::skills[i]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
-    Clear,
     Skill(usize),
 }
 
 /// Picker state for the `$` skill menu.
 pub struct SkillMenu {
     skills: Vec<Skill>,
-    /// Visible rows (after filtering). Always begins with `Clear` when
-    /// `has_active` is true.
+    /// Visible rows (after filtering).
     rows: Vec<Row>,
     selected: usize,
     query: String,
-    has_active: bool,
 }
 
 impl SkillMenu {
-    /// Open a new picker. `has_active` controls whether a leading "clear"
-    /// row is shown (i.e. whether there's an active skill to un-set).
-    pub fn new(skills: Vec<Skill>, has_active: bool) -> Self {
-        let rows = Self::build_rows(&skills, "", has_active);
+    /// Open a new picker over the given skills.
+    pub fn new(skills: Vec<Skill>) -> Self {
+        let rows = Self::build_rows(&skills, "");
         SkillMenu {
             skills,
             rows,
             selected: 0,
             query: String::new(),
-            has_active,
         }
     }
 
@@ -109,12 +97,7 @@ impl SkillMenu {
         &self.query
     }
 
-    /// `true` if the highlighted row is the synthetic "clear" row.
-    pub fn is_clear_selected(&self) -> bool {
-        self.rows.get(self.selected) == Some(&Row::Clear)
-    }
-
-    /// The skill under the highlight, if the highlight isn't on "clear".
+    /// The skill under the highlight, if any.
     pub fn selected_skill(&self) -> Option<&Skill> {
         match self.rows.get(self.selected) {
             Some(Row::Skill(i)) => self.skills.get(*i),
@@ -155,10 +138,9 @@ impl SkillMenu {
     }
 
     /// Rebuild `rows` from the current query (case-insensitive substring match
-    /// on name, then description) and clamp the selection. The "clear" row is
-    /// always shown when `has_active`, regardless of the query.
+    /// on name, then description) and clamp the selection.
     fn refilter(&mut self) {
-        self.rows = Self::build_rows(&self.skills, &self.query, self.has_active);
+        self.rows = Self::build_rows(&self.skills, &self.query);
         if self.visible_count() == 0 {
             self.selected = 0;
         } else {
@@ -166,12 +148,9 @@ impl SkillMenu {
         }
     }
 
-    fn build_rows(skills: &[Skill], query: &str, has_active: bool) -> Vec<Row> {
+    fn build_rows(skills: &[Skill], query: &str) -> Vec<Row> {
         let q = query.trim().to_lowercase();
         let mut rows = Vec::new();
-        if has_active {
-            rows.push(Row::Clear);
-        }
         if q.is_empty() {
             for (i, _s) in skills.iter().enumerate() {
                 rows.push(Row::Skill(i));
@@ -253,10 +232,6 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
         .rows
         .iter()
         .map(|row| match row {
-            Row::Clear => ListItem::new(Line::from(Span::styled(
-                "\u{2717} clear skill",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ))),
             Row::Skill(i) => {
                 let s = &menu.skills[*i];
                 ListItem::new(Line::from(vec![
@@ -340,10 +315,6 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
         .rows
         .iter()
         .map(|row| match row {
-            Row::Clear => ListItem::new(Line::from(Span::styled(
-                "\u{2717} clear skill",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ))),
             Row::Skill(i) => {
                 let s = &menu.skills[*i];
                 ListItem::new(Line::from(vec![
@@ -412,26 +383,13 @@ mod tests {
     }
 
     fn menu_of(names: &[&str]) -> SkillMenu {
-        SkillMenu::new(
-            names.iter().map(|n| sk(n, &format!("desc {n}"))).collect(),
-            false,
-        )
+        SkillMenu::new(names.iter().map(|n| sk(n, &format!("desc {n}"))).collect())
     }
 
     #[test]
     fn opens_with_all_visible_and_first_selected() {
         let m = menu_of(&["alpha", "beta"]);
         assert_eq!(m.visible_count(), 2);
-        assert_eq!(m.selected_skill().unwrap().name, "alpha");
-        assert!(!m.is_clear_selected());
-    }
-
-    #[test]
-    fn prepend_clear_row_when_active() {
-        let mut m = SkillMenu::new(vec![sk("alpha", "a")], true);
-        assert_eq!(m.visible_count(), 2);
-        assert!(m.is_clear_selected()); // first row is clear
-        m.move_down();
         assert_eq!(m.selected_skill().unwrap().name, "alpha");
     }
 
@@ -456,7 +414,6 @@ mod tests {
                 sk("task-plan", "build a go-live plan"),
                 sk("ship", "deliver to production"),
             ],
-            false,
         );
         for c in "PLAN".chars() {
             m.on_char(c);
@@ -487,28 +444,17 @@ mod tests {
 
     #[test]
     fn empty_list_is_empty_and_selects_nothing() {
-        let m = SkillMenu::new(vec![], false);
+        let m = SkillMenu::new(vec![]);
         assert!(m.is_empty());
         assert!(m.selected_skill().is_none());
     }
 
     #[test]
     fn empty_menu_moves_without_panicking() {
-        let mut m = SkillMenu::new(vec![], false);
+        let mut m = SkillMenu::new(vec![]);
         m.move_up();
         m.move_down();
         assert!(m.selected_skill().is_none());
-    }
-
-    #[test]
-    fn clear_row_stays_visible_through_filter_when_active() {
-        let mut m = SkillMenu::new(vec![sk("alpha", "a"), sk("beta", "b")], true);
-        for c in "zzz".chars() {
-            m.on_char(c);
-        } // matches nothing
-          // clear row always remains, skills filtered out
-        assert_eq!(m.visible_count(), 1);
-        assert!(m.is_clear_selected());
     }
 
     #[test]
@@ -540,9 +486,8 @@ mod tests {
         let names: Vec<&str> = m
             .rows
             .iter()
-            .filter_map(|r| match r {
-                Row::Skill(i) => Some(m.skills[*i].name.as_str()),
-                _ => None,
+            .map(|r| match r {
+                Row::Skill(i) => m.skills[*i].name.as_str(),
             })
             .collect();
         assert!(
@@ -562,7 +507,7 @@ mod tests {
         let mut menu = Some(menu_of(&["alpha", "beta"]));
         let outcome = handle_menu_key(&mut menu, key(KeyCode::Enter));
         match outcome {
-            MenuOutcome::Pick(Some((name, body))) => {
+            MenuOutcome::Pick((name, body)) => {
                 assert_eq!(name, "alpha");
                 assert_eq!(body, "body of alpha");
             }
@@ -579,24 +524,15 @@ mod tests {
         m.move_down();
         let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
         match outcome {
-            MenuOutcome::Pick(Some((name, _))) => assert_eq!(name, "beta"),
+            MenuOutcome::Pick((name, _)) => assert_eq!(name, "beta"),
             _ => panic!("Tab should confirm the highlighted skill"),
         }
         assert!(menu.is_none(), "menu must close on Tab pick");
     }
 
     #[test]
-    fn tab_picks_clear_row_like_enter() {
-        let mut menu = Some(SkillMenu::new(vec![sk("alpha", "a")], true));
-        // clear row is first and selected by default.
-        let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
-        assert!(matches!(outcome, MenuOutcome::Pick(None)));
-        assert!(menu.is_none());
-    }
-
-    #[test]
     fn tab_on_empty_menu_just_closes() {
-        let mut menu = Some(SkillMenu::new(vec![], false));
+        let mut menu = Some(SkillMenu::new(vec![]));
         let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
         assert!(matches!(outcome, MenuOutcome::Idle));
         assert!(menu.is_none());

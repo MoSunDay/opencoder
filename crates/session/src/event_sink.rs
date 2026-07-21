@@ -299,6 +299,9 @@ mod tests {
         ) -> anyhow::Result<Option<opencoder_store::SubagentTaskRecord>> {
             self.inner.get_subagent_task(id).await
         }
+        async fn cancel_subagent_task(&self, id: &str) -> anyhow::Result<()> {
+            self.inner.cancel_subagent_task(id).await
+        }
     }
 
     // N text deltas + 1 structural event must persist every delta (no loss) while

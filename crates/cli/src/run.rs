@@ -14,16 +14,11 @@ use crate::Cli;
 
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     let workdir = resolve_workdir(cli)?;
-    let mut config = Config::load(&workdir)?;
-    if let Some(m) = &cli.model {
-        config.model = m.clone();
-    }
-    if let Some(m) = &cli.small_model {
-        config.small_model = Some(m.clone());
-    }
-    let (base_url, api_key) = config.resolve_endpoint()?;
-    let client: Arc<dyn ChatStream> =
-        Arc::new(ChatClient::new(&base_url, &api_key, config.network.proxy.as_deref())?);
+    let config = Config::load(&workdir)?;
+    let ep = config.resolve_endpoint()?;
+    let client: Arc<dyn ChatStream> = Arc::new(
+        ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, config.network.proxy.as_deref())?,
+    );
     let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
         .await
         .ok()
@@ -47,7 +42,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         )
         .await?
     } else {
-        let agent_name = cli.agent.as_deref().unwrap_or(&config.agent.default);
+        let agent_name = config.agent.default.as_str();
         let agent = resolve_agent(agent_name)
             .or_else(|| resolve_agent("act"))
             .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
@@ -71,6 +66,13 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     }
 
     print_resume_summary(&session).await;
+
+    if let Some(pf) = &cli.prompt_file {
+        let body = std::fs::read_to_string(pf)
+            .map_err(|e| anyhow!("--prompt-file {}: {e}", pf.display()))?;
+        session.agent.prompt =
+            format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
+    }
 
     print_prompt_header(&session, &prompt);
     let prompt_owned = prompt.clone();
@@ -193,7 +195,9 @@ pub(crate) fn format_resume_summary(
                     }
                 }
                 SubagentStatus::Failed => "\u{2718}",
-                SubagentStatus::Running => "\u{2026}",
+                SubagentStatus::Cancelled => "\u{2298}",
+                // Unknown is a serde fallback; treat like still-in-flight.
+                SubagentStatus::Running | SubagentStatus::Unknown => "\u{2026}",
             };
             format!("{mark} {}", truncate(&t.prompt, 40))
         })

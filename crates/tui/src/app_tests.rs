@@ -37,7 +37,6 @@ fn run_handle(
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        None,
         80,
         2,
     )
@@ -50,7 +49,6 @@ fn run_handle_menu(
     input: &mut String,
     cursor_idx: &mut usize,
     skill_menu: &mut Option<SkillMenu>,
-    active_skill: Option<&str>,
 ) -> KeyAction {
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
@@ -71,7 +69,6 @@ fn run_handle_menu(
         &mut follow,
         &mut last_esc,
         skill_menu,
-        active_skill,
         80,
         2,
     )
@@ -594,7 +591,6 @@ fn dollar_on_empty_input_opens_skill_menu() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(
@@ -619,7 +615,6 @@ fn dollar_anywhere_opens_skill_menu() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(
@@ -640,7 +635,7 @@ fn skill_menu_enter_picks_selected_skill() {
         body: "the body".into(),
         source: PathBuf::from("/x.md"),
     };
-    let mut menu = Some(SkillMenu::new(vec![skill], false));
+    let mut menu = Some(SkillMenu::new(vec![skill]));
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle_menu(
@@ -648,7 +643,6 @@ fn skill_menu_enter_picks_selected_skill() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     // Picking now inserts a `{$name}` token at the cursor instead of emitting
     // SetSkill; the skill body is resolved and loaded on submit.
@@ -675,7 +669,7 @@ fn pick_inserts_token_at_cursor_mid_text() {
         body: "b".into(),
         source: PathBuf::from("/x.md"),
     };
-    let mut menu = Some(SkillMenu::new(vec![skill], false));
+    let mut menu = Some(SkillMenu::new(vec![skill]));
     let mut input = String::from("hello ");
     let mut idx = 6; // end of "hello "
     let action = run_handle_menu(
@@ -683,7 +677,6 @@ fn pick_inserts_token_at_cursor_mid_text() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(menu.is_none());
@@ -693,7 +686,7 @@ fn pick_inserts_token_at_cursor_mid_text() {
 
 #[test]
 fn skill_menu_esc_closes_without_picking() {
-    let mut menu = Some(SkillMenu::new(vec![], false));
+    let mut menu = Some(SkillMenu::new(vec![]));
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle_menu(
@@ -701,7 +694,6 @@ fn skill_menu_esc_closes_without_picking() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     assert!(
         matches!(action, KeyAction::None),
@@ -721,7 +713,6 @@ fn skill_menu_intercepts_typing_from_composer() {
             body: "b".into(),
             source: PathBuf::from("/x.md"),
         }],
-        false,
     ));
     let mut input = String::new();
     let mut idx = 0;
@@ -730,7 +721,6 @@ fn skill_menu_intercepts_typing_from_composer() {
         &mut input,
         &mut idx,
         &mut menu,
-        None,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(
@@ -738,36 +728,6 @@ fn skill_menu_intercepts_typing_from_composer() {
         "typed char must NOT reach the composer while the menu is open"
     );
     assert!(menu.is_some(), "menu stays open while filtering");
-}
-
-#[test]
-fn skill_menu_clear_row_unsets_skill() {
-    use opencoder_core::Skill;
-    use std::path::PathBuf;
-    // has_active=true prepends the "✕ clear" row, selected by default.
-    let mut menu = Some(SkillMenu::new(
-        vec![Skill {
-            name: "alpha".into(),
-            description: "d".into(),
-            body: "b".into(),
-            source: PathBuf::from("/x.md"),
-        }],
-        true,
-    ));
-    let mut input = String::new();
-    let mut idx = 0;
-    let action = run_handle_menu(
-        key(KeyCode::Enter, KeyModifiers::NONE),
-        &mut input,
-        &mut idx,
-        &mut menu,
-        Some("old"),
-    );
-    assert!(
-        matches!(action, KeyAction::SetSkill(None)),
-        "clear row must yield SetSkill(None)"
-    );
-    assert!(menu.is_none());
 }
 
 #[test]
@@ -790,6 +750,17 @@ fn flash_visible_handles_wraparound() {
     assert!(flash_visible(u32::MAX, 3, 5));
     assert!(!flash_visible(u32::MAX, 4, 5));
     assert!(!flash_visible(u32::MAX, 99, 5));
+}
+
+#[test]
+fn skill_trigger_names_the_active_skill() {
+    assert_eq!(
+        crate::app_helpers::skill_trigger("repo-memory"),
+        "The `repo-memory` skill is now active. Begin executing its instructions immediately."
+    );
+    // The trigger is identical across Submit/Steer/Queue so a pure-skill
+    // submission behaves consistently regardless of the submit verb.
+    assert!(crate::app_helpers::skill_trigger("x").contains("`x`"));
 }
 
 /// `start_turn` must report failure when the worker command channel has no
@@ -1171,7 +1142,6 @@ fn double_esc_while_running_cancels() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        None,
         80,
         2,
     );
@@ -1191,7 +1161,6 @@ fn double_esc_while_running_cancels() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        None,
         80,
         2,
     );
@@ -1213,6 +1182,7 @@ fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-key".to_string()),
             model: None,
+            headers: Vec::new(),
         },
     );
     let cfg = Config {
@@ -1224,13 +1194,14 @@ fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: Some("oai-key".to_string()),
             model: None,
+            headers: Vec::new(),
         },
         providers,
         ..Default::default()
     };
-    let (base_url, api_key) = crate::app::startup_endpoint(&cfg).unwrap();
-    assert_eq!(base_url, "https://api.deepseek.com/v1");
-    assert_eq!(api_key, "dk-key");
+    let ep = crate::app::startup_endpoint(&cfg).unwrap();
+    assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
+    assert_eq!(ep.api_key, "dk-key");
 }
 
 #[test]
@@ -1245,11 +1216,12 @@ fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
             base_url: "https://legacy.example.com/v1".to_string(),
             api_key: Some("legacy-key".to_string()),
             model: None,
+            headers: Vec::new(),
         },
         providers: HashMap::new(),
         ..Default::default()
     };
-    let (base_url, api_key) = crate::app::startup_endpoint(&cfg).unwrap();
-    assert_eq!(base_url, "https://legacy.example.com/v1");
-    assert_eq!(api_key, "legacy-key");
+    let ep = crate::app::startup_endpoint(&cfg).unwrap();
+    assert_eq!(ep.base_url, "https://legacy.example.com/v1");
+    assert_eq!(ep.api_key, "legacy-key");
 }

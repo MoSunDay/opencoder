@@ -165,6 +165,15 @@ pub enum SubagentStatus {
     Running,
     Completed,
     Failed,
+    /// Interrupted mid-run. The parent `task` tool_use is left open (no
+    /// tool_result) so the child can be replayed on the next user turn. Distinct
+    /// from `Failed` (a natural error result) and `Completed` (a real result).
+    Cancelled,
+    /// Forward-compat fallback produced only by `#[serde(other)]` when an
+    /// unknown status string is deserialized from JSON. The DB TEXT path uses
+    /// `parse()`, which maps unknown strings to `Running` (still-in-flight).
+    #[serde(other)]
+    Unknown,
 }
 
 impl SubagentStatus {
@@ -173,6 +182,8 @@ impl SubagentStatus {
             SubagentStatus::Running => "running",
             SubagentStatus::Completed => "completed",
             SubagentStatus::Failed => "failed",
+            SubagentStatus::Cancelled => "cancelled",
+            SubagentStatus::Unknown => "unknown",
         }
     }
 
@@ -180,6 +191,7 @@ impl SubagentStatus {
         match s {
             "completed" => SubagentStatus::Completed,
             "failed" => SubagentStatus::Failed,
+            "cancelled" => SubagentStatus::Cancelled,
             _ => SubagentStatus::Running,
         }
     }

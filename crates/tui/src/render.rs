@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
+use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
@@ -91,6 +92,7 @@ pub(crate) fn render<B: Backend>(
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
+    cache_salt_menu: Option<&CacheSaltMenu>,
     hits: &mut MouseHits,
     selection: Option<crate::selection::SelRange>,
     copy_status: Option<&str>,
@@ -195,6 +197,9 @@ pub(crate) fn render<B: Backend>(
         }
         if let Some(mm) = model_menu {
             crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
+        }
+        if let Some(cs) = cache_salt_menu {
+            crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
         }
         if let Some(text) = mode_flash {
             let is_plan = text.contains("plan");

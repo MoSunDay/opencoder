@@ -341,6 +341,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: true,
+        cancelled: false,
         summary: "result-a".into(),
     });
     assert_eq!(v.subagents_running, 1);
@@ -354,6 +355,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
+        cancelled: false,
         summary: "result-b".into(),
     });
     assert_eq!(v.subagents_running, 0);
@@ -396,6 +398,7 @@ fn single_subagent_does_not_withhold() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "s".into(),
         ok: true,
+        cancelled: false,
         summary: "done-single".into(),
     });
     assert!(block_text(&v).contains("done-single"));

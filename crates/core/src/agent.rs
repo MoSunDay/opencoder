@@ -122,6 +122,25 @@ pub fn base_prompt_act() -> String {
     BASE_PROMPT.to_string()
 }
 
+/// Bash + subagent usage preamble appended to a custom `--prompt-file` prompt.
+///
+/// It advertises the `bash` and `task` tools and the `explore`/`build`/`tools`
+/// delegation, so a user-supplied role prompt still drives correct tool use.
+/// The `tools` umbrella advertisement is the exact [`TOOLS_SUBAGENT_AD`] line,
+/// so [`strip_tools_subagent_ad`] can hide it when the `tools_subagent`
+/// capability is off; the `'build'` delegation clause matches the substring
+/// targeted by `base_prompt_plan` for the same reason.
+pub fn tool_preamble() -> &'static str {
+    "## Tools
+- You have two tools: bash (terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
+- For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
+- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.
+- Run tool calls in parallel when none needs the other's output; otherwise run sequentially. You MAY emit multiple `task` blocks in a single response -- independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
+- Keep responses concise and friendly. Do not dump large files; reference paths only.
+- When a tool errors, read the error, fix the approach, and retry; do not loop on the same failing command.
+"
+}
+
 pub fn base_prompt_plan() -> String {
     // Plan mode must not advertise the 'build' subagent: strip the build
     // delegation clause from the shared base prompt before appending the plan
@@ -270,5 +289,25 @@ mod tests {
         // tools is plan-visible: act and plan prompts both advertise it.
         assert!(base_prompt_act().contains("'tools' subagent"));
         assert!(base_prompt_plan().contains("'tools' subagent"));
+    }
+
+    /// Guards `tool_preamble`: it must contain the exact [`TOOLS_SUBAGENT_AD`]
+    /// line (so [`strip_tools_subagent_ad`] keeps working on a custom prompt)
+    /// and advertise the `build` subagent.
+    #[test]
+    fn tool_preamble_contains_substrings() {
+        let p = tool_preamble();
+        assert!(
+            p.contains(TOOLS_SUBAGENT_AD),
+            "tool_preamble must contain the exact TOOLS_SUBAGENT_AD line so              strip_tools_subagent_ad still works on --prompt-file prompts"
+        );
+        assert!(
+            p.contains("'build'"),
+            "tool_preamble must advertise the 'build' subagent"
+        );
+        assert!(
+            p.contains("'tools' subagent"),
+            "tool_preamble must advertise the 'tools' subagent"
+        );
     }
 }

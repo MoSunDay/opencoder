@@ -38,6 +38,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: true,
+        cancelled: false,
         summary: "result-a".into(),
     });
     assert_eq!(v.subagents_running, 1);
@@ -51,6 +52,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
+        cancelled: false,
         summary: "result-b".into(),
     });
     assert_eq!(v.subagents_running, 0);
@@ -93,6 +95,7 @@ fn single_subagent_does_not_withhold() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "s".into(),
         ok: true,
+        cancelled: false,
         summary: "done-single".into(),
     });
     assert!(block_text(&v).contains("done-single"));
@@ -154,6 +157,7 @@ fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: false,
+        cancelled: false,
         summary: "crashed".into(),
     });
     assert_eq!(v.subagents_running, 1);
@@ -167,6 +171,7 @@ fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
+        cancelled: false,
         summary: "ok-b".into(),
     });
     let text = block_text(&v);
@@ -272,6 +277,7 @@ fn subagent_events_render() {
     v.apply(&SessionEvent::SubagentEnd {
         id: "s1".into(),
         ok: true,
+        cancelled: false,
         summary: "found it".into(),
     });
     assert_eq!(v.subagents_running, 0);

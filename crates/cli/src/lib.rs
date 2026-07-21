@@ -2,6 +2,7 @@ pub mod client;
 pub mod run;
 pub mod server;
 pub mod session_cmd;
+pub mod ts;
 
 use std::path::{Path, PathBuf};
 
@@ -16,14 +17,12 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
-    #[arg(short, long, global = true)]
-    pub model: Option<String>,
-    #[arg(long, global = true)]
-    pub small_model: Option<String>,
-    #[arg(long, global = true)]
-    pub agent: Option<String>,
     #[arg(long, global = true)]
     pub workdir: Option<PathBuf>,
+    /// Override the agent system prompt with the contents of this file.
+    /// A standard bash/subagent usage preamble is appended automatically.
+    #[arg(long, global = true)]
+    pub prompt_file: Option<PathBuf>,
     /// Resume a specific session by id.
     #[arg(short, long, global = true)]
     pub session: Option<String>,
@@ -48,6 +47,20 @@ pub enum Command {
     },
     /// Start the interactive TUI.
     Tui,
+    /// Run the TUI inside a tmux session that survives SSH disconnect.
+    /// Use `ts -l` to list managed sessions and `ts -r <id>` to reattach.
+    Ts {
+        /// List managed tmux sessions (task-list with tmux id).
+        #[arg(short, long)]
+        list: bool,
+        /// Resume/attach a tmux session by id (tmux name `opencode-<id>`,
+        /// `$index`, or bare opencode session id).
+        #[arg(short, long)]
+        resume: Option<String>,
+        /// Force a fresh tmux session even when a single managed one exists.
+        #[arg(long)]
+        new: bool,
+    },
     /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),
     /// protected by a bearer token. (`serve` is accepted as an alias.)
     #[command(alias = "serve")]

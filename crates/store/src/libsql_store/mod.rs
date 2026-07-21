@@ -189,6 +189,10 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         subagent_tasks::get_by_task_id(&conn, task_id).await
     }
+    async fn cancel_subagent_task(&self, task_id: &str) -> Result<()> {
+        let conn = self.conn().await?;
+        subagent_tasks::cancel(&conn, task_id).await
+    }
 
     async fn import_messages(
         &self,

@@ -15,12 +15,13 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
+use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutcome};
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::composer;
 use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
-use crate::model_menu::{handle_model_key, ModelMenu, ModelOutcome};
+use crate::model_menu::{handle_model_key, ConfigForm, ModelMenu, ModelOutcome, ProviderList};
 use crate::render::{render, MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::TerminalGuard;
@@ -56,7 +57,7 @@ pub(crate) fn resume_hint(id: &str) -> String {
 /// `deepseek/deepseek-chat` resolves against `providers["deepseek"]` rather
 /// than the legacy top-level `provider.base_url`. Extracted as a testable seam
 /// for the startup path, which otherwise only runs inside `run`.
-pub(crate) fn startup_endpoint(config: &Config) -> Result<(String, String)> {
+pub(crate) fn startup_endpoint(config: &Config) -> Result<opencoder_core::Endpoint> {
     Ok(config.resolve_endpoint()?)
 }
 
@@ -65,14 +66,12 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         .workdir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let mut config = Config::load(&workdir)?;
-    if let Some(m) = &opts.model {
-        config.model = m.clone();
-    }
-    let (base_url, api_key) = startup_endpoint(&config)?;
+    let config = Config::load(&workdir)?;
+    let ep = startup_endpoint(&config)?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
-        &base_url,
-        &api_key,
+        &ep.base_url,
+        &ep.api_key,
+        &ep.headers,
         config.network.proxy.as_deref(),
     )?);
 
@@ -104,10 +103,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         )
         .await?
     } else {
-        let agent_name = opts
-            .agent
-            .clone()
-            .unwrap_or_else(|| config.agent.default.clone());
+        let agent_name = config.agent.default.clone();
         let agent = resolve_agent(&agent_name)
             .or_else(|| resolve_agent("act"))
             .context("agent")?;
@@ -174,9 +170,22 @@ async fn run_app(
     let session = session.with_cancel(cancel.clone());
     let mut skill_handle = session.skill_prompt.clone();
 
-    let mut chat = crate::chat::ChatView {
-        agent: session.agent.name.clone(),
-        ..Default::default()
+    let mut chat = if !session.messages.is_empty() {
+        // A resumed session carries persisted history: rebuild the chat view
+        // from it so the transcript is visible on startup (mirroring /task
+        // switch-back and TranscriptReset), instead of a blank view.
+        crate::session_ui::replay_into_chat(
+            &session.agent.name,
+            &session.messages,
+            &store,
+            &session.id,
+        )
+        .await
+    } else {
+        crate::chat::ChatView {
+            agent: session.agent.name.clone(),
+            ..Default::default()
+        }
     };
     let mut input = String::new();
     let mut cursor_idx: usize = 0;
@@ -197,6 +206,7 @@ async fn run_app(
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
+    let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut active_skill: Option<String> = None;
     let mut active_skill_body: Option<String> = None;
     let mut anim_tick: u32 = 0;
@@ -357,6 +367,7 @@ async fn run_app(
                 task_picker.as_ref(),
                 command_menu.as_ref(),
                 model_menu.as_ref(),
+                cache_salt_menu.as_ref(),
                 &mut hits,
                 selection,
                 copy_status.as_ref().and_then(|(msg, t)| {
@@ -576,8 +587,7 @@ async fn run_app(
                         // `/config` modal: intercept all keys while open.
                         if model_menu.is_some() {
                             match handle_model_key(&mut model_menu, k) {
-                                ModelOutcome::Save(patch) => {
-                                    let json = patch.to_json();
+                                ModelOutcome::Save(json) => {
                                     match Config::save(&workdir, &json) {
                                         Ok(path) => {
                                             match Config::load(&workdir) {
@@ -587,8 +597,8 @@ async fn run_app(
                                                     // Rebuild the outer `client` too so subsequent
                                                     // `/task` new sessions pick up the new endpoint
                                                     // (the worker only swaps its own sess.client).
-                                                    if let Ok((base_url, api_key)) = reloaded.resolve_endpoint() {
-                                                        if let Ok(new_client) = opencoder_llm::ChatClient::new(&base_url, &api_key, reloaded.network.proxy.as_deref()) {
+                                                    if let Ok(ep) = reloaded.resolve_endpoint() {
+                                                        if let Ok(new_client) = opencoder_llm::ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, reloaded.network.proxy.as_deref()) {
                                                             client = Arc::new(new_client);
                                                         }
                                                     }
@@ -625,6 +635,17 @@ async fn run_app(
                             }
                             continue;
                         }
+                        // `/cache_salt` read-only panel: intercept all keys while open.
+                        if cache_salt_menu.is_some() {
+                            match handle_cache_salt_key(&mut cache_salt_menu, k) {
+                                CacheSaltOutcome::Quit => {
+                                    let _ = cmd_tx.send(UiCmd::Quit).await;
+                                    break;
+                                }
+                                CacheSaltOutcome::Cancel | CacheSaltOutcome::Idle => {}
+                            }
+                            continue;
+                        }
                         // `/` command picker: intercept all keys while open.
                         if command_menu.is_some() {
                             let (outcome, quit) = handle_command_key(&mut command_menu, k);
@@ -636,10 +657,10 @@ async fn run_app(
                                     task_picker = Some(TaskPicker::new(sessions, session_id.clone()));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Model) => {
-                                    model_menu = Some(ModelMenu::new_provider_list(&config));
+                                    model_menu = Some(ModelMenu::List(ProviderList::new(&config)));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Config) => {
-                                    model_menu = Some(ModelMenu::new(&config));
+                                    model_menu = Some(ModelMenu::Config(ConfigForm::new(&config)));
                                 }
                                 CommandOutcome::Dispatch(SlashAction::Compact) => {
                                     match gate_compact(running) {
@@ -661,6 +682,26 @@ async fn run_app(
                                             )));
                                         }
                                     }
+                                }
+                                CommandOutcome::Dispatch(SlashAction::CacheSalt) => {
+                                    let enabled = config.cache_salt == Some(true);
+                                    cache_salt_menu = Some(
+                                        match CacheSaltMenu::build(
+                                            store.as_ref(),
+                                            &session_id,
+                                            &agent_name,
+                                            enabled,
+                                        )
+                                        .await
+                                        {
+                                            Ok(m) => m,
+                                            Err(_) => CacheSaltMenu::parent_only(
+                                                &agent_name,
+                                                &session_id,
+                                                enabled,
+                                            ),
+                                        },
+                                    );
                                 }
                                 CommandOutcome::Idle => {}
                             }
@@ -694,7 +735,6 @@ async fn run_app(
                             &mut follow,
                             &mut last_esc,
                             &mut skill_menu,
-                            active_skill.as_deref(),
                             // Composer wrap geometry: matches the values used by `render`
                             // (inner_w = term width - 2 borders, prompt_w = 2 for the `❯ ` prefix)
                             // so Up/Down cursor movement tracks the rendered wrapped rows.
@@ -720,9 +760,7 @@ async fn run_app(
                                             // skill so the model records a user turn and begins acting on
                                             // the skill body injected into the system prompt.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
-                                            let trigger = format!(
-                                                "The `{skill_name}` skill is now active. Begin executing its instructions immediately."
-                                            );
+                                            let trigger = skill_trigger(skill_name);
                                             if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger)).await
                                             {
                                                 worker_dead(&mut chat);
@@ -767,6 +805,16 @@ async fn run_app(
                                     // execution area. Steer input is surfaced
                                     // only in the side queue panel + status bar
                                     // badge, consistent with queued inputs.
+                                } else if let Some(skill_name) = active_skill.as_deref() {
+                                    // Pure-skill submit (only a `{$name}` token,
+                                    // no text): admit the skill trigger as a
+                                    // steer so the skill body — already injected
+                                    // into the system prompt — is acted on via
+                                    // the steer queue rather than being dropped.
+                                    let trigger = skill_trigger(skill_name);
+                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Steer, &trigger)).await {
+                                        chat.steer_items.push((seq, trigger));
+                                    }
                                 }
                                 follow = true;
                             }
@@ -779,6 +827,15 @@ async fn run_app(
                                 if !clean.is_empty() {
                                     if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, clean)).await {
                                         queue_items.push((seq, clean.to_string()));
+                                    }
+                                } else if let Some(skill_name) = active_skill.as_deref() {
+                                    // Pure-skill submit (only a `{$name}` token,
+                                    // no text): admit the skill trigger to the
+                                    // queue so the active skill is acted on
+                                    // instead of being silently dropped.
+                                    let trigger = skill_trigger(skill_name);
+                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &trigger)).await {
+                                        queue_items.push((seq, trigger));
                                     }
                                 }
                                 follow = true;
@@ -1050,7 +1107,8 @@ async fn run_app(
 
 pub(crate) use crate::app_helpers::{
     clear_pending_inputs, data_dir_for, handle_mouse, mk_input, MouseOutcome, paste_payload,
-    pre_key_intercept, push_user, resolve_and_warn, start_turn, sys_tokens_for, worker_dead,
+    pre_key_intercept, push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for,
+    worker_dead,
 };
 
 #[cfg(test)]

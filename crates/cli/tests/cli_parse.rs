@@ -18,16 +18,19 @@ fn default_is_run_with_no_prompt() {
 fn global_flags_parsed() {
     let cli = parse(&[
         "opencoder",
-        "--model",
-        "glm-5.2",
-        "--agent",
-        "plan",
-        "--small-model",
-        "glm-flash",
+        "--workdir",
+        "/tmp/proj",
+        "--prompt-file",
+        "persona.md",
     ]);
-    assert_eq!(cli.model.as_deref(), Some("glm-5.2"));
-    assert_eq!(cli.agent.as_deref(), Some("plan"));
-    assert_eq!(cli.small_model.as_deref(), Some("glm-flash"));
+    assert_eq!(
+        cli.workdir.as_deref(),
+        Some(std::path::Path::new("/tmp/proj"))
+    );
+    assert_eq!(
+        cli.prompt_file.as_deref(),
+        Some(std::path::Path::new("persona.md"))
+    );
 }
 
 #[test]
@@ -180,5 +183,70 @@ fn client_subcommand_parses() {
             assert!(continue_);
         }
         _ => panic!("expected Client"),
+    }
+}
+
+#[test]
+fn prompt_file_flag_parsed() {
+    let cli = parse(&["opencoder", "--prompt-file", "x.md"]);
+    assert_eq!(
+        cli.prompt_file.as_deref(),
+        Some(std::path::Path::new("x.md"))
+    );
+    // absent by default
+    let cli2 = parse(&["opencoder"]);
+    assert!(cli2.prompt_file.is_none());
+}
+
+#[test]
+fn ts_subcommand_parses_list_flag() {
+    let cli = parse(&["opencode", "ts", "-l"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new }) => {
+            assert!(list);
+            assert!(resume.is_none());
+            assert!(!new);
+        }
+        _ => panic!("expected Ts"),
+    }
+}
+
+#[test]
+fn ts_subcommand_parses_resume_target() {
+    let cli = parse(&["opencode", "ts", "-r", "01HZ"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new }) => {
+            assert!(!list);
+            assert_eq!(resume.as_deref(), Some("01HZ"));
+            assert!(!new);
+        }
+        _ => panic!("expected Ts"),
+    }
+}
+
+#[test]
+fn ts_subcommand_parses_new_flag() {
+    let cli = parse(&["opencode", "ts", "--new"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new }) => {
+            assert!(!list);
+            assert!(resume.is_none());
+            assert!(new);
+        }
+        _ => panic!("expected Ts"),
+    }
+}
+
+#[test]
+fn ts_subcommand_defaults_to_no_flags() {
+    // Bare `opencode ts` -> Ts with every flag at its default.
+    let cli = parse(&["opencode", "ts"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new }) => {
+            assert!(!list);
+            assert!(resume.is_none());
+            assert!(!new);
+        }
+        _ => panic!("expected Ts"),
     }
 }

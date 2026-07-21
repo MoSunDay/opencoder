@@ -340,6 +340,37 @@ fn save_wraps_env_var_name_in_braces() {
 }
 
 #[test]
+fn save_refuses_malformed_model_value() {
+    // `m/g` would resolve model_id() to "g" and silently break every request;
+    // save must refuse to persist it so the bad value does not stick in the
+    // config file (mirrors the load-side warn_if_suspicious_model predicate,
+    // but as a hard write-path guard).
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+
+    let res = Config::save(dir.path(), &serde_json::json!({ "model": "m/g" }));
+    assert!(
+        res.is_err(),
+        "save must reject a malformed `model` value, not write it"
+    );
+    let msg = format!("{}", res.unwrap_err());
+    assert!(
+        msg.contains("malformed") || msg.contains("model"),
+        "error should mention the malformed model; got: {msg}"
+    );
+    // No file should have been written for the rejected value.
+    assert!(
+        !dir.path().join("opencoder.json").exists(),
+        "rejected model must not produce a config file"
+    );
+
+    // A well-formed bare model id (no `/`) is still accepted and round-trips.
+    Config::save(dir.path(), &serde_json::json!({ "model": "glm-5.2" })).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.model, "glm-5.2");
+}
+
+#[test]
 fn save_can_remove_reasoning_effort_via_null() {
     // Setting reasoning_effort to null in the patch must REMOVE the field
     // (merge_json treats null as delete) so it is omitted from request bodies.
@@ -347,7 +378,7 @@ fn save_can_remove_reasoning_effort_via_null() {
     let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
-        r#"{"model":"m","reasoning_effort":"high"}"#,
+        r#"{"model":"demo/model","reasoning_effort":"high"}"#,
     )
     .unwrap();
     let patch = serde_json::json!({ "reasoning_effort": serde_json::Value::Null });
@@ -366,7 +397,7 @@ fn save_env_var_api_key_roundtrips_through_resolve() {
     let (_home_guard, dir) = isolated_home();
     std::env::set_var("MY_TEST_KEY", "resolved-secret");
     let patch = serde_json::json!({
-        "model": "m",
+        "model": "demo/model",
         "provider": { "api_key": "{MY_TEST_KEY}" }
     });
     Config::save(dir.path(), &patch).unwrap();
@@ -405,9 +436,9 @@ fn providers_map_resolves_endpoint_by_prefix() {
     let cfg = Config::load(dir.path()).unwrap();
 
     // resolve_endpoint picks the provider matching the model prefix.
-    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
-    assert_eq!(base_url, "https://api.deepseek.com/v1");
-    assert_eq!(api_key, "sk-deepseek-xxx");
+    let ep = cfg.resolve_endpoint().unwrap();
+    assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
+    assert_eq!(ep.api_key, "sk-deepseek-xxx");
 }
 
 #[test]
@@ -452,9 +483,9 @@ fn prefix_not_in_providers_falls_back_to_legacy_provider() {
     let cfg = Config::load(dir.path()).unwrap();
 
     // "unknown-svc" is not in providers → fall back to legacy provider field.
-    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
-    assert_eq!(base_url, "https://legacy.example.com/v1");
-    assert_eq!(api_key, "legacy-key");
+    let ep = cfg.resolve_endpoint().unwrap();
+    assert_eq!(ep.base_url, "https://legacy.example.com/v1");
+    assert_eq!(ep.api_key, "legacy-key");
 }
 
 #[test]
@@ -477,9 +508,9 @@ fn provider_api_key_missing_falls_back_to_env() {
     // No api_key in providers[deepseek], no legacy provider.api_key → env fallback.
     // (api_key_for reads OPENAI_API_KEY live at call time, so keep it set
     // through the resolve, then clean up.)
-    let (base_url, api_key) = cfg.resolve_endpoint().unwrap();
-    assert_eq!(base_url, "https://api.deepseek.com/v1");
-    assert_eq!(api_key, "env-fallback-key");
+    let ep = cfg.resolve_endpoint().unwrap();
+    assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
+    assert_eq!(ep.api_key, "env-fallback-key");
     std::env::remove_var("OPENAI_API_KEY");
 }
 
@@ -549,6 +580,41 @@ fn provider_model_field_round_trips() {
         cfg.providers.get("deepseek").unwrap().model.as_deref(),
         Some("deepseek-chat")
     );
+}
+
+#[test]
+fn resolve_endpoint_includes_custom_headers_with_env_resolution() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::set_var("MY_TENANT", "tenant-42");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "dk-key",
+                    "headers": [
+                        { "name": "X-Tenant", "value": "{MY_TENANT}" },
+                        { "name": "X-Literal", "value": "static-val" }
+                    ]
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    let ep = cfg.resolve_endpoint().unwrap();
+    assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
+    assert_eq!(ep.api_key, "dk-key");
+    assert_eq!(ep.headers.len(), 2);
+    // {MY_TENANT} env reference is resolved at endpoint-resolution time.
+    assert_eq!(ep.headers[0], ("X-Tenant".to_string(), "tenant-42".to_string()));
+    // A literal value passes through unchanged.
+    assert_eq!(ep.headers[1], ("X-Literal".to_string(), "static-val".to_string()));
+    std::env::remove_var("MY_TENANT");
 }
 
 /// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`

@@ -39,6 +39,7 @@ pub enum SlashAction {
     Model,
     Config,
     Compact,
+    CacheSalt,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries

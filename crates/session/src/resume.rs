@@ -41,14 +41,14 @@ pub async fn resume(
     let mut messages: Vec<Message> = store.load_messages(id).await?;
 
     // Reconcile subagent tasks stuck in Running state — the process was
-    // interrupted mid-subagent. Mark them as Failed with an interrupted marker.
+    // interrupted mid-subagent. Mark them Cancelled (not Failed): a cancelled
+    // task keeps its parent tool_use open so it is replayed on the next user
+    // turn (run_with_registry), rather than recording a terminal error result.
     let tasks = store.list_subagent_tasks(id).await.unwrap_or_default();
     for task in &tasks {
         if task.status == SubagentStatus::Running {
-            tracing::warn!(task_id = %task.task_id, "marking stuck Running subagent as Failed on resume");
-            let _ = store
-                .complete_subagent_task(&task.task_id, "(interrupted)", false)
-                .await;
+            tracing::warn!(task_id = %task.task_id, "marking stuck Running subagent as Cancelled on resume");
+            let _ = store.cancel_subagent_task(&task.task_id).await;
         }
     }
 
@@ -97,11 +97,21 @@ pub async fn resume(
             _ => None,
         })
         .collect();
+    // `task` tool_use ids whose subagent is still in-flight (Running) or was
+    // interrupted (Cancelled): these are replayed/backfilled on the next user
+    // turn, so leave them dangling rather than synthesizing error results.
+    let replayable: HashSet<&str> = tasks
+        .iter()
+        .filter(|t| matches!(t.status, SubagentStatus::Running | SubagentStatus::Cancelled))
+        .map(|t| t.task_id.as_str())
+        .collect();
     let dangling: Vec<ContentBlock> = messages
         .iter()
         .flat_map(|m| m.blocks.iter())
         .filter_map(|b| match b {
-            ContentBlock::ToolUse { id, .. } if !answered.contains(id.as_str()) => {
+            ContentBlock::ToolUse { id, .. }
+                if !answered.contains(id.as_str()) && !replayable.contains(id.as_str()) =>
+            {
                 Some(ContentBlock::ToolResult {
                     tool_use_id: id.clone(),
                     content: "session interrupted: tool result missing".to_string(),
@@ -244,6 +254,73 @@ pub async fn resume_and_replay(
     resume(store, id, config, client, working_dir).await
 }
 
+/// Replay subagent tasks left in `Cancelled` status, then mark them complete.
+///
+/// Called from `run_with_registry` before the main loop runs, so a continued
+/// session resumes each cancelled child (run to completion), backfills the
+/// resulting `tool_result` into the parent transcript, and flips the task to
+/// `Completed`. The model then sees [user input + subagent result] together and
+/// the interrupted call is transparently resumed. No-op when there is no store
+/// or no cancelled tasks (e.g. children, which hold no `task` tool).
+pub async fn replay_cancelled_tasks(session: &mut SessionState) {
+    let store = match session.store.clone() {
+        Some(s) => s,
+        None => return,
+    };
+    let cancelled: Vec<SubagentTaskRecord> = store
+        .list_subagent_tasks(&session.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.status == SubagentStatus::Cancelled)
+        .collect();
+    if cancelled.is_empty() {
+        return;
+    }
+    let mut backfill: Vec<ContentBlock> = Vec::with_capacity(cancelled.len());
+    for task in &cancelled {
+        let outcome = replay_child(
+            store.clone(),
+            task,
+            &session.config,
+            &session.client,
+            &session.working_dir,
+        )
+        .await;
+        let (text, ok) = match outcome {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    task_id = %task.task_id,
+                    child = %task.child_session_id,
+                    error = %e,
+                    "cancelled subagent replay failed; backfilling an error result"
+                );
+                (format!("subagent resume failed: {e:#}"), false)
+            }
+        };
+        let _ = store
+            .complete_subagent_task(&task.task_id, &text, ok)
+            .await;
+        backfill.push(ContentBlock::ToolResult {
+            tool_use_id: task.task_id.clone(),
+            content: text,
+            is_error: !ok,
+        });
+    }
+    let tool_msg = Message {
+        id: crate::runner::new_id(),
+        role: Role::Tool,
+        blocks: backfill,
+        model: None,
+        agent: None,
+        usage: MessageUsage::default(),
+        created_at: now_ms(),
+        synthetic: false,
+    };
+    session.record(tool_msg).await;
+}
+
 /// Resume a single child task and run it to completion with an empty prompt
 /// ("continue"). The child's continuation messages and events are persisted to
 /// its own session, mirroring `run_subagent`. Returns `(result_text, ok)`.
@@ -275,7 +352,10 @@ async fn replay_child(
     // Batched, lossless drain (shared with TUI/web/subagent surfaces).
     let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
     let registry = crate::tools::registry();
-    let res = crate::runner::run_with_registry(
+    // Boxed to break the run_with_registry -> replay_cancelled_tasks ->
+    // replay_child -> run_with_registry recursion (children hold no task tool,
+    // so replay_cancelled_tasks is a no-op there, but the type must be finite).
+    let res = Box::pin(crate::runner::run_with_registry(
         &mut child,
         String::new(),
         &registry,
@@ -292,7 +372,7 @@ async fn replay_child(
                 tracing::warn!(error = %e, "replay: child event channel full/closed, dropping event");
             }
         },
-    )
+    ))
     .await;
     // The callback owned `ev_tx`; once `run_with_registry` returns the closure
     // is dropped, closing the channel so the flusher drains and exits.

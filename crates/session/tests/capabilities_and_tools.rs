@@ -205,7 +205,7 @@ async fn config_save_load_round_trips_capabilities() {
     // merged via Config::save and must be read back by Config::load.
     let dir = tempfile::tempdir().unwrap();
     let patch = serde_json::json!({
-        "model": "m/g",
+        "model": "demo/model",
         "capabilities": { "browser": true, "computer_use": true, "tools_subagent": true },
     });
     Config::save(dir.path(), &patch).expect("save patch");

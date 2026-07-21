@@ -120,6 +120,9 @@ impl Store for CountingStore {
     async fn get_subagent_task(&self, id: &str) -> Result<Option<SubagentTaskRecord>> {
         self.inner.get_subagent_task(id).await
     }
+    async fn cancel_subagent_task(&self, id: &str) -> Result<()> {
+        self.inner.cancel_subagent_task(id).await
+    }
     async fn import_messages(&self, sid: &str, msgs: &[Message]) -> Result<ImportReport> {
         self.inner.import_messages(sid, msgs).await
     }

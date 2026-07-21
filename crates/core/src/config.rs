@@ -85,15 +85,20 @@ fn is_none_interleaved(v: &Option<bool>) -> bool {
 /// malformed value that would silently break requests. Only logs — never
 /// mutates the user's config. Catches legacy values such as single-char or
 /// placeholder strings so they are not silently written back to config.json.
-fn warn_if_suspicious_model(model: &str) {
+/// Pure predicate: is the `model` string malformed (too short on either side
+/// of the `/`, or too short when unscoped)? Exposed for unit testing.
+pub(crate) fn is_suspicious_model(model: &str) -> bool {
     if model.is_empty() {
-        return;
+        return false;
     }
-    let suspicious = match model.split_once('/') {
+    match model.split_once('/') {
         Some((provider, mid)) => provider.len() < 2 || mid.len() < 2,
         None => model.len() < 3,
-    };
-    if suspicious {
+    }
+}
+
+pub(crate) fn warn_if_suspicious_model(model: &str) {
+    if is_suspicious_model(model) {
         tracing::warn!(
             model = %model,
             "config `model` looks malformed (expected `provider/model`, e.g. `openai/gpt-4o`); override with --model if this is a stale value"
@@ -654,5 +659,48 @@ fn resolve_env(raw: &str) -> String {
         std::env::var(name).unwrap_or_default()
     } else {
         trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_suspicious_model;
+
+    #[test]
+    fn empty_model_is_not_suspicious() {
+        assert!(!is_suspicious_model(""));
+    }
+
+    #[test]
+    fn well_formed_scoped_model_is_not_suspicious() {
+        assert!(!is_suspicious_model("openai/gpt-4o"));
+        assert!(!is_suspicious_model("anthropic/claude-3.5-sonnet"));
+    }
+
+    #[test]
+    fn boundary_two_char_sides_are_not_suspicious() {
+        // provider.len() == 2 && mid.len() == 2 is the minimum valid scoped model
+        assert!(!is_suspicious_model("ab/cd"));
+    }
+
+    #[test]
+    fn unscoped_short_model_is_suspicious() {
+        assert!(is_suspicious_model("x")); // len < 3, no slash
+    }
+
+    #[test]
+    fn unscoped_three_char_model_is_not_suspicious() {
+        // len == 3 is the minimum valid unscoped model (boundary)
+        assert!(!is_suspicious_model("abc"));
+    }
+
+    #[test]
+    fn short_provider_side_is_suspicious() {
+        assert!(is_suspicious_model("a/bc")); // provider.len() < 2
+    }
+
+    #[test]
+    fn short_model_side_is_suspicious() {
+        assert!(is_suspicious_model("ab/c")); // mid.len() < 2
     }
 }

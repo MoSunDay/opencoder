@@ -115,4 +115,4 @@ pub struct Usage {
 |----|------|
 | `cargo build --workspace` | 零错误 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 零警告 |
-| `cargo test --workspace` | 708 passed / 0 failed / 0 ignored |
+| `cargo test --workspace` | 725 passed / 0 failed / 0 ignored |

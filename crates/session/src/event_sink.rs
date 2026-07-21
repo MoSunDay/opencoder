@@ -9,7 +9,7 @@
 //! itself — so structural events are never reordered or coalesced, and a turn
 //! boundary (channel close) triggers a final flush.
 //!
-//! This keeps the persisted event stream 100% lossless on normal termination
+//! This keeps the persisted event stream lossless on normal termination (channel close triggers a final flush). On a store *write* failure the batch is logged and dropped (warn-only) rather than retried — so the lossless guarantee holds for the buffering path, not for underlying store errors.
 //! while collapsing the write count from O(tokens) to O(turn). Live UI/SSE
 //! delivery is unaffected: each surface still forwards every event to its own
 //! channel the instant it arrives — only the *disk* path is buffered. On a

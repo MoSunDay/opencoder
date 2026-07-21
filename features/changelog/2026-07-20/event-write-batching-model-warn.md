@@ -13,7 +13,7 @@
 - **粗粒度映射**：`TextDelta` 与 `ReasoningDelta` 都 coarse-map 到 `EventKind::TextDelta`，
   仅这两类被缓冲；所有其它事件类型（Status/ToolStart/ToolEnd/Done/Error/...）立即 flush。
 - **turn 边界 / channel close 触发最终 flush**：丢弃所有 `EventSink` clone 并 `await` flusher
-  句柄即保证剩余缓冲全部落库（无损契约）。
+  句柄即保证剩余缓冲全部落库（缓冲路径无损；store 写失败时降级为 warn-only）
 - **崩溃语义**：最坏丢失当前 in-flight turn 少量未 flush 的 token delta；权威 turn 文本始终
   经 per-turn `messages` append 落地。
 - **批量阈值**：`DELTA_BATCH=512` 条 或 `DELTA_BYTES=8*1024` 字节，先到先 flush。
@@ -32,7 +32,7 @@
 ### Part B/C — 缓冲 flusher + surface 接线
 
 - 新模块 `crates/session/src/event_sink.rs`：`EventSink`（可 clone push 句柄，unbounded channel）、
-  `spawn_event_flusher`、`run_flusher`（批量 drain，close 时无损 flush）。
+  `spawn_event_flusher`、`run_flusher`（批量 drain，close 时 flush；store 写失败时降级为 warn-only）。
 - `crates/session/src/lib.rs` 导出 `event_sink` mod + `EventSink`/`spawn_event_flusher`/`run_flusher`。
 - **surface 接线**（调用方在 `on_event` 闭包内 `sink.push(&ev)`，run 结束后 `drop(sink)` + `flusher.await`）：
   - TUI `worker.rs`：`Prompt`/`SwitchAndStart`/`Compact` 三 arm。
@@ -57,7 +57,7 @@
 | 端到端：MockChatClient→run→sink→store 无损 + O(turn) | `token_storm_persists_losslessly_with_oturn_writes` | `session/tests/event_sink_flusher.rs` |
 | ReasoningDelta 走同一缓冲路径无损 + O(turn) | `reasoning_deltas_buffered_on_same_path_as_text` | `session/tests/event_sink_flusher.rs` |
 
-- 全量回归：`cargo test --workspace` → 688 passed / 0 failed
+- 全量回归：`cargo test --workspace` → 725 passed / 0 failed / 0 ignored（61 二进制）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - 构建：`cargo build --workspace` → 零错误
 

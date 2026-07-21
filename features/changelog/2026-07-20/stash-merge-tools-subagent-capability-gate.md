@@ -1,4 +1,4 @@
-# subagent tool-set 受 tools_subagent 能力门控 + 应用 stash@{1}（validation-stash-non-tools-subagent）
+# 应用 stash@{1}：cache_salt / usage cache tokens / model_menu provider-list + 内建 skills（含 tools_subagent gate 溯源更正）
 
 ## 背景
 
@@ -7,7 +7,7 @@
 
 | stash | 裁决 | 依据 |
 |-------|------|------|
-| `stash@{1}` `validation-stash-non-tools-subagent` | ✅ **应用**（唯一真新功能） | base=58c7542；功能为 subagent 能力门控 |
+| `stash@{1}` `validation-stash-non-tools-subagent` | ✅ **应用**（唯一真新功能） | base=58c7542；含 cache_salt / usage cache tokens / model_menu / skills 资产 |
 | `stash@{0}` `validation-isolate-divergent` | 已被 @{1} 包含 | `git diff @{0} @{1} -- agent.rs` = 0 行（agent.rs 字节相同） |
 | `stash@{2}` WIP tui composer | 被 HEAD 取代 | HEAD 已有 `wrap_rows`+`delete_word_back`（grep=20），@{2} 二者皆无 → 应用即回归 |
 | `stash@{3}` rename+payload | 已由并发会话正式入库 | flusher 测试以 `8d0a01d` 落地；rename / bash_guard / selection 均已定稿于 HEAD |
@@ -16,11 +16,14 @@
 
 ## 变更
 
-### subagent 能力门控（headline）
-- **`crates/session/src/runner.rs:657`**：新增 `fn valid_subagent_options(plan, tools_on)` —— 把
-  subagent tool-set 的可用性收敛到 `tools_subagent` 能力开关之后。
-- **`crates/session/src/runner.rs:696`**：dispatch 路径读 `parent.config.capabilities.tools_subagent_enabled()`
-  并经 3 个 call site（:703/:713/:721）传入 `valid_subagent_options`，能力关时 subagent 工具集不可派发。
+### subagent 能力门控（⚠️ 溯源更正）
+> **注**：`tools_subagent` gate 的代码（`valid_subagent_options`、`tools_subagent_enabled()`、
+> schema/runtime 双层门控、gate 测试）实际由并发会话的 commit **`ac033dd`** 落地
+> （`git blame -L 700,700 runner.rs` → `ac033ddc`）。本 commit `eda4ff8` 对 runner.rs 仅 +3 行
+> （cache_salt + 2 个 cache token 字段，stash 冲突解决 keep-ours）。
+> 此处记录以保 auditability；gate 的设计/测试详情见
+> [event-write-batching-model-warn.md](event-write-batching-model-warn.md) 同期工作。
+- gate 语义（fail-closed 默认 `false`、schema + runtime 双层防御、正向/反向/往返测试）均正确，详见 ac033dd。
 
 ### model_menu provider-list 弹窗
 - **`crates/tui/src/model_menu/view.rs`**：新增 `render_provider_list_popup`，ProviderList 状态走早返回分支
@@ -45,7 +48,7 @@
 | tools_subagent 序列化往返 | `tools_subagent` round-trip 断言 | `crates/session/tests/capabilities_and_tools.rs` |
 | cache_salt 出站请求体三态 + 子 agent 隔离 | `cache_salt.rs`（3 test） | `crates/session/tests/cache_salt.rs` |
 
-- 全量回归：`cargo test --workspace` → 718 passed / 0 failed / 0 ignored（61 二进制）
+- 全量回归：`cargo test --workspace` → 725 passed / 0 failed / 0 ignored（61 二进制）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 0 警告
 - 新文件行数：最大 298（repo-local-memory/SKILL.md）≤ 400
 

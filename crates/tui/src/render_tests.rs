@@ -1,5 +1,6 @@
 use super::*;
 use crate::chat::ChatView;
+use crate::queue_panel::render_queue_panel;
 use opencoder_session::SessionEvent;
 use ratatui::backend::TestBackend;
 

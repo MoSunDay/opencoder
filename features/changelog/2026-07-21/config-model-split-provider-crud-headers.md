@@ -60,7 +60,7 @@
 | HeadersEditor pair 导航 / 编辑 / 删除 | `tests::*`（7 test） | `model_menu/headers.rs` |
 | Esc 取消各模式 | `esc_cancels_any_mode` | `model_menu/tests/provider_tests.rs` |
 
-- 全量回归：`cargo test --workspace` → 768 passed / 0 failed / 0 ignored
+- 全量回归：`cargo test --workspace` → 769 passed / 0 failed / 0 ignored
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 0 警告
 - 行数：所有 model_menu 新文件 ≤ 400 行（view.rs 247 最大）；mod.rs 32 行
 
@@ -69,7 +69,7 @@
 | 项 | 变更前 | 变更后 |
 |----|--------|--------|
 | clippy | 0 警告 | 0 警告 |
-| 测试 | 763 passed | 768 passed |
+| 测试 | 763 passed | 769 passed |
 | model_menu 文件 | mod.rs + state.rs + view.rs（单文件 ~800+ 行） | 8 文件拆分，最大 247 行 |
 
 ## Impact Surface

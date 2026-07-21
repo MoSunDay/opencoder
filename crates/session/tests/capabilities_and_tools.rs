@@ -59,6 +59,58 @@ fn exposed_tool_names(req: &opencoder_llm::ChatRequest) -> Vec<String> {
         .collect()
 }
 
+// ---- HOME isolation for `Config::save` tests ----
+// `Config::save_target` walks `config_candidates`, whose global entries are
+// resolved from HOME (`~/.opencoder/config.json`) and XDG_CONFIG_HOME
+// (`~/.config/opencode/config.json`). When HOME is the developer's real home,
+// `save_target` returns the real `~/.opencoder/config.json` (it already holds
+// an editable key) and `Config::save` overwrites it — e.g. clobbering the
+// user's `model` with a test placeholder like `demo/model`. Pointing both HOME
+// and XDG_CONFIG_HOME at the test tempdir keeps every global candidate inside
+// the tempdir, so the real user config is never written. The static mutex
+// serializes HOME mutations across the parallel tests in this binary so two
+// tests can't clobber each other's HOME.
+static HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII guard: holds `HOME_MUTEX`, points HOME + XDG_CONFIG_HOME at `home`, and
+/// restores the previous values on drop (releasing the mutex last).
+struct HomeGuard {
+    prev_home: Option<std::ffi::OsString>,
+    prev_xdg: Option<std::ffi::OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+/// Point HOME + XDG_CONFIG_HOME at `home` for the lifetime of the returned
+/// guard. The guard also holds `HOME_MUTEX`, so concurrent tests in this binary
+/// that call `lock_home` are serialized. `&HOME_MUTEX` is `&'static` (the static
+/// lives for the whole program), so the returned guard is `MutexGuard<'static>`
+/// without any unsafe lifetime promotion.
+fn lock_home(home: &std::path::Path) -> HomeGuard {
+    let _lock = HOME_MUTEX.lock().unwrap();
+    let prev_home = std::env::var_os("HOME");
+    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("HOME", home);
+    std::env::set_var("XDG_CONFIG_HOME", home);
+    HomeGuard {
+        prev_home,
+        prev_xdg,
+        _lock,
+    }
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        match self.prev_home.take() {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        match self.prev_xdg.take() {
+            Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn capability_gate_hides_computer_use_when_disabled() {
     // The `tools` subagent allows `computer_use`, but with the capability
@@ -204,6 +256,10 @@ async fn config_save_load_round_trips_capabilities() {
     // The `/config` save path: a ModelPatch.to_json() capabilities object is
     // merged via Config::save and must be read back by Config::load.
     let dir = tempfile::tempdir().unwrap();
+    // Isolate HOME so save_target() never resolves to the real
+    // ~/.opencoder/config.json (HOME=/root would otherwise be overwritten with
+    // the placeholder `demo/model` below).
+    let _home = lock_home(dir.path());
     let patch = serde_json::json!({
         "model": "demo/model",
         "capabilities": { "browser": true, "computer_use": true, "tools_subagent": true },

@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use libsql::{Builder, Connection};
+use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::store::Store;
@@ -28,6 +29,13 @@ mod subagent_tasks;
 /// so the backend can be swapped without touching callers.
 pub struct LibsqlStore {
     conn: Connection,
+    /// Serializes all DB operations. libsql 0.9.x local backend runs sync
+    /// SQLite FFI directly on the tokio worker thread; without serialization,
+    /// concurrent operations (multi-subagent flushers + run_loop) contend on
+    /// SQLite's internal mutex, starving the runtime. An async Mutex yields on
+    /// contention (never blocks a worker thread) while ensuring at most one
+    /// worker touches SQLite FFI at a time.
+    db_lock: Mutex<()>,
 }
 
 impl LibsqlStore {
@@ -40,7 +48,7 @@ impl LibsqlStore {
         let conn = db.connect().context("connect libsql")?;
         schema::apply_connection_pragmas(&conn).await?;
         schema::bootstrap(&conn).await?;
-        let store = LibsqlStore { conn };
+        let store = LibsqlStore { conn, db_lock: Mutex::new(()) };
         debug!(backend = "libsql", "store opened");
         Ok(store)
     }
@@ -54,7 +62,7 @@ impl LibsqlStore {
         let conn = db.connect().context("connect in-memory")?;
         schema::apply_connection_pragmas(&conn).await?;
         schema::bootstrap(&conn).await?;
-        Ok(LibsqlStore { conn })
+        Ok(LibsqlStore { conn, db_lock: Mutex::new(()) })
     }
 
     /// Acquire a connection that shares the underlying database. Cheap clone.
@@ -70,31 +78,38 @@ impl Store for LibsqlStore {
     }
 
     async fn create_session(&self, meta: &SessionMeta) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::create(&conn, meta).await
     }
     async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::get(&conn, id).await
     }
     async fn list_sessions(&self, filter: &SessionFilter) -> Result<Vec<SessionListItem>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::list(&conn, filter).await
     }
     async fn update_session(&self, id: &str, patch: &SessionPatch) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::update(&conn, id, patch).await
     }
     async fn delete_session(&self, id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::delete(&conn, id).await
     }
     async fn clear_other_sessions(&self, keep_session_id: &str) -> Result<u64> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         sessions::clear_others(&conn, keep_session_id).await
     }
 
     async fn append_message(&self, session_id: &str, msg: &opencoder_core::Message) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::append(&conn, session_id, msg).await
     }
@@ -103,19 +118,23 @@ impl Store for LibsqlStore {
         session_id: &str,
         msgs: &[opencoder_core::Message],
     ) -> Result<Vec<i64>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::append_many(&conn, session_id, msgs).await
     }
     async fn load_messages(&self, session_id: &str) -> Result<Vec<opencoder_core::Message>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::load(&conn, session_id).await
     }
     async fn last_message_seq(&self, session_id: &str) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::last_seq(&conn, session_id).await
     }
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::admit(&conn, input).await
     }
@@ -124,6 +143,7 @@ impl Store for LibsqlStore {
         session_id: &str,
         delivery: Delivery,
     ) -> Result<Vec<SessionInput>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::pending(&conn, session_id, delivery).await
     }
@@ -133,27 +153,33 @@ impl Store for LibsqlStore {
         up_to_admitted_seq: i64,
         delivery: Delivery,
     ) -> Result<Vec<i64>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::promote(&conn, session_id, up_to_admitted_seq, delivery).await
     }
     async fn promote_next_queued(&self, session_id: &str) -> Result<Option<i64>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::promote_next_queued(&conn, session_id).await
     }
     async fn claim_next_queue(&self, session_id: &str) -> Result<Option<(i64, SessionInput)>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::claim_next_queue(&conn, session_id).await
     }
     async fn delete_input(&self, input_id: i64) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::delete_input(&conn, input_id).await
     }
     async fn swap_input_order(&self, session_id: &str, seq_a: i64, seq_b: i64) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         inputs::swap_input_order(&conn, session_id, seq_a, seq_b).await
     }
 
     async fn append_events(&self, events: &[SessionEventRecord]) -> Result<Vec<i64>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         events::append_many(&conn, events).await
     }
@@ -162,19 +188,23 @@ impl Store for LibsqlStore {
         session_id: &str,
         after_seq: i64,
     ) -> Result<Vec<SessionEventRecord>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         events::after(&conn, session_id, after_seq).await
     }
     async fn last_event_seq(&self, session_id: &str) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         events::last_seq(&conn, session_id).await
     }
 
     async fn create_subagent_task(&self, record: &SubagentTaskRecord) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::create(&conn, record).await
     }
     async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::complete(&conn, task_id, result, ok).await
     }
@@ -182,14 +212,17 @@ impl Store for LibsqlStore {
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<SubagentTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::list(&conn, parent_session_id).await
     }
     async fn get_subagent_task(&self, task_id: &str) -> Result<Option<SubagentTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::get_by_task_id(&conn, task_id).await
     }
     async fn cancel_subagent_task(&self, task_id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::cancel(&conn, task_id).await
     }
@@ -199,6 +232,7 @@ impl Store for LibsqlStore {
         session_id: &str,
         msgs: &[opencoder_core::Message],
     ) -> Result<ImportReport> {
+        let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::import(&conn, session_id, msgs).await
     }

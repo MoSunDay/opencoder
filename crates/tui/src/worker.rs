@@ -99,6 +99,37 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
+/// Minimum free capacity to reserve for lifecycle events. When the channel
+/// is near-full, droppable streaming events (TextDelta, ReasoningDelta, and
+/// SubagentChild wrapping those) are dropped — their final text is always
+/// reconstructed from the store by `TurnDone → finalize_assistant()`, so no
+/// information is lost. Non-delta lifecycle events always get a slot.
+const DELTA_MIN_CAPACITY: usize = 64;
+
+/// Returns true for events whose information is fully recoverable from the
+/// store on the next `TurnDone` (i.e. streaming text deltas). These can be
+/// safely dropped when the UI channel is near capacity without data loss.
+fn is_droppable_delta(sev: &SessionEvent) -> bool {
+    match sev {
+        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) => true,
+        SessionEvent::SubagentChild { ev, .. } => {
+            matches!(ev.as_ref(), SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_))
+        }
+        _ => false,
+    }
+}
+
+/// Forward a SessionEvent to the UI channel with backpressure-aware dropping.
+/// Droppable streaming deltas are discarded when the channel has <=
+/// DELTA_MIN_CAPACITY free slots (final text is always rebuilt from the store
+/// on TurnDone). Non-delta lifecycle events always get through via try_send.
+fn forward_event(tx: &mpsc::Sender<UiEvent>, sev: SessionEvent) {
+    if is_droppable_delta(&sev) && tx.capacity() <= DELTA_MIN_CAPACITY {
+        return; // drop delta — final text rebuilt from store on TurnDone
+    }
+    let _ = tx.try_send(UiEvent::Session(sev));
+}
+
 /// Fire-and-forget persist a parent-session event to the store so web/SSE
 /// clients can replay sessions driven by the TUI. Awaited (not fire-and-
 /// forget) so the event is durable before the worker proceeds — no loss on
@@ -132,13 +163,13 @@ pub async fn process_cmd(
             let sink_for_run = sink.clone();
             let res = run_session(sess, prompt, move |sev| {
                 let _ = sink_for_run.push(&sev);
-                let _ = tx.try_send(UiEvent::Session(sev));
+                forward_event(&tx, sev);
             })
             .await;
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
                 let _ = sink.push(&ev);
-                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                forward_event(evt_tx, ev);
             }
             // Drop every sender clone so the flusher's channel closes and it
             // performs a final flush — guaranteeing zero event loss this turn.
@@ -151,7 +182,7 @@ pub async fn process_cmd(
                 sess.agent = a;
                 let ev = SessionEvent::AgentSwitch(name);
                 persist_event(&sess.store, &sess.id, &ev).await;
-                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                forward_event(evt_tx, ev);
             }
         }
         UiCmd::SwitchAndStart(name, extra) => {
@@ -160,7 +191,7 @@ pub async fn process_cmd(
                 sess.agent = a;
                 let ev = SessionEvent::AgentSwitch(name);
                 let _ = sink.push(&ev);
-                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                forward_event(evt_tx, ev);
             }
             // Plan→act handoff: clear the transcript so the act agent starts
             // from only the final plan, not the full read-only planning noise.
@@ -184,22 +215,23 @@ pub async fn process_cmd(
                 }
                 let ev = SessionEvent::TranscriptReset(sess.messages.clone());
                 let _ = sink.push(&ev);
-                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                forward_event(evt_tx, ev);
                 let ev2 = SessionEvent::PlanHandoff(plan_display);
                 let _ = sink.push(&ev2);
-                let _ = evt_tx.try_send(UiEvent::Session(ev2));
+                forward_event(evt_tx, ev2);
             }
+            sess.set_skill(None);
             let tx = evt_tx.clone();
             let sink_for_run = sink.clone();
             let res = run_session(sess, String::new(), move |sev| {
                 let _ = sink_for_run.push(&sev);
-                let _ = tx.try_send(UiEvent::Session(sev));
+                forward_event(&tx, sev);
             })
             .await;
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
                 let _ = sink.push(&ev);
-                let _ = evt_tx.try_send(UiEvent::Session(ev));
+                forward_event(evt_tx, ev);
             }
             drop(sink);
             let _ = flusher.await;
@@ -215,7 +247,7 @@ pub async fn process_cmd(
                 let sink_for_emit = sink.clone();
                 let mut emit = move |sev: SessionEvent| {
                     let _ = sink_for_emit.push(&sev);
-                    let _ = tx.try_send(UiEvent::Session(sev));
+                    forward_event(&tx, sev);
                 };
                 opencoder_session::compaction::compact(sess, &registry, &mut emit).await
             };
@@ -223,16 +255,16 @@ pub async fn process_cmd(
                 Ok(Some(summary)) => {
                     let ev = SessionEvent::TranscriptReset(sess.messages.clone());
                     let _ = sink.push(&ev);
-                    let _ = evt_tx.try_send(UiEvent::Session(ev));
+                    forward_event(evt_tx, ev);
                     let ev2 = SessionEvent::Compaction(summary);
                     let _ = sink.push(&ev2);
-                    let _ = evt_tx.try_send(UiEvent::Session(ev2));
+                    forward_event(evt_tx, ev2);
                 }
                 Ok(None) => {}
                 Err(e) => {
                     let ev = SessionEvent::Error(format!("compaction failed: {e:#}"));
                     let _ = sink.push(&ev);
-                    let _ = evt_tx.try_send(UiEvent::Session(ev));
+                    forward_event(evt_tx, ev);
                 }
             }
             drop(sink);
@@ -374,5 +406,57 @@ mod tests {
             stale_probe.is_cancelled(),
             "the old token must remain cancelled (not reused)"
         );
+    }
+
+    #[test]
+    fn forward_event_throttles_delta_preserves_lifecycle() {
+        // Channel with small capacity so we can fill it easily.
+        let (tx, _rx) = mpsc::channel::<UiEvent>(2 * DELTA_MIN_CAPACITY + 1);
+
+        // Fill the channel to near-capacity (leave <= DELTA_MIN_CAPACITY free).
+        for _ in 0..DELTA_MIN_CAPACITY + 1 {
+            tx.try_send(UiEvent::TurnDone).unwrap();
+        }
+        // Now capacity() <= DELTA_MIN_CAPACITY — deltas should be dropped.
+        assert!(tx.capacity() <= DELTA_MIN_CAPACITY);
+
+        // TextDelta is droppable — forward_event should silently drop it.
+        forward_event(&tx, SessionEvent::TextDelta("x".into()));
+        // Capacity unchanged (event was dropped, not enqueued).
+        assert!(tx.capacity() <= DELTA_MIN_CAPACITY);
+
+        // SubagentChild wrapping TextDelta is also droppable.
+        forward_event(
+            &tx,
+            SessionEvent::SubagentChild {
+                id: "s1".into(),
+                ev: Box::new(SessionEvent::TextDelta("y".into())),
+            },
+        );
+
+        // SubagentStart is a lifecycle event — must always get through.
+        forward_event(
+            &tx,
+            SessionEvent::SubagentStart {
+                id: "s1".into(),
+                kind: "explore".into(),
+                prompt: "p".into(),
+                child_session_id: "c1".into(),
+            },
+        );
+        // The SubagentStart should have been enqueued (capacity decreased by 1).
+        assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 1);
+
+        // SubagentEnd is a lifecycle event — must always get through.
+        forward_event(
+            &tx,
+            SessionEvent::SubagentEnd {
+                id: "s1".into(),
+                ok: true,
+                cancelled: false,
+                summary: "done".into(),
+            },
+        );
+        assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 2);
     }
 }

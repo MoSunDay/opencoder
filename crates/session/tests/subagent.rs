@@ -562,3 +562,90 @@ fn format_ev(e: &SessionEvent) -> &'static str {
         _ => "Other",
     }
 }
+
+/// Regression test for the db_lock fix (Phase 1): 3+ concurrent subagents each
+/// spawning their own flusher + writing to the shared store. Before the fix,
+/// SQLite FFI contention across tokio workers caused the session to hang or
+/// time out. With serialization, all subagents complete cleanly.
+#[tokio::test]
+async fn multi_subagent_no_deadlock() {
+    // Parent emits THREE task calls in one turn. Each child writes events to
+    // the shared store via its own flusher. The db_lock serializes all store
+    // access, preventing worker-thread starvation.
+    let three_task_turn = LlmEvent::Completed {
+        text: "delegating to three".into(),
+        tool_calls: vec![
+            CompletedToolCall {
+                id: "task-1".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job 1", "subagent_type": "explore"}),
+            },
+            CompletedToolCall {
+                id: "task-2".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job 2", "subagent_type": "explore"}),
+            },
+            CompletedToolCall {
+                id: "task-3".into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "job 3", "subagent_type": "explore"}),
+            },
+        ],
+        usage: Some(Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            total_tokens: 15,
+            ..Default::default()
+        }),
+    };
+
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![three_task_turn]) // parent: 3 task calls
+            .push_script(vec![text_done("result 1")]) // child 1
+            .push_script(vec![text_done("result 2")]) // child 2
+            .push_script(vec![text_done("result 3")]) // child 3
+            .push_script(vec![text_done("parent done")]), // parent turn 2
+    );
+
+    let store = mem_store().await;
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "multi-sub",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone());
+
+    // Wrap in a timeout — before the fix, concurrent DB contention would hang.
+    let mut events = Vec::new();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run(&mut session, "delegate three jobs".into(), |ev| {
+            events.push(ev)
+        }),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "multi-subagent run timed out — db_lock serialization should prevent deadlock"
+    );
+    result.unwrap().unwrap(); // propagate inner Result errors
+
+    // All 3 subagents must emit SubagentStart + SubagentEnd(ok=true).
+    let starts = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::SubagentStart { .. }))
+        .count();
+    assert_eq!(starts, 3, "expected 3 SubagentStart events, got {starts}");
+
+    let ends_ok = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::SubagentEnd { ok: true, .. }))
+        .count();
+    assert_eq!(ends_ok, 3, "expected 3 SubagentEnd(ok=true), got {ends_ok}");
+}

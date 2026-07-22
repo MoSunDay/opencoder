@@ -12,7 +12,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 #[test]
 fn merge_project_file_overrides_defaults() {
     let _g = ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
         r#"{
@@ -45,7 +45,7 @@ fn env_overrides_project_file() {
     std::env::set_var("OPENCODER_CONTEXT_LIMIT", "99999");
     std::env::remove_var("OPENAI_BASE_URL");
 
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
         r#"{"model":"file/model","small_model":"file/sm","context_limit":1000}"#,
@@ -74,7 +74,7 @@ fn cache_salt_env_override() {
     // asserted here. Body emission itself is covered by request_body.rs and
     // cache_salt.rs; this test pins the config->field link they compose with.
     let _g = ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     fs::write(dir.path().join("opencoder.json"), r#"{"cache_salt":true}"#).unwrap();
 
     // Unset -> serde default kicks in (Some(true)).
@@ -126,7 +126,7 @@ fn cache_salt_env_override() {
 fn braces_api_key_resolves_env_var() {
     let _g = ENV_LOCK.lock().unwrap();
     std::env::set_var("ZHIPU_API_KEY", "secret-value-123");
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
         r#"{"provider":{"api_key":"{ZHIPU_API_KEY}"}}"#,
@@ -144,7 +144,7 @@ fn braces_api_key_resolves_env_var() {
 #[test]
 fn defaults_when_no_config_present() {
     let _g = ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     let cfg = Config::load(dir.path()).unwrap();
     assert_eq!(cfg.context_limit(), opencoder_core::DEFAULT_CONTEXT_LIMIT);
     assert_eq!(cfg.compaction.reserved, 20_000);
@@ -155,7 +155,7 @@ fn defaults_when_no_config_present() {
 #[test]
 fn reserved_saturates_against_context_limit() {
     let _g = ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let (_home_guard, dir) = isolated_home();
     fs::write(
         dir.path().join("opencoder.json"),
         r#"{"context_limit": 1000, "compaction": {"reserved": 5000}}"#,

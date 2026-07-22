@@ -76,12 +76,14 @@ pub(crate) async fn switch_session(
         }
         crate::task::TaskPick::Resume(id) => {
             let new_config = Config::load(workdir).unwrap_or_else(|_| config.clone());
+            let replay_cancel = CancellationToken::new();
             opencoder_session::resume::resume_and_replay(
                 store.clone(),
                 id,
                 new_config,
                 client.clone(),
                 workdir.to_path_buf(),
+                Some(replay_cancel),
             )
             .await?
         }

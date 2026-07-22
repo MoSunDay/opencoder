@@ -183,7 +183,7 @@ async fn drain_to_completion(
     handle: Arc<SessionHandle>,
 ) {
     // clear `draining` on any exit (including panic) so the session is re-spawnable.
-    let _guard = DrainGuard {
+    let guard = DrainGuard {
         handle: handle.clone(),
     };
 
@@ -199,12 +199,15 @@ async fn drain_to_completion(
     }
 
     // build the session (resume if history exists)
+    // Obtain the handle's cancel token so the replay phase also respects interrupts.
+    let cancel_token = handle.cancel.lock().await.clone();
     let mut session = match resume_session(
         store.clone(),
         session_id,
         config.clone(),
         client.clone(),
         workdir.clone(),
+        Some(cancel_token),
     )
     .await
     {
@@ -236,6 +239,9 @@ async fn drain_to_completion(
     })
     .await;
     drop(sink);
+    // Release the drain guard BEFORE awaiting the flusher so a new prompt
+    // can spawn a fresh drain while the old flusher persists events.
+    drop(guard);
     let _ = flusher.await;
 
     if let Err(e) = result {

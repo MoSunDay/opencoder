@@ -145,8 +145,8 @@ async fn switch_provider_in_map_updates_model_and_client() {
     // When the config's model prefix switches to a different provider in the
     // `providers` map, apply_config_reload must update sess.model to the new
     // provider's model_id and route through the new client.
-    use std::collections::HashMap;
     use opencoder_core::ProviderConfig;
+    use std::collections::HashMap;
 
     let agent = resolve_agent("act").unwrap();
     let mock_a = Arc::new(MockChatClient::new().with_default(done()));
@@ -217,6 +217,10 @@ async fn switch_provider_in_map_updates_model_and_client() {
 
     // Post-reload call routes through mock_b only.
     drain(sess.client.chat_stream(req()).unwrap()).await;
-    assert_eq!(mock_a.call_count(), 1, "old client must NOT serve after switch");
+    assert_eq!(
+        mock_a.call_count(),
+        1,
+        "old client must NOT serve after switch"
+    );
     assert_eq!(mock_b.call_count(), 1, "new client must serve after switch");
 }

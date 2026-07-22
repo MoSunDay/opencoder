@@ -24,7 +24,10 @@ fn config_patch_serializes_all_fields() {
     assert_eq!(v["interleaved_thinking"], serde_json::json!(true));
     assert_eq!(v["max_tokens"], serde_json::json!(8192));
     assert_eq!(v["fps"], serde_json::json!(25));
-    assert_eq!(v["compaction"]["context_threshold"], serde_json::json!(80_000));
+    assert_eq!(
+        v["compaction"]["context_threshold"],
+        serde_json::json!(80_000)
+    );
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
 }
 
@@ -41,7 +44,10 @@ fn config_patch_omits_max_tokens_when_none() {
         capabilities_tools_subagent: false,
     };
     let v = p.to_json();
-    assert!(v.get("max_tokens").is_none(), "max_tokens must be absent when None");
+    assert!(
+        v.get("max_tokens").is_none(),
+        "max_tokens must be absent when None"
+    );
 }
 
 // ── ConfigForm ────────────────────────────────────────────────────────────

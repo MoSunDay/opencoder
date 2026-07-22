@@ -408,13 +408,11 @@ mod tests {
 
     #[test]
     fn query_filters_by_name_or_description_case_insensitive() {
-        let mut m = SkillMenu::new(
-            vec![
-                sk("repo-memory", "maintain local docs"),
-                sk("task-plan", "build a go-live plan"),
-                sk("ship", "deliver to production"),
-            ],
-        );
+        let mut m = SkillMenu::new(vec![
+            sk("repo-memory", "maintain local docs"),
+            sk("task-plan", "build a go-live plan"),
+            sk("ship", "deliver to production"),
+        ]);
         for c in "PLAN".chars() {
             m.on_char(c);
         }

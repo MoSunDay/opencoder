@@ -40,7 +40,11 @@ impl ProviderList {
                     .clone()
                     .unwrap_or_else(|| config.model_id().to_string()),
                 api_key: p.api_key.clone().unwrap_or_default(),
-                headers: p.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
+                headers: p
+                    .headers
+                    .iter()
+                    .map(|h| (h.name.clone(), h.value.clone()))
+                    .collect(),
                 active: name == active,
             })
             .collect();

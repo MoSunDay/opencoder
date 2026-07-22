@@ -133,49 +133,43 @@ impl Tool for BashTool {
             })
         };
 
-        let exit_status = match tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            child.wait(),
-        )
-        .await
-        {
-            Ok(r) => r?,
-            Err(_) => {
-                // Timed out: signal the entire process group. A negative pid
-                // means "send to every process in the group". `kill_on_drop` is
-                // kept above as a last-resort net for the direct child should
-                // this path unwind.
-                #[cfg(unix)]
-                unsafe {
-                    let _ = libc::kill(-pgid, libc::SIGKILL);
+        let exit_status =
+            match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
+                Ok(r) => r?,
+                Err(_) => {
+                    // Timed out: signal the entire process group. A negative pid
+                    // means "send to every process in the group". `kill_on_drop` is
+                    // kept above as a last-resort net for the direct child should
+                    // this path unwind.
+                    #[cfg(unix)]
+                    unsafe {
+                        let _ = libc::kill(-pgid, libc::SIGKILL);
+                    }
+                    // Reap the direct child so it does not become a zombie; the rest
+                    // of the group is reparented to init and reaped there.
+                    let _ = child.wait().await;
+                    // Recover partial output: after the group kill the pipe
+                    // write-ends close and the drain tasks resolve. Whatever the
+                    // command printed before timing out is usually the key clue to
+                    // *why* it hung, so surface it instead of discarding it.
+                    let stdout = drain_partial(stdout_task).await;
+                    let stderr = drain_partial(stderr_task).await;
+                    let partial = merge_streams(&stdout, &stderr);
+                    let msg = if partial.is_empty() {
+                        format!("command timed out after {timeout_secs}s")
+                    } else {
+                        format!("command timed out after {timeout_secs}s\n{partial}")
+                    };
+                    return Ok(opencoder_core::tool::truncate_output_with_error(
+                        msg,
+                        ctx.max_output,
+                        true,
+                    ));
                 }
-                // Reap the direct child so it does not become a zombie; the rest
-                // of the group is reparented to init and reaped there.
-                let _ = child.wait().await;
-                // Recover partial output: after the group kill the pipe
-                // write-ends close and the drain tasks resolve. Whatever the
-                // command printed before timing out is usually the key clue to
-                // *why* it hung, so surface it instead of discarding it.
-                let stdout = drain_partial(stdout_task).await;
-                let stderr = drain_partial(stderr_task).await;
-                let partial = merge_streams(&stdout, &stderr);
-                let msg = if partial.is_empty() {
-                    format!("command timed out after {timeout_secs}s")
-                } else {
-                    format!("command timed out after {timeout_secs}s\n{partial}")
-                };
-                return Ok(opencoder_core::tool::truncate_output_with_error(
-                    msg,
-                    ctx.max_output,
-                    true,
-                ));
-            }
-        };
+            };
 
-        let stdout =
-            String::from_utf8_lossy(&stdout_task.await.expect("stdout drain")).to_string();
-        let stderr =
-            String::from_utf8_lossy(&stderr_task.await.expect("stderr drain")).to_string();
+        let stdout = String::from_utf8_lossy(&stdout_task.await.expect("stdout drain")).to_string();
+        let stderr = String::from_utf8_lossy(&stderr_task.await.expect("stderr drain")).to_string();
         let code = exit_status.code().unwrap_or(-1);
         let streams = merge_streams(&stdout, &stderr);
         let combined = if streams.is_empty() {

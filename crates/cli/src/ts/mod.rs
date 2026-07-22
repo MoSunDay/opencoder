@@ -28,7 +28,12 @@ pub use env::{inside_tmux, tmux_available};
 // ===== dispatch ============================================================
 
 /// Entry point routed from `main.rs`.
-pub async fn ts_dispatch(cli: &Cli, list: bool, resume: Option<&str>, force_new: bool) -> Result<()> {
+pub async fn ts_dispatch(
+    cli: &Cli,
+    list: bool,
+    resume: Option<&str>,
+    force_new: bool,
+) -> Result<()> {
     if list {
         actions::ts_list(cli).await
     } else if let Some(id) = resume {

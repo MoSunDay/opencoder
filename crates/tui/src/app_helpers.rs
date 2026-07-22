@@ -611,12 +611,11 @@ pub(crate) async fn handle_mouse(
                     // had different lengths — breaking wheel-scroll inside a
                     // subagent view. This mirrors the resolution the MouseUp
                     // copy path already performs below.
-                    let viewed: &ChatView = match (*subagent_focus)
-                        .and_then(|idx| chat.blocks.get(idx))
-                    {
-                        Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
-                        _ => &*chat,
-                    };
+                    let viewed: &ChatView =
+                        match (*subagent_focus).and_then(|idx| chat.blocks.get(idx)) {
+                            Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
+                            _ => &*chat,
+                        };
                     let total_rows = Paragraph::new(viewed.flatten())
                         .wrap(Wrap { trim: false })
                         .line_count(inner_w);
@@ -632,7 +631,6 @@ pub(crate) async fn handle_mouse(
     }
     MouseOutcome::None
 }
-
 
 #[cfg(test)]
 #[path = "app_helpers_tests.rs"]

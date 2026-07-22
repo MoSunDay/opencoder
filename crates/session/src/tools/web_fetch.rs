@@ -54,37 +54,39 @@ impl Tool for WebFetchTool {
         // Run the !Send obscura work on a dedicated blocking thread with its
         // own single-threaded runtime + LocalSet. The closure owns only `Send`
         // data; the returned `(html, final_url)` is `Send`.
-        let joined = tokio::task::spawn_blocking(move || -> std::result::Result<(String, String), String> {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| format!("worker runtime build failed: {e}"))?;
-            let local = tokio::task::LocalSet::new();
-            local.block_on(&rt, async move {
-                let mut builder = obscura::Browser::builder().stealth(false);
-                if let Some(p) = &proxy {
-                    builder = builder.proxy(p.clone());
-                }
-                let browser = builder
+        let joined = tokio::task::spawn_blocking(
+            move || -> std::result::Result<(String, String), String> {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
                     .build()
-                    .map_err(|e| format!("browser build failed: {e}"))?;
-                let mut page = browser
-                    .new_page()
-                    .await
-                    .map_err(|e| format!("open page failed: {e}"))?;
-                if let Err(e) = page.goto(&url_str).await {
-                    return Err(format!("navigate failed: {e}"));
-                }
-                if let Some(sel) = &wait_selector {
-                    let _ = page.wait_for_selector(sel, Duration::from_secs(15)).await;
-                }
-                let html = page.content();
-                let final_url = page.url();
-                drop(page);
-                drop(browser);
-                Ok((html, final_url))
-            })
-        })
+                    .map_err(|e| format!("worker runtime build failed: {e}"))?;
+                let local = tokio::task::LocalSet::new();
+                local.block_on(&rt, async move {
+                    let mut builder = obscura::Browser::builder().stealth(false);
+                    if let Some(p) = &proxy {
+                        builder = builder.proxy(p.clone());
+                    }
+                    let browser = builder
+                        .build()
+                        .map_err(|e| format!("browser build failed: {e}"))?;
+                    let mut page = browser
+                        .new_page()
+                        .await
+                        .map_err(|e| format!("open page failed: {e}"))?;
+                    if let Err(e) = page.goto(&url_str).await {
+                        return Err(format!("navigate failed: {e}"));
+                    }
+                    if let Some(sel) = &wait_selector {
+                        let _ = page.wait_for_selector(sel, Duration::from_secs(15)).await;
+                    }
+                    let html = page.content();
+                    let final_url = page.url();
+                    drop(page);
+                    drop(browser);
+                    Ok((html, final_url))
+                })
+            },
+        )
         .await;
 
         let (html, final_url) = match joined {

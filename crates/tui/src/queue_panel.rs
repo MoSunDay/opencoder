@@ -309,6 +309,9 @@ mod tests {
 
     #[test]
     fn submit_action_is_noop_in_plan() {
-        assert_eq!(plan(&items(), 20, QueueBtnAction::Submit), QueueEffect::None);
+        assert_eq!(
+            plan(&items(), 20, QueueBtnAction::Submit),
+            QueueEffect::None
+        );
     }
 }

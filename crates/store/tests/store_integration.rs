@@ -1240,7 +1240,10 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let m0 = store.get_session("s2").await.unwrap().unwrap();
     assert_eq!(m0.id, "s2");
     assert!(m0.handoff_seq.is_none(), "v2 row: handoff_seq must be None");
-    assert!(m0.handoff_plan.is_none(), "v2 row: handoff_plan must be None");
+    assert!(
+        m0.handoff_plan.is_none(),
+        "v2 row: handoff_plan must be None"
+    );
     assert!(m0.skill.is_none(), "v2 row: skill must be None");
 
     // (2) The migrated columns round-trip through SessionPatch (write + read).

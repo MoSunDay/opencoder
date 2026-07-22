@@ -1,5 +1,6 @@
 pub mod app;
 pub mod app_helpers;
+pub mod cache_salt_menu;
 pub mod chat;
 pub mod command;
 pub mod composer;
@@ -9,7 +10,6 @@ pub mod key_handler;
 pub mod keybind;
 pub mod markdown;
 pub mod menu;
-pub mod cache_salt_menu;
 pub mod model_menu;
 pub mod queue_panel;
 pub mod render;

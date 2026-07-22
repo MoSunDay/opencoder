@@ -66,9 +66,7 @@ pub trait Store: Send + Sync {
 
     /// Persist a single event. Default impl delegates to [`append_events`].
     async fn append_event(&self, event: &SessionEventRecord) -> Result<i64> {
-        let mut seqs = self
-            .append_events(std::slice::from_ref(event))
-            .await?;
+        let mut seqs = self.append_events(std::slice::from_ref(event)).await?;
         Ok(seqs.pop().unwrap_or(0))
     }
     async fn events_after(

@@ -48,7 +48,10 @@ impl EventSink {
     /// channel is unbounded), so it is safe to call from a sync event callback.
     /// Returns `Err(rec)` only if the flusher has already exited (channel
     /// closed) — i.e. after the run ended; such tail events are dropped.
-    pub fn push(&self, sev: &SessionEvent) -> Result<(), mpsc::error::SendError<SessionEventRecord>> {
+    pub fn push(
+        &self,
+        sev: &SessionEvent,
+    ) -> Result<(), mpsc::error::SendError<SessionEventRecord>> {
         let rec = SessionEventRecord {
             session_id: self.session_id.clone(),
             kind: sev.coarse_kind(),
@@ -150,9 +153,9 @@ async fn flush(store: &Arc<dyn Store>, batch: &[SessionEventRecord]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use opencoder_core::Message;
     use opencoder_store::{Delivery, LibsqlStore, SessionMeta};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn fresh() -> (tempfile::TempDir, Arc<LibsqlStore>) {
         let dir = tempfile::TempDir::new().unwrap();
@@ -210,11 +213,7 @@ mod tests {
         async fn append_message(&self, sid: &str, m: &Message) -> anyhow::Result<i64> {
             self.inner.append_message(sid, m).await
         }
-        async fn append_messages(
-            &self,
-            sid: &str,
-            m: &[Message],
-        ) -> anyhow::Result<Vec<i64>> {
+        async fn append_messages(&self, sid: &str, m: &[Message]) -> anyhow::Result<Vec<i64>> {
             self.inner.append_messages(sid, m).await
         }
         async fn load_messages(&self, sid: &str) -> anyhow::Result<Vec<Message>> {
@@ -233,12 +232,7 @@ mod tests {
         ) -> anyhow::Result<Vec<opencoder_store::SessionInput>> {
             self.inner.pending_inputs(sid, d).await
         }
-        async fn promote_inputs(
-            &self,
-            sid: &str,
-            s: i64,
-            d: Delivery,
-        ) -> anyhow::Result<Vec<i64>> {
+        async fn promote_inputs(&self, sid: &str, s: i64, d: Delivery) -> anyhow::Result<Vec<i64>> {
             self.inner.promote_inputs(sid, s, d).await
         }
         async fn promote_next_queued(&self, sid: &str) -> anyhow::Result<Option<i64>> {
@@ -256,18 +250,11 @@ mod tests {
         async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> anyhow::Result<()> {
             self.inner.swap_input_order(sid, a, b).await
         }
-        async fn append_events(
-            &self,
-            evs: &[SessionEventRecord],
-        ) -> anyhow::Result<Vec<i64>> {
+        async fn append_events(&self, evs: &[SessionEventRecord]) -> anyhow::Result<Vec<i64>> {
             self.events_calls.fetch_add(1, Ordering::Relaxed);
             self.inner.append_events(evs).await
         }
-        async fn events_after(
-            &self,
-            sid: &str,
-            s: i64,
-        ) -> anyhow::Result<Vec<SessionEventRecord>> {
+        async fn events_after(&self, sid: &str, s: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
             self.inner.events_after(sid, s).await
         }
         async fn last_event_seq(&self, sid: &str) -> anyhow::Result<i64> {
@@ -331,7 +318,10 @@ mod tests {
             .iter()
             .filter(|r| r.sse_kind.as_deref() == Some("text_delta"))
             .count();
-        assert_eq!(text_deltas, n, "every TextDelta must be persisted (no loss)");
+        assert_eq!(
+            text_deltas, n,
+            "every TextDelta must be persisted (no loss)"
+        );
         let calls = store.events_calls.load(Ordering::Relaxed);
         assert!(
             calls < n / 10,
@@ -359,7 +349,10 @@ mod tests {
         let _ = flusher.await;
 
         let all = store.events_after("s", 0).await.unwrap();
-        let kinds: Vec<&str> = all.iter().map(|r| r.sse_kind.as_deref().unwrap_or("")).collect();
+        let kinds: Vec<&str> = all
+            .iter()
+            .map(|r| r.sse_kind.as_deref().unwrap_or(""))
+            .collect();
         assert_eq!(
             kinds,
             vec!["text_delta", "text_delta", "status", "text_delta", "done"]

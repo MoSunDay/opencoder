@@ -75,10 +75,8 @@ mod tests {
         // Env-isolated: an empty explicit value must fall through to env, and
         // with no proxy env vars set at all, resolve to None.
         let keys = ["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"];
-        let saved: std::collections::HashMap<&str, Option<String>> = keys
-            .iter()
-            .map(|&k| (k, std::env::var(k).ok()))
-            .collect();
+        let saved: std::collections::HashMap<&str, Option<String>> =
+            keys.iter().map(|&k| (k, std::env::var(k).ok())).collect();
         for k in keys {
             std::env::remove_var(k);
         }

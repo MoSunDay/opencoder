@@ -164,14 +164,7 @@ pub(crate) fn render<B: Backend>(
             }
         }
         ci += 1;
-        render_composer(
-            f,
-            chunks[ci],
-            input,
-            composer_scroll,
-            inner_w,
-            prompt_w,
-        );
+        render_composer(f, chunks[ci], input, composer_scroll, inner_w, prompt_w);
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
@@ -337,10 +330,7 @@ fn render_body(
         let top_style = Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD);
-        let top_w: u16 = top_label
-            .chars()
-            .map(composer::char_width)
-            .sum::<usize>() as u16;
+        let top_w: u16 = top_label.chars().map(composer::char_width).sum::<usize>() as u16;
         let top_w = top_w.min(area.width);
         let top_rect = Rect::new(
             area.right().saturating_sub(1).saturating_sub(top_w),
@@ -528,10 +518,7 @@ fn render_composer(
         spans.push(Span::raw(text));
         lines.push(Line::from(spans));
     }
-    f.render_widget(
-        Paragraph::new(Text::from(lines)).scroll((scroll, 0)),
-        inner,
-    );
+    f.render_widget(Paragraph::new(Text::from(lines)).scroll((scroll, 0)), inner);
 }
 
 #[allow(clippy::too_many_arguments)]

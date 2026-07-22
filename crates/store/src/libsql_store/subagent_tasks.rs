@@ -56,9 +56,12 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
 
 pub async fn cancel(conn: &Connection, task_id: &str) -> Result<()> {
     let now = opencoder_core::message::now_ms();
-    conn.execute(CANCEL, params![SubagentStatus::Cancelled.as_str(), now, task_id])
-        .await
-        .context("cancel subagent_task")?;
+    conn.execute(
+        CANCEL,
+        params![SubagentStatus::Cancelled.as_str(), now, task_id],
+    )
+    .await
+    .context("cancel subagent_task")?;
     Ok(())
 }
 
@@ -91,7 +94,10 @@ pub async fn list(conn: &Connection, parent_session_id: &str) -> Result<Vec<Suba
     Ok(out)
 }
 
-pub async fn get_by_task_id(conn: &Connection, task_id: &str) -> Result<Option<SubagentTaskRecord>> {
+pub async fn get_by_task_id(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<SubagentTaskRecord>> {
     let stmt = conn
         .prepare(SELECT_BY_TASK_ID)
         .await

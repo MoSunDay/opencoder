@@ -126,21 +126,30 @@ mod tests {
     #[test]
     fn esc_closes_panel() {
         let mut m = Some(CacheSaltMenu::parent_only("act", "s", true));
-        assert_eq!(handle_cache_salt_key(&mut m, esc()), CacheSaltOutcome::Cancel);
+        assert_eq!(
+            handle_cache_salt_key(&mut m, esc()),
+            CacheSaltOutcome::Cancel
+        );
         assert!(m.is_none(), "Esc must close (set Option to None)");
     }
 
     #[test]
     fn enter_closes_panel() {
         let mut m = Some(CacheSaltMenu::parent_only("act", "s", true));
-        assert_eq!(handle_cache_salt_key(&mut m, enter()), CacheSaltOutcome::Cancel);
+        assert_eq!(
+            handle_cache_salt_key(&mut m, enter()),
+            CacheSaltOutcome::Cancel
+        );
         assert!(m.is_none());
     }
 
     #[test]
     fn ctrl_d_quits_and_closes() {
         let mut m = Some(CacheSaltMenu::parent_only("act", "s", true));
-        assert_eq!(handle_cache_salt_key(&mut m, ctrl_d()), CacheSaltOutcome::Quit);
+        assert_eq!(
+            handle_cache_salt_key(&mut m, ctrl_d()),
+            CacheSaltOutcome::Quit
+        );
         assert!(m.is_none());
     }
 

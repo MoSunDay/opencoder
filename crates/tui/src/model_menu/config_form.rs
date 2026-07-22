@@ -114,10 +114,7 @@ impl ConfigForm {
         ConfigForm {
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
-            max_tokens_input: config
-                .max_tokens
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
+            max_tokens_input: config.max_tokens.map(|v| v.to_string()).unwrap_or_default(),
             threshold: config.compaction.context_threshold,
             fps: config.tui_fps(),
             capabilities_browser: config.capabilities.browser,
@@ -174,38 +171,48 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
         KeyCode::Down => form.focus = form.focus.next(),
         KeyCode::Left => match form.focus {
             ConfigField::Reasoning => form.reasoning = form.reasoning.prev(),
-            ConfigField::InterleavedThinking => form.interleaved_thinking = !form.interleaved_thinking,
+            ConfigField::InterleavedThinking => {
+                form.interleaved_thinking = !form.interleaved_thinking
+            }
             ConfigField::Threshold => form.adjust_threshold(-1000),
             ConfigField::Fps => form.adjust_fps(-1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
-            ConfigField::ComputerUse => form.capabilities_computer_use = !form.capabilities_computer_use,
-            ConfigField::ToolsSubagent => form.capabilities_tools_subagent = !form.capabilities_tools_subagent,
+            ConfigField::ComputerUse => {
+                form.capabilities_computer_use = !form.capabilities_computer_use
+            }
+            ConfigField::ToolsSubagent => {
+                form.capabilities_tools_subagent = !form.capabilities_tools_subagent
+            }
             _ => {}
         },
         KeyCode::Right => match form.focus {
             ConfigField::Reasoning => form.reasoning = form.reasoning.next(),
-            ConfigField::InterleavedThinking => form.interleaved_thinking = !form.interleaved_thinking,
+            ConfigField::InterleavedThinking => {
+                form.interleaved_thinking = !form.interleaved_thinking
+            }
             ConfigField::Threshold => form.adjust_threshold(1000),
             ConfigField::Fps => form.adjust_fps(1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
-            ConfigField::ComputerUse => form.capabilities_computer_use = !form.capabilities_computer_use,
-            ConfigField::ToolsSubagent => form.capabilities_tools_subagent = !form.capabilities_tools_subagent,
+            ConfigField::ComputerUse => {
+                form.capabilities_computer_use = !form.capabilities_computer_use
+            }
+            ConfigField::ToolsSubagent => {
+                form.capabilities_tools_subagent = !form.capabilities_tools_subagent
+            }
             _ => {}
         },
-        KeyCode::Enter => {
-            match form.focus {
-                ConfigField::Save => {
-                    if let Err(e) = form.validate() {
-                        form.error = Some(e);
-                        return (ModelOutcome::Idle, Some(ModelMenu::Config(form)));
-                    }
-                    let json = form.build_patch().to_json();
-                    return (ModelOutcome::Save(json), None);
+        KeyCode::Enter => match form.focus {
+            ConfigField::Save => {
+                if let Err(e) = form.validate() {
+                    form.error = Some(e);
+                    return (ModelOutcome::Idle, Some(ModelMenu::Config(form)));
                 }
-                ConfigField::Cancel => return (ModelOutcome::Cancel, None),
-                _ => form.focus = form.focus.next(),
+                let json = form.build_patch().to_json();
+                return (ModelOutcome::Save(json), None);
             }
-        }
+            ConfigField::Cancel => return (ModelOutcome::Cancel, None),
+            _ => form.focus = form.focus.next(),
+        },
         KeyCode::Backspace => {
             if matches!(form.focus, ConfigField::MaxTokens) {
                 form.max_tokens_input.pop();
@@ -231,7 +238,9 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking if c == ' ' => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::Browser if c == ' ' => form.capabilities_browser = !form.capabilities_browser,
+            ConfigField::Browser if c == ' ' => {
+                form.capabilities_browser = !form.capabilities_browser
+            }
             ConfigField::ComputerUse if c == ' ' => {
                 form.capabilities_computer_use = !form.capabilities_computer_use
             }

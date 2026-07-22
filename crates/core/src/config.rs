@@ -41,7 +41,10 @@ pub struct Config {
     /// field entirely (no behavior change). The value is stable across an
     /// agent's turns; subagents derive their own salt from their child session
     /// id (`sub-<ULID>`), so each subagent run gets an independent namespace.
-    #[serde(default = "default_cache_salt", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_cache_salt",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cache_salt: Option<bool>,
     /// Interleaved thinking: when true, the `reasoning_content` produced on
     /// tool-call turns is persisted into the assistant message and sent back
@@ -646,10 +649,7 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(providers) = obj.get("providers").and_then(|v| v.as_object()) {
             for (name, pv) in providers {
                 if let Some(pcfg) = pv.as_object() {
-                    let entry = cfg
-                        .providers
-                        .entry(name.clone())
-                        .or_default();
+                    let entry = cfg.providers.entry(name.clone()).or_default();
                     if let Some(b) = pcfg.get("base_url").and_then(|v| v.as_str()) {
                         entry.base_url = b.to_string();
                     }
@@ -697,7 +697,11 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
             if let Some(p) = n.get("proxy").and_then(|v| v.as_str()) {
                 let t = p.trim();
-                cfg.network.proxy = if t.is_empty() { None } else { Some(t.to_string()) };
+                cfg.network.proxy = if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                };
             }
         }
         if let Some(c) = obj.get("capabilities").and_then(|v| v.as_object()) {

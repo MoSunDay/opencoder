@@ -70,11 +70,7 @@ pub fn llms_txt_candidates(url: &Url, filename: &str) -> Vec<Url> {
     let mut base = url.clone();
     base.set_query(None);
     base.set_fragment(None);
-    let segments: Vec<&str> = base
-        .path()
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let segments: Vec<&str> = base.path().split('/').filter(|s| !s.is_empty()).collect();
     let n = segments.len();
     let mut out = Vec::new();
     // Treat the last path segment as a file and walk its directory up to the
@@ -82,7 +78,10 @@ pub fn llms_txt_candidates(url: &Url, filename: &str) -> Vec<Url> {
     // leading segments kept as the directory. `n.max(1)` ensures a root URL
     // (no path segments) still yields the single `/llms.txt` root candidate.
     for take in (0..n.max(1)).rev() {
-        let dir = segments.get(..take).map(|s| s.join("/")).unwrap_or_default();
+        let dir = segments
+            .get(..take)
+            .map(|s| s.join("/"))
+            .unwrap_or_default();
         let p = if dir.is_empty() {
             format!("/{filename}")
         } else {
@@ -155,13 +154,10 @@ pub fn parse_ddg_results(html: &str, limit: usize) -> Vec<SearchResult> {
     let snip_sel = Selector::parse(".result__snippet").unwrap();
     let mut out = Vec::new();
     for r in doc.select(&result_sel) {
-        let Some(a) = r.select(&link_sel).next() else { continue };
-        let title: String = a
-            .text()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .trim()
-            .to_string();
+        let Some(a) = r.select(&link_sel).next() else {
+            continue;
+        };
+        let title: String = a.text().collect::<Vec<_>>().join(" ").trim().to_string();
         if title.is_empty() {
             continue;
         }
@@ -170,15 +166,13 @@ pub fn parse_ddg_results(html: &str, limit: usize) -> Vec<SearchResult> {
         let snippet = r
             .select(&snip_sel)
             .next()
-            .map(|s| {
-                s.text()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .trim()
-                    .to_string()
-            })
+            .map(|s| s.text().collect::<Vec<_>>().join(" ").trim().to_string())
             .unwrap_or_default();
-        out.push(SearchResult { title, url, snippet });
+        out.push(SearchResult {
+            title,
+            url,
+            snippet,
+        });
         if out.len() >= limit {
             break;
         }
@@ -203,7 +197,6 @@ fn decode_ddg_href(href: &str) -> String {
     }
     full
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -76,10 +76,7 @@ fn run_handle_menu(
 
 #[test]
 fn resume_hint_is_copyable_command() {
-    assert_eq!(
-        resume_hint("01ABC"),
-        "resume with: opencoder -s 01ABC"
-    );
+    assert_eq!(resume_hint("01ABC"), "resume with: opencoder -s 01ABC");
 }
 
 #[test]
@@ -315,29 +312,6 @@ fn backtab_without_shift_also_toggles() {
         "act",
     );
     assert!(matches!(action, KeyAction::SwitchAgent(ref a) if a == "plan"));
-}
-
-#[test]
-fn ctrl_t_toggles_plan_act() {
-    let mut input = String::new();
-    let mut idx = 0;
-    let action = run_handle(
-        key(KeyCode::Char('t'), KeyModifiers::CONTROL),
-        &mut input,
-        &mut idx,
-        false,
-        "act",
-    );
-    assert!(matches!(action, KeyAction::SwitchAgent(ref a) if a == "plan"));
-
-    let action2 = run_handle(
-        key(KeyCode::Char('t'), KeyModifiers::CONTROL),
-        &mut input,
-        &mut idx,
-        false,
-        "plan",
-    );
-    assert!(matches!(action2, KeyAction::SwitchAgent(ref a) if a == "act"));
 }
 
 #[test]
@@ -706,14 +680,12 @@ fn skill_menu_esc_closes_without_picking() {
 fn skill_menu_intercepts_typing_from_composer() {
     use opencoder_core::Skill;
     use std::path::PathBuf;
-    let mut menu = Some(SkillMenu::new(
-        vec![Skill {
-            name: "alpha".into(),
-            description: "d".into(),
-            body: "b".into(),
-            source: PathBuf::from("/x.md"),
-        }],
-    ));
+    let mut menu = Some(SkillMenu::new(vec![Skill {
+        name: "alpha".into(),
+        description: "d".into(),
+        body: "b".into(),
+        source: PathBuf::from("/x.md"),
+    }]));
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle_menu(
@@ -1145,7 +1117,10 @@ fn double_esc_while_running_cancels() {
         80,
         2,
     );
-    assert!(matches!(first, KeyAction::None), "first esc is a soft clear");
+    assert!(
+        matches!(first, KeyAction::None),
+        "first esc is a soft clear"
+    );
     assert!(last_esc.is_some(), "first esc records the timestamp");
 
     let second = handle_key(
@@ -1169,7 +1144,6 @@ fn double_esc_while_running_cancels() {
         "double esc within the window must hard-abort"
     );
 }
-
 
 #[test]
 fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {

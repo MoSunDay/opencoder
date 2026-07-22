@@ -69,9 +69,7 @@ async fn write_sse_header(stream: &mut tokio::net::TcpStream) {
 
 /// Format a text-delta SSE chunk.
 fn sse_text(content: &str) -> String {
-    format!(
-        "data: {{\"choices\":[{{\"delta\":{{\"content\":\"{content}\"}}}}]}}\n\n"
-    )
+    format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"{content}\"}}}}]}}\n\n")
 }
 
 /// Format a finish SSE chunk + [DONE] marker.
@@ -166,10 +164,7 @@ async fn stalled_stream_interrupted_by_read_timeout() {
         write_sse_header(&mut stream).await;
 
         // Send one chunk, then stall forever.
-        stream
-            .write_all(sse_text("only").as_bytes())
-            .await
-            .unwrap();
+        stream.write_all(sse_text("only").as_bytes()).await.unwrap();
         stream.flush().await.unwrap();
         // Sleep for a very long time — longer than any reasonable test timeout.
         tokio::time::sleep(Duration::from_secs(120)).await;
@@ -207,10 +202,7 @@ async fn stalled_stream_interrupted_by_read_timeout() {
     let has_completed = events
         .iter()
         .any(|e| matches!(e, LlmEvent::Completed { .. }));
-    assert!(
-        !has_completed,
-        "stalled stream must not produce Completed"
-    );
+    assert!(!has_completed, "stalled stream must not produce Completed");
 
     // Must complete well under the old 1800 s absolute timeout.
     assert!(

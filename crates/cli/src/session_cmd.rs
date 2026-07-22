@@ -77,10 +77,7 @@ pub(crate) fn models_summary(cfg: &Config) -> String {
         for name in names {
             let p = &cfg.providers[name];
             let mark = if name == active { "*" } else { " " };
-            let model_id = p
-                .model
-                .as_deref()
-                .unwrap_or("<no default model>");
+            let model_id = p.model.as_deref().unwrap_or("<no default model>");
             s.push_str(&format!(
                 "provider {mark}   : {} | {} | {}\n",
                 name, p.base_url, model_id

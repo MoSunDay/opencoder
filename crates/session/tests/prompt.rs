@@ -25,7 +25,12 @@ fn build_system_includes_agent_prompt_and_environment() {
 fn build_system_appends_skill_when_provided() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp");
-    let msg = build_system(&agent, dir, Some("Always use tabs for indentation."), &CapabilitiesConfig::default());
+    let msg = build_system(
+        &agent,
+        dir,
+        Some("Always use tabs for indentation."),
+        &CapabilitiesConfig::default(),
+    );
     let text = msg.text();
     assert!(text.contains("Active skill"));
     assert!(text.contains("Always use tabs"));
@@ -290,7 +295,11 @@ fn global_instructions_none_when_no_global_file() {
 fn global_instructions_none_when_global_file_empty() {
     let home = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
-    std::fs::write(home.path().join(".opencoder").join("AGENTS.md"), "   \n\n  ").unwrap();
+    std::fs::write(
+        home.path().join(".opencoder").join("AGENTS.md"),
+        "   \n\n  ",
+    )
+    .unwrap();
     let working = tempfile::TempDir::new().unwrap();
 
     with_home(home.path(), || {

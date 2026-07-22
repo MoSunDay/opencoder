@@ -112,7 +112,11 @@ async fn concurrent_store_ops_serialized() {
             errs.is_empty(),
             "db_lock serialization must prevent all concurrent errors, but {} occurred:\n{}",
             errs.len(),
-            errs.iter().take(20).map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+            errs.iter()
+                .take(20)
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 
@@ -134,8 +138,7 @@ async fn concurrent_store_ops_serialized() {
             .iter()
             .filter(|e| {
                 e.kind == EventKind::TextDelta
-                    && e.payload
-                        == serde_json::Value::String(format!("ev-{w}-{}", ITERS - 1))
+                    && e.payload == serde_json::Value::String(format!("ev-{w}-{}", ITERS - 1))
             })
             .count();
         // At minimum, the last event we appended must be present.

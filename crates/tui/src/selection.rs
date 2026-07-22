@@ -44,10 +44,7 @@ impl CopyReport {
     /// Build a user-facing status message from this report.
     pub fn status_message(&self) -> String {
         match self.local_tool {
-            Some(tool) => format!(
-                "\u{1f4cb} Copied {} line(s) (OSC52 + {})",
-                self.lines, tool
-            ),
+            Some(tool) => format!("\u{1f4cb} Copied {} line(s) (OSC52 + {})", self.lines, tool),
             None => osc52_only_message(self.lines, under_tmux()),
         }
     }

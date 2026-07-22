@@ -30,7 +30,10 @@ pub(crate) async fn ts_start(cli: &Cli, force_new: bool) -> Result<()> {
     }
     let managed = list_managed()?;
     if !force_new && managed.len() == 1 {
-        eprintln!("ts: reattaching the single managed session {}", managed[0].name);
+        eprintln!(
+            "ts: reattaching the single managed session {}",
+            managed[0].name
+        );
         return attach(&managed[0].name);
     }
     if !force_new && managed.len() > 1 {
@@ -134,7 +137,9 @@ pub(crate) async fn ts_list(cli: &Cli) -> Result<()> {
             task
         );
     }
-    println!("\n* = attached    columns: tmux-name | tmux-id | started | workdir | task(first 10 chars)");
+    println!(
+        "\n* = attached    columns: tmux-name | tmux-id | started | workdir | task(first 10 chars)"
+    );
     println!("resume: opencode ts -r <name|id>");
     Ok(())
 }

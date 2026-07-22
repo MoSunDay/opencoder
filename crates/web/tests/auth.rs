@@ -28,7 +28,12 @@ async fn app() -> axum::Router {
 async fn health_without_token_is_401() {
     let app = app().await;
     let resp = app
-        .oneshot(Request::builder().uri("/api/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);

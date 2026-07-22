@@ -76,11 +76,7 @@ impl Remote {
     }
 
     /// POST /api/sessions → the new session id.
-    pub async fn create_session(
-        &self,
-        agent: Option<&str>,
-        model: Option<&str>,
-    ) -> Result<String> {
+    pub async fn create_session(&self, agent: Option<&str>, model: Option<&str>) -> Result<String> {
         let mut body = serde_json::json!({});
         if let Some(a) = agent {
             body["agent"] = serde_json::json!(a);
@@ -167,8 +163,7 @@ impl Remote {
         let resp = ensure_ok(resp, "post prompt").await?;
         let v: serde_json::Value = resp.json().await.context("prompt json")?;
         // server returns { "admitted_seq": N, "ok": true }; fall back to "seq".
-        Ok(v
-            .get("admitted_seq")
+        Ok(v.get("admitted_seq")
             .or_else(|| v.get("seq"))
             .and_then(|s| s.as_i64())
             .unwrap_or(0))

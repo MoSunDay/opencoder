@@ -20,16 +20,14 @@ const TOKEN: &str = "e2e-bearer-token";
 /// one text delta then completes.
 async fn state_with_mock() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mock: Arc<dyn ChatStream> = Arc::new(
-        MockChatClient::new().with_default(vec![
-            LlmEvent::TextDelta("hello from server".into()),
-            LlmEvent::Completed {
-                text: "hello from server".into(),
-                tool_calls: vec![],
-                usage: None,
-            },
-        ]),
-    );
+    let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
+        LlmEvent::TextDelta("hello from server".into()),
+        LlmEvent::Completed {
+            text: "hello from server".into(),
+            tool_calls: vec![],
+            usage: None,
+        },
+    ]));
     Arc::new(opencoder_web::AppState {
         store,
         workdir: std::env::temp_dir(),
@@ -76,7 +74,10 @@ async fn client_echo_matches_server_persisted_events() {
     let after = remote.last_event_seq(&id).await.unwrap();
 
     // 3. post the prompt
-    let seq = remote.post_prompt(&id, "ping", None, None, None).await.unwrap();
+    let seq = remote
+        .post_prompt(&id, "ping", None, None, None)
+        .await
+        .unwrap();
     assert!(seq > 0);
 
     // 4. stream events from the snapshot; collect kinds + echoed text
@@ -99,7 +100,10 @@ async fn client_echo_matches_server_persisted_events() {
     }
 
     // The echo must include the streamed text and terminate with done.
-    assert!(text.contains("hello from server"), "echoed text was {text:?}");
+    assert!(
+        text.contains("hello from server"),
+        "echoed text was {text:?}"
+    );
     assert_eq!(kinds.last(), Some(&"done".to_string()), "kinds = {kinds:?}");
 
     // 5. the server persisted the SAME sequence (poll: the done persist is a
@@ -133,7 +137,10 @@ async fn client_get_messages_returns_transcript() {
 
     let id = remote.create_session(None, None).await.unwrap();
     let after = remote.last_event_seq(&id).await.unwrap();
-    let _ = remote.post_prompt(&id, "hello", None, None, None).await.unwrap();
+    let _ = remote
+        .post_prompt(&id, "hello", None, None, None)
+        .await
+        .unwrap();
 
     // drain to completion
     let mut rx = remote.events(&id, after).unwrap();
@@ -149,14 +156,19 @@ async fn client_get_messages_returns_transcript() {
         got = remote.get_messages(&id).await.unwrap();
         if got.iter().any(|m| {
             m.role == opencoder_core::Role::Assistant
-                && m.blocks.iter().any(|b| b.as_text() == Some("hello from server"))
+                && m.blocks
+                    .iter()
+                    .any(|b| b.as_text() == Some("hello from server"))
         }) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     assert!(
-        got.iter().any(|m| m.blocks.iter().any(|b| b.as_text() == Some("hello from server"))),
+        got.iter().any(|m| m
+            .blocks
+            .iter()
+            .any(|b| b.as_text() == Some("hello from server"))),
         "assistant text missing from transcript: {got:?}"
     );
 }
@@ -169,5 +181,7 @@ async fn list_sessions_returns_created_session() {
 
     let id = remote.create_session(Some("plan"), None).await.unwrap();
     let list = remote.list_sessions().await.unwrap();
-    assert!(list.iter().any(|v| v.get("id").and_then(|i| i.as_str()) == Some(&id)));
+    assert!(list
+        .iter()
+        .any(|v| v.get("id").and_then(|i| i.as_str()) == Some(&id)));
 }

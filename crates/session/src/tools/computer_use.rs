@@ -11,8 +11,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use opencoder_core::{
-    json, tool::truncate_output, ComputerAction, ComputerUseLoop,
-    LoopOutcome, RecordingExecutor, Tool, ToolContext, ToolOutput,
+    json, tool::truncate_output, ComputerAction, ComputerUseLoop, LoopOutcome, RecordingExecutor,
+    Tool, ToolContext, ToolOutput,
 };
 use serde_json::Value;
 
@@ -28,7 +28,10 @@ impl Tool for ComputerUseTool {
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
-        props.insert("prompt".into(), json::prop_str("The high-level task to perform."));
+        props.insert(
+            "prompt".into(),
+            json::prop_str("The high-level task to perform."),
+        );
         props.insert(
             "actions".into(),
             serde_json::json!({

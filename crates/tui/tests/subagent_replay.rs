@@ -419,7 +419,10 @@ async fn replay_refreshes_status_after_subagent_completes() {
             done, ok, summary, ..
         } = sub
         {
-            assert!(*done, "running subagent should display as done (interrupted)");
+            assert!(
+                *done,
+                "running subagent should display as done (interrupted)"
+            );
             assert!(!*ok, "running subagent should display as failed");
             assert_eq!(summary, "(interrupted)");
         }

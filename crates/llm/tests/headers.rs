@@ -5,9 +5,18 @@ use opencoder_llm::build_header_map;
 #[test]
 fn built_in_headers_are_present() {
     let map = build_header_map("sk-secret", &[]);
-    assert_eq!(map.get("authorization").unwrap().to_str().unwrap(), "Bearer sk-secret");
-    assert_eq!(map.get("content-type").unwrap().to_str().unwrap(), "application/json");
-    assert_eq!(map.get("accept").unwrap().to_str().unwrap(), "text/event-stream");
+    assert_eq!(
+        map.get("authorization").unwrap().to_str().unwrap(),
+        "Bearer sk-secret"
+    );
+    assert_eq!(
+        map.get("content-type").unwrap().to_str().unwrap(),
+        "application/json"
+    );
+    assert_eq!(
+        map.get("accept").unwrap().to_str().unwrap(),
+        "text/event-stream"
+    );
 }
 
 #[test]
@@ -29,7 +38,10 @@ fn custom_headers_are_appended() {
     assert_eq!(map.get("x-foo").unwrap().to_str().unwrap(), "bar");
     assert_eq!(map.get("x-baz").unwrap().to_str().unwrap(), "qux");
     // built-ins still present
-    assert_eq!(map.get("authorization").unwrap().to_str().unwrap(), "Bearer k");
+    assert_eq!(
+        map.get("authorization").unwrap().to_str().unwrap(),
+        "Bearer k"
+    );
 }
 
 #[test]
@@ -37,20 +49,32 @@ fn custom_header_overrides_built_in_by_name() {
     // A custom "accept" must replace the built-in text/event-stream.
     let custom = vec![("accept".to_string(), "application/x-ndjson".to_string())];
     let map = build_header_map("k", &custom);
-    assert_eq!(map.get("accept").unwrap().to_str().unwrap(), "application/x-ndjson");
+    assert_eq!(
+        map.get("accept").unwrap().to_str().unwrap(),
+        "application/x-ndjson"
+    );
     assert_eq!(map.len(), 3);
 
     // authorization can also be overridden (e.g. non-Bearer schemes).
     let custom = vec![("authorization".to_string(), "Key k-xyz".to_string())];
     let map = build_header_map("ignored", &custom);
-    assert_eq!(map.get("authorization").unwrap().to_str().unwrap(), "Key k-xyz");
+    assert_eq!(
+        map.get("authorization").unwrap().to_str().unwrap(),
+        "Key k-xyz"
+    );
 }
 
 #[test]
 fn custom_override_is_case_insensitive() {
-    let custom = vec![("Content-Type".to_string(), "application/x-custom".to_string())];
+    let custom = vec![(
+        "Content-Type".to_string(),
+        "application/x-custom".to_string(),
+    )];
     let map = build_header_map("k", &custom);
-    assert_eq!(map.get("content-type").unwrap().to_str().unwrap(), "application/x-custom");
+    assert_eq!(
+        map.get("content-type").unwrap().to_str().unwrap(),
+        "application/x-custom"
+    );
 }
 
 #[test]

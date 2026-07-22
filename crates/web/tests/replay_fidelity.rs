@@ -86,7 +86,11 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
         .unwrap();
 
     let variants = all_variants();
-    assert_eq!(variants.len(), 16, "expected exactly 16 SessionEvent variants");
+    assert_eq!(
+        variants.len(),
+        16,
+        "expected exactly 16 SessionEvent variants"
+    );
 
     // For each variant: compute the live kind, persist with sse_kind, read back.
     for (i, ev) in variants.iter().enumerate() {

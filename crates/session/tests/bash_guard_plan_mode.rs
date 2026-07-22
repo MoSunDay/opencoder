@@ -156,7 +156,13 @@ async fn plan_mode_allows_devnull_redirect() {
     );
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("plan").unwrap();
-    let mut session = SessionState::new("guard-devnull", agent, config(), mock, dir.path().to_path_buf());
+    let mut session = SessionState::new(
+        "guard-devnull",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
 
     let mut events = Vec::new();
     run(&mut session, "list rust files".into(), |ev| events.push(ev))
@@ -211,7 +217,10 @@ async fn plan_mode_allows_subshell_fd_merge() {
         .iter()
         .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
     assert!(tool_end.is_some(), "expected a ToolEnd for bash");
-    if let SessionEvent::ToolEnd { is_error, output, .. } = tool_end.unwrap() {
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
         assert!(
             !*is_error,
             "fd-merge in subshell must succeed, output: {output}"
@@ -235,13 +244,8 @@ async fn plan_mode_allows_tee_to_devnull() {
     );
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("plan").unwrap();
-    let mut session = SessionState::new(
-        "guard-tee",
-        agent,
-        config(),
-        mock,
-        dir.path().to_path_buf(),
-    );
+    let mut session =
+        SessionState::new("guard-tee", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
     run(&mut session, "tee to devnull".into(), |ev| events.push(ev))
@@ -252,11 +256,11 @@ async fn plan_mode_allows_tee_to_devnull() {
         .iter()
         .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
     assert!(tool_end.is_some(), "expected a ToolEnd for bash");
-    if let SessionEvent::ToolEnd { is_error, output, .. } = tool_end.unwrap() {
-        assert!(
-            !*is_error,
-            "tee /dev/null must succeed, output: {output}"
-        );
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(!*is_error, "tee /dev/null must succeed, output: {output}");
         assert!(
             !output.contains("Blocked in plan mode"),
             "tee /dev/null must not be blocked, got: {output}"

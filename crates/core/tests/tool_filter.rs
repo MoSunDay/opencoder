@@ -87,7 +87,10 @@ fn truncate_output_with_error_no_truncation_when_under_max() {
 
 #[test]
 fn truncate_output_line_limit_truncates() {
-    let content: String = (0..1000).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+    let content: String = (0..1000)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let out = truncate_output(content.clone(), 100_000);
     assert!(!out.is_error);
     assert!(

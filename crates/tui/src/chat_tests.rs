@@ -122,7 +122,9 @@ fn done_renders_markdown() {
     // bold regardless of rendering state.
     let has_md_bold = v.flatten().iter().any(|line| {
         line.spans.iter().any(|s| {
-            s.style.add_modifier.contains(ratatui::style::Modifier::BOLD)
+            s.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
                 && (s.content.contains("Title") || s.content.contains("bold"))
         })
     });
@@ -677,7 +679,10 @@ fn short_truncates_by_display_width_not_char_count() {
         "short() must fit in 10 columns; got {out:?} ({} cols)",
         composer::str_width(&out)
     );
-    assert!(out.ends_with('…'), "truncated output should end with ellipsis; got {out:?}");
+    assert!(
+        out.ends_with('…'),
+        "truncated output should end with ellipsis; got {out:?}"
+    );
 
     // Short strings are returned unchanged.
     assert_eq!(short("hi", 10), "hi");
@@ -690,19 +695,22 @@ fn short_truncates_by_display_width_not_char_count() {
 #[test]
 fn plan_handoff_creates_plan_card() {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::PlanHandoff("## Plan\n1. do X\n2. do Y".into()));
+    v.apply(&SessionEvent::PlanHandoff(
+        "## Plan\n1. do X\n2. do Y".into(),
+    ));
 
     // A Plan block is pushed.
     assert!(
-        v.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Plan { .. })),
+        v.blocks.iter().any(|b| matches!(b, ChatBlock::Plan { .. })),
         "PlanHandoff must create a Plan block"
     );
 
     // The card renders with a header and the markdown content.
     let flat = v.flatten();
-    let text: String = flat.iter().flat_map(|l| l.spans.iter().map(|s| s.content.to_string())).collect();
+    let text: String = flat
+        .iter()
+        .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+        .collect();
     assert!(text.contains("plan"), "plan header must be present");
     assert!(text.contains("Plan"), "plan heading text must be present");
     assert!(text.contains("do X"), "plan content must be present");
@@ -772,8 +780,7 @@ fn plan_card_flatten_structure() {
     // Verify the Yellow + Bold styling on the header span.
     assert!(
         header.spans.iter().any(|s| {
-            s.style.fg == Some(Color::Yellow)
-                && s.style.add_modifier.contains(Modifier::BOLD)
+            s.style.fg == Some(Color::Yellow) && s.style.add_modifier.contains(Modifier::BOLD)
         }),
         "plan header must be Yellow + Bold"
     );
@@ -781,7 +788,11 @@ fn plan_card_flatten_structure() {
     // Body lines are indented (start with 2 spaces).
     let body_line = &flat[1];
     assert!(
-        body_line.spans.first().map(|s| s.content.starts_with("  ")).unwrap_or(false),
+        body_line
+            .spans
+            .first()
+            .map(|s| s.content.starts_with("  "))
+            .unwrap_or(false),
         "body lines must be indented by 2 spaces, got: {:?}",
         body_line.spans
     );
@@ -802,7 +813,10 @@ fn begin_turn_clears_status() {
     v.apply(&SessionEvent::Status("interrupted".into()));
     assert_eq!(v.status, "interrupted");
     v.begin_turn();
-    assert!(v.status.is_empty(), "begin_turn must clear transient status");
+    assert!(
+        v.status.is_empty(),
+        "begin_turn must clear transient status"
+    );
 }
 
 #[test]
@@ -814,7 +828,11 @@ fn begin_turn_preserves_transcript() {
     v.apply(&SessionEvent::Status("interrupted".into()));
     let before = block_text(&v);
     v.begin_turn();
-    assert_eq!(block_text(&v), before, "transcript blocks must survive begin_turn");
+    assert_eq!(
+        block_text(&v),
+        before,
+        "transcript blocks must survive begin_turn"
+    );
     assert!(v.status.is_empty());
 }
 
@@ -845,5 +863,9 @@ fn steer_consumed_unknown_seq_is_noop() {
     let before = block_text(&v);
     v.apply(&SessionEvent::SteerConsumed { seq: 999 });
     assert_eq!(block_text(&v), before, "unknown seq must not push a marker");
-    assert_eq!(v.steer_items.len(), 1, "unknown seq must retain all entries");
+    assert_eq!(
+        v.steer_items.len(),
+        1,
+        "unknown seq must retain all entries"
+    );
 }

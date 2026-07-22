@@ -7,10 +7,10 @@
 
 use axum::extract::State;
 use axum::http::Request;
+use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use axum::http::StatusCode;
 use serde_json::json;
 
 /// The middleware state is the shared bearer token.
@@ -66,7 +66,11 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
-pub async fn require_token(State(token): State<TokenState>, req: Request<axum::body::Body>, next: Next) -> Response {
+pub async fn require_token(
+    State(token): State<TokenState>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
     // 1. Authorization: Bearer <T>
     if let Some(h) = req.headers().get(axum::http::header::AUTHORIZATION) {
         if let Ok(v) = h.to_str() {

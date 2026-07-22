@@ -27,7 +27,8 @@ pub fn char_width(ch: char) -> usize {
         || (0x0300..=0x036F).contains(&cp) // combining diacritical marks
         || (0x200B..=0x200D).contains(&cp) // ZWSP, ZWNJ, ZWJ
         || (0xFE00..=0xFE0F).contains(&cp) // variation selectors
-        || cp == 0xFEFF                    // BOM / zero-width no-break space
+        || cp == 0xFEFF
+    // BOM / zero-width no-break space
     {
         return 0;
     }
@@ -49,7 +50,8 @@ pub fn char_width(ch: char) -> usize {
         || (0xFF00..=0xFF60).contains(&cp) // fullwidth forms
         || (0xFFE0..=0xFFE6).contains(&cp) // fullwidth signs
         || (0x1F300..=0x1FAFF).contains(&cp) // emoji & symbols (SMP)
-        || (0x20000..=0x3FFFD).contains(&cp) // CJK extension B and beyond
+        || (0x20000..=0x3FFFD).contains(&cp)
+    // CJK extension B and beyond
     {
         return 2;
     }
@@ -210,7 +212,10 @@ pub fn wrap_rows(input: &str, inner_w: u16, prompt_w: u16) -> Vec<VisualRow> {
     while i < n {
         let ch = chars[i];
         if ch == '\n' {
-            rows.push(VisualRow { start: row_start, end: i });
+            rows.push(VisualRow {
+                start: row_start,
+                end: i,
+            });
             row_idx += 1;
             i += 1;
             row_start = i;
@@ -226,11 +231,17 @@ pub fn wrap_rows(input: &str, inner_w: u16, prompt_w: u16) -> Vec<VisualRow> {
             // (long word / no spaces). Re-evaluate the moved chars on the new
             // row by rewinding `i` to the break point.
             if last_break > row_start {
-                rows.push(VisualRow { start: row_start, end: last_break });
+                rows.push(VisualRow {
+                    start: row_start,
+                    end: last_break,
+                });
                 row_start = last_break;
                 i = last_break;
             } else {
-                rows.push(VisualRow { start: row_start, end: i });
+                rows.push(VisualRow {
+                    start: row_start,
+                    end: i,
+                });
                 row_start = i;
             }
             row_idx += 1;
@@ -245,7 +256,10 @@ pub fn wrap_rows(input: &str, inner_w: u16, prompt_w: u16) -> Vec<VisualRow> {
             last_break = i;
         }
     }
-    rows.push(VisualRow { start: row_start, end: n });
+    rows.push(VisualRow {
+        start: row_start,
+        end: n,
+    });
     rows
 }
 
@@ -301,7 +315,10 @@ pub fn move_cursor_vertical(
         }
     }
     let cur_start = rows[cur].start;
-    let col: usize = chars[cur_start..char_idx].iter().map(|c| char_width(*c)).sum();
+    let col: usize = chars[cur_start..char_idx]
+        .iter()
+        .map(|c| char_width(*c))
+        .sum();
     let target = cur as i32 + direction;
     if target < 0 || target as usize >= rows.len() {
         return char_idx;
@@ -311,7 +328,11 @@ pub fn move_cursor_vertical(
     // landing on the closest char boundary.
     let mut actual = 0usize;
     let mut idx = trow.start;
-    for (j, &ch) in chars[trow.start..trow.end].iter().enumerate().map(|(i, c)| (trow.start + i, c)) {
+    for (j, &ch) in chars[trow.start..trow.end]
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (trow.start + i, c))
+    {
         let cw = char_width(ch);
         if actual + cw > col {
             break;
@@ -490,9 +511,9 @@ mod tests {
         // char-wrap and word-wrap diverge on the FIRST row boundary.
         let rows = wrap_rows("ab cdefgh", 5, 0);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0], VisualRow { start: 0, end: 3 });  // "ab "
-        assert_eq!(rows[1], VisualRow { start: 3, end: 8 });  // "cdefg"
-        assert_eq!(rows[2], VisualRow { start: 8, end: 9 });  // "h"
+        assert_eq!(rows[0], VisualRow { start: 0, end: 3 }); // "ab "
+        assert_eq!(rows[1], VisualRow { start: 3, end: 8 }); // "cdefg"
+        assert_eq!(rows[2], VisualRow { start: 8, end: 9 }); // "h"
     }
 
     #[test]
@@ -507,8 +528,10 @@ mod tests {
 
     #[test]
     fn wrap_rows_explicit_newline() {
-        let rows = wrap_rows("ab
-cd", 80, 0);
+        let rows = wrap_rows(
+            "ab
+cd", 80, 0,
+        );
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0], VisualRow { start: 0, end: 2 });
         assert_eq!(rows[1], VisualRow { start: 3, end: 5 });
@@ -739,7 +762,7 @@ bbbbb";
         assert_eq!(char_width('\u{200D}'), 0); // ZWJ
         assert_eq!(char_width('\u{FE0F}'), 0); // variation selector-16
         assert_eq!(char_width('\u{FEFF}'), 0); // BOM / zero-width no-break space
-        // A combining mark adds no display width to its base char.
+                                               // A combining mark adds no display width to its base char.
         assert_eq!(str_width("e\u{0300}"), 1); // decomposed e-grave = 1 column
         assert_eq!(str_width("a\u{0308}b"), 2); // a + combining diaeresis + b
     }

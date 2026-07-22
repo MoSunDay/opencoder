@@ -79,7 +79,10 @@ pub struct ComputerUseLoop<'a> {
 
 impl<'a> ComputerUseLoop<'a> {
     pub fn new(executor: &'a dyn ComputerUseExecutor, max_steps: usize) -> Self {
-        Self { executor, max_steps }
+        Self {
+            executor,
+            max_steps,
+        }
     }
 
     /// Drive the loop with a closure that, given the latest observation,

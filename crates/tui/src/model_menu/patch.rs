@@ -73,9 +73,7 @@ impl ProviderPatch {
         provider["headers"] = serde_json::Value::Array(
             self.headers
                 .iter()
-                .map(|(n, v)| {
-                    serde_json::json!({ "name": n, "value": v })
-                })
+                .map(|(n, v)| serde_json::json!({ "name": n, "value": v }))
                 .collect(),
         );
         let mut providers = serde_json::Map::new();

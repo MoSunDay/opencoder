@@ -128,7 +128,12 @@ pub async fn post_prompt(
                 Ok(v) => v,
                 Err(e) => return error_500(format!("api_key: {e:#}")),
             };
-            match ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, config.network.proxy.as_deref()) {
+            match ChatClient::new(
+                &ep.base_url,
+                &ep.api_key,
+                &ep.headers,
+                config.network.proxy.as_deref(),
+            ) {
                 Ok(c) => Arc::new(c),
                 Err(e) => return error_500(format!("client: {e:#}")),
             }

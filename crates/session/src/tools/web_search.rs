@@ -99,7 +99,9 @@ impl Tool for WebSearchTool {
 
         let results: Vec<SearchResult> = web_read::parse_ddg_results(&html, limit);
         if results.is_empty() {
-            return Ok(ToolOutput::err("no results parsed (DDG layout may have changed)"));
+            return Ok(ToolOutput::err(
+                "no results parsed (DDG layout may have changed)",
+            ));
         }
         Ok(truncate_output(
             serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".into()),

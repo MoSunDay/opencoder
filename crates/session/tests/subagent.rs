@@ -518,9 +518,8 @@ async fn subagent_child_events_persisted_before_return() {
 
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    let mut session =
-        SessionState::new("sub-ev2", agent, config(), mock, dir.path().to_path_buf())
-            .with_store(store.clone());
+    let mut session = SessionState::new("sub-ev2", agent, config(), mock, dir.path().to_path_buf())
+        .with_store(store.clone());
 
     run(&mut session, "delegate".into(), |_| {}).await.unwrap();
 
@@ -611,14 +610,9 @@ async fn multi_subagent_no_deadlock() {
     let store = mem_store().await;
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    let mut session = SessionState::new(
-        "multi-sub",
-        agent,
-        config(),
-        mock,
-        dir.path().to_path_buf(),
-    )
-    .with_store(store.clone());
+    let mut session =
+        SessionState::new("multi-sub", agent, config(), mock, dir.path().to_path_buf())
+            .with_store(store.clone());
 
     // Wrap in a timeout — before the fix, concurrent DB contention would hang.
     let mut events = Vec::new();

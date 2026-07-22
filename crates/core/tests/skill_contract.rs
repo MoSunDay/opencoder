@@ -5,8 +5,10 @@
 
 use std::fs;
 
-use opencoder_core::skill::{discover_in, parse_skill, seed_builtin_skills_in};
-use opencoder_core::{discover_skills, skills_dir, Skill};
+use opencoder_core::skill::{
+    discover_in, parse_skill, seed_builtin_skills_in, seed_dep_gated_skills_in,
+};
+use opencoder_core::{discover_skills, skills_dir, Skill, DEPS_SENTINEL};
 
 fn write(path: &std::path::Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -134,4 +136,46 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     );
     // ...while the other packs are still written.
     assert!(root.path().join("review").join("SKILL.md").exists());
+}
+
+#[test]
+fn seed_dep_gated_skills_only_when_sentinel() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+
+    // Without sentinel: dep-gated skills should NOT be seeded.
+    seed_dep_gated_skills_in(root).unwrap();
+    assert!(!root.join("ssh-pty").exists());
+    assert!(!root.join("chrome-headless").exists());
+
+    // With sentinel: dep-gated skills SHOULD be seeded.
+    std::fs::write(root.join(DEPS_SENTINEL), "").unwrap();
+    seed_dep_gated_skills_in(root).unwrap();
+    assert!(root.join("ssh-pty/SKILL.md").exists());
+    assert!(root.join("chrome-headless/SKILL.md").exists());
+
+    // Content should be non-empty.
+    let ssh_body = std::fs::read_to_string(root.join("ssh-pty/SKILL.md")).unwrap();
+    assert!(ssh_body.contains("ssh-pty"));
+    assert!(ssh_body.contains("ssh_pty"));
+}
+
+#[test]
+fn dep_gated_skills_do_not_clobber_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join(DEPS_SENTINEL), "").unwrap();
+
+    // Pre-write a user-modified ssh-pty skill.
+    std::fs::create_dir_all(root.join("ssh-pty")).unwrap();
+    std::fs::write(root.join("ssh-pty/SKILL.md"), "my custom skill").unwrap();
+
+    seed_dep_gated_skills_in(root).unwrap();
+
+    // User file preserved.
+    let body = std::fs::read_to_string(root.join("ssh-pty/SKILL.md")).unwrap();
+    assert_eq!(body, "my custom skill");
+
+    // chrome-headless still written (didn't exist).
+    assert!(root.join("chrome-headless/SKILL.md").exists());
 }

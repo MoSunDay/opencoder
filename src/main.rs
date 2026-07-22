@@ -22,8 +22,10 @@ async fn main() -> Result<()> {
     // submit) into ~/.opencoder/skills on first run. Idempotent: a no-op once
     // the `review` skill directory exists.
     opencoder_core::seed_builtin_skills();
+    opencoder_core::seed_dep_gated_skills();
+    opencoder_core::write_install_script();
 
-    match &cli.command {
+    let result = match &cli.command {
         Some(Command::Run { prompt }) => {
             let parts = if prompt.is_empty() {
                 cli.prompt.clone()
@@ -34,10 +36,21 @@ async fn main() -> Result<()> {
             require(&p)?;
             opencoder_cli::run::run_headless(&cli, p).await
         }
-        Some(Command::Server { host, port, web, token }) => {
+        Some(Command::Server {
+            host,
+            port,
+            web,
+            token,
+        }) => {
             opencoder_cli::server::server_run(&cli, host.clone(), *port, *web, token.clone()).await
         }
-        Some(Command::Client { remote, token, session, continue_, prompt }) => {
+        Some(Command::Client {
+            remote,
+            token,
+            session,
+            continue_,
+            prompt,
+        }) => {
             let parts = if prompt.is_empty() {
                 cli.prompt.clone()
             } else {
@@ -57,8 +70,14 @@ async fn main() -> Result<()> {
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
         Some(Command::Ts { list, resume, new }) => {
             // If already inside tmux, run the TUI inline (never nest tmux).
-            if opencoder_cli::ts::runs_inline(*list, resume.is_some(), opencoder_cli::ts::inside_tmux()) {
-                return opencoder_tui::run_tui(&opts_from_cli(&cli)).await;
+            if opencoder_cli::ts::runs_inline(
+                *list,
+                resume.is_some(),
+                opencoder_cli::ts::inside_tmux(),
+            ) {
+                let r = opencoder_tui::run_tui(&opts_from_cli(&cli)).await;
+                opencoder_cli::exit_tips::print_exit_tips();
+                return r;
             }
             opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *new).await
         }
@@ -78,12 +97,15 @@ async fn main() -> Result<()> {
                 opencoder_tui::run_tui(&opts_from_cli(&cli)).await
             }
         }
+    };
+    if is_tui {
+        opencoder_cli::exit_tips::print_exit_tips();
     }
+    result
 }
 
 fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {
-    opencoder_tui::TuiOpts::new(cli.workdir.clone())
-        .with_session(cli.session.clone())
+    opencoder_tui::TuiOpts::new(cli.workdir.clone()).with_session(cli.session.clone())
 }
 
 fn join(parts: Vec<String>) -> String {

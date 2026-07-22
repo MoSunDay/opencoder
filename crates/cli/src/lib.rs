@@ -1,4 +1,5 @@
 pub mod client;
+pub mod exit_tips;
 pub mod run;
 pub mod server;
 pub mod session_cmd;

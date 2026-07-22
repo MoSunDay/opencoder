@@ -120,7 +120,12 @@ impl SessionEvent {
             SessionEvent::ToolStart { id, name, input } => {
                 serde_json::json!({ "id": id, "name": name, "input": input })
             }
-            SessionEvent::ToolEnd { id, name, output, is_error } => {
+            SessionEvent::ToolEnd {
+                id,
+                name,
+                output,
+                is_error,
+            } => {
                 serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error })
             }
             SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
@@ -128,10 +133,20 @@ impl SessionEvent {
             SessionEvent::Status(s) => serde_json::json!({ "status": s }),
             SessionEvent::Done => serde_json::json!({}),
             SessionEvent::Error(e) => serde_json::json!({ "error": e }),
-            SessionEvent::SubagentStart { id, kind, prompt, child_session_id } => {
+            SessionEvent::SubagentStart {
+                id,
+                kind,
+                prompt,
+                child_session_id,
+            } => {
                 serde_json::json!({ "id": id, "kind": kind, "prompt": prompt, "child_session_id": child_session_id })
             }
-            SessionEvent::SubagentEnd { id, ok, cancelled, summary } => {
+            SessionEvent::SubagentEnd {
+                id,
+                ok,
+                cancelled,
+                summary,
+            } => {
                 serde_json::json!({ "id": id, "ok": ok, "cancelled": cancelled, "summary": summary })
             }
             SessionEvent::SubagentChild { id, ev } => {
@@ -171,12 +186,8 @@ impl SessionEvent {
                 output: data.get("output")?.as_str()?.to_string(),
                 is_error: data.get("is_error")?.as_bool().unwrap_or(false),
             },
-            "agent_switched" => {
-                SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string())
-            }
-            "compaction" => {
-                SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string())
-            }
+            "agent_switched" => SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string()),
+            "compaction" => SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string()),
             "status" => SessionEvent::Status(data.get("status")?.as_str()?.to_string()),
             "subagent_start" => SessionEvent::SubagentStart {
                 id: data.get("id")?.as_str()?.to_string(),
@@ -191,16 +202,13 @@ impl SessionEvent {
                 summary: data.get("summary")?.as_str()?.to_string(),
             },
             "subagent_child" => {
-                let ev: SessionEvent =
-                    serde_json::from_value(data.get("event")?.clone()).ok()?;
+                let ev: SessionEvent = serde_json::from_value(data.get("event")?.clone()).ok()?;
                 SessionEvent::SubagentChild {
                     id: data.get("id")?.as_str()?.to_string(),
                     ev: Box::new(ev),
                 }
             }
-            "plan_handoff" => {
-                SessionEvent::PlanHandoff(data.get("plan")?.as_str()?.to_string())
-            }
+            "plan_handoff" => SessionEvent::PlanHandoff(data.get("plan")?.as_str()?.to_string()),
             "transcript_reset" => {
                 // Wire payload is `{}`; the rebuilt message list is intentionally
                 // empty (see method doc). Callers re-fetch /messages if needed.
@@ -546,11 +554,15 @@ async fn run_one_llm_call(
     to_send.extend(session.messages.iter().cloned());
     let openai_msgs = lower_messages(&to_send);
 
+    let skill_body = session.skill_prompt_cloned();
+    let unlocked = crate::tools::latent::unlocked_from_body(skill_body.as_deref());
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
         .filter(|(name, _)| {
             session.agent.tools.allows(name)
                 && session.config.capabilities.tool_enabled(name)
+                && (!crate::tools::latent::is_latent_tool(name.as_str())
+                    || unlocked.contains(name.as_str()))
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
@@ -674,7 +686,6 @@ async fn execute_call(
         None => ToolOutput::err(format!("unknown tool: {}", tc.name)),
     }
 }
-
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
 /// by agent kind and the `tools_subagent` capability. Plan mode omits 'build';
@@ -1098,7 +1109,11 @@ mod from_sse_tests {
         let mut kinds: Vec<&str> = cases.iter().map(|e| e.sse_kind()).collect();
         kinds.sort();
         kinds.dedup();
-        assert_eq!(kinds.len(), 16, "expected all 16 unique kinds, got {kinds:?}");
+        assert_eq!(
+            kinds.len(),
+            16,
+            "expected all 16 unique kinds, got {kinds:?}"
+        );
 
         for ev in &cases {
             let kind = ev.sse_kind();

@@ -149,6 +149,7 @@ async fn resume_and_replay_continues_running_child_and_backfills_result() {
         config("m"),
         mock.clone() as Arc<dyn ChatStream>,
         PathBuf::from("/tmp"),
+        None,
     )
     .await
     .unwrap();
@@ -247,6 +248,7 @@ async fn resume_and_replay_leaves_completed_tasks_untouched() {
         config("m"),
         mock.clone() as Arc<dyn ChatStream>,
         PathBuf::from("/tmp"),
+        None,
     )
     .await
     .unwrap();
@@ -275,6 +277,7 @@ async fn resume_and_replay_no_running_tasks_just_resumes() {
         config("m"),
         mock.clone() as Arc<dyn ChatStream>,
         PathBuf::from("/tmp"),
+        None,
     )
     .await
     .unwrap();
@@ -340,6 +343,7 @@ async fn resume_and_replay_replays_multiple_children_into_one_backfill_message()
         config("m"),
         mock.clone() as Arc<dyn ChatStream>,
         PathBuf::from("/tmp"),
+        None,
     )
     .await
     .unwrap();
@@ -384,4 +388,186 @@ async fn resume_and_replay_replays_multiple_children_into_one_backfill_message()
     assert!(dangling.is_empty(), "no dangling tool_use after backfill: {dangling:?}");
 
     assert_eq!(mock.call_count(), 2, "expected 2 child LLM calls");
+}
+
+
+// ---------------------------------------------------------------------------
+// Regression: replay_cancelled_tasks respects the session cancel token.
+// An interrupted (Cancelled) subagent must NOT be replayed when the parent
+// cancel token is already fired -- the user double-Esc'd and expects no work.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn replay_cancelled_tasks_skips_children_when_cancel_token_fired() {
+    use opencoder_session::SessionState;
+    use tokio_util::sync::CancellationToken;
+
+    let store = mem_store().await;
+    store.create_session(&session_meta("parent", "act")).await.unwrap();
+    store.create_session(&session_meta("child-x", "explore")).await.unwrap();
+    store.append_message("parent", &Message::user("u1", "explore")).await.unwrap();
+    store.append_message("parent", &parent_task_turn(&["task-cx"])).await.unwrap();
+    store.append_message("child-x", &Message::user("cu", "explore")).await.unwrap();
+    store.create_subagent_task(&SubagentTaskRecord {
+        task_id: "task-cx".into(),
+        parent_session_id: "parent".into(),
+        child_session_id: "child-x".into(),
+        parent_message_id: None,
+        agent: "explore".into(),
+        prompt: "explore".into(),
+        result: None,
+        status: SubagentStatus::Cancelled,
+        ok: None,
+        started_at: 0,
+        completed_at: None,
+    }).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new());
+    let agent = opencoder_core::resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent",
+        agent,
+        config("m"),
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    ).with_store(store.clone());
+    // Load the task tool_use into the session so the replay filter matches it.
+    session.messages.push(parent_task_turn(&["task-cx"]));
+
+    let token = CancellationToken::new();
+    token.cancel();
+    session.cancel = Some(token);
+
+    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+
+    assert_eq!(mock.call_count(), 0, "cancelled token must prevent child replay");
+    let tasks = store.list_subagent_tasks("parent").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(matches!(tasks[0].status, SubagentStatus::Cancelled),
+        "task must remain Cancelled, got {:?}", tasks[0].status);
+}
+
+#[tokio::test]
+async fn replay_cancelled_tasks_runs_children_when_token_not_fired() {
+    use opencoder_session::SessionState;
+    use tokio_util::sync::CancellationToken;
+
+    let store = mem_store().await;
+    store.create_session(&session_meta("parent", "act")).await.unwrap();
+    store.create_session(&session_meta("child-y", "explore")).await.unwrap();
+    store.append_message("parent", &Message::user("u1", "explore")).await.unwrap();
+    store.append_message("parent", &parent_task_turn(&["task-cy"])).await.unwrap();
+    store.append_message("child-y", &Message::user("cu", "explore")).await.unwrap();
+    store.create_subagent_task(&SubagentTaskRecord {
+        task_id: "task-cy".into(),
+        parent_session_id: "parent".into(),
+        child_session_id: "child-y".into(),
+        parent_message_id: None,
+        agent: "explore".into(),
+        prompt: "explore".into(),
+        result: None,
+        status: SubagentStatus::Cancelled,
+        ok: None,
+        started_at: 0,
+        completed_at: None,
+    }).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_event("explored: a, b")]));
+    let agent = opencoder_core::resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent",
+        agent,
+        config("m"),
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    ).with_store(store.clone());
+    // Load the task tool_use into the session so the replay filter matches it.
+    session.messages.push(parent_task_turn(&["task-cy"]));
+
+    session.cancel = Some(CancellationToken::new());
+
+    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+
+    assert_eq!(mock.call_count(), 1, "uncancelled token must allow child replay");
+    let tasks = store.list_subagent_tasks("parent").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(matches!(tasks[0].status, SubagentStatus::Completed),
+        "task must be Completed after replay, got {:?}", tasks[0].status);
+    assert!(tasks[0].result.as_deref().unwrap().contains("explored"),
+        "result must reflect child output: {:?}", tasks[0].result);
+}
+
+// ---------------------------------------------------------------------------
+// Regression: a pending steer (user clicked steer-submit while a subagent was
+// running) must cause cancelled subagents to be ABANDONED, not replayed.
+// Otherwise the drain turn silently re-runs the child the user just
+// interrupted, and the steer never gets processed (the steer is stuck).
+// ---------------------------------------------------------------------------
+#[tokio::test]
+async fn replay_cancelled_tasks_abandons_when_steer_pending() {
+    use opencoder_session::SessionState;
+    use opencoder_store::{Delivery, SessionInput};
+    use tokio_util::sync::CancellationToken;
+
+    let store = mem_store().await;
+    store.create_session(&session_meta("parent", "act")).await.unwrap();
+    store.create_session(&session_meta("child-z", "explore")).await.unwrap();
+    store.append_message("parent", &Message::user("u1", "explore")).await.unwrap();
+    store.append_message("parent", &parent_task_turn(&["task-cz"])).await.unwrap();
+    store.append_message("child-z", &Message::user("cu", "explore")).await.unwrap();
+    store.create_subagent_task(&SubagentTaskRecord {
+        task_id: "task-cz".into(),
+        parent_session_id: "parent".into(),
+        child_session_id: "child-z".into(),
+        parent_message_id: None,
+        agent: "explore".into(),
+        prompt: "explore".into(),
+        result: None,
+        status: SubagentStatus::Cancelled,
+        ok: None,
+        started_at: 0,
+        completed_at: None,
+    }).await.unwrap();
+
+    // The user steered while the subagent was running: admit a pending steer.
+    store.admit_input(&SessionInput {
+        seq: None,
+        id: "steer-1".into(),
+        session_id: "parent".into(),
+        delivery: Delivery::Steer,
+        prompt: "forget that, do something else".into(),
+        admitted_seq: 0,
+        promoted_seq: None,
+    }).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_event("should not run")]));
+    let agent = opencoder_core::resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent",
+        agent,
+        config("m"),
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    ).with_store(store.clone());
+    // Load the task tool_use into the session so the replay filter matches it.
+    session.messages.push(parent_task_turn(&["task-cz"]));
+    // Fresh (uncancelled) token — this is the drain turn after a steer-submit.
+    session.cancel = Some(CancellationToken::new());
+
+    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+
+    // The child must NOT be replayed.
+    assert_eq!(mock.call_count(), 0, "pending steer must prevent child replay");
+    // The task must be terminal (Failed), not Cancelled, so it is never
+    // replayed again on a subsequent turn or resume.
+    let tasks = store.list_subagent_tasks("parent").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(matches!(tasks[0].status, SubagentStatus::Failed),
+        "steered task must be Failed (abandoned), got {:?}", tasks[0].status);
+    // A terminal tool_result must be backfilled so the transcript is well-formed.
+    let dangling = dangling_tool_uses(&session.messages);
+    assert!(dangling.is_empty(), "no dangling tool_use after abandon: {dangling:?}");
+    // The backfilled result must mention the steer/redirect.
+    assert!(tasks[0].result.as_deref().unwrap().contains("steer"),
+        "result must mention the steer redirect: {:?}", tasks[0].result);
 }

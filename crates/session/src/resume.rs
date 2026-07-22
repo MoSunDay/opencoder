@@ -10,9 +10,10 @@ use opencoder_core::{
     message::now_ms, resolve_agent, Agent, Config, ContentBlock, Message, MessageUsage, Role,
 };
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{Delivery, SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord};
 
 use crate::SessionState;
+use tokio_util::sync::CancellationToken;
 
 /// Rebuild a session from persisted history. The agent/model come from the
 /// stored session metadata when available, so a resumed session keeps its
@@ -157,6 +158,7 @@ pub async fn resume(
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
+    active_skill_names: Arc::new(Mutex::new(infer_skill_names(&meta.skill))),
         persisted_count: n,
         session_created: true,
         cancel: None,
@@ -188,6 +190,7 @@ pub async fn resume_and_replay(
     config: Config,
     client: Arc<dyn ChatStream>,
     working_dir: PathBuf,
+    replay_cancel: Option<CancellationToken>,
 ) -> Result<SessionState> {
     let running: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(id)
@@ -203,6 +206,11 @@ pub async fn resume_and_replay(
     // so results land deterministically in dispatch order.
     let mut backfill: Vec<ContentBlock> = Vec::with_capacity(running.len());
     for task in &running {
+        if let Some(c) = &replay_cancel {
+            if c.is_cancelled() {
+                break;
+            }
+        }
         let outcome = replay_child(store.clone(), task, &config, &client, &working_dir).await;
         let (text, ok) = match outcome {
             Ok(v) => v,
@@ -272,13 +280,43 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter(|t| t.status == SubagentStatus::Cancelled)
+        .filter(|t| {
+            t.status == SubagentStatus::Cancelled
+                && (session.handoff_seq.is_none()
+                    || session.messages.iter().any(|m| {
+                        m.blocks
+                            .iter()
+                            .any(|b| matches!(b, ContentBlock::ToolUse { id, .. } if id == &t.task_id))
+                    }))
+        })
         .collect();
     if cancelled.is_empty() {
         return;
     }
+    // A pending steer means the user explicitly redirected this turn (e.g.
+    // clicked the steer-submit button while a subagent was running). Abandon
+    // the cancelled subagents instead of replaying them: the user wants to move
+    // on, not silently resume the child they just interrupted. Backfill a
+    // terminal "cancelled" tool_result so the transcript stays well-formed, and
+    // mark each task Failed so it is never replayed again. This unblocks the
+    // steer (claimed next in run_loop) without re-running the cancelled child.
+    let has_pending_steers = store
+        .pending_inputs(&session.id, Delivery::Steer)
+        .await
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    if has_pending_steers {
+        abandon_cancelled_tasks(session, &store, &cancelled).await;
+        return;
+    }
+    let cancel = session.cancel.clone();
     let mut backfill: Vec<ContentBlock> = Vec::with_capacity(cancelled.len());
     for task in &cancelled {
+        if let Some(c) = &cancel {
+            if c.is_cancelled() {
+                break;
+            }
+        }
         let outcome = replay_child(
             store.clone(),
             task,
@@ -307,6 +345,46 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
             content: text,
             is_error: !ok,
         });
+    }
+    let tool_msg = Message {
+        id: crate::runner::new_id(),
+        role: Role::Tool,
+        blocks: backfill,
+        model: None,
+        agent: None,
+        usage: MessageUsage::default(),
+        created_at: now_ms(),
+        synthetic: false,
+    };
+    session.record(tool_msg).await;
+}
+
+/// Backfill terminal "cancelled" tool_results for subagent tasks that were
+/// interrupted by a user steer (redirect), WITHOUT re-running the children.
+/// Each task's `tool_use` gets a terminal error `tool_result` so the transcript
+/// stays well-formed (no dangling ids that providers reject with HTTP 400), and
+/// the task is marked Failed so `replay_cancelled_tasks` never picks it up
+/// again. Used when the user steers to redirect mid-subagent: they want to move
+/// on, not resume the interrupted child.
+async fn abandon_cancelled_tasks(
+    session: &mut SessionState,
+    store: &Arc<dyn Store>,
+    tasks: &[SubagentTaskRecord],
+) {
+    const MSG: &str = "cancelled: the user redirected this turn (steer).";
+    let mut backfill: Vec<ContentBlock> = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let _ = store.complete_subagent_task(&task.task_id, MSG, false).await;
+        backfill.push(ContentBlock::ToolResult {
+            tool_use_id: task.task_id.clone(),
+            content: MSG.to_string(),
+            is_error: true,
+        });
+        tracing::info!(
+            task_id = %task.task_id,
+            child = %task.child_session_id,
+            "abandoning cancelled subagent (user steered) instead of replaying"
+        );
     }
     let tool_msg = Message {
         id: crate::runner::new_id(),
@@ -448,3 +526,79 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
 
 #[allow(dead_code)]
 fn _ensure_agent_used(_a: &Agent) {}
+
+
+/// Infer active skill names from a skill prompt body by matching known
+/// skill body prefixes. Used on resume to restore latent tool unlocking.
+fn infer_skill_names(body: &Option<String>) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let mut names = HashSet::new();
+    if let Some(b) = body {
+        let prefix = b.chars().take(200).collect::<String>();
+        if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
+            names.insert("ssh-pty".to_string());
+        }
+        if prefix.contains("chrome_headless") || prefix.contains("chrome-headless") {
+            names.insert("chrome-headless".to_string());
+        }
+    }
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn infer_skill_names_none_body() {
+        let names = infer_skill_names(&None);
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn infer_skill_names_empty_body() {
+        let names = infer_skill_names(&Some(String::new()));
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn infer_skill_names_detects_ssh_pty() {
+        let body = Some("Use ssh_pty to connect to the server".to_string());
+        let names = infer_skill_names(&body);
+        assert_eq!(names, HashSet::from(["ssh-pty".to_string()]));
+    }
+
+    #[test]
+    fn infer_skill_names_detects_ssh_pty_dash() {
+        let body = Some("Active skill: ssh-pty".to_string());
+        let names = infer_skill_names(&body);
+        assert_eq!(names, HashSet::from(["ssh-pty".to_string()]));
+    }
+
+    #[test]
+    fn infer_skill_names_detects_chrome_headless() {
+        let body = Some("Use chrome_headless tool".to_string());
+        let names = infer_skill_names(&body);
+        assert_eq!(names, HashSet::from(["chrome-headless".to_string()]));
+    }
+
+    #[test]
+    fn infer_skill_names_detects_both() {
+        let body = Some("ssh_pty and chrome-headless are active".to_string());
+        let names = infer_skill_names(&body);
+        assert_eq!(
+            names,
+            HashSet::from(["ssh-pty".to_string(), "chrome-headless".to_string()])
+        );
+    }
+
+    #[test]
+    fn infer_skill_names_ignores_after_200_chars() {
+        // Content after the first 200 chars should be ignored.
+        let padding = "x".repeat(200);
+        let body = Some(format!("{padding}ssh_pty"));
+        let names = infer_skill_names(&body);
+        assert!(names.is_empty(), "skill names past 200 chars should be ignored");
+    }
+}

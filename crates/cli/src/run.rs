@@ -39,6 +39,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             config.clone(),
             client.clone(),
             workdir.clone(),
+            None,
         )
         .await?
     } else {
@@ -74,9 +75,30 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
     }
 
+    // Extract and resolve {$skill-name} tokens from the prompt.
+    let prompt = {
+        let (clean, names) = opencoder_core::extract_skill_tokens(&prompt);
+        if !names.is_empty() {
+            let skills = opencoder_core::discover_skills();
+            let mut resolved_bodies = Vec::new();
+            let mut resolved_names = std::collections::HashSet::new();
+            for name in &names {
+                if let Some(sk) = skills.iter().find(|s| &s.name == name) {
+                    resolved_bodies.push(sk.body.clone());
+                    resolved_names.insert(sk.name.clone());
+                }
+            }
+            if !resolved_bodies.is_empty() {
+                let body = resolved_bodies.join("\n\n");
+                session.set_skill(Some(body));
+                session.set_active_skill_names(resolved_names);
+            }
+        }
+        clean
+    };
+
     print_prompt_header(&session, &prompt);
-    let prompt_owned = prompt.clone();
-    opencoder_session::run(&mut session, prompt_owned, |ev| print_event(&ev)).await?;
+    opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
 
     // cheap background title generation (small model) after the first round
     generate_title(&session).await;

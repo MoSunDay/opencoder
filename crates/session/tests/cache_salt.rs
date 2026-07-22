@@ -160,11 +160,15 @@ async fn subagent_request_carries_its_own_salt() {
     );
 
     // The parent's salt is `act:test-session`.
-    let has_parent_salt = reqs.iter().any(|r| r.cache_salt.as_deref() == Some("act:test-session"));
+    let has_parent_salt = reqs
+        .iter()
+        .any(|r| r.cache_salt.as_deref() == Some("act:test-session"));
     assert!(
         has_parent_salt,
         "parent request salt must be act:test-session; salts: {:?}",
-        reqs.iter().map(|r| r.cache_salt.clone()).collect::<Vec<_>>()
+        reqs.iter()
+            .map(|r| r.cache_salt.clone())
+            .collect::<Vec<_>>()
     );
 
     // The child's salt is `explore:sub-<ULID>`; the ULID is random, so
@@ -178,6 +182,8 @@ async fn subagent_request_carries_its_own_salt() {
         has_child_salt,
         "explore subagent must carry its own salt starting with explore:sub-; \
          salts: {:?}",
-        reqs.iter().map(|r| r.cache_salt.clone()).collect::<Vec<_>>()
+        reqs.iter()
+            .map(|r| r.cache_salt.clone())
+            .collect::<Vec<_>>()
     );
 }

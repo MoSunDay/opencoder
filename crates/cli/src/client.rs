@@ -19,9 +19,7 @@ pub fn resolve_token(token: Option<String>) -> Result<String> {
     std::env::var("OPENCODER_SERVER_TOKEN")
         .ok()
         .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!("no token: pass --token <T> or set OPENCODER_SERVER_TOKEN")
-        })
+        .ok_or_else(|| anyhow!("no token: pass --token <T> or set OPENCODER_SERVER_TOKEN"))
 }
 
 pub async fn client_run(

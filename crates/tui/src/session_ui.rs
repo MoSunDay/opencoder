@@ -290,12 +290,7 @@ async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<dyn Store>)
             false,
             task.result.clone().unwrap_or_default(),
         ),
-        SubagentStatus::Failed => (
-            true,
-            false,
-            false,
-            task.result.clone().unwrap_or_default(),
-        ),
+        SubagentStatus::Failed => (true, false, false, task.result.clone().unwrap_or_default()),
         SubagentStatus::Cancelled => (true, false, true, "(cancelled)".to_string()),
         SubagentStatus::Running | SubagentStatus::Unknown => {
             // Interrupted during resume — display as done/failed with a marker.
@@ -344,13 +339,19 @@ async fn reconstruct_child_view(
     }
 
     // Fallback: replay messages.
-    tracing::debug!(child_session_id, "no persisted events for subagent child, falling back to messages");
+    tracing::debug!(
+        child_session_id,
+        "no persisted events for subagent child, falling back to messages"
+    );
     let messages = store
         .load_messages(child_session_id)
         .await
         .unwrap_or_default();
     if messages.is_empty() {
-        tracing::debug!(child_session_id, "no events or messages for subagent child session");
+        tracing::debug!(
+            child_session_id,
+            "no events or messages for subagent child session"
+        );
     }
     replay_messages(agent_name, &messages)
 }
@@ -415,7 +416,11 @@ mod tests {
         let history = vec!["msg1".into(), "msg2".into()];
         let skill = Some("code-review".into());
         let skill_body = Some("review every change carefully".into());
-        let steers = vec![(10_i64, "fix bug".into()), (11, "add tests".into()), (12, "refactor".into())];
+        let steers = vec![
+            (10_i64, "fix bug".into()),
+            (11, "add tests".into()),
+            (12, "refactor".into()),
+        ];
         let queues = vec![(1_i64, "run lint".into())];
         chat.steer_items = steers.clone();
 

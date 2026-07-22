@@ -158,7 +158,10 @@ async fn bash_tool_captures_stdout_via_pipe() {
         .await
         .unwrap();
     assert!(!out.is_error, "unexpected error: {out:?}");
-    assert!(out.content.contains("hello-from-bash"), "stdout missing: {out:?}");
+    assert!(
+        out.content.contains("hello-from-bash"),
+        "stdout missing: {out:?}"
+    );
 }
 
 #[tokio::test]
@@ -171,7 +174,10 @@ async fn bash_tool_captures_stderr_via_pipe() {
         .await
         .unwrap();
     assert!(out.content.contains("oops"), "stderr missing: {out:?}");
-    assert!(out.content.contains("[stderr]"), "stderr marker missing: {out:?}");
+    assert!(
+        out.content.contains("[stderr]"),
+        "stderr marker missing: {out:?}"
+    );
 }
 
 #[tokio::test]
@@ -233,7 +239,10 @@ async fn bash_tool_kills_process_group_on_timeout() {
 
     // The grandchild should have produced a heartbeat during the 1s window.
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-    assert!(heartbeat.exists(), "grandchild never ran — test setup invalid");
+    assert!(
+        heartbeat.exists(),
+        "grandchild never ran — test setup invalid"
+    );
 
     // Sample the heartbeat twice; if the grandchild is dead the file is static.
     let s1 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);

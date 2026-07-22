@@ -55,7 +55,12 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     ];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let quit = process_cmd(UiCmd::SwitchAndStart("act".into(), "".into()), &mut session, &tx).await;
+    let quit = process_cmd(
+        UiCmd::SwitchAndStart("act".into(), "".into()),
+        &mut session,
+        &tx,
+    )
+    .await;
     assert!(!quit, "SwitchAndStart must not signal quit");
 
     let mut events: Vec<UiEvent> = Vec::new();
@@ -191,7 +196,12 @@ async fn switch_and_start_without_plan_falls_back_gracefully() {
     session.messages = vec![Message::user("u1", "just talking, no plan yet")];
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let _ = process_cmd(UiCmd::SwitchAndStart("act".into(), "".into()), &mut session, &tx).await;
+    let _ = process_cmd(
+        UiCmd::SwitchAndStart("act".into(), "".into()),
+        &mut session,
+        &tx,
+    )
+    .await;
 
     let mut events: Vec<UiEvent> = Vec::new();
     while let Ok(ev) = rx.try_recv() {
@@ -221,8 +231,7 @@ async fn switch_and_start_without_plan_falls_back_gracefully() {
 async fn switch_and_start_appends_input_to_plan_handoff() {
     // Plan-mode input left in the box must be appended to the plan in the
     // handoff message and reach the act agent's LLM request.
-    let mock =
-        Arc::new(MockChatClient::new().push_script(vec![text_done("starting now")]));
+    let mock = Arc::new(MockChatClient::new().push_script(vec![text_done("starting now")]));
     let dir = tempfile::tempdir().unwrap();
     let plan_agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
@@ -295,5 +304,66 @@ async fn switch_and_start_appends_input_to_plan_handoff() {
     // extra must follow the plan.
     let plan_pos = content.find("## Plan").unwrap();
     let extra_pos = content.find(extra).unwrap();
-    assert!(plan_pos < extra_pos, "input must follow the plan in the request");
+    assert!(
+        plan_pos < extra_pos,
+        "input must follow the plan in the request"
+    );
+}
+
+#[tokio::test]
+async fn switch_and_start_clears_skill_prompt() {
+    // A plan-mode skill prompt (e.g. task-plan instructions) must be cleared on
+    // the plan->act handoff, so it does not bleed into the act agent's system
+    // prompt for the empty-prompt continuation turn.
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![text_done("starting implementation now")]));
+    let dir = tempfile::tempdir().unwrap();
+    let plan_agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new(
+        "handoff-skill",
+        plan_agent,
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock.clone(),
+        dir.path().to_path_buf(),
+    )
+    .with_skill("PLAN-SKILL-INSTRUCTIONS-MARKER".into());
+    session.messages = vec![
+        Message::user("u1", "implement feature X"),
+        assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
+    ];
+
+    let (tx, _rx) = mpsc::channel::<UiEvent>(64);
+    let quit = process_cmd(
+        UiCmd::SwitchAndStart("act".into(), "".into()),
+        &mut session,
+        &tx,
+    )
+    .await;
+    assert!(!quit, "SwitchAndStart must not signal quit");
+
+    // (1) The skill prompt is cleared on the session.
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "skill_prompt must be cleared after plan->act handoff"
+    );
+
+    // (2) The act agent's system prompt must not carry the plan-mode skill.
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1, "exactly one act LLM call expected");
+    let sys_has_skill = requests[0].messages.iter().any(|m| {
+        m.get("role").and_then(|v| v.as_str()) == Some("system")
+            && m.get("content")
+                .and_then(|v| v.as_str())
+                .map(|c| {
+                    c.contains("PLAN-SKILL-INSTRUCTIONS-MARKER") || c.contains("## Active skill")
+                })
+                .unwrap_or(false)
+    });
+    assert!(
+        !sys_has_skill,
+        "act system prompt must not contain the plan-mode skill instructions"
+    );
 }

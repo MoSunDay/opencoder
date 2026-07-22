@@ -43,3 +43,5 @@ cargo clippy --workspace --all-targets -- -D warnings   → 0 warnings (Finished
 cargo build  --workspace                                 → clean (Finished)
 cargo test   --workspace                                 → 784 passed; 0 failed
 ```
+
+> 基线口径：784 为本变更提交时（clean worktree，commit `2c4c68f`）的回归数。该数字仅计入本变更引入的 2 个新测试（`concurrent_store_ops_serialized`、`multi_subagent_no_deadlock`）。后续并发进程向工作树追加了无关测试，当前 workspace 实跑为 789 passed / 0 failed（+5 属本变更范围外的外部增量）；`cargo build` / `cargo clippy -D warnings` 仍零错误零警告。

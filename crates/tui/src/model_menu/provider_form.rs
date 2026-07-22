@@ -127,17 +127,13 @@ impl ProviderForm {
             return Err("provider name must not be empty".into());
         }
         if self.name.trim().len() < 2 {
-            return Err(
-                "provider name must be at least 2 chars (e.g. `bigmodel`)".into(),
-            );
+            return Err("provider name must be at least 2 chars (e.g. `bigmodel`)".into());
         }
         if self.model_id.trim().is_empty() {
             return Err("model_id must not be empty".into());
         }
         if self.model_id.trim().len() < 2 {
-            return Err(
-                "model_id must be at least 2 chars (e.g. `glm-5.2`)".into(),
-            );
+            return Err("model_id must be at least 2 chars (e.g. `glm-5.2`)".into());
         }
         if self.base_url.trim().is_empty() {
             return Err("base_url must not be empty".into());
@@ -182,9 +178,15 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
             _ => form.focus = form.focus.next(),
         },
         KeyCode::Backspace => match form.focus {
-            ProviderField::Name if !form.name_readonly => { form.name.pop(); }
-            ProviderField::ModelId => { form.model_id.pop(); }
-            ProviderField::BaseUrl => { form.base_url.pop(); }
+            ProviderField::Name if !form.name_readonly => {
+                form.name.pop();
+            }
+            ProviderField::ModelId => {
+                form.model_id.pop();
+            }
+            ProviderField::BaseUrl => {
+                form.base_url.pop();
+            }
             ProviderField::ApiKey => {
                 if !form.api_key_edited {
                     form.api_key_input.clear();

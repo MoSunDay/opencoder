@@ -155,9 +155,7 @@ async fn subagent_reasoning_persisted_on_child_tool_call_turn() {
     )
     .with_store(store.clone());
 
-    run(&mut session, "delegate".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "delegate".into(), |_| {}).await.unwrap();
 
     // Locate the child session via the parent-child task record.
     let tasks = store.list_subagent_tasks("parent-rit-1").await.unwrap();
@@ -199,9 +197,7 @@ async fn subagent_reasoning_sent_back_in_child_second_request() {
         dir.path().to_path_buf(),
     );
 
-    run(&mut session, "delegate".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "delegate".into(), |_| {}).await.unwrap();
 
     // Four chat_stream calls in deterministic order:
     //   [0] parent turn 1   [1] child turn 1   [2] child turn 2   [3] parent turn 2
@@ -246,9 +242,7 @@ async fn subagent_interleaved_disabled_skips_child_persistence() {
     )
     .with_store(store.clone());
 
-    run(&mut session, "delegate".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "delegate".into(), |_| {}).await.unwrap();
 
     let tasks = store.list_subagent_tasks("parent-rit-3").await.unwrap();
     let child_id = tasks[0].child_session_id.clone();
@@ -284,9 +278,7 @@ async fn subagent_inherits_reasoning_effort() {
         dir.path().to_path_buf(),
     );
 
-    run(&mut session, "delegate".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "delegate".into(), |_| {}).await.unwrap();
 
     // The child's first request (index 1) must carry reasoning_effort=high.
     let reqs = mock.requests();

@@ -75,7 +75,11 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     session.messages = plan_msgs.clone();
 
     let display = plan_handoff::handoff(&mut session, "").expect("plan present");
-    assert_eq!(session.messages.len(), 1, "handoff collapses in-memory transcript");
+    assert_eq!(
+        session.messages.len(),
+        1,
+        "handoff collapses in-memory transcript"
+    );
     assert_eq!(
         session.handoff_seq,
         Some(n_plan as i64),

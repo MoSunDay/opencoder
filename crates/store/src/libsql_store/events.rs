@@ -12,18 +12,14 @@ VALUES (?, ?, ?, ?, ?)";
 /// highest seqs for the session — AUTOINCREMENT assigns contiguous ids inside
 /// the transaction and the write lock prevents concurrent interleave). Returns
 /// the seqs in input (emission) order. All `events` must share `session_id`.
-pub async fn append_many(
-    conn: &Connection,
-    events: &[SessionEventRecord],
-) -> Result<Vec<i64>> {
+pub async fn append_many(conn: &Connection, events: &[SessionEventRecord]) -> Result<Vec<i64>> {
     if events.is_empty() {
         return Ok(Vec::new());
     }
     let session_id = events[0].session_id.as_str();
     let tx = conn.transaction().await.context("begin tx")?;
     for ev in events {
-        let payload_json =
-            serde_json::to_string(&ev.payload).context("serialize event payload")?;
+        let payload_json = serde_json::to_string(&ev.payload).context("serialize event payload")?;
         tx.execute(
             INSERT_EVENT,
             params![

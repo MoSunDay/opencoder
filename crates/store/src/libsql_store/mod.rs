@@ -48,7 +48,10 @@ impl LibsqlStore {
         let conn = db.connect().context("connect libsql")?;
         schema::apply_connection_pragmas(&conn).await?;
         schema::bootstrap(&conn).await?;
-        let store = LibsqlStore { conn, db_lock: Mutex::new(()) };
+        let store = LibsqlStore {
+            conn,
+            db_lock: Mutex::new(()),
+        };
         debug!(backend = "libsql", "store opened");
         Ok(store)
     }
@@ -62,7 +65,10 @@ impl LibsqlStore {
         let conn = db.connect().context("connect in-memory")?;
         schema::apply_connection_pragmas(&conn).await?;
         schema::bootstrap(&conn).await?;
-        Ok(LibsqlStore { conn, db_lock: Mutex::new(()) })
+        Ok(LibsqlStore {
+            conn,
+            db_lock: Mutex::new(()),
+        })
     }
 
     /// Acquire a connection that shares the underlying database. Cheap clone.

@@ -273,25 +273,31 @@ pub(crate) async fn handle_model_outcome(
                             let new_frame_ms = reloaded.tui_frame_ms();
                             if new_frame_ms != *frame_ms {
                                 *frame_ms = new_frame_ms;
-                                *frame_ticker = tokio::time::interval(Duration::from_millis(*frame_ms));
-                                frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                                *frame_ticker =
+                                    tokio::time::interval(Duration::from_millis(*frame_ms));
+                                frame_ticker.set_missed_tick_behavior(
+                                    tokio::time::MissedTickBehavior::Skip,
+                                );
                             }
                             let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
                             chat.push_marker(Line::from(Span::styled(
                                 format!("[/config] saved \u{2192} {}", path.display()),
-                                Style::default().fg(Color::Green))));
+                                Style::default().fg(Color::Green),
+                            )));
                         }
                         Err(e) => {
                             chat.push_marker(Line::from(Span::styled(
                                 format!("[/config] reload failed: {e:#}"),
-                                Style::default().fg(Color::Red))));
+                                Style::default().fg(Color::Red),
+                            )));
                         }
                     }
                 }
                 Err(e) => {
                     chat.push_marker(Line::from(Span::styled(
                         format!("[/config] save failed: {e:#}"),
-                        Style::default().fg(Color::Red))));
+                        Style::default().fg(Color::Red),
+                    )));
                 }
             }
         }
@@ -346,31 +352,27 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::Dispatch(SlashAction::Config) => {
             *model_menu = Some(ModelMenu::Config(ConfigForm::new(config)));
         }
-        CommandOutcome::Dispatch(SlashAction::Compact) => {
-            match gate_compact(*running) {
-                CompactGate::Run => {
-                    if !start_turn(cmd_tx, cancel, UiCmd::Compact).await {
-                        worker_dead(chat);
-                        return LoopFlow::Quit;
-                    }
-                    *running = true;
-                    *follow = true;
-                    chat.begin_turn();
+        CommandOutcome::Dispatch(SlashAction::Compact) => match gate_compact(*running) {
+            CompactGate::Run => {
+                if !start_turn(cmd_tx, cancel, UiCmd::Compact).await {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
                 }
-                CompactGate::SkipRunning => {
-                    chat.push_marker(Line::from(Span::styled(
-                        "[compact] busy \u{2014} retry when idle",
-                        Style::default().fg(Color::Yellow),
-                    )));
-                }
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
             }
-        }
+            CompactGate::SkipRunning => {
+                chat.push_marker(Line::from(Span::styled(
+                    "[compact] busy \u{2014} retry when idle",
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+        },
         CommandOutcome::Dispatch(SlashAction::CacheSalt) => {
             let enabled = config.cache_salt == Some(true);
             *cache_salt_menu = Some(
-                match CacheSaltMenu::build(store.as_ref(), session_id, agent_name, enabled)
-                    .await
-                {
+                match CacheSaltMenu::build(store.as_ref(), session_id, agent_name, enabled).await {
                     Ok(m) => m,
                     Err(_) => CacheSaltMenu::parent_only(agent_name, session_id, enabled),
                 },

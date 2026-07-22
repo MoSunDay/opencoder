@@ -534,7 +534,9 @@ fn merge_into_deep_merges_providers_across_files() {
     .unwrap();
     // Write a global config that adds deepseek's api_key (merge, not replace).
     let home_dir = std::env::var_os("HOME").unwrap();
-    let global_path = std::path::Path::new(&home_dir).join(".opencoder").join("config.json");
+    let global_path = std::path::Path::new(&home_dir)
+        .join(".opencoder")
+        .join("config.json");
     std::fs::create_dir_all(global_path.parent().unwrap()).unwrap();
     std::fs::write(
         &global_path,
@@ -611,9 +613,15 @@ fn resolve_endpoint_includes_custom_headers_with_env_resolution() {
     assert_eq!(ep.api_key, "dk-key");
     assert_eq!(ep.headers.len(), 2);
     // {MY_TENANT} env reference is resolved at endpoint-resolution time.
-    assert_eq!(ep.headers[0], ("X-Tenant".to_string(), "tenant-42".to_string()));
+    assert_eq!(
+        ep.headers[0],
+        ("X-Tenant".to_string(), "tenant-42".to_string())
+    );
     // A literal value passes through unchanged.
-    assert_eq!(ep.headers[1], ("X-Literal".to_string(), "static-val".to_string()));
+    assert_eq!(
+        ep.headers[1],
+        ("X-Literal".to_string(), "static-val".to_string())
+    );
     std::env::remove_var("MY_TENANT");
 }
 

@@ -18,7 +18,10 @@ fn provider_patch_wraps_env_var_name_in_braces() {
     };
     let v = p.to_json();
     assert_eq!(v["model"], serde_json::json!("deepseek/chat"));
-    assert_eq!(v["providers"]["deepseek"]["api_key"], serde_json::json!("{MY_KEY}"));
+    assert_eq!(
+        v["providers"]["deepseek"]["api_key"],
+        serde_json::json!("{MY_KEY}")
+    );
 }
 
 #[test]
@@ -31,7 +34,10 @@ fn provider_patch_omits_api_key_when_untouched() {
         headers: vec![],
     };
     let v = p.to_json();
-    let has_key = v["providers"]["deepseek"].as_object().unwrap().contains_key("api_key");
+    let has_key = v["providers"]["deepseek"]
+        .as_object()
+        .unwrap()
+        .contains_key("api_key");
     assert!(!has_key, "untouched api_key must be absent from patch");
 }
 
@@ -45,7 +51,10 @@ fn provider_patch_clears_api_key_when_empty() {
         headers: vec![],
     };
     let v = p.to_json();
-    assert_eq!(v["providers"]["deepseek"]["api_key"], serde_json::Value::Null);
+    assert_eq!(
+        v["providers"]["deepseek"]["api_key"],
+        serde_json::Value::Null
+    );
 }
 
 #[test]
@@ -55,7 +64,10 @@ fn provider_patch_serializes_headers() {
         model_id: "m".into(),
         base_url: "u".into(),
         api_key: Some("k".into()),
-        headers: vec![("X-Tenant".into(), "42".into()), ("X-Trace".into(), "abc".into())],
+        headers: vec![
+            ("X-Tenant".into(), "42".into()),
+            ("X-Trace".into(), "abc".into()),
+        ],
     };
     let v = p.to_json();
     let hdrs = v["providers"]["svc"]["headers"].as_array().unwrap();
@@ -99,7 +111,10 @@ fn list_enter_switches_provider() {
 fn list_e_transitions_to_form() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
     handle_model_key(&mut slot, key('e'));
-    assert!(matches!(slot, Some(ModelMenu::Form(_))), "e should transition to Form");
+    assert!(
+        matches!(slot, Some(ModelMenu::Form(_))),
+        "e should transition to Form"
+    );
     if let Some(ModelMenu::Form(f)) = &slot {
         assert!(f.name_readonly, "editing existing -> name is read-only");
         assert_eq!(f.name, "deepseek");
@@ -138,7 +153,7 @@ fn list_d_then_y_deletes() {
 fn provider_form_save_produces_patch() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
     handle_model_key(&mut slot, key('e')); // -> Form
-    // Set focus to Save explicitly and press Enter
+                                           // Set focus to Save explicitly and press Enter
     {
         let f = match slot.as_mut() {
             Some(ModelMenu::Form(f)) => f,
@@ -178,10 +193,16 @@ fn esc_cancels_any_mode() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(
         crate::model_menu::config_form::ConfigForm::new(&super::common::cfg()),
     ));
-    assert!(matches!(handle_model_key(&mut slot, esc()), ModelOutcome::Cancel));
+    assert!(matches!(
+        handle_model_key(&mut slot, esc()),
+        ModelOutcome::Cancel
+    ));
     assert!(slot.is_none());
 
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    assert!(matches!(handle_model_key(&mut slot, esc()), ModelOutcome::Cancel));
+    assert!(matches!(
+        handle_model_key(&mut slot, esc()),
+        ModelOutcome::Cancel
+    ));
     assert!(slot.is_none());
 }

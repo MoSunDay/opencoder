@@ -56,7 +56,10 @@ async fn handoff_keeps_only_final_plan() {
 
     let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset.is_some(), "handoff should reset when a plan is present");
+    assert!(
+        reset.is_some(),
+        "handoff should reset when a plan is present"
+    );
     assert_eq!(
         session.messages.len(),
         1,
@@ -87,7 +90,10 @@ async fn handoff_noop_without_plan() {
 
     let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset.is_none(), "handoff must be a no-op with no assistant plan");
+    assert!(
+        reset.is_none(),
+        "handoff must be a no-op with no assistant plan"
+    );
     assert_eq!(session.messages.len(), 1, "messages must be unchanged");
     assert_eq!(session.messages[0].id, "u1");
 }
@@ -136,7 +142,10 @@ async fn handoff_does_not_touch_store() {
 
     let reset = plan_handoff::handoff(&mut session, "");
 
-    assert!(reset.is_some(), "handoff should reset when a plan is present");
+    assert!(
+        reset.is_some(),
+        "handoff should reset when a plan is present"
+    );
     assert_eq!(
         session.messages.len(),
         1,
@@ -155,15 +164,17 @@ async fn handoff_does_not_touch_store() {
     );
 }
 
-
 #[tokio::test]
 async fn handoff_appends_extra_input_to_plan() {
     let mut session = empty_session();
     session.messages = vec![
         Message::user("u1", "build a foo"),
-        assistant_with_text("a1", "## Plan
+        assistant_with_text(
+            "a1",
+            "## Plan
 1. do X
-2. do Y"),
+2. do Y",
+        ),
     ];
 
     let reset = plan_handoff::handoff(
@@ -175,9 +186,11 @@ async fn handoff_appends_extra_input_to_plan() {
     assert_eq!(session.messages.len(), 1);
     let body = session.messages[0].text();
     assert!(
-        body.contains("## Plan
+        body.contains(
+            "## Plan
 1. do X
-2. do Y"),
+2. do Y"
+        ),
         "plan must be present, got: {body}"
     );
     assert!(
@@ -198,18 +211,26 @@ async fn handoff_ignores_whitespace_only_extra() {
     let mut session = empty_session();
     session.messages = vec![
         Message::user("u1", "build a foo"),
-        assistant_with_text("a1", "## Plan
-1. do X"),
+        assistant_with_text(
+            "a1",
+            "## Plan
+1. do X",
+        ),
     ];
 
-    let reset = plan_handoff::handoff(&mut session, "   
-	  ");
+    let reset = plan_handoff::handoff(
+        &mut session,
+        "   
+	  ",
+    );
 
     assert!(reset.is_some());
     let body = session.messages[0].text();
     assert!(
-        !body.ends_with("   
-	  "),
+        !body.ends_with(
+            "   
+	  "
+        ),
         "whitespace-only extra must not be appended, got: {body}"
     );
 }
@@ -301,5 +322,110 @@ async fn handoff_display_includes_extra() {
     assert!(
         !display.contains("Planning phase complete"),
         "display must not contain the directive prefix"
+    );
+}
+
+#[tokio::test]
+async fn handoff_skips_orphaned_cancelled_subagent() {
+    // After a plan->act handoff the transcript collapses to the handoff
+    // directive; any `task` tool_use from plan-mode history is gone. A
+    // cancelled subagent task whose tool_use_id no longer exists in the live
+    // transcript is an orphan and must NOT be replayed/backfilled — replaying
+    // it would inject a tool_result with no matching tool_use. Only the
+    // `handoff_seq.is_some()` branch applies this orphan filter.
+    use opencoder_llm::MockChatClient;
+    use opencoder_session::resume::replay_cancelled_tasks;
+    use opencoder_store::{LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn meta(
+        id: &str,
+        agent: &str,
+        handoff_seq: Option<i64>,
+        handoff_plan: Option<&str>,
+    ) -> SessionMeta {
+        SessionMeta {
+            id: id.into(),
+            title: Some("t".into()),
+            agent: Some(agent.into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq,
+            handoff_plan: handoff_plan.map(str::to_string),
+            skill: None,
+        }
+    }
+
+    let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    store
+        .create_session(&meta("parent", "act", Some(1), Some("## Plan\n1. do X")))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("child-o", "explore", None, None))
+        .await
+        .unwrap();
+    // Child seed so its own resume (if ever reached) has history.
+    store
+        .append_message("child-o", &Message::user("cu", "explore"))
+        .await
+        .unwrap();
+    // Orphan task: Cancelled, but its tool_use_id lived in the now-trimmed
+    // plan-mode history and is absent from the live transcript.
+    store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-orphan".into(),
+            parent_session_id: "parent".into(),
+            child_session_id: "child-o".into(),
+            parent_message_id: None,
+            agent: "explore".into(),
+            prompt: "explore".into(),
+            result: None,
+            status: SubagentStatus::Cancelled,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        })
+        .await
+        .unwrap();
+
+    let mock = Arc::new(MockChatClient::new());
+    let agent = resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent",
+        agent,
+        config(),
+        mock.clone(),
+        PathBuf::from("/tmp"),
+    )
+    .with_store(store.clone());
+    // Post-handoff transcript: only the synthetic plan directive; the old
+    // `task` tool_use is gone (orphaned).
+    session.handoff_seq = Some(1);
+    session.messages = vec![Message::user("handoff", "## Plan\n1. do X")];
+
+    replay_cancelled_tasks(&mut session).await;
+
+    // Orphan is skipped: no child replay, no Tool backfill, task stays Cancelled.
+    assert_eq!(mock.call_count(), 0, "orphaned task must not be replayed");
+    assert!(
+        !session.messages.iter().any(|m| m.role == Role::Tool),
+        "no Tool message must be backfilled for an orphaned task",
+    );
+    let tasks = store.list_subagent_tasks("parent").await.unwrap();
+    assert!(
+        tasks
+            .iter()
+            .any(|t| t.task_id == "task-orphan" && matches!(t.status, SubagentStatus::Cancelled)),
+        "orphaned task must remain Cancelled, got {:?}",
+        tasks
+            .iter()
+            .map(|t| (&t.task_id, t.status))
+            .collect::<Vec<_>>()
     );
 }

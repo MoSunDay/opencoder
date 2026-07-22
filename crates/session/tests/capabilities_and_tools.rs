@@ -182,7 +182,9 @@ async fn tools_subagent_is_dispatchable_from_act() {
     let mut s = SessionState::new("dispatch", agent, cfg, client, dir.path().to_path_buf());
 
     let mut events = Vec::new();
-    run(&mut s, "delegate to tools".into(), |ev| events.push(ev)).await.unwrap();
+    run(&mut s, "delegate to tools".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
 
     // The task tool must complete without error and NOT report an unknown type.
     let task_ends: Vec<&SessionEvent> = events
@@ -191,7 +193,10 @@ async fn tools_subagent_is_dispatchable_from_act() {
         .collect();
     assert!(!task_ends.is_empty(), "expected a task ToolEnd");
     for ev in &task_ends {
-        if let SessionEvent::ToolEnd { is_error, output, .. } = ev {
+        if let SessionEvent::ToolEnd {
+            is_error, output, ..
+        } = ev
+        {
             assert!(!*is_error, "tools subagent must dispatch cleanly");
             assert!(
                 !output.contains("Unknown subagent_type"),
@@ -235,7 +240,10 @@ async fn tools_subagent_rejected_when_capability_disabled() {
         .iter()
         .find_map(|ev| match ev {
             SessionEvent::ToolEnd {
-                name, is_error, output, ..
+                name,
+                is_error,
+                output,
+                ..
             } if name == "task" && *is_error => Some(output.clone()),
             _ => None,
         })
@@ -267,9 +275,18 @@ async fn config_save_load_round_trips_capabilities() {
     Config::save(dir.path(), &patch).expect("save patch");
 
     let loaded = Config::load(dir.path()).expect("load");
-    assert!(loaded.capabilities.browser, "browser capability round-trips");
-    assert!(loaded.capabilities.computer_use, "computer_use capability round-trips");
-    assert!(loaded.capabilities.tools_subagent, "tools_subagent capability round-trips");
+    assert!(
+        loaded.capabilities.browser,
+        "browser capability round-trips"
+    );
+    assert!(
+        loaded.capabilities.computer_use,
+        "computer_use capability round-trips"
+    );
+    assert!(
+        loaded.capabilities.tools_subagent,
+        "tools_subagent capability round-trips"
+    );
 
     // Toggle off and confirm the merge overwrites (not just creates).
     Config::save(
@@ -278,7 +295,16 @@ async fn config_save_load_round_trips_capabilities() {
     )
     .expect("save toggle");
     let reloaded = Config::load(dir.path()).expect("reload");
-    assert!(!reloaded.capabilities.browser, "browser capability toggles off");
-    assert!(!reloaded.capabilities.computer_use, "computer_use toggles off");
-    assert!(!reloaded.capabilities.tools_subagent, "tools_subagent toggles off");
+    assert!(
+        !reloaded.capabilities.browser,
+        "browser capability toggles off"
+    );
+    assert!(
+        !reloaded.capabilities.computer_use,
+        "computer_use toggles off"
+    );
+    assert!(
+        !reloaded.capabilities.tools_subagent,
+        "tools_subagent toggles off"
+    );
 }

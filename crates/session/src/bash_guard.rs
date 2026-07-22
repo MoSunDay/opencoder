@@ -141,15 +141,27 @@ fn match_redirect_op(chars: &[char], i: usize) -> Option<usize> {
     let c = chars[i];
     // &> / &>> (redirect both stdout and stderr to a file)
     if c == '&' && i + 1 < n && chars[i + 1] == '>' {
-        return Some(if i + 2 < n && chars[i + 2] == '>' { 3 } else { 2 });
+        return Some(if i + 2 < n && chars[i + 2] == '>' {
+            3
+        } else {
+            2
+        });
     }
     // [12]>> / [12]> (fd-prefixed redirect)
     if (c == '1' || c == '2') && i + 1 < n && chars[i + 1] == '>' {
-        return Some(if i + 2 < n && chars[i + 2] == '>' { 3 } else { 2 });
+        return Some(if i + 2 < n && chars[i + 2] == '>' {
+            3
+        } else {
+            2
+        });
     }
     // >> / > (bare redirect)
     if c == '>' {
-        return Some(if i + 1 < n && chars[i + 1] == '>' { 2 } else { 1 });
+        return Some(if i + 1 < n && chars[i + 1] == '>' {
+            2
+        } else {
+            1
+        });
     }
     None
 }
@@ -417,10 +429,7 @@ mod tests {
         assert_eq!(classify("cmd 1>&2"), BashVerdict::ReadOnly);
         assert_eq!(classify("cmd >&1"), BashVerdict::ReadOnly);
         // In a pipeline — the pipe splits segments, both read-only.
-        assert_eq!(
-            classify("grep foo file 2>&1 | head"),
-            BashVerdict::ReadOnly
-        );
+        assert_eq!(classify("grep foo file 2>&1 | head"), BashVerdict::ReadOnly);
         // Multiple /dev/null redirects are fine.
         assert_eq!(
             classify("cmd >/dev/null 2>/dev/null"),
@@ -614,10 +623,22 @@ mod tests {
     fn real_file_redirect_before_metachar_still_blocked() {
         // Genuine file writes right before `)`/`}` must still be blocked —
         // the boundary fix must not over-loosen.
-        assert!(matches!(classify("(echo x > file)"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("{ echo x 2> err.log; }"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("(echo x >> log)"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("(echo x &> all.out)"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("(echo x > file)"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("{ echo x 2> err.log; }"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("(echo x >> log)"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("(echo x &> all.out)"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -640,9 +661,18 @@ mod tests {
     #[test]
     fn tee_to_real_file_blocked() {
         // tee writing to any non-/dev/null path is a real write.
-        assert!(matches!(classify("echo x | tee file"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("tee -a f.log"), BashVerdict::WriteBlocked(_)));
-        assert!(matches!(classify("echo x | tee a b"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("echo x | tee file"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("tee -a f.log"),
+            BashVerdict::WriteBlocked(_)
+        ));
+        assert!(matches!(
+            classify("echo x | tee a b"),
+            BashVerdict::WriteBlocked(_)
+        ));
         // One /dev/null plus one real file is still a write.
         assert!(matches!(
             classify("echo x | tee /dev/null file"),

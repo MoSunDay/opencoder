@@ -14,8 +14,8 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::chat::ChatView;
 use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutcome};
+use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
 use crate::input::spawn_input_pump;
@@ -85,6 +85,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
     };
 
     // Resume an existing session if --session was given, otherwise start fresh.
+    let replay_cancel = CancellationToken::new();
     let session = if let Some(id) = &opts.session {
         // Try as a session ID first; if not found, try as a subagent
         // task_id to resolve the parent session.
@@ -103,6 +104,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
             config.clone(),
             client.clone(),
             workdir.clone(),
+            Some(replay_cancel.clone()),
         )
         .await?
     } else {
@@ -288,10 +290,21 @@ async fn run_app(
 
     loop {
         let app_loop::DisplayState {
-            agent_name, status, display_chat, display_title, display_status_agent,
-            display_ctx, display_sys, status_model,
+            agent_name,
+            status,
+            display_chat,
+            display_title,
+            display_status_agent,
+            display_ctx,
+            display_sys,
+            status_model,
         } = app_loop::compute_display(
-            &chat, subagent_focus, subagent_sys, sys_tokens, &config, &model_label,
+            &chat,
+            subagent_focus,
+            subagent_sys,
+            sys_tokens,
+            &config,
+            &model_label,
         );
         // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
         // refreshes the spinner still animates at full frame rate because it is
@@ -300,52 +313,50 @@ async fn run_app(
             display_chat_cached = Some(display_chat.clone());
             body_refresh_pending = false;
         }
-        let render_chat = display_chat_cached
-            .as_ref()
-            .unwrap_or(display_chat);
+        let render_chat = display_chat_cached.as_ref().unwrap_or(display_chat);
         if dirty && render_pending {
             if !skip_next_render {
-            render(
-                terminal,
-                render_chat,
-                &input,
-                cursor_idx,
-                &display_title,
-                &display_status_agent,
-                running,
-                show_help,
-                display_ctx,
-                display_sys,
-                context_limit,
-                &status_model,
-                &status,
-                &chat.steer_items,
-                &queue_items,
-                &mut scroll,
-                follow,
-                anim_tick,
-                mode_flash.as_ref().and_then(|(t, s)| {
-                    if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
-                        Some(t.as_str())
-                    } else {
-                        None
-                    }
-                }),
-                skill_menu.as_ref(),
-                task_picker.as_ref(),
-                command_menu.as_ref(),
-                model_menu.as_ref(),
-                cache_salt_menu.as_ref(),
-                &mut hits,
-                selection,
-                copy_status.as_ref().and_then(|(msg, t)| {
-                    if t.elapsed() < Duration::from_secs(2) {
-                        Some(msg.as_str())
-                    } else {
-                        None
-                    }
-                }),
-            )?;
+                render(
+                    terminal,
+                    render_chat,
+                    &input,
+                    cursor_idx,
+                    &display_title,
+                    &display_status_agent,
+                    running,
+                    show_help,
+                    display_ctx,
+                    display_sys,
+                    context_limit,
+                    &status_model,
+                    &status,
+                    &chat.steer_items,
+                    &queue_items,
+                    &mut scroll,
+                    follow,
+                    anim_tick,
+                    mode_flash.as_ref().and_then(|(t, s)| {
+                        if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
+                            Some(t.as_str())
+                        } else {
+                            None
+                        }
+                    }),
+                    skill_menu.as_ref(),
+                    task_picker.as_ref(),
+                    command_menu.as_ref(),
+                    model_menu.as_ref(),
+                    cache_salt_menu.as_ref(),
+                    &mut hits,
+                    selection,
+                    copy_status.as_ref().and_then(|(msg, t)| {
+                        if t.elapsed() < Duration::from_secs(2) {
+                            Some(msg.as_str())
+                        } else {
+                            None
+                        }
+                    }),
+                )?;
             }
             dirty = false;
         }
@@ -780,9 +791,9 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, MouseOutcome, paste_payload,
-    pre_key_intercept, push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for,
-    worker_dead,
+    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, paste_payload, pre_key_intercept,
+    push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for, worker_dead,
+    MouseOutcome,
 };
 
 #[cfg(test)]

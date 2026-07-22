@@ -116,9 +116,7 @@ fn status_bar_omits_branding() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(
-                f, area, false, "", "glm-4.6", "act", 0, 0, 200000,
-            );
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000);
         })
         .unwrap();
 
@@ -143,9 +141,7 @@ fn status_bar_running_shows_spinner_and_status() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(
-                f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000,
-            );
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000);
         })
         .unwrap();
 
@@ -164,7 +160,6 @@ fn status_bar_running_shows_spinner_and_status() {
     );
 }
 
-
 // ----- Guard: skill badge removed from status bar -----
 
 /// The status bar must NOT render a `skill:` badge (removed per user request
@@ -177,9 +172,7 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(
-                f, area, false, "", "glm-4.6", "act", 0, 0, 200000,
-            );
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000);
         })
         .unwrap();
 
@@ -202,9 +195,7 @@ fn status_bar_has_no_steer_queue_or_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(
-                f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000,
-            );
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000);
         })
         .unwrap();
 
@@ -301,9 +292,7 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
         "queue row must have an Up button"
     );
     assert!(
-        queue_btns
-            .iter()
-            .any(|b| b.action == QueueBtnAction::Down),
+        queue_btns.iter().any(|b| b.action == QueueBtnAction::Down),
         "queue row must have a Down button"
     );
     assert!(
@@ -322,7 +311,6 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
 }
 
 // ----- Guard (B): composer rendering with multi-line input -----
-
 
 /// The composer renders a `❯ ` prompt on the first line, the first input
 /// segment after it, subsequent lines without a prompt, and a follow label
@@ -452,10 +440,7 @@ fn body_follow_label_when_following() {
         row.contains('跟') && row.contains('随'),
         "follow label should appear on bottom border; got: {row}"
     );
-    assert!(
-        jump_btn.is_none(),
-        "jump_btn should be None when following"
-    );
+    assert!(jump_btn.is_none(), "jump_btn should be None when following");
 }
 
 /// When scrolled past the top, the body's top-border row shows the `⬆`
@@ -797,15 +782,19 @@ fn status_bar_shows_ctx_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(
-                f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000,
-            );
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000);
         })
         .unwrap();
 
     let row = row_text(terminal.backend().buffer(), 0, 120);
-    assert!(row.contains("ctx"), "status bar should show ctx; got: {row}");
-    assert!(row.contains('%'), "status bar should show percent; got: {row}");
+    assert!(
+        row.contains("ctx"),
+        "status bar should show ctx; got: {row}"
+    );
+    assert!(
+        row.contains('%'),
+        "status bar should show percent; got: {row}"
+    );
     assert!(
         row.contains("5K"),
         "should show compact used tokens; got: {row}"
@@ -823,9 +812,7 @@ fn status_bar_ctx_red_at_high_usage() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(
-                f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000,
-            );
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000);
         })
         .unwrap();
 
@@ -833,9 +820,7 @@ fn status_bar_ctx_red_at_high_usage() {
     let area = buf.area;
     let row = row_text(buf, 0, area.width);
     let ctx_col = row.find("ctx").expect("ctx should be present");
-    let cell = buf
-        .cell((ctx_col as u16, 0))
-        .expect("cell at ctx");
+    let cell = buf.cell((ctx_col as u16, 0)).expect("cell at ctx");
     assert_eq!(cell.fg, Color::Red, "high usage should be red; got: {row}");
 }
 
@@ -857,7 +842,9 @@ async fn render_then_click_arrow_targets_jump_view() {
     // Tall chat so the body scrolls (max_rows > 0) and both arrows can appear.
     let mut chat = ChatView::default();
     for i in 0..80 {
-        chat.apply(&SessionEvent::TextDelta(format!("content line number {i}\n")));
+        chat.apply(&SessionEvent::TextDelta(format!(
+            "content line number {i}\n"
+        )));
     }
     chat.apply(&SessionEvent::Done);
 

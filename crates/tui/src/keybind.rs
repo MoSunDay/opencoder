@@ -1,6 +1,6 @@
 pub const HELP: &str = "\
 Keybindings:
-  Shift+Tab        switch mode act <--> plan  (Alt+Tab / Ctrl+T fallback)
+  Shift+Tab        switch mode act <--> plan  (Alt+Tab fallback)
   Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
   t+Tab           switch mode act <--> plan (keep context, no handoff reset)
@@ -17,7 +17,7 @@ Keybindings:
   Ctrl+A / Ctrl+E  cursor to start / end (same as Home / End)
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
   Ctrl+U           scroll up
-  Ctrl+L           collapse all thinking / exit subagent view / clear input
+  Ctrl+L           exit subagent view (if focused) / collapse all thinking / clear input
 Mouse:            scroll wheel to scroll transcript; click arrow to follow
                   drag in the body to select text and copy it to the clipboard (OSC52)
                   SHIFT+drag = terminal-native selection (fallback when OSC52 is blocked)

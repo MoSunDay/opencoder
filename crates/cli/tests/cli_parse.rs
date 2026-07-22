@@ -118,14 +118,7 @@ fn server_subcommand_and_serve_alias() {
     }
 
     // The canonical name works too, and accepts --token.
-    let cli2 = parse(&[
-        "opencoder",
-        "server",
-        "--port",
-        "1",
-        "--token",
-        "abc",
-    ]);
+    let cli2 = parse(&["opencoder", "server", "--port", "1", "--token", "abc"]);
     match cli2.command {
         Some(Command::Server { token, .. }) => {
             assert_eq!(token.as_deref(), Some("abc"));

@@ -113,7 +113,10 @@ fn is_droppable_delta(sev: &SessionEvent) -> bool {
     match sev {
         SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) => true,
         SessionEvent::SubagentChild { ev, .. } => {
-            matches!(ev.as_ref(), SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_))
+            matches!(
+                ev.as_ref(),
+                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_)
+            )
         }
         _ => false,
     }
@@ -276,7 +279,12 @@ pub async fn process_cmd(
         }
         UiCmd::ReloadConfig(new_cfg) => {
             if let Ok(ep) = new_cfg.resolve_endpoint() {
-                if let Ok(new_client) = ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, new_cfg.network.proxy.as_deref()) {
+                if let Ok(new_client) = ChatClient::new(
+                    &ep.base_url,
+                    &ep.api_key,
+                    &ep.headers,
+                    new_cfg.network.proxy.as_deref(),
+                ) {
                     sess.apply_config_reload(*new_cfg, Arc::new(new_client));
                 }
             }

@@ -33,9 +33,10 @@ pub(crate) fn provider_cfg() -> Config {
             base_url: "https://api.deepseek.com/v1".to_string(),
             api_key: Some("dk-secret-key".to_string()),
             model: Some("deepseek-chat".to_string()),
-            headers: vec![
-                opencoder_core::HttpHeader { name: "X-Region".into(), value: "eu".into() },
-            ],
+            headers: vec![opencoder_core::HttpHeader {
+                name: "X-Region".into(),
+                value: "eu".into(),
+            }],
         },
     );
     c
@@ -71,7 +72,12 @@ fn mask_hides_short_keys_entirely() {
 #[test]
 fn reasoning_cycle_is_circular() {
     let mut r = Reasoning::Off;
-    let seq = [Reasoning::Low, Reasoning::Medium, Reasoning::High, Reasoning::Off];
+    let seq = [
+        Reasoning::Low,
+        Reasoning::Medium,
+        Reasoning::High,
+        Reasoning::Off,
+    ];
     for expect in seq {
         r = r.next();
         assert_eq!(r, expect);

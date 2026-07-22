@@ -90,7 +90,11 @@ pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -
 
     // Apply line limit first, then byte limit.
     let mut result: String = if over_lines {
-        content.lines().take(MAX_OUTPUT_LINES).collect::<Vec<_>>().join("\n")
+        content
+            .lines()
+            .take(MAX_OUTPUT_LINES)
+            .collect::<Vec<_>>()
+            .join("\n")
     } else {
         content
     };

@@ -124,7 +124,10 @@ async fn resume_marks_stuck_running_subagent_as_cancelled() {
         "stuck Running task must be marked Cancelled on resume, got {:?}",
         t.status
     );
-    assert_eq!(t.ok, None, "ok must be untouched (None) for a cancelled task");
+    assert_eq!(
+        t.ok, None,
+        "ok must be untouched (None) for a cancelled task"
+    );
     assert_eq!(
         t.result, None,
         "result must be untouched (None) for a cancelled task"
@@ -377,10 +380,21 @@ async fn resume_synthesizes_error_result_for_dangling_tool_use() {
     .unwrap();
 
     // 3 messages: user, assistant(tool_use), synthetic tool_result.
-    assert_eq!(resumed.messages.len(), 3, "expected a synthetic tool result");
+    assert_eq!(
+        resumed.messages.len(),
+        3,
+        "expected a synthetic tool result"
+    );
     let tool_msg = &resumed.messages[2];
-    assert_eq!(tool_msg.role, Role::Tool, "synthesized msg must be Role::Tool");
-    assert!(tool_msg.synthetic, "synthesized msg must be flagged synthetic");
+    assert_eq!(
+        tool_msg.role,
+        Role::Tool,
+        "synthesized msg must be Role::Tool"
+    );
+    assert!(
+        tool_msg.synthetic,
+        "synthesized msg must be flagged synthetic"
+    );
     let result = tool_msg.blocks.iter().find_map(|b| match b {
         ContentBlock::ToolResult {
             tool_use_id,
@@ -451,7 +465,10 @@ async fn resume_does_not_inject_when_tool_result_already_present() {
         synthetic: false,
     };
     let _ = &mut tool_msg; // keep field-order explicit above
-    store.append_message("paired-sess", &tool_msg).await.unwrap();
+    store
+        .append_message("paired-sess", &tool_msg)
+        .await
+        .unwrap();
 
     let resumed = resume(
         store.clone(),

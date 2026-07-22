@@ -327,14 +327,17 @@ async fn compaction_fires_with_real_default_config() {
 
     // Assert the real defaults (no compaction field was overridden).
     assert_eq!(s.config.context_limit(), 128_000, "default context window");
-    assert_eq!(s.config.compaction.context_threshold, 80_000, "default threshold");
+    assert_eq!(
+        s.config.compaction.context_threshold, 80_000,
+        "default threshold"
+    );
     assert_eq!(s.config.compaction.reserved, 20_000, "default reserved");
     assert_eq!(s.config.compaction.tail_turns, 2, "default tail_turns");
-    let budget = s
-        .config
-        .compaction
-        .context_threshold
-        .min(s.config.context_limit().saturating_sub(s.config.compaction.reserved));
+    let budget = s.config.compaction.context_threshold.min(
+        s.config
+            .context_limit()
+            .saturating_sub(s.config.compaction.reserved),
+    );
     assert_eq!(budget, 80_000, "budget = min(threshold, limit - reserved)");
 
     // ~150k estimated tokens — well above the 80k budget.
@@ -343,7 +346,10 @@ async fn compaction_fires_with_real_default_config() {
     s.messages.push(big_user_message("u3", 200_000));
 
     // Layer 1: the trigger must fire BEFORE any run() call.
-    assert!(should_compact(&s), "150k estimated tokens must trip the 80k budget");
+    assert!(
+        should_compact(&s),
+        "150k estimated tokens must trip the 80k budget"
+    );
 
     // Rebuild the session with a real mock script: summary call, then a
     // tool-less done so the loop terminates after one turn.
@@ -424,7 +430,7 @@ async fn compaction_fires_when_over_budget_but_few_turns() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_event("SUMMARY")]) // compaction summarize call
-            .with_default(vec![done_event("done")]),  // subsequent turn(s)
+            .with_default(vec![done_event("done")]), // subsequent turn(s)
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let (_dir, mut s) = session_with(config, client).await;

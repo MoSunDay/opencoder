@@ -144,12 +144,9 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
     if from < 2 {
         // v2: add sse_kind column to session_events for lossless event-kind
         // replay. The column is nullable so existing rows stay valid.
-        conn.execute(
-            "ALTER TABLE session_events ADD COLUMN sse_kind TEXT",
-            (),
-        )
-        .await
-        .context("migrate v2: add sse_kind column")?;
+        conn.execute("ALTER TABLE session_events ADD COLUMN sse_kind TEXT", ())
+            .await
+            .context("migrate v2: add sse_kind column")?;
     }
     if from < 3 {
         // v3: plan→act handoff boundary + active skill on sessions, so resume

@@ -185,10 +185,7 @@ mod tests {
 
     #[test]
     fn delete_last_pair_adjusts_selection() {
-        let mut ed = HeadersEditor::new(vec![
-            ("A".into(), "1".into()),
-            ("B".into(), "2".into()),
-        ]);
+        let mut ed = HeadersEditor::new(vec![("A".into(), "1".into()), ("B".into(), "2".into())]);
         ed.selected = 1;
         ed.handle_key(key('-'));
         assert_eq!(ed.pairs.len(), 1);
@@ -197,10 +194,7 @@ mod tests {
 
     #[test]
     fn up_down_navigate_pairs() {
-        let mut ed = HeadersEditor::new(vec![
-            ("A".into(), "1".into()),
-            ("B".into(), "2".into()),
-        ]);
+        let mut ed = HeadersEditor::new(vec![("A".into(), "1".into()), ("B".into(), "2".into())]);
         ed.selected = 1;
         ed.handle_key(up());
         assert_eq!(ed.selected, 0);

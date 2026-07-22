@@ -160,10 +160,7 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
         None => return (CommandOutcome::Idle, false),
     };
     if k.modifiers.contains(KeyModifiers::CONTROL) {
-        if matches!(
-            k.code,
-            KeyCode::Char('d') | KeyCode::Char('\u{4}')
-        ) {
+        if matches!(k.code, KeyCode::Char('d') | KeyCode::Char('\u{4}')) {
             let quit = true;
             *menu = None;
             return (CommandOutcome::Idle, quit);

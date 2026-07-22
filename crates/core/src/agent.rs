@@ -280,7 +280,15 @@ mod tests {
     fn tools_subagent_is_registered_with_capability_tools() {
         let tools_agent = resolve_agent("tools").expect("tools subagent registered");
         assert_eq!(tools_agent.mode, AgentMode::Subagent);
-        for required in ["web_fetch", "web_search", "computer_use", "read", "glob", "grep", "ls"] {
+        for required in [
+            "web_fetch",
+            "web_search",
+            "computer_use",
+            "read",
+            "glob",
+            "grep",
+            "ls",
+        ] {
             assert!(
                 tools_agent.tools.allows(required),
                 "tools subagent must allow '{required}'"

@@ -68,7 +68,7 @@ pub(crate) fn handle_key(
             MenuOutcome::Idle => KeyAction::None,
         };
     }
-    // Alt+Tab (and Ctrl+T fallback) switches act <-> plan mode.
+    // Alt+Tab (and Shift+Tab) switches act <-> plan mode.
     if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab)
     {
         let next = if agent == "plan" { "act" } else { "plan" };
@@ -81,11 +81,6 @@ pub(crate) fn handle_key(
             // (DISAMBIGUATE_ESCAPE_CODES) crossterm reports this as the raw
             // control char `\u{4}` (EOT) with the CONTROL modifier set.
             KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
-            // Fallback mode switch for terminals that swallow Alt+Tab.
-            KeyCode::Char('t') => {
-                let next = if agent == "plan" { "act" } else { "plan" };
-                return KeyAction::SwitchAgent(next.into());
-            }
             KeyCode::Char('h') => {
                 *show_help = !*show_help;
                 return KeyAction::None;
@@ -212,7 +207,8 @@ pub(crate) fn handle_key(
         }
         KeyCode::Up => {
             if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, -1, inner_w, prompt_w);
+                *cursor_idx =
+                    composer::move_cursor_vertical(input, *cursor_idx, -1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, -1);
             }
@@ -220,7 +216,8 @@ pub(crate) fn handle_key(
         }
         KeyCode::Down => {
             if input.contains('\n') {
-                *cursor_idx = composer::move_cursor_vertical(input, *cursor_idx, 1, inner_w, prompt_w);
+                *cursor_idx =
+                    composer::move_cursor_vertical(input, *cursor_idx, 1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, 1);
             }

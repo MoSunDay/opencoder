@@ -58,9 +58,7 @@ pub enum ChatBlock {
     },
     /// Read-only plan card shown after plan→act handoff. The finalized plan,
     /// rendered as markdown. Not interactive — purely informational context.
-    Plan {
-        rendered: Vec<Line<'static>>,
-    },
+    Plan { rendered: Vec<Line<'static>> },
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -241,7 +239,12 @@ impl ChatView {
                     view.apply(ev);
                 }
             }
-            SessionEvent::SubagentEnd { id, ok, cancelled, summary } => {
+            SessionEvent::SubagentEnd {
+                id,
+                ok,
+                cancelled,
+                summary,
+            } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
                 if self.subagents_running > 0 {
@@ -277,6 +280,14 @@ impl ChatView {
                     ))]));
             }
             SessionEvent::PlanHandoff(plan) => {
+                // Dedup: don't stack a second plan card on a replayed PlanHandoff.
+                if self
+                    .blocks
+                    .iter()
+                    .any(|b| matches!(b, ChatBlock::Plan { .. }))
+                {
+                    return;
+                }
                 self.finalize_assistant();
                 let rendered = crate::markdown::render(plan);
                 if !rendered.is_empty() {
@@ -286,12 +297,8 @@ impl ChatView {
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq } => {
-                // A steered input was promoted at the turn boundary. Resolve
-                // seq -> prompt text, embed a `steer: {prompt}` marker so the
-                // user sees WHEN the steer actually intervened (distinct from
-                // the submit-time echo in the queue panel), then drop the row.
-                // Clone the text first to release the shared borrow before the
-                // mutable `push_marker`/`retain` calls below.
+                // Steer promoted at turn boundary: resolve seq->prompt, embed a
+                // `steer:` marker, drop the row. Clone text to free the borrow.
                 if let Some(prompt) = self
                     .steer_items
                     .iter()
@@ -300,7 +307,9 @@ impl ChatView {
                 {
                     self.push_marker(Line::from(Span::styled(
                         format!("steer: {prompt}"),
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     self.push_marker(Line::from(""));
                 }
@@ -583,7 +592,9 @@ impl ChatView {
                 ChatBlock::Plan { rendered } => {
                     out.push(Line::from(Span::styled(
                         "\u{2500}\u{2500} plan \u{2500}\u{2500}",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     )));
                     let indent = Span::raw("  ");
                     for l in rendered.iter() {
@@ -644,8 +655,11 @@ impl ChatView {
                     if *done && !summary.is_empty() {
                         spans.push(Span::styled(
                             format!("  {summary}"),
-                            Style::default()
-                                .fg(if *cancelled || *ok { Color::DarkGray } else { Color::Red }),
+                            Style::default().fg(if *cancelled || *ok {
+                                Color::DarkGray
+                            } else {
+                                Color::Red
+                            }),
                         ));
                     }
                     out.push(Line::from(spans));

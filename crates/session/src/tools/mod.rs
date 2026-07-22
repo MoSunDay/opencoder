@@ -5,12 +5,15 @@ use opencoder_core::{AgentKind, ToolArc};
 use serde_json::Value;
 
 pub mod bash;
+pub mod chrome_headless;
 pub mod computer_use;
 pub mod edit;
 pub mod glob;
 pub mod grep;
+pub mod latent;
 pub mod ls;
 pub mod read;
+pub mod ssh_pty;
 pub mod task;
 pub mod web_read;
 pub mod write;
@@ -34,6 +37,8 @@ pub fn registry() -> HashMap<String, ToolArc> {
             Arc::new(ls::ListTool) as ToolArc,
             Arc::new(task::TaskTool) as ToolArc,
             Arc::new(computer_use::ComputerUseTool) as ToolArc,
+            Arc::new(ssh_pty::SshPtyTool) as ToolArc,
+            Arc::new(chrome_headless::ChromeHeadlessTool) as ToolArc,
         ];
         // Browser tools are heavy (obscura + V8): only compiled with the
         // `browser` feature. Runtime visibility is additionally gated by
@@ -234,7 +239,10 @@ mod tests {
             "act+tools-off description must not mention 'tools', got: {desc}"
         );
         assert!(desc.contains("explore"), "must mention explore: {desc}");
-        assert!(desc.contains("build"), "act must still advertise build: {desc}");
+        assert!(
+            desc.contains("build"),
+            "act must still advertise build: {desc}"
+        );
         let st_desc = func["parameters"]["properties"]["subagent_type"]["description"]
             .as_str()
             .unwrap();

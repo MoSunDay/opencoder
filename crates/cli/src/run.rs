@@ -16,9 +16,12 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     let workdir = resolve_workdir(cli)?;
     let config = Config::load(&workdir)?;
     let ep = config.resolve_endpoint()?;
-    let client: Arc<dyn ChatStream> = Arc::new(
-        ChatClient::new(&ep.base_url, &ep.api_key, &ep.headers, config.network.proxy.as_deref())?,
-    );
+    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
+        &ep.base_url,
+        &ep.api_key,
+        &ep.headers,
+        config.network.proxy.as_deref(),
+    )?);
     let store: Option<Arc<dyn Store>> = crate::session_cmd::open_store(&workdir)
         .await
         .ok()
@@ -71,8 +74,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     if let Some(pf) = &cli.prompt_file {
         let body = std::fs::read_to_string(pf)
             .map_err(|e| anyhow!("--prompt-file {}: {e}", pf.display()))?;
-        session.agent.prompt =
-            format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
+        session.agent.prompt = format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
     }
 
     // Extract and resolve {$skill-name} tokens from the prompt.
@@ -399,10 +401,7 @@ mod tests {
 
     #[test]
     fn resume_hint_is_copyable_command() {
-        assert_eq!(
-            resume_hint("01ABC"),
-            "resume with: opencoder -s 01ABC"
-        );
+        assert_eq!(resume_hint("01ABC"), "resume with: opencoder -s 01ABC");
     }
 
     #[test]
@@ -433,20 +432,47 @@ mod tests {
         assert!(format_resume_summary(&[]).is_none());
 
         let tasks = vec![
-            task("t1", "explore", "find all TODO comments", SubagentStatus::Completed, Some(true)),
-            task("t2", "build", "fix the bug in module foo bar baz qux", SubagentStatus::Failed, Some(false)),
+            task(
+                "t1",
+                "explore",
+                "find all TODO comments",
+                SubagentStatus::Completed,
+                Some(true),
+            ),
+            task(
+                "t2",
+                "build",
+                "fix the bug in module foo bar baz qux",
+                SubagentStatus::Failed,
+                Some(false),
+            ),
         ];
         let s = format_resume_summary(&tasks).expect("non-empty -> Some");
         assert!(s.contains("2/2 subagents done"), "got: {s}");
         assert!(s.contains('\u{2714}'), "completed mark (✔) present: {s}");
         assert!(s.contains('\u{2718}'), "failed mark (✘) present: {s}");
-        assert!(s.contains("find all TODO comments"), "explore prompt present: {s}");
-        assert!(s.contains("fix the bug in module foo bar baz qux"), "build prompt present: {s}");
+        assert!(
+            s.contains("find all TODO comments"),
+            "explore prompt present: {s}"
+        );
+        assert!(
+            s.contains("fix the bug in module foo bar baz qux"),
+            "build prompt present: {s}"
+        );
 
         // A Running task counts toward total but not done.
-        let running = vec![task("r", "explore", "still going", SubagentStatus::Running, None)];
+        let running = vec![task(
+            "r",
+            "explore",
+            "still going",
+            SubagentStatus::Running,
+            None,
+        )];
         let s = format_resume_summary(&running).expect("Some");
-        assert!(s.contains("0/1 subagents done"), "running not counted as done: {s}");
+        assert!(
+            s.contains("0/1 subagents done"),
+            "running not counted as done: {s}"
+        );
         assert!(s.contains('\u{2026}'), "running mark (…) present: {s}");
     }
 
@@ -519,8 +545,9 @@ mod tests {
 
         // `--session <task_id>` should resolve to the parent session id.
         let cli = Cli::parse_from(["opencoder", "--session", task_id]);
-        let resolved =
-            pick_resume_id(&cli, Some(&store as &dyn Store)).await.unwrap();
+        let resolved = pick_resume_id(&cli, Some(&store as &dyn Store))
+            .await
+            .unwrap();
         assert_eq!(resolved.as_deref(), Some(parent_id));
     }
 
@@ -553,8 +580,9 @@ mod tests {
 
         // `--session <session_id>` should be returned unchanged.
         let cli = Cli::parse_from(["opencoder", "--session", session_id]);
-        let resolved =
-            pick_resume_id(&cli, Some(&store as &dyn Store)).await.unwrap();
+        let resolved = pick_resume_id(&cli, Some(&store as &dyn Store))
+            .await
+            .unwrap();
         assert_eq!(resolved.as_deref(), Some(session_id));
     }
 }

@@ -103,7 +103,12 @@ pub async fn resume(
     // turn, so leave them dangling rather than synthesizing error results.
     let replayable: HashSet<&str> = tasks
         .iter()
-        .filter(|t| matches!(t.status, SubagentStatus::Running | SubagentStatus::Cancelled))
+        .filter(|t| {
+            matches!(
+                t.status,
+                SubagentStatus::Running | SubagentStatus::Cancelled
+            )
+        })
         .map(|t| t.task_id.as_str())
         .collect();
     let dangling: Vec<ContentBlock> = messages
@@ -158,7 +163,7 @@ pub async fn resume(
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
-    active_skill_names: Arc::new(Mutex::new(infer_skill_names(&meta.skill))),
+        active_skill_names: Arc::new(Mutex::new(infer_skill_names(&meta.skill))),
         persisted_count: n,
         session_created: true,
         cancel: None,
@@ -224,9 +229,7 @@ pub async fn resume_and_replay(
                 (format!("subagent resume failed: {e:#}"), false)
             }
         };
-        let _ = store
-            .complete_subagent_task(&task.task_id, &text, ok)
-            .await;
+        let _ = store.complete_subagent_task(&task.task_id, &text, ok).await;
         backfill.push(ContentBlock::ToolResult {
             tool_use_id: task.task_id.clone(),
             content: text,
@@ -284,9 +287,9 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
             t.status == SubagentStatus::Cancelled
                 && (session.handoff_seq.is_none()
                     || session.messages.iter().any(|m| {
-                        m.blocks
-                            .iter()
-                            .any(|b| matches!(b, ContentBlock::ToolUse { id, .. } if id == &t.task_id))
+                        m.blocks.iter().any(
+                            |b| matches!(b, ContentBlock::ToolUse { id, .. } if id == &t.task_id),
+                        )
                     }))
         })
         .collect();
@@ -337,9 +340,7 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
                 (format!("subagent resume failed: {e:#}"), false)
             }
         };
-        let _ = store
-            .complete_subagent_task(&task.task_id, &text, ok)
-            .await;
+        let _ = store.complete_subagent_task(&task.task_id, &text, ok).await;
         backfill.push(ContentBlock::ToolResult {
             tool_use_id: task.task_id.clone(),
             content: text,
@@ -374,7 +375,9 @@ async fn abandon_cancelled_tasks(
     const MSG: &str = "cancelled: the user redirected this turn (steer).";
     let mut backfill: Vec<ContentBlock> = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let _ = store.complete_subagent_task(&task.task_id, MSG, false).await;
+        let _ = store
+            .complete_subagent_task(&task.task_id, MSG, false)
+            .await;
         backfill.push(ContentBlock::ToolResult {
             tool_use_id: task.task_id.clone(),
             content: MSG.to_string(),
@@ -527,7 +530,6 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
 #[allow(dead_code)]
 fn _ensure_agent_used(_a: &Agent) {}
 
-
 /// Infer active skill names from a skill prompt body by matching known
 /// skill body prefixes. Used on resume to restore latent tool unlocking.
 fn infer_skill_names(body: &Option<String>) -> std::collections::HashSet<String> {
@@ -599,6 +601,9 @@ mod tests {
         let padding = "x".repeat(200);
         let body = Some(format!("{padding}ssh_pty"));
         let names = infer_skill_names(&body);
-        assert!(names.is_empty(), "skill names past 200 chars should be ignored");
+        assert!(
+            names.is_empty(),
+            "skill names past 200 chars should be ignored"
+        );
     }
 }

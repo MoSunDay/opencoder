@@ -11,6 +11,7 @@ pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, SessionEvent};
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -34,6 +35,9 @@ pub struct SessionState {
     /// Active skill instructions, injected into the system prompt each turn.
     /// `None` means no skill is active. Set from the TUI `$` picker.
     pub skill_prompt: Arc<Mutex<Option<String>>>,
+    /// Names of skills currently activated via `{$name}` tokens. Used to
+    /// unlock latent tools (ssh_pty, chrome_headless) in the runner filter.
+    pub active_skill_names: Arc<Mutex<HashSet<String>>>,
     /// Number of messages already persisted to `store` (loaded on resume).
     persisted_count: usize,
     /// Whether the session row has been created in the store.
@@ -77,6 +81,7 @@ impl SessionState {
             last_usage: opencoder_llm::Usage::default(),
             store: None,
             skill_prompt: Arc::new(Mutex::new(None)),
+            active_skill_names: Arc::new(Mutex::new(HashSet::new())),
             persisted_count: 0,
             session_created: false,
             cancel: None,
@@ -116,6 +121,17 @@ impl SessionState {
     /// Snapshot the active skill instructions (clones the inner String).
     pub fn skill_prompt_cloned(&self) -> Option<String> {
         self.skill_prompt.lock().unwrap().clone()
+    }
+
+    /// Snapshot the set of active skill names (cloned).
+    pub fn active_skill_names_cloned(&self) -> HashSet<String> {
+        self.active_skill_names.lock().unwrap().clone()
+    }
+
+    /// Replace the active skill names set. Called when skill tokens are
+    /// resolved (TUI) or inferred (resume).
+    pub fn set_active_skill_names(&self, names: HashSet<String>) {
+        *self.active_skill_names.lock().unwrap() = names;
     }
 
     /// Update the active skill instructions in place. `None` clears the skill.

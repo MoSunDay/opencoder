@@ -77,16 +77,31 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "review",
-        &[(
-            "SKILL.md",
-            include_str!("../assets/skills/review/SKILL.md"),
-        )],
+        &[("SKILL.md", include_str!("../assets/skills/review/SKILL.md"))],
     ),
     (
         "submit",
+        &[("SKILL.md", include_str!("../assets/skills/submit/SKILL.md"))],
+    ),
+];
+
+/// Dependency-gated skills — hidden until the user runs
+/// `install-skills-dep.sh` which creates a sentinel file in `skills_dir()`.
+/// Seeded independently of [`BUILTIN_SKILLS`] so a fresh install does not get
+/// these skills unless the optional deps (tmux, chromium) are installed.
+const DEP_GATED_SKILLS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "ssh-pty",
         &[(
             "SKILL.md",
-            include_str!("../assets/skills/submit/SKILL.md"),
+            include_str!("../assets/skills/ssh-pty/SKILL.md"),
+        )],
+    ),
+    (
+        "chrome-headless",
+        &[(
+            "SKILL.md",
+            include_str!("../assets/skills/chrome-headless/SKILL.md"),
         )],
     ),
 ];
@@ -95,6 +110,11 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
 /// `review` means a user deleting any other skill won't trigger a full reseed,
 /// but a truly fresh install (no `review` dir) gets the full default set.
 const SEED_GATE: &str = "review";
+
+/// Sentinel file (inside [`skills_dir`]) whose presence means the user ran
+/// `install-skills-dep.sh` and the optional-dependency skills should be
+/// seeded. Independent of `SEED_GATE`.
+pub const DEPS_SENTINEL: &str = ".skills-deps";
 
 /// Seed the built-in skills into `~/.opencoder/skills` if they are missing.
 ///
@@ -135,6 +155,82 @@ pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+/// Seed the dependency-gated skills (ssh-pty, chrome-headless) into
+/// `~/.opencode/skills` if the [`DEPS_SENTINEL`] file exists.
+///
+/// Independent of [`seed_builtin_skills`]: a fresh install gets only the
+/// built-in skills until the user explicitly installs the optional deps via
+/// `install-skills-dep.sh`. Idempotent and best-effort.
+pub fn seed_dep_gated_skills() {
+    let root = skills_dir();
+    if !root.join(DEPS_SENTINEL).exists() {
+        return;
+    }
+    if let Err(e) = seed_dep_gated_skills_in(&root) {
+        tracing::warn!(
+            "failed to seed dep-gated skills into {}: {e}",
+            root.display()
+        );
+    }
+}
+
+/// Filesystem-writing core for dep-gated skills, factored out for tests.
+/// Like [`seed_builtin_skills_in`] but writes the dep-gated set; never
+/// overwrites existing files. Sentinel-gated: writes nothing unless
+/// [`DEPS_SENTINEL`] exists under `root`, mirroring the gate in
+/// [`seed_dep_gated_skills`] so the contract is testable against a tempdir.
+pub fn seed_dep_gated_skills_in(root: &Path) -> std::io::Result<()> {
+    if !root.join(DEPS_SENTINEL).exists() {
+        return Ok(());
+    }
+    for (skill_dir, files) in DEP_GATED_SKILLS {
+        let dir = root.join(skill_dir);
+        std::fs::create_dir_all(&dir)?;
+        for (name, content) in *files {
+            let path = dir.join(name);
+            if path.exists() {
+                continue;
+            }
+            std::fs::write(&path, content)?;
+        }
+    }
+    Ok(())
+}
+
+/// Write `install-skills-dep.sh` into `~/.opencode/` so the user can discover
+/// and run it. Idempotent: skips if the file already exists.
+pub fn write_install_script() {
+    let dir = match dirs::home_dir() {
+        Some(h) => h.join(".opencode"),
+        None => return,
+    };
+    if let Err(e) = write_install_script_in(&dir) {
+        tracing::warn!("failed to write install script to {}: {e}", dir.display());
+    }
+}
+
+/// Filesystem-writing core for the install script, factored out so tests can
+/// target a tempdir. Idempotent: skips if the file already exists. Sets
+/// executable permissions on Unix.
+pub fn write_install_script_in(base: &Path) -> std::io::Result<()> {
+    let path = base.join("install-skills-dep.sh");
+    if path.exists() {
+        return Ok(());
+    }
+    std::fs::write(&path, INSTALL_SCRIPT)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+/// Embedded copy of `scripts/install-skills-dep.sh`, written to
+/// `~/.opencode/install-skills-dep.sh` on startup so users can discover the
+/// optional-dependency installer.
+const INSTALL_SCRIPT: &str = include_str!("../../../scripts/install-skills-dep.sh");
 
 /// Scan `~/.opencoder/skills` and return every skill found, sorted by name.
 ///
@@ -276,6 +372,38 @@ fn file_stem(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Strip every `{$name}` token from `text`, returning the cleaned text and the
+/// list of skill names in the order they appeared (empty names from `{$}` are
+/// skipped; duplicates are preserved here and deduped by the caller).
+///
+/// An unclosed `{$abc` (no matching `}`) is treated as literal text. The scan
+/// is UTF-8 safe: `{$` are ASCII so byte-level detection never splits a
+/// multi-byte char.
+pub fn extract_skill_tokens(text: &str) -> (String, Vec<String>) {
+    let mut clean = String::with_capacity(text.len());
+    let mut names = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < text.len() {
+        if bytes[i] == b'{' && i + 1 < text.len() && bytes[i + 1] == b'$' {
+            let after = i + 2;
+            if let Some(rel) = text[after..].find('}') {
+                let close = after + rel;
+                let name = text[after..close].trim();
+                if !name.is_empty() {
+                    names.push(name.to_string());
+                }
+                i = close + 1;
+                continue;
+            }
+        }
+        let ch = text[i..].chars().next().unwrap();
+        clean.push(ch);
+        i += ch.len_utf8();
+    }
+    (clean, names)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +487,110 @@ mod tests {
             .map(|s| s.name)
             .collect();
         assert_eq!(names, vec!["alpha", "mid", "zeta"]);
+    }
+
+    // ----- extract_skill_tokens tests (migrated from tui/skill_token.rs) -----
+
+    #[test]
+    fn extract_tokens_empty_input() {
+        let (clean, names) = extract_skill_tokens("");
+        assert!(clean.is_empty());
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_lone_dollar_is_literal() {
+        let (clean, names) = extract_skill_tokens("price is $5");
+        assert_eq!(clean, "price is $5");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_basic_stripped() {
+        let (clean, names) = extract_skill_tokens("{$code}");
+        assert_eq!(clean, "");
+        assert_eq!(names, vec!["code"]);
+    }
+
+    #[test]
+    fn extract_tokens_mid_text_preserves_surrounding_text() {
+        let (clean, names) = extract_skill_tokens("hello {$code} world");
+        assert_eq!(clean, "hello  world");
+        assert_eq!(names, vec!["code"]);
+    }
+
+    #[test]
+    fn extract_tokens_multiple_in_order() {
+        let (clean, names) = extract_skill_tokens("{$a} then {$b} then {$a}");
+        assert_eq!(clean, " then  then ");
+        assert_eq!(names, vec!["a", "b", "a"]);
+    }
+
+    #[test]
+    fn extract_tokens_adjacent() {
+        let (clean, names) = extract_skill_tokens("x{$a}{$b}y");
+        assert_eq!(clean, "xy");
+        assert_eq!(names, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn extract_tokens_name_with_spaces_trimmed() {
+        let (clean, names) = extract_skill_tokens("{$  spaced  }");
+        assert_eq!(clean, "");
+        assert_eq!(names, vec!["spaced"]);
+    }
+
+    #[test]
+    fn extract_tokens_empty_name_skipped() {
+        let (clean, names) = extract_skill_tokens("text {$} more");
+        assert_eq!(clean, "text  more");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_unclosed_is_literal() {
+        let (clean, names) = extract_skill_tokens("{$unclosed followed by text");
+        assert_eq!(clean, "{$unclosed followed by text");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_double_brace_not_a_token() {
+        let (clean, names) = extract_skill_tokens("{{not a token}}");
+        assert_eq!(clean, "{{not a token}}");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_utf8_text_preserved() {
+        let (clean, names) = extract_skill_tokens("héllo {$wörld} 日本語");
+        assert_eq!(clean, "héllo  日本語");
+        assert_eq!(names, vec!["wörld"]);
+    }
+
+    // ----- write_install_script_in tests -----
+
+    #[test]
+    fn write_install_script_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        write_install_script_in(base).unwrap();
+        let script = base.join("install-skills-dep.sh");
+        assert!(script.is_file());
+        let content = std::fs::read_to_string(&script).unwrap();
+        assert!(!content.is_empty());
+    }
+
+    #[test]
+    fn write_install_script_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        write_install_script_in(base).unwrap();
+        // Write a sentinel to detect overwrite.
+        let script = base.join("install-skills-dep.sh");
+        std::fs::write(&script, "SENTINEL").unwrap();
+        write_install_script_in(base).unwrap();
+        let content = std::fs::read_to_string(&script).unwrap();
+        assert_eq!(content, "SENTINEL");
     }
 }

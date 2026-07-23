@@ -638,6 +638,40 @@ fn tool_output_truncated_to_six_lines() {
 }
 
 #[test]
+fn summarize_keeps_full_bash_command_no_truncation() {
+    // Regression: bash commands longer than 80 columns were truncated to
+    // 80 display columns (with …), hiding the real command behind an
+    // ellipsis. summarize() must now return the full command text so the
+    // body layer can wrap it to the terminal width.
+    let long_cmd = format!("echo {}", "a".repeat(100));
+    assert!(long_cmd.chars().count() > 80, "test setup: command must exceed 80 cols");
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": long_cmd.clone()}),
+    });
+    let header = v
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::Tool { header, .. } => Some(header),
+            _ => None,
+        })
+        .expect("tool block");
+    // spans[0] is the "▸ bash " label; spans[1] is the summarize() output.
+    let summary = header.spans[1].content.to_string();
+    assert!(
+        summary.contains(&long_cmd),
+        "header must contain the full command; got {summary:?}"
+    );
+    assert!(
+        !summary.contains('\u{2026}'),
+        "header must not be truncated with ellipsis; got {summary:?}"
+    );
+}
+
+#[test]
 fn collapse_all_thinking_collapses_every_block() {
     let mut v = ChatView::default();
     // Two thinking blocks separated by an assistant block.

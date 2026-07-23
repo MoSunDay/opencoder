@@ -40,12 +40,18 @@ pub(crate) enum QueueEffect {
 /// current ordered pending list (admitted_seq ASC = drain order). Pure: does not
 /// mutate; returns the seq pair to swap, the seq to delete, or `None`.
 pub(crate) fn plan(items: &[(i64, String)], seq: i64, action: QueueBtnAction) -> QueueEffect {
+    // Delete only needs the seq — not the list index — so handle it first.
+    // This lets the ✕ work for steer rows, whose seq lives in a separate
+    // `steer_items` vec and is never present in `items` here.
+    if action == QueueBtnAction::Delete {
+        return QueueEffect::Delete(seq);
+    }
     let i = match items.iter().position(|(s, _)| *s == seq) {
         Some(i) => i,
         None => return QueueEffect::None,
     };
     match action {
-        QueueBtnAction::Delete => QueueEffect::Delete(seq),
+        QueueBtnAction::Delete => unreachable!("handled above"),
         QueueBtnAction::Up => {
             if i == 0 {
                 QueueEffect::None
@@ -266,6 +272,18 @@ mod tests {
         assert_eq!(
             plan(&items(), 20, QueueBtnAction::Delete),
             QueueEffect::Delete(20)
+        );
+    }
+
+    #[test]
+    fn delete_steer_seq_absent_from_items_still_deletes() {
+        // Regression: a steer row's seq lives in `steer_items`, never in
+        // `queue_items`. Previously `plan` did the position lookup before
+        // examining the action, so this returned `None` and the ✕ was a
+        // silent no-op. Delete only needs the seq — not the index.
+        assert_eq!(
+            plan(&items(), 777, QueueBtnAction::Delete),
+            QueueEffect::Delete(777)
         );
     }
 

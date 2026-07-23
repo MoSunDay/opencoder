@@ -92,6 +92,12 @@ impl CommandMenu {
         self.refilter();
     }
 
+    /// Paste multi-char text into the query and refilter (mirrors `on_char`).
+    pub fn paste(&mut self, text: &str) {
+        self.query.push_str(text);
+        self.refilter();
+    }
+
     pub fn on_backspace(&mut self) {
         self.query.pop();
         self.refilter();
@@ -338,6 +344,20 @@ mod tests {
             m.selected_action(),
             Some(SlashAction::Task),
             "first row is /task"
+        );
+    }
+
+    #[test]
+    fn paste_appends_to_query_and_refilters() {
+        let mut m = CommandMenu::new();
+        let all = m.visible_count();
+        assert!(m.query().is_empty());
+        m.paste("task");
+        assert_eq!(m.query(), "task");
+        assert!(m.visible_count() >= 1, "filter should still match 'task'");
+        assert!(
+            m.visible_count() < all,
+            "refilter should narrow the visible list"
         );
     }
 }

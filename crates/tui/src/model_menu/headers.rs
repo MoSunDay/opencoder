@@ -106,6 +106,13 @@ impl HeadersEditor {
         }
     }
 
+    /// Bulk-insert pasted text into the active name/value field (mirrors `Char`).
+    pub fn paste_into(&mut self, text: &str) {
+        if let Some(s) = self.active_string() {
+            s.push_str(text);
+        }
+    }
+
     /// Human-readable label for the selected pair's active sub-field.
     pub fn active_label(&self) -> &'static str {
         if self.editing_value {

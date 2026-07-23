@@ -23,10 +23,11 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{start_turn, worker_dead};
+use crate::app_helpers::{paste_payload, start_turn, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::composer;
 use crate::model_menu::{handle_model_key, ConfigForm, ModelMenu, ModelOutcome, ProviderList};
 use crate::task::TaskPicker;
 use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
@@ -39,7 +40,6 @@ use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
 pub(crate) enum LoopFlow {
     Proceed,
     /// Used by extracted blocks that previously did `continue` (re-render).
-    #[allow(dead_code)] // constructed by a later-extracted block
     Redraw,
     Quit,
 }
@@ -381,4 +381,155 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::Idle => {}
     }
     LoopFlow::Proceed
+}
+
+
+/// Route a paste payload by the same modal priority as key events: an open
+/// popup owns the paste, so it never reaches the main input hidden behind it.
+///
+/// Mirrors [`Event::Key`](crossterm::event::Event::Key)'s priority chain:
+/// - task picker / cache-salt menu open -> modal isolation (no text fields),
+///   swallow the paste;
+/// - model menu open -> feed the trimmed payload to its focused field via
+///   [`ModelMenu::paste`];
+/// - command menu open -> append to its query and refilter via
+///   [`CommandMenu::paste`];
+/// - otherwise -> resolve a dragged file to its absolute path (or insert the
+///   payload verbatim) into the main composer.
+///
+/// Returns [`LoopFlow::Redraw`] when a modal consumed the paste (the caller
+/// re-renders), [`LoopFlow::Proceed`] when the main composer absorbed it
+/// (`input`/`cursor_idx` updated in place). Never returns `Quit`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn route_paste(
+    pasted: &str,
+    task_picker_open: bool,
+    cache_salt_menu_open: bool,
+    model_menu: &mut Option<ModelMenu>,
+    command_menu: &mut Option<CommandMenu>,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    workdir: &Path,
+) -> LoopFlow {
+    if task_picker_open || cache_salt_menu_open {
+        // No text fields here -- modal isolation: swallow the paste.
+        return LoopFlow::Redraw;
+    }
+    // Modal fields never resolve drag-and-drop file paths; only strip the
+    // trailing newline terminals append to pasted payloads.
+    let trimmed = pasted.trim_end_matches(['\r', '\n']);
+    if let Some(menu) = model_menu.as_mut() {
+        menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    if let Some(menu) = command_menu.as_mut() {
+        menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    // Main composer: drag a file in (or clipboard paste) arrives as one
+    // atomic payload; resolve an existing file to its absolute path, else
+    // insert verbatim.
+    let payload = paste_payload(pasted, workdir);
+    let (new_input, new_idx) = composer::insert_str(input, *cursor_idx, &payload);
+    *input = new_input;
+    *cursor_idx = new_idx;
+    LoopFlow::Proceed
+}
+
+/// Hard exit (Ctrl+C/Ctrl+D): interrupt any in-flight turn so the worker stops
+/// promptly. Without cancelling the shared token the worker stays blocked inside
+/// `run_session` and cannot read `UiCmd::Quit` until the turn naturally ends (up
+/// to the 30-min timeout), freezing the terminal on the alt-screen.
+pub(crate) async fn handle_quit(
+    running: bool,
+    cancel: &CancellationToken,
+    chat: &mut ChatView,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+) {
+    if running {
+        cancel.cancel();
+        chat.push_marker(Line::from(Span::styled(
+            "[exiting…]",
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    let _ = cmd_tx.send(UiCmd::Quit).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// No modal open + plain (non-file) text: the main-composer path inserts it
+    /// verbatim, advances the cursor, and returns `Proceed` (caller falls
+    /// through rather than `continue`).
+    #[test]
+    fn route_paste_into_main_composer_inserts_verbatim_text() {
+        let mut model_menu: Option<ModelMenu> = None;
+        let mut command_menu: Option<CommandMenu> = None;
+        let mut input = String::new();
+        let mut idx = 0usize;
+        let flow = route_paste(
+            "plain text",
+            false,
+            false,
+            &mut model_menu,
+            &mut command_menu,
+            &mut input,
+            &mut idx,
+            Path::new("."),
+        );
+        assert!(matches!(flow, LoopFlow::Proceed));
+        assert_eq!(input, "plain text");
+        assert_eq!(idx, "plain text".chars().count());
+    }
+
+    /// task picker open (no text field): the paste is swallowed — `Redraw` is
+    /// returned and the main composer stays untouched.
+    #[test]
+    fn route_paste_swallowed_when_task_picker_open() {
+        let mut model_menu: Option<ModelMenu> = None;
+        let mut command_menu: Option<CommandMenu> = None;
+        let mut input = String::new();
+        let mut idx = 0usize;
+        let flow = route_paste(
+            "plain text",
+            true,
+            false,
+            &mut model_menu,
+            &mut command_menu,
+            &mut input,
+            &mut idx,
+            Path::new("."),
+        );
+        assert!(matches!(flow, LoopFlow::Redraw));
+        assert!(
+            input.is_empty(),
+            "main composer must be untouched when a modal swallows the paste"
+        );
+        assert_eq!(idx, 0);
+    }
+
+    /// cache-salt menu open: same modal-isolation contract — paste swallowed,
+    /// existing composer contents and cursor preserved.
+    #[test]
+    fn route_paste_swallowed_when_cache_salt_menu_open() {
+        let mut model_menu: Option<ModelMenu> = None;
+        let mut command_menu: Option<CommandMenu> = None;
+        let mut input = String::from("kept");
+        let mut idx = 2usize;
+        let flow = route_paste(
+            "plain text",
+            false,
+            true,
+            &mut model_menu,
+            &mut command_menu,
+            &mut input,
+            &mut idx,
+            Path::new("."),
+        );
+        assert!(matches!(flow, LoopFlow::Redraw));
+        assert_eq!(input, "kept");
+        assert_eq!(idx, 2);
+    }
 }

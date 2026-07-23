@@ -158,6 +158,31 @@ impl ConfigForm {
         }
         Ok(())
     }
+
+    /// Paste text into the focused numeric field (mirrors the `Char` digit filter).
+    pub fn paste_into(&mut self, text: &str) {
+        for c in text.chars() {
+            if !c.is_ascii_digit() {
+                continue;
+            }
+            match self.focus {
+                ConfigField::MaxTokens => self.max_tokens_input.push(c),
+                ConfigField::Threshold => {
+                    let s = format!("{}{}", self.threshold, c);
+                    if let Ok(n) = s.parse::<u64>() {
+                        self.threshold = n.max(1000);
+                    }
+                }
+                ConfigField::Fps => {
+                    let s = format!("{}{}", self.fps, c);
+                    if let Ok(n) = s.parse::<u32>() {
+                        self.fps = n.clamp(1, 30);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Handle a key in `/config` mode. Takes ownership, returns outcome + next menu.

@@ -8,6 +8,7 @@ pub mod net;
 pub mod skill;
 pub mod sse;
 pub mod tool;
+pub mod tool_guard_config;
 
 pub use agent::{
     builtin_agents, resolve_agent, strip_tools_subagent_ad, tool_preamble, Agent, AgentKind,
@@ -19,8 +20,10 @@ pub use computer_use::{
 };
 pub use config::{
     looks_like_env_var, AgentDefaults, CapabilitiesConfig, CompactionConfig, Config, Endpoint,
-    HttpHeader, NetworkConfig, ProviderConfig, ToolGuardConfig, DEFAULT_CONTEXT_LIMIT,
+    HttpHeader, NetworkConfig, ProviderConfig, DEFAULT_CONTEXT_LIMIT,
 };
+pub use tool_guard_config::ToolGuardConfig;
+
 pub use error::{CoreError, Result};
 pub use message::{ContentBlock, Message, MessageUsage, Role};
 pub use net::{build_http_client, effective_proxy};

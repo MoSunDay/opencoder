@@ -34,9 +34,9 @@ Commit: (working-tree, pre-initial-commit)
   `SessionEvent::Error` 并 `break` 中止当前 turn。
 
 ### 测试
-- **`crates/session/src/tool_guard.rs`**：7 个单元测试（计数重置、阈值精确
+- **`crates/session/src/tool_guard.rs`**：8 个单元测试（计数重置、阈值精确
   触发、指数退避与封顶、工具间独立计数、成功插入重置、阈值为 0 禁用、
-  `worst` 空映射）。
+  `worst` 返回计数最高、`worst` 空映射）。
 - **`crates/session/tests/tool_failure_guard.rs`**（新文件）：4 个集成测试，
   覆盖「3 次连续失败即停」「触发时发 Error 事件」「成功插入重置计数」
   「禁用守卫可无限失败」。每个 fixture 用不同 `input` 绕开 doom-loop 签名
@@ -49,7 +49,10 @@ Commit: (working-tree, pre-initial-commit)
 | 阈值精确触发 | `threshold_trips_exactly_at_limit` | tool_guard.rs |
 | 指数退避与封顶 | `backoff_exponential_and_capped` | tool_guard.rs |
 | 工具间独立计数 | `independent_tools_tracked_separately` | tool_guard.rs |
+| 成功插入重置（连续失败中插入一次成功） | `success_between_failures_resets` | tool_guard.rs |
 | 阈值为 0 禁用 | `zero_threshold_disables_guard` | tool_guard.rs |
+| worst 返回计数最高的工具 | `worst_returns_highest_count` | tool_guard.rs |
+| worst 空映射返回 None | `worst_empty_is_none` | tool_guard.rs |
 | 3 次失败即停 | `threshold_stops_after_three_consecutive_failures` | tests/tool_failure_guard.rs |
 | 触发发 Error 事件 | `emits_error_event_on_threshold` | tests/tool_failure_guard.rs |
 | 成功插入重置 | `success_between_failures_resets_counter` | tests/tool_failure_guard.rs |

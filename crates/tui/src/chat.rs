@@ -66,6 +66,11 @@ pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
+    /// Whether the user submitted a prompt while in plan mode since the last
+    /// plan-mode entry. Reset to `false` on every `AgentSwitch` *to* plan.
+    /// Drives the plan→act handoff decision: only hand off when the user
+    /// actually interacted with the plan agent, otherwise plain-swap.
+    pub plan_submitted: bool,
     /// Pending steer inputs mirrored from the store, owned by this view so the
     /// `SteerConsumed` handler can resolve seq -> prompt text and drop the row
     /// in one place. The single source of truth for steer display state.
@@ -186,6 +191,9 @@ impl ChatView {
             SessionEvent::AgentSwitch(to) => {
                 self.finalize_assistant();
                 self.agent = to.clone();
+                if to == "plan" {
+                    self.plan_submitted = false;
+                }
             }
             SessionEvent::Compaction(c) => {
                 self.finalize_assistant();

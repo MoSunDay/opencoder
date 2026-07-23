@@ -209,6 +209,49 @@ fn agent_switch_finalizes_pending_assistant() {
 }
 
 #[test]
+fn plan_submitted_defaults_false() {
+    let v = ChatView::default();
+    assert!(
+        !v.plan_submitted,
+        "plan_submitted must default to false so a fresh session never \
+         triggers the plan->act handoff spuriously"
+    );
+}
+
+#[test]
+fn agent_switch_to_plan_resets_plan_submitted() {
+    // Regression: switching into plan mode must reset the flag so that the
+    // plan->act handoff only fires when the user actually submitted a prompt
+    // during THIS plan session. Previously the check used
+    // !chat.blocks.is_empty(), which is always true (blocks hold act history),
+    // causing an accidental plan->act toggle to collapse the transcript.
+    let mut v = ChatView {
+        plan_submitted: true,
+        ..Default::default()
+    };
+    v.apply(&SessionEvent::AgentSwitch("plan".into()));
+    assert!(
+        !v.plan_submitted,
+        "entering plan mode must reset plan_submitted to false"
+    );
+}
+
+#[test]
+fn agent_switch_to_act_keeps_plan_submitted() {
+    // Switching to act must NOT reset the flag — the app.rs event loop reads
+    // it BEFORE the AgentSwitch event arrives to decide handoff vs plain swap.
+    let mut v = ChatView {
+        plan_submitted: true,
+        ..Default::default()
+    };
+    v.apply(&SessionEvent::AgentSwitch("act".into()));
+    assert!(
+        v.plan_submitted,
+        "switching to act must not clobber plan_submitted"
+    );
+}
+
+#[test]
 fn multiline_delta_splits_lines() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("line1\nline2".into()));

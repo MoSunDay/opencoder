@@ -181,3 +181,43 @@ fn typing_digits_sets_max_tokens() {
     assert_eq!(f.max_tokens_input, "8192");
     assert_eq!(f.build_patch().max_tokens, Some(8192));
 }
+
+// ── paste routing (ConfigForm) ───────────────────────────────────────────
+
+#[test]
+fn config_form_paste_into_max_tokens() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::MaxTokens;
+    f.paste_into("8192");
+    assert_eq!(f.max_tokens_input, "8192");
+    assert_eq!(f.build_patch().max_tokens, Some(8192));
+}
+
+#[test]
+fn config_form_paste_filters_non_digits_in_max_tokens() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::MaxTokens;
+    f.paste_into("12abc3");
+    assert_eq!(f.max_tokens_input, "123", "only ascii digits are kept");
+}
+
+#[test]
+fn config_form_paste_into_fps_clamps_at_30() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::Fps;
+    f.fps = 2;
+    f.paste_into("4");
+    assert_eq!(f.fps, 24, "2 -> append 4 -> 24");
+    f.fps = 2;
+    f.paste_into("99");
+    assert_eq!(f.fps, 30, "clamped to 30");
+}
+
+#[test]
+fn config_form_paste_into_threshold() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::Threshold;
+    f.threshold = 1000;
+    f.paste_into("000");
+    assert_eq!(f.threshold, 1_000_000, "1000 -> append 000 -> 1000000");
+}

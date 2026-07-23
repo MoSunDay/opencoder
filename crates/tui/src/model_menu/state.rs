@@ -25,6 +25,18 @@ pub enum ModelOutcome {
     Quit,
 }
 
+impl ModelMenu {
+    /// Route pasted text to the focused field of the active form.
+    /// `List` has no text fields and ignores paste.
+    pub fn paste(&mut self, text: &str) {
+        match self {
+            ModelMenu::Config(form) => form.paste_into(text),
+            ModelMenu::Form(form) => form.paste_into(text),
+            ModelMenu::List(_) => {}
+        }
+    }
+}
+
 /// Handle one keystroke. Uses `slot.take()` to avoid double-borrow of the
 /// `Option<ModelMenu>`: ownership moves into the per-mode handler, which
 /// returns `(outcome, next_menu)`. If `next_menu` is `Some` the slot is

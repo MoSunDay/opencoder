@@ -17,7 +17,6 @@ use tokio_util::sync::CancellationToken;
 use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutcome};
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
-use crate::composer;
 use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
@@ -684,22 +683,7 @@ async fn run_app(
                                 command_menu = Some(CommandMenu::new());
                             }
                             KeyAction::Quit => {
-                                // Hard exit (Ctrl+C/Ctrl+D): interrupt any
-                                // in-flight turn so the worker stops promptly.
-                                // Without this the worker is blocked inside
-                                // `run_session` and cannot read the UiCmd::Quit
-                                // until the turn naturally ends (up to the
-                                // 30-min timeout), freezing the terminal on the
-                                // alt-screen. Cancelling the shared token makes
-                                // the runner's select! arms return immediately.
-                                if running {
-                                    cancel.cancel();
-                                    chat.push_marker(Line::from(Span::styled(
-                                        "[exiting…]",
-                                        Style::default().fg(Color::Yellow),
-                                    )));
-                                }
-                                let _ = cmd_tx.send(UiCmd::Quit).await;
+                                app_loop::handle_quit(running, &cancel, &mut chat, &cmd_tx).await;
                                 break;
                             }
                             KeyAction::None => {}
@@ -740,15 +724,14 @@ async fn run_app(
                         let _ = terminal.autoresize();
                     }
                     Event::Paste(pasted) => {
-                        // Dragging a file into the terminal (or any clipboard
-                        // paste) arrives as one atomic payload. If it resolves
-                        // to an existing file, echo its full absolute path;
-                        // otherwise insert the text verbatim.
-                        let payload = paste_payload(&pasted, &workdir);
-                        let (new_input, new_idx) =
-                            composer::insert_str(&input, cursor_idx, &payload);
-                        input = new_input;
-                        cursor_idx = new_idx;
+                        // Modal-priority paste routing (mirrors Event::Key).
+                        if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
+                            &pasted, task_picker.is_some(), cache_salt_menu.is_some(),
+                            &mut model_menu, &mut command_menu, &mut input,
+                            &mut cursor_idx, &workdir,
+                        ) {
+                            continue;
+                        }
                     }
                     _ => {}
                 }
@@ -791,7 +774,7 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, paste_payload, pre_key_intercept,
+    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, pre_key_intercept,
     push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for, worker_dead,
     MouseOutcome,
 };

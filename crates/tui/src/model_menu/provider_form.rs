@@ -96,6 +96,27 @@ impl ProviderForm {
         }
     }
 
+    /// Paste text into the focused field (mirrors the `Char` arm of `handle_key`).
+    pub fn paste_into(&mut self, text: &str) {
+        if self.headers_active && self.focus == ProviderField::Headers {
+            self.headers.paste_into(text);
+            return;
+        }
+        match self.focus {
+            ProviderField::Name if !self.name_readonly => self.name.push_str(text),
+            ProviderField::ModelId => self.model_id.push_str(text),
+            ProviderField::BaseUrl => self.base_url.push_str(text),
+            ProviderField::ApiKey => {
+                if !self.api_key_edited {
+                    self.api_key_input.clear();
+                    self.api_key_edited = true;
+                }
+                self.api_key_input.push_str(text);
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn api_key_display(&self) -> String {
         if self.api_key_edited {
             "*".repeat(self.api_key_input.chars().count())

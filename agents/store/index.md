@@ -13,6 +13,7 @@ Commit: (working-tree, pre-initial-commit)
 ## 关键抽象
 - `Store` trait（`src/store.rs`）：async_trait，dyn 兼容。这是「切换其它 Rust SQLite 实现」的唯一接缝——换后端只需新实现 trait，上层零改动。
 - `LibsqlStore`（`src/libsql_store/mod.rs`）：持有**单个** Connection（`db.connect()` 一次），每个 op clone。libsql 的 `:memory:` 每次 connect 返回独立空库，故必须缓存连接共享——这是正确性关键。 另持 `db_lock: tokio::sync::Mutex<()>`，在全部 26 个 async Store 方法入口 `lock().await` 串行化——libsql 0.9.x 把同步 SQLite FFI 直接跑在 tokio worker 线程，并发 op（多 subagent flusher + run_loop）争 SQLite 内部互斥锁会饿死 runtime；async Mutex 争用时 yield（不阻塞 worker 线程），保证同一时刻至多一个 worker 触碰 FFI。
+- `run_tx`（`src/libsql_store/tx.rs`）：手动 `BEGIN`/`COMMIT`/`ROLLBACK` 事务辅助函数，替代 `libsql::Transaction`。原因：libsql 0.9.30 的 `Transaction::Drop` 调用 `do_rollback().unwrap()`，在 async 取消（`tokio::select!`）先丢弃 `MutexGuard` 后丢弃 `Transaction` 时，另一任务可能已修改共享连接使 rollback 失败 → panic。`run_tx` 把 rollback 失败降级为 `tracing::warn!`（绝不 panic），并在 `BEGIN` 前做 best-effort `ROLLBACK` 恢复上一轮取消遗留的悬挂事务。全部事务方法（inputs.rs 5 处 / messages.rs 2 处 / events.rs 1 处）均经此函数。`claim_next_queue` 传 `"BEGIN IMMEDIATE"`（写锁），其余传 `"BEGIN"`（deferred）。
 - schema（`src/libsql_store/schema.rs`）：6 表 + 5 索引 + `schema_version`（当前 v3）。bootstrap 幂等：先 CREATE TABLE IF NOT EXISTS 全表，再读已存版本做**增量迁移**（`migrate(from)`：v2 加 `session_events.sse_kind TEXT`、v3 对 `sessions` `ALTER TABLE ADD COLUMN` 加 `handoff_seq INTEGER`/`handoff_plan TEXT`/`skill TEXT`，均 nullable 故旧行仍合法）；新库（version None）已含全量 schema 故跳过迁移，仅写版本号。`PRAGMA journal_mode=WAL` 等 per-connection 应用（注意该 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"）。`subagent_tasks` 表记录父子 agent 关系（task_id/parent/child session_id/prompt/result/status）。
 - 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`（含 `sse_kind: Option<String>`——细粒度 SSE 事件名，replay 优先取它、`None` 时回退 `event_kind_str(coarse)`）/`EventKind`（12 变体，粗粒度，仅作 DB `type` 列与回退）/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。`SessionMeta`/`SessionPatch` 额外暴露 v3 三列 `handoff_seq: Option<i64>`/`handoff_plan: Option<String>`/`skill: Option<String>`（plan→act 移交边界 + 技能持久化），libsql 的 INSERT/SELECT/update handler/`row_to_meta` 四处读写。
 
@@ -37,5 +38,5 @@ Commit: (working-tree, pre-initial-commit)
 - 崩溃恢复：`tests/store_integration.rs::wal_crash_recovery`
 - 事务回滚：`tests/store_integration.rs::transaction_rollback_on_partial_failure`
 - 性能门槛：`tests/store_perf.rs`（0.031ms/append、2.4ms/load1000、0.95ms/list200）
-ation.rs::transaction_rollback_on_partial_failure`
-- 性能门槛：`tests/store_perf.rs`（0.031ms/append、2.4ms/load1000、0.95ms/list200）
+- 取消安全（无 panic）：`tests/store_integration.rs::cancelled_transaction_does_not_panic`
+- 取消后一致性：`tests/store_integration.rs::cancelled_then_concurrent_ops_stay_consistent`

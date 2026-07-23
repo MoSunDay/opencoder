@@ -1292,3 +1292,221 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let v: i64 = r.get(0).unwrap();
     assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: future cancellation must not panic (no libsql::Transaction::Drop)
+// ---------------------------------------------------------------------------
+//
+// Before the fix, every transaction used `libsql::Transaction` whose `Drop`
+// calls `do_rollback().unwrap()`. When a future was cancelled mid-transaction
+// (e.g. via `tokio::select!`), the `db_lock` guard could be released before
+// the `Transaction` was dropped, allowing another task to mutate the shared
+// connection and invalidate the transaction state — causing the Drop's
+// `unwrap()` to panic the entire process.
+//
+// With manual BEGIN/COMMIT/ROLLBACK (run_tx), cancellation leaves at worst a
+// dangling transaction that the next run_tx recovers from via a pre-BEGIN
+// ROLLBACK. No panic, no crash, no data corruption.
+
+#[tokio::test]
+async fn cancelled_transaction_does_not_panic() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s1", 1).await;
+
+    // Start a multi-message append (opens a transaction) and cancel it after
+    // a tiny delay — simulating tokio::select! interrupting a drain step.
+    let big_batch = conv("cancel", 50);
+    let store = Arc::new(store);
+
+    let cancelled = {
+        let s = store.clone();
+        tokio::select! {
+            // Bias toward the timeout so the append future starts but gets
+            // dropped before (or shortly after) it can commit.
+            _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => true,
+            res = s.append_messages("s1", &big_batch) => {
+                // If it managed to commit, that's fine too — the point is no
+                // panic.
+                let _ = res;
+                false
+            }
+        }
+    };
+
+    // Regardless of whether the cancelled batch committed, the store MUST be
+    // usable afterwards without panicking or erroring.
+    let follow_up = conv("after", 3);
+    store.append_messages("s1", &follow_up).await.unwrap();
+
+    // The follow-up messages must be present and correct.
+    let loaded = store.load_messages("s1").await.unwrap();
+    let _ = cancelled; // unused in assertions — we just needed the drop to happen
+    assert!(
+        loaded.iter().any(|m| m.id == "after-0"),
+        "post-cancellation append must be persisted"
+    );
+    // If the cancelled batch committed, there may be up to 50 + 3 = 53 rows.
+    // If it was dropped mid-transaction, the dangling tx is rolled back by
+    // the next run_tx, so only the 3 follow-up rows exist. Either way, the
+    // 3 follow-up messages must all be present.
+    for i in 0..3 {
+        let id = format!("after-{i}");
+        assert!(
+            loaded.iter().any(|m| m.id == id),
+            "follow-up message {id} must be present"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cancelled_then_concurrent_ops_stay_consistent() {
+    // Stress variant: cancel several transaction futures interleaved with
+    // successful operations, then verify final state is consistent.
+    let (_dir, store) = fresh().await;
+    make_session(&store, "sx", 1).await;
+    let store = Arc::new(store);
+
+    const ROUNDS: usize = 10;
+
+    for round in 0..ROUNDS {
+        // Cancel a batch.
+        let batch = conv(&format!("c{round}"), 5);
+        let s = store.clone();
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_micros(100)) => {}
+            _ = s.append_messages("sx", &batch) => {}
+        }
+
+        // Immediately do a successful append — must not panic.
+        let ok = conv(&format!("ok{round}"), 1);
+        store.append_messages("sx", &ok).await.unwrap();
+    }
+
+    // All 10 "ok" messages must be present.
+    let loaded = store.load_messages("sx").await.unwrap();
+    for round in 0..ROUNDS {
+        let id = format!("ok{round}-0");
+        assert!(
+            loaded.iter().any(|m| m.id == id),
+            "ok message {id} from round {round} must survive"
+        );
+    }
+}
+
+#[tokio::test]
+async fn schema_migration_is_idempotent_when_column_already_exists() {
+    use libsql::Builder;
+    use opencoder_store::{EventKind, SessionEventRecord};
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("idempotent-migrate.db");
+
+    // Reproduce the exact failure mode: the on-disk tables already carry the
+    // *full latest* shape (CREATE TABLE statements embed the full schema, so
+    // they include e.g. sse_kind on session_events and handoff_seq/handoff_plan/
+    // skill on sessions), but schema_version is stale at 1. A bare ADD COLUMN
+    // in migrate() would fail with `duplicate column name: sse_kind`.
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        // sessions with the full current shape, including the v3 handoff/skill
+        // columns — identical to the CREATE_SESSIONS the store ships.
+        conn.execute(
+            "CREATE TABLE sessions (\
+               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
+               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, summary TEXT,\
+               summary_seq INTEGER, handoff_seq INTEGER, handoff_plan TEXT, skill TEXT)",
+            (),
+        )
+        .await
+        .unwrap();
+        // session_events with the full current shape, including the v2 sse_kind
+        // column — identical to CREATE_EVENTS the store ships.
+        conn.execute(
+            "CREATE TABLE session_events (\
+               seq INTEGER PRIMARY KEY AUTOINCREMENT,\
+               session_id TEXT NOT NULL,\
+               type TEXT NOT NULL, payload_json TEXT NOT NULL,\
+               sse_kind TEXT, ts INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .unwrap();
+        // Stale version: schema_version = 1, but tables are already at v3 shape.
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s1', 1, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+        // Pre-existing event carrying a real sse_kind value that must survive.
+        conn.execute(
+            "INSERT INTO session_events (session_id, type, payload_json, sse_kind, ts) \
+             VALUES ('s1', 'step', '{\"status\":\"ok\"}', 'status', 100)",
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Reopen — triggers bootstrap → migrate(1). Before the fix this errored:
+    //   `migrate v2: add sse_kind column` / `duplicate column name: sse_kind`.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+
+    // The pre-existing sse_kind data is intact and reads back through the store.
+    let events = store.events_after("s1", 0).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].sse_kind.as_deref(),
+        Some("status"),
+        "pre-existing sse_kind data must survive migration"
+    );
+
+    // schema_version bumped all the way to 3.
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare("SELECT version FROM schema_version LIMIT 1")
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let r = rows.next().await.unwrap().unwrap();
+        let v: i64 = r.get(0).unwrap();
+        assert_eq!(v, 3, "schema version must be 3 after migration");
+    }
+
+    // A freshly appended event still round-trips its sse_kind.
+    store
+        .append_event(&SessionEventRecord {
+            session_id: "s1".into(),
+            kind: EventKind::Step,
+            payload: serde_json::json!({"status": "more"}),
+            ts: 200,
+            seq: None,
+            sse_kind: Some("status".into()),
+        })
+        .await
+        .unwrap();
+    let events2 = store.events_after("s1", 0).await.unwrap();
+    assert_eq!(events2.len(), 2);
+    assert_eq!(events2[1].sse_kind.as_deref(), Some("status"));
+
+    // Idempotent: reopening again does not re-run migration or error.
+    drop(store);
+    let store2 = LibsqlStore::open(&db_path).await.unwrap();
+    let conn = store2.conn().await.unwrap();
+    let stmt = conn
+        .prepare("SELECT version FROM schema_version LIMIT 1")
+        .await
+        .unwrap();
+    let mut rows = stmt.query(()).await.unwrap();
+    let r = rows.next().await.unwrap().unwrap();
+    let v: i64 = r.get(0).unwrap();
+    assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
+}

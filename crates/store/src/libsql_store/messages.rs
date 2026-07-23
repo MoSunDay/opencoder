@@ -36,32 +36,33 @@ pub async fn append_many(
     session_id: &str,
     msgs: &[Message],
 ) -> Result<Vec<i64>> {
-    let tx = conn.transaction().await.context("begin tx")?;
-    let mut seqs = Vec::with_capacity(msgs.len());
-    for m in msgs {
-        let blocks_json = serde_json::to_string(&m.blocks).context("serialize blocks")?;
-        let usage_json = serde_json::to_string(&m.usage).context("serialize usage")?;
-        tx.execute(
-            INSERT_MESSAGE,
-            params![
-                m.id.as_str(),
-                session_id,
-                role_str(m.role),
-                m.agent.as_deref(),
-                m.model.as_deref(),
-                blocks_json,
-                usage_json,
-                m.created_at,
-                m.synthetic as i64,
-            ],
-        )
-        .await
-        .context("insert message in tx")?;
-        let seq = last_seq_in_tx(&tx, session_id).await?;
-        seqs.push(seq);
-    }
-    tx.commit().await.context("commit append_many")?;
-    Ok(seqs)
+    super::tx::run_tx(conn, "BEGIN", || async move {
+        let mut seqs = Vec::with_capacity(msgs.len());
+        for m in msgs {
+            let blocks_json = serde_json::to_string(&m.blocks).context("serialize blocks")?;
+            let usage_json = serde_json::to_string(&m.usage).context("serialize usage")?;
+            conn.execute(
+                INSERT_MESSAGE,
+                params![
+                    m.id.as_str(),
+                    session_id,
+                    role_str(m.role),
+                    m.agent.as_deref(),
+                    m.model.as_deref(),
+                    blocks_json,
+                    usage_json,
+                    m.created_at,
+                    m.synthetic as i64,
+                ],
+            )
+            .await
+            .context("insert message in tx")?;
+            let seq = last_seq_in_tx(conn, session_id).await?;
+            seqs.push(seq);
+        }
+        Ok(seqs)
+    })
+    .await
 }
 
 pub async fn load(conn: &Connection, session_id: &str) -> Result<Vec<Message>> {
@@ -88,8 +89,8 @@ pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {
     }
 }
 
-async fn last_seq_in_tx(tx: &libsql::Transaction, session_id: &str) -> Result<i64> {
-    let stmt = tx
+async fn last_seq_in_tx(conn: &Connection, session_id: &str) -> Result<i64> {
+    let stmt = conn
         .prepare("SELECT MAX(seq) FROM messages WHERE session_id = ?")
         .await?;
     let mut rows = stmt.query(params![session_id]).await?;
@@ -101,39 +102,40 @@ async fn last_seq_in_tx(tx: &libsql::Transaction, session_id: &str) -> Result<i6
 }
 
 /// Transactional import with count; returns a report. Used by the one-time
-/// JSONL migration and any bulk-load path.
+/// JSONL migrations and any bulk-load path.
 pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
     if msgs.is_empty() {
         return Ok(ImportReport::default());
     }
-    let tx = conn.transaction().await?;
-    let mut count = 0u32;
-    for m in msgs {
-        let blocks_json = serde_json::to_string(&m.blocks)?;
-        let usage_json = serde_json::to_string(&m.usage)?;
-        tx.execute(
-            INSERT_MESSAGE,
-            params![
-                m.id.as_str(),
-                session_id,
-                role_str(m.role),
-                m.agent.as_deref(),
-                m.model.as_deref(),
-                blocks_json,
-                usage_json,
-                m.created_at,
-                m.synthetic as i64,
-            ],
-        )
-        .await?;
-        count += 1;
-    }
-    tx.commit().await?;
-    Ok(ImportReport {
-        sessions: 1,
-        messages: count,
-        skipped: 0,
+    super::tx::run_tx(conn, "BEGIN", || async move {
+        let mut count = 0u32;
+        for m in msgs {
+            let blocks_json = serde_json::to_string(&m.blocks)?;
+            let usage_json = serde_json::to_string(&m.usage)?;
+            conn.execute(
+                INSERT_MESSAGE,
+                params![
+                    m.id.as_str(),
+                    session_id,
+                    role_str(m.role),
+                    m.agent.as_deref(),
+                    m.model.as_deref(),
+                    blocks_json,
+                    usage_json,
+                    m.created_at,
+                    m.synthetic as i64,
+                ],
+            )
+            .await?;
+            count += 1;
+        }
+        Ok(ImportReport {
+            sessions: 1,
+            messages: count,
+            skipped: 0,
+        })
     })
+    .await
 }
 
 fn row_to_message(r: &libsql::Row) -> Result<Message> {

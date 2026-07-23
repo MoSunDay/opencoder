@@ -526,6 +526,9 @@ async fn run_app(
                                             }
                                             running = true;
                                             follow = true;
+                                            if chat.agent == "plan" {
+                                                chat.plan_submitted = true;
+                                            }
                                             chat.begin_turn();
                                         }
                                     }
@@ -546,6 +549,9 @@ async fn run_app(
                                     }
                                     running = true;
                                     follow = true;
+                                    if chat.agent == "plan" {
+                                        chat.plan_submitted = true;
+                                    }
                                     chat.begin_turn();
                                 }
                             }
@@ -602,7 +608,7 @@ async fn run_app(
                                 mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
                                 let plan_to_act = chat.agent == "plan" && name == "act" && !running;
                                 sys_tokens = sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
-                                if plan_to_act && !chat.blocks.is_empty() {
+                                if plan_to_act && chat.plan_submitted {
                                     // Carry any text the user left in the
                                     // input box into the handoff so it is
                                     // appended to the plan and submitted.

@@ -157,7 +157,7 @@ pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
 }
 
 /// Seed the dependency-gated skills (ssh-pty, chrome-headless) into
-/// `~/.opencode/skills` if the [`DEPS_SENTINEL`] file exists.
+/// `~/.opencoder/skills` if the [`DEPS_SENTINEL`] file exists.
 ///
 /// Independent of [`seed_builtin_skills`]: a fresh install gets only the
 /// built-in skills until the user explicitly installs the optional deps via
@@ -198,11 +198,11 @@ pub fn seed_dep_gated_skills_in(root: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Write `install-skills-dep.sh` into `~/.opencode/` so the user can discover
+/// Write `install-skills-dep.sh` into `~/.opencoder/` so the user can discover
 /// and run it. Idempotent: skips if the file already exists.
 pub fn write_install_script() {
     let dir = match dirs::home_dir() {
-        Some(h) => h.join(".opencode"),
+        Some(h) => h.join(".opencoder"),
         None => return,
     };
     if let Err(e) = write_install_script_in(&dir) {
@@ -228,7 +228,7 @@ pub fn write_install_script_in(base: &Path) -> std::io::Result<()> {
 }
 
 /// Embedded copy of `scripts/install-skills-dep.sh`, written to
-/// `~/.opencode/install-skills-dep.sh` on startup so users can discover the
+/// `~/.opencoder/install-skills-dep.sh` on startup so users can discover the
 /// optional-dependency installer.
 const INSTALL_SCRIPT: &str = include_str!("../../../scripts/install-skills-dep.sh");
 

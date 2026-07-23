@@ -79,7 +79,7 @@ pub(crate) fn compute_display<'a>(
     let status = chat.status.clone();
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
-    // The body title keeps the "Esc back" hint; the status bar uses the
+    // The body title keeps the "Ctrl+L back" hint; the status bar uses the
     // short subagent kind so it renders the same layout as the parent.
     let (display_chat, display_title, display_status_agent, display_ctx, display_sys) =
         if let Some(idx) = subagent_focus {
@@ -88,7 +88,7 @@ pub(crate) fn compute_display<'a>(
                     view, kind, prompt, ..
                 }) => (
                     view as &crate::chat::ChatView,
-                    format!("\u{2190} [Esc] back | \u{2937}sub [{kind}] {prompt}"),
+                    format!("\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"),
                     kind.clone(),
                     view.context_used,
                     subagent_sys,

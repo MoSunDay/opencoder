@@ -5,6 +5,7 @@ pub mod plan_handoff;
 pub mod prompt;
 pub mod resume;
 pub mod runner;
+pub mod tool_guard;
 pub mod tools;
 
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};

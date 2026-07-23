@@ -328,6 +328,7 @@ async fn run_loop(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<()> {
     let mut doom: VecDeque<String> = VecDeque::new();
+    let mut tool_failures: crate::tool_guard::FailureMap = HashMap::new();
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -420,6 +421,7 @@ async fn run_loop(
         // concurrent futures can emit events safely (each emit is a fast push).
         // Results are re-sorted by original call index so the Tool message and
         // event replay stay deterministic regardless of completion order.
+        let mut failure_tripped = false;
         let tool_blocks: Vec<ContentBlock> = {
             let sink: Sink = Arc::new(Mutex::new(&mut *on_event));
             // Doom-loop guard, evaluated over this turn's batch.
@@ -502,6 +504,31 @@ async fn run_loop(
                 // and the run halts at the next run_loop top-of-loop check.
             }
             results.sort_by_key(|(i, _)| *i);
+            // Tool-failure guard: track consecutive failures per tool name
+            // and apply exponential backoff before continuing.
+            {
+                let tg = &session.config.tool_guard;
+                if tg.max_consecutive_failures > 0 {
+                    let mut max_delay = std::time::Duration::ZERO;
+                    for &(i, ref out) in &results {
+                        let (tripped, delay) = crate::tool_guard::record(
+                            &mut tool_failures,
+                            &tool_calls[i].name,
+                            out.is_error,
+                            tg,
+                        );
+                        if tripped {
+                            failure_tripped = true;
+                        }
+                        if delay > max_delay {
+                            max_delay = delay;
+                        }
+                    }
+                    if !max_delay.is_zero() {
+                        tokio::time::sleep(max_delay).await;
+                    }
+                }
+            }
             results
                 .into_iter()
                 .map(|(i, out)| ContentBlock::ToolResult {
@@ -535,6 +562,18 @@ async fn run_loop(
             synthetic: false,
         };
         session.record(tool_msg).await;
+
+        // Tool-failure threshold: if any tool hit the consecutive-failure
+        // limit, abort the turn to break the retry loop.
+        if failure_tripped {
+            let detail = crate::tool_guard::worst(&tool_failures)
+                .map(|(n, c)| format!("'{n}' failed {c}x consecutively"))
+                .unwrap_or_else(|| "threshold reached".into());
+            on_event(SessionEvent::Error(format!(
+                "tool-failure guard: {detail}, stopping"
+            )));
+            break;
+        }
     }
     Ok(())
 }

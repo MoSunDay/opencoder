@@ -19,7 +19,7 @@ pub use computer_use::{
 };
 pub use config::{
     looks_like_env_var, AgentDefaults, CapabilitiesConfig, CompactionConfig, Config, Endpoint,
-    HttpHeader, NetworkConfig, ProviderConfig, DEFAULT_CONTEXT_LIMIT,
+    HttpHeader, NetworkConfig, ProviderConfig, ToolGuardConfig, DEFAULT_CONTEXT_LIMIT,
 };
 pub use error::{CoreError, Result};
 pub use message::{ContentBlock, Message, MessageUsage, Role};

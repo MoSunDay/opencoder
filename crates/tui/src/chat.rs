@@ -784,16 +784,26 @@ impl ChatView {
 }
 
 pub(crate) fn summarize(input: &serde_json::Value) -> String {
+    // The full value is returned verbatim (trimmed); the transcript body
+    // renders with `Paragraph::wrap(Wrap { trim: false })`, so the terminal
+    // wraps long commands to its actual width. Never truncate here — an
+    // 80-column cut hid the real command behind an ellipsis.
     match input {
         serde_json::Value::Object(m) => {
             for k in ["command", "path", "description", "pattern", "prompt"] {
                 if let Some(s) = m.get(k).and_then(|v| v.as_str()) {
-                    return short(s, 80);
+                    return s.trim().to_string();
                 }
             }
-            short(&serde_json::to_string(input).unwrap_or_default(), 80)
+            serde_json::to_string(input)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
         }
-        o => short(&serde_json::to_string(o).unwrap_or_default(), 80),
+        o => serde_json::to_string(o)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
     }
 }
 

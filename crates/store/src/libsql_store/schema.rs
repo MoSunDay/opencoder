@@ -110,7 +110,11 @@ pub async fn apply_connection_pragmas(conn: &Connection) -> Result<()> {
 }
 
 /// Create all tables if absent, run incremental migrations, and record the
-/// schema version. Idempotent: safe on fresh and existing databases.
+/// schema version. Idempotent: safe on fresh and existing databases. Because
+/// the `CREATE TABLE` statements carry the full latest schema while
+/// `schema_version` may record a stale older version, migrations guard every
+/// `ADD COLUMN` via `add_column_if_absent`, so re-running never fails with
+/// `duplicate column name`.
 pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
     conn.execute(CREATE_SESSIONS, ()).await?;
@@ -140,28 +144,71 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
 }
 
 /// Run incremental schema migrations from `from` up to the current version.
+///
+/// Migrations are idempotent: each `ALTER TABLE ... ADD COLUMN` is guarded by
+/// `add_column_if_absent`, which inspects `PRAGMA table_info` and skips the
+/// column when it is already present. This is important because `bootstrap`
+/// always runs the `CREATE TABLE` statements carrying the *full latest* schema,
+/// so a table can already physically carry a column even when `schema_version`
+/// records a stale older version (e.g. a database whose schema_version row was
+/// left behind at 1 while the tables were recreated at the latest shape). A
+/// bare `ADD COLUMN` would fail with `duplicate column name` in that case;
+/// guarding the ALTER makes re-migration safe regardless of the
+/// CREATE-TABLE-vs-stale-version disagreement.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
     if from < 2 {
         // v2: add sse_kind column to session_events for lossless event-kind
         // replay. The column is nullable so existing rows stay valid.
-        conn.execute("ALTER TABLE session_events ADD COLUMN sse_kind TEXT", ())
-            .await
-            .context("migrate v2: add sse_kind column")?;
+        add_column_if_absent(conn, "session_events", "sse_kind", "TEXT").await?;
     }
     if from < 3 {
         // v3: plan→act handoff boundary + active skill on sessions, so resume
         // can reconstruct the post-handoff focused transcript and the active
         // skill across restarts. All nullable so existing rows stay valid.
-        conn.execute("ALTER TABLE sessions ADD COLUMN handoff_seq INTEGER", ())
-            .await
-            .context("migrate v3: add handoff_seq column")?;
-        conn.execute("ALTER TABLE sessions ADD COLUMN handoff_plan TEXT", ())
-            .await
-            .context("migrate v3: add handoff_plan column")?;
-        conn.execute("ALTER TABLE sessions ADD COLUMN skill TEXT", ())
-            .await
-            .context("migrate v3: add skill column")?;
+        add_column_if_absent(conn, "sessions", "handoff_seq", "INTEGER").await?;
+        add_column_if_absent(conn, "sessions", "handoff_plan", "TEXT").await?;
+        add_column_if_absent(conn, "sessions", "skill", "TEXT").await?;
     }
+    Ok(())
+}
+
+/// Return `true` if `table` has a column named `column`.
+///
+/// Inspects `PRAGMA table_info(<table>)`, where the column-name lives at result
+/// index 1. `table` and `column` are code-controlled literals, so interpolating
+/// them into the SQL is safe.
+async fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .await?;
+    let mut rows = stmt.query(()).await?;
+    while let Some(row) = rows.next().await? {
+        let name: String = row.get::<String>(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `ALTER TABLE {table} ADD COLUMN {column} {type_def}`, but a no-op when the
+/// column already exists. `table`, `column`, and `type_def` are code-controlled
+/// literals (not user input), so the format! interpolation is intentional.
+async fn add_column_if_absent(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    type_def: &str,
+) -> Result<()> {
+    if column_exists(conn, table, column).await? {
+        return Ok(());
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {type_def}"),
+        (),
+    )
+    .await
+    .with_context(|| format!("add column {table}.{column}"))?;
     Ok(())
 }
 

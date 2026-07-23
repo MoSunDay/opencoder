@@ -18,6 +18,7 @@ mod messages;
 mod schema;
 mod sessions;
 mod subagent_tasks;
+mod tx;
 
 /// Primary `Store` implementation backed by libsql (embedded local SQLite, WAL).
 ///

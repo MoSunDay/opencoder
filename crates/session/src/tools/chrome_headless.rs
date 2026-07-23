@@ -43,7 +43,7 @@ fn find_chrome() -> Option<PathBuf> {
 }
 
 fn not_found_msg() -> String {
-    "Chrome/Chromium not found. Run ~/.opencode/install-skills-dep.sh to install, \
+    "Chrome/Chromium not found. Run ~/.opencoder/install-skills-dep.sh to install, \
      or set the CHROME_PATH environment variable to the binary path."
         .to_string()
 }

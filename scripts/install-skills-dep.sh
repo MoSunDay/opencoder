@@ -5,13 +5,13 @@
 #   - tmux is available (enables the `ts` persistent TUI command and the
 #     ssh-pty skill's session backend).
 #   - chromium/chrome is available (enables the chrome-headless skill).
-#   - the `~/.opencode/skills/.skills-deps` sentinel is created so opencode
+#   - the `~/.opencoder/skills/.skills-deps` sentinel is created so opencode
 #     seeds the ssh-pty and chrome-headless skills on next startup.
 #
 # Safe to re-run; skips packages already installed.
 set -euo pipefail
 
-OP_DIR="${HOME}/.opencode"
+OP_DIR="${HOME}/.opencoder"
 SENTINEL="${OP_DIR}/skills/.skills-deps"
 
 echo "=== opencode optional skill dependencies ==="

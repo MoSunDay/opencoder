@@ -9,6 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use opencoder_core::{json, tool::truncate_output, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
+use url::Url;
 
 use super::web_read;
 
@@ -86,6 +87,24 @@ fn normalise_url(raw: &str) -> Result<String, String> {
     Ok(format!("https://{trimmed}"))
 }
 
+/// Render structured SERP results as a clean numbered markdown list. The header
+/// echoes the source URL so callers can tell which query produced the rows; the
+/// snippet and url lines are omitted when empty.
+fn format_serp_output(url: &str, results: &[web_read::SearchResult]) -> String {
+    let mut out = format!("# Search results: {url}\n");
+    for (i, r) in results.iter().enumerate() {
+        let n = i + 1;
+        out.push_str(&format!("\n{n}. **{}**\n", r.title));
+        if !r.snippet.is_empty() {
+            out.push_str(&format!("   {}\n", r.snippet));
+        }
+        if !r.url.is_empty() {
+            out.push_str(&format!("   {}\n", r.url));
+        }
+    }
+    out
+}
+
 async fn do_fetch(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let raw_url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
     if raw_url.is_empty() {
@@ -122,8 +141,20 @@ async fn do_fetch(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     match output {
         Ok(o) if o.status.success() => {
             let html = String::from_utf8_lossy(&o.stdout);
-            let text = web_read::extract_readable_text(&html);
-            let body = format!("# {url}\n\n{text}");
+            // Auto-detect SERP pages and emit structured results; otherwise fall
+            // back to readable-text extraction. Keeps non-search pages unchanged.
+            let parsed_url = Url::parse(&url).ok();
+            let serp = parsed_url
+                .as_ref()
+                .map(|u| web_read::parse_search_results(u, &html, 12))
+                .filter(|v| !v.is_empty());
+            let body = match serp {
+                Some(results) => format_serp_output(&url, &results),
+                None => {
+                    let text = web_read::extract_readable_text(&html);
+                    format!("# {url}\n\n{text}")
+                }
+            };
             Ok(truncate_output(body, ctx.max_output))
         }
         Ok(o) => {
@@ -284,5 +315,31 @@ mod tests {
         let msg = not_found_msg();
         assert!(msg.contains("install-skills-dep.sh"));
         assert!(msg.contains("CHROME_PATH"));
+    }
+
+    #[test]
+    fn format_serp_output_renders_markdown_list() {
+        let results = vec![
+            web_read::SearchResult {
+                title: "First".to_string(),
+                url: "http://www.baidu.com/link?url=a".to_string(),
+                snippet: "snippet one".to_string(),
+            },
+            web_read::SearchResult {
+                title: "Second".to_string(),
+                url: String::new(),
+                snippet: String::new(),
+            },
+        ];
+        let out = format_serp_output("https://www.baidu.com/s?wd=x", &results);
+        assert!(out.starts_with("# Search results: https://www.baidu.com/s?wd=x\n"));
+        // numbered starting at 1
+        assert!(out.contains("\n1. **First**\n"));
+        assert!(out.contains("\n2. **Second**\n"));
+        // snippet + url printed for first row
+        assert!(out.contains("   snippet one\n"));
+        assert!(out.contains("   http://www.baidu.com/link?url=a\n"));
+        // empty fields are omitted (no url line for second row)
+        assert!(!out.contains("**Second**\n   \n"));
     }
 }

@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use regex::Regex;
 use serde_json::Value;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 pub struct GrepTool;
 
@@ -48,7 +49,8 @@ impl Tool for GrepTool {
         let root = Path::new(&base);
         let mut results: Vec<String> = Vec::new();
         let mut visited = 0u32;
-        walk(root, &re, &inc_re, &mut results, &mut visited, 1000);
+        let mut seen = HashSet::new();
+        walk(root, &re, &inc_re, &mut results, &mut visited, 1000, &mut seen);
         if results.is_empty() {
             return Ok(ToolOutput::ok("no matches"));
         }
@@ -64,8 +66,19 @@ fn walk(
     out: &mut Vec<String>,
     visited: &mut u32,
     cap: usize,
+    seen: &mut HashSet<PathBuf>,
 ) {
     if *visited > 50_000 || out.len() >= cap {
+        return;
+    }
+    // Break symlink cycles: record the real (canonical) directory path. A
+    // symlink pointing at an ancestor resolves to an already-seen canonical
+    // path and is skipped, instead of recursing until the file-count cap.
+    let canon = match dir.canonicalize() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if !seen.insert(canon) {
         return;
     }
     let entries = match std::fs::read_dir(dir) {
@@ -83,7 +96,7 @@ fn walk(
             ) {
                 continue;
             }
-            walk(&path, re, inc_re, out, visited, cap);
+            walk(&path, re, inc_re, out, visited, cap, seen);
         } else if path.is_file() {
             *visited += 1;
             if let Some(inc) = inc_re {

@@ -69,26 +69,6 @@ pub(crate) fn handle_key(
             MenuOutcome::Idle => KeyAction::None,
         };
     }
-    // Alt+Tab (and Shift+Tab) switches act <-> plan mode.
-    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab)
-    {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgent(next.into());
-    }
-
-    // Ctrl+Shift+Tab: switch act <-> plan mode WITHOUT clearing context or
-    // auto-executing (pure mode toggle, keeps the full transcript). Must be
-    // checked before the CONTROL branch which would otherwise swallow
-    // Tab/BackTab. Terminals report this as BackTab+CONTROL, or (under kitty
-    // keyboard protocol with full disambiguation) Tab+CONTROL+SHIFT.
-    if k.modifiers.contains(KeyModifiers::CONTROL)
-        && (matches!(k.code, KeyCode::BackTab)
-            || (k.modifiers.contains(KeyModifiers::SHIFT) && matches!(k.code, KeyCode::Tab)))
-    {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgentNoClear(next.into());
-    }
-
     // Body scroll keys (PageUp / PageDown) — shared between enabled
     // and disabled (subagent-focus) states so scrolling always works.
     if apply_scroll(&k, scroll, follow) {
@@ -109,6 +89,26 @@ pub(crate) fn handle_key(
             }
         }
         return KeyAction::None;
+    }
+
+    // Alt+Tab (and Shift+Tab) switches act <-> plan mode.
+    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab)
+    {
+        let next = if agent == "plan" { "act" } else { "plan" };
+        return KeyAction::SwitchAgent(next.into());
+    }
+
+    // Ctrl+Shift+Tab: switch act <-> plan mode WITHOUT clearing context or
+    // auto-executing (pure mode toggle, keeps the full transcript). Must be
+    // checked before the CONTROL branch which would otherwise swallow
+    // Tab/BackTab. Terminals report this as BackTab+CONTROL, or (under kitty
+    // keyboard protocol with full disambiguation) Tab+CONTROL+SHIFT.
+    if k.modifiers.contains(KeyModifiers::CONTROL)
+        && (matches!(k.code, KeyCode::BackTab)
+            || (k.modifiers.contains(KeyModifiers::SHIFT) && matches!(k.code, KeyCode::Tab)))
+    {
+        let next = if agent == "plan" { "act" } else { "plan" };
+        return KeyAction::SwitchAgentNoClear(next.into());
     }
 
     if k.modifiers.contains(KeyModifiers::CONTROL) {
@@ -441,6 +441,70 @@ mod tests {
             &mut skill_menu, 80, 2, true,
         );
         assert!(matches!(action, KeyAction::Quit));
+    }
+
+    #[test]
+    fn handle_key_disabled_blocks_alt_tab() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Alt+Tab must be blocked when input is disabled (subagent-focus
+        // view) so the parent agent is not switched prematurely.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+
+        // Alt+BackTab variant.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::ALT),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+    }
+
+    #[test]
+    fn handle_key_disabled_blocks_ctrl_shift_tab() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Ctrl+Shift+Tab (BackTab+CONTROL) must be blocked when input is
+        // disabled so the parent agent is not switched prematurely.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::CONTROL),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+
+        // kitty: Tab+CONTROL+SHIFT.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
     }
 
     #[test]

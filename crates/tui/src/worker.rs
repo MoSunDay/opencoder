@@ -278,14 +278,36 @@ pub async fn process_cmd(
             sess.set_skill(body);
         }
         UiCmd::ReloadConfig(new_cfg) => {
-            if let Ok(ep) = new_cfg.resolve_endpoint() {
-                if let Ok(new_client) = ChatClient::new(
+            match new_cfg.resolve_endpoint() {
+                Ok(ep) => match ChatClient::new(
                     &ep.base_url,
                     &ep.api_key,
                     &ep.headers,
                     new_cfg.network.proxy.as_deref(),
                 ) {
-                    sess.apply_config_reload(*new_cfg, Arc::new(new_client));
+                    Ok(new_client) => {
+                        sess.apply_config_reload(*new_cfg, Arc::new(new_client));
+                    }
+                    Err(e) => {
+                        let model = new_cfg.model_id().to_string();
+                        sess.apply_config_reload_keep_client(*new_cfg);
+                        let msg = format!(
+                            "model switched to {model} but client build failed \
+                             ({e:#}); keeping previous client"
+                        );
+                        let ev = SessionEvent::Error(msg);
+                        forward_event(evt_tx, ev);
+                    }
+                },
+                Err(e) => {
+                    let model = new_cfg.model_id().to_string();
+                    sess.apply_config_reload_keep_client(*new_cfg);
+                    let msg = format!(
+                        "model switched to {model} but endpoint resolve failed \
+                         ({e:#}); keeping previous client"
+                    );
+                    let ev = SessionEvent::Error(msg);
+                    forward_event(evt_tx, ev);
                 }
             }
         }
@@ -466,5 +488,92 @@ mod tests {
             },
         );
         assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 2);
+    }
+
+    #[tokio::test]
+    async fn reload_config_success_swaps_model() {
+        use opencoder_core::{resolve_agent, Config, ProviderConfig};
+        use opencoder_llm::MockChatClient;
+
+        let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
+        let agent = resolve_agent("act").expect("act agent");
+        let mut sess = SessionState::new(
+            "reload-ok",
+            agent,
+            Config::default(),
+            std::sync::Arc::new(MockChatClient::new())
+                as std::sync::Arc<dyn opencoder_llm::ChatStream>,
+            std::env::temp_dir(),
+        );
+        assert_eq!(sess.model, "gpt-4o-mini", "default model id");
+
+        let new_cfg = Config {
+            model: "openai/test-model".into(),
+            provider: ProviderConfig {
+                api_key: Some("k".into()),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        let should_break =
+            process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx).await;
+        assert!(!should_break, "ReloadConfig must not break the worker loop");
+        assert_eq!(sess.model, "test-model", "model must be swapped on success");
+    }
+
+    #[tokio::test]
+    async fn reload_config_bad_proxy_keeps_client_and_emits_error() {
+        use opencoder_core::{resolve_agent, Config, NetworkConfig, ProviderConfig};
+        use opencoder_llm::MockChatClient;
+
+        let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(16);
+        let agent = resolve_agent("act").expect("act agent");
+        let mut sess = SessionState::new(
+            "reload-bad-proxy",
+            agent,
+            Config::default(),
+            std::sync::Arc::new(MockChatClient::new())
+                as std::sync::Arc<dyn opencoder_llm::ChatStream>,
+            std::env::temp_dir(),
+        );
+        assert_eq!(sess.model, "gpt-4o-mini", "default model id");
+
+        // api_key present so resolve_endpoint() succeeds, but an invalid
+        // proxy URL makes ChatClient::new fail -> keep-client fallback path.
+        let new_cfg = Config {
+            model: "openai/proxy-model".into(),
+            provider: ProviderConfig {
+                api_key: Some("k".into()),
+                ..Default::default()
+            },
+            network: NetworkConfig {
+                proxy: Some("not-a-valid-url".into()),
+            },
+            ..Config::default()
+        };
+        let should_break =
+            process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx).await;
+        assert!(!should_break, "ReloadConfig must not break the worker loop");
+        // model updated via keep-client fallback (consistent with on-disk config)
+        assert_eq!(sess.model, "proxy-model", "model updated despite client failure");
+        // an Error event must have been forwarded to the UI
+        let ev = evt_rx.recv().await.expect("an error event was forwarded");
+        match ev {
+            UiEvent::Session(SessionEvent::Error(msg)) => {
+                assert!(
+                    msg.contains("client build failed"),
+                    "unexpected error message: {msg}"
+                );
+                assert!(msg.contains("proxy-model"), "error should mention new model");
+            }
+            other => panic!("expected Error event, got a different variant: {}", variant_name(&other)),
+        }
+    }
+
+    fn variant_name(ev: &UiEvent) -> &'static str {
+        match ev {
+            UiEvent::Session(_) => "Session",
+            UiEvent::TurnDone => "TurnDone",
+        }
     }
 }

@@ -79,12 +79,14 @@ async fn make_session(config: Config, client: Arc<dyn ChatStream>) -> SessionSta
 }
 
 #[tokio::test]
-async fn threshold_stops_after_three_consecutive_failures() {
+async fn threshold_stops_after_five_consecutive_failures() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![failing_tool_call(1)])
             .push_script(vec![failing_tool_call(2)])
             .push_script(vec![failing_tool_call(3)])
+            .push_script(vec![failing_tool_call(4)])
+            .push_script(vec![failing_tool_call(5)])
             .push_script(vec![done()]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
@@ -92,8 +94,8 @@ async fn threshold_stops_after_three_consecutive_failures() {
 
     run(&mut s, "test".into(), |_| {}).await.unwrap();
 
-    // Loop stopped after 3 failures — 4th script never consumed.
-    assert_eq!(mock.call_count(), 3);
+    // Loop stopped after 5 failures — 6th script never consumed.
+    assert_eq!(mock.call_count(), 5);
 }
 
 #[tokio::test]
@@ -102,7 +104,9 @@ async fn emits_error_event_on_threshold() {
         MockChatClient::new()
             .push_script(vec![failing_tool_call(1)])
             .push_script(vec![failing_tool_call(2)])
-            .push_script(vec![failing_tool_call(3)]),
+            .push_script(vec![failing_tool_call(3)])
+            .push_script(vec![failing_tool_call(4)])
+            .push_script(vec![failing_tool_call(5)]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
@@ -134,7 +138,9 @@ async fn success_between_failures_resets_counter() {
             .push_script(vec![bash_call("echo ok")]) // success → reset
             .push_script(vec![bash_call("exit 3")]) // fail 1 again
             .push_script(vec![bash_call("exit 4")]) // fail 2
-            .push_script(vec![bash_call("exit 5")]) // fail 3 → trip
+            .push_script(vec![bash_call("exit 5")]) // fail 3
+            .push_script(vec![bash_call("exit 6")]) // fail 4
+            .push_script(vec![bash_call("exit 7")]) // fail 5 → trip
             .push_script(vec![done()]),             // should NOT reach
     );
     let client: Arc<dyn ChatStream> = mock.clone();
@@ -142,8 +148,8 @@ async fn success_between_failures_resets_counter() {
 
     run(&mut s, "test".into(), |_| {}).await.unwrap();
 
-    // 6 tool-call turns consumed; 7th (done) not reached.
-    assert_eq!(mock.call_count(), 6);
+    // 8 tool-call turns consumed; 9th (done) not reached.
+    assert_eq!(mock.call_count(), 8);
 }
 
 #[tokio::test]

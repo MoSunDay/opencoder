@@ -12,9 +12,7 @@ Keybindings:
   Ctrl+D           quit
   Ctrl+H           toggle this help
   Ctrl+W           delete word before cursor (backward-kill-word)
-  Ctrl+N / Ctrl+P  next / previous history
-  Home / End       cursor to start / end
-  Ctrl+A / Ctrl+E  cursor to start / end (same as Home / End)
+  Ctrl+A / Ctrl+E  cursor to start / end
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
   Ctrl+U / Ctrl+L  exit subagent view (if focused) / collapse all thinking / clear input
 Mouse:            scroll wheel to scroll transcript; click arrow to follow

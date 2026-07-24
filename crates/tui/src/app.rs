@@ -269,6 +269,7 @@ async fn run_app(
     // `Skip` prevents burst-fire catch-up after a stall.
     let mut body_ticker = tokio::time::interval(Duration::from_millis(BODY_REFRESH_MS));
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut quitting = false; // render "shutting down…" frame before worker-shutdown wait
     let mut skip_next_render = false;
     // `dirty` = state changed since the last render. `render_pending` = a
     // frame-tick boundary authorized a render. A redraw happens only when
@@ -370,6 +371,9 @@ async fn run_app(
         }
         render_pending = false;
         skip_next_render = false;
+        if quitting {
+            break;
+        }
 
         tokio::select! {
             maybe_ev = input_rx.recv() => {
@@ -693,7 +697,10 @@ async fn run_app(
                             }
                             KeyAction::Quit => {
                                 app_loop::handle_quit(running, &cancel, &mut chat, &cmd_tx).await;
-                                break;
+                                chat.status = "shutting down\u{2026}".to_string();
+                                dirty = true;
+                                render_pending = true;
+                                quitting = true;
                             }
                             KeyAction::None => {}
                         }

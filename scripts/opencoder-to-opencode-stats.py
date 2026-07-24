@@ -132,13 +132,12 @@ def sum_tokens(tokens_list):
     return agg
 
 def parse_model(s):
-    """Parse opencoder 'provider/model' or bare 'model' -> opencode model json."""
+    """Parse opencoder model string -> {id,providerID,variant}; glm-5.2 -> zhipuai-coding-plan."""
     if not s:
         return {"id": "unknown", "providerID": "unknown", "variant": "default"}
-    parts = s.split("/")
-    if len(parts) >= 2:
-        return {"id": parts[1], "providerID": parts[0], "variant": "default"}
-    return {"id": parts[0], "providerID": parts[0], "variant": "default"}
+    mid = s.rsplit("/", 1)[-1]
+    provider = "zhipuai-coding-plan" if mid == "glm-5.2" else s.split("/")[0]
+    return {"id": mid, "providerID": provider, "variant": "default"}
 
 def slugify(title, fallback):
     s = re.sub(r"[^a-z0-9]+", "-", (title or "").strip().lower()).strip("-")

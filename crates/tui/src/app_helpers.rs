@@ -28,7 +28,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 const DBL_CLICK_MS: u64 = 400;
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
-/// subagent view, and Ctrl+L collapses all thinking blocks / exits a
+/// subagent view, and Ctrl+L / Ctrl+U collapses all thinking blocks / exits a
 /// subagent view / clears the input. Returns `true` when the key was
 /// consumed (caller should `continue` to the next event).
 #[allow(clippy::too_many_arguments)]
@@ -54,9 +54,11 @@ pub(crate) fn pre_key_intercept(
         *last_esc = None;
         return true;
     }
-    // Ctrl+L: collapse all thinking blocks, exit subagent view if in one,
-    // and clear the input box.
-    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
+    // Ctrl+L / Ctrl+U: collapse all thinking blocks, exit subagent view if in
+    // one, and clear the input box.
+    if k.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(k.code, KeyCode::Char('l') | KeyCode::Char('u'))
+    {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
                 view.collapse_all_thinking();

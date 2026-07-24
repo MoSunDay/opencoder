@@ -196,6 +196,9 @@ async fn run_app(
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
     let mut running = false;
+    let mut pending_handoff: Option<String> = None;
+    let mut run_elapsed_ms: u64 = 0;
+    let mut last_clock = Instant::now();
     let mut cancelled = false;
     let mut drain_pending = false;
     let mut show_help = false;
@@ -288,6 +291,7 @@ async fn run_app(
     let mut hits = MouseHits::default();
 
     loop {
+        app_loop::tick_clock(running, &mut last_clock, &mut run_elapsed_ms);
         let app_loop::DisplayState {
             agent_name,
             status,
@@ -304,6 +308,7 @@ async fn run_app(
             sys_tokens,
             &config,
             &model_label,
+            &workdir,
         );
         // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
         // refreshes the spinner still animates at full frame rate because it is
@@ -335,7 +340,9 @@ async fn run_app(
                     follow,
                     anim_tick,
                     mode_flash.as_ref().and_then(|(t, s)| {
-                        if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
+                        if pending_handoff.is_some() {
+                            Some("\u{2192} act (pending)")
+                        } else if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
                             Some(t.as_str())
                         } else {
                             None
@@ -355,6 +362,8 @@ async fn run_app(
                             None
                         }
                     }),
+                    subagent_focus.is_some(),
+                    run_elapsed_ms,
                 )?;
             }
             dirty = false;
@@ -501,6 +510,7 @@ async fn run_app(
                                 .map(|r| r.width.saturating_sub(2))
                                 .unwrap_or(78),
                             2,
+                            subagent_focus.is_some(),
                         ) {
                             KeyAction::Submit(text) => {
                                 let (clean, _unresolved) = resolve_and_warn(
@@ -605,26 +615,17 @@ async fn run_app(
                                 follow = true;
                             }
                             KeyAction::SwitchAgent(name) => {
-                                mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-                                let plan_to_act = chat.agent == "plan" && name == "act" && !running;
-                                sys_tokens = sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
-                                if plan_to_act && chat.plan_submitted {
-                                    // Carry any text the user left in the
-                                    // input box into the handoff so it is
-                                    // appended to the plan and submitted.
-                                    let extra = std::mem::take(&mut input);
-                                    cursor_idx = 0;
-                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::SwitchAndStart(name, extra))
-                                        .await
-                                    {
-                                        worker_dead(&mut chat);
-                                        break;
-                                    }
-                                    running = true;
-                                    follow = true;
-                                    chat.begin_turn();
-                                } else {
-                                    let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                                if matches!(
+                                    app_loop::handle_switch_agent(
+                                        name, &mut chat, &mut running, &mut follow, &mut input,
+                                        &mut cursor_idx, &mut pending_handoff, &mut mode_flash,
+                                        anim_tick, &cmd_tx, &mut cancel, &mut sys_tokens,
+                                        &workdir, &active_skill_body,
+                                    )
+                                    .await,
+                                    app_loop::SwitchOutcome::Quit
+                                ) {
+                                    break;
                                 }
                             }
                             KeyAction::SwitchAgentNoClear(name) => {
@@ -633,6 +634,7 @@ async fn run_app(
                                 // transcript is preserved in full, unlike
                                 // Shift+Tab which collapses to the final plan.
                                 mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+                                pending_handoff = None;
                                 sys_tokens =
                                     sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
                                 let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
@@ -670,6 +672,7 @@ async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 cancel.cancel();
+                                pending_handoff = None; // cancel = explicit interrupt, no auto-handoff
                                 // Double-Esc hard-abort: also drop any pending
                                 // steer/queue inputs so they don't resurface on
                                 // resume. delete_input is idempotent.
@@ -746,7 +749,7 @@ async fn run_app(
                 match app_loop::fold_ui_events(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
-                    &cmd_tx, &mut cancel, &mut evt_rx,
+                    &cmd_tx, &mut cancel, &mut pending_handoff, &mut evt_rx,
                 )
                 .await
                 {

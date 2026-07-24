@@ -5,7 +5,8 @@ use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
 use opencoder_session::tools::{
-    bash::BashTool, edit::EditTool, glob::GlobTool, ls::ListTool, write::WriteTool,
+    bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool, ls::ListTool,
+    write::WriteTool,
 };
 use serde_json::json;
 
@@ -290,4 +291,83 @@ async fn bash_tool_returns_partial_output_on_timeout() {
         out.content.contains("PARTIAL-MARKER-9f3a"),
         "partial output discarded (should be surfaced): {out:?}"
     );
+}
+
+
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_follows_symlink_but_breaks_cycle() {
+    // A self-referencing symlink (loop -> .) must not cause infinite recursion.
+    // The canonical-path guard deduplicates the real directory, so the match is
+    // found exactly once instead of up to the 1000-result cap.
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("real.txt"), "UNIQUE_NEEDLE here").unwrap();
+    symlink(".", dir.path().join("loop")).unwrap();
+    let c = ctx(dir.path());
+    let out = GrepTool
+        .execute(json!({"pattern": "UNIQUE_NEEDLE"}), &c)
+        .await
+        .unwrap();
+    let count = out.content.matches("UNIQUE_NEEDLE").count();
+    assert_eq!(count, 1, "expected exactly one match (cycle not broken): {out:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_includes_symlinked_directory() {
+    // The real directory lives outside the search root and is reachable only
+    // through a symlink — proving grep follows symlinked directories.
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("realdir")).unwrap();
+    std::fs::write(dir.path().join("realdir").join("deep.txt"), "DEEP_NEEDLE").unwrap();
+    std::fs::create_dir(dir.path().join("search")).unwrap();
+    symlink("../realdir", dir.path().join("search").join("alias")).unwrap();
+    let c = ctx(dir.path());
+    let out = GrepTool
+        .execute(
+            json!({"pattern": "DEEP_NEEDLE", "path": dir.path().join("search").to_str().unwrap()}),
+            &c,
+        )
+        .await
+        .unwrap();
+    assert!(out.content.contains("DEEP_NEEDLE"), "symlinked dir not searched: {out:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn grep_includes_symlinked_file() {
+    // A symlink to a file outside the search root — grep must read through it.
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("realfile.txt"), "FILE_NEEDLE").unwrap();
+    std::fs::create_dir(dir.path().join("search")).unwrap();
+    symlink("../realfile.txt", dir.path().join("search").join("link.txt")).unwrap();
+    let c = ctx(dir.path());
+    let out = GrepTool
+        .execute(
+            json!({"pattern": "FILE_NEEDLE", "path": dir.path().join("search").to_str().unwrap()}),
+            &c,
+        )
+        .await
+        .unwrap();
+    assert!(out.content.contains("FILE_NEEDLE"), "symlinked file not searched: {out:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn glob_survives_self_referencing_symlink() {
+    // Defensive: confirm glob's `**` does not hang on a self-referencing symlink.
+    // If glob 0.3.x lacks cycle detection this test would never complete.
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "").unwrap();
+    symlink(".", dir.path().join("loop")).unwrap();
+    let c = ctx(dir.path());
+    let out = GlobTool
+        .execute(json!({"pattern": "**/*.rs"}), &c)
+        .await
+        .unwrap();
+    assert!(out.content.contains("a.rs"), "glob result: {out:?}");
 }

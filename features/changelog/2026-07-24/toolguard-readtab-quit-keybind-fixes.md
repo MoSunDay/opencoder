@@ -1,4 +1,4 @@
-# Fix: tool-guard threshold, read-tool tab expansion, graceful Ctrl+D quit, keybind cleanup
+# Fix: tool-guard threshold, read/grep tool hardening, graceful Ctrl+D quit, keybind cleanup, stats provider
 
 **Date:** 2026-07-24
 **Scope:** `opencoder-core`, `opencoder-session`, `opencoder-tui`, scripts
@@ -25,6 +25,12 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 5. **Stats script provider mapping (P3):** `parse_model` mapped `glm-5.2` to a
    `glm-5.2` provider, but the correct provider id is `zhipuai-coding-plan`.
    Fixed the mapping and its test.
+6. **Grep tool hung on symlink cycles (P1):** The `GrepTool` directory walk
+   followed symlinks but had no cycle guard, so a self-referencing symlink
+   (`loop -> .`) recursed until the 50 000-file / 1000-result cap. The walk now
+   tracks the canonical (real) path of each visited directory in a `HashSet` and
+   skips already-seen canonical dirs, breaking the cycle while still following
+   legitimate symlinked directories/files.
 
 ## Changes
 
@@ -34,6 +40,8 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 | Threshold doc/comment | `crates/core/src/config.rs` | `tool_guard` doc comment updated to "5 consecutive failures" |
 | Threshold memory doc | `agents/session/index.md` | `max_consecutive_failures` documented value updated 3→5 |
 | Read-tool tab expansion | `crates/session/src/tools/read.rs` | new pure `expand_tabs()` advances column to next 8-col stop; applied per line in output (`{:>5}: {}`) |
+| Grep symlink-cycle guard | `crates/session/src/tools/grep.rs` | `walk()` now takes `&mut HashSet<PathBuf>`; canonicalizes each dir via `canonicalize()` and skips already-seen real paths |
+| Grep test coverage | `crates/session/tests/tools_contract.rs` | 4 new `#[cfg(unix)]` tests: symlink cycle, symlinked dir, symlinked file, glob self-ref |
 | Ctrl+D graceful quit | `crates/tui/src/app.rs` | `KeyAction::Quit` sets `quitting=true` + "shutting down…" status + dirty/render flags; loop renders one frame then `break`s at top-of-loop `if quitting { break; }` |
 | History keybind cleanup | `crates/tui/src/key_handler.rs` | removed dead `Ctrl+N`/`Ctrl+P` history handlers in multiline mode |
 | Keybind help text | `crates/tui/src/keybind.rs` | removed `Ctrl+N`/`Ctrl+P` and duplicate `Home/End` lines |
@@ -50,6 +58,10 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 | `no_tab_returns_unchanged` | `crates/session/src/tools/read.rs` | no-op for tab-free input |
 | `tab_at_eighth_column_adds_eight_spaces` | `crates/session/src/tools/read.rs` | advances to next stop at col 16 |
 | `empty_string_unchanged` | `crates/session/src/tools/read.rs` | empty input no-op |
+| `grep_follows_symlink_but_breaks_cycle` | `crates/session/tests/tools_contract.rs` | self-ref `loop -> .` yields exactly one match (cycle broken) |
+| `grep_includes_symlinked_directory` | `crates/session/tests/tools_contract.rs` | symlinked dir outside root is searched |
+| `grep_includes_symlinked_file` | `crates/session/tests/tools_contract.rs` | symlinked file outside root is read |
+| `glob_survives_self_referencing_symlink` | `crates/session/tests/tools_contract.rs` | glob `**` does not hang on self-ref symlink |
 | `threshold_stops_after_five_consecutive_failures` | `crates/session/tests/tool_failure_guard.rs` | loop aborts after 5 consecutive failures; 6th script unconsumed |
 | `emits_error_event_on_threshold` | `crates/session/tests/tool_failure_guard.rs` | error event emitted at threshold (now 5) |
 | `success_between_failures_resets_counter` | `crates/session/tests/tool_failure_guard.rs` | success resets counter; needs 5 consecutive to trip |
@@ -58,12 +70,12 @@ A set of small, independent polish/fix changes accumulated in the working tree:
 - 全量回归：`cargo test --workspace` → 全绿 (0 failures)
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 编译干净
-- 行数：`crates/tui/src/app.rs` 800 ≤ 800；`crates/core/src/config.rs` 779 ≤ 800；其余新增/改动文件均 ≤ 400
+- 行数：`crates/tui/src/app.rs` 800 ≤ 800；`crates/core/src/config.rs` 779 ≤ 800；`scripts/opencoder-to-opencode-stats.py` 399 ≤ 400；其余改动文件均 ≤ 400/800
 
 ## Impact Surface
 
-- 用户可感知：agent 在连续工具失败时更宽容（5 次而非 3 次才中止）；带 Tab 的文件在 TUI 中行号沟槽对齐；Ctrl+D 退出时显示 "shutting down…" 反馈；移除未用的 Ctrl+N/P 历史键绑定。
-- 不影响：CLI/Web/Store/session drain 边界（仅默认常量与 read 工具渲染）。
+- 用户可感知：agent 在连续工具失败时更宽容（5 次而非 3 次才中止）；带 Tab 的文件在 TUI 中行号沟槽对齐；grep 遇自引用 symlink 不再卡死且仍跟随合法软链；Ctrl+D 退出时显示 "shutting down…" 反馈；移除未用的 Ctrl+N/P 历史键绑定。
+- 不影响：CLI/Web/Store/session drain 边界（仅默认常量、read/grep 工具实现与 TUI 渲染循环）。
 - 仅 stats 脚本（非运行时）受 provider 映射影响。
 
 ## Related Docs

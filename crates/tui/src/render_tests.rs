@@ -1024,13 +1024,13 @@ fn format_run_duration_formats_correctly() {
     assert_eq!(super::format_run_duration(999), "0s");
     assert_eq!(super::format_run_duration(1000), "1s");
     assert_eq!(super::format_run_duration(59000), "59s");
-    assert_eq!(super::format_run_duration(60000), "1m");
-    assert_eq!(super::format_run_duration(119000), "1m");
-    assert_eq!(super::format_run_duration(120000), "2m");
-    assert_eq!(super::format_run_duration(3599000), "59m");
-    assert_eq!(super::format_run_duration(3600000), "1h0m");
-    assert_eq!(super::format_run_duration(3900000), "1h5m");
-    assert_eq!(super::format_run_duration(7384000), "2h3m");
+    assert_eq!(super::format_run_duration(60000), "1m0s");
+    assert_eq!(super::format_run_duration(119000), "1m59s");
+    assert_eq!(super::format_run_duration(120000), "2m0s");
+    assert_eq!(super::format_run_duration(3599000), "59m59s");
+    assert_eq!(super::format_run_duration(3600000), "1h0m0s");
+    assert_eq!(super::format_run_duration(3900000), "1h5m0s");
+    assert_eq!(super::format_run_duration(7384000), "2h3m4s");
 }
 
 /// When running with a non-zero run_ms, the status bar shows the duration.

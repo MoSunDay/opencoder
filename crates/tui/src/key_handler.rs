@@ -76,6 +76,19 @@ pub(crate) fn handle_key(
         return KeyAction::SwitchAgent(next.into());
     }
 
+    // Ctrl+Shift+Tab: switch act <-> plan mode WITHOUT clearing context or
+    // auto-executing (pure mode toggle, keeps the full transcript). Must be
+    // checked before the CONTROL branch which would otherwise swallow
+    // Tab/BackTab. Terminals report this as BackTab+CONTROL, or (under kitty
+    // keyboard protocol with full disambiguation) Tab+CONTROL+SHIFT.
+    if k.modifiers.contains(KeyModifiers::CONTROL)
+        && (matches!(k.code, KeyCode::BackTab)
+            || (k.modifiers.contains(KeyModifiers::SHIFT) && matches!(k.code, KeyCode::Tab)))
+    {
+        let next = if agent == "plan" { "act" } else { "plan" };
+        return KeyAction::SwitchAgentNoClear(next.into());
+    }
+
     // Body scroll keys (PageUp / PageDown) — shared between enabled
     // and disabled (subagent-focus) states so scrolling always works.
     if apply_scroll(&k, scroll, follow) {
@@ -176,16 +189,6 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::Tab => {
-            // Chord: "t" + Tab switches act <-> plan WITHOUT the plan->act
-            // handoff / TranscriptReset cleanup (unlike Shift+Tab which
-            // preserves only the final plan). The full transcript is kept.
-            if input.trim() == "t" {
-                input.clear();
-                *cursor_idx = 0;
-                *hist_idx = None;
-                let next = if agent == "plan" { "act" } else { "plan" };
-                return KeyAction::SwitchAgentNoClear(next.into());
-            }
             // Tab = follow-up (queue) when running; normal submit when idle.
             if input.trim().is_empty() {
                 return KeyAction::None;

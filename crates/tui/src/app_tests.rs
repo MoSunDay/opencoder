@@ -201,14 +201,14 @@ fn tab_while_idle_submits() {
 }
 
 #[test]
-fn t_then_tab_in_act_mode_switches_without_clear() {
-    // The "t" + Tab chord: input box holds exactly "t" when Tab is pressed.
-    // In act mode this switches to plan WITHOUT the plan->act handoff /
-    // TranscriptReset cleanup (unlike Shift+Tab).
-    let mut input = String::from("t");
-    let mut idx = 1;
+fn ctrl_shift_tab_in_act_mode_switches_without_clear() {
+    // Ctrl+Shift+Tab switches act <-> plan WITHOUT the plan->act handoff /
+    // TranscriptReset cleanup and WITHOUT auto-executing. The input box is
+    // left untouched (unlike the old t+Tab chord which consumed it).
+    let mut input = String::from("draft text");
+    let mut idx = 5;
     let action = run_handle(
-        key(KeyCode::Tab, KeyModifiers::NONE),
+        key(KeyCode::BackTab, KeyModifiers::CONTROL),
         &mut input,
         &mut idx,
         false,
@@ -216,21 +216,21 @@ fn t_then_tab_in_act_mode_switches_without_clear() {
     );
     assert!(
         matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "plan"),
-        "t+Tab in act mode should switch to plan without clear"
+        "Ctrl+Shift+Tab in act mode should switch to plan without clear"
     );
-    // Input must be consumed.
-    assert!(input.is_empty());
-    assert_eq!(idx, 0);
+    // Input is preserved — only the mode flips.
+    assert_eq!(input, "draft text");
+    assert_eq!(idx, 5);
 }
 
 #[test]
-fn t_then_tab_in_plan_mode_switches_without_clear() {
-    // The chord works in both directions: plan -> act, again skipping the
+fn ctrl_shift_tab_in_plan_mode_switches_without_clear() {
+    // The key works in both directions: plan -> act, again skipping the
     // handoff that Shift+Tab would trigger.
-    let mut input = String::from("t");
-    let mut idx = 1;
+    let mut input = String::from("keep me");
+    let mut idx = 3;
     let action = run_handle(
-        key(KeyCode::Tab, KeyModifiers::NONE),
+        key(KeyCode::BackTab, KeyModifiers::CONTROL),
         &mut input,
         &mut idx,
         false,
@@ -238,17 +238,19 @@ fn t_then_tab_in_plan_mode_switches_without_clear() {
     );
     assert!(
         matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "act"),
-        "t+Tab in plan mode should switch to act without clear"
+        "Ctrl+Shift+Tab in plan mode should switch to act without clear"
     );
-    assert!(input.is_empty());
-    assert_eq!(idx, 0);
+    // Input preserved — only mode toggles.
+    assert_eq!(input, "keep me");
+    assert_eq!(idx, 3);
 }
 
 #[test]
-fn t_then_tab_does_not_fire_on_longer_input() {
-    // "test" + Tab must NOT trigger the chord — it should submit normally.
-    let mut input = String::from("test");
-    let mut idx = 4;
+fn single_t_then_tab_submits_normally() {
+    // With the t+Tab chord removed, even input == "t" + Tab must submit
+    // normally (no special-casing).
+    let mut input = String::from("t");
+    let mut idx = 1;
     let action = run_handle(
         key(KeyCode::Tab, KeyModifiers::NONE),
         &mut input,
@@ -257,8 +259,8 @@ fn t_then_tab_does_not_fire_on_longer_input() {
         "act",
     );
     assert!(
-        matches!(action, KeyAction::Submit(ref t) if t == "test"),
-        "longer input must submit normally, not trigger the chord"
+        matches!(action, KeyAction::Submit(ref t) if t == "t"),
+        "single 't' + Tab must submit normally now that the chord is gone"
     );
 }
 

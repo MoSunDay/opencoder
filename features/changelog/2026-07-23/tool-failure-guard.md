@@ -15,7 +15,7 @@ Commit: (working-tree, pre-initial-commit)
 ## 变更
 ### 配置（core）
 - **`crates/core/src/config.rs`**：新增 `ToolGuardConfig` 结构（
-  `max_consecutive_failures=3`、`backoff_base_ms=200`、`backoff_max_ms=2000`），
+  `max_consecutive_failures=5`、`backoff_base_ms=200`、`backoff_max_ms=2000`），
   带各自 `serde(default=...)` 与 `Default` 实现；`Config` 新增 `tool_guard`
   字段（`#[serde(default)]`），保证旧配置文件可平滑反序列化。
 - **`crates/core/src/lib.rs`**：re-export `ToolGuardConfig`。
@@ -38,7 +38,7 @@ Commit: (working-tree, pre-initial-commit)
   触发、指数退避与封顶、工具间独立计数、成功插入重置、阈值为 0 禁用、
   `worst` 返回计数最高、`worst` 空映射）。
 - **`crates/session/tests/tool_failure_guard.rs`**（新文件）：4 个集成测试，
-  覆盖「3 次连续失败即停」「触发时发 Error 事件」「成功插入重置计数」
+  覆盖「5 次连续失败即停」「触发时发 Error 事件」「成功插入重置计数」
   「禁用守卫可无限失败」。每个 fixture 用不同 `input` 绕开 doom-loop 签名
   匹配，使失败计数按工具名累积。
 
@@ -53,7 +53,7 @@ Commit: (working-tree, pre-initial-commit)
 | 阈值为 0 禁用 | `zero_threshold_disables_guard` | tool_guard.rs |
 | worst 返回计数最高的工具 | `worst_returns_highest_count` | tool_guard.rs |
 | worst 空映射返回 None | `worst_empty_is_none` | tool_guard.rs |
-| 3 次失败即停 | `threshold_stops_after_three_consecutive_failures` | tests/tool_failure_guard.rs |
+| 5 次失败即停 | `threshold_stops_after_five_consecutive_failures` | tests/tool_failure_guard.rs |
 | 触发发 Error 事件 | `emits_error_event_on_threshold` | tests/tool_failure_guard.rs |
 | 成功插入重置 | `success_between_failures_resets_counter` | tests/tool_failure_guard.rs |
 | 禁用守卫无限失败 | `disabled_guard_allows_unlimited_failures` | tests/tool_failure_guard.rs |
@@ -63,7 +63,7 @@ Commit: (working-tree, pre-initial-commit)
 - 行数：`crates/session/src/tool_guard.rs` ≤ 400（新文件）
 
 ## Impact Surface
-- 用户：模型反复调用同一失败工具时，连续 3 次后该 turn 自动中止并发
+- 用户：模型反复调用同一失败工具时，连续 5 次后该 turn 自动中止并发
   Error 事件，避免无意义重试与 token 浪费；退避降低对失败资源的冲击。
 - 配置：新增可选 `tool_guard` 段，默认值即旧行为之外的新增保护；设
   `max_consecutive_failures=0` 可完全禁用，行为退回改动前。

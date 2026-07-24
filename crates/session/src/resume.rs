@@ -439,6 +439,7 @@ async fn replay_child(
     let res = Box::pin(crate::runner::run_with_registry(
         &mut child,
         String::new(),
+        Vec::new(),
         &registry,
         move |cev| {
             let rec = SessionEventRecord {

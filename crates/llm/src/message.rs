@@ -47,7 +47,33 @@ fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
         .map(|s| s.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    if !text.is_empty() {
+    // Multimodal path: when the message carries an Image block, emit the
+    // OpenAI `content` array (`text` + `image_url`) so vision models receive
+    // the attachment. Pure-text messages keep the original string `content`
+    // — the `else` branch is byte-for-byte identical to the pre-image output,
+    // preserving backwards compatibility and saving tokens.
+    if msg.has_image() {
+        let mut content: Vec<Value> = Vec::new();
+        if !text.is_empty() {
+            content.push(json!({ "type": "text", "text": text }));
+        }
+        for block in &msg.blocks {
+            if let ContentBlock::Image { url, detail } = block {
+                let mut image_url = serde_json::Map::new();
+                image_url.insert("url".to_string(), Value::String(url.clone()));
+                if let Some(d) = detail {
+                    image_url.insert("detail".to_string(), Value::String(d.clone()));
+                }
+                content.push(json!({
+                    "type": "image_url",
+                    "image_url": Value::Object(image_url)
+                }));
+            }
+        }
+        if !content.is_empty() {
+            out.push(json!({ "role": "user", "content": content }));
+        }
+    } else if !text.is_empty() {
         out.push(json!({ "role": "user", "content": text }));
     }
 }

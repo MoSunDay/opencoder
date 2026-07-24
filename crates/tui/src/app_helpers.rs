@@ -153,6 +153,7 @@ pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> Se
         session_id: session_id.to_string(),
         delivery,
         prompt: prompt.to_string(),
+        images: Vec::new(),
         admitted_seq: 0,
         promoted_seq: None,
     }

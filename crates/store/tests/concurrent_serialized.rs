@@ -59,6 +59,7 @@ async fn concurrent_store_ops_serialized() {
                 session_id: sid.clone(),
                 delivery: Delivery::Queue,
                 prompt: format!("q-{w}-{k}"),
+                images: Vec::new(),
                 admitted_seq: k as i64 + 1,
                 promoted_seq: None,
             };

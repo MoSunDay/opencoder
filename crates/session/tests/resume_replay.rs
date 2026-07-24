@@ -638,6 +638,7 @@ async fn replay_cancelled_tasks_abandons_when_steer_pending() {
             session_id: "parent".into(),
             delivery: Delivery::Steer,
             prompt: "forget that, do something else".into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })

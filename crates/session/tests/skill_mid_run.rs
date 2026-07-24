@@ -126,6 +126,7 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
             session_id: "skill-mid-run".into(),
             delivery: Delivery::Steer,
             prompt: "STEER-MARKER".into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })
@@ -240,6 +241,7 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
             session_id: "skill-queue".into(),
             delivery: Delivery::Queue,
             prompt: "follow-up".into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })

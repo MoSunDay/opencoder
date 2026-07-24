@@ -150,6 +150,16 @@ impl SessionState {
         self.config = new_cfg;
     }
 
+    /// Apply a hot-reloaded config but keep the existing client. Used when
+    /// the new endpoint/client cannot be constructed (e.g. missing api_key)
+    /// so that at least the `model` and `config` fields stay consistent with
+    /// the on-disk config — the live session keeps the old client until the
+    /// next successful reload.
+    pub fn apply_config_reload_keep_client(&mut self, new_cfg: Config) {
+        self.model = new_cfg.model_id().to_string();
+        self.config = new_cfg;
+    }
+
     /// Push a message to the in-memory transcript AND persist it if a store is
     /// attached. Best-effort: persistence errors are logged, not fatal, so a
     /// store hiccup never kills an agent run.

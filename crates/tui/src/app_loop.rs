@@ -343,14 +343,34 @@ pub(crate) async fn handle_model_outcome(
                             // Rebuild the outer `client` too so subsequent
                             // `/task` new sessions pick up the new endpoint
                             // (the worker only swaps its own sess.client).
-                            if let Ok(ep) = reloaded.resolve_endpoint() {
-                                if let Ok(new_client) = opencoder_llm::ChatClient::new(
+                            match reloaded.resolve_endpoint() {
+                                Ok(ep) => match opencoder_llm::ChatClient::new(
                                     &ep.base_url,
                                     &ep.api_key,
                                     &ep.headers,
                                     reloaded.network.proxy.as_deref(),
                                 ) {
-                                    *client = Arc::new(new_client);
+                                    Ok(new_client) => {
+                                        *client = Arc::new(new_client);
+                                    }
+                                    Err(e) => {
+                                        chat.push_marker(Line::from(Span::styled(
+                                            format!(
+                                                "[/config] client build failed: {e:#} — \
+                                                 live session keeps previous client"
+                                            ),
+                                            Style::default().fg(Color::Red),
+                                        )));
+                                    }
+                                },
+                                Err(e) => {
+                                    chat.push_marker(Line::from(Span::styled(
+                                        format!(
+                                            "[/config] endpoint resolve failed: {e:#} — \
+                                             live session keeps previous client"
+                                        ),
+                                        Style::default().fg(Color::Red),
+                                    )));
                                 }
                             }
                             *config = reloaded.clone();

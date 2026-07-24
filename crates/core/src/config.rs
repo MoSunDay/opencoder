@@ -72,7 +72,7 @@ pub struct Config {
     #[serde(default)]
     pub capabilities: CapabilitiesConfig,
     /// Tool-failure guard: consecutive-failure threshold and exponential
-    /// backoff. Defaults: 3 consecutive failures → abort; 200 ms → 2000 ms
+    /// backoff. Defaults: 5 consecutive failures → abort; 200 ms → 2000 ms
     /// exponential backoff.
     #[serde(default)]
     pub tool_guard: ToolGuardConfig,

@@ -121,22 +121,13 @@ pub(crate) fn handle_key(
                 *show_help = !*show_help;
                 return KeyAction::None;
             }
-            KeyCode::Char('n') => {
-                move_hist(history, hist_idx, input, cursor_idx, 1);
-                return KeyAction::None;
-            }
-            KeyCode::Char('p') => {
-                move_hist(history, hist_idx, input, cursor_idx, -1);
-                return KeyAction::None;
-            }
             KeyCode::Char('j') => {
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s;
                 *cursor_idx = i;
                 return KeyAction::None;
             }
-            // Ctrl+A / Ctrl+E: cursor to start / end of the input buffer
-            // (same as Home / End).
+            // Ctrl+A / Ctrl+E: cursor to start / end of the input buffer.
             KeyCode::Char('a') => {
                 *cursor_idx = 0;
                 return KeyAction::None;
@@ -250,14 +241,6 @@ pub(crate) fn handle_key(
         }
         KeyCode::Right => {
             *cursor_idx = (*cursor_idx + 1).min(input.chars().count());
-            KeyAction::None
-        }
-        KeyCode::Home => {
-            *cursor_idx = 0;
-            KeyAction::None
-        }
-        KeyCode::End => {
-            *cursor_idx = input.chars().count();
             KeyAction::None
         }
         KeyCode::Backspace => {

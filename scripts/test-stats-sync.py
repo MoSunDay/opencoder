@@ -135,7 +135,8 @@ def test_parse_usage():
 def test_parse_model():
     print("test_parse_model")
     check("provider/model", m.parse_model("glm-5.2/glm-5.2") ==
-          {"id": "glm-5.2", "providerID": "glm-5.2", "variant": "default"})
+          {"id": "glm-5.2", "providerID": "zhipuai-coding-plan", "variant": "default"})
+    check("bare glm provider", m.parse_model("glm-5.2")["providerID"] == "zhipuai-coding-plan")
     check("bare model", m.parse_model("glm-5.2")["id"] == "glm-5.2")
     check("empty", m.parse_model("")["id"] == "unknown")
     check("variant default", m.parse_model("a/b")["variant"] == "default")

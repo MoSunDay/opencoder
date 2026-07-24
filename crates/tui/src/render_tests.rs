@@ -116,7 +116,7 @@ fn status_bar_omits_branding() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000);
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 0);
         })
         .unwrap();
 
@@ -141,7 +141,7 @@ fn status_bar_running_shows_spinner_and_status() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000);
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 0);
         })
         .unwrap();
 
@@ -172,7 +172,7 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000);
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 0);
         })
         .unwrap();
 
@@ -195,7 +195,7 @@ fn status_bar_has_no_steer_queue_or_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000);
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 0);
         })
         .unwrap();
 
@@ -328,6 +328,7 @@ fn composer_renders_prompt_and_multiline_text() {
                 0,
                 38, // inner_w: 40 - 2 borders
                 2,  // prompt_w: "❯ "
+                false,
             );
         })
         .unwrap();
@@ -619,7 +620,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
     let input = "ab cdefgh";
     terminal
         .draw(|f| {
-            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2);
+            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2, false);
         })
         .unwrap();
     let buf = terminal.backend().buffer();
@@ -782,7 +783,7 @@ fn status_bar_shows_ctx_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000);
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000, 0);
         })
         .unwrap();
 
@@ -812,7 +813,7 @@ fn status_bar_ctx_red_at_high_usage() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000);
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000, 0);
         })
         .unwrap();
 
@@ -884,6 +885,8 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut hits,
             None,
             None,
+            false,
+            0,
         )
         .unwrap();
         let btn = hits
@@ -963,6 +966,8 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut hits,
             None,
             None,
+            false,
+            0,
         )
         .unwrap();
         assert!(scroll > 0, "precondition: body must be scrolled");
@@ -1009,4 +1014,79 @@ async fn render_then_click_arrow_targets_jump_view() {
         assert_eq!(scroll, 0, "clicking the jump-top arrow must reset scroll");
         assert!(!follow, "clicking the jump-top arrow must disable follow");
     }
+}
+
+// ----- Run-duration timer tests -----
+
+#[test]
+fn format_run_duration_formats_correctly() {
+    assert_eq!(super::format_run_duration(0), "0s");
+    assert_eq!(super::format_run_duration(999), "0s");
+    assert_eq!(super::format_run_duration(1000), "1s");
+    assert_eq!(super::format_run_duration(59000), "59s");
+    assert_eq!(super::format_run_duration(60000), "1m");
+    assert_eq!(super::format_run_duration(119000), "1m");
+    assert_eq!(super::format_run_duration(120000), "2m");
+    assert_eq!(super::format_run_duration(3599000), "59m");
+    assert_eq!(super::format_run_duration(3600000), "1h0m");
+    assert_eq!(super::format_run_duration(3900000), "1h5m");
+    assert_eq!(super::format_run_duration(7384000), "2h3m");
+}
+
+/// When running with a non-zero run_ms, the status bar shows the duration.
+#[test]
+fn status_bar_shows_run_duration() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_status(
+                f,
+                f.area(),
+                true,
+                "working",
+                "glm-4.6",
+                "act",
+                0,
+                5000,
+                200000,
+                42000,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        row.contains("42s"),
+        "status bar should show run duration; got: {row}"
+    );
+}
+
+/// When run_ms is 0, no duration is shown (idle session).
+#[test]
+fn status_bar_hides_duration_when_zero() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_status(
+                f,
+                f.area(),
+                false,
+                "",
+                "glm-4.6",
+                "act",
+                0,
+                0,
+                200000,
+                0,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        !row.contains("0s"),
+        "zero duration should not be rendered; got: {row}"
+    );
 }

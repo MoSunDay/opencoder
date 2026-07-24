@@ -49,6 +49,7 @@ pub(crate) fn handle_key(
     skill_menu: &mut Option<SkillMenu>,
     inner_w: u16,
     prompt_w: u16,
+    input_disabled: bool,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -75,6 +76,28 @@ pub(crate) fn handle_key(
         return KeyAction::SwitchAgent(next.into());
     }
 
+    // Body scroll keys (PageUp / PageDown) — shared between enabled
+    // and disabled (subagent-focus) states so scrolling always works.
+    if apply_scroll(&k, scroll, follow) {
+        return KeyAction::None;
+    }
+
+    // Subagent-focus view: disable text input, submit, steer, queue. Only
+    // scroll (handled above) and global keys (Quit, Help) are honoured.
+    if input_disabled {
+        if k.modifiers.contains(KeyModifiers::CONTROL) {
+            match k.code {
+                KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
+                KeyCode::Char('h') => {
+                    *show_help = !*show_help;
+                    return KeyAction::None;
+                }
+                _ => {}
+            }
+        }
+        return KeyAction::None;
+    }
+
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         match k.code {
             // Ctrl+D quits. Under Kitty keyboard protocol
@@ -91,11 +114,6 @@ pub(crate) fn handle_key(
             }
             KeyCode::Char('p') => {
                 move_hist(history, hist_idx, input, cursor_idx, -1);
-                return KeyAction::None;
-            }
-            KeyCode::Char('u') => {
-                *scroll = scroll.saturating_sub(10);
-                *follow = false;
                 return KeyAction::None;
             }
             KeyCode::Char('j') => {
@@ -239,15 +257,6 @@ pub(crate) fn handle_key(
             *cursor_idx = input.chars().count();
             KeyAction::None
         }
-        KeyCode::PageUp => {
-            *scroll = scroll.saturating_sub(20);
-            *follow = false;
-            KeyAction::None
-        }
-        KeyCode::PageDown => {
-            *follow = true;
-            KeyAction::None
-        }
         KeyCode::Backspace => {
             if let Some((s, i)) = composer::backspace(input, *cursor_idx) {
                 *input = s;
@@ -285,6 +294,23 @@ pub(crate) fn handle_key(
     }
 }
 
+/// Handle body-scroll keys (PageUp / PageDown) uniformly.
+/// Returns `true` when the key was consumed and scroll/follow updated.
+pub(crate) fn apply_scroll(k: &KeyEvent, scroll: &mut u16, follow: &mut bool) -> bool {
+    match k.code {
+        KeyCode::PageUp => {
+            *scroll = scroll.saturating_sub(20);
+            *follow = false;
+            true
+        }
+        KeyCode::PageDown => {
+            *follow = true;
+            true
+        }
+        _ => false,
+    }
+}
+
 fn move_hist(
     history: &[String],
     hist_idx: &mut Option<usize>,
@@ -314,6 +340,122 @@ fn move_hist(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_scroll_page_up() {
+        let mut scroll = 50u16;
+        let mut follow = true;
+        let k = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
+        assert!(apply_scroll(&k, &mut scroll, &mut follow));
+        assert_eq!(scroll, 30);
+        assert!(!follow);
+    }
+
+    #[test]
+    fn apply_scroll_page_down() {
+        let mut scroll = 50u16;
+        let mut follow = false;
+        let k = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
+        assert!(apply_scroll(&k, &mut scroll, &mut follow));
+        assert!(follow);
+    }
+
+    #[test]
+    fn apply_scroll_char_not_consumed() {
+        let mut scroll = 50u16;
+        let mut follow = true;
+        let k = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert!(!apply_scroll(&k, &mut scroll, &mut follow));
+        assert_eq!(scroll, 50);
+        assert!(follow);
+    }
+
+    #[test]
+    fn handle_key_disabled_blocks_char() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn handle_key_disabled_blocks_enter() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+    }
+
+    #[test]
+    fn handle_key_disabled_allows_scroll() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 50u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        let action = handle_key(
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::None));
+        assert_eq!(scroll, 30);
+        assert!(!follow);
+    }
+
+    #[test]
+    fn handle_key_disabled_allows_quit() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, true,
+        );
+        assert!(matches!(action, KeyAction::Quit));
+    }
 
     #[test]
     fn move_hist_down_does_not_clear_input_when_not_browsing() {

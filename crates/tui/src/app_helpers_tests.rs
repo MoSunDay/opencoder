@@ -917,3 +917,45 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
         "queue rows deleted from store"
     );
 }
+
+/// Ctrl+U must behave identically to Ctrl+L: consume the key, clear the input
+/// box, and reset the cursor. Regression guard for the keybinding unification.
+#[test]
+fn ctrl_u_matches_ctrl_l_clears_input() {
+    fn run(key: KeyEvent) -> (bool, String, usize) {
+        let mut chat = ChatView::default();
+        let mut subagent_focus: Option<usize> = None;
+        let mut scroll = 5u16;
+        let mut follow = true;
+        let mut selection = None;
+        let mut last_esc = None;
+        let mut input = "hello world".to_string();
+        let mut cursor = 5usize;
+        let consumed = pre_key_intercept(
+            key,
+            &mut subagent_focus,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut last_esc,
+            &mut chat,
+            &mut input,
+            &mut cursor,
+            0,
+            true,
+        );
+        (consumed, input, cursor)
+    }
+
+    let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+
+    let (u_consumed, u_input, u_cursor) = run(ctrl_u);
+    let (l_consumed, l_input, l_cursor) = run(ctrl_l);
+
+    assert!(u_consumed, "Ctrl+U must be consumed by pre_key_intercept");
+    assert!(u_input.is_empty(), "Ctrl+U must clear the input");
+    assert_eq!(u_cursor, 0, "Ctrl+U must reset the cursor");
+    // Identical outcome to Ctrl+L.
+    assert_eq!((u_consumed, u_input.as_str(), u_cursor), (l_consumed, l_input.as_str(), l_cursor));
+}

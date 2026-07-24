@@ -992,7 +992,29 @@ async fn run_subagent(
     if ok {
         ToolOutput::ok(text)
     } else {
-        ToolOutput::err("subagent failed")
+        // Surface the real failure reason instead of an opaque banner. The
+        // child's `run_loop` returns Err for hard failures (LLM error, stream
+        // ended without completion, panic); `text` holds whatever final
+        // assistant text the child produced (often empty on a hard crash).
+        // Combine both so the parent model can react to the actual cause.
+        let detail = match res.as_ref().err() {
+            Some(e) => {
+                let mut s = format!("subagent failed: {e}");
+                if !text.is_empty() {
+                    s.push_str("\n\n");
+                    s.push_str(&text);
+                }
+                s
+            }
+            None => {
+                if text.is_empty() {
+                    "subagent failed".to_string()
+                } else {
+                    text
+                }
+            }
+        };
+        ToolOutput::err(detail)
     }
 }
 

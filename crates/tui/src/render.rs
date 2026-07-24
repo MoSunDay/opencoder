@@ -26,6 +26,18 @@ pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 /// Context baseline subtracted from used/window so small sessions read ~0%.
 const CONTEXT_BASELINE: u64 = 4_000;
 
+/// Format a run-duration in ms as a short status-bar label: `42s`, `3m`, `1h5m`.
+fn format_run_duration(ms: u64) -> String {
+    let secs = ms / 1000;
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 /// Braille spinner frames shown while a task is running.
 const SPINNER: [&str; 10] = [
     "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
@@ -96,6 +108,8 @@ pub(crate) fn render<B: Backend>(
     hits: &mut MouseHits,
     selection: Option<crate::selection::SelRange>,
     copy_status: Option<&str>,
+    input_disabled: bool,
+    run_ms: u64,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -164,7 +178,7 @@ pub(crate) fn render<B: Backend>(
             }
         }
         ci += 1;
-        render_composer(f, chunks[ci], input, composer_scroll, inner_w, prompt_w);
+        render_composer(f, chunks[ci], input, composer_scroll, inner_w, prompt_w, input_disabled);
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
@@ -177,6 +191,7 @@ pub(crate) fn render<B: Backend>(
             anim_tick,
             context_used + sys_tokens,
             context_limit,
+            run_ms,
         );
 
         if show_help {
@@ -201,15 +216,17 @@ pub(crate) fn render<B: Backend>(
         if let Some(text) = copy_status {
             render_status_chip(f, composer_area, text, Color::Green);
         }
-        place_cursor(
-            f,
-            composer_area,
-            input,
-            cursor_idx,
-            inner_w,
-            prompt_w,
-            composer_scroll,
-        );
+        if !input_disabled {
+            place_cursor(
+                f,
+                composer_area,
+                input,
+                cursor_idx,
+                inner_w,
+                prompt_w,
+                composer_scroll,
+            );
+        }
     })?;
     Ok(())
 }
@@ -492,7 +509,27 @@ fn render_composer(
     scroll: u16,
     inner_w: u16,
     prompt_w: u16,
+    disabled: bool,
 ) {
+    if disabled {
+        let dim = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(dim);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let hint = "\u{2190} esc / Ctrl+L to return";
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("\u{276f} ", dim),
+                Span::styled(hint, dim),
+            ])),
+            inner,
+        );
+        return;
+    }
     let block = Block::default().borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -585,6 +622,7 @@ fn render_status(
     anim_tick: u32,
     used: u64,
     limit: u64,
+    run_ms: u64,
 ) {
     let mut spans = vec![
         Span::raw(" "),
@@ -597,6 +635,15 @@ fn render_status(
             Style::default().fg(agent_chip_fg(agent)),
         ),
     ];
+
+    // Run-duration timer: shown when a turn has been running (run_ms > 0).
+    if run_ms > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format_run_duration(run_ms),
+            Style::default().fg(if running { Color::Yellow } else { Color::DarkGray }),
+        ));
+    }
 
     // Context-window usage indicator, placed right after the agent chip.
     let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);

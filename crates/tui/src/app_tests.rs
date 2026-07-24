@@ -39,6 +39,7 @@ fn run_handle(
         &mut skill_menu,
         80,
         2,
+        false,
     )
 }
 
@@ -71,6 +72,7 @@ fn run_handle_menu(
         skill_menu,
         80,
         2,
+        false,
     )
 }
 
@@ -1116,6 +1118,7 @@ fn double_esc_while_running_cancels() {
         &mut skill_menu,
         80,
         2,
+        false,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -1138,6 +1141,7 @@ fn double_esc_while_running_cancels() {
         &mut skill_menu,
         80,
         2,
+        false,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

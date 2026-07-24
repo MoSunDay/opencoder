@@ -643,3 +643,51 @@ async fn multi_subagent_no_deadlock() {
         .count();
     assert_eq!(ends_ok, 3, "expected 3 SubagentEnd(ok=true), got {ends_ok}");
 }
+
+#[tokio::test]
+async fn subagent_failure_surfaces_actual_error() {
+    // When the child's run loop fails (here: an LLM stream error), the parent's
+    // task tool result must carry the *real* failure reason, not an opaque
+    // "subagent failed" banner, so the parent model can react to the cause.
+    let mock = Arc::new(
+        MockChatClient::new()
+            // Parent turn 1: dispatch the task subagent.
+            .push_script(vec![task_turn("find the foo")])
+            // Child turn 1: hard failure from the LLM stream.
+            .push_script(vec![LlmEvent::Error("connection reset by peer".into())])
+            // Parent turn 2: recover and finish.
+            .push_script(vec![text_done("recovered")]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session =
+        SessionState::new("sub-fail", agent, config(), mock, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut session, "delegate".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events.iter().find(|e| {
+        matches!(
+            e,
+            SessionEvent::ToolEnd { name, .. } if name == "task"
+        )
+    });
+    assert!(tool_end.is_some(), "expected a ToolEnd for the task tool");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(*is_error, "failed subagent must surface is_error=true");
+        assert!(
+            output.contains("connection reset by peer"),
+            "must surface the real failure reason, got: {output}"
+        );
+        assert_ne!(
+            *output,
+            "subagent failed",
+            "must not collapse to the opaque generic banner"
+        );
+    }
+}

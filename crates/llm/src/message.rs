@@ -34,10 +34,10 @@ fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
         if let ContentBlock::ToolResult {
             tool_use_id,
             content,
-            ..
+            is_error,
         } = block
         {
-            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": content }));
+            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": tool_result_body(content, *is_error) }));
         }
     }
     let text: String = msg
@@ -111,10 +111,23 @@ fn push_tool_results(out: &mut Vec<OpenAIMessage>, msg: &Message) {
         if let ContentBlock::ToolResult {
             tool_use_id,
             content,
-            ..
+            is_error,
         } = block
         {
-            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": content }));
+            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": tool_result_body(content, *is_error) }));
         }
+    }
+}
+
+/// Render a tool result's content for the model. The OpenAI `tool` role has no
+/// native error flag, so an error result is prefixed with `[error]` — the
+/// convention the model treats as a failed tool call. Without it the model sees
+/// failure output indistinguishable from success and may repeat the failing
+/// call.
+fn tool_result_body(content: &str, is_error: bool) -> String {
+    if is_error {
+        format!("[error] {content}")
+    } else {
+        content.to_string()
     }
 }

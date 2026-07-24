@@ -11,7 +11,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::KeyEvent;
 use opencoder_core::Config;
@@ -23,7 +23,7 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{paste_payload, start_turn, worker_dead};
+use crate::app_helpers::{paste_payload, start_turn, sys_tokens_for, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
@@ -74,6 +74,7 @@ pub(crate) fn compute_display<'a>(
     sys_tokens: u64,
     config: &Config,
     model_label: &str,
+    workdir: &Path,
 ) -> DisplayState<'a> {
     let agent_name = chat.agent.clone();
     let status = chat.status.clone();
@@ -104,7 +105,7 @@ pub(crate) fn compute_display<'a>(
         } else {
             (
                 chat,
-                agent_name.clone(),
+                workdir.display().to_string(),
                 agent_name.clone(),
                 chat.context_used,
                 sys_tokens,
@@ -126,6 +127,73 @@ pub(crate) fn compute_display<'a>(
         display_sys,
         status_model,
     }
+}
+
+/// Advance the status-bar run-timer: accumulates wall-clock elapsed time while
+/// a turn is running. Called every loop iteration before the select.
+pub(crate) fn tick_clock(running: bool, last_clock: &mut Instant, run_elapsed_ms: &mut u64) {
+    let now = Instant::now();
+    let dt = now.duration_since(*last_clock).as_millis() as u64;
+    *last_clock = now;
+    if running {
+        *run_elapsed_ms = run_elapsed_ms.saturating_add(dt);
+    }
+}
+
+/// Outcome of [`handle_switch_agent`]: mirrors the `break` (quit) that lived
+/// inline in the loop body when the worker channel died.
+pub(crate) enum SwitchOutcome {
+    Proceed,
+    Quit,
+}
+
+/// Handle `KeyAction::SwitchAgent`: switch agent mode, and for plan→act with a
+/// submitted plan, either handoff immediately (idle) or defer until the running
+/// turn completes (P0 race-fix: `pending_handoff`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_switch_agent(
+    name: String,
+    chat: &mut ChatView,
+    running: &mut bool,
+    follow: &mut bool,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    pending_handoff: &mut Option<String>,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    sys_tokens: &mut u64,
+    workdir: &Path,
+    active_skill_body: &Option<String>,
+) -> SwitchOutcome {
+    let plan_to_act = chat.agent == "plan" && name == "act";
+    *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
+    if plan_to_act && chat.plan_submitted {
+        // Carry any text left in the input box into the handoff.
+        let extra = std::mem::take(input);
+        *cursor_idx = 0;
+        if !*running {
+            // Idle: handoff immediately.
+            *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+            if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart(name, extra)).await {
+                worker_dead(chat);
+                return SwitchOutcome::Quit;
+            }
+            *running = true;
+            *follow = true;
+            chat.begin_turn();
+        } else {
+            // P0 fix: plan is running — defer handoff until the turn ends.
+            *pending_handoff = Some(extra);
+            *mode_flash = Some(("\u{2192} act (pending)".into(), anim_tick));
+        }
+    } else {
+        *pending_handoff = None;
+        *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+        let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+    }
+    SwitchOutcome::Proceed
 }
 
 /// Body of the `maybe_ev = evt_rx.recv()` select arm: drain all queued
@@ -150,6 +218,7 @@ pub(crate) async fn fold_ui_events(
     follow: &mut bool,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
+    pending_handoff: &mut Option<String>,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
@@ -171,8 +240,10 @@ pub(crate) async fn fold_ui_events(
             UiEvent::Session(sev) => {
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
                     let agent = chat.agent.clone();
+                    let saved_plan_submitted = chat.plan_submitted;
                     *chat =
                         crate::session_ui::replay_into_chat(&agent, msgs, store, session_id).await;
+                    chat.plan_submitted = saved_plan_submitted;
                 } else {
                     chat.apply(&sev);
                     if matches!(sev, SessionEvent::ReasoningDelta(_))
@@ -219,6 +290,21 @@ pub(crate) async fn fold_ui_events(
                     *cancelled = false;
                 } else {
                     *running = false;
+                    // P0 fix: if user requested plan→act switch while
+                    // running, now that the turn is done, trigger it.
+                    if let Some(extra) = pending_handoff.take() {
+                        if chat.plan_submitted {
+                            start_turn(
+                                cmd_tx,
+                                cancel,
+                                UiCmd::SwitchAndStart("act".into(), extra),
+                            )
+                            .await;
+                            *running = true;
+                            *follow = true;
+                            chat.begin_turn();
+                        }
+                    }
                 }
             }
         }
@@ -457,79 +543,5 @@ pub(crate) async fn handle_quit(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// No modal open + plain (non-file) text: the main-composer path inserts it
-    /// verbatim, advances the cursor, and returns `Proceed` (caller falls
-    /// through rather than `continue`).
-    #[test]
-    fn route_paste_into_main_composer_inserts_verbatim_text() {
-        let mut model_menu: Option<ModelMenu> = None;
-        let mut command_menu: Option<CommandMenu> = None;
-        let mut input = String::new();
-        let mut idx = 0usize;
-        let flow = route_paste(
-            "plain text",
-            false,
-            false,
-            &mut model_menu,
-            &mut command_menu,
-            &mut input,
-            &mut idx,
-            Path::new("."),
-        );
-        assert!(matches!(flow, LoopFlow::Proceed));
-        assert_eq!(input, "plain text");
-        assert_eq!(idx, "plain text".chars().count());
-    }
-
-    /// task picker open (no text field): the paste is swallowed — `Redraw` is
-    /// returned and the main composer stays untouched.
-    #[test]
-    fn route_paste_swallowed_when_task_picker_open() {
-        let mut model_menu: Option<ModelMenu> = None;
-        let mut command_menu: Option<CommandMenu> = None;
-        let mut input = String::new();
-        let mut idx = 0usize;
-        let flow = route_paste(
-            "plain text",
-            true,
-            false,
-            &mut model_menu,
-            &mut command_menu,
-            &mut input,
-            &mut idx,
-            Path::new("."),
-        );
-        assert!(matches!(flow, LoopFlow::Redraw));
-        assert!(
-            input.is_empty(),
-            "main composer must be untouched when a modal swallows the paste"
-        );
-        assert_eq!(idx, 0);
-    }
-
-    /// cache-salt menu open: same modal-isolation contract — paste swallowed,
-    /// existing composer contents and cursor preserved.
-    #[test]
-    fn route_paste_swallowed_when_cache_salt_menu_open() {
-        let mut model_menu: Option<ModelMenu> = None;
-        let mut command_menu: Option<CommandMenu> = None;
-        let mut input = String::from("kept");
-        let mut idx = 2usize;
-        let flow = route_paste(
-            "plain text",
-            false,
-            true,
-            &mut model_menu,
-            &mut command_menu,
-            &mut input,
-            &mut idx,
-            Path::new("."),
-        );
-        assert!(matches!(flow, LoopFlow::Redraw));
-        assert_eq!(input, "kept");
-        assert_eq!(idx, 2);
-    }
-}
+#[path = "app_loop_tests.rs"]
+mod tests;

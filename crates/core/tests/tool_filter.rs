@@ -155,3 +155,45 @@ fn truncate_output_does_not_split_multibyte_chars() {
     // The truncated prefix should still be valid UTF-8 (no panic means valid).
     assert!(out.content.starts_with("世"));
 }
+
+#[test]
+fn truncate_output_preserves_tail_error_text() {
+    // Long output whose only useful signal is the final error line. Head-only
+    // truncation would drop "THE TAIL ERROR"; head+tail keeps it.
+    let mut content = String::new();
+    for i in 0..1000 {
+        content.push_str(&format!("noise line {i}\n"));
+    }
+    content.push_str("THE TAIL ERROR");
+    let out = truncate_output(content, 100_000);
+    assert!(out.content.contains("THE TAIL ERROR"), "tail must survive");
+    assert!(out.content.contains("[output truncated"));
+}
+
+#[test]
+fn truncate_output_preserves_both_head_and_tail() {
+    // Head marker survives, middle is omitted, tail marker survives.
+    let mut content = String::new();
+    content.push_str("HEAD MARKER\n");
+    for i in 0..1000 {
+        content.push_str(&format!("middle {i}\n"));
+    }
+    content.push_str("TAIL MARKER");
+    let out = truncate_output(content, 100_000);
+    assert!(out.content.contains("HEAD MARKER"), "head must survive");
+    assert!(out.content.contains("TAIL MARKER"), "tail must survive");
+    assert!(
+        out.content.contains("omitted"),
+        "middle omission must be marked"
+    );
+}
+
+#[test]
+fn truncate_output_bytes_preserve_tail() {
+    // Byte-budget truncation must also keep the trailing text.
+    let head = "h".repeat(8000);
+    let content = format!("{head}Z TAIL");
+    let out = truncate_output(content, 4096);
+    assert!(out.content.contains("Z TAIL"), "byte tail must survive");
+    assert!(out.content.contains("truncated"));
+}

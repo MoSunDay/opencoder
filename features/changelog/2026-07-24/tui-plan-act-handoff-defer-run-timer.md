@@ -71,7 +71,7 @@ commit `db71fa1` 把 `run_app` 主循环中三块内联逻辑抽成纯/异步函
 | running 时状态栏显示计时 | `status_bar_shows_run_duration` | render_tests.rs |
 | 计时为 0 时隐藏（渲染门） | `status_bar_hides_duration_when_zero` | render_tests.rs |
 
-- 全量回归：`cargo test --workspace` → 903 passed; 0 failed
+- 全量回归：`cargo test --workspace` → 921 passed; 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → Finished
 - 行数：app.rs 793（HEAD，已提交态）/ app_loop.rs 547 / app_loop_tests.rs 449 /

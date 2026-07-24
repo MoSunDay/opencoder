@@ -26,15 +26,19 @@ pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 /// Context baseline subtracted from used/window so small sessions read ~0%.
 const CONTEXT_BASELINE: u64 = 4_000;
 
-/// Format a run-duration in ms as a short status-bar label: `42s`, `3m`, `1h5m`.
+/// Format a run-duration in ms as a short status-bar label: `42s`, `3m5s`, `1h5m30s`.
+/// Always shows the seconds component; largest unit is hours.
 fn format_run_duration(ms: u64) -> String {
     let secs = ms / 1000;
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h{m}m{s}s")
+    } else if m > 0 {
+        format!("{m}m{s}s")
     } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+        format!("{s}s")
     }
 }
 
@@ -636,15 +640,6 @@ fn render_status(
         ),
     ];
 
-    // Run-duration timer: shown when a turn has been running (run_ms > 0).
-    if run_ms > 0 {
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format_run_duration(run_ms),
-            Style::default().fg(if running { Color::Yellow } else { Color::DarkGray }),
-        ));
-    }
-
     // Context-window usage indicator, placed right after the agent chip.
     let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
     let ctx_color = if pct >= 85 {
@@ -663,6 +658,16 @@ fn render_status(
         ),
         Style::default().fg(ctx_color),
     ));
+
+    // Run-duration timer: shown on the right of ctx when a turn has been
+    // running (run_ms > 0).
+    if run_ms > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format_run_duration(run_ms),
+            Style::default().fg(if running { Color::Yellow } else { Color::DarkGray }),
+        ));
+    }
     spans.push(Span::raw("  "));
 
     if running {

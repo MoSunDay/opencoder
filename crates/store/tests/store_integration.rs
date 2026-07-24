@@ -349,7 +349,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 3, "schema_version must be 3 after bootstrap");
+    assert_eq!(v, 4, "schema_version must be 4 after bootstrap");
 }
 
 #[tokio::test]
@@ -855,6 +855,7 @@ async fn mixed_concurrent_writes_with_immediate_tx() {
                 session_id: sid.clone(),
                 delivery: Delivery::Queue,
                 prompt: format!("q-{w}-{k}"),
+                images: Vec::new(),
                 admitted_seq: k as i64 + 1,
                 promoted_seq: None,
             };
@@ -1095,7 +1096,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 3, "schema version must be 3 after migration");
+        assert_eq!(v, 4, "schema version must be 4 after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -1127,7 +1128,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
+    assert_eq!(v, 4, "schema version stays 4 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -1275,11 +1276,11 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 3, "schema version must be 3 after v2→v3 migration");
+        assert_eq!(v, 4, "schema version must be 4 after v2→v3 migration");
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
-    //     the version stays at 3.
+    //     the version stays at 4.
     drop(store);
     let store2 = LibsqlStore::open(&db_path).await.unwrap();
     let conn = store2.conn().await.unwrap();
@@ -1290,7 +1291,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
+    assert_eq!(v, 4, "schema version stays 4 after idempotent re-open");
 }
 
 // ---------------------------------------------------------------------------
@@ -1478,7 +1479,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 3, "schema version must be 3 after migration");
+        assert_eq!(v, 4, "schema version must be 4 after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -1508,5 +1509,5 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 3, "schema version stays 3 after idempotent re-open");
+    assert_eq!(v, 4, "schema version stays 4 after idempotent re-open");
 }

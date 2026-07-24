@@ -114,6 +114,12 @@ pub struct SessionInput {
     pub session_id: String,
     pub delivery: Delivery,
     pub prompt: String,
+    /// Image attachments carried alongside the prompt as data URIs
+    /// (`data:image/<fmt>;base64,...`). Empty for plain-text inputs. Persisted
+    /// in `session_inputs.images_json` so steered/queued/resumed inputs keep
+    /// their images across turn boundaries and restarts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
     pub admitted_seq: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_seq: Option<i64>,

@@ -122,6 +122,7 @@ pub async fn admit_and_drain(
         session_id: session_id.to_string(),
         delivery,
         prompt,
+        images: Vec::new(),
         admitted_seq: 0,
         promoted_seq: None,
     };

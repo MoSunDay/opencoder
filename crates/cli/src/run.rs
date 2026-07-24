@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use base64::Engine as _;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
@@ -100,7 +101,19 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     };
 
     print_prompt_header(&session, &prompt);
-    opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
+
+    // Read any --image attachments into base64 data URIs and attach them to
+    // the first user message. An unreadable/missing file is a hard error
+    // (fail loudly rather than silently dropping an attachment).
+    let images = load_image_data_uris(&cli.image)?;
+    if images.is_empty() {
+        opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
+    } else {
+        opencoder_session::run_with_images(&mut session, prompt, images, |ev| {
+            print_event(&ev)
+        })
+        .await?;
+    }
 
     // cheap background title generation (small model) after the first round
     generate_title(&session).await;
@@ -362,6 +375,40 @@ fn indent_first(s: &str, n: usize) -> String {
 #[allow(dead_code)]
 pub fn _duration() -> Duration {
     Duration::from_secs(0)
+}
+
+/// Read each `--image` file path into a `data:image/<fmt>;base64,<...>` URI
+/// suitable for the `ContentBlock::Image` / OpenAI `image_url` field. Returns
+/// an empty vec when no paths were given. A missing/unreadable file errors.
+fn load_image_data_uris(paths: &[String]) -> Result<Vec<String>> {
+    let mut out = Vec::with_capacity(paths.len());
+    for p in paths {
+        let path = std::path::Path::new(p);
+        let bytes = std::fs::read(path)
+            .with_context(|| format!("--image {p}: cannot read file"))?;
+        let mime = mime_from_ext(path);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        out.push(format!("data:{mime};base64,{b64}"));
+    }
+    Ok(out)
+}
+
+/// Map a file extension to an image MIME type. Unknown extensions fall back to
+/// `image/png`, the most widely supported default for vision endpoints.
+fn mime_from_ext(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        _ => "image/png",
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS session_inputs (
   session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   delivery     TEXT NOT NULL,
   prompt       TEXT NOT NULL,
+  images_json  TEXT NOT NULL DEFAULT '[]',
   admitted_seq INTEGER NOT NULL,
   promoted_seq INTEGER
 )";
@@ -168,6 +169,19 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         add_column_if_absent(conn, "sessions", "handoff_seq", "INTEGER").await?;
         add_column_if_absent(conn, "sessions", "handoff_plan", "TEXT").await?;
         add_column_if_absent(conn, "sessions", "skill", "TEXT").await?;
+    }
+    if from < 4 {
+        // v4: image attachments on session inputs (multimodal prompts). The
+        // column is a JSON array of data URIs, defaulting to an empty array so
+        // existing plain-text rows stay valid. NOT NULL + DEFAULT keeps the
+        // invariant that the column is always readable as JSON.
+        add_column_if_absent(
+            conn,
+            "session_inputs",
+            "images_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        .await?;
     }
     Ok(())
 }

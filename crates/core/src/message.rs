@@ -28,6 +28,15 @@ pub enum ContentBlock {
         content: String,
         is_error: bool,
     },
+    /// Inline image attached to a user message. `url` is either an
+    /// `http(s)://` URL or a `data:image/<fmt>;base64,...` URI. `detail`
+    /// maps to the OpenAI `image_url.detail` field (high/low/auto); `None`
+    /// leaves the choice to the provider. Excluded from `text()` so the
+    /// plain-text view stays clean.
+    Image {
+        url: String,
+        detail: Option<String>,
+    },
 }
 
 impl ContentBlock {
@@ -37,6 +46,12 @@ impl ContentBlock {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             ContentBlock::Text { text } => Some(text),
+            _ => None,
+        }
+    }
+    pub fn as_image(&self) -> Option<(&str, Option<&str>)> {
+        match self {
+            ContentBlock::Image { url, detail } => Some((url, detail.as_deref())),
             _ => None,
         }
     }
@@ -84,6 +99,40 @@ impl Message {
             id: id.into(),
             role: Role::User,
             blocks: vec![ContentBlock::text(text)],
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: now_ms(),
+            synthetic: false,
+        }
+    }
+
+    pub fn has_image(&self) -> bool {
+        self.blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Image { .. }))
+    }
+
+    /// Build a user message from a text prompt plus zero or more image URIs
+    /// (`data:image/...;base64,...` or `http(s)://`). Each image becomes an
+    /// `Image` content block appended after the text block. With no images
+    /// this is equivalent to [`Message::user`].
+    pub fn user_with_images(
+        id: impl Into<String>,
+        text: impl Into<String>,
+        images: &[String],
+    ) -> Self {
+        let mut blocks = vec![ContentBlock::text(text)];
+        for url in images {
+            blocks.push(ContentBlock::Image {
+                url: url.clone(),
+                detail: None,
+            });
+        }
+        Message {
+            id: id.into(),
+            role: Role::User,
+            blocks,
             model: None,
             agent: None,
             usage: MessageUsage::default(),
@@ -139,6 +188,11 @@ impl Message {
                     out.push_str(&serde_json::to_string(input).unwrap_or_default());
                 }
                 ContentBlock::ToolResult { content, .. } => out.push_str(content),
+                // Vision attachments cost ~hundreds of tokens regardless of
+                // payload size. Count a fixed rough cost instead of dumping
+                // the (huge) base64 URI, which would blow past compaction
+                // budgets by orders of magnitude. ~256 tokens per image.
+                ContentBlock::Image { .. } => out.push_str(&"x".repeat(1024)),
             }
             out.push('\n');
         }

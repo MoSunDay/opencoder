@@ -43,6 +43,7 @@ async fn inputs_steer_and_queue_promotion_semantics() {
             session_id: "s".into(),
             delivery,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: seq,
             promoted_seq: None,
         }
@@ -102,6 +103,7 @@ async fn swap_input_order_changes_drain_order() {
             session_id: "s".into(),
             delivery,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: seq,
             promoted_seq: None,
         }
@@ -162,6 +164,7 @@ async fn delete_input_removes_pending_and_preserves_order() {
             session_id: "s".into(),
             delivery,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: seq,
             promoted_seq: None,
         }
@@ -216,6 +219,7 @@ async fn delete_input_preserves_already_promoted_audit_row() {
             session_id: "s".into(),
             delivery,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: seq,
             promoted_seq: None,
         }
@@ -265,6 +269,7 @@ async fn claim_next_queue_returns_seq_marks_promoted_and_idempotent_delete() {
             session_id: "s".into(),
             delivery: Delivery::Queue,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: seq,
             promoted_seq: None,
         }

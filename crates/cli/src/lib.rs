@@ -35,6 +35,12 @@ pub struct Cli {
     pub fork: bool,
     #[arg(long, global = true, default_value_t = false)]
     pub verbose: bool,
+    /// Attach an image (local file path) to the prompt. May be repeated.
+    /// The file is read and embedded as a base64 data URI and sent to a
+    /// vision-capable model. Put `--image` before the prompt text so the
+    /// trailing prompt arg does not swallow it.
+    #[arg(long = "image", global = true, value_name = "PATH")]
+    pub image: Vec<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub prompt: Vec<String>,
 }

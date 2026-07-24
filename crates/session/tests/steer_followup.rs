@@ -125,6 +125,7 @@ async fn admit_steer(store: &Arc<dyn Store>, session_id: &str, id: &str, prompt:
             session_id: session_id.into(),
             delivery: Delivery::Steer,
             prompt: prompt.into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })
@@ -158,6 +159,7 @@ async fn steer_promotes_at_turn_boundary() {
             session_id: "drain-sess".into(),
             delivery: Delivery::Steer,
             prompt: "STEER-MARKER".into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })
@@ -205,6 +207,7 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
                 session_id: "drain-sess".into(),
                 delivery: Delivery::Steer,
                 prompt: format!("multi-{i}"),
+                images: Vec::new(),
                 admitted_seq: 0,
                 promoted_seq: None,
             })
@@ -243,6 +246,7 @@ async fn queue_only_promotes_at_idle_exactly_one_per_cycle() {
                 session_id: "drain-sess".into(),
                 delivery: Delivery::Queue,
                 prompt: format!("QUEUE-{i}"),
+                images: Vec::new(),
                 admitted_seq: 0,
                 promoted_seq: None,
             })
@@ -283,6 +287,7 @@ async fn durable_pending_input_survives_until_drain() {
             session_id: "drain-sess".into(),
             delivery: Delivery::Steer,
             prompt: "waiting".into(),
+            images: Vec::new(),
             admitted_seq: 0,
             promoted_seq: None,
         })

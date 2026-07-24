@@ -115,6 +115,7 @@ async fn reasoning_persisted_on_tool_call_turn() {
                 ContentBlock::Reasoning { .. } => "Reasoning",
                 ContentBlock::ToolUse { name, .. } => name,
                 ContentBlock::ToolResult { .. } => "ToolResult",
+                ContentBlock::Image { .. } => "Image",
             })
             .collect::<Vec<_>>()
     );

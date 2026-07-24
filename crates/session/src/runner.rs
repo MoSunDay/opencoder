@@ -284,12 +284,26 @@ pub async fn run(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let registry = build_registry();
-    run_with_registry(session, user_text, &registry, on_event).await
+    run_with_registry(session, user_text, Vec::new(), &registry, on_event).await
+}
+
+/// Like [`run`] but attaches `images` (data URIs or URLs) as `Image` content
+/// blocks to the first user message, enabling multimodal/vision prompts from
+/// the headless CLI (`opencode run "..." --image ./a.png`).
+pub async fn run_with_images(
+    session: &mut SessionState,
+    user_text: String,
+    images: Vec<String>,
+    on_event: impl FnMut(SessionEvent) + Send,
+) -> Result<()> {
+    let registry = build_registry();
+    run_with_registry(session, user_text, images, &registry, on_event).await
 }
 
 pub async fn run_with_registry(
     session: &mut SessionState,
     user_text: String,
+    images: Vec<String>,
     registry: &HashMap<String, ToolArc>,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
@@ -309,7 +323,7 @@ pub async fn run_with_registry(
     // message so the model records a user turn and acts on the skill body in
     // the system prompt instead of treating it passively.
     if !user_text.trim().is_empty() {
-        let user = Message::user(new_id(), user_text);
+        let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
     } else if session.skill_prompt_cloned().is_some() {
         let mut msg = Message::user(
@@ -343,8 +357,8 @@ async fn run_loop(
         // last turn. A steer is absorbed into history HERE.
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
-            for (seq, p) in &steer_prompts {
-                let mut m = Message::user(new_id(), p.clone());
+            for (seq, p, imgs) in &steer_prompts {
+                let mut m = Message::user_with_images(new_id(), p.clone(), imgs);
                 m.synthetic = true;
                 session.record(m).await;
                 on_event(SessionEvent::SteerConsumed { seq: *seq });
@@ -404,8 +418,8 @@ async fn run_loop(
         if tool_calls.is_empty() {
             // Idle boundary: consume exactly ONE queued follow-up, if any. A
             // queued input only fires when the session would otherwise go idle.
-            if let Some((seq, q)) = claim_one_queued(session).await {
-                let mut m = Message::user(new_id(), q);
+            if let Some((seq, q, imgs)) = claim_one_queued(session).await {
+                let mut m = Message::user_with_images(new_id(), q, &imgs);
                 m.synthetic = true;
                 session.record(m).await;
                 on_event(SessionEvent::QueueConsumed { seq });
@@ -892,6 +906,7 @@ async fn run_subagent(
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
+        Vec::new(),
         registry,
         move |cev| {
             // Incremental persist: push to the ordered flusher channel. The
@@ -1037,7 +1052,7 @@ fn core_usage(u: &Usage) -> MessageUsage {
 /// `admitted_seq` (a different column scoped per session). No-op when no store
 /// is attached or none pending. Idempotent (promote only touches NULL
 /// promoted_seq).
-async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String)> {
+async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String, Vec<String>)> {
     let store = match session.store.clone() {
         Some(s) => s,
         None => return Vec::new(),
@@ -1074,15 +1089,15 @@ async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String)> {
     pending
         .into_iter()
         .zip(promoted_seqs)
-        .map(|(i, seq)| (seq, i.prompt))
+        .map(|(i, seq)| (seq, i.prompt, i.images.clone()))
         .collect()
 }
 
 /// Claim exactly one queued input at idle. Returns its (row seq, prompt), or None.
-async fn claim_one_queued(session: &mut SessionState) -> Option<(i64, String)> {
+async fn claim_one_queued(session: &mut SessionState) -> Option<(i64, String, Vec<String>)> {
     let store = session.store.clone()?;
     match store.claim_next_queue(&session.id).await {
-        Ok(Some((seq, input))) => Some((seq, input.prompt)),
+        Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
         Ok(None) => None,
         Err(e) => {
             tracing::warn!(error = %e, "claim_one_queued failed");

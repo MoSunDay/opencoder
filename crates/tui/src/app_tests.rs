@@ -515,6 +515,11 @@ fn kitty_ctrl_c_does_not_quit() {
 
 #[test]
 fn sys_tokens_counts_system_prompt() {
+    // Serialize with the `with_home` tests below: `sys_tokens_for`
+    // performs two independent `home_dir()` reads (build_system and
+    // global_instructions_text). A concurrent HOME mutation can split
+    // them and underflow the global-subtraction to 0.
+    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
     let dir = std::env::temp_dir();
     let base = crate::app::sys_tokens_for("act", &dir, None);
     assert!(base > 0, "the system prompt must register some tokens");
@@ -542,6 +547,7 @@ fn sys_tokens_counts_system_prompt() {
 /// passing the body is observably correct.
 #[test]
 fn sys_tokens_skill_body_dominates_skill_name() {
+    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
     let dir = std::env::temp_dir();
     // A realistic short skill name vs. a long instruction body.
     let name = "code-review";

@@ -918,10 +918,12 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
     );
 }
 
-/// Ctrl+U must behave identically to Ctrl+L: consume the key, clear the input
-/// box, and reset the cursor. Regression guard for the keybinding unification.
+/// Ctrl+U is now a pure act<->plan mode toggle and must NOT be consumed by
+/// `pre_key_intercept` (so it falls through to `handle_key`, which switches
+/// mode without collapsing thinking or clearing the input). Ctrl+L still owns
+/// the collapse/clear behaviour.
 #[test]
-fn ctrl_u_matches_ctrl_l_clears_input() {
+fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
     fn run(key: KeyEvent) -> (bool, String, usize) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
@@ -950,12 +952,15 @@ fn ctrl_u_matches_ctrl_l_clears_input() {
     let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
     let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
 
+    // Ctrl+U must pass through untouched (handled downstream as a mode toggle).
     let (u_consumed, u_input, u_cursor) = run(ctrl_u);
-    let (l_consumed, l_input, l_cursor) = run(ctrl_l);
+    assert!(!u_consumed, "Ctrl+U must NOT be consumed by pre_key_intercept");
+    assert_eq!(u_input, "hello world", "Ctrl+U must leave the input untouched");
+    assert_eq!(u_cursor, 5, "Ctrl+U must not move the cursor");
 
-    assert!(u_consumed, "Ctrl+U must be consumed by pre_key_intercept");
-    assert!(u_input.is_empty(), "Ctrl+U must clear the input");
-    assert_eq!(u_cursor, 0, "Ctrl+U must reset the cursor");
-    // Identical outcome to Ctrl+L.
-    assert_eq!((u_consumed, u_input.as_str(), u_cursor), (l_consumed, l_input.as_str(), l_cursor));
+    // Ctrl+L still collapses thinking / clears the input.
+    let (l_consumed, l_input, l_cursor) = run(ctrl_l);
+    assert!(l_consumed, "Ctrl+L must be consumed by pre_key_intercept");
+    assert!(l_input.is_empty(), "Ctrl+L must clear the input");
+    assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
 }

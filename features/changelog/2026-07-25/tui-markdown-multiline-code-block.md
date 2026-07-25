@@ -31,10 +31,6 @@ thinking 头部点击热区全部错位 → 后续内容堆叠错乱。旧测试
 流式纯文本路径 `raw.split('\n')` 增加 `strip_suffix('\r')`，消除同类 CRLF
 残留（影响小：turn done 后会重渲染，零状态变更）。
 
-### `crates/tui/src/session_ui.rs:593`（unblock 编译）
-补上 in-progress images 特性遗漏的 `images: Vec::new()` 字段（与同文件
-~662/~668 两处构造一致），解除 tui crate 测试无法编译的阻塞。
-
 ## 测试清单（功能 → 测试名）
 
 | 功能 | 测试 | 结果 |

@@ -211,8 +211,23 @@ impl MdRenderer {
             format!("\u{250c} {label} "),
             Style::default().fg(Color::DarkGray),
         )));
-        for line in &self.code_buf {
-            let t = line.trim_end_matches('\n');
+        // A fenced code block can arrive as a single `Event::Text` whose
+        // string contains embedded newlines (pulldown-cmark returns the whole
+        // body at once). Flatten every buffered chunk, split on `\n`, and emit
+        // one bordered `Line` per logical line — otherwise a multi-line block
+        // collapses into one `Line` carrying literal `\n`, which breaks the
+        // border and the paragraph line count (scrolling / hit areas).
+        let joined: String = self.code_buf.concat();
+        let mut rows: Vec<&str> = joined.split('\n').collect();
+        // A trailing newline yields a final empty split element that does not
+        // correspond to a real line — drop only that single trailing empty, so
+        // genuine interior blank lines are preserved.
+        if rows.last().is_some_and(|s| s.is_empty()) {
+            rows.pop();
+        }
+        for row in rows {
+            // tolerate CRLF endings left in the buffer
+            let t = row.strip_suffix('\r').unwrap_or(row);
             if t.is_empty() {
                 self.lines.push(Line::from(Span::styled(
                     "\u{2502}",
@@ -268,6 +283,51 @@ mod tests {
             .collect();
         assert!(t.contains("fn main()"), "{t}");
         assert!(t.contains("rust"), "{t}");
+    }
+
+    #[test]
+    fn multi_line_code_block() {
+        // pulldown-cmark returns the whole fenced body as one Text event with
+        // embedded newlines; each logical line must become its own bordered Line.
+        let ls = render("```rust\nfn a() {}\nfn b() {}\n```");
+        let body: Vec<&Line> = ls
+            .iter()
+            .filter(|l| l.spans.iter().any(|s| s.content.starts_with('\u{2502}')))
+            .collect();
+        assert_eq!(body.len(), 2, "expected 2 code lines, got {ls:?}");
+        for l in &ls {
+            for s in &l.spans {
+                assert!(!s.content.contains('\n'), "literal newline in span: {:?}", s.content);
+            }
+        }
+    }
+
+    #[test]
+    fn code_block_with_blank_line() {
+        // an interior blank line must still produce its own bordered row.
+        let ls = render("```rust\nfn a()\n\nfn b()\n```");
+        let body: Vec<&Line> = ls
+            .iter()
+            .filter(|l| l.spans.iter().any(|s| s.content.starts_with('\u{2502}')))
+            .collect();
+        assert_eq!(body.len(), 3, "expected 3 code lines (incl. blank), got {ls:?}");
+    }
+
+    #[test]
+    fn crlf_code_block() {
+        // CRLF line endings must not leave stray `\r` (or `\n`) in any span.
+        let ls = render("```rust\r\nfn a()\r\nfn b()\r\n```");
+        for l in &ls {
+            for s in &l.spans {
+                assert!(!s.content.contains('\r'), "stray CR in span: {:?}", s.content);
+                assert!(!s.content.contains('\n'), "stray LF in span: {:?}", s.content);
+            }
+        }
+        let body: Vec<&Line> = ls
+            .iter()
+            .filter(|l| l.spans.iter().any(|s| s.content.starts_with('\u{2502}')))
+            .collect();
+        assert_eq!(body.len(), 2, "expected 2 code lines, got {ls:?}");
     }
 
     #[test]

@@ -73,7 +73,6 @@ pub(crate) fn compute_display<'a>(
     subagent_sys: u64,
     sys_tokens: u64,
     config: &Config,
-    model_label: &str,
     workdir: &Path,
 ) -> DisplayState<'a> {
     let agent_name = chat.agent.clone();
@@ -111,11 +110,12 @@ pub(crate) fn compute_display<'a>(
                 sys_tokens,
             )
         };
-    // Compose status-bar model label with reasoning-effort badge (e.g.
-    // "glm-5.2 \u{00b7}high") so the active thinking depth is visible.
+    // Status bar shows the bare model id (without provider prefix) plus an
+    // optional reasoning-effort badge, e.g. "glm-5.2 \u{00b7}high".
+    let mid = config.model_id();
     let status_model = match &config.reasoning_effort {
-        Some(e) if !e.trim().is_empty() => format!("{model_label} \u{00b7}{e}"),
-        _ => model_label.to_string(),
+        Some(e) if !e.trim().is_empty() => format!("{mid} \u{00b7}{e}"),
+        _ => mid.to_string(),
     };
     DisplayState {
         agent_name,
@@ -148,8 +148,7 @@ pub(crate) enum SwitchOutcome {
 }
 
 /// Handle `KeyAction::SwitchAgent`: switch agent mode, and for plan→act with a
-/// submitted plan, either handoff immediately (idle) or defer until the running
-/// turn completes (P0 race-fix: `pending_handoff`).
+/// submitted plan, handoff immediately when idle, no-op when running.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
@@ -158,7 +157,6 @@ pub(crate) async fn handle_switch_agent(
     follow: &mut bool,
     input: &mut String,
     cursor_idx: &mut usize,
-    pending_handoff: &mut Option<String>,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     cmd_tx: &mpsc::Sender<UiCmd>,
@@ -170,26 +168,23 @@ pub(crate) async fn handle_switch_agent(
     let plan_to_act = chat.agent == "plan" && name == "act";
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
     if plan_to_act && chat.plan_submitted {
-        // Carry any text left in the input box into the handoff.
+        if *running {
+            // Plan turn still running — Shift+Tab is a no-op.
+            *mode_flash = Some(("\u{21bb} plan running\u{2026}".into(), anim_tick));
+            return SwitchOutcome::Proceed;
+        }
+        // Idle: handoff immediately, carrying any input text.
         let extra = std::mem::take(input);
         *cursor_idx = 0;
-        if !*running {
-            // Idle: handoff immediately.
-            *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-            if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart(name, extra)).await {
-                worker_dead(chat);
-                return SwitchOutcome::Quit;
-            }
-            *running = true;
-            *follow = true;
-            chat.begin_turn();
-        } else {
-            // P0 fix: plan is running — defer handoff until the turn ends.
-            *pending_handoff = Some(extra);
-            *mode_flash = Some(("\u{2192} act (pending)".into(), anim_tick));
+        *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+        if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart(name, extra)).await {
+            worker_dead(chat);
+            return SwitchOutcome::Quit;
         }
+        *running = true;
+        *follow = true;
+        chat.begin_turn();
     } else {
-        *pending_handoff = None;
         *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
         let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
     }
@@ -218,7 +213,6 @@ pub(crate) async fn fold_ui_events(
     follow: &mut bool,
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
-    pending_handoff: &mut Option<String>,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
@@ -264,7 +258,14 @@ pub(crate) async fn fold_ui_events(
                     } else if !*drain_pending {
                         *running = false;
                         chat.steer_items.clear();
-                        queue_items.clear();
+                        // Only clear queue_items on Done — the store queue is provably
+                        // empty (claim_one_queued returned None before Done). On Error,
+                        // queued items may still be pending in the store; they are
+                        // maintained per-item by QueueConsumed events and will be
+                        // consumed on the next drain.
+                        if matches!(sev, SessionEvent::Done) {
+                            queue_items.clear();
+                        }
                     }
                 }
             }
@@ -282,7 +283,7 @@ pub(crate) async fn fold_ui_events(
                     // the drain loop to promote pending steers.
                     *drain_pending = false;
                     *cancelled = false;
-                    start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new())).await;
+                    start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
                     *running = true;
                     *follow = true;
                     chat.begin_turn();
@@ -290,21 +291,6 @@ pub(crate) async fn fold_ui_events(
                     *cancelled = false;
                 } else {
                     *running = false;
-                    // P0 fix: if user requested plan→act switch while
-                    // running, now that the turn is done, trigger it.
-                    if let Some(extra) = pending_handoff.take() {
-                        if chat.plan_submitted {
-                            start_turn(
-                                cmd_tx,
-                                cancel,
-                                UiCmd::SwitchAndStart("act".into(), extra),
-                            )
-                            .await;
-                            *running = true;
-                            *follow = true;
-                            chat.begin_turn();
-                        }
-                    }
                 }
             }
         }
@@ -318,6 +304,26 @@ pub(crate) async fn fold_ui_events(
 /// a marker. `Cancel | Idle` does nothing. `Quit` sends `UiCmd::Quit` and was a
 /// `break`. Returns [`LoopFlow::Quit`] for the `Quit` arm, otherwise
 /// [`LoopFlow::Proceed`] (the caller keeps the post-match `continue` inline).
+/// Detect whether an exported `OPENCODER_MODEL` silently overrode a `/model`
+/// switch. `Config::load` runs `apply_env` on every load, so an exported
+/// `OPENCODER_MODEL` re-pins `cfg.model` and reverts a just-saved menu switch
+/// -- leaving the status bar showing an unexpected model with no feedback.
+///
+/// Pure (no env I/O) so it is unit-testable without flaky process-wide env.
+/// Returns the env model value when an override occurred, else `None`.
+pub(crate) fn env_model_override(
+    intended_model: Option<&str>,
+    effective_model: &str,
+    env_model: Option<&str>,
+) -> Option<String> {
+    let intended = intended_model?;
+    let env = env_model?.trim();
+    if env.is_empty() {
+        return None;
+    }
+    (effective_model != intended).then(|| env.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_model_outcome(
     model_menu: &mut Option<ModelMenu>,
@@ -338,7 +344,7 @@ pub(crate) async fn handle_model_outcome(
                 Ok(path) => {
                     match Config::load(workdir) {
                         Ok(reloaded) => {
-                            *model_label = reloaded.model_id().to_string();
+                            *model_label = reloaded.model.clone();
                             *context_limit = reloaded.context_limit();
                             // Rebuild the outer `client` too so subsequent
                             // `/task` new sessions pick up the new endpoint
@@ -374,6 +380,7 @@ pub(crate) async fn handle_model_outcome(
                                 }
                             }
                             *config = reloaded.clone();
+                            let effective_model = reloaded.model.clone();
                             // Apply a new TUI frame rate immediately: rebuild the frame
                             // interval so the just-saved fps takes effect without restart.
                             let new_frame_ms = reloaded.tui_frame_ms();
@@ -390,6 +397,22 @@ pub(crate) async fn handle_model_outcome(
                                 format!("[/config] saved \u{2192} {}", path.display()),
                                 Style::default().fg(Color::Green),
                             )));
+                            // Issue #2: if an exported OPENCODER_MODEL silently
+                            // reverted this /model switch, surface it instead of
+                            // leaving the status bar on an unexpected model.
+                            if let Some(env_val) = env_model_override(
+                                json.get("model").and_then(|v| v.as_str()),
+                                &effective_model,
+                                std::env::var("OPENCODER_MODEL").ok().as_deref(),
+                            ) {
+                                chat.push_marker(Line::from(Span::styled(
+                                    format!(
+                                        "[config] OPENCODER_MODEL is set ({env_val}) \u{2014} \
+                                         /model switch overridden by env"
+                                    ),
+                                    Style::default().fg(Color::Red),
+                                )));
+                            }
                         }
                         Err(e) => {
                             chat.push_marker(Line::from(Span::styled(
@@ -489,7 +512,6 @@ pub(crate) async fn dispatch_command(
     LoopFlow::Proceed
 }
 
-
 /// Route a paste payload by the same modal priority as key events: an open
 /// popup owns the paste, so it never reaches the main input hidden behind it.
 ///
@@ -501,7 +523,8 @@ pub(crate) async fn dispatch_command(
 /// - command menu open -> append to its query and refilter via
 ///   [`CommandMenu::paste`];
 /// - otherwise -> resolve a dragged file to its absolute path (or insert the
-///   payload verbatim) into the main composer.
+///   payload verbatim) into the main composer; image file paths are loaded
+///   into `pending_images` as data URIs instead.
 ///
 /// Returns [`LoopFlow::Redraw`] when a modal consumed the paste (the caller
 /// re-renders), [`LoopFlow::Proceed`] when the main composer absorbed it
@@ -515,6 +538,7 @@ pub(crate) fn route_paste(
     command_menu: &mut Option<CommandMenu>,
     input: &mut String,
     cursor_idx: &mut usize,
+    pending_images: &mut Vec<(String, String)>,
     workdir: &Path,
 ) -> LoopFlow {
     if task_picker_open || cache_salt_menu_open {
@@ -532,7 +556,12 @@ pub(crate) fn route_paste(
         menu.paste(trimmed);
         return LoopFlow::Redraw;
     }
-    // Main composer: drag a file in (or clipboard paste) arrives as one
+    // Main composer: check if pasted content is an image file path.
+    if let Some((data_uri, filename)) = crate::image_util::try_load_image(trimmed, workdir) {
+        pending_images.push((data_uri, filename));
+        return LoopFlow::Proceed;
+    }
+    // Otherwise: drag a file in (or clipboard paste) arrives as one
     // atomic payload; resolve an existing file to its absolute path, else
     // insert verbatim.
     let payload = paste_payload(pasted, workdir);
@@ -562,6 +591,179 @@ pub(crate) async fn handle_quit(
     let _ = cmd_tx.send(UiCmd::Quit).await;
 }
 
+
+/// Handle a key while in plan-edit mode. Takes ownership of the `Option<PlanEdit>`
+/// via `take()` so there are no borrow conflicts. On `Exit`:
+/// - If the text was modified, update the `ChatView` and send `UiCmd::EditPlan`.
+/// - The `Option` stays `None` (plan editing ended).
+///
+/// On `Continue`: the `PlanEdit` is put back.
+/// Returns [`LoopFlow::Redraw`] so the caller re-renders.
+pub(crate) async fn handle_plan_edit_key(
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    k: crossterm::event::KeyEvent,
+    chat: &mut crate::chat::ChatView,
+    cmd_tx: &mpsc::Sender<crate::worker::UiCmd>,
+    inner_w: u16,
+) -> LoopFlow {
+    let mut pe = match plan_edit.take() {
+        Some(pe) => pe,
+        None => return LoopFlow::Proceed,
+    };
+    if matches!(
+        crate::plan_edit::handle_plan_edit_key(&mut pe, k, inner_w, 2),
+        crate::plan_edit::PlanEditAction::Exit
+    ) {
+        if pe.is_modified() {
+            let text = pe.text.clone();
+            chat.update_plan_text(&text);
+            let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await;
+        }
+        // plan_edit stays None — editing ended
+    } else {
+        *plan_edit = Some(pe);
+    }
+    LoopFlow::Redraw
+}
+
+/// Lifetime (in animation ticks) of a transient mode flash shown in the
+/// status line (plan-edit / mode-switch hints). Moved here from `app.rs`
+/// alongside the frame render that consumes it.
+const MODE_FLASH_TICKS: u32 = 15;
+
+/// Whether a transient flash started at `start` is still visible at `now`,
+/// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
+/// stays correct across the u32 wraparound of `anim_tick`. Re-exported from
+/// `app.rs` so existing `crate::app::flash_visible` test imports still resolve.
+pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
+    now.wrapping_sub(start) < ticks
+}
+
+/// Render the full TUI frame in one call. Extracted from `run_app`'s render
+/// block so that the plan-edit composer state, the transient mode-flash and
+/// copy-status closures, and the 30-argument `render()` invocation live in a
+/// single place; the call site in `app.rs` stays a thin one-liner. The plan
+/// edit modal owns the composer (its text + cursor) when active, otherwise the
+/// normal input line is shown.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_frame(
+    terminal: &mut crate::render::Term,
+    chat: &crate::chat::ChatView,
+    plan_edit: &Option<crate::plan_edit::PlanEdit>,
+    input: &str,
+    cursor_idx: usize,
+    title: &str,
+    agent: &str,
+    running: bool,
+    show_help: bool,
+    ctx: u64,
+    sys: u64,
+    context_limit: u64,
+    model: &str,
+    status: &str,
+    steer_items: &[(i64, String)],
+    queue_items: &[(i64, String)],
+    scroll: &mut u16,
+    follow: bool,
+    anim_tick: u32,
+    mode_flash: &Option<(String, u32)>,
+    skill_menu: Option<&crate::menu::SkillMenu>,
+    task_picker: Option<&crate::task::TaskPicker>,
+    command_menu: Option<&crate::command::CommandMenu>,
+    model_menu: Option<&crate::model_menu::ModelMenu>,
+    cache_salt_menu: Option<&crate::cache_salt_menu::CacheSaltMenu>,
+    hits: &mut crate::render::MouseHits,
+    selection: Option<crate::selection::SelRange>,
+    copy_status: &Option<(String, Instant)>,
+    pending_images: &[(String, String)],
+    input_disabled: bool,
+    run_ms: u64,
+) -> anyhow::Result<()> {
+    let (plan_mode, render_input, render_cursor) = match plan_edit {
+        Some(pe) => (Some(pe.mode_label()), pe.text.as_str(), pe.cursor),
+        None => (None, input, cursor_idx),
+    };
+    crate::render::render(
+        terminal,
+        chat,
+        render_input,
+        render_cursor,
+        title,
+        agent,
+        running,
+        show_help,
+        ctx,
+        sys,
+        context_limit,
+        model,
+        status,
+        steer_items,
+        queue_items,
+        scroll,
+        follow,
+        anim_tick,
+        mode_flash.as_ref().and_then(|(t, s)| {
+            if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
+                Some(t.as_str())
+            } else {
+                None
+            }
+        }),
+        skill_menu,
+        task_picker,
+        command_menu,
+        model_menu,
+        cache_salt_menu,
+        hits,
+        selection,
+        copy_status.as_ref().and_then(|(msg, t)| {
+            if t.elapsed() < Duration::from_secs(2) {
+                Some(msg.as_str())
+            } else {
+                None
+            }
+        }),
+        pending_images,
+        input_disabled,
+        plan_mode,
+        run_ms,
+    )
+}
+
+/// Activate plan-edit mode using the text from the last Plan (or non-empty
+/// Assistant) block, flashing a hint that Esc saves the edit.
+pub(crate) fn enter_plan_edit(
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    chat: &crate::chat::ChatView,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+) {
+    if let Some(text) = chat.last_plan_text() {
+        *plan_edit = Some(crate::plan_edit::PlanEdit::new(text));
+        *mode_flash = Some(("edit plan \u{2014} enter to save".into(), anim_tick));
+    }
+}
+
+/// Dispatch a key to the active plan-edit modal: compute the usable inner
+/// width from the terminal, then delegate to [`handle_plan_edit_key`].
+pub(crate) async fn dispatch_plan_edit_key(
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    k: KeyEvent,
+    chat: &mut crate::chat::ChatView,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    terminal: &crate::render::Term,
+) -> LoopFlow {
+    let inner_w = terminal
+        .size()
+        .map(|r| r.width.saturating_sub(2))
+        .unwrap_or(78);
+    handle_plan_edit_key(plan_edit, k, chat, cmd_tx, inner_w).await
+}
+
 #[cfg(test)]
 #[path = "app_loop_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "app_loop_bugfix_tests.rs"]
+mod bugfix_tests;

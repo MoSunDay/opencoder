@@ -15,6 +15,7 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
     let mut command_menu: Option<CommandMenu> = None;
     let mut input = String::new();
     let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
     let flow = route_paste(
         "plain text",
         false,
@@ -23,6 +24,7 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
         &mut command_menu,
         &mut input,
         &mut idx,
+        &mut pending_images,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -38,6 +40,7 @@ fn route_paste_swallowed_when_task_picker_open() {
     let mut command_menu: Option<CommandMenu> = None;
     let mut input = String::new();
     let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
     let flow = route_paste(
         "plain text",
         true,
@@ -46,6 +49,7 @@ fn route_paste_swallowed_when_task_picker_open() {
         &mut command_menu,
         &mut input,
         &mut idx,
+        &mut pending_images,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Redraw));
@@ -64,6 +68,7 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
     let mut command_menu: Option<CommandMenu> = None;
     let mut input = String::from("kept");
     let mut idx = 2usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
     let flow = route_paste(
         "plain text",
         false,
@@ -72,6 +77,7 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
         &mut command_menu,
         &mut input,
         &mut idx,
+        &mut pending_images,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Redraw));
@@ -89,57 +95,6 @@ fn plan_view() -> ChatView {
     }
 }
 
-/// P0 fix: plan→act while running defers the handoff into `pending_handoff`
-/// instead of dropping it or racing the worker.
-#[tokio::test]
-async fn switch_plan_to_act_while_running_defers_handoff() {
-    let mut chat = plan_view();
-    let mut running = true;
-    let mut follow = true;
-    let mut input = "extra text".to_string();
-    let mut cursor_idx = 10;
-    let mut pending_handoff: Option<String> = None;
-    let mut mode_flash: Option<(String, u32)> = None;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let mut sys_tokens = 0u64;
-    let workdir = Path::new(".");
-    let active_skill_body: Option<String> = None;
-
-    let outcome = handle_switch_agent(
-        "act".into(),
-        &mut chat,
-        &mut running,
-        &mut follow,
-        &mut input,
-        &mut cursor_idx,
-        &mut pending_handoff,
-        &mut mode_flash,
-        0,
-        &cmd_tx,
-        &mut cancel,
-        &mut sys_tokens,
-        workdir,
-        &active_skill_body,
-    )
-    .await;
-
-    assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert_eq!(pending_handoff.as_deref(), Some("extra text"));
-    assert!(input.is_empty(), "input should be consumed into handoff");
-    assert_eq!(cursor_idx, 0);
-    assert!(running, "running should stay true (plan turn still active)");
-    assert!(
-        mode_flash.as_ref().unwrap().0.contains("pending"),
-        "mode flash should show pending; got {:?}",
-        mode_flash
-    );
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "no command should be sent while deferring"
-    );
-}
-
 /// Regression: plan→act while idle triggers the handoff immediately.
 #[tokio::test]
 async fn switch_plan_to_act_while_idle_triggers_handoff() {
@@ -148,7 +103,6 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
     let mut follow = false;
     let mut input = "do it".to_string();
     let mut cursor_idx = 5;
-    let mut pending_handoff: Option<String> = None;
     let mut mode_flash: Option<(String, u32)> = None;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
@@ -163,7 +117,6 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
         &mut follow,
         &mut input,
         &mut cursor_idx,
-        &mut pending_handoff,
         &mut mode_flash,
         0,
         &cmd_tx,
@@ -175,7 +128,6 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
     .await;
 
     assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert!(pending_handoff.is_none());
     assert!(running);
     assert!(follow);
     // ResetCancel + SwitchAndStart
@@ -189,18 +141,16 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
     }
 }
 
-/// Non-plan→act switch clears any stale pending_handoff (pure switch).
+/// Regression for the removal of deferred handoff: plan→act Shift+Tab while
+/// the plan turn is running is now a complete no-op — no command sent, input
+/// untouched, running stays true, and a flash hint is shown.
 #[tokio::test]
-async fn switch_non_plan_to_act_clears_pending() {
-    let mut chat = ChatView {
-        agent: "act".into(),
-        ..Default::default()
-    };
-    let mut running = false;
-    let mut follow = false;
-    let mut input = String::new();
-    let mut cursor_idx = 0;
-    let mut pending_handoff: Option<String> = Some("stale".into());
+async fn switch_plan_to_act_while_running_is_noop() {
+    let mut chat = plan_view();
+    let mut running = true;
+    let mut follow = true;
+    let mut input = "do not lose me".to_string();
+    let mut cursor_idx = 14;
     let mut mode_flash: Option<(String, u32)> = None;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
@@ -209,13 +159,12 @@ async fn switch_non_plan_to_act_clears_pending() {
     let active_skill_body: Option<String> = None;
 
     let outcome = handle_switch_agent(
-        "plan".into(),
+        "act".into(),
         &mut chat,
         &mut running,
         &mut follow,
         &mut input,
         &mut cursor_idx,
-        &mut pending_handoff,
         &mut mode_flash,
         0,
         &cmd_tx,
@@ -227,11 +176,21 @@ async fn switch_non_plan_to_act_clears_pending() {
     .await;
 
     assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert!(pending_handoff.is_none(), "stale pending should be cleared");
-    match cmd_rx.try_recv().unwrap() {
-        UiCmd::SwitchAgent(ref n) => assert_eq!(n, "plan"),
-        _ => panic!("expected SwitchAgent"),
-    }
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while running"
+    );
+    assert!(running, "running must stay true (plan turn still active)");
+    assert_eq!(input, "do not lose me", "input must be untouched on no-op");
+    assert_eq!(cursor_idx, 14, "cursor must be untouched on no-op");
+    assert!(
+        mode_flash
+            .as_ref()
+            .map(|(t, _)| t.contains("running"))
+            .unwrap_or(false),
+        "mode flash should hint that plan is running; got {:?}",
+        mode_flash
+    );
 }
 
 /// plan→act without a submitted plan is a pure switch (no handoff).
@@ -246,7 +205,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
     let mut follow = false;
     let mut input = String::new();
     let mut cursor_idx = 0;
-    let mut pending_handoff: Option<String> = Some("stale".into());
     let mut mode_flash: Option<(String, u32)> = None;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
@@ -261,7 +219,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
         &mut follow,
         &mut input,
         &mut cursor_idx,
-        &mut pending_handoff,
         &mut mode_flash,
         0,
         &cmd_tx,
@@ -273,7 +230,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
     .await;
 
     assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert!(pending_handoff.is_none());
     assert!(!running);
     match cmd_rx.try_recv().unwrap() {
         UiCmd::SwitchAgent(ref n) => assert_eq!(n, "act"),
@@ -286,110 +242,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
 use opencoder_core::Message;
 use opencoder_session::SessionEvent;
 use opencoder_store::{LibsqlStore, SessionMeta};
-
-/// P0 fix: when a plan→act switch was deferred (pending_handoff set) and the
-/// plan turn finishes normally (TurnDone), fold_ui_events fires the handoff.
-#[tokio::test]
-async fn fold_turndone_with_pending_triggers_handoff() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        plan_submitted: true,
-        ..Default::default()
-    };
-    let mut queue_items: Vec<(i64, String)> = Vec::new();
-    let mut running = true;
-    let mut cancelled = false;
-    let mut drain_pending = false;
-    let mut skip_next_render = false;
-    let mut follow = true;
-    let mut pending_handoff: Option<String> = Some("do it now".into());
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
-
-    let flow = fold_ui_events(
-        Some(UiEvent::TurnDone),
-        &mut chat,
-        &store,
-        "test-session",
-        &mut queue_items,
-        &mut running,
-        &mut cancelled,
-        &mut drain_pending,
-        &mut skip_next_render,
-        &mut follow,
-        &cmd_tx,
-        &mut cancel,
-        &mut pending_handoff,
-        &mut evt_rx,
-    )
-    .await;
-
-    assert!(matches!(flow, LoopFlow::Proceed));
-    assert!(pending_handoff.is_none(), "pending_handoff should be consumed");
-    assert!(running, "running should be true again (handoff turn started)");
-    // ResetCancel + SwitchAndStart("act", "do it now")
-    assert!(matches!(cmd_rx.try_recv().unwrap(), UiCmd::ResetCancel(_)));
-    match cmd_rx.try_recv().unwrap() {
-        UiCmd::SwitchAndStart(ref n, ref extra) => {
-            assert_eq!(n, "act");
-            assert_eq!(extra, "do it now");
-        }
-        _ => panic!("expected SwitchAndStart"),
-    }
-}
-
-/// Cancel path: if the turn was cancelled (user hit Esc), TurnDone should NOT
-/// trigger the pending handoff — cancel = explicit interrupt.
-#[tokio::test]
-async fn fold_turndone_cancelled_blocks_handoff() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        plan_submitted: true,
-        ..Default::default()
-    };
-    let mut queue_items: Vec<(i64, String)> = Vec::new();
-    // Cancel handler already set running=false before TurnDone arrives.
-    let mut running = false;
-    let mut cancelled = true;
-    let mut drain_pending = false;
-    let mut skip_next_render = false;
-    let mut follow = true;
-    let mut pending_handoff: Option<String> = Some("deferred".into());
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
-
-    let _flow = fold_ui_events(
-        Some(UiEvent::TurnDone),
-        &mut chat,
-        &store,
-        "test-session",
-        &mut queue_items,
-        &mut running,
-        &mut cancelled,
-        &mut drain_pending,
-        &mut skip_next_render,
-        &mut follow,
-        &cmd_tx,
-        &mut cancel,
-        &mut pending_handoff,
-        &mut evt_rx,
-    )
-    .await;
-
-    assert!(
-        pending_handoff.is_some(),
-        "pending_handoff should NOT be consumed on cancel"
-    );
-    assert!(!running, "running should be false after cancelled turn");
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "no command should be sent when cancelled"
-    );
-}
 
 /// P1 fix: TranscriptReset (compaction) must NOT reset plan_submitted to false.
 #[tokio::test]
@@ -417,7 +269,6 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
     let mut drain_pending = false;
     let mut skip_next_render = false;
     let mut follow = true;
-    let mut pending_handoff: Option<String> = None;
     let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
@@ -435,7 +286,6 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
         &mut follow,
         &cmd_tx,
         &mut cancel,
-        &mut pending_handoff,
         &mut evt_rx,
     )
     .await;
@@ -541,17 +391,28 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
         crossterm::event::KeyModifiers::empty(),
     );
     let flow = handle_model_outcome(
-        &mut model_menu, k, &mut client, &mut config, &mut model_label,
-        &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx,
-        &mut chat, workdir,
-    ).await;
+        &mut model_menu,
+        k,
+        &mut client,
+        &mut config,
+        &mut model_label,
+        &mut context_limit,
+        &mut frame_ms,
+        &mut frame_ticker,
+        &cmd_tx,
+        &mut chat,
+        workdir,
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(model_menu.is_none(), "modal should close on Save");
 
     // Collect all marker blocks; expect at least the red error marker and the
     // green "saved" marker.
-    let markers: Vec<&[ratatui::text::Line]> = chat.blocks.iter()
+    let markers: Vec<&[ratatui::text::Line]> = chat
+        .blocks
+        .iter()
         .filter_map(|b| match b {
             ChatBlock::Marker(lines) => Some(lines.as_slice()),
             _ => None,
@@ -564,7 +425,8 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
     );
 
     // The first marker is the red error; it must mention "client build failed".
-    let error_text: String = markers[0].iter()
+    let error_text: String = markers[0]
+        .iter()
         .flat_map(|line| line.spans.iter())
         .map(|span| span.content.as_ref())
         .collect();
@@ -628,15 +490,26 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
         crossterm::event::KeyModifiers::empty(),
     );
     let flow = handle_model_outcome(
-        &mut model_menu, k, &mut client, &mut config, &mut model_label,
-        &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx,
-        &mut chat, workdir,
-    ).await;
+        &mut model_menu,
+        k,
+        &mut client,
+        &mut config,
+        &mut model_label,
+        &mut context_limit,
+        &mut frame_ms,
+        &mut frame_ticker,
+        &cmd_tx,
+        &mut chat,
+        workdir,
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(model_menu.is_none(), "modal should close on Save");
 
-    let markers: Vec<&[ratatui::text::Line]> = chat.blocks.iter()
+    let markers: Vec<&[ratatui::text::Line]> = chat
+        .blocks
+        .iter()
         .filter_map(|b| match b {
             ChatBlock::Marker(lines) => Some(lines.as_slice()),
             _ => None,
@@ -648,7 +521,8 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
         markers.len()
     );
 
-    let error_text: String = markers[0].iter()
+    let error_text: String = markers[0]
+        .iter()
         .flat_map(|line| line.spans.iter())
         .map(|span| span.content.as_ref())
         .collect();
@@ -660,3 +534,218 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
     assert!(matches!(cmd, crate::worker::UiCmd::ReloadConfig(_)));
 }
+
+// ----- Done/Error queue_items clear tests -----
+//
+// Regression: `fold_ui_events`'s `Done | Error` handler used to
+// unconditionally `queue_items.clear()`. On `Done` this is safe — the
+// store queue is provably empty (claim_one_queued returned None before
+// Done was emitted). On `Error` it is WRONG: the error path
+// short-circuits run_loop before the idle boundary, so queued items may
+// still be pending in the store. Wiping the in-memory mirror makes them
+// invisible in the UI even though they would be consumed on the next
+// drain. The fix only clears `queue_items` on `Done`.
+
+/// Pre-populate `queue_items` with a couple of pending entries (as if a
+/// steer was submitted while running, then the fresh drain errored) and
+/// drive `fold_ui_events` with an `Error` event. The mirror must survive
+/// — `running` flips off but `queue_items` stays intact.
+#[tokio::test]
+async fn fold_error_does_not_clear_queue_items() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![
+        (10, "queued prompt A".into()),
+        (11, "queued prompt B".into()),
+    ];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::Error(
+            "llm api failure".into(),
+        ))),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(
+        !running,
+        "running should flip false on Error (not cancelled, no drain pending)"
+    );
+    assert!(
+        chat.steer_items.is_empty(),
+        "steer_items should be cleared on Error"
+    );
+    assert_eq!(
+        queue_items.len(),
+        2,
+        "queue_items must NOT be cleared on Error — items may still be \
+         pending in the store and would be consumed on the next drain"
+    );
+    assert_eq!(queue_items[0].0, 10);
+    assert_eq!(queue_items[1].0, 11);
+}
+
+/// Counterpart: on `Done` the store queue is provably empty
+/// (claim_one_queued returned None before Done was emitted), so the
+/// in-memory mirror should be wiped.
+#[tokio::test]
+async fn fold_done_clears_queue_items() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![
+        (20, "queued prompt C".into()),
+        (21, "queued prompt D".into()),
+    ];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::Done)),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(!running, "running should flip false on Done");
+    assert!(
+        chat.steer_items.is_empty(),
+        "steer_items should be cleared on Done"
+    );
+    assert!(
+        queue_items.is_empty(),
+        "queue_items should be cleared on Done — store queue is provably empty"
+    );
+}
+
+/// Safety: when the turn was cancelled (`cancelled=true`), neither
+/// `Done` nor `Error` should touch `queue_items` — the event belongs to
+/// a stale turn and items may belong to a fresh turn.
+#[tokio::test]
+async fn fold_error_when_cancelled_preserves_queue_items() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![(30, "queued after steer".into())];
+    let mut running = true;
+    let mut cancelled = true;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::Error("stale".into()))),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(
+        running,
+        "running must stay true when the event is from a cancelled turn"
+    );
+    assert!(!cancelled, "cancelled flag should be reset to false");
+    assert_eq!(
+        queue_items.len(),
+        1,
+        "queue_items must be untouched for a stale (cancelled) Error event"
+    );
+    assert_eq!(queue_items[0].0, 30);
+}
+
+// ----- Regression: status bar shows bare model id, not provider/model -----
+
+/// The status bar's `status_model` must strip the `provider/` prefix so the
+/// user sees `glm-5.2` rather than the full `bigmodel/glm-5.2`. This guards
+/// against regressions where the raw `config.model` leaks through.
+#[test]
+fn compute_display_strips_provider_prefix_from_status_model() {
+    use opencoder_core::Config;
+
+    let chat = ChatView::default();
+    let config = Config {
+        model: "bigmodel/glm-5.2".to_string(),
+        ..Config::default()
+    };
+
+    let ds = compute_display(&chat, None, 0, 0, &config, Path::new("."));
+
+    assert_eq!(
+        ds.status_model, "glm-5.2",
+        "status bar must show only the model id without provider prefix"
+    );
+    assert!(
+        !ds.status_model.contains('/'),
+        "status_model must not contain the provider separator '/': got {}",
+        ds.status_model
+    );
+}
+
+/// With a reasoning-effort badge the prefix must still be stripped, yielding
+/// e.g. "glm-5.2 ·high".
+#[test]
+fn compute_display_status_model_with_effort_strips_prefix() {
+    use opencoder_core::Config;
+
+    let chat = ChatView::default();
+    let config = Config {
+        model: "bigmodel/glm-5.2".to_string(),
+        reasoning_effort: Some("high".to_string()),
+        ..Config::default()
+    };
+
+    let ds = compute_display(&chat, None, 0, 0, &config, Path::new("."));
+
+    assert_eq!(
+        ds.status_model, "glm-5.2 \u{00b7}high",
+        "status bar must show bare id plus effort badge; got: {}",
+        ds.status_model
+    );
+}
+

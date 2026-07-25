@@ -460,6 +460,36 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
 static HOME_LOCK_1: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static HOME_LOCK_2: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// RAII guard that restores an env var to its prior value on drop,
+/// guaranteeing restoration even if a test assertion panics mid-`await`.
+struct EnvGuard {
+    key: &'static str,
+    old: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let old = std::env::var_os(key);
+        std::env::set_var(key, value);
+        EnvGuard { key, old }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let old = std::env::var_os(key);
+        std::env::remove_var(key);
+        EnvGuard { key, old }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.old {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 /// `ChatClient::new` rejects an invalid proxy URL → the "client build failed"
 /// red marker is pushed. The project-local `opencoder.json` pre-supplies a valid
 /// api_key (so `resolve_endpoint` succeeds) plus a malformed proxy string; the
@@ -563,12 +593,11 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     let _guard = HOME_LOCK_2.lock().unwrap_or_else(|e| e.into_inner());
 
     // Redirect HOME to a temp dir so no global config can supply an api_key,
-    // and clear any inherited `OPENAI_API_KEY`.
-    let old_home = std::env::var_os("HOME");
-    let old_key = std::env::var_os("OPENAI_API_KEY");
+    // and clear any inherited `OPENAI_API_KEY`. RAII guards guarantee
+    // restoration even if an assertion panics mid-`await`.
     let tmp = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", tmp.path());
-    std::env::remove_var("OPENAI_API_KEY");
+    let _home_guard = EnvGuard::set("HOME", tmp.path());
+    let _key_guard = EnvGuard::remove("OPENAI_API_KEY");
 
     let workdir = tmp.path();
 
@@ -603,10 +632,6 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
         &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx,
         &mut chat, workdir,
     ).await;
-
-    // Restore env vars as soon as the call returns.
-    match old_home { Some(v) => std::env::set_var("HOME", v), None => std::env::remove_var("HOME") }
-    match old_key { Some(v) => std::env::set_var("OPENAI_API_KEY", v), None => std::env::remove_var("OPENAI_API_KEY") }
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(model_menu.is_none(), "modal should close on Save");

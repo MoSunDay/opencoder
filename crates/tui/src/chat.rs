@@ -457,6 +457,7 @@ impl ChatView {
                         }
                     } else {
                         for l in raw.split('\n') {
+                            let l = l.strip_suffix('\r').unwrap_or(l);
                             out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));
                         }
                     }

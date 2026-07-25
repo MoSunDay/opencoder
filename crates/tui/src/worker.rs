@@ -324,6 +324,9 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
+    static API_KEY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static PROXY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn gate_compact_runs_when_idle() {
         assert_eq!(gate_compact(false), CompactGate::Run);
@@ -491,9 +494,15 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn reload_config_success_swaps_model() {
         use opencoder_core::{resolve_agent, Config, ProviderConfig};
         use opencoder_llm::MockChatClient;
+
+        let _guard = PROXY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
+            std::env::remove_var(v);
+        }
 
         let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
         let agent = resolve_agent("act").expect("act agent");
@@ -539,7 +548,8 @@ mod tests {
         assert_eq!(sess.model, "gpt-4o-mini", "default model id");
 
         // api_key present so resolve_endpoint() succeeds, but an invalid
-        // proxy URL makes ChatClient::new fail -> keep-client fallback path.
+        // proxy URL ("://nope") makes ChatClient::new fail -> keep-client
+        // fallback path.
         let new_cfg = Config {
             model: "openai/proxy-model".into(),
             provider: ProviderConfig {
@@ -547,7 +557,7 @@ mod tests {
                 ..Default::default()
             },
             network: NetworkConfig {
-                proxy: Some("not-a-valid-url".into()),
+                proxy: Some("://nope".into()),
             },
             ..Config::default()
         };
@@ -565,6 +575,60 @@ mod tests {
                     "unexpected error message: {msg}"
                 );
                 assert!(msg.contains("proxy-model"), "error should mention new model");
+            }
+            other => panic!("expected Error event, got a different variant: {}", variant_name(&other)),
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn reload_config_missing_api_key_keeps_client_and_emits_error() {
+        use opencoder_core::{resolve_agent, Config, ProviderConfig};
+        use opencoder_llm::MockChatClient;
+
+        let _guard = API_KEY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("OPENAI_API_KEY");
+
+        let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(16);
+        let agent = resolve_agent("act").expect("act agent");
+        let mut sess = SessionState::new(
+            "reload-no-key",
+            agent,
+            Config::default(),
+            std::sync::Arc::new(MockChatClient::new())
+                as std::sync::Arc<dyn opencoder_llm::ChatStream>,
+            std::env::temp_dir(),
+        );
+        assert_eq!(sess.model, "gpt-4o-mini", "default model id");
+
+        // api_key missing so resolve_endpoint() fails -> outer Err branch ->
+        // keep-client fallback path. No ChatClient::new call is attempted.
+        let new_cfg = Config {
+            model: "openai/no-key-model".into(),
+            provider: ProviderConfig {
+                api_key: None,
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        let should_break =
+            process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx).await;
+        assert!(!should_break, "ReloadConfig must not break the worker loop");
+        // model updated via keep-client fallback (consistent with on-disk config)
+        assert_eq!(sess.model, "no-key-model", "model updated despite resolve failure");
+        // an Error event must have been forwarded to the UI
+        let ev = evt_rx.recv().await.expect("an error event was forwarded");
+        match ev {
+            UiEvent::Session(SessionEvent::Error(msg)) => {
+                assert!(
+                    msg.contains("endpoint resolve failed"),
+                    "unexpected error message: {msg}"
+                );
+                assert!(
+                    !msg.contains("client build failed"),
+                    "must not mention client build failure: {msg}"
+                );
+                assert!(msg.contains("no-key-model"), "error should mention new model");
             }
             other => panic!("expected Error event, got a different variant: {}", variant_name(&other)),
         }

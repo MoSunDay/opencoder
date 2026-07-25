@@ -97,6 +97,11 @@ async fn messages_response(state: &AppState, id: &str) -> Response {
 #[derive(Deserialize)]
 pub struct PromptBody {
     pub prompt: String,
+    /// Optional image attachments as data URIs (`data:image/<fmt>;base64,...`)
+    /// or `http(s)://` URLs. Forwarded to `SessionInput.images` so vision
+    /// models receive them. Empty/absent for plain-text prompts.
+    #[serde(default)]
+    pub images: Vec<String>,
     pub delivery: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
@@ -107,7 +112,7 @@ pub struct PromptBody {
 pub async fn post_prompt(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(body): Json<PromptBody>,
+    Json(mut body): Json<PromptBody>,
 ) -> Response {
     let mut config = match Config::load(&state.workdir) {
         Ok(c) => c,
@@ -150,6 +155,7 @@ pub async fn post_prompt(
         state.store.clone(),
         &id,
         body.prompt,
+        std::mem::take(&mut body.images),
         delivery,
         client,
         state.workdir.clone(),

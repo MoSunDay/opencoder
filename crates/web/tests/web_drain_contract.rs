@@ -87,6 +87,7 @@ async fn admit(state: &opencoder_web::AppState, sid: &str, prompt: &str, reply: 
         state.store.clone(),
         sid,
         prompt.to_string(),
+        Vec::new(),
         opencoder_store::Delivery::Steer,
         mock_reply(reply),
         std::env::temp_dir(),
@@ -260,6 +261,7 @@ async fn events_subscriber_before_prompt_receives_live() {
         state.store.clone(),
         sid,
         "ping".into(),
+        Vec::new(),
         opencoder_store::Delivery::Steer,
         mock,
         std::env::temp_dir(),
@@ -303,6 +305,7 @@ async fn post_prompt_returns_500_on_malformed_config() {
         axum::extract::Path("any-sid".to_string()),
         axum::extract::Json(opencoder_web::api::PromptBody {
             prompt: "hi".into(),
+            images: Vec::new(),
             delivery: None,
             agent: None,
             model: None,

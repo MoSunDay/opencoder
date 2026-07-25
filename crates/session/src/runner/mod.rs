@@ -27,6 +27,7 @@ use event::{Sink, DOOM_THRESHOLD};
 use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 use steer::{claim_one_queued, claim_steers};
+pub(crate) use steer::await_cancel;
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -144,6 +145,11 @@ async fn run_loop(
             }
         };
         let (text, reasoning, tool_calls, usage) = turn;
+        // Streamline the completed assistant text before it is persisted and
+        // re-sent as context. The live TextDelta stream already delivered the
+        // verbatim original to the UI, so this only trims the stored +
+        // future-context copy (fenced code is preserved verbatim).
+        let text = crate::streamline::streamline(&text, &session.config.output_streamline);
         if let Some(u) = &usage {
             session.last_usage = u.clone();
         }
@@ -222,6 +228,7 @@ async fn run_loop(
                             tool_use_id: tc.id.clone(),
                             content: "doom-loop: tool execution skipped".to_string(),
                             is_error: true,
+                            images: Vec::new(),
                         })
                         .collect();
                     let doom_msg = Message {
@@ -309,6 +316,7 @@ async fn run_loop(
                     tool_use_id: tool_calls[i].id.clone(),
                     content: out.content,
                     is_error: out.is_error,
+                    images: out.images,
                 })
                 .collect()
         };

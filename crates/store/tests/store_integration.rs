@@ -189,6 +189,7 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
                     tool_use_id: "tu1".into(),
                     content: "file.txt".into(),
                     is_error: false,
+                    images: Vec::new(),
                 }],
                 model: None,
                 agent: None,

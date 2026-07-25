@@ -1,4 +1,5 @@
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,6 +7,8 @@ use async_trait::async_trait;
 use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
+
+use super::bg::{handoff, BgState};
 
 pub struct BashTool;
 
@@ -26,20 +29,6 @@ fn merge_streams(stdout: &str, stderr: &str) -> String {
         combined.push_str(stderr);
     }
     combined
-}
-
-/// After a timeout we've already `kill(-pgid)`'d the whole group, so the pipe
-/// write-ends close and the drain tasks resolve with EOF. Await them (bounded,
-/// in case a grandchild that escaped the group kill still holds a write-end) to
-/// recover whatever output the command produced before timing out — far more
-/// useful for diagnosing a hanging build/test than a bare "timed out" message.
-async fn drain_partial(task: tokio::task::JoinHandle<Vec<u8>>) -> String {
-    match tokio::time::timeout(Duration::from_millis(500), task).await {
-        Ok(Ok(v)) => String::from_utf8_lossy(&v).to_string(),
-        // Join error (task panicked) or bounded-timeout expiry: nothing safely
-        // recoverable — report empty rather than risk wedging the tool.
-        _ => String::new(),
-    }
 }
 
 #[async_trait]
@@ -110,26 +99,52 @@ impl Tool for BashTool {
         // process-group id equals its pid, so `kill(-pgid, SIGKILL)` reaps the
         // whole descendant tree on timeout.
         let mut child = cmd.spawn()?;
+        let pid = child.id().unwrap_or(0);
         #[cfg(unix)]
-        let pgid = child.id().unwrap_or(0) as libc::pid_t;
+        let pgid = pid as libc::pid_t;
+
+        // Shared capture state: incremental drain tasks push 8 KiB chunks here.
+        // In the foreground phase this only buffers; after `handoff` the file
+        // handle is set and pushes also write to the output file.
+        let state = Arc::new(Mutex::new(BgState::new()));
 
         // Drain the pipes concurrently with `wait()`. Without concurrent reads a
         // process that emits more than the pipe buffer (~64 KiB) would deadlock:
         // it blocks on write, `wait()` never returns, and we hang until timeout.
-        let stdout_task: tokio::task::JoinHandle<Vec<u8>> = {
+        // Incremental reads (instead of read_to_end) let us hand off a still-
+        // running command to the background supervisor without losing the pipe.
+        let stdout_task: tokio::task::JoinHandle<()> = {
+            let state = Arc::clone(&state);
             let mut pipe = child.stdout.take().expect("stdout was piped");
             tokio::spawn(async move {
-                let mut v = Vec::new();
-                let _ = pipe.read_to_end(&mut v).await;
-                v
+                let mut buf = [0u8; 8192];
+                loop {
+                    match pipe.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let mut st = state.lock().unwrap();
+                            st.push_stdout(&buf[..n]);
+                        }
+                        Err(_) => break,
+                    }
+                }
             })
         };
-        let stderr_task: tokio::task::JoinHandle<Vec<u8>> = {
+        let stderr_task: tokio::task::JoinHandle<()> = {
+            let state = Arc::clone(&state);
             let mut pipe = child.stderr.take().expect("stderr was piped");
             tokio::spawn(async move {
-                let mut v = Vec::new();
-                let _ = pipe.read_to_end(&mut v).await;
-                v
+                let mut buf = [0u8; 8192];
+                loop {
+                    match pipe.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let mut st = state.lock().unwrap();
+                            st.push_stderr(&buf[..n]);
+                        }
+                        Err(_) => break,
+                    }
+                }
             })
         };
 
@@ -137,39 +152,49 @@ impl Tool for BashTool {
             match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
                 Ok(r) => r?,
                 Err(_) => {
-                    // Timed out: signal the entire process group. A negative pid
-                    // means "send to every process in the group". `kill_on_drop` is
-                    // kept above as a last-resort net for the direct child should
-                    // this path unwind.
+                    // Timed out: instead of killing the group, hand the child
+                    // (and its drain tasks + capture state) off to a detached
+                    // background supervisor. The supervisor keeps the command
+                    // running, streams output to /tmp/opencode_bg_<pid>.output,
+                    // and cleans up the process group when the command exits.
                     #[cfg(unix)]
-                    unsafe {
-                        let _ = libc::kill(-pgid, libc::SIGKILL);
+                    {
+                        handoff(
+                            pid,
+                            pgid,
+                            ctx.session_id.clone(),
+                            child,
+                            stdout_task,
+                            stderr_task,
+                            state,
+                        );
                     }
-                    // Reap the direct child so it does not become a zombie; the rest
-                    // of the group is reparented to init and reaped there.
-                    let _ = child.wait().await;
-                    // Recover partial output: after the group kill the pipe
-                    // write-ends close and the drain tasks resolve. Whatever the
-                    // command printed before timing out is usually the key clue to
-                    // *why* it hung, so surface it instead of discarding it.
-                    let stdout = drain_partial(stdout_task).await;
-                    let stderr = drain_partial(stderr_task).await;
-                    let partial = merge_streams(&stdout, &stderr);
-                    let msg = if partial.is_empty() {
-                        format!("command timed out after {timeout_secs}s")
-                    } else {
-                        format!("command timed out after {timeout_secs}s\n{partial}")
-                    };
-                    return Ok(opencoder_core::tool::truncate_output_with_error(
-                        msg,
-                        ctx.max_output,
-                        true,
-                    ));
+                    #[cfg(not(unix))]
+                    {
+                        let _ = (pid, child, stdout_task, stderr_task, state);
+                    }
+                    let path = super::bg::output_path(pid);
+                    let msg = format!(
+                        "Command exceeded {timeout_secs}s — moved to background. \
+                         PID: {pid}. Check progress: cat {}. \
+                         Cleaned up automatically when it exits.",
+                        path.display()
+                    );
+                    return Ok(ToolOutput::ok(msg));
                 }
             };
 
-        let stdout = String::from_utf8_lossy(&stdout_task.await.expect("stdout drain")).to_string();
-        let stderr = String::from_utf8_lossy(&stderr_task.await.expect("stderr drain")).to_string();
+        // Normal completion: await drain tasks (they resolve at EOF when the
+        // child exits) then read the captured buffers.
+        let _ = stdout_task.await;
+        let _ = stderr_task.await;
+        let (stdout, stderr) = {
+            let st = state.lock().unwrap();
+            (
+                String::from_utf8_lossy(&st.stdout_buf).to_string(),
+                String::from_utf8_lossy(&st.stderr_buf).to_string(),
+            )
+        };
         let code = exit_status.code().unwrap_or(-1);
         let streams = merge_streams(&stdout, &stderr);
         let combined = if streams.is_empty() {
@@ -183,5 +208,89 @@ impl Tool for BashTool {
             ctx.max_output,
             is_error,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_core::ToolContext;
+    use serde_json::json;
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            message_id: "test".into(),
+            agent: "act".into(),
+            working_dir: std::env::current_dir().unwrap(),
+            max_output: 100_000,
+            proxy: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn bash_normal_completion() {
+        let tool = BashTool;
+        let input = json!({"command": "echo hello; echo world >&2"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(!out.is_error, "expected success, got: {}", out.content);
+        assert!(out.content.contains("hello"), "stdout: {}", out.content);
+        assert!(out.content.contains("[stderr]"), "stderr marker: {}", out.content);
+        assert!(out.content.contains("world"), "stderr text: {}", out.content);
+        assert!(out.content.contains("[exit code: 0]"), "exit code: {}", out.content);
+    }
+
+    #[tokio::test]
+    async fn bash_handoff_on_timeout() {
+        let tool = BashTool;
+        // Use a 1-second timeout on a 10-second sleep to trigger handoff fast.
+        let input = json!({"command": "sleep 3; echo done", "timeout": 1});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        // Handoff is not an error — the model gets a guidance message.
+        assert!(
+            !out.is_error,
+            "handoff should be ToolOutput::ok, got: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("moved to background"),
+            "missing handoff text: {}",
+            out.content
+        );
+        // Extract pid from the message and check the output path is mentioned.
+        assert!(
+            out.content.contains("/tmp/opencode_bg_"),
+            "missing output path: {}",
+            out.content
+        );
+        // The background supervisor writes [exit code: N] when the child exits.
+        // Wait for the output file to contain it (the sleep is 3s, so poll).
+        let pid_str = out
+            .content
+            .split("PID: ")
+            .nth(1)
+            .and_then(|s| s.split('.').next())
+            .unwrap_or("");
+        let pid: u32 = pid_str.parse().unwrap_or(0);
+        assert!(pid > 0, "could not parse pid from: {}", out.content);
+        let path = super::super::bg::output_path(pid);
+        let deadline = std::time::Instant::now() + Duration::from_secs(6);
+        let mut got_exit_code = false;
+        while std::time::Instant::now() < deadline {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if content.contains("[exit code:") {
+                    got_exit_code = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        assert!(
+            got_exit_code,
+            "output file never received [exit code:]: {:?}",
+            std::fs::read_to_string(&path).ok()
+        );
+        // Clean up the temp file.
+        let _ = std::fs::remove_file(&path);
     }
 }

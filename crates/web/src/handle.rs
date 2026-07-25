@@ -111,6 +111,7 @@ pub async fn admit_and_drain(
     store: Arc<dyn Store>,
     session_id: &str,
     prompt: String,
+    images: Vec<String>,
     delivery: Delivery,
     client: Arc<dyn ChatStream>,
     workdir: std::path::PathBuf,
@@ -122,7 +123,7 @@ pub async fn admit_and_drain(
         session_id: session_id.to_string(),
         delivery,
         prompt,
-        images: Vec::new(),
+        images,
         admitted_seq: 0,
         promoted_seq: None,
     };

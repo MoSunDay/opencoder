@@ -152,13 +152,22 @@ fn resolve_existing_path(candidate: &str, workdir: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
+    mk_input_with_images(session_id, delivery, prompt, &[])
+}
+
+pub(crate) fn mk_input_with_images(
+    session_id: &str,
+    delivery: Delivery,
+    prompt: &str,
+    images: &[String],
+) -> SessionInput {
     SessionInput {
         seq: None,
         id: opencoder_session::runner::new_id(),
         session_id: session_id.to_string(),
         delivery,
         prompt: prompt.to_string(),
-        images: Vec::new(),
+        images: images.to_vec(),
         admitted_seq: 0,
         promoted_seq: None,
     }
@@ -278,6 +287,37 @@ pub(crate) fn apply_skill_tokens(
     workdir: &Path,
     skill_handle: &Arc<Mutex<Option<String>>>,
 ) -> (String, Vec<String>) {
+    let skills = discover_skills();
+    apply_skill_tokens_with(
+        &skills,
+        text,
+        active_skill,
+        active_skill_body,
+        sys_tokens,
+        agent_name,
+        workdir,
+        skill_handle,
+    )
+}
+
+/// Core of [`apply_skill_tokens`] that resolves `{$name}` tokens against an
+/// *explicit* skill slice instead of scanning `~/.opencoder/skills`. Factored
+/// out so tests can pass `discover_in(tempdir)` and avoid mutating the
+/// process-global `HOME` env var — `std::env::set_var` is not thread-safe at
+/// the libc level, so under parallel test execution a concurrent `getenv`
+/// could observe a transiently-wrong HOME and spuriously mark a known skill
+/// unresolved. Taking the skills as a parameter removes the global entirely.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_skill_tokens_with(
+    skills: &[opencoder_core::Skill],
+    text: &str,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+    skill_handle: &Arc<Mutex<Option<String>>>,
+) -> (String, Vec<String>) {
     let (clean, names) = crate::skill_token::extract_skill_tokens(text);
     if names.is_empty() {
         return (clean, Vec::new());
@@ -290,7 +330,6 @@ pub(crate) fn apply_skill_tokens(
             unique.push(n);
         }
     }
-    let skills = discover_skills();
     let mut resolved_names: Vec<String> = Vec::new();
     let mut resolved_bodies: Vec<String> = Vec::new();
     let mut unresolved: Vec<String> = Vec::new();

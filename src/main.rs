@@ -101,11 +101,16 @@ async fn main() -> Result<()> {
     if is_tui {
         opencoder_cli::exit_tips::print_exit_tips();
     }
+    // Kill any backgrounded bash commands (timeout handoff) and remove their
+    // temp output files before the process exits.
+    opencoder_session::tools::bg::cleanup_all();
     result
 }
 
 fn opts_from_cli(cli: &Cli) -> opencoder_tui::TuiOpts {
-    opencoder_tui::TuiOpts::new(cli.workdir.clone()).with_session(cli.session.clone())
+    opencoder_tui::TuiOpts::new(cli.workdir.clone())
+        .with_session(cli.session.clone())
+        .with_model(cli.model.clone())
 }
 
 fn join(parts: Vec<String>) -> String {

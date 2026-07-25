@@ -89,7 +89,7 @@ pub(crate) async fn switch_session(
         }
     };
     let new_session_id = new_session.id.clone();
-    *model_label = new_session.model.clone();
+    *model_label = new_session.config.model.clone();
     let new_cancel = CancellationToken::new();
     let new_session = new_session.with_cancel(new_cancel.clone());
     let new_skill_handle = new_session.skill_prompt.clone();

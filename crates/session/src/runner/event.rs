@@ -22,6 +22,11 @@ pub enum SessionEvent {
         is_error: bool,
     },
     AgentSwitch(String),
+    /// The active model was switched at runtime (e.g. via the `/model` menu
+    /// or the web `POST /sessions/:id/model` endpoint). Carries the new
+    /// `"provider/model_id"` string so display surfaces and resume stay in
+    /// sync with the on-disk config.
+    ModelSwitch(String),
     Compaction(String),
     Status(String),
     /// A subagent (task tool) started. `child_session_id` is the child's
@@ -83,6 +88,7 @@ impl SessionEvent {
             SessionEvent::ToolStart { .. } => "tool_start",
             SessionEvent::ToolEnd { .. } => "tool_end",
             SessionEvent::AgentSwitch(_) => "agent_switched",
+            SessionEvent::ModelSwitch(_) => "model_switched",
             SessionEvent::Compaction(_) => "compaction",
             SessionEvent::Status(_) => "status",
             SessionEvent::Done => "done",
@@ -116,6 +122,7 @@ impl SessionEvent {
                 serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error })
             }
             SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
+            SessionEvent::ModelSwitch(m) => serde_json::json!({ "model": m }),
             SessionEvent::Compaction(s) => serde_json::json!({ "summary": s }),
             SessionEvent::Status(s) => serde_json::json!({ "status": s }),
             SessionEvent::Done => serde_json::json!({}),
@@ -174,6 +181,7 @@ impl SessionEvent {
                 is_error: data.get("is_error")?.as_bool().unwrap_or(false),
             },
             "agent_switched" => SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string()),
+            "model_switched" => SessionEvent::ModelSwitch(data.get("model")?.as_str()?.to_string()),
             "compaction" => SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string()),
             "status" => SessionEvent::Status(data.get("status")?.as_str()?.to_string()),
             "subagent_start" => SessionEvent::SubagentStart {
@@ -221,6 +229,7 @@ impl SessionEvent {
             SessionEvent::ToolStart { .. } => EventKind::ToolStart,
             SessionEvent::ToolEnd { .. } => EventKind::ToolEnd,
             SessionEvent::AgentSwitch(_) => EventKind::AgentSwitched,
+            SessionEvent::ModelSwitch(_) => EventKind::ModelSwitched,
             SessionEvent::Compaction(_) => EventKind::Compaction,
             SessionEvent::Status(_) => EventKind::Step,
             SessionEvent::Done => EventKind::Done,
@@ -278,6 +287,7 @@ mod from_sse_tests {
                 is_error: true,
             },
             SessionEvent::AgentSwitch("plan".into()),
+            SessionEvent::ModelSwitch("openai/gpt-4o".into()),
             SessionEvent::Compaction("summary".into()),
             SessionEvent::Status("running".into()),
             SessionEvent::SubagentStart {
@@ -308,8 +318,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            16,
-            "expected all 16 unique kinds, got {kinds:?}"
+            17,
+            "expected all 17 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {

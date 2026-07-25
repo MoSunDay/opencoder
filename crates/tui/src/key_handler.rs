@@ -24,6 +24,8 @@ pub(crate) enum KeyAction {
     SwitchAgent(String),
     SwitchAgentNoClear(String),
     Cancel,
+    /// Enter the plan-text editor (Shift+I in plan mode when idle).
+    EnterPlanEdit,
     // Kept for the app.rs `KeyAction::SetSkill` plumbing (skill set/clear +
     // persistence). No longer constructed by the menu after the "clear skill"
     // row was removed, but the match arm in app.rs still handles it.
@@ -81,6 +83,11 @@ pub(crate) fn handle_key(
         if k.modifiers.contains(KeyModifiers::CONTROL) {
             match k.code {
                 KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
+            // Ctrl+C: interrupt the running task (same as double-Esc), when one
+            // is active. When idle it is a no-op (use Ctrl+D to quit).
+            KeyCode::Char('c') => {
+                return if running { KeyAction::Cancel } else { KeyAction::None };
+            }
                 KeyCode::Char('h') => {
                     *show_help = !*show_help;
                     return KeyAction::None;
@@ -259,16 +266,29 @@ pub(crate) fn handle_key(
             KeyAction::None
         }
         KeyCode::Char(c) => {
+            // Shift+I (uppercase I) enters plan-edit mode — but ONLY when in
+            // plan mode, idle, and the input box is empty. Once the user starts
+            // typing, regular `I` insertion resumes.
+            if c == 'I'
+                && agent == "plan"
+                && !running
+                && !input_disabled
+                && input.is_empty()
+            {
+                return KeyAction::EnterPlanEdit;
+            }
             // Fallback quit for terminals/crossterm configs that deliver Ctrl+D
             // (EOT, 0x04) as a raw control char without the CONTROL modifier
             // flag (the Ctrl-block match above would miss it).
             if c == '\u{4}' {
                 return KeyAction::Quit;
             }
-            // Swallow raw ETX (Ctrl+C, 0x03) so it is not inserted as a literal
-            // control char into the input buffer.
+            // Raw ETX (Ctrl+C, 0x03) delivered without the CONTROL modifier
+            // flag: interrupt the running task if one is active (mirrors the
+            // Ctrl-block handling above); otherwise swallow it so it is not
+            // inserted as a literal control char into the input buffer.
             if c == '\u{3}' {
-                return KeyAction::None;
+                return if running { KeyAction::Cancel } else { KeyAction::None };
             }
             if c == '$' {
                 *skill_menu = Some(SkillMenu::new(discover_skills()));
@@ -556,5 +576,122 @@ mod tests {
         move_hist(&history, &mut hist_idx, &mut input, &mut cursor, 1);
         assert_eq!(input, "", "Down past newest should clear input");
         assert_eq!(hist_idx, None);
+    }
+
+    #[test]
+    fn shift_i_in_plan_mode_idle_enters_plan_edit() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Shift+I (uppercase I) on empty input while idle in plan mode enters
+        // the plan-text editor.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, false,
+        );
+        assert!(matches!(action, KeyAction::EnterPlanEdit));
+        assert!(input.is_empty(), "input should be untouched on EnterPlanEdit");
+    }
+
+    #[test]
+    fn shift_i_in_act_mode_does_not_enter_plan_edit() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Shift+I in act mode is a plain char insertion, not plan-edit entry.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, false,
+        );
+        assert!(!matches!(action, KeyAction::EnterPlanEdit));
+        assert_eq!(input, "I", "should insert the character 'I'");
+    }
+
+    #[test]
+    fn shift_i_while_running_does_not_enter_plan_edit() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Even in plan mode, Shift+I while running just inserts the char.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, true, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, false,
+        );
+        assert!(!matches!(action, KeyAction::EnterPlanEdit));
+        assert_eq!(input, "I", "should insert the character 'I'");
+    }
+
+    #[test]
+    fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
+        let mut input = "hello".to_string();
+        let mut cursor = 5usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Once the user has started typing, Shift+I resumes normal insertion.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, false,
+        );
+        assert!(!matches!(action, KeyAction::EnterPlanEdit));
+        assert_eq!(input, "helloI", "should append the character 'I'");
+    }
+
+    #[test]
+    fn lowercase_i_in_plan_mode_inserts_normally() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
+            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
+            &mut skill_menu, 80, 2, false,
+        );
+        assert!(matches!(action, KeyAction::None));
+        assert_eq!(input, "i", "lowercase i should be inserted into input");
+        assert_eq!(cursor, 1);
     }
 }

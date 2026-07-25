@@ -102,7 +102,8 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            if text.is_empty() {
+            let has_images = msg.blocks.iter().any(|b| b.as_image().is_some());
+            if text.is_empty() && !has_images {
                 return;
             }
             chat.push_marker(Line::from(Span::styled(
@@ -112,6 +113,19 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
             let rendered = crate::markdown::render(&text);
             if !rendered.is_empty() {
                 chat.blocks.push(ChatBlock::Marker(rendered));
+            }
+            // Render any Image blocks inline after the text.
+            for b in &msg.blocks {
+                if let ContentBlock::Image { url, .. } = b {
+                    let filename = crate::image_util::extract_filename(url);
+                    let rendered_img = crate::image_render::decode_data_uri(url)
+                        .map(|bytes| crate::image_render::render_image_halfblock(&bytes, 120))
+                        .unwrap_or_default();
+                    chat.blocks.push(ChatBlock::Image {
+                        filename,
+                        rendered: rendered_img,
+                    });
+                }
             }
             chat.push_marker(Line::from(""));
         }
@@ -160,6 +174,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                     tool_use_id,
                     content,
                     is_error,
+                    ..
                 } = b
                 {
                     let color = if *is_error {
@@ -229,7 +244,7 @@ pub async fn replay_into_chat(
         if let Some(plan) = &meta.handoff_plan {
             let rendered = crate::markdown::render(plan);
             if !rendered.is_empty() {
-                chat.blocks.push(ChatBlock::Plan { rendered });
+                chat.blocks.push(ChatBlock::Plan { rendered, raw: plan.clone() });
             }
         }
     }
@@ -579,6 +594,7 @@ mod tests {
             tool_use_id: "t1".into(),
             content: "hi".into(),
             is_error: false,
+            images: Vec::new(),
         }];
         let chat = replay_messages("act", &[asst, tool_msg]);
         let tools: Vec<_> = chat
@@ -648,11 +664,13 @@ mod tests {
                 tool_use_id: "p2".into(),
                 content: "two".into(),
                 is_error: false,
+                images: Vec::new(),
             },
             ContentBlock::ToolResult {
                 tool_use_id: "p1".into(),
                 content: "one".into(),
                 is_error: false,
+                images: Vec::new(),
             },
         ];
         let chat = replay_messages("act", &[asst, tool_msg]);

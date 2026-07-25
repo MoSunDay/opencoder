@@ -4,7 +4,7 @@ use crate::SessionState;
 
 /// Resolves when the session is cancelled. If no token is attached, this never
 /// resolves (pending forever), so the `select!` cancel arm stays dormant.
-pub(super) async fn await_cancel(session: &SessionState) {
+pub(crate) async fn await_cancel(session: &SessionState) {
     match session.cancel.as_ref() {
         Some(c) => c.cancelled().await,
         None => std::future::pending::<()>().await,

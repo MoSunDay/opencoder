@@ -73,6 +73,7 @@ fn tool_result(id: &str, tool_id: &str, content: &str) -> Message {
             tool_use_id: tool_id.into(),
             content: content.into(),
             is_error: false,
+            images: Vec::new(),
         }],
         model: None,
         agent: None,

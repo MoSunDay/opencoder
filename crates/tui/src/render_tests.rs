@@ -328,7 +328,9 @@ fn composer_renders_prompt_and_multiline_text() {
                 0,
                 38, // inner_w: 40 - 2 borders
                 2,  // prompt_w: "❯ "
+                &[], // no pending images
                 false,
+                None,
             );
         })
         .unwrap();
@@ -620,7 +622,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
     let input = "ab cdefgh";
     terminal
         .draw(|f| {
-            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2, false);
+            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2, &[], false, None);
         })
         .unwrap();
     let buf = terminal.backend().buffer();
@@ -813,7 +815,18 @@ fn status_bar_ctx_red_at_high_usage() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 180000, 200000, 0);
+            render_status(
+                f,
+                f.area(),
+                false,
+                "",
+                "glm-4.6",
+                "act",
+                0,
+                180000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -885,7 +898,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut hits,
             None,
             None,
+            &[],
             false,
+            None,
             0,
         )
         .unwrap();
@@ -966,7 +981,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut hits,
             None,
             None,
+            &[],
             false,
+            None,
             0,
         )
         .unwrap();
@@ -1069,18 +1086,7 @@ fn status_bar_hides_duration_when_zero() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(
-                f,
-                f.area(),
-                false,
-                "",
-                "glm-4.6",
-                "act",
-                0,
-                0,
-                200000,
-                0,
-            );
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 0, 200000, 0);
         })
         .unwrap();
 

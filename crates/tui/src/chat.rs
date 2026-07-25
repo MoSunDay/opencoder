@@ -90,6 +90,18 @@ impl ChatView {
                     self.plan_submitted = false;
                 }
             }
+            SessionEvent::ModelSwitch(m) => {
+                self.finalize_assistant();
+                // Strip a provider prefix defensively so the marker shows the
+                // bare model id even if a stale/persisted event carries the
+                // full "provider/model" string (issue #1).
+                let bare = m.split_once('/').map(|(_, id)| id).unwrap_or(m);
+                self.blocks
+                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
+                        format!("[model] {bare}"),
+                        Style::default().fg(Color::Magenta),
+                    ))]));
+            }
             SessionEvent::Compaction(c) => {
                 self.finalize_assistant();
                 self.blocks
@@ -194,7 +206,10 @@ impl ChatView {
                 self.finalize_assistant();
                 let rendered = crate::markdown::render(plan);
                 if !rendered.is_empty() {
-                    self.blocks.push(ChatBlock::Plan { rendered });
+                    self.blocks.push(ChatBlock::Plan {
+                        rendered,
+                        raw: plan.clone(),
+                    });
                 }
             }
             SessionEvent::TranscriptReset(_) => {}
@@ -360,10 +375,13 @@ impl ChatView {
                     // header line + output lines + trailing blank line.
                     line_idx += 1 + output.len() + 1;
                 }
+                ChatBlock::Image { rendered, .. } => {
+                    line_idx += 1 + rendered.len() + 1;
+                }
                 ChatBlock::Subagent { .. } => {
                     line_idx += 1; // header only — no inline expansion
                 }
-                ChatBlock::Plan { rendered } => {
+                ChatBlock::Plan { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;
                 }
             }
@@ -405,6 +423,9 @@ impl ChatView {
                 ChatBlock::Tool { output, .. } => {
                     line_idx += 1 + output.len() + 1;
                 }
+                ChatBlock::Image { rendered, .. } => {
+                    line_idx += 1 + rendered.len() + 1;
+                }
                 ChatBlock::Subagent { .. } => {
                     out.push(SubagentHeader {
                         block_idx,
@@ -412,7 +433,7 @@ impl ChatView {
                     });
                     line_idx += 1; // header only — no inline expansion
                 }
-                ChatBlock::Plan { rendered } => {
+                ChatBlock::Plan { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;
                 }
             }
@@ -493,7 +514,27 @@ impl ChatView {
                     out.extend(output.iter().cloned());
                     out.push(Line::from(""));
                 }
-                ChatBlock::Plan { rendered } => {
+                ChatBlock::Image { filename, rendered } => {
+                    out.push(Line::from(Span::styled(
+                        format!("[image: {filename}]"),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                    if rendered.is_empty() {
+                        out.push(Line::from(Span::styled(
+                            "  (unable to render)",
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    } else {
+                        let indent = Span::raw("    ");
+                        for l in rendered.iter() {
+                            let mut spans = vec![indent.clone()];
+                            spans.extend(l.spans.iter().cloned());
+                            out.push(Line::from(spans));
+                        }
+                    }
+                    out.push(Line::from(""));
+                }
+                ChatBlock::Plan { rendered, .. } => {
                     out.push(Line::from(Span::styled(
                         "\u{2500}\u{2500} plan \u{2500}\u{2500}",
                         Style::default()
@@ -677,6 +718,7 @@ impl ChatView {
             })
         )
     }
+
 }
 
 pub(crate) fn summarize(input: &serde_json::Value) -> String {
@@ -718,6 +760,8 @@ pub fn block_text(view: &ChatView) -> String {
         .map(|s| s.content.clone())
         .collect()
 }
+
+
 
 #[cfg(test)]
 #[path = "chat_tests.rs"]

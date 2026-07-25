@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
-use opencoder_session::{run as run_session, spawn_event_flusher, SessionEvent, SessionState};
+use opencoder_session::{run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState};
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub enum UiCmd {
-    Prompt(String),
+    Prompt(String, Vec<String>),
     SwitchAgent(String),
     /// Switch agent then immediately start a turn without recording a new user
     /// message. Used for the plan->act manual transition: the system prompt
@@ -24,6 +24,11 @@ pub enum UiCmd {
     SetSkill(Option<String>),
     /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
     ReloadConfig(Box<Config>),
+    /// Replace the plan text in the last non-empty Assistant message in-memory.
+    /// Does not touch the append-only store (consistent with compaction/handoff
+    /// which also rewrite the in-memory `messages` without appending a record).
+    /// On resume the original (un-edited) plan is reloaded from the store.
+    EditPlan(String),
     /// Swap the session's cancellation token for a fresh, uncancelled one.
     /// Sent before every turn-starting command so a prior double-Esc abort
     /// doesn't leave `sess.cancel` permanently cancelled (which would make
@@ -35,6 +40,7 @@ pub enum UiCmd {
     Quit,
 }
 
+#[derive(Debug)]
 pub enum UiEvent {
     Session(SessionEvent),
     TurnDone,
@@ -160,15 +166,23 @@ pub async fn process_cmd(
     evt_tx: &mpsc::Sender<UiEvent>,
 ) -> bool {
     match cmd {
-        UiCmd::Prompt(prompt) => {
+        UiCmd::Prompt(prompt, images) => {
             let tx = evt_tx.clone();
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             let sink_for_run = sink.clone();
-            let res = run_session(sess, prompt, move |sev| {
-                let _ = sink_for_run.push(&sev);
-                forward_event(&tx, sev);
-            })
-            .await;
+            let res = if images.is_empty() {
+                run_session(sess, prompt, move |sev| {
+                    let _ = sink_for_run.push(&sev);
+                    forward_event(&tx, sev);
+                })
+                .await
+            } else {
+                run_with_images(sess, prompt, images, move |sev| {
+                    let _ = sink_for_run.push(&sev);
+                    forward_event(&tx, sev);
+                })
+                .await
+            };
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
                 let _ = sink.push(&ev);
@@ -278,6 +292,7 @@ pub async fn process_cmd(
             sess.set_skill(body);
         }
         UiCmd::ReloadConfig(new_cfg) => {
+            let applied_model;
             match new_cfg.resolve_endpoint() {
                 Ok(ep) => match ChatClient::new(
                     &ep.base_url,
@@ -287,6 +302,7 @@ pub async fn process_cmd(
                 ) {
                     Ok(new_client) => {
                         sess.apply_config_reload(*new_cfg, Arc::new(new_client));
+                        applied_model = true;
                     }
                     Err(e) => {
                         let model = new_cfg.model_id().to_string();
@@ -297,6 +313,7 @@ pub async fn process_cmd(
                         );
                         let ev = SessionEvent::Error(msg);
                         forward_event(evt_tx, ev);
+                        applied_model = true;
                     }
                 },
                 Err(e) => {
@@ -308,7 +325,56 @@ pub async fn process_cmd(
                     );
                     let ev = SessionEvent::Error(msg);
                     forward_event(evt_tx, ev);
+                    applied_model = true;
                 }
+            }
+            // Persist the switched model to the store so resume() honors it
+            // (otherwise the stale `sessions.model` column reverts the switch
+            // on the next /task resume or `opencode -s <id>` restart).
+            if applied_model {
+                // The store column keeps the full `provider/model` string
+                // (resume honors it); the ModelSwitch display marker uses the
+                // bare model id so it matches the status bar (issue #1).
+                let model_full = sess.config.model.clone();
+                if let Some(store) = &sess.store {
+                    let _ = store
+                        .update_session(
+                            &sess.id,
+                            &opencoder_store::SessionPatch {
+                                model: Some(model_full),
+                                updated_at: Some(now_ms()),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                }
+                let ev = SessionEvent::ModelSwitch(sess.config.model_id().to_string());
+                persist_event(&sess.store, &sess.id, &ev).await;
+                forward_event(evt_tx, ev);
+            }
+        }
+        UiCmd::EditPlan(new_text) => {
+            // Find the last Assistant message whose `text()` is non-empty and
+            // replace its Text blocks with a single block carrying the edited
+            // text. Non-Text blocks (Reasoning, ToolUse, etc.) are preserved.
+            for msg in sess.messages.iter_mut().rev() {
+                if msg.role != opencoder_core::Role::Assistant {
+                    continue;
+                }
+                if msg.text().trim().is_empty() {
+                    continue;
+                }
+                let mut new_blocks: Vec<opencoder_core::ContentBlock> = msg
+                    .blocks
+                    .iter()
+                    .filter(|b| !matches!(b, opencoder_core::ContentBlock::Text { .. }))
+                    .cloned()
+                    .collect();
+                new_blocks.push(opencoder_core::ContentBlock::Text {
+                    text: new_text.clone(),
+                });
+                msg.blocks = new_blocks;
+                break;
             }
         }
         UiCmd::ResetCancel(c) => {
@@ -441,6 +507,66 @@ mod tests {
         );
     }
 
+    // EditPlan rewrites the Text blocks of the last non-empty Assistant message
+    // in-memory while preserving non-Text blocks (Reasoning/ToolUse/etc.). This
+    // guards the plan-mode edit path: an edit that dropped Reasoning blocks or
+    // failed to swap the text would break here. It must not break the loop.
+    #[tokio::test]
+    async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
+        use opencoder_core::{resolve_agent, ContentBlock, Message};
+        use opencoder_llm::MockChatClient;
+
+        let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
+        let agent = resolve_agent("act").expect("act agent");
+        let mut sess = SessionState::new(
+            "edit-plan-test",
+            agent,
+            opencoder_core::Config::default(),
+            std::sync::Arc::new(MockChatClient::new())
+                as std::sync::Arc<dyn opencoder_llm::ChatStream>,
+            std::env::temp_dir(),
+        );
+
+        // Realistic plan-mode assistant shape: a Reasoning block followed by the
+        // plan Text block.
+        let mut msg = Message::assistant("a1");
+        msg.blocks = vec![
+            ContentBlock::Reasoning {
+                text: "let me think".into(),
+            },
+            ContentBlock::Text {
+                text: "original plan".into(),
+            },
+        ];
+        sess.messages.push(msg);
+
+        let should_break =
+            process_cmd(UiCmd::EditPlan("edited plan text".to_string()), &mut sess, &evt_tx).await;
+        assert!(!should_break, "EditPlan must not break the worker loop");
+
+        // Exactly one assistant message, now carrying the edited plan.
+        assert_eq!(sess.messages.len(), 1);
+        let edited = &sess.messages[0];
+        assert_eq!(edited.text(), "edited plan text", "text must be replaced");
+
+        // The Reasoning block survives the edit.
+        let has_reasoning = edited.blocks.iter().any(|b| {
+            matches!(b, ContentBlock::Reasoning { text } if text == "let me think")
+        });
+        assert!(
+            has_reasoning,
+            "non-Text blocks must be preserved across the edit"
+        );
+
+        // Exactly one Text block remains (the original was dropped, not kept).
+        let text_count = edited
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::Text { .. }))
+            .count();
+        assert_eq!(text_count, 1, "old Text block must be replaced, not appended");
+    }
+
     #[test]
     fn forward_event_throttles_delta_preserves_lifecycle() {
         // Channel with small capacity so we can fill it easily.
@@ -565,7 +691,10 @@ mod tests {
             process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx).await;
         assert!(!should_break, "ReloadConfig must not break the worker loop");
         // model updated via keep-client fallback (consistent with on-disk config)
-        assert_eq!(sess.model, "proxy-model", "model updated despite client failure");
+        assert_eq!(
+            sess.model, "proxy-model",
+            "model updated despite client failure"
+        );
         // an Error event must have been forwarded to the UI
         let ev = evt_rx.recv().await.expect("an error event was forwarded");
         match ev {
@@ -574,9 +703,15 @@ mod tests {
                     msg.contains("client build failed"),
                     "unexpected error message: {msg}"
                 );
-                assert!(msg.contains("proxy-model"), "error should mention new model");
+                assert!(
+                    msg.contains("proxy-model"),
+                    "error should mention new model"
+                );
             }
-            other => panic!("expected Error event, got a different variant: {}", variant_name(&other)),
+            other => panic!(
+                "expected Error event, got a different variant: {}",
+                variant_name(&other)
+            ),
         }
     }
 
@@ -615,7 +750,10 @@ mod tests {
             process_cmd(UiCmd::ReloadConfig(Box::new(new_cfg)), &mut sess, &evt_tx).await;
         assert!(!should_break, "ReloadConfig must not break the worker loop");
         // model updated via keep-client fallback (consistent with on-disk config)
-        assert_eq!(sess.model, "no-key-model", "model updated despite resolve failure");
+        assert_eq!(
+            sess.model, "no-key-model",
+            "model updated despite resolve failure"
+        );
         // an Error event must have been forwarded to the UI
         let ev = evt_rx.recv().await.expect("an error event was forwarded");
         match ev {
@@ -628,9 +766,15 @@ mod tests {
                     !msg.contains("client build failed"),
                     "must not mention client build failure: {msg}"
                 );
-                assert!(msg.contains("no-key-model"), "error should mention new model");
+                assert!(
+                    msg.contains("no-key-model"),
+                    "error should mention new model"
+                );
             }
-            other => panic!("expected Error event, got a different variant: {}", variant_name(&other)),
+            other => panic!(
+                "expected Error event, got a different variant: {}",
+                variant_name(&other)
+            ),
         }
     }
 

@@ -946,3 +946,150 @@ fn steer_consumed_unknown_seq_is_noop() {
         "unknown seq must retain all entries"
     );
 }
+
+#[test]
+fn last_plan_text_returns_raw_from_plan_block() {
+    // When a Plan block exists, last_plan_text must return its `raw` field
+    // (the editable markdown source), ignoring any Assistant blocks.
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Plan {
+        rendered: crate::markdown::render("## Plan\n- step one"),
+        raw: "## Plan\n- step one".to_string(),
+    });
+    assert_eq!(
+        v.last_plan_text().as_deref(),
+        Some("## Plan\n- step one"),
+        "last_plan_text must return the Plan block's raw field"
+    );
+}
+
+#[test]
+fn last_plan_text_falls_back_to_assistant_raw() {
+    // With no Plan block, last_plan_text falls back to the last non-empty
+    // Assistant block's raw — in plan mode the plan IS the last assistant
+    // message before the Plan card is handed off.
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "first reply".to_string(),
+        rendered: crate::markdown::render("first reply"),
+        done: true,
+    });
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "second reply".to_string(),
+        rendered: crate::markdown::render("second reply"),
+        done: true,
+    });
+    assert_eq!(
+        v.last_plan_text().as_deref(),
+        Some("second reply"),
+        "with no Plan block, last_plan_text must return the last non-empty Assistant raw"
+    );
+}
+
+#[test]
+fn last_plan_text_skips_empty_assistant() {
+    // An empty Assistant block must be skipped in favour of the most recent
+    // non-empty one.
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Assistant {
+        raw: String::new(),
+        rendered: Vec::new(),
+        done: false,
+    });
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "real content".to_string(),
+        rendered: crate::markdown::render("real content"),
+        done: true,
+    });
+    assert_eq!(
+        v.last_plan_text().as_deref(),
+        Some("real content"),
+        "last_plan_text must skip the empty Assistant and return the non-empty one"
+    );
+}
+
+#[test]
+fn last_plan_text_returns_none_when_empty() {
+    // An empty ChatView has nothing to return.
+    let v = ChatView::default();
+    assert!(
+        v.last_plan_text().is_none(),
+        "last_plan_text must be None for an empty ChatView"
+    );
+}
+
+#[test]
+fn update_plan_text_updates_plan_block() {
+    // When a Plan block exists, update_plan_text rewrites both its `raw` and
+    // its `rendered` (markdown re-rendered from the new source).
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Plan {
+        rendered: crate::markdown::render("old plan"),
+        raw: "old plan".to_string(),
+    });
+    v.update_plan_text("new plan text");
+    match &v.blocks[0] {
+        ChatBlock::Plan { raw, rendered } => {
+            assert_eq!(raw, "new plan text", "Plan raw must be updated");
+            assert_eq!(
+                rendered,
+                &crate::markdown::render("new plan text"),
+                "Plan rendered must be re-rendered from the new text"
+            );
+        }
+        other => panic!("expected Plan block, got {other:?}"),
+    }
+}
+
+#[test]
+fn update_plan_text_updates_assistant_when_no_plan() {
+    // Without a Plan block, update_plan_text edits the last non-empty
+    // Assistant block in place: raw is rewritten, rendered is re-rendered,
+    // and `done` flips to true.
+    let mut v = ChatView::default();
+    v.blocks.push(ChatBlock::Assistant {
+        raw: "original assistant text".to_string(),
+        rendered: crate::markdown::render("original assistant text"),
+        done: false,
+    });
+    v.update_plan_text("edited plan via assistant");
+    match &v.blocks[0] {
+        ChatBlock::Assistant { raw, rendered, done } => {
+            assert_eq!(raw, "edited plan via assistant", "Assistant raw must be updated");
+            assert_eq!(
+                rendered,
+                &crate::markdown::render("edited plan via assistant"),
+                "Assistant rendered must be re-rendered"
+            );
+            assert!(
+                *done,
+                "done must flip to true after the plan edit is applied"
+            );
+        }
+        other => panic!("expected Assistant block, got {other:?}"),
+    }
+}
+
+/// Issue #1: the `[model]` chat marker must show the bare model id (no
+/// `provider/` prefix), matching the status bar — both when the event carries
+/// the full string (defensive strip) and the bare id (worker now emits bare).
+#[test]
+fn model_switch_marker_strips_provider_prefix() {
+    let mut v = ChatView::default();
+
+    // Full "provider/model" string -> rendered as bare id.
+    v.apply(&SessionEvent::ModelSwitch("bigmodel/glm-5.2".into()));
+    let text = block_text(&v);
+    assert!(text.contains("[model]"), "marker prefix present");
+    assert!(text.contains("glm-5.2"), "bare model id present");
+    assert!(
+        !text.contains('/'),
+        "marker must not leak the provider slash: {text:?}"
+    );
+
+    // Bare id (what the worker now emits) -> unchanged, no slash.
+    v.apply(&SessionEvent::ModelSwitch("glm-5.2".into()));
+    let text2 = block_text(&v);
+    assert!(text2.contains("glm-5.2"));
+    assert!(!text2.contains('/'));
+}

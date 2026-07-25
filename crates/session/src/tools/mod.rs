@@ -5,16 +5,19 @@ use opencoder_core::{AgentKind, ToolArc};
 use serde_json::Value;
 
 pub mod bash;
+pub mod bg;
 pub mod chrome_headless;
 pub mod computer_use;
 pub mod edit;
 pub mod glob;
 pub mod grep;
+pub mod image_data;
 pub mod latent;
 pub mod ls;
 pub mod read;
 pub mod ssh_pty;
 pub mod task;
+pub mod view_image;
 pub mod web_read;
 pub mod write;
 
@@ -30,6 +33,7 @@ pub fn registry() -> HashMap<String, ToolArc> {
         let mut v: Vec<ToolArc> = vec![
             Arc::new(bash::BashTool) as ToolArc,
             Arc::new(read::ReadTool) as ToolArc,
+            Arc::new(view_image::ViewImageTool) as ToolArc,
             Arc::new(write::WriteTool) as ToolArc,
             Arc::new(edit::EditTool) as ToolArc,
             Arc::new(glob::GlobTool) as ToolArc,

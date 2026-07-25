@@ -27,6 +27,12 @@ pub struct Cli {
     /// Resume a specific session by id.
     #[arg(short, long, global = true)]
     pub session: Option<String>,
+    /// Override the model for this run, as "{provider}/{model_id}"
+    /// (e.g. "anthropic/claude-3"). Bound to the session: new sessions
+    /// persist it; resuming with --model re-applies it (explicit choice
+    /// wins over the stored model) and re-persists so later resumes honor it.
+    #[arg(long, global = true, value_name = "MODEL")]
+    pub model: Option<String>,
     /// Resume the most recent session for this workdir.
     #[arg(long, global = true, default_value_t = false)]
     pub continue_: bool,

@@ -12,6 +12,7 @@ Commit: (working-tree, pre-initial-commit)
 - `Tool` trait / `ToolArc` / `ToolContext` / `ToolOutput`（`src/tool.rs`）。
 - `Skill`（`src/skill.rs`）：用户可编排的「技能」指令包（`name/description/body/source`）。`skills_dir()` 返回 `~/.opencoder/skills`（二进制自有配置主目录，与 config 同源）；`discover()` 扫描该目录，识别 `<name>.md` 与 `<name>/SKILL.md` 两种布局，解析可选 `---` YAML frontmatter（`name`/`description`，缺省回退文件名/首行）。目录缺失返回空 `Vec`（非错误）。
 - `CompactionConfig`（`src/config.rs`）：`auto/context_threshold/tail_turns/reserved/buffer`（`prune` 字段已移除——曾为死配置）。
+- `OutputStreamlineConfig`（`src/config.rs`）：`enabled/trim_trailing/collapse_blank_lines/trim_outer`（默认全开）+ `collapse_inline_ws`（默认关，opt-in）。session 在 `run_loop` 持久化前对完成的 assistant 文本做保义精简（见 session 模块）。
 - `net` 模块（`src/net.rs`）：`build_http_client`/`build_http_client_with_read_timeout`/`effective_proxy`——proxy-aware reqwest 客户端，**loopback bypass**（`127.0.0.1`/`localhost`/`::1`/`0.0.0.0` 永不经代理，否则本地 mock/自连在代理环境下被截断）。被 llm client 与 browser 工具共用。
 - `computer_use` 模块（`src/computer_use.rs`）：`ComputerUseExecutor` trait / `ComputerUseLoop` / `RecordingExecutor`（测试替身）——从 cua 的 perceive→act 循环提炼，backend 无关、仅拥有步数预算 + 完成守卫，故可单测。`ComputerAction`/`Observation`/`LoopOutcome` 为循环数据模型。
 

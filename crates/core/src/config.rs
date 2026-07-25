@@ -21,6 +21,10 @@ pub struct Config {
     pub agent: AgentDefaults,
     #[serde(default)]
     pub compaction: CompactionConfig,
+    /// Per-message assistant-output streamlining (deterministic, meaning-
+    /// preserving). See [`OutputStreamlineConfig`].
+    #[serde(default)]
+    pub output_streamline: OutputStreamlineConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_limit: Option<u64>,
     /// Max output tokens per generation. When unset the provider default is
@@ -76,6 +80,17 @@ pub struct Config {
     /// exponential backoff.
     #[serde(default)]
     pub tool_guard: ToolGuardConfig,
+    /// Max idle duration (no LLM stream events received) before a streaming
+    /// call is considered stalled and aborted (seconds). Defaults to 120.
+    /// Independent of the HTTP read_timeout — catches stalls where the upstream
+    /// keeps the connection alive with SSE comment frames but never delivers
+    /// actual content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_idle_timeout_secs: Option<u64>,
+    /// Max wall-clock duration for a `task` subagent before it is aborted
+    /// (seconds). Defaults to 1800 (30 min). Prevents indefinite subagent hangs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_timeout_secs: Option<u64>,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -199,6 +214,45 @@ impl Default for CompactionConfig {
         }
     }
 }
+/// Per-message assistant-output streamlining. Deterministic, meaning-preserving
+/// normalization applied to completed assistant text *after* it has been
+/// streamed to the UI (so live display fidelity is untouched) and *before* it
+/// is persisted / re-sent as context — shaving **input** token overhead on
+/// every later turn. Fenced code blocks are passed through verbatim; only
+/// prose whitespace/structure is touched, so it is a no-op on already-clean
+/// text. Configured via the `output_streamline` field of [`Config`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputStreamlineConfig {
+    /// Master switch. On by default — every rule is a no-op on clean text.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Strip trailing whitespace from each prose line.
+    #[serde(default = "default_true")]
+    pub trim_trailing: bool,
+    /// Collapse runs of 2+ blank prose lines into a single blank line.
+    #[serde(default = "default_true")]
+    pub collapse_blank_lines: bool,
+    /// Trim leading/trailing blank lines from the whole message.
+    #[serde(default = "default_true")]
+    pub trim_outer: bool,
+    /// Collapse interior space/tab runs in prose to a single space (leading
+    /// indentation is preserved). Off by default: opt-in "aggressive" mode.
+    #[serde(default)]
+    pub collapse_inline_ws: bool,
+}
+
+impl Default for OutputStreamlineConfig {
+    fn default() -> Self {
+        OutputStreamlineConfig {
+            enabled: true,
+            trim_trailing: true,
+            collapse_blank_lines: true,
+            trim_outer: true,
+            collapse_inline_ws: false,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -269,6 +323,7 @@ impl Default for Config {
             small_model: None,
             agent: AgentDefaults::default(),
             compaction: CompactionConfig::default(),
+            output_streamline: OutputStreamlineConfig::default(),
             context_limit: None,
             max_tokens: None,
             reasoning_effort: None,
@@ -278,6 +333,8 @@ impl Default for Config {
             network: NetworkConfig::default(),
             capabilities: CapabilitiesConfig::default(),
             tool_guard: ToolGuardConfig::default(),
+            stream_idle_timeout_secs: None,
+            task_timeout_secs: None,
         }
     }
 }
@@ -317,6 +374,16 @@ impl Config {
     /// Effective context window: explicit override, else the default.
     pub fn context_limit(&self) -> u64 {
         self.context_limit.unwrap_or(DEFAULT_CONTEXT_LIMIT)
+    }
+    /// Effective stream idle timeout for LLM streaming calls. When no events
+    /// are received within this duration, the call is aborted to prevent
+    /// indefinite hangs from stalled connections.
+    pub fn stream_idle_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.stream_idle_timeout_secs.unwrap_or(120))
+    }
+    /// Effective max wall-clock duration for a single `task` subagent.
+    pub fn task_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.task_timeout_secs.unwrap_or(1800))
     }
     /// Model id used for low-cost background calls (title generation, compaction
     /// summarization). Returns the id (after the `/`) so the request body carries
@@ -722,6 +789,12 @@ fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 cfg.capabilities.tools_subagent = b;
             }
         }
+        if let Some(v) = obj.get("stream_idle_timeout_secs").and_then(|v| v.as_u64()) {
+            cfg.stream_idle_timeout_secs = Some(v);
+        }
+        if let Some(v) = obj.get("task_timeout_secs").and_then(|v| v.as_u64()) {
+            cfg.task_timeout_secs = Some(v);
+        }
     }
 }
 
@@ -737,7 +810,7 @@ fn resolve_env(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_suspicious_model;
+    use super::{is_suspicious_model, Config};
 
     #[test]
     fn empty_model_is_not_suspicious() {
@@ -775,5 +848,33 @@ mod tests {
     #[test]
     fn short_model_side_is_suspicious() {
         assert!(is_suspicious_model("ab/c")); // mid.len() < 2
+    }
+
+    #[test]
+    fn stream_idle_timeout_defaults_to_120s() {
+        assert_eq!(Config::default().stream_idle_timeout(), std::time::Duration::from_secs(120));
+    }
+
+    #[test]
+    fn stream_idle_timeout_is_configurable() {
+        let c = Config {
+            stream_idle_timeout_secs: Some(60),
+            ..Default::default()
+        };
+        assert_eq!(c.stream_idle_timeout(), std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn task_timeout_defaults_to_1800s() {
+        assert_eq!(Config::default().task_timeout(), std::time::Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn task_timeout_is_configurable() {
+        let c = Config {
+            task_timeout_secs: Some(300),
+            ..Default::default()
+        };
+        assert_eq!(c.task_timeout(), std::time::Duration::from_secs(300));
     }
 }

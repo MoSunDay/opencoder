@@ -27,6 +27,11 @@ pub enum ContentBlock {
         tool_use_id: String,
         content: String,
         is_error: bool,
+        /// Images returned by the tool (data URIs / URLs), forwarded to vision
+        /// models as `image_url` parts on the `tool` message. Backward
+        /// compatible: persisted rows without this key deserialize to empty.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<String>,
     },
     /// Inline image attached to a user message. `url` is either an
     /// `http(s)://` URL or a `data:image/<fmt>;base64,...` URI. `detail`
@@ -187,7 +192,16 @@ impl Message {
                     out.push_str(name);
                     out.push_str(&serde_json::to_string(input).unwrap_or_default());
                 }
-                ContentBlock::ToolResult { content, .. } => out.push_str(content),
+                ContentBlock::ToolResult { content, images, .. } => {
+                    out.push_str(content);
+                    // Vision attachments returned by a tool cost ~hundreds of
+                    // tokens regardless of payload size; count a fixed rough
+                    // cost (do NOT dump the base64 URI — it would blow past
+                    // compaction budgets). ~256 tokens per image.
+                    for _ in images {
+                        out.push_str(&"x".repeat(1024));
+                    }
+                }
                 // Vision attachments cost ~hundreds of tokens regardless of
                 // payload size. Count a fixed rough cost instead of dumping
                 // the (huge) base64 URI, which would blow past compaction

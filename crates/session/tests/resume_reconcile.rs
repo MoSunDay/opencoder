@@ -457,6 +457,7 @@ async fn resume_does_not_inject_when_tool_result_already_present() {
             tool_use_id: "call_paired".into(),
             content: "ran fine".into(),
             is_error: false,
+            images: Vec::new(),
         }],
         model: None,
         agent: None,

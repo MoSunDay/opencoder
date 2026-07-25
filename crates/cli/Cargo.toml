@@ -12,6 +12,7 @@ opencoder-store.workspace = true
 opencoder-web.workspace = true
 opencoder-client.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

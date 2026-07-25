@@ -606,11 +606,13 @@ fn kitty_ctrl_c_does_not_quit() {
 
 #[test]
 fn sys_tokens_counts_system_prompt() {
-    // Serialize with the `with_home` tests below: `sys_tokens_for`
-    // performs two independent `home_dir()` reads (build_system and
-    // global_instructions_text). A concurrent HOME mutation can split
-    // them and underflow the global-subtraction to 0.
-    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
+    // `sys_tokens_for` reads `home_dir()` (via `global_instructions_text`);
+    // take the shared HOME lock so a concurrent test that mutates HOME
+    // can't race the read and flake the determinism assertion below
+    // (0 vs 406).
+    let _home = super::app_loop::tests::HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir();
     let base = crate::app::sys_tokens_for("act", &dir, None);
     assert!(base > 0, "the system prompt must register some tokens");
@@ -638,7 +640,13 @@ fn sys_tokens_counts_system_prompt() {
 /// passing the body is observably correct.
 #[test]
 fn sys_tokens_skill_body_dominates_skill_name() {
-    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
+    // `sys_tokens_for` reads `home_dir()` (via `global_instructions_text`);
+    // take the shared HOME lock so a concurrent test that mutates HOME
+    // can't race the read and flake the determinism assertion below
+    // (0 vs 406).
+    let _home = super::app_loop::tests::HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir();
     // A realistic short skill name vs. a long instruction body.
     let name = "code-review";
@@ -850,7 +858,7 @@ async fn start_turn_reports_false_when_worker_is_dead() {
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(8);
     drop(cmd_rx); // worker gone — channel closed
     let mut cancel = CancellationToken::new();
-    let ok = crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into())).await;
+    let ok = crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
     assert!(
         !ok,
         "start_turn must return false when the worker channel is closed"
@@ -1046,23 +1054,9 @@ fn ctrl_w_multibyte_chars() {
 }
 
 // ---- apply_skill_tokens tests ----
-// `apply_skill_tokens` calls `discover_skills()` which reads `~/.opencoder/skills`,
-// so these tests serialize `HOME` mutations via a dedicated mutex (mirroring the
-// pattern in session/tests/prompt.rs) and point HOME at a tempdir.
-
-static APPTEST_HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn with_home<R>(home: &std::path::Path, f: impl FnOnce() -> R) -> R {
-    let _guard = APPTEST_HOME_MUTEX.lock().unwrap();
-    let old = std::env::var_os("HOME");
-    std::env::set_var("HOME", home);
-    let result = f();
-    match old {
-        Some(h) => std::env::set_var("HOME", h),
-        None => std::env::remove_var("HOME"),
-    }
-    result
-}
+// These tests resolve skills against a tempdir by passing
+// `discover_in(tempdir)` straight into `apply_skill_tokens_with`, so they never
+// touch the process-global `HOME` env var and need no serialization.
 
 /// Create a tempdir whose `~/.opencoder/skills/<name>.md` contains a skill
 /// with the given body, returning the tempdir (keep alive for the test).
@@ -1084,17 +1078,17 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     let mut sys_tokens = 0u64;
     let workdir = std::path::PathBuf::from("/tmp");
 
-    let (clean, unresolved) = with_home(dir.path(), || {
-        crate::app_helpers::apply_skill_tokens(
-            "hello {$alpha} world",
-            &mut active_skill,
-            &mut active_skill_body,
-            &mut sys_tokens,
-            "act",
-            &workdir,
-            &skill_handle,
-        )
-    });
+    let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
+    let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
+        &skills,
+        "hello {$alpha} world",
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &skill_handle,
+    );
 
     // Token stripped from clean text; name not unresolved.
     assert_eq!(clean, "hello  world");
@@ -1124,17 +1118,17 @@ async fn apply_skill_tokens_reports_unknown_skill() {
     let mut sys_tokens = 0u64;
     let workdir = std::path::PathBuf::from("/tmp");
 
-    let (clean, unresolved) = with_home(dir.path(), || {
-        crate::app_helpers::apply_skill_tokens(
-            "go {$ghost} now",
-            &mut active_skill,
-            &mut active_skill_body,
-            &mut sys_tokens,
-            "act",
-            &workdir,
-            &skill_handle,
-        )
-    });
+    let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
+    let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
+        &skills,
+        "go {$ghost} now",
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &skill_handle,
+    );
 
     assert_eq!(clean, "go  now");
     assert_eq!(unresolved, vec!["ghost".to_string()]);
@@ -1161,17 +1155,17 @@ async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
     let mut sys_tokens = 999u64;
     let workdir = std::path::PathBuf::from("/tmp");
 
-    let (clean, unresolved) = with_home(dir.path(), || {
-        crate::app_helpers::apply_skill_tokens(
-            "plain text no tokens",
-            &mut active_skill,
-            &mut active_skill_body,
-            &mut sys_tokens,
-            "act",
-            &workdir,
-            &skill_handle,
-        )
-    });
+    let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
+    let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
+        &skills,
+        "plain text no tokens",
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &skill_handle,
+    );
 
     // No tokens -> text unchanged, nothing unresolved, sticky skill preserved.
     assert_eq!(clean, "plain text no tokens");

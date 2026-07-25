@@ -7,9 +7,11 @@ Keybindings:
   Ctrl+U          switch mode act <--> plan (same pure toggle; use when Ctrl+Shift+Tab is taken)
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                pick skill anywhere -> {$name}; loaded on submit
-  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history)
+  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history), /clip (paste image from clipboard)
+  Shift+I          edit plan (plan mode only, when idle)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
+  Ctrl+C          interrupt a running task (same as Esc Esc)
   Ctrl+D           quit
   Ctrl+H           toggle this help
   Ctrl+W           delete word before cursor (backward-kill-word)

@@ -20,6 +20,11 @@ pub struct ToolContext {
 pub struct ToolOutput {
     pub content: String,
     pub is_error: bool,
+    /// Image attachments returned by the tool as data URIs
+    /// (`data:image/<fmt>;base64,...`) or `http(s)://` URLs, fed to vision
+    /// models alongside the text content. Empty for text-only results.
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 impl ToolOutput {
@@ -27,12 +32,22 @@ impl ToolOutput {
         ToolOutput {
             content: content.into(),
             is_error: false,
+            images: Vec::new(),
         }
     }
     pub fn err(content: impl Into<String>) -> Self {
         ToolOutput {
             content: content.into(),
             is_error: true,
+            images: Vec::new(),
+        }
+    }
+    /// Successful text result plus one or more image attachments.
+    pub fn ok_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
+        ToolOutput {
+            content: content.into(),
+            is_error: false,
+            images,
         }
     }
 }
@@ -92,7 +107,11 @@ pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -
     let over_bytes = total_bytes > max_bytes;
 
     if !over_lines && !over_bytes {
-        return ToolOutput { content, is_error };
+        return ToolOutput {
+            content,
+            is_error,
+            images: Vec::new(),
+        };
     }
 
     // Apply the line cap first (head+tail), then the byte cap on the result.
@@ -119,6 +138,7 @@ pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -
     ToolOutput {
         content: format!("{body}\n\n[output truncated, original {}]", parts.join(", ")),
         is_error,
+        images: Vec::new(),
     }
 }
 

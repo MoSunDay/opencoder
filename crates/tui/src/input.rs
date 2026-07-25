@@ -38,9 +38,16 @@ const CHANNEL_CAPACITY: usize = 256;
 /// thread handle. The thread exits on its own when the receiver is dropped
 /// (detected via `Sender::is_closed()` on every poll cycle) or when stdin
 /// reports a read error. Drop the receiver to shut it down.
-pub fn spawn_input_pump() -> (mpsc::Receiver<Event>, thread::JoinHandle<()>) {
+pub fn spawn_input_pump(
+    heartbeat: crate::supervisor::Heartbeat,
+) -> (mpsc::Receiver<Event>, thread::JoinHandle<()>) {
     let (tx, rx) = mpsc::channel::<Event>(CHANNEL_CAPACITY);
     let handle = thread::spawn(move || loop {
+        // Bumped *before* the blocking poll: if the poll never returns
+        // (crossterm 0.28's mio source busy-loops forever on tty EOF/EIO,
+        // holding the global event mutex), the bump stops and the liveness
+        // supervisor restores the terminal + exits instead of freezing.
+        heartbeat.bump();
         // Receiver gone? Shut down without touching the terminal. Checked every
         // iteration so an idle stream (no events) still exits promptly.
         if tx.is_closed() {
@@ -88,7 +95,7 @@ mod tests {
     /// relies on: ending `run_app` drops the receiver, the thread exits, no leak.
     #[test]
     fn pump_exits_when_receiver_dropped() {
-        let (rx, handle) = spawn_input_pump();
+        let (rx, handle) = spawn_input_pump(crate::supervisor::Heartbeat::new());
         drop(rx);
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {

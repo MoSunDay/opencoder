@@ -36,6 +36,13 @@ pub enum ChatBlock {
         header: Line<'static>,
         output: Vec<Line<'static>>,
     },
+    /// Inline image attachment rendered as half-block ASCII art.
+    /// `filename` is the display name; `rendered` is the pre-computed
+    /// half-block `Line` set (empty when rendering failed → placeholder).
+    Image {
+        filename: String,
+        rendered: Vec<Line<'static>>,
+    },
     /// Foldable subagent block. Clicking the header enters the subagent's
     /// perspective (ctx-switch) showing its child `view` as the full body plus
     /// its own context stats. The header always renders as a single clickable
@@ -51,9 +58,11 @@ pub enum ChatBlock {
         cancelled: bool,
         summary: String,
     },
-    /// Read-only plan card shown after plan→act handoff. The finalized plan,
-    /// rendered as markdown. Not interactive — purely informational context.
-    Plan { rendered: Vec<Line<'static>> },
+    /// Read-only plan card shown after plan→act handoff. `raw` holds the
+    /// original markdown source so it can be edited in plan mode; `rendered`
+    /// is the pre-computed markdown rendering for display.
+    /// Not interactive post-handoff — purely informational context.
+    Plan { rendered: Vec<Line<'static>>, raw: String },
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -108,4 +117,3 @@ pub struct SubagentHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
 }
-

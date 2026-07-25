@@ -122,6 +122,7 @@ pub async fn resume(
                     tool_use_id: id.clone(),
                     content: "session interrupted: tool result missing".to_string(),
                     is_error: true,
+                    images: Vec::new(),
                 })
             }
             _ => None,
@@ -234,6 +235,7 @@ pub async fn resume_and_replay(
             tool_use_id: task.task_id.clone(),
             content: text,
             is_error: !ok,
+            images: Vec::new(),
         });
     }
 
@@ -345,6 +347,7 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
             tool_use_id: task.task_id.clone(),
             content: text,
             is_error: !ok,
+            images: Vec::new(),
         });
     }
     let tool_msg = Message {
@@ -382,6 +385,7 @@ async fn abandon_cancelled_tasks(
             tool_use_id: task.task_id.clone(),
             content: MSG.to_string(),
             is_error: true,
+            images: Vec::new(),
         });
         tracing::info!(
             task_id = %task.task_id,

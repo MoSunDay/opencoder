@@ -159,6 +159,7 @@ async fn prompt_admit_returns_immediately_with_seq() {
         state.store.clone(),
         &sid,
         "hello".into(),
+        Vec::new(),
         opencoder_store::Delivery::Steer,
         mock,
         std::env::temp_dir(),

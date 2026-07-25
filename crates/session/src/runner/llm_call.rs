@@ -63,12 +63,25 @@ pub(super) async fn run_one_llm_call(
     // doesn't linger after recovery.
     let mut retried = false;
     let mut cancel_fut = std::pin::pin!(await_cancel(session));
+    let idle_dur = session.config.stream_idle_timeout();
     loop {
+        // Recreated each iteration so every received event resets the idle
+        // window: a stalled stream (no events for `idle_dur`) trips the guard
+        // below. SSE keep-alive comments carry no content and never reach this
+        // channel, so a connection dribbling only keep-alives is treated as idle.
+        let mut idle = std::pin::pin!(tokio::time::sleep(idle_dur));
         tokio::select! {
             biased;
             _ = &mut cancel_fut => {
                 on_event(SessionEvent::Status("interrupted".into()));
                 return Ok((String::new(), String::new(), Vec::new(), None));
+            }
+            _ = &mut idle => {
+                on_event(SessionEvent::Status("stream idle".into()));
+                return Err(anyhow!(
+                    "stream idle timeout: no events received in {:?} — the upstream may be stalled or sending keep-alive without content",
+                    idle_dur
+                ));
             }
             ev = rx.recv() => {
                 let ev = match ev { Some(ev) => ev, None => break };
@@ -119,5 +132,111 @@ pub(super) fn core_usage(u: &Usage) -> MessageUsage {
         total_tokens: u.total_tokens,
         cache_read_tokens: u.cache_read_tokens,
         cache_creation_tokens: u.cache_creation_tokens,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use anyhow::Result;
+    use tokio::sync::mpsc;
+
+    use opencoder_core::{resolve_agent, Config, ToolArc};
+    use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
+
+    use crate::SessionState;
+
+    use super::run_one_llm_call;
+
+    /// A chat stream that opens a channel but never sends any event. Simulates
+    /// a stalled upstream that keeps the connection alive (so the HTTP
+    /// read_timeout never trips) but delivers no content — the exact scenario
+    /// the idle watchdog is designed to catch.
+    struct StalledClient;
+
+    impl ChatStream for StalledClient {
+        fn chat_stream(&self, _req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
+            let (tx, rx) = mpsc::channel::<LlmEvent>(128);
+            // Leak the sender so it is never dropped — the channel stays open
+            // forever but no events are ever sent. This faithfully simulates a
+            // stalled upstream that keeps the connection alive but delivers no
+            // content.
+            std::mem::forget(tx);
+            Ok(rx)
+        }
+        fn backend(&self) -> &'static str {
+            "stalled"
+        }
+    }
+
+    fn make_session(client: Arc<dyn ChatStream>, idle_secs: u64) -> SessionState {
+        let cfg = Config {
+            stream_idle_timeout_secs: Some(idle_secs),
+            ..Default::default()
+        };
+        SessionState::new(
+            "test",
+            resolve_agent("act").unwrap(),
+            cfg,
+            client,
+            std::env::temp_dir().join("opencoder-idle-test"),
+        )
+    }
+
+    #[tokio::test]
+    async fn idle_stream_triggers_timeout() {
+        let session = make_session(Arc::new(StalledClient) as Arc<dyn ChatStream>, 1);
+        let registry: HashMap<String, ToolArc> = HashMap::new();
+        let result = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        assert!(result.is_err(), "expected error, got: {:?}", result);
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("idle timeout"),
+            "expected idle timeout error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_stream_unaffected_by_idle_timeout() {
+        let mock = MockChatClient::new().push_script(vec![
+            LlmEvent::TextDelta("hello".into()),
+            LlmEvent::Completed {
+                text: "hello".into(),
+                tool_calls: vec![],
+                usage: None,
+            },
+        ]);
+        let session = make_session(Arc::new(mock) as Arc<dyn ChatStream>, 30);
+        let registry: HashMap<String, ToolArc> = HashMap::new();
+        let result = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        assert!(result.is_ok(), "expected success, got: {:?}", result);
+        let (text, _, _, _) = result.unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_does_not_fire_if_events_keep_coming() {
+        // Events arriving within the idle window must not trigger the guard,
+        // even if the total stream duration exceeds the idle duration.
+        let mock = MockChatClient::new().push_script(vec![
+            LlmEvent::TextDelta("a".into()),
+            LlmEvent::TextDelta("b".into()),
+            LlmEvent::TextDelta("c".into()),
+            LlmEvent::Completed {
+                text: "abc".into(),
+                tool_calls: vec![],
+                usage: None,
+            },
+        ]);
+        // Short idle window — would trip if the guard weren't reset on each event.
+        let session = make_session(Arc::new(mock) as Arc<dyn ChatStream>, 2);
+        let registry: HashMap<String, ToolArc> = HashMap::new();
+        let result = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        assert!(result.is_ok(), "expected success, got: {:?}", result);
+        let (text, _, _, _) = result.unwrap();
+        assert_eq!(text, "abc");
     }
 }

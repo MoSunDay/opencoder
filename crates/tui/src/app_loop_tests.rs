@@ -307,8 +307,13 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
 // match — see `app_loop.rs`). These two tests pin the error-marker text and
 // the ReloadConfig dispatch for each Err branch.
 
-static HOME_LOCK_1: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static HOME_LOCK_2: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Single process-global lock serializing every test that either mutates the
+/// `HOME` env var or reads it indirectly via `sys_tokens_for` (->
+/// `global_instructions_text` -> `home_dir()`). `std::env::set_var` is not
+/// thread-safe at the libc level: without this lock a concurrent reader can
+/// observe a transiently-wrong/empty HOME and compute a different token
+/// estimate -- the classic `sys_tokens_counts_system_prompt` flake (0 vs 406).
+pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// RAII guard that restores an env var to its prior value on drop,
 /// guaranteeing restoration even if a test assertion panics mid-`await`.
@@ -353,7 +358,7 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
     use opencoder_core::Config;
     use opencoder_llm::MockChatClient;
 
-    let _guard = HOME_LOCK_1.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     let tmp = tempfile::tempdir().unwrap();
     let workdir = tmp.path();
@@ -452,7 +457,7 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     use opencoder_core::Config;
     use opencoder_llm::MockChatClient;
 
-    let _guard = HOME_LOCK_2.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     // Redirect HOME to a temp dir so no global config can supply an api_key,
     // and clear any inherited `OPENAI_API_KEY`. RAII guards guarantee

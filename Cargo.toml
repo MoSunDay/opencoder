@@ -25,6 +25,7 @@ path = "src/main.rs"
 opencoder-cli.workspace = true
 opencoder-tui.workspace = true
 opencoder-core.workspace = true
+opencoder-session.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -68,6 +69,7 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"
+arboard = "3"
 
 [profile.release]
 opt-level = 3

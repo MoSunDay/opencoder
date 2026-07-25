@@ -212,21 +212,16 @@ async fn bash_tool_detaches_controlling_terminal() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn bash_tool_kills_process_group_on_timeout() {
-    // Regression: on timeout the bash tool must kill the *entire* child process
-    // group, not only the direct bash child. Otherwise grandchildren (builds,
-    // servers, test runners, backgrounded jobs) survive as orphans. We spawn a
-    // grandchild that beats a heartbeat file, time the tool out, then verify the
-    // heartbeat stops growing — proving the grandchild died with the group.
-    //
-    // Non-interactive `bash -lc` keeps job control OFF, so the backgrounded
-    // pipeline stays in bash's process group → `kill(-pgid, SIGKILL)` reaches it.
+async fn bash_tool_hands_off_on_timeout() {
+    // On timeout the bash tool must NOT kill the command — instead it hands
+    // off to a background supervisor and returns a guidance message with the
+    // PID and output file path. The process stays alive.
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     let heartbeat = dir.path().join("heartbeat");
     let pidfile = dir.path().join("gpid");
     let command = format!(
-        "sh -c 'echo $$ > {pid}; while true; do echo x >> {hb}; sleep 0.2; done' & sleep 30",
+        "sh -c 'echo $$ > {pid}; while true; do echo x >> {hb}; sleep 0.2; done' & sleep 4",
         pid = pidfile.display(),
         hb = heartbeat.display(),
     );
@@ -235,62 +230,123 @@ async fn bash_tool_kills_process_group_on_timeout() {
         .execute(json!({"command": command, "timeout": 1}), &c)
         .await
         .unwrap();
-    assert!(out.is_error);
-    assert!(out.content.contains("timed out"), "unexpected: {out:?}");
-
-    // The grandchild should have produced a heartbeat during the 1s window.
-    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    // Handoff is not an error.
+    assert!(!out.is_error, "expected ok, got: {out:?}");
     assert!(
-        heartbeat.exists(),
-        "grandchild never ran — test setup invalid"
+        out.content.contains("moved to background"),
+        "missing handoff text: {out:?}"
+    );
+    assert!(
+        out.content.contains("/tmp/opencode_bg_"),
+        "missing output path: {out:?}"
     );
 
-    // Sample the heartbeat twice; if the grandchild is dead the file is static.
+    // The grandchild should be alive and producing a heartbeat.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    assert!(heartbeat.exists(), "grandchild never ran — test setup invalid");
     let s1 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
     let s2 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
-    assert_eq!(
-        s1, s2,
-        "grandchild kept writing ({} -> {} bytes): process-group kill failed",
+    assert!(
+        s2 > s1,
+        "grandchild heartbeat stopped ({} -> {} bytes) — process killed prematurely",
         s1, s2
     );
 
-    // Cleanup: if a buggy build left the grandchild alive, kill it so the test
-    // never leaks a runaway process.
+    // Extract pid and wait for the output file to get [exit code:].
+    let pid_str = out
+        .content
+        .split("PID: ")
+        .nth(1)
+        .and_then(|s| s.split('.').next())
+        .unwrap_or("");
+    let pid: u32 = pid_str.parse().unwrap_or(0);
+    assert!(pid > 0, "could not parse pid: {out:?}");
+    let path = std::path::PathBuf::from(format!("/tmp/opencode_bg_{pid}.output"));
+
+    // Wait for the command (sleep 4) to exit and the supervisor to clean up.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut got_exit_code = false;
+    while std::time::Instant::now() < deadline {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("[exit code:") {
+                got_exit_code = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    assert!(got_exit_code, "output file never got [exit code:]");
+
+    // After exit + supervisor kill, the heartbeat should be static.
+    let s3 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let s4 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
+    assert_eq!(
+        s3, s4,
+        "heartbeat kept growing ({} -> {}) — supervisor failed to kill group",
+        s3, s4
+    );
+
+    // Cleanup.
+    let _ = std::fs::remove_file(&path);
     if let Ok(txt) = std::fs::read_to_string(&pidfile) {
-        if let Ok(pid) = txt.trim().parse::<i32>() {
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+        if let Ok(gpid) = txt.trim().parse::<i32>() {
+            unsafe { libc::kill(gpid, libc::SIGKILL) };
         }
     }
 }
 
 #[tokio::test]
 #[cfg(unix)]
-async fn bash_tool_returns_partial_output_on_timeout() {
-    // On timeout the tool must surface whatever the command printed before it
-    // hung — that output is usually the only clue to *why* it hung (the failing
-    // test, the blocking syscall, the last build step). Discarding it (the old
-    // behavior) forces the agent to blindly retry. We print a unique marker to
-    // stdout, then block forever; after a 1s timeout the partial marker must be
-    // present in the returned (error) output.
+async fn bash_tool_output_file_captures_output_on_timeout() {
+    // On timeout, the command's output is streamed to the background output
+    // file. We print a unique marker, block briefly, and verify the file
+    // contains the marker and the exit code.
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     let out = BashTool
         .execute(
-            json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 30", "timeout": 1}),
+            json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 3", "timeout": 1}),
             &c,
         )
         .await
         .unwrap();
-    assert!(out.is_error, "expected error on timeout: {out:?}");
+    assert!(!out.is_error, "expected ok on handoff: {out:?}");
     assert!(
-        out.content.contains("timed out"),
-        "missing timeout banner: {out:?}"
+        out.content.contains("moved to background"),
+        "missing handoff text: {out:?}"
     );
+
+    let pid_str = out
+        .content
+        .split("PID: ")
+        .nth(1)
+        .and_then(|s| s.split('.').next())
+        .unwrap_or("");
+    let pid: u32 = pid_str.parse().unwrap_or(0);
+    assert!(pid > 0, "could not parse pid: {out:?}");
+    let path = std::path::PathBuf::from(format!("/tmp/opencode_bg_{pid}.output"));
+
+    // Wait for the command to exit and the supervisor to append [exit code:].
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
+    let mut got = false;
+    while std::time::Instant::now() < deadline {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if content.contains("PARTIAL-MARKER-9f3a") && content.contains("[exit code: 0]") {
+                got = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
     assert!(
-        out.content.contains("PARTIAL-MARKER-9f3a"),
-        "partial output discarded (should be surfaced): {out:?}"
+        got,
+        "output file missing marker or exit code: {:?}",
+        std::fs::read_to_string(&path).ok()
     );
+
+    let _ = std::fs::remove_file(&path);
 }
 
 
@@ -370,4 +426,93 @@ async fn glob_survives_self_referencing_symlink() {
         .await
         .unwrap();
     assert!(out.content.contains("a.rs"), "glob result: {out:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn glob_survives_multiple_self_referencing_symlinks() {
+    // The real regression point. A single self-loop (`loop -> .`) is a linear
+    // chain the kernel cuts off via ELOOP, so it gives a false sense of safety.
+    // Two or more self-referencing symlinks in one directory (`a -> .`, `b -> .`)
+    // cause branching recursion: 2^depth paths, i.e. a real hang / IO explosion.
+    // The canonical-path `seen` set must dedup the real directory so each is
+    // visited exactly once. Asserts completion under 5s (would hang without fix).
+    use std::os::unix::fs::symlink;
+    use std::time::Instant;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("target.rs"), "").unwrap();
+    symlink(".", dir.path().join("a")).unwrap();
+    symlink(".", dir.path().join("b")).unwrap();
+    symlink(".", dir.path().join("c")).unwrap();
+    let c = ctx(dir.path());
+    let start = Instant::now();
+    let out = GlobTool
+        .execute(json!({"pattern": "**/*.rs"}), &c)
+        .await
+        .unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_secs() < 5,
+        "glob took {:?} on triple self-loop; cycle not broken",
+        elapsed
+    );
+    assert!(
+        out.content.contains("target.rs"),
+        "expected target.rs in results: {out:?}"
+    );
+    // Result must not blow up toward the 500 cap — the deduped real dir is
+    // entered once, so target.rs appears exactly once.
+    let count = out.content.matches("target.rs").count();
+    assert_eq!(count, 1, "target.rs should appear once, got {count}: {out:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn glob_matches_normal_tree_parity_with_crate() {
+    // On a symlink-free mixed tree, the self-written walker (matches_path_with)
+    // must produce exactly the same result set as the glob crate's own
+    // `glob::glob()` iterator. Guards against matching-semantics drift,
+    // including `**`, trailing-`**` (dir-only), and `.hidden` handling.
+    use std::path::PathBuf;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("sub/deep")).unwrap();
+    std::fs::write(root.join("a.rs"), "").unwrap();
+    std::fs::write(root.join("sub/b.rs"), "").unwrap();
+    std::fs::write(root.join("sub/deep/c.rs"), "").unwrap();
+    std::fs::write(root.join(".hidden.rs"), "").unwrap();
+    std::fs::write(root.join("d.txt"), "").unwrap();
+    let c = ctx(root);
+    for pat in &[
+        "**/*.rs",
+        "**/*.txt",
+        "*.rs",
+        "sub/**/*.rs",
+        "a.rs",
+        "**/.hidden.rs",
+        "**/*",
+        "sub/**",
+    ] {
+        let mut crate_results: Vec<String> = glob::glob(&format!("{}/{}", root.display(), pat))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .map(|p: PathBuf| p.display().to_string())
+            .collect();
+        crate_results.sort();
+        let out = GlobTool
+            .execute(json!({"pattern": pat}), &c)
+            .await
+            .unwrap();
+        let mut tool_results: Vec<String> = if out.content == "no matches" {
+            Vec::new()
+        } else {
+            out.content.lines().map(String::from).collect()
+        };
+        tool_results.sort();
+        assert_eq!(
+            tool_results, crate_results,
+            "parity drift for pattern {:?}:\n  tool : {:?}\n  crate: {:?}",
+            pat, tool_results, crate_results
+        );
+    }
 }

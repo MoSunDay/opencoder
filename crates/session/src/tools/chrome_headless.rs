@@ -212,10 +212,16 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
 
     let output = cmd.output().await;
     match output {
-        Ok(o) if o.status.success() && tmp.exists() => Ok(ToolOutput::ok(format!(
-            "Screenshot saved to: {}\nUse the `read` tool to inspect the image.",
-            tmp.display()
-        ))),
+        Ok(o) if o.status.success() && tmp.exists() => {
+            let images = match super::image_data::file_to_data_uri(&tmp) {
+                Ok(uri) => vec![uri],
+                Err(_) => Vec::new(),
+            };
+            Ok(ToolOutput::ok_with_images(
+                format!("Screenshot of {} captured and saved to: {}", url, tmp.display()),
+                images,
+            ))
+        }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
             Ok(ToolOutput::err(format!(

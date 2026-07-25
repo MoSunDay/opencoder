@@ -181,7 +181,7 @@ async fn resume_and_replay_continues_running_child_and_backfills_result() {
     let has_result = msgs.iter().any(|m| {
         m.blocks.iter().any(|b| {
             matches!(b,
-                ContentBlock::ToolResult { tool_use_id, content, is_error }
+                ContentBlock::ToolResult { tool_use_id, content, is_error, .. }
                 if tool_use_id == "task-stuck" && content.contains("found 3 files") && !is_error
             )
         })

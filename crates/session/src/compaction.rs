@@ -7,6 +7,7 @@ use opencoder_store::SessionPatch;
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
 use crate::runner::SessionEvent;
+use crate::runner::await_cancel;
 use crate::SessionState;
 
 /// Decide whether to compact. Two signals are checked: the estimated tokens
@@ -238,19 +239,47 @@ async fn summarize(
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut text = String::new();
-    while let Some(ev) = rx.recv().await {
-        match ev {
-            LlmEvent::TextDelta(t) => {
-                text.push_str(&t);
-                on_event(SessionEvent::TextDelta(t));
+    // Cancel + idle guard, mirroring `run_one_llm_call`: a double-Esc / web
+    // interrupt during the compaction-summary stream must break out promptly
+    // instead of blocking the runner until the summary finishes (issue #3).
+    // On cancel we abandon the summary -- `compact` only rewrites
+    // `session.messages` AFTER this returns Ok, so abandoning leaves the
+    // transcript untouched.
+    let mut cancel_fut = std::pin::pin!(await_cancel(session));
+    let idle_dur = session.config.stream_idle_timeout();
+    loop {
+        // Recreated each iteration so every received event resets the idle
+        // window (matches the LLM-call guard).
+        let mut idle = std::pin::pin!(tokio::time::sleep(idle_dur));
+        tokio::select! {
+            biased;
+            _ = &mut cancel_fut => {
+                on_event(SessionEvent::Status("interrupted".into()));
+                return Err(anyhow!("cancelled"));
             }
-            LlmEvent::Completed { text: t, .. } => {
-                if !t.is_empty() {
-                    text = t;
+            _ = &mut idle => {
+                on_event(SessionEvent::Status("stream idle".into()));
+                return Err(anyhow!(
+                    "compaction summary stream idle timeout: no events in {:?}",
+                    idle_dur
+                ));
+            }
+            ev = rx.recv() => {
+                let ev = match ev { Some(ev) => ev, None => break };
+                match ev {
+                    LlmEvent::TextDelta(t) => {
+                        text.push_str(&t);
+                        on_event(SessionEvent::TextDelta(t));
+                    }
+                    LlmEvent::Completed { text: t, .. } => {
+                        if !t.is_empty() {
+                            text = t;
+                        }
+                    }
+                    LlmEvent::Error(e) => return Err(anyhow!(e)),
+                    _ => {}
                 }
             }
-            LlmEvent::Error(e) => return Err(anyhow!(e)),
-            _ => {}
         }
     }
     if text.trim().is_empty() {
@@ -281,6 +310,7 @@ mod tests {
                 tool_use_id: tool_use_id.into(),
                 content: "x".into(),
                 is_error: false,
+                images: Vec::new(),
             }],
             model: None,
             agent: None,
@@ -434,5 +464,74 @@ mod tests {
         // turn_starts = [0, 2, 4]; tail=2 -> turn_starts[1] = 2
         assert_eq!(compaction_split(&msgs, 2), Some(2));
         assert_eq!(compaction_split(&msgs, 2).unwrap(), split_index(&msgs, 2));
+    }
+
+    /// Issue #3 (root cause A): the compaction-summary LLM stream must honor
+    /// the session cancel token. A double-Esc / web interrupt mid-compaction
+    /// must abort promptly and leave the transcript untouched (compaction only
+    /// rewrites `messages` after the summary returns Ok).
+    #[tokio::test]
+    async fn compact_honors_cancel_and_leaves_messages_intact() {
+        use std::sync::Arc;
+
+        use opencoder_core::{resolve_agent, Config};
+        use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
+        use tokio_util::sync::CancellationToken;
+
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mock: Arc<dyn ChatStream> = Arc::new(
+            MockChatClient::new().with_default(vec![
+                LlmEvent::TextDelta("partial ".into()),
+                LlmEvent::TextDelta("summary".into()),
+                LlmEvent::Completed {
+                    text: "partial summary".into(),
+                    tool_calls: Vec::<CompletedToolCall>::new(),
+                    usage: Some(Usage {
+                        input_tokens: 5,
+                        output_tokens: 3,
+                        total_tokens: 8,
+                        ..Default::default()
+                    }),
+                },
+            ]),
+        );
+        let agent = resolve_agent("act").expect("act agent");
+        let mut s = SessionState::new(
+            "compact-cancel",
+            agent,
+            Config {
+                model: "main/glm-5.2".into(),
+                ..Config::default()
+            },
+            mock,
+            std::env::temp_dir(),
+        )
+        .with_cancel(cancel);
+        // Two turns so `compaction_split` returns a real head/tail split.
+        s.messages.push(Message::user("u1", "first turn"));
+        s.messages.push(Message::assistant("a1"));
+        s.messages.push(Message::user("u2", "second turn"));
+        s.messages.push(Message::assistant("a2"));
+        let before = s.messages.len();
+
+        let mut events: Vec<SessionEvent> = Vec::new();
+        let outcome = compact(&mut s, &HashMap::new(), &mut |ev| events.push(ev)).await;
+
+        assert!(outcome.is_err(), "compaction must abort when cancelled");
+        assert_eq!(
+            s.messages.len(),
+            before,
+            "transcript must be untouched when compaction is cancelled"
+        );
+        // No synthetic compaction-summary message was prepended.
+        assert!(s.messages.iter().all(|m| {
+            !(m.synthetic
+                && m.text().starts_with("[Conversation summary so far]"))
+        }));
+        // The cancel arm emits an interrupted status before bailing.
+        assert!(events
+            .iter()
+            .any(|ev| matches!(ev, SessionEvent::Status(msg) if msg == "interrupted")));
     }
 }

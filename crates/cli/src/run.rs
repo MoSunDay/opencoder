@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use tokio_util::sync::CancellationToken;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -9,13 +11,43 @@ use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
     generate_title, resume_and_replay as resume_session, run_once, SessionEvent, SessionState,
 };
-use opencoder_store::{SessionFilter, Store};
+use opencoder_store::{SessionFilter, SessionPatch, Store};
 
 use crate::Cli;
 
+/// Apply a `--model` override (format `provider/model_id`) to the config.
+/// Must be called before `resolve_endpoint` so the LLM client is built against
+/// the chosen provider's credentials. Returns true when the config changed.
+pub(crate) fn apply_model_override(config: &mut Config, model: &Option<String>) -> bool {
+    if let Some(m) = model {
+        if config.model != *m {
+            config.model = m.clone();
+            return true;
+        }
+    }
+    false
+}
+
+/// Re-apply an explicit `--model` to a resumed session. `resume()` restores the
+/// stored model into the session, so an explicit `--model` must win here. Returns
+/// the new model string when the session was changed (caller persists it), else None.
+pub(crate) fn reapply_resume_model(
+    session: &mut SessionState,
+    model: &Option<String>,
+) -> Option<String> {
+    let m = model.as_ref()?;
+    if session.config.model == *m {
+        return None;
+    }
+    session.config.model = m.clone();
+    session.model = session.config.model_id().to_string();
+    Some(m.clone())
+}
+
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     let workdir = resolve_workdir(cli)?;
-    let config = Config::load(&workdir)?;
+    let mut config = Config::load(&workdir)?;
+    apply_model_override(&mut config, &cli.model);
     let ep = config.resolve_endpoint()?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
         &ep.base_url,
@@ -64,6 +96,23 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         s
     };
 
+    // resume() restored the session's stored model; an explicit --model wins
+    // over it and is re-persisted so subsequent resumes honor the new choice.
+    if let Some(new_model) = reapply_resume_model(&mut session, &cli.model) {
+        if let Some(st) = &store {
+            let _ = st
+                .update_session(
+                    &session.id,
+                    &SessionPatch {
+                        model: Some(new_model),
+                        updated_at: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+    }
+
     if session.store.is_none() {
         if let Some(st) = &store {
             session.store = Some(st.clone());
@@ -106,6 +155,29 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     // the first user message. An unreadable/missing file is a hard error
     // (fail loudly rather than silently dropping an attachment).
     let images = load_image_data_uris(&cli.image)?;
+
+    // Attach a cancellation token so a hung tool/LLM call (which previously
+    // had no headless escape hatch) can be interrupted: first Ctrl-C requests
+    // a graceful stop at the next turn boundary / select! cancel arm; a second
+    // Ctrl-C forces an immediate exit. Without this, `run_headless` would
+    // block forever on a tool whose future never resolves.
+    let cancel = CancellationToken::new();
+    session.cancel = Some(cancel.clone());
+    let cancel_for_signal = cancel.clone();
+    tokio::spawn(async move {
+        // First Ctrl-C: ask the run loop to stop at the next await point it
+        // can interrupt (turn boundary, LLM `rx.recv()`, or tool select!).
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!(
+                "\n\x1b[2m[interrupting\u{2026} press Ctrl-C again to force quit]\x1b[0m"
+            );
+            cancel_for_signal.cancel();
+        }
+        // Second Ctrl-C: graceful stop did not satisfy the user; bail out.
+        let _ = tokio::signal::ctrl_c().await;
+        opencoder_session::tools::bg::cleanup_all();
+        std::process::exit(130);
+    });
     if images.is_empty() {
         opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
     } else {
@@ -115,8 +187,18 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         .await?;
     }
 
-    // cheap background title generation (small model) after the first round
-    generate_title(&session).await;
+    // cheap background title generation (small model) after the first round.
+    // This is a best-effort nicety: if the model is unreachable (e.g. the
+    // endpoint hangs) or the user already pressed Ctrl-C, never block the exit
+    // here. A 30 s cap is ample for a 64-token generation; on timeout/cancel
+    // the session simply keeps its default (empty) title.
+    if !cancel.is_cancelled() {
+        let _ = tokio::time::timeout(
+            Duration::from_secs(30),
+            generate_title(&session),
+        )
+        .await;
+    }
 
     eprintln!("\n\x1b[2m[session {}]\x1b[0m", session.id);
     eprintln!("\x1b[2m{}\x1b[0m", resume_hint(&session.id));
@@ -302,6 +384,9 @@ pub(crate) fn print_event(ev: &SessionEvent) {
         }
         SessionEvent::AgentSwitch(to) => {
             eprintln!("\n\x1b[35m[switched to {to} mode]\x1b[0m");
+        }
+        SessionEvent::ModelSwitch(to) => {
+            eprintln!("\n\x1b[35m[switched to model: {to}]\x1b[0m");
         }
         SessionEvent::Compaction(s) => {
             eprintln!("\n\x1b[33m[context compacted]\x1b[0m {}", truncate(s, 160));
@@ -631,5 +716,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved.as_deref(), Some(session_id));
+    }
+
+    #[test]
+    fn apply_model_override_sets_provider_model() {
+        let mut cfg = Config::default();
+        assert!(apply_model_override(
+            &mut cfg,
+            &Some("anthropic/claude-3".into())
+        ));
+        assert_eq!(cfg.model, "anthropic/claude-3");
+        assert_eq!(cfg.provider_id(), "anthropic");
+        assert_eq!(cfg.model_id(), "claude-3");
+        // no override -> no change
+        let mut cfg2 = Config::default();
+        let before = cfg2.model.clone();
+        assert!(!apply_model_override(&mut cfg2, &None));
+        assert_eq!(cfg2.model, before);
+    }
+
+    #[test]
+    fn reapply_resume_model_overrides_stored_model() {
+        use std::sync::Arc;
+        use opencoder_core::resolve_agent;
+        use opencoder_llm::{ChatStream, MockChatClient};
+        use opencoder_session::SessionState;
+        // simulate a session resumed with stored model "openai/gpt-4o-mini"
+        let cfg = Config {
+            model: "openai/gpt-4o-mini".into(),
+            ..Config::default()
+        };
+        let agent = resolve_agent("act").unwrap();
+        let mut s = SessionState::new(
+            "s1",
+            agent,
+            cfg,
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            std::path::PathBuf::from("/tmp"),
+        );
+        // explicit --model anthropic/claude-3 wins over stored model
+        let changed = reapply_resume_model(&mut s, &Some("anthropic/claude-3".into()));
+        assert_eq!(changed.as_deref(), Some("anthropic/claude-3"));
+        assert_eq!(s.model, "claude-3");
+        assert_eq!(s.config.provider_id(), "anthropic");
+        // no override -> no change, returns None
+        assert_eq!(reapply_resume_model(&mut s, &None), None);
     }
 }

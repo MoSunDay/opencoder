@@ -452,6 +452,7 @@ pub(crate) async fn dispatch_command(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     chat: &mut ChatView,
+    pending_images: &mut Vec<(String, String)>,
     running: &mut bool,
     follow: &mut bool,
     store: &Arc<dyn Store>,
@@ -506,6 +507,30 @@ pub(crate) async fn dispatch_command(
                     Err(_) => CacheSaltMenu::parent_only(agent_name, session_id, enabled),
                 },
             );
+        }
+        CommandOutcome::Dispatch(SlashAction::Clip) => {
+            match tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await {
+                Ok(Some(data_uri)) => {
+                    let n = pending_images.len() + 1;
+                    pending_images.push((data_uri, "clipboard.png".to_string()));
+                    chat.push_marker(Line::from(Span::styled(
+                        format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
+                        Style::default().fg(Color::Green),
+                    )));
+                }
+                Ok(None) => {
+                    chat.push_marker(Line::from(Span::styled(
+                        "[clip] no image in clipboard",
+                        Style::default().fg(Color::Yellow),
+                    )));
+                }
+                Err(e) => {
+                    chat.push_marker(Line::from(Span::styled(
+                        format!("[clip] clipboard read failed: {e}"),
+                        Style::default().fg(Color::Red),
+                    )));
+                }
+            }
         }
         CommandOutcome::Idle => {}
     }
@@ -762,7 +787,7 @@ pub(crate) async fn dispatch_plan_edit_key(
 
 #[cfg(test)]
 #[path = "app_loop_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "app_loop_bugfix_tests.rs"]

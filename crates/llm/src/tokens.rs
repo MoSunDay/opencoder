@@ -93,6 +93,7 @@ mod tests {
             tool_use_id: "call_1".into(),
             content: "x".repeat(400),
             is_error: false,
+            images: Vec::new(),
         });
         let total = estimate_messages(&[m]);
         assert!(

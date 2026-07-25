@@ -964,3 +964,28 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
     assert!(l_input.is_empty(), "Ctrl+L must clear the input");
     assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
 }
+
+#[test]
+fn mk_input_with_images_passes_images_through() {
+    let images = vec!["data:image/png;base64,abc".to_string()];
+    let input = crate::app_helpers::mk_input_with_images(
+        "s1",
+        opencoder_store::Delivery::Steer,
+        "hello",
+        &images,
+    );
+    assert_eq!(input.session_id, "s1");
+    assert_eq!(input.prompt, "hello");
+    assert_eq!(input.images, images);
+    assert_eq!(input.delivery, opencoder_store::Delivery::Steer);
+}
+
+#[test]
+fn mk_input_without_images_defaults_empty() {
+    let input = crate::app_helpers::mk_input(
+        "s2",
+        opencoder_store::Delivery::Queue,
+        "plain",
+    );
+    assert!(input.images.is_empty());
+}

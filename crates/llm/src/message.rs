@@ -35,9 +35,10 @@ fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
             tool_use_id,
             content,
             is_error,
+            images,
         } = block
         {
-            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": tool_result_body(content, *is_error) }));
+            out.push(tool_message(tool_use_id, content, *is_error, images));
         }
     }
     let text: String = msg
@@ -138,9 +139,10 @@ fn push_tool_results(out: &mut Vec<OpenAIMessage>, msg: &Message) {
             tool_use_id,
             content,
             is_error,
+            images,
         } = block
         {
-            out.push(json!({ "role": "tool", "tool_call_id": tool_use_id, "content": tool_result_body(content, *is_error) }));
+            out.push(tool_message(tool_use_id, content, *is_error, images));
         }
     }
 }
@@ -155,5 +157,25 @@ fn tool_result_body(content: &str, is_error: bool) -> String {
         format!("[error] {content}")
     } else {
         content.to_string()
+    }
+}
+
+/// Build one OpenAI `tool` message. When the tool returned images, emit a
+/// `content` array of `text` + `image_url` parts so vision models receive the
+/// attachments; otherwise keep the plain-string `content` (byte-for-byte
+/// identical to the pre-image output).
+fn tool_message(tool_use_id: &str, content: &str, is_error: bool, images: &[String]) -> Value {
+    let body = tool_result_body(content, is_error);
+    if images.is_empty() {
+        json!({ "role": "tool", "tool_call_id": tool_use_id, "content": body })
+    } else {
+        let mut parts: Vec<Value> = Vec::new();
+        if !body.is_empty() {
+            parts.push(json!({ "type": "text", "text": body }));
+        }
+        for url in images {
+            parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
+        }
+        json!({ "role": "tool", "tool_call_id": tool_use_id, "content": parts })
     }
 }

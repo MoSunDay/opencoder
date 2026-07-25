@@ -31,6 +31,7 @@ glob.workspace = true
 regex.workspace = true
 libc = "0.2"
 ulid.workspace = true
+base64.workspace = true
 # Content-extraction (ported from agent-browser read.rs) — light, always-on so
 # the extraction logic is unit-tested in the default build.
 url = "2"

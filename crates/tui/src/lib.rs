@@ -2,19 +2,25 @@ pub mod app;
 pub mod app_helpers;
 pub mod cache_salt_menu;
 pub mod chat;
+pub mod chat_plan;
+pub mod clipboard;
 pub mod command;
 pub mod composer;
 pub mod fmt;
+pub mod image_render;
+pub mod image_util;
 pub mod input;
 pub mod key_handler;
 pub mod keybind;
 pub mod markdown;
 pub mod menu;
+pub mod plan_edit;
 pub mod model_menu;
 pub mod queue_panel;
 pub mod render;
 pub mod selection;
 pub mod session_ui;
+pub mod supervisor;
 pub mod skill_token;
 pub mod task;
 pub mod terminal;
@@ -28,6 +34,7 @@ use anyhow::Result;
 pub struct TuiOpts {
     pub workdir: Option<PathBuf>,
     pub session: Option<String>,
+    pub model: Option<String>,
 }
 
 impl TuiOpts {
@@ -35,11 +42,17 @@ impl TuiOpts {
         TuiOpts {
             workdir,
             session: None,
+            model: None,
         }
     }
 
     pub fn with_session(mut self, session: Option<String>) -> Self {
         self.session = session;
+        self
+    }
+
+    pub fn with_model(mut self, model: Option<String>) -> Self {
+        self.model = model;
         self
     }
 }

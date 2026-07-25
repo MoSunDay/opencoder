@@ -30,6 +30,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "/compact",
         "手动压缩对话历史（总结早期消息，释放上下文窗口）",
     ),
+    ("/clip", "从剪贴板粘贴图片 (paste image from clipboard)"),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -40,6 +41,7 @@ pub enum SlashAction {
     Config,
     Compact,
     CacheSalt,
+    Clip,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -143,6 +145,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "model" | "mdl" => Some(SlashAction::Model),
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
+        "clip" | "cl" => Some(SlashAction::Clip),
         _ => None,
     }
 }
@@ -153,6 +156,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/model" => Some(SlashAction::Model),
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
+        "/clip" => Some(SlashAction::Clip),
         _ => None,
     }
 }
@@ -307,6 +311,8 @@ mod tests {
         assert_eq!(parse("/t"), Some(SlashAction::Task));
         assert_eq!(parse("/compact"), Some(SlashAction::Compact));
         assert_eq!(parse("/c"), Some(SlashAction::Compact));
+        assert_eq!(parse("/clip"), Some(SlashAction::Clip));
+        assert_eq!(parse("/cl"), Some(SlashAction::Clip));
         assert_eq!(parse("/"), Some(SlashAction::Task));
         assert_eq!(parse("/unknown"), None);
         assert_eq!(parse("hello"), None);

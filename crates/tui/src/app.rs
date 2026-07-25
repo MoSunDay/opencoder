@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,7 +22,7 @@ use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
-use crate::render::{render, MouseHits, Term};
+use crate::render::{MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::TerminalGuard;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
@@ -36,18 +37,12 @@ mod app_task;
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
 /// How long the plan/act switch flash stays visible, in anim ticks (~100ms each).
-const MODE_FLASH_TICKS: u32 = 15;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
 /// at this cadence (3 FPS), decoupling text layout from the fast spinner.
 const BODY_REFRESH_MS: u64 = 333;
 
-/// Whether a transient flash started at `start` is still visible at `now`,
-/// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
-/// stays correct across the u32 wraparound of `anim_tick`.
-pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
-    now.wrapping_sub(start) < ticks
-}
-
+#[cfg(test)]
+pub(crate) use app_loop::flash_visible;
 /// Copy-paste-ready command to resume a session by id.
 pub(crate) fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
@@ -68,7 +63,10 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         .workdir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let config = Config::load(&workdir)?;
+    let mut config = Config::load(&workdir)?;
+    if let Some(m) = &opts.model {
+        config.model = m.clone();
+    }
     let ep = startup_endpoint(&config)?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
         &ep.base_url,
@@ -123,7 +121,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
 
     let session_id = session.id.clone();
     let context_limit = session.config.context_limit();
-    let model_label = session.model.clone();
+    let model_label = session.config.model.clone();
 
     // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
     // hook it installs — restore raw/alt-screen/mouse/kitty state on ANY exit
@@ -192,11 +190,11 @@ async fn run_app(
         }
     };
     let mut input = String::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
     let mut cursor_idx: usize = 0;
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
     let mut running = false;
-    let mut pending_handoff: Option<String> = None;
     let mut run_elapsed_ms: u64 = 0;
     let mut last_clock = Instant::now();
     let mut cancelled = false;
@@ -204,6 +202,7 @@ async fn run_app(
     let mut show_help = false;
     let mut scroll: u16 = 0;
     let mut follow = true;
+    let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
@@ -254,11 +253,17 @@ async fn run_app(
 
     // Terminal input is collected by a dedicated OS thread (bounded
     // `poll`+`read`) and delivered here over `input_rx` — see `crate::input`.
-    // Unlike `crossterm::EventStream`, whose reader could wedge forever on a
-    // half-disambiguated Esc sequence under the Kitty protocol (freezing the
-    // whole loop, Ctrl+C/D included), the bounded poll wakes at least every
-    // 150ms, so this loop can never be starved of input.
-    let (mut input_rx, _input_handle) = spawn_input_pump();
+    //
+    // Liveness supervisor: crossterm 0.28's mio source busy-loops forever
+    // when the pty master closes (SSH drop / pane kill) — it holds the global
+    // event mutex, so our `poll(150ms)` never returns and the collector thread
+    // stops bumping its heartbeat. The supervisor (a separate OS thread, immune
+    // to runtime starvation) detects the stall + termination signals and restores
+    // the terminal + exits cleanly instead of leaving a frozen screen.
+    let heartbeat = crate::supervisor::Heartbeat::new();
+    let supervisor_active = Arc::new(AtomicBool::new(true));
+    crate::supervisor::spawn(heartbeat.clone(), Arc::clone(&supervisor_active));
+    let (mut input_rx, _input_handle) = spawn_input_pump(heartbeat);
     let mut anim_ticker = tokio::time::interval(Duration::from_millis(ANIM_TICK_MS));
     // Frame-rate limiter: redraw cadence is decided by the `/config` fps
     // (default 10 FPS). `Skip` prevents burst-fire catch-up after a stall.
@@ -308,7 +313,6 @@ async fn run_app(
             subagent_sys,
             sys_tokens,
             &config,
-            &model_label,
             &workdir,
         );
         // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
@@ -321,50 +325,15 @@ async fn run_app(
         let render_chat = display_chat_cached.as_ref().unwrap_or(display_chat);
         if dirty && render_pending {
             if !skip_next_render {
-                render(
-                    terminal,
-                    render_chat,
-                    &input,
-                    cursor_idx,
-                    &display_title,
-                    &display_status_agent,
-                    running,
-                    show_help,
-                    display_ctx,
-                    display_sys,
-                    context_limit,
-                    &status_model,
-                    &status,
-                    &chat.steer_items,
-                    &queue_items,
-                    &mut scroll,
-                    follow,
-                    anim_tick,
-                    mode_flash.as_ref().and_then(|(t, s)| {
-                        if pending_handoff.is_some() {
-                            Some("\u{2192} act (pending)")
-                        } else if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
-                            Some(t.as_str())
-                        } else {
-                            None
-                        }
-                    }),
-                    skill_menu.as_ref(),
-                    task_picker.as_ref(),
-                    command_menu.as_ref(),
-                    model_menu.as_ref(),
-                    cache_salt_menu.as_ref(),
-                    &mut hits,
-                    selection,
-                    copy_status.as_ref().and_then(|(msg, t)| {
-                        if t.elapsed() < Duration::from_secs(2) {
-                            Some(msg.as_str())
-                        } else {
-                            None
-                        }
-                    }),
-                    subagent_focus.is_some(),
-                    run_elapsed_ms,
+                app_loop::render_frame(
+                    terminal, render_chat, &plan_edit, &input, cursor_idx,
+                    &display_title, &display_status_agent, running, show_help,
+                    display_ctx, display_sys, context_limit, &status_model, &status,
+                    &chat.steer_items, &queue_items, &mut scroll, follow, anim_tick,
+                    &mode_flash, skill_menu.as_ref(), task_picker.as_ref(),
+                    command_menu.as_ref(), model_menu.as_ref(), cache_salt_menu.as_ref(),
+                    &mut hits, selection, &copy_status, &pending_images,
+                    subagent_focus.is_some(), run_elapsed_ms,
                 )?;
             }
             dirty = false;
@@ -390,6 +359,17 @@ async fn run_app(
                 match ev {
                     Event::Key(k) => {
                         copy_status = None;
+                        // Plan edit modal: intercept all keys while active.
+                        if plan_edit.is_some() {
+                            match app_loop::dispatch_plan_edit_key(
+                                &mut plan_edit, k, &mut chat, &cmd_tx, terminal,
+                            )
+                            .await
+                            {
+                                app_loop::LoopFlow::Quit => break,
+                                _ => continue,
+                            }
+                        }
                         // Task picker modal: intercept all keys while open.
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
@@ -533,7 +513,7 @@ async fn run_app(
                                             // the skill body injected into the system prompt.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
-                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger)).await
+                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, Vec::new())).await
                                             {
                                                 worker_dead(&mut chat);
                                                 break;
@@ -547,8 +527,10 @@ async fn run_app(
                                         }
                                     }
                                 } else if running {
+                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
+                                    pending_images.clear();
                                     if let Ok(seq) = store
-                                        .admit_input(&mk_input(&session_id, Delivery::Queue, &clean))
+                                        .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, &image_uris))
                                         .await
                                     {
                                         queue_items.push((seq, clean.clone()));
@@ -556,7 +538,9 @@ async fn run_app(
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
-                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean)).await
+                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
+                                    pending_images.clear();
+                                    if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
                                     {
                                         worker_dead(&mut chat);
                                         break;
@@ -576,7 +560,9 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Steer, clean)).await {
+                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
+                                    pending_images.clear();
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, &image_uris)).await {
                                         chat.steer_items.push((seq, clean.to_string()));
                                     }
                                     // Do NOT echo into the main transcript /
@@ -603,7 +589,9 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, clean)).await {
+                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
+                                    pending_images.clear();
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, &image_uris)).await {
                                         queue_items.push((seq, clean.to_string()));
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
@@ -622,7 +610,7 @@ async fn run_app(
                                 if matches!(
                                     app_loop::handle_switch_agent(
                                         name, &mut chat, &mut running, &mut follow, &mut input,
-                                        &mut cursor_idx, &mut pending_handoff, &mut mode_flash,
+                                        &mut cursor_idx, &mut mode_flash,
                                         anim_tick, &cmd_tx, &mut cancel, &mut sys_tokens,
                                         &workdir, &active_skill_body,
                                     )
@@ -638,7 +626,6 @@ async fn run_app(
                                 // transcript is preserved in full, unlike
                                 // Shift+Tab which collapses to the final plan.
                                 mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-                                pending_handoff = None;
                                 sys_tokens =
                                     sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
                                 let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
@@ -676,7 +663,6 @@ async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 cancel.cancel();
-                                pending_handoff = None; // cancel = explicit interrupt, no auto-handoff
                                 // Double-Esc hard-abort: also drop any pending
                                 // steer/queue inputs so they don't resurface on
                                 // resume. delete_input is idempotent.
@@ -691,6 +677,11 @@ async fn run_app(
                                 running = false;
                                 cancelled = true;
                                 follow = true;
+                            }
+                            KeyAction::EnterPlanEdit => {
+                                app_loop::enter_plan_edit(
+                                    &mut plan_edit, &chat, &mut mode_flash, anim_tick,
+                                );
                             }
                             KeyAction::OpenCommand => {
                                 command_menu = Some(CommandMenu::new());
@@ -723,7 +714,7 @@ async fn run_app(
                                 cancelled = true;
                                 drain_pending = true;
                             } else {
-                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new()))
+                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new()))
                                     .await;
                                 running = true;
                                 chat.begin_turn();
@@ -744,7 +735,7 @@ async fn run_app(
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(),
                             &mut model_menu, &mut command_menu, &mut input,
-                            &mut cursor_idx, &workdir,
+                            &mut cursor_idx, &mut pending_images, &workdir,
                         ) {
                             continue;
                         }
@@ -756,7 +747,7 @@ async fn run_app(
                 match app_loop::fold_ui_events(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
-                    &cmd_tx, &mut cancel, &mut pending_handoff, &mut evt_rx,
+                    &cmd_tx, &mut cancel, &mut evt_rx,
                 )
                 .await
                 {
@@ -780,6 +771,9 @@ async fn run_app(
         }
     }
 
+    // Disarm the liveness supervisor: once we drop the input pump its heartbeat
+    // stops advancing, which is expected during shutdown — not a wedge.
+    supervisor_active.store(false, Ordering::Relaxed);
     drop(cmd_tx);
     // The cancel issued on Quit should make the worker finish promptly. As a
     // last-resort guard against a tool/subagent that ignores cancellation,
@@ -790,9 +784,8 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, pre_key_intercept,
-    push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for, worker_dead,
-    MouseOutcome,
+    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, mk_input_with_images, pre_key_intercept, push_user,
+    resolve_and_warn, skill_trigger, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 
 #[cfg(test)]

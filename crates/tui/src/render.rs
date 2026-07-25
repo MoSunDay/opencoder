@@ -112,7 +112,9 @@ pub(crate) fn render<B: Backend>(
     hits: &mut MouseHits,
     selection: Option<crate::selection::SelRange>,
     copy_status: Option<&str>,
+    pending_images: &[(String, String)],
     input_disabled: bool,
+    plan_mode: Option<&str>,
     run_ms: u64,
 ) -> Result<()> {
     terminal.draw(|f| {
@@ -120,25 +122,42 @@ pub(crate) fn render<B: Backend>(
         let prompt_w = 2u16;
         let inner_w = area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
-        let composer_h = (input_rows + 2).min(area.height / 3);
+        let plan_active = plan_mode.is_some();
+        let pending = steer_items.len() + queue_items.len();
+        let queue_h = if plan_active {
+            0
+        } else if pending > 0 {
+            pending.min(3) as u16
+        } else {
+            0
+        };
+        let skill_h = if plan_active {
+            0
+        } else if skill_menu.is_some() {
+            8
+        } else {
+            0
+        };
+        let composer_h = if plan_active {
+            area.height.saturating_sub(queue_h + skill_h + 1)
+        } else {
+            (input_rows + 2).min(area.height / 3)
+        };
         let composer_inner_h = composer_h.saturating_sub(2).max(1);
         let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
         let max_scroll = input_rows.saturating_sub(composer_inner_h);
         let composer_scroll = (cur_row as u16)
             .saturating_sub(composer_inner_h.saturating_sub(1))
             .min(max_scroll);
-        let pending = steer_items.len() + queue_items.len();
-        let queue_h = if pending > 0 {
-            pending.min(3) as u16
-        } else {
-            0
-        };
-        let skill_h = if skill_menu.is_some() { 8 } else { 0 };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(3),
+                if plan_active {
+                    Constraint::Length(0)
+                } else {
+                    Constraint::Min(3)
+                },
                 Constraint::Length(queue_h),
                 Constraint::Length(skill_h),
                 Constraint::Length(composer_h),
@@ -150,21 +169,23 @@ pub(crate) fn render<B: Backend>(
         hits.queue_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
-        render_body(
-            f,
-            chunks[ci],
-            chat,
-            title,
-            scroll,
-            follow,
-            anim_tick,
-            &mut hits.body,
-            &mut hits.jump_btn,
-            &mut hits.top_btn,
-            &mut hits.thinking_btns,
-            &mut hits.subagent_btns,
-            selection,
-        );
+        if !plan_active {
+            render_body(
+                f,
+                chunks[ci],
+                chat,
+                title,
+                scroll,
+                follow,
+                anim_tick,
+                &mut hits.body,
+                &mut hits.jump_btn,
+                &mut hits.top_btn,
+                &mut hits.thinking_btns,
+                &mut hits.subagent_btns,
+                selection,
+            );
+        }
         ci += 1;
         if queue_h > 0 {
             crate::queue_panel::render_queue_panel(
@@ -182,7 +203,17 @@ pub(crate) fn render<B: Backend>(
             }
         }
         ci += 1;
-        render_composer(f, chunks[ci], input, composer_scroll, inner_w, prompt_w, input_disabled);
+        render_composer(
+            f,
+            chunks[ci],
+            input,
+            composer_scroll,
+            inner_w,
+            prompt_w,
+            if plan_mode.is_some() { &[] } else { pending_images },
+            input_disabled,
+            plan_mode,
+        );
         let composer_area = chunks[ci];
         ci += 1;
         render_status(
@@ -506,6 +537,7 @@ fn record_subagent_hits(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_composer(
     f: &mut Frame,
     area: Rect,
@@ -513,15 +545,15 @@ fn render_composer(
     scroll: u16,
     inner_w: u16,
     prompt_w: u16,
+    pending_images: &[(String, String)],
     disabled: bool,
+    plan_mode: Option<&str>,
 ) {
     if disabled {
         let dim = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::DIM);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(dim);
+        let block = Block::default().borders(Borders::ALL).border_style(dim);
         let inner = block.inner(area);
         f.render_widget(block, area);
         let hint = "\u{2190} esc / Ctrl+L to return";
@@ -534,9 +566,39 @@ fn render_composer(
         );
         return;
     }
-    let block = Block::default().borders(Borders::ALL);
+    let block = if let Some(label) = plan_mode {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(format!(" edit plan [{label}] "))
+    } else {
+        Block::default().borders(Borders::ALL)
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // Attachment indicator: show filenames of pending images above the input.
+    // Render the badge on the first inner line and shift the input area down by
+    // one row so the text is not overwritten.
+    let inner_input = if !pending_images.is_empty() {
+        let count = pending_images.len();
+        let names: Vec<&str> = pending_images.iter().map(|(_, n)| n.as_str()).collect();
+        let label = if count == 1 {
+            format!("\u{1f4ce} {}", names[0])
+        } else {
+            format!("\u{1f4ce} {} \u{00d7}{count}", names[0])
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                label,
+                Style::default().fg(Color::Yellow),
+            ))),
+            inner,
+        );
+        // Return area shifted down by 1 line for the input.
+        Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1))
+    } else {
+        inner
+    };
     // Pre-split the input into visual rows using the SAME `wrap_rows` model the
     // cursor math derives from, then render each row as an explicit `Line`
     // WITHOUT ratatui's own `.wrap()`. This is the fix for cursor misalignment
@@ -548,10 +610,15 @@ fn render_composer(
     for (ri, vr) in rows.iter().enumerate() {
         let mut spans: Vec<Span> = Vec::new();
         if ri == 0 {
+            let prompt_color = if plan_mode.is_some() {
+                Color::Yellow
+            } else {
+                Color::Cyan
+            };
             spans.push(Span::styled(
                 "\u{276f} ",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(prompt_color)
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -559,7 +626,7 @@ fn render_composer(
         spans.push(Span::raw(text));
         lines.push(Line::from(spans));
     }
-    f.render_widget(Paragraph::new(Text::from(lines)).scroll((scroll, 0)), inner);
+    f.render_widget(Paragraph::new(Text::from(lines)).scroll((scroll, 0)), inner_input);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -665,7 +732,11 @@ fn render_status(
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             format_run_duration(run_ms),
-            Style::default().fg(if running { Color::Yellow } else { Color::DarkGray }),
+            Style::default().fg(if running {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }),
         ));
     }
     spans.push(Span::raw("  "));

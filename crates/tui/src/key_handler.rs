@@ -145,6 +145,14 @@ pub(crate) fn handle_key(
                 }
                 return KeyAction::None;
             }
+            // Ctrl+U: switch act <-> plan mode WITHOUT clearing context
+            // or auto-executing (pure mode toggle, same as Ctrl+Shift+Tab).
+            // Preferred on terminals where Ctrl+Shift+Tab is captured by the
+            // OS/shell before reaching the app. Input is left untouched.
+            KeyCode::Char('u') => {
+                let next = if agent == "plan" { "act" } else { "plan" };
+                return KeyAction::SwitchAgentNoClear(next.into());
+            }
             _ => return KeyAction::None,
         }
     }

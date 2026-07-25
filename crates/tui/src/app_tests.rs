@@ -43,6 +43,41 @@ fn run_handle(
     )
 }
 
+/// Like `run_handle` but with input disabled (subagent-focus view), used to
+/// verify that mode-switch chords are correctly suppressed while browsing a
+/// subagent.
+fn run_handle_disabled(
+    k: KeyEvent,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    agent: &str,
+) -> KeyAction {
+    let history: Vec<String> = vec![];
+    let mut hist_idx = None;
+    let mut show_help = false;
+    let mut scroll = 0u16;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    handle_key(
+        k,
+        input,
+        cursor_idx,
+        &history,
+        &mut hist_idx,
+        false,
+        agent,
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        true,
+    )
+}
+
 /// Like `run_handle` but exposes the skill-menu state so `$`-trigger and modal
 /// behavior can be inspected.
 fn run_handle_menu(
@@ -243,6 +278,62 @@ fn ctrl_shift_tab_in_plan_mode_switches_without_clear() {
     // Input preserved — only mode toggles.
     assert_eq!(input, "keep me");
     assert_eq!(idx, 3);
+}
+
+#[test]
+fn ctrl_u_switches_mode_without_clear() {
+    // Ctrl+U is the preferred chord for the pure act<->plan mode toggle on
+    // terminals where Ctrl+Shift+Tab is captured by the OS/shell. It must
+    // behave exactly like Ctrl+Shift+Tab: switch mode, keep the transcript,
+    // and leave the input box untouched.
+    let mut input = String::from("draft text");
+    let mut idx = 5;
+    let action = run_handle(
+        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(
+        matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "plan"),
+        "Ctrl+U in act mode should switch to plan without clear"
+    );
+    assert_eq!(input, "draft text");
+    assert_eq!(idx, 5);
+
+    // plan -> act direction.
+    let mut input = String::from("keep me");
+    let mut idx = 3;
+    let action = run_handle(
+        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "plan",
+    );
+    assert!(
+        matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "act"),
+        "Ctrl+U in plan mode should switch to act without clear"
+    );
+    assert_eq!(input, "keep me");
+    assert_eq!(idx, 3);
+}
+
+#[test]
+fn ctrl_u_blocked_when_input_disabled() {
+    // In subagent-focus view (input_disabled) Ctrl+U must be a no-op, matching
+    // Ctrl+Shift+Tab's behaviour, so the parent agent is not switched while
+    // browsing a subagent.
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle_disabled(
+        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        "plan",
+    );
+    assert!(matches!(action, KeyAction::None));
 }
 
 #[test]

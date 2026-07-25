@@ -28,9 +28,13 @@ use ratatui::widgets::{Paragraph, Wrap};
 const DBL_CLICK_MS: u64 = 400;
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
-/// subagent view, and Ctrl+L / Ctrl+U collapses all thinking blocks / exits a
+/// subagent view, and Ctrl+L collapses all thinking blocks / exits a
 /// subagent view / clears the input. Returns `true` when the key was
 /// consumed (caller should `continue` to the next event).
+///
+/// Note: Ctrl+U is intentionally NOT handled here — it is a pure act<->plan
+/// mode toggle (see `handle_key`). Keeping it out of this intercept lets it
+/// switch mode without collapsing thinking or clearing the input box.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,
@@ -54,10 +58,11 @@ pub(crate) fn pre_key_intercept(
         *last_esc = None;
         return true;
     }
-    // Ctrl+L / Ctrl+U: collapse all thinking blocks, exit subagent view if in
-    // one, and clear the input box.
+    // Ctrl+L: collapse all thinking blocks, exit subagent view if in one, and
+    // clear the input box. (Ctrl+U used to alias this but is now a pure
+    // act<->plan mode toggle handled in `handle_key`.)
     if k.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(k.code, KeyCode::Char('l') | KeyCode::Char('u'))
+        && matches!(k.code, KeyCode::Char('l'))
     {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {

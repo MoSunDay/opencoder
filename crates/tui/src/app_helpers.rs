@@ -221,10 +221,6 @@ fn resolve_existing_path(candidate: &str, workdir: &Path) -> Option<PathBuf> {
     None
 }
 
-pub(crate) fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
-    mk_input_with_images(session_id, delivery, prompt, &[])
-}
-
 pub(crate) fn mk_input_with_images(
     session_id: &str,
     delivery: Delivery,
@@ -241,6 +237,16 @@ pub(crate) fn mk_input_with_images(
         admitted_seq: 0,
         promoted_seq: None,
     }
+}
+
+/// Drain pending clipboard/paste images into a plain URI vector, clearing the
+/// pending buffer in one step. Every submit path (text, pure-skill, steer,
+/// queue) uses this so an attached image is never silently dropped nor leaked
+/// onto a later, unrelated submission.
+pub(crate) fn drain_pending_images(pending: &mut Vec<(String, String)>) -> Vec<String> {
+    let uris: Vec<String> = pending.iter().map(|(u, _)| u.clone()).collect();
+    pending.clear();
+    uris
 }
 
 /// Build the synthetic prompt sent when a user submits ONLY a skill token

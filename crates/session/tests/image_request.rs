@@ -77,3 +77,45 @@ async fn image_attachment_reaches_request_body() {
         "the text part must accompany the image"
     );
 }
+
+#[tokio::test]
+async fn empty_text_with_image_still_recorded() {
+    // RC3 regression: an image-only prompt (empty text) must still produce a
+    // user message carrying the image in the request body. Previously the
+    // `!user_text.trim().is_empty()` guard dropped images when text was empty.
+    let mock = Arc::new(
+        MockChatClient::new().push_script(vec![LlmEvent::TextDelta("ok".into()), done("ok")]),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let (_dir, mut s) = session_with(client).await;
+
+    run_with_images(
+        &mut s,
+        String::new(),
+        vec!["data:image/png;base64,iVBOR=".to_string()],
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    let reqs = mock.requests();
+    assert!(
+        !reqs.is_empty(),
+        "at least one request must be captured for an image-only prompt"
+    );
+    let user = reqs[0]
+        .messages
+        .iter()
+        .find(|m| m["role"] == "user")
+        .expect("a user message for an image-only prompt");
+    assert!(
+        user["content"].is_array(),
+        "image-only user content must be an array"
+    );
+    let content = user["content"].as_array().unwrap();
+    assert!(
+        content.iter().any(|p| p["type"] == "image_url"
+            && p["image_url"]["url"] == "data:image/png;base64,iVBOR="),
+        "image must reach the request even with empty text: {content:?}"
+    );
+}

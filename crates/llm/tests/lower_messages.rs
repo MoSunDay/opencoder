@@ -129,10 +129,12 @@ fn image_detail_is_forwarded_when_present() {
 // --- tool-result images ---
 
 #[test]
-fn tool_result_with_image_lowers_to_content_array() {
-    // A ToolResult carrying an image must lower to a `tool` message whose
-    // `content` is an array of `text` + `image_url` parts, so vision models
-    // receive the attachment.
+fn tool_result_image_rehomes_to_user_message() {
+    // A ToolResult carrying an image must lower to:
+    //   1. a `tool` message with plain-STRING content (OpenAI spec requires a
+    //      string on the `tool` role), and
+    //   2. a following `role:"user"` message whose `content` array carries the
+    //      image as an `image_url` part (the only legal place for images).
     let msg = Message {
         id: "m1".into(),
         role: Role::Tool,
@@ -149,23 +151,32 @@ fn tool_result_with_image_lowers_to_content_array() {
         synthetic: false,
     };
     let out = lower_messages(&[msg]);
-    assert_eq!(out.len(), 1);
-    let expected = serde_json::json!({
-        "role": "tool",
-        "tool_call_id": "t1",
-        "content": [
-            { "type": "text", "text": "see image" },
-            { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBOR=" } }
-        ]
-    });
-    assert_eq!(
-        out[0], expected,
-        "image tool result must lower to content array"
+    assert_eq!(out.len(), 2, "tool string msg + rehomed user image msg");
+
+    let tool = &out[0];
+    assert_eq!(tool["role"], "tool");
+    assert_eq!(tool["tool_call_id"], "t1");
+    assert!(
+        tool["content"].is_string(),
+        "tool content must be a plain string (spec), got: {}",
+        tool["content"]
     );
+    assert_eq!(tool["content"].as_str().unwrap(), "see image");
+
+    let user = &out[1];
+    assert_eq!(user["role"], "user");
+    let content = user["content"]
+        .as_array()
+        .expect("rehomed user content must be an array");
+    assert!(content
+        .iter()
+        .any(|p| p["type"] == "text" && p["text"] == "[image returned by tool]"));
+    assert!(content.iter().any(|p| p["type"] == "image_url"
+        && p["image_url"]["url"] == "data:image/png;base64,iVBOR="));
 }
 
 #[test]
-fn tool_result_with_multiple_images_lowers_all_image_url_parts() {
+fn tool_result_with_multiple_images_rehomes_all() {
     let msg = Message {
         id: "m1".into(),
         role: Role::Tool,
@@ -185,7 +196,14 @@ fn tool_result_with_multiple_images_lowers_all_image_url_parts() {
         synthetic: false,
     };
     let out = lower_messages(&[msg]);
-    let content = out[0]["content"].as_array().expect("must be content array");
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0]["role"], "tool");
+    assert!(out[0]["content"].is_string());
+    assert_eq!(out[0]["content"].as_str().unwrap(), "two shots");
+
+    let user = &out[1];
+    assert_eq!(user["role"], "user");
+    let content = user["content"].as_array().expect("user content array");
     // [text, image_url, image_url]
     assert_eq!(content.len(), 3, "one text + two image_url parts");
     assert_eq!(content[0]["type"], "text");
@@ -196,9 +214,9 @@ fn tool_result_with_multiple_images_lowers_all_image_url_parts() {
 }
 
 #[test]
-fn error_tool_result_with_image_prefixes_text_and_keeps_image() {
-    // is_error must still produce the [error] prefix on the text part while
-    // the image_url part is forwarded unchanged.
+fn error_tool_result_image_rehomes_with_prefixed_string() {
+    // is_error must still produce the [error] prefix on the STRING tool content
+    // while the image is rehomed unchanged onto the trailing user turn.
     let msg = Message {
         id: "m1".into(),
         role: Role::Tool,
@@ -215,13 +233,26 @@ fn error_tool_result_with_image_prefixes_text_and_keeps_image() {
         synthetic: false,
     };
     let out = lower_messages(&[msg]);
-    let content = out[0]["content"].as_array().unwrap();
-    assert_eq!(content[0]["type"], "text");
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0]["role"], "tool");
+    assert!(out[0]["content"].is_string());
     assert!(
-        content[0]["text"].as_str().unwrap().starts_with("[error] "),
+        out[0]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("[error] "),
         "error text must be prefixed"
     );
-    assert_eq!(content[1]["image_url"]["url"], "https://x.test/e.png");
+    assert!(out[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("permission denied"));
+
+    let user = &out[1];
+    assert_eq!(user["role"], "user");
+    let content = user["content"].as_array().unwrap();
+    assert!(content.iter().any(|p| p["type"] == "image_url"
+        && p["image_url"]["url"] == "https://x.test/e.png"));
 }
 
 #[test]
@@ -255,9 +286,40 @@ fn text_only_tool_result_still_lowers_to_plain_string_content() {
 }
 
 #[test]
-fn user_embedded_tool_result_with_image_also_lowers_to_array() {
-    // The push_user path (Role::User embedding a ToolResult) must honour the
-    // image lowering just like the dedicated Role::Tool path.
+fn tool_message_content_is_always_string_even_with_image() {
+    // Regression guard: the `tool` role content is a string regardless of
+    // whether the tool returned images (strict providers HTTP-400 on an array).
+    let msg = Message {
+        id: "m1".into(),
+        role: Role::Tool,
+        blocks: vec![ContentBlock::ToolResult {
+            tool_use_id: "t1".into(),
+            content: "shot".into(),
+            is_error: false,
+            images: vec!["data:image/png;base64,AA==".into()],
+        }],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let out = lower_messages(&[msg]);
+    let tool = out
+        .iter()
+        .find(|v| v["role"] == "tool")
+        .expect("tool message present");
+    assert!(
+        tool["content"].is_string(),
+        "tool content must always be a string"
+    );
+}
+
+#[test]
+fn user_embedded_tool_result_image_rehomes_to_user_message() {
+    // The push_user path (Role::User embedding a ToolResult) must rehome the
+    // image just like the dedicated Role::Tool path: tool message keeps string
+    // content, image lands on a trailing user turn.
     let mut msg = Message {
         id: "m1".into(),
         role: Role::User,
@@ -279,12 +341,19 @@ fn user_embedded_tool_result_with_image_also_lowers_to_array() {
         .iter()
         .find(|v| v["role"] == "tool")
         .expect("a tool role message must be lowered");
-    let content = tool["content"].as_array().expect("must be content array");
-    assert_eq!(content.len(), 2, "[text, image_url]");
-    assert_eq!(content[0]["type"], "text");
-    assert_eq!(content[1]["type"], "image_url");
-    assert_eq!(
-        content[1]["image_url"]["url"],
-        "data:image/png;base64,iVBOR="
+    assert!(
+        tool["content"].is_string(),
+        "tool content must stay a string"
     );
+    assert_eq!(tool["content"].as_str().unwrap(), "see image");
+    // Exactly one user message carrying the rehomed image.
+    let user_msgs: Vec<_> = out.iter().filter(|v| v["role"] == "user").collect();
+    assert_eq!(
+        user_msgs.len(),
+        1,
+        "exactly one rehomed user image message"
+    );
+    let content = user_msgs[0]["content"].as_array().unwrap();
+    assert!(content.iter().any(|p| p["type"] == "image_url"
+        && p["image_url"]["url"] == "data:image/png;base64,iVBOR="));
 }

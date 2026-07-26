@@ -83,7 +83,7 @@ pub async fn run_with_registry(
     // submits (empty prompt with an active skill), inject a synthetic trigger
     // message so the model records a user turn and acts on the skill body in
     // the system prompt instead of treating it passively.
-    if !user_text.trim().is_empty() {
+    if !user_text.trim().is_empty() || !images.is_empty() {
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
     } else if session.skill_prompt_cloned().is_some() {

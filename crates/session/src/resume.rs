@@ -63,25 +63,48 @@ pub async fn resume(
     if let Some(hs) = meta.handoff_seq {
         if let Some(plan_display) = &meta.handoff_plan {
             let hs = hs as usize;
+            // The discarded plan-mode head is still in the store; re-derive its
+            // recent images and attach them to the handoff instruction so they
+            // survive resume.
+            let preserved_images = if hs < messages.len() {
+                crate::compaction::collect_head_images(&messages[..hs])
+            } else {
+                Vec::new()
+            };
             if hs < messages.len() {
                 messages = messages[hs..].to_vec();
             } else {
                 messages = Vec::new();
             }
-            let plan_msg = crate::plan_handoff::handoff_message(plan_display);
+            let mut plan_msg = crate::plan_handoff::handoff_message(plan_display);
+            for url in &preserved_images {
+                plan_msg
+                    .blocks
+                    .push(ContentBlock::Image { url: url.clone(), detail: None });
+            }
             messages.insert(0, plan_msg);
         }
     } else if let Some(skip) = meta.summary_seq {
+        let mut preserved_images: Vec<String> = Vec::new();
         if skip > 0 {
             let skip = skip as usize;
             if skip < messages.len() {
+                // The compacted head is still present in the store (compaction
+                // only sets summary_seq); re-derive its recent images here so
+                // they survive resume by attaching to the reconstructed summary.
+                preserved_images = crate::compaction::collect_head_images(&messages[..skip]);
                 messages = messages[skip..].to_vec();
             } else {
                 messages = Vec::new();
             }
         }
         if let Some(summary_text) = &meta.summary {
-            let summary_msg = crate::compaction::compaction_message(summary_text.clone());
+            let mut summary_msg = crate::compaction::compaction_message(summary_text.clone());
+            for url in &preserved_images {
+                summary_msg
+                    .blocks
+                    .push(ContentBlock::Image { url: url.clone(), detail: None });
+            }
             messages.insert(0, summary_msg);
         }
     }

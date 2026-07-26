@@ -30,6 +30,13 @@ fn push_system(out: &mut Vec<OpenAIMessage>, msg: &Message) {
 }
 
 fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
+    // Tool results embedded on a user message lower to `tool` messages whose
+    // `content` is always a plain string (the OpenAI spec requires the `tool`
+    // role to carry a string). Images a tool returned are rehomed to a fresh
+    // `role:"user"` turn placed right after the matching tool result(s) so
+    // vision models receive them as legal `image_url` parts — see
+    // `tool_image_user_message`.
+    let mut tool_images: Vec<String> = Vec::new();
     for block in &msg.blocks {
         if let ContentBlock::ToolResult {
             tool_use_id,
@@ -38,9 +45,14 @@ fn push_user(out: &mut Vec<OpenAIMessage>, msg: &Message) {
             images,
         } = block
         {
-            out.push(tool_message(tool_use_id, content, *is_error, images));
+            out.push(tool_message(tool_use_id, content, *is_error));
+            tool_images.extend_from_slice(images);
         }
     }
+    if let Some(img_msg) = tool_image_user_message(&tool_images) {
+        out.push(img_msg);
+    }
+
     let text: String = msg
         .blocks
         .iter()
@@ -134,6 +146,12 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
 }
 
 fn push_tool_results(out: &mut Vec<OpenAIMessage>, msg: &Message) {
+    // Emit every `tool` message with plain-string content (spec-compliant),
+    // collecting tool-returned images so they can be rehomed onto a trailing
+    // `role:"user"` turn immediately after the tool results — keeping the
+    // tool_call/tool_result pairing complete while delivering images to vision
+    // models.
+    let mut tool_images: Vec<String> = Vec::new();
     for block in &msg.blocks {
         if let ContentBlock::ToolResult {
             tool_use_id,
@@ -142,8 +160,12 @@ fn push_tool_results(out: &mut Vec<OpenAIMessage>, msg: &Message) {
             images,
         } = block
         {
-            out.push(tool_message(tool_use_id, content, *is_error, images));
+            out.push(tool_message(tool_use_id, content, *is_error));
+            tool_images.extend_from_slice(images);
         }
+    }
+    if let Some(img_msg) = tool_image_user_message(&tool_images) {
+        out.push(img_msg);
     }
 }
 
@@ -160,22 +182,33 @@ fn tool_result_body(content: &str, is_error: bool) -> String {
     }
 }
 
-/// Build one OpenAI `tool` message. When the tool returned images, emit a
-/// `content` array of `text` + `image_url` parts so vision models receive the
-/// attachments; otherwise keep the plain-string `content` (byte-for-byte
-/// identical to the pre-image output).
-fn tool_message(tool_use_id: &str, content: &str, is_error: bool, images: &[String]) -> Value {
+/// Build one OpenAI `tool` message. The `content` is **always** a plain string:
+/// the OpenAI Chat Completions spec requires the `tool` role to carry a string,
+/// and strict providers/proxies reject a `content` array with HTTP 400. Tool
+/// images are delivered separately via [`tool_image_user_message`].
+fn tool_message(tool_use_id: &str, content: &str, is_error: bool) -> Value {
     let body = tool_result_body(content, is_error);
+    json!({ "role": "tool", "tool_call_id": tool_use_id, "content": body })
+}
+
+/// Build a legal `role:"user"` message carrying tool-returned images.
+///
+/// The OpenAI `tool` role only accepts a string `content`, so images a tool
+/// returns (e.g. `view_image`) cannot ride on the `tool` message itself.
+/// They are rehomed here as `image_url` parts in a fresh user turn, placed
+/// immediately after the matching `tool` result(s). This keeps the
+/// tool-call / tool-result pairing intact (every `tool_call_id` still has its
+/// string `tool` message) while letting vision models receive the attachment
+/// as a spec-compliant multimodal user request. Returns `None` when there are
+/// no images so no spurious turn is emitted.
+fn tool_image_user_message(images: &[String]) -> Option<Value> {
     if images.is_empty() {
-        json!({ "role": "tool", "tool_call_id": tool_use_id, "content": body })
-    } else {
-        let mut parts: Vec<Value> = Vec::new();
-        if !body.is_empty() {
-            parts.push(json!({ "type": "text", "text": body }));
-        }
-        for url in images {
-            parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
-        }
-        json!({ "role": "tool", "tool_call_id": tool_use_id, "content": parts })
+        return None;
     }
+    let mut parts: Vec<Value> = Vec::new();
+    parts.push(json!({ "type": "text", "text": "[image returned by tool]" }));
+    for url in images {
+        parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
+    }
+    Some(json!({ "role": "user", "content": parts }))
 }

@@ -275,6 +275,7 @@ async fn run_loop(
                         name: tool_calls[i].name.clone(),
                         output: out.content.clone(),
                         is_error: out.is_error,
+                        images: out.images.clone(),
                     },
                 );
                 results.push((i, out));

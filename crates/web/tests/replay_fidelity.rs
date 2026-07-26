@@ -31,6 +31,7 @@ fn all_variants() -> Vec<SessionEvent> {
             name: "read".into(),
             output: "done".into(),
             is_error: false,
+            images: Vec::new(),
         },
         SessionEvent::AgentSwitch("act".into()),
         SessionEvent::Compaction("summary".into()),

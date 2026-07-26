@@ -174,6 +174,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                     tool_use_id,
                     content,
                     is_error,
+                    images,
                     ..
                 } = b
                 {
@@ -213,6 +214,14 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                                 output: out,
                             });
                         }
+                    }
+                    // Render tool-returned images inline after the text output.
+                    for url in images {
+                        let (filename, rendered_img) = crate::image_render::build_image_block(url);
+                        chat.blocks.push(ChatBlock::Image {
+                            filename,
+                            rendered: rendered_img,
+                        });
                     }
                 }
             }
@@ -702,5 +711,77 @@ mod tests {
             .collect();
         assert!(out0.contains("one"), "p1 output: {out0}");
         assert!(out1.contains("two"), "p2 output: {out1}");
+    }
+
+    // -----------------------------------------------------------------------
+    // P0: Tool-returned images render inline on the replay path.
+    // When a persisted Tool message carries images, replay must produce
+    // ChatBlock::Image blocks alongside the tool output.
+    // -----------------------------------------------------------------------
+
+    fn tiny_png_data_uri() -> String {
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==".into()
+    }
+
+    #[test]
+    fn replay_tool_message_with_images_renders_image_block() {
+        use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
+        let uri = tiny_png_data_uri();
+        let tool_msg = Message {
+            id: "m-tool".into(),
+            role: Role::Tool,
+            blocks: vec![ContentBlock::ToolResult {
+                tool_use_id: "t1".into(),
+                content: "Loaded image: cat.png (0.1 KiB)".into(),
+                is_error: false,
+                images: vec![uri],
+            }],
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: 0,
+            synthetic: false,
+        };
+        let chat = replay_messages("act", &[tool_msg]);
+        let images: Vec<_> = chat
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, ChatBlock::Image { .. }))
+            .collect();
+        assert_eq!(
+            images.len(),
+            1,
+            "replayed tool message with one image must produce one Image block"
+        );
+    }
+
+    #[test]
+    fn replay_tool_message_without_images_no_image_block() {
+        use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
+        let tool_msg = Message {
+            id: "m-tool2".into(),
+            role: Role::Tool,
+            blocks: vec![ContentBlock::ToolResult {
+                tool_use_id: "t2".into(),
+                content: "command output".into(),
+                is_error: false,
+                images: Vec::new(),
+            }],
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: 0,
+            synthetic: false,
+        };
+        let chat = replay_messages("act", &[tool_msg]);
+        let images: Vec<_> = chat
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, ChatBlock::Image { .. }))
+            .collect();
+        assert!(
+            images.is_empty(),
+            "tool message without images must not produce Image blocks"
+        );
     }
 }

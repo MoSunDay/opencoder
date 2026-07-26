@@ -26,6 +26,18 @@ pub fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
+/// Build a `(filename, rendered_lines)` pair suitable for a `ChatBlock::Image`
+/// from an image URL (data URI or http URL). Data URIs are decoded and
+/// rendered as half-block art; remote URLs yield a placeholder (empty lines)
+/// since we cannot fetch synchronously.
+pub fn build_image_block(url: &str) -> (String, Vec<Line<'static>>) {
+    let filename = crate::image_util::extract_filename(url);
+    let rendered = decode_data_uri(url)
+        .map(|bytes| render_image_halfblock(&bytes, 120))
+        .unwrap_or_default();
+    (filename, rendered)
+}
+
 /// Render image bytes as half-block `Line`s fitting within `max_width` cells.
 /// Each output line represents 2 pixel rows: the upper pixel row maps to the
 /// cell's foreground (▀ = upper pixel), the lower to background (▄ = lower).

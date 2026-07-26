@@ -121,9 +121,7 @@ mod tests {
     #[test]
     fn load_image_data_uri_generates_valid_uri() {
         // Minimal 1x1 PNG
-        let png_bytes: &[u8] = &[
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-        ];
+        let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), png_bytes).unwrap();
         let uri = load_image_data_uri(tmp.path()).unwrap();
@@ -147,9 +145,7 @@ mod tests {
 
     #[test]
     fn try_load_image_loads_image_file() {
-        let png_bytes: &[u8] = &[
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-        ];
+        let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
         std::fs::write(tmp.path(), png_bytes).unwrap();
         let path_str = tmp.path().to_str().unwrap();

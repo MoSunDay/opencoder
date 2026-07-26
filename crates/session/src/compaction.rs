@@ -6,8 +6,8 @@ use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 use opencoder_store::SessionPatch;
 
 use crate::prompt::{build_system, compaction_system_prompt, compaction_user_prompt};
-use crate::runner::SessionEvent;
 use crate::runner::await_cancel;
+use crate::runner::SessionEvent;
 use crate::SessionState;
 
 /// Decide whether to compact. Two signals are checked: the estimated tokens
@@ -480,22 +480,20 @@ mod tests {
 
         let cancel = CancellationToken::new();
         cancel.cancel();
-        let mock: Arc<dyn ChatStream> = Arc::new(
-            MockChatClient::new().with_default(vec![
-                LlmEvent::TextDelta("partial ".into()),
-                LlmEvent::TextDelta("summary".into()),
-                LlmEvent::Completed {
-                    text: "partial summary".into(),
-                    tool_calls: Vec::<CompletedToolCall>::new(),
-                    usage: Some(Usage {
-                        input_tokens: 5,
-                        output_tokens: 3,
-                        total_tokens: 8,
-                        ..Default::default()
-                    }),
-                },
-            ]),
-        );
+        let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
+            LlmEvent::TextDelta("partial ".into()),
+            LlmEvent::TextDelta("summary".into()),
+            LlmEvent::Completed {
+                text: "partial summary".into(),
+                tool_calls: Vec::<CompletedToolCall>::new(),
+                usage: Some(Usage {
+                    input_tokens: 5,
+                    output_tokens: 3,
+                    total_tokens: 8,
+                    ..Default::default()
+                }),
+            },
+        ]));
         let agent = resolve_agent("act").expect("act agent");
         let mut s = SessionState::new(
             "compact-cancel",
@@ -525,10 +523,10 @@ mod tests {
             "transcript must be untouched when compaction is cancelled"
         );
         // No synthetic compaction-summary message was prepended.
-        assert!(s.messages.iter().all(|m| {
-            !(m.synthetic
-                && m.text().starts_with("[Conversation summary so far]"))
-        }));
+        assert!(s
+            .messages
+            .iter()
+            .all(|m| { !(m.synthetic && m.text().starts_with("[Conversation summary so far]")) }));
         // The cancel arm emits an interrupted status before bailing.
         assert!(events
             .iter()

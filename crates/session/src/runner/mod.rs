@@ -15,7 +15,6 @@ use crate::compaction;
 use crate::tools::registry as build_registry;
 use crate::SessionState;
 
-
 mod event;
 mod execute;
 mod llm_call;
@@ -25,10 +24,10 @@ mod subagent;
 pub use event::SessionEvent;
 use event::{Sink, DOOM_THRESHOLD};
 use execute::execute_call;
-use llm_call::{core_usage, run_one_llm_call};
-use steer::{claim_one_queued, claim_steers};
-pub(crate) use steer::await_cancel;
 pub(crate) use execute::DEFAULT_TOOL_TIMEOUT;
+use llm_call::{core_usage, run_one_llm_call};
+pub(crate) use steer::await_cancel;
+use steer::{claim_one_queued, claim_steers};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.

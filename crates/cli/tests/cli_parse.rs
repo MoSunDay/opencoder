@@ -70,6 +70,32 @@ fn config_show_subcommand() {
 }
 
 #[test]
+fn config_set_subcommand_parsed() {
+    let cli = parse(&["opencoder", "config", "set", "anthropic/claude-3"]);
+    match cli.command {
+        Some(Command::Config {
+            sub: Some(ConfigSub::Set { model }),
+        }) => {
+            assert_eq!(model, "anthropic/claude-3");
+        }
+        other => panic!("expected ConfigSub::Set, got {other:?}"),
+    }
+}
+
+#[test]
+fn config_set_bare_model_parsed() {
+    let cli = parse(&["opencoder", "config", "set", "glm-5.2"]);
+    match cli.command {
+        Some(Command::Config {
+            sub: Some(ConfigSub::Set { model }),
+        }) => {
+            assert_eq!(model, "glm-5.2");
+        }
+        other => panic!("expected ConfigSub::Set, got {other:?}"),
+    }
+}
+
+#[test]
 fn session_subcommands() {
     let cli = parse(&["opencoder", "session", "list"]);
     assert!(matches!(

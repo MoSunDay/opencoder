@@ -297,7 +297,11 @@ mod tests {
         assert_eq!(body.len(), 2, "expected 2 code lines, got {ls:?}");
         for l in &ls {
             for s in &l.spans {
-                assert!(!s.content.contains('\n'), "literal newline in span: {:?}", s.content);
+                assert!(
+                    !s.content.contains('\n'),
+                    "literal newline in span: {:?}",
+                    s.content
+                );
             }
         }
     }
@@ -310,7 +314,11 @@ mod tests {
             .iter()
             .filter(|l| l.spans.iter().any(|s| s.content.starts_with('\u{2502}')))
             .collect();
-        assert_eq!(body.len(), 3, "expected 3 code lines (incl. blank), got {ls:?}");
+        assert_eq!(
+            body.len(),
+            3,
+            "expected 3 code lines (incl. blank), got {ls:?}"
+        );
     }
 
     #[test]
@@ -319,8 +327,16 @@ mod tests {
         let ls = render("```rust\r\nfn a()\r\nfn b()\r\n```");
         for l in &ls {
             for s in &l.spans {
-                assert!(!s.content.contains('\r'), "stray CR in span: {:?}", s.content);
-                assert!(!s.content.contains('\n'), "stray LF in span: {:?}", s.content);
+                assert!(
+                    !s.content.contains('\r'),
+                    "stray CR in span: {:?}",
+                    s.content
+                );
+                assert!(
+                    !s.content.contains('\n'),
+                    "stray LF in span: {:?}",
+                    s.content
+                );
             }
         }
         let body: Vec<&Line> = ls

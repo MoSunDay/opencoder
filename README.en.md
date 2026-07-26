@@ -163,7 +163,7 @@ Global options:
 | Append 1000 messages (transaction) | 30.5 ms → **0.031 ms/msg** | < 2 ms/msg |
 | Load 1000 messages | **2.4 ms** | < 50 ms |
 | List 200 sessions | **0.95 ms** | < 100 ms |
-| Full deterministic test suite | **~3 s / 1059 tests** | — |
+| Full deterministic test suite | **~3 s / 1076 tests** | — |
 
 See [`docs/perf.md`](docs/perf.md) for details.
 

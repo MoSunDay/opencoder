@@ -61,9 +61,7 @@ pub(crate) fn pre_key_intercept(
     // Ctrl+L: collapse all thinking blocks, exit subagent view if in one, and
     // clear the input box. (Ctrl+U used to alias this but is now a pure
     // act<->plan mode toggle handled in `handle_key`.)
-    if k.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(k.code, KeyCode::Char('l'))
-    {
+    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
                 view.collapse_all_thinking();

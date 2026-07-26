@@ -954,8 +954,14 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
 
     // Ctrl+U must pass through untouched (handled downstream as a mode toggle).
     let (u_consumed, u_input, u_cursor) = run(ctrl_u);
-    assert!(!u_consumed, "Ctrl+U must NOT be consumed by pre_key_intercept");
-    assert_eq!(u_input, "hello world", "Ctrl+U must leave the input untouched");
+    assert!(
+        !u_consumed,
+        "Ctrl+U must NOT be consumed by pre_key_intercept"
+    );
+    assert_eq!(
+        u_input, "hello world",
+        "Ctrl+U must leave the input untouched"
+    );
     assert_eq!(u_cursor, 5, "Ctrl+U must not move the cursor");
 
     // Ctrl+L still collapses thinking / clears the input.
@@ -982,10 +988,6 @@ fn mk_input_with_images_passes_images_through() {
 
 #[test]
 fn mk_input_without_images_defaults_empty() {
-    let input = crate::app_helpers::mk_input(
-        "s2",
-        opencoder_store::Delivery::Queue,
-        "plain",
-    );
+    let input = crate::app_helpers::mk_input("s2", opencoder_store::Delivery::Queue, "plain");
     assert!(input.images.is_empty());
 }

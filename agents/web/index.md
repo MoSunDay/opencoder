@@ -20,7 +20,7 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 ## 主流程
 POST /prompt（`src/api.rs`）：解析 body → load config → 建 ChatClient → `ensure_session_row` → `admit_and_drain` → 返回 `{admitted_seq}`（非阻塞）。
 GET /events：`events_after(after)` 重放 + 订阅 broadcast 实时转发（BroadcastStream，lag 客户端丢帧不阻塞 runner）。
-POST /agent|/model：更新 store meta + handle.overrides（下一轮 drain 生效）。
+POST /agent|/model：更新 store meta + handle.overrides（下一轮 drain 生效）。`POST /model` body 新增 `persist_default: bool`（`#[serde(default)]`=false）：false（默认）= session-only（**不写盘**，与 TUI `/model` 默认一致）；true=额外 `Config::save` 写全局默认到 opencoder.json，失败返 500。
 POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
 
 ## 依赖与接口

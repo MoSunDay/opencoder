@@ -23,6 +23,10 @@ pub struct ProviderList {
     pub selected: usize,
     /// `Some(i)` = confirming deletion of entry `i`.
     pub confirm_delete: Option<usize>,
+    /// `Some(patch)` = asking "save as default?" for the model switch whose
+    /// JSON merge-patch is `patch`. `y` persists to disk; anything else
+    /// applies session-only.
+    pub confirm_save_default: Option<serde_json::Value>,
     pub default_base_url: String,
 }
 
@@ -57,6 +61,7 @@ impl ProviderList {
             entries,
             selected,
             confirm_delete: None,
+            confirm_save_default: None,
             default_base_url: config.base_url_for(config.provider_id()),
         }
     }
@@ -80,6 +85,25 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
             _ => {}
         }
         return (ModelOutcome::Idle, Some(ModelMenu::List(list)));
+    }
+
+    // Save-as-default confirmation sub-state.
+    if let Some(patch) = list.confirm_save_default.take() {
+        match k.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                // Persist to disk as the new global default.
+                return (ModelOutcome::Save(patch), None);
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+                // Session-only: swap the model without touching opencoder.json.
+                return (ModelOutcome::SaveSessionOnly(patch), None);
+            }
+            _ => {
+                // Any other key re-arms the prompt and stays idle.
+                list.confirm_save_default = Some(patch);
+                return (ModelOutcome::Idle, Some(ModelMenu::List(list)));
+            }
+        }
     }
 
     match k.code {
@@ -112,8 +136,11 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
                     );
                     (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
                 } else {
+                    // Arm the "save as default?" prompt instead of switching
+                    // immediately.  Default (Enter/n) = session-only.
                     let json = switch_provider_json(&entry.name, &entry.model_id);
-                    (ModelOutcome::Save(json), None)
+                    list.confirm_save_default = Some(json);
+                    (ModelOutcome::Idle, Some(ModelMenu::List(list)))
                 }
             } else {
                 (ModelOutcome::Idle, Some(ModelMenu::List(list)))

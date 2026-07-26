@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
-use opencoder_session::{run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState};
+use opencoder_session::{
+    run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState,
+};
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -540,8 +542,12 @@ mod tests {
         ];
         sess.messages.push(msg);
 
-        let should_break =
-            process_cmd(UiCmd::EditPlan("edited plan text".to_string()), &mut sess, &evt_tx).await;
+        let should_break = process_cmd(
+            UiCmd::EditPlan("edited plan text".to_string()),
+            &mut sess,
+            &evt_tx,
+        )
+        .await;
         assert!(!should_break, "EditPlan must not break the worker loop");
 
         // Exactly one assistant message, now carrying the edited plan.
@@ -550,9 +556,10 @@ mod tests {
         assert_eq!(edited.text(), "edited plan text", "text must be replaced");
 
         // The Reasoning block survives the edit.
-        let has_reasoning = edited.blocks.iter().any(|b| {
-            matches!(b, ContentBlock::Reasoning { text } if text == "let me think")
-        });
+        let has_reasoning = edited
+            .blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Reasoning { text } if text == "let me think"));
         assert!(
             has_reasoning,
             "non-Text blocks must be preserved across the edit"
@@ -564,7 +571,10 @@ mod tests {
             .iter()
             .filter(|b| matches!(b, ContentBlock::Text { .. }))
             .count();
-        assert_eq!(text_count, 1, "old Text block must be replaced, not appended");
+        assert_eq!(
+            text_count, 1,
+            "old Text block must be replaced, not appended"
+        );
     }
 
     #[test]

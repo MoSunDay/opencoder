@@ -158,13 +158,62 @@ fn provider_list_builds_from_config() {
 }
 
 #[test]
-fn list_enter_switches_provider() {
+fn list_enter_arms_save_default_prompt() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    match handle_model_key(&mut slot, enter()) {
+    // Enter arms the "save as default?" prompt; it must NOT switch immediately.
+    let outcome = handle_model_key(&mut slot, enter());
+    assert!(
+        matches!(outcome, ModelOutcome::Idle),
+        "Enter should arm the prompt (Idle)"
+    );
+    assert!(slot.is_some(), "menu must stay open while prompting");
+}
+
+#[test]
+fn list_enter_then_y_saves_as_default() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
+    handle_model_key(&mut slot, enter());
+    match handle_model_key(&mut slot, key('y')) {
         ModelOutcome::Save(json) => {
             assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
         }
-        _ => panic!("Enter should Save"),
+        _ => panic!("y should Save (persist default)"),
+    }
+    assert!(slot.is_none(), "menu closes after Save");
+}
+
+#[test]
+fn list_enter_then_n_is_session_only() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
+    handle_model_key(&mut slot, enter());
+    match handle_model_key(&mut slot, key('n')) {
+        ModelOutcome::SaveSessionOnly(json) => {
+            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
+        }
+        _ => panic!("n should be SaveSessionOnly"),
+    }
+    assert!(slot.is_none(), "menu closes after session-only switch");
+}
+
+#[test]
+fn list_enter_then_enter_is_session_only() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
+    handle_model_key(&mut slot, enter());
+    match handle_model_key(&mut slot, enter()) {
+        ModelOutcome::SaveSessionOnly(json) => {
+            assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
+        }
+        _ => panic!("second Enter should be SaveSessionOnly"),
+    }
+}
+
+#[test]
+fn list_enter_then_esc_is_session_only() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
+    handle_model_key(&mut slot, enter());
+    match handle_model_key(&mut slot, esc()) {
+        ModelOutcome::SaveSessionOnly(_) => {}
+        _ => panic!("Esc during prompt should be SaveSessionOnly"),
     }
 }
 
@@ -276,7 +325,10 @@ fn provider_form_paste_into_api_key() {
     form.focus = ProviderField::ApiKey;
     form.paste_into("sk-pasted-secret");
     assert_eq!(form.api_key_input, "sk-pasted-secret");
-    assert!(form.api_key_edited, "paste should mark the api key as edited");
+    assert!(
+        form.api_key_edited,
+        "paste should mark the api key as edited"
+    );
     assert_eq!(form.resolve_api_key(), Some("sk-pasted-secret".into()));
 }
 
@@ -308,9 +360,13 @@ fn provider_form_paste_into_base_url() {
 
 #[test]
 fn model_menu_paste_routes_to_provider_form_field() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(
-        ProviderForm::from_existing("svc", "u", "m", "orig", vec![]),
-    ));
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
+        "svc",
+        "u",
+        "m",
+        "orig",
+        vec![],
+    )));
     {
         let f = match slot.as_mut() {
             Some(ModelMenu::Form(f)) => f,
@@ -338,7 +394,6 @@ fn model_menu_paste_is_a_noop_in_list() {
     }
     assert!(matches!(slot, Some(ModelMenu::List(_))));
 }
-
 
 // ── model_id fallback for unset provider model ────────────────────────────
 //

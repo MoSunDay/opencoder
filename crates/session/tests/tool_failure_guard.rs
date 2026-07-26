@@ -69,13 +69,7 @@ async fn make_session(config: Config, client: Arc<dyn ChatStream>) -> SessionSta
     // `hard_abort` integration test's pattern.
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    SessionState::new(
-        "test-session",
-        agent,
-        config,
-        client,
-        dir.keep(),
-    )
+    SessionState::new("test-session", agent, config, client, dir.keep())
 }
 
 #[tokio::test]
@@ -141,7 +135,7 @@ async fn success_between_failures_resets_counter() {
             .push_script(vec![bash_call("exit 5")]) // fail 3
             .push_script(vec![bash_call("exit 6")]) // fail 4
             .push_script(vec![bash_call("exit 7")]) // fail 5 → trip
-            .push_script(vec![done()]),             // should NOT reach
+            .push_script(vec![done()]), // should NOT reach
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;

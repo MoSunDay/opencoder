@@ -858,7 +858,8 @@ async fn start_turn_reports_false_when_worker_is_dead() {
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(8);
     drop(cmd_rx); // worker gone — channel closed
     let mut cancel = CancellationToken::new();
-    let ok = crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
+    let ok =
+        crate::app::start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt("hi".into(), Vec::new())).await;
     assert!(
         !ok,
         "start_turn must return false when the worker channel is closed"

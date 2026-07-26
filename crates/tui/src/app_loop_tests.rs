@@ -754,3 +754,6 @@ fn compute_display_status_model_with_effort_strips_prefix() {
     );
 }
 
+#[cfg(test)]
+#[path = "app_loop_session_only_tests.rs"]
+mod session_only_tests;

@@ -23,6 +23,21 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
             println!("{json}");
             Ok(())
         }
+        Some(ConfigSub::Set { model }) => {
+            let workdir = current_workdir(cli)?;
+            let patch = serde_json::json!({ "model": model });
+            let path =
+                Config::save(&workdir, &patch).context("failed to persist model to config")?;
+            let cfg = Config::load(&workdir)?;
+            println!(
+                "default model \u{2192} {} (provider: {}, id: {})",
+                cfg.model,
+                cfg.provider_id(),
+                cfg.model_id()
+            );
+            println!("saved \u{2192} {}", path.display());
+            Ok(())
+        }
     }
 }
 
@@ -370,5 +385,36 @@ mod tests {
         let store = LibsqlStore::open_memory().await.unwrap();
         let err = build_session_json(&store, "does-not-exist").await;
         assert!(err.is_err(), "missing session must error, not empty output");
+    }
+
+    #[tokio::test]
+    async fn config_set_persists_model_to_disk() {
+        use crate::{Cli, Command};
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workdir = tmp.path();
+        // Pre-create opencoder.json with an editable key so save_target
+        // resolves to this project-local file (never touches ~/.opencoder).
+        std::fs::write(workdir.join("opencoder.json"), r#"{"model":"old-model"}"#).unwrap();
+
+        let cli = Cli::parse_from([
+            "opencoder",
+            "--workdir",
+            workdir.to_str().unwrap(),
+            "config",
+            "set",
+            "openai/gpt-4o",
+        ]);
+        if let Some(Command::Config { sub }) = &cli.command {
+            super::config_dispatch(&cli, sub).await.unwrap();
+        } else {
+            panic!("expected Config command");
+        }
+
+        // Config file updated with the new model.
+        let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(cfg["model"], "openai/gpt-4o");
     }
 }

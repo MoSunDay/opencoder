@@ -685,8 +685,7 @@ async fn subagent_failure_surfaces_actual_error() {
             "must surface the real failure reason, got: {output}"
         );
         assert_ne!(
-            *output,
-            "subagent failed",
+            *output, "subagent failed",
             "must not collapse to the opaque generic banner"
         );
     }

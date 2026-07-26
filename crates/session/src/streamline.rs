@@ -170,7 +170,8 @@ fn trim_outer_blanks(s: &str) -> String {
 }
 
 fn line_is_blank(line: &str) -> bool {
-    line.chars().all(|c| c == ' ' || c == '\t' || c == '\n' || c == '\r')
+    line.chars()
+        .all(|c| c == ' ' || c == '\t' || c == '\n' || c == '\r')
 }
 
 #[cfg(test)]

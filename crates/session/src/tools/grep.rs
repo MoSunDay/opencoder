@@ -50,7 +50,15 @@ impl Tool for GrepTool {
         let mut results: Vec<String> = Vec::new();
         let mut visited = 0u32;
         let mut seen = HashSet::new();
-        walk(root, &re, &inc_re, &mut results, &mut visited, 1000, &mut seen);
+        walk(
+            root,
+            &re,
+            &inc_re,
+            &mut results,
+            &mut visited,
+            1000,
+            &mut seen,
+        );
         if results.is_empty() {
             return Ok(ToolOutput::ok("no matches"));
         }

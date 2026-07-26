@@ -192,7 +192,9 @@ impl Message {
                     out.push_str(name);
                     out.push_str(&serde_json::to_string(input).unwrap_or_default());
                 }
-                ContentBlock::ToolResult { content, images, .. } => {
+                ContentBlock::ToolResult {
+                    content, images, ..
+                } => {
                     out.push_str(content);
                     // Vision attachments returned by a tool cost ~hundreds of
                     // tokens regardless of payload size; count a fixed rough

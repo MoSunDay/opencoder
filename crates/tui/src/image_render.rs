@@ -46,19 +46,20 @@ fn render_dynamic_image(img: &image::DynamicImage, max_w: u32) -> Vec<Line<'stat
     if w == 0 || h == 0 {
         return Vec::new();
     }
-    let scale = if w > max_w { max_w as f64 / w as f64 } else { 1.0 };
+    let scale = if w > max_w {
+        max_w as f64 / w as f64
+    } else {
+        1.0
+    };
     let new_w = (w as f64 * scale).round().max(1.0) as u32;
     let new_h = (h as f64 * scale).round().max(1.0) as u32;
-    let resized = image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Nearest);
+    let resized =
+        image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Nearest);
     render_rgba_image(&resized, new_w, new_h)
 }
 
 /// Convert an RGBA pixel buffer to half-block `Line`s.
-fn render_rgba_image(
-    rgba: &image::RgbaImage,
-    width: u32,
-    height: u32,
-) -> Vec<Line<'static>> {
+fn render_rgba_image(rgba: &image::RgbaImage, width: u32, height: u32) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut y = 0u32;
     while y < height {
@@ -130,13 +131,23 @@ mod tests {
     #[test]
     fn render_image_halfblock_produces_lines() {
         // Create a small 2x2 red image
-        let img = image::RgbaImage::from_raw(2, 2, vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255]).unwrap();
+        let img = image::RgbaImage::from_raw(
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+            ],
+        )
+        .unwrap();
         let mut buf = Vec::new();
         image::codecs::png::PngEncoder::new(&mut buf)
             .write_image(img.as_raw(), 2, 2, image::ExtendedColorType::Rgba8)
             .unwrap();
         let lines = render_image_halfblock(&buf, 80);
-        assert!(!lines.is_empty(), "should produce at least 1 line for 2px height");
+        assert!(
+            !lines.is_empty(),
+            "should produce at least 1 line for 2px height"
+        );
         // 2 pixel rows → 1 half-block line
         assert_eq!(lines.len(), 1);
     }

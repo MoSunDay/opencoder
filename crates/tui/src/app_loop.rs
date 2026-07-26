@@ -29,6 +29,7 @@ use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::composer;
 use crate::model_menu::{handle_model_key, ConfigForm, ModelMenu, ModelOutcome, ProviderList};
+use crate::model_session_switch::switch_session;
 use crate::task::TaskPicker;
 use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
 
@@ -430,6 +431,11 @@ pub(crate) async fn handle_model_outcome(
                 }
             }
         }
+        ModelOutcome::SaveSessionOnly(json) => {
+            switch_session(json, config, client, cmd_tx, chat).await;
+            *model_label = config.model.clone();
+            *context_limit = config.context_limit();
+        }
         ModelOutcome::Cancel | ModelOutcome::Idle => {}
         ModelOutcome::Quit => {
             let _ = cmd_tx.send(UiCmd::Quit).await;
@@ -615,7 +621,6 @@ pub(crate) async fn handle_quit(
     }
     let _ = cmd_tx.send(UiCmd::Quit).await;
 }
-
 
 /// Handle a key while in plan-edit mode. Takes ownership of the `Option<PlanEdit>`
 /// via `take()` so there are no borrow conflicts. On `Exit`:

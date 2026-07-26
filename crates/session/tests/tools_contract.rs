@@ -5,8 +5,7 @@ use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
 use opencoder_session::tools::{
-    bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool, ls::ListTool,
-    write::WriteTool,
+    bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool, ls::ListTool, write::WriteTool,
 };
 use serde_json::json;
 
@@ -243,14 +242,18 @@ async fn bash_tool_hands_off_on_timeout() {
 
     // The grandchild should be alive and producing a heartbeat.
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-    assert!(heartbeat.exists(), "grandchild never ran — test setup invalid");
+    assert!(
+        heartbeat.exists(),
+        "grandchild never ran — test setup invalid"
+    );
     let s1 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
     let s2 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
     assert!(
         s2 > s1,
         "grandchild heartbeat stopped ({} -> {} bytes) — process killed prematurely",
-        s1, s2
+        s1,
+        s2
     );
 
     // Extract pid and wait for the output file to get [exit code:].
@@ -349,7 +352,6 @@ async fn bash_tool_output_file_captures_output_on_timeout() {
     let _ = std::fs::remove_file(&path);
 }
 
-
 #[cfg(unix)]
 #[tokio::test]
 async fn grep_follows_symlink_but_breaks_cycle() {
@@ -366,7 +368,10 @@ async fn grep_follows_symlink_but_breaks_cycle() {
         .await
         .unwrap();
     let count = out.content.matches("UNIQUE_NEEDLE").count();
-    assert_eq!(count, 1, "expected exactly one match (cycle not broken): {out:?}");
+    assert_eq!(
+        count, 1,
+        "expected exactly one match (cycle not broken): {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -388,7 +393,10 @@ async fn grep_includes_symlinked_directory() {
         )
         .await
         .unwrap();
-    assert!(out.content.contains("DEEP_NEEDLE"), "symlinked dir not searched: {out:?}");
+    assert!(
+        out.content.contains("DEEP_NEEDLE"),
+        "symlinked dir not searched: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -399,7 +407,11 @@ async fn grep_includes_symlinked_file() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("realfile.txt"), "FILE_NEEDLE").unwrap();
     std::fs::create_dir(dir.path().join("search")).unwrap();
-    symlink("../realfile.txt", dir.path().join("search").join("link.txt")).unwrap();
+    symlink(
+        "../realfile.txt",
+        dir.path().join("search").join("link.txt"),
+    )
+    .unwrap();
     let c = ctx(dir.path());
     let out = GrepTool
         .execute(
@@ -408,7 +420,10 @@ async fn grep_includes_symlinked_file() {
         )
         .await
         .unwrap();
-    assert!(out.content.contains("FILE_NEEDLE"), "symlinked file not searched: {out:?}");
+    assert!(
+        out.content.contains("FILE_NEEDLE"),
+        "symlinked file not searched: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -463,7 +478,10 @@ async fn glob_survives_multiple_self_referencing_symlinks() {
     // Result must not blow up toward the 500 cap — the deduped real dir is
     // entered once, so target.rs appears exactly once.
     let count = out.content.matches("target.rs").count();
-    assert_eq!(count, 1, "target.rs should appear once, got {count}: {out:?}");
+    assert_eq!(
+        count, 1,
+        "target.rs should appear once, got {count}: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -499,10 +517,7 @@ async fn glob_matches_normal_tree_parity_with_crate() {
             .map(|p: PathBuf| p.display().to_string())
             .collect();
         crate_results.sort();
-        let out = GlobTool
-            .execute(json!({"pattern": pat}), &c)
-            .await
-            .unwrap();
+        let out = GlobTool.execute(json!({"pattern": pat}), &c).await.unwrap();
         let mut tool_results: Vec<String> = if out.content == "no matches" {
             Vec::new()
         } else {

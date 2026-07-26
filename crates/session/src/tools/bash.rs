@@ -264,9 +264,21 @@ mod tests {
         let out = tool.execute(input, &ctx()).await.unwrap();
         assert!(!out.is_error, "expected success, got: {}", out.content);
         assert!(out.content.contains("hello"), "stdout: {}", out.content);
-        assert!(out.content.contains("[stderr]"), "stderr marker: {}", out.content);
-        assert!(out.content.contains("world"), "stderr text: {}", out.content);
-        assert!(out.content.contains("[exit code: 0]"), "exit code: {}", out.content);
+        assert!(
+            out.content.contains("[stderr]"),
+            "stderr marker: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("world"),
+            "stderr text: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("[exit code: 0]"),
+            "exit code: {}",
+            out.content
+        );
     }
 
     #[tokio::test]

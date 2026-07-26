@@ -245,7 +245,6 @@ impl SessionEvent {
     }
 }
 
-
 pub(super) const MAX_OUTPUT: usize = 4096;
 pub(super) const DOOM_THRESHOLD: usize = 3;
 

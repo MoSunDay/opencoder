@@ -40,7 +40,9 @@ pub async fn append_many(conn: &Connection, events: &[SessionEventRecord]) -> Re
         // reverse into emission order.
         let n = events.len() as i64;
         let stmt = conn
-            .prepare("SELECT seq FROM session_events WHERE session_id = ? ORDER BY seq DESC LIMIT ?")
+            .prepare(
+                "SELECT seq FROM session_events WHERE session_id = ? ORDER BY seq DESC LIMIT ?",
+            )
             .await?;
         let mut rows = stmt.query(params![session_id, n]).await?;
         let mut seqs = Vec::with_capacity(events.len());

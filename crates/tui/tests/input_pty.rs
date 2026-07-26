@@ -28,7 +28,8 @@ use common::PtyStdin;
 async fn lone_esc_is_delivered_within_bound() {
     let pty = PtyStdin::open();
 
-    let (mut rx, _handle) = opencoder_tui::input::spawn_input_pump(opencoder_tui::supervisor::Heartbeat::new());
+    let (mut rx, _handle) =
+        opencoder_tui::input::spawn_input_pump(opencoder_tui::supervisor::Heartbeat::new());
     // NOTE: `_handle` is intentionally detached (not joined). If the collector
     // ever wedged (the regression this family of tests guards), joining would
     // hang the test forever; detaching lets the recv-timeout fail fast and the

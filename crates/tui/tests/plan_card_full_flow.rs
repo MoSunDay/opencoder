@@ -135,7 +135,13 @@ async fn forward_order_agent_switch_reset_then_handoff_yields_one_plan_block() {
 
     // TranscriptReset handling: REPLACE the ChatView with a fresh replay
     // (this is what fold_ui_events does for TranscriptReset — NOT apply).
-    chat = replay_into_chat("act", std::slice::from_ref(&handoff_msg), &store, session_id).await;
+    chat = replay_into_chat(
+        "act",
+        std::slice::from_ref(&handoff_msg),
+        &store,
+        session_id,
+    )
+    .await;
     assert_eq!(
         plan_block_count(&chat),
         1,

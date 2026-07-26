@@ -33,8 +33,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use signal_hook::flag;
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+use signal_hook::flag;
 
 use crate::terminal::TerminalGuard;
 
@@ -215,6 +215,9 @@ mod tests {
     fn trip_reason_boundary_is_strictly_greater() {
         // Exactly at the wedge window is NOT a trip (off-by-one safety).
         assert_eq!(trip_reason(5_000, 0, false, true, 5_000), None);
-        assert_eq!(trip_reason(5_001, 0, false, true, 5_000), Some(Trip::InputWedge));
+        assert_eq!(
+            trip_reason(5_001, 0, false, true, 5_000),
+            Some(Trip::InputWedge)
+        );
     }
 }

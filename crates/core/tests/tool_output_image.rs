@@ -33,10 +33,7 @@ fn ok_and_err_produce_empty_images() {
 
 #[test]
 fn tool_output_with_images_roundtrips_through_serde() {
-    let out = ToolOutput::ok_with_images(
-        "see attached",
-        vec!["data:image/png;base64,YQ==".into()],
-    );
+    let out = ToolOutput::ok_with_images("see attached", vec!["data:image/png;base64,YQ==".into()]);
     let json = serde_json::to_string(&out).unwrap();
     let back: ToolOutput = serde_json::from_str(&json).unwrap();
     assert_eq!(back.content, "see attached");
@@ -63,5 +60,8 @@ fn old_tool_output_json_without_images_still_deserializes() {
     let back: ToolOutput = serde_json::from_str(legacy).unwrap();
     assert_eq!(back.content, "ok");
     assert!(!back.is_error);
-    assert!(back.images.is_empty(), "missing images key must default to empty");
+    assert!(
+        back.images.is_empty(),
+        "missing images key must default to empty"
+    );
 }

@@ -88,7 +88,11 @@ mod tests {
         let out = tool.execute(input, &ctx(dir.path().to_path_buf())).await;
 
         let result = out.expect("execute must not error for a readable image");
-        assert!(!result.is_error, "expected success, got: {}", result.content);
+        assert!(
+            !result.is_error,
+            "expected success, got: {}",
+            result.content
+        );
         assert!(
             !result.images.is_empty(),
             "image attachment must be present"
@@ -128,7 +132,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tool = ViewImageTool;
         let out = tool
-            .execute(json!({ "path": "nope.png" }), &ctx(dir.path().to_path_buf()))
+            .execute(
+                json!({ "path": "nope.png" }),
+                &ctx(dir.path().to_path_buf()),
+            )
             .await
             .unwrap();
         assert!(out.is_error, "nonexistent path must be an error");

@@ -62,7 +62,10 @@ pub enum ChatBlock {
     /// original markdown source so it can be edited in plan mode; `rendered`
     /// is the pre-computed markdown rendering for display.
     /// Not interactive post-handoff — purely informational context.
-    Plan { rendered: Vec<Line<'static>>, raw: String },
+    Plan {
+        rendered: Vec<Line<'static>>,
+        raw: String,
+    },
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]

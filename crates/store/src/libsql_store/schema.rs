@@ -192,9 +192,7 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
 /// index 1. `table` and `column` are code-controlled literals, so interpolating
 /// them into the SQL is safe.
 async fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
-    let stmt = conn
-        .prepare(&format!("PRAGMA table_info({table})"))
-        .await?;
+    let stmt = conn.prepare(&format!("PRAGMA table_info({table})")).await?;
     let mut rows = stmt.query(()).await?;
     while let Some(row) = rows.next().await? {
         let name: String = row.get::<String>(1)?;

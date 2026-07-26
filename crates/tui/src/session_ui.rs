@@ -244,7 +244,10 @@ pub async fn replay_into_chat(
         if let Some(plan) = &meta.handoff_plan {
             let rendered = crate::markdown::render(plan);
             if !rendered.is_empty() {
-                chat.blocks.push(ChatBlock::Plan { rendered, raw: plan.clone() });
+                chat.blocks.push(ChatBlock::Plan {
+                    rendered,
+                    raw: plan.clone(),
+                });
             }
         }
     }

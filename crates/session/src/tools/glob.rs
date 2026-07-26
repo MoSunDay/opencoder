@@ -79,7 +79,13 @@ impl Tool for GlobTool {
             let mut visited = 0u32;
             let mut seen: HashSet<PathBuf> = HashSet::new();
             walk(
-                &root, &compiled, &opts, dir_only, &mut out, &mut visited, &mut seen,
+                &root,
+                &compiled,
+                &opts,
+                dir_only,
+                &mut out,
+                &mut visited,
+                &mut seen,
             );
         }
         out.sort();
@@ -92,7 +98,10 @@ impl Tool for GlobTool {
             .cloned()
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(opencoder_core::tool::truncate_output(joined, ctx.max_output))
+        Ok(opencoder_core::tool::truncate_output(
+            joined,
+            ctx.max_output,
+        ))
     }
 }
 
@@ -184,8 +193,14 @@ mod tests {
     #[test]
     fn literal_root_stops_at_first_glob_component() {
         let base = Path::new("/work");
-        assert_eq!(literal_root("/work/src/**/*.rs", base), PathBuf::from("/work/src"));
-        assert_eq!(literal_root("/work/a/b/c.rs", base), PathBuf::from("/work/a/b/c.rs"));
+        assert_eq!(
+            literal_root("/work/src/**/*.rs", base),
+            PathBuf::from("/work/src")
+        );
+        assert_eq!(
+            literal_root("/work/a/b/c.rs", base),
+            PathBuf::from("/work/a/b/c.rs")
+        );
         assert_eq!(literal_root("/work/*.rs", base), PathBuf::from("/work"));
         assert_eq!(literal_root("*.rs", base), PathBuf::from("/work"));
     }

@@ -20,6 +20,11 @@ pub enum SessionEvent {
         name: String,
         output: String,
         is_error: bool,
+        /// Image attachments returned by a tool (data URIs or URLs), rendered
+        /// inline in the TUI transcript alongside the text output. Defaults to
+        /// empty when absent (backward-compatible with old persisted events).
+        #[serde(default)]
+        images: Vec<String>,
     },
     AgentSwitch(String),
     /// The active model was switched at runtime (e.g. via the `/model` menu
@@ -118,8 +123,9 @@ impl SessionEvent {
                 name,
                 output,
                 is_error,
+                images,
             } => {
-                serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error })
+                serde_json::json!({ "id": id, "name": name, "output": output, "is_error": is_error, "images": images })
             }
             SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
             SessionEvent::ModelSwitch(m) => serde_json::json!({ "model": m }),
@@ -179,6 +185,10 @@ impl SessionEvent {
                 name: data.get("name")?.as_str()?.to_string(),
                 output: data.get("output")?.as_str()?.to_string(),
                 is_error: data.get("is_error")?.as_bool().unwrap_or(false),
+                images: data
+                    .get("images")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default(),
             },
             "agent_switched" => SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string()),
             "model_switched" => SessionEvent::ModelSwitch(data.get("model")?.as_str()?.to_string()),
@@ -278,12 +288,14 @@ mod from_sse_tests {
                 name: "bash".into(),
                 output: "done".into(),
                 is_error: false,
+                images: Vec::new(),
             },
             SessionEvent::ToolEnd {
                 id: "t2".into(),
                 name: "bash".into(),
                 output: "boom".into(),
                 is_error: true,
+                images: Vec::new(),
             },
             SessionEvent::AgentSwitch("plan".into()),
             SessionEvent::ModelSwitch("openai/gpt-4o".into()),
@@ -348,5 +360,49 @@ mod from_sse_tests {
     fn from_sse_missing_field_is_none() {
         // tool_start without the required `name` field
         assert!(SessionEvent::from_sse("tool_start", serde_json::json!({"id":"x"})).is_none());
+    }
+
+    #[test]
+    fn tool_end_images_roundtrip_through_sse() {
+        let ev = SessionEvent::ToolEnd {
+            id: "img-1".into(),
+            name: "view_image".into(),
+            output: "Loaded image: cat.png".into(),
+            is_error: false,
+            images: vec![
+                "data:image/png;base64,iVBORw0KGgo=".into(),
+                "https://example.com/photo.jpg".into(),
+            ],
+        };
+        let kind = ev.sse_kind();
+        let data = ev.sse_data();
+        let back = SessionEvent::from_sse(kind, data).expect("roundtrip");
+        match back {
+            SessionEvent::ToolEnd { images, .. } => {
+                assert_eq!(images.len(), 2, "images must survive roundtrip");
+                assert_eq!(images[0], "data:image/png;base64,iVBORw0KGgo=");
+                assert_eq!(images[1], "https://example.com/photo.jpg");
+            }
+            other => panic!("expected ToolEnd, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_end_without_images_field_is_backward_compatible() {
+        // Old persisted events predate the `images` field. A tool_end SSE
+        // payload without the key must still deserialize (defaults to empty).
+        let data = serde_json::json!({
+            "id": "old",
+            "name": "bash",
+            "output": "done",
+            "is_error": false,
+        });
+        let ev = SessionEvent::from_sse("tool_end", data).expect("old event");
+        match ev {
+            SessionEvent::ToolEnd { images, .. } => {
+                assert!(images.is_empty(), "missing images field must default to empty");
+            }
+            other => panic!("expected ToolEnd, got {other:?}"),
+        }
     }
 }

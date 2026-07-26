@@ -49,7 +49,7 @@ impl ChatView {
                 name,
                 output,
                 is_error,
-                ..
+                images,
             } => {
                 if name == "task" {
                     return;
@@ -80,6 +80,14 @@ impl ChatView {
                             Style::default().fg(Color::Cyan),
                         )),
                         output: out,
+                    });
+                }
+                // Render tool-returned images inline after the text output.
+                for url in images {
+                    let (filename, rendered_img) = crate::image_render::build_image_block(url);
+                    self.blocks.push(ChatBlock::Image {
+                        filename,
+                        rendered: rendered_img,
                     });
                 }
             }

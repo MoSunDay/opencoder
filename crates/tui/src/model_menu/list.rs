@@ -35,10 +35,13 @@ impl ProviderList {
             .map(|(name, p)| ProviderEntry {
                 name: name.clone(),
                 base_url: p.base_url.clone(),
-                model_id: p
-                    .model
-                    .clone()
-                    .unwrap_or_else(|| config.model_id().to_string()),
+                model_id: p.model.clone().unwrap_or_else(|| {
+                    if name == active {
+                        config.model_id().to_string()
+                    } else {
+                        String::new()
+                    }
+                }),
                 api_key: p.api_key.clone().unwrap_or_default(),
                 headers: p
                     .headers
@@ -95,9 +98,23 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
             (ModelOutcome::Idle, Some(ModelMenu::List(list)))
         }
         KeyCode::Enter => {
-            if let Some(entry) = list.entries.get(list.selected) {
-                let json = switch_provider_json(&entry.name, &entry.model_id);
-                (ModelOutcome::Save(json), None)
+            if let Some(entry) = list.entries.get(list.selected).cloned() {
+                if entry.model_id.is_empty() {
+                    // Provider has no model set — guide the user to fill it in
+                    // rather than emitting a suspicious "name/" switch that
+                    // would be rejected downstream.
+                    let form = ProviderForm::from_existing(
+                        &entry.name,
+                        &entry.base_url,
+                        &entry.model_id,
+                        &entry.api_key,
+                        entry.headers,
+                    );
+                    (ModelOutcome::Idle, Some(ModelMenu::Form(form)))
+                } else {
+                    let json = switch_provider_json(&entry.name, &entry.model_id);
+                    (ModelOutcome::Save(json), None)
+                }
             } else {
                 (ModelOutcome::Idle, Some(ModelMenu::List(list)))
             }

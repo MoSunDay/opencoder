@@ -233,9 +233,14 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
             let confirming = list.confirm_delete == Some(i);
             let mark = if entry.active { "\u{25cf}" } else { " " };
             let prefix = if confirming { "?" } else { " " };
+            let model_display = if entry.model_id.is_empty() {
+                "(unset)"
+            } else {
+                entry.model_id.as_str()
+            };
             let text = format!(
                 "{}{} {:<13} {:<30} {}",
-                prefix, mark, entry.name, entry.base_url, entry.model_id
+                prefix, mark, entry.name, entry.base_url, model_display
             );
             let style = if confirming {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)

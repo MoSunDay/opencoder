@@ -63,12 +63,19 @@ impl TerminalGuard {
         let main_thread = std::thread::current().id();
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
+            // C1: structured panic tracing for observability.
+            tracing::error!(
+                panic = %info,
+                thread = ?std::thread::current().name(),
+                "panic caught by TerminalGuard hook"
+            );
             if std::thread::current().id() == main_thread {
                 Self::hook_body(&Self::restore, &prev, info);
             } else {
-                // Worker thread panic: chain to the previous hook without
-                // restoring the terminal (main loop may still be rendering).
-                prev(info);
+                // C4: Worker thread panic — redirect to a log file instead of
+                // calling `prev(info)` (the default hook prints to stderr,
+                // which corrupts the alternate-screen terminal display).
+                Self::write_panic_log(info);
             }
         }));
 
@@ -84,6 +91,28 @@ impl TerminalGuard {
         let mut out = std::io::stdout();
         let _ = out.write_all(buf.as_bytes());
         let _ = out.flush();
+    }
+
+    /// Best-effort redirect of a worker-thread panic message to a log file,
+    /// avoiding the stderr output of the default hook that corrupts the
+    /// alternate-screen terminal (C4).
+    fn write_panic_log(info: &dyn fmt::Display) {
+        let mut path = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+        path.push("opencoder");
+        path.push("tui-panic.log");
+        let _ = std::fs::create_dir_all(&path);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            use std::io::Write;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(f, "[{now}] {info}");
+        }
     }
 
     /// The panic-hook body in isolation: restore the terminal first, then chain

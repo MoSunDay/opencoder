@@ -20,6 +20,7 @@ pub mod model_session_switch;
 pub mod plan_edit;
 pub mod queue_panel;
 pub mod render;
+pub mod render_viewport;
 pub mod selection;
 pub mod session_ui;
 pub mod skill_token;

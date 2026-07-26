@@ -1,9 +1,9 @@
 //! Buffered event persistence for high-frequency session surfaces (TUI / web /
 //! subagent child streams).
 //!
-//! A single background flusher drains an unbounded channel of
-//! [`SessionEventRecord`]s, batching the high-frequency delta variants
-//! (`TextDelta` / `ReasoningDelta`, both coarse-mapped to
+//! A single background flusher drains a bounded channel (capacity
+//! [`CAPACITY`]) of [`SessionEventRecord`]s, batching the high-frequency
+//! delta variants (`TextDelta` / `ReasoningDelta`, both coarse-mapped to
 //! [`EventKind::TextDelta`]) into one transactional [`Store::append_events`]
 //! call. Every other event flushes any pending deltas first, then persists
 //! itself — so structural events are never reordered or coalesced, and a turn
@@ -33,25 +33,41 @@ const DELTA_BATCH: usize = 512;
 /// batch size against the crash window (un-flushed tail of the live turn).
 const DELTA_BYTES: usize = 8 * 1024;
 
-/// A clonable handle that enqueues session events into an ordered, unbounded
-/// buffer drained by a single [`spawn_event_flusher`] task. Cheap to clone
-/// (shares one channel) so a run closure and the surrounding one-off emitters
-/// in the same turn share the exact same ordered persistence path.
+/// Bounded-channel capacity for the event buffer. Bounds peak memory if the
+/// flusher falls behind a slow DB: once full, delta fragments (`TextDelta` /
+/// `ReasoningDelta`, both coarse-mapped to [`EventKind::TextDelta`]) are
+/// dropped on `push` (lossy display-only tail) while structural events still
+/// surface their backpressure error to the caller. Large enough that under
+/// normal flush cadence (O(turn) writes) the channel never fills.
+pub const CAPACITY: usize = 4096;
+
+/// A clonable handle that enqueues session events into an ordered, bounded
+/// (capacity [`CAPACITY`]) buffer drained by a single [`spawn_event_flusher`]
+/// task. Cheap to clone (shares one channel) so a run closure and the
+/// surrounding one-off emitters in the same turn share the exact same ordered
+/// persistence path.
 #[derive(Clone)]
 pub struct EventSink {
-    tx: mpsc::UnboundedSender<SessionEventRecord>,
+    tx: mpsc::Sender<SessionEventRecord>,
     session_id: String,
 }
 
 impl EventSink {
-    /// Build a persistence record for `sev` and enqueue it. Never blocks (the
-    /// channel is unbounded), so it is safe to call from a sync event callback.
-    /// Returns `Err(rec)` only if the flusher has already exited (channel
-    /// closed) — i.e. after the run ended; such tail events are dropped.
+    /// Build a persistence record for `sev` and enqueue it. Uses `try_send`
+    /// (sync, non-blocking) so it is safe to call from a sync event callback.
+    /// On a full channel (slow-DB backpressure) delta variants (`TextDelta` /
+    /// `ReasoningDelta`, both coarse-mapped to [`EventKind::TextDelta`]) are
+    /// silently dropped — the authoritative text still lands via the per-turn
+    /// `messages` append and `TurnDone` re-render, so only a momentary display
+    /// gap results. Structural events return [`TrySendError::Full`] so callers
+    /// can decide (in practice the flusher drains fast enough that this never
+    /// fires for them). Returns [`TrySendError::Closed`] only if the flusher
+    /// has already exited (channel closed) — i.e. after the run ended; such
+    /// tail events are dropped.
     pub fn push(
         &self,
         sev: &SessionEvent,
-    ) -> Result<(), mpsc::error::SendError<SessionEventRecord>> {
+    ) -> Result<(), mpsc::error::TrySendError<SessionEventRecord>> {
         let rec = SessionEventRecord {
             session_id: self.session_id.clone(),
             kind: sev.coarse_kind(),
@@ -60,7 +76,27 @@ impl EventSink {
             seq: None,
             sse_kind: Some(sev.sse_kind().to_string()),
         };
-        self.tx.send(rec)
+        match self.tx.try_send(rec) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(rec)) => {
+                // Delta events (TextDelta/ReasoningDelta) are safe to drop —
+                // the authoritative text persists via the per-turn messages
+                // append, and TurnDone reconstruction calls finalize_assistant
+                // which re-renders from raw text. Dropping a few token
+                // fragments only causes a momentary display gap.
+                if rec.kind == EventKind::TextDelta {
+                    // Silently drop — deltas are redundant
+                    Ok(())
+                } else {
+                    // Structural events should not be dropped. Return the
+                    // error so callers can decide (currently all use
+                    // `let _ =`). In practice the flusher drains fast enough
+                    // that this never fires for structural events.
+                    Err(mpsc::error::TrySendError::Full(rec))
+                }
+            }
+            Err(e @ mpsc::error::TrySendError::Closed(_)) => Err(e),
+        }
     }
 }
 
@@ -75,7 +111,7 @@ pub fn spawn_event_flusher(
     store: Option<Arc<dyn Store>>,
     session_id: String,
 ) -> (EventSink, JoinHandle<()>) {
-    let (tx, rx) = mpsc::unbounded_channel::<SessionEventRecord>();
+    let (tx, rx) = mpsc::channel::<SessionEventRecord>(CAPACITY);
     let sink = EventSink {
         tx,
         session_id: session_id.clone(),
@@ -94,7 +130,7 @@ pub fn spawn_event_flusher(
 /// child payload is the whole event, not `sse_data`) but share this drain.
 pub async fn run_flusher(
     store: Option<Arc<dyn Store>>,
-    mut rx: mpsc::UnboundedReceiver<SessionEventRecord>,
+    mut rx: mpsc::Receiver<SessionEventRecord>,
 ) {
     let Some(store) = store else {
         // No durable store: drain to completion so the buffer never pins memory.
@@ -372,6 +408,40 @@ mod tests {
         for _ in 0..100 {
             let _ = sink.push(&SessionEvent::TextDelta("z".into()));
         }
+        drop(sink);
+        let _ = flusher.await;
+    }
+
+    // Under a saturated bounded channel (slow-DB backpressure) a `TextDelta`
+    // must be silently dropped (display-only — the authoritative text lands via
+    // the per-turn messages append), while a structural event must surface
+    // `Full` so a caller can react instead of silently losing it.
+    //
+    // `#[tokio::test]` drives a current-thread runtime, and the fill loop + the
+    // two probes below are fully synchronous (no `await` between them), so the
+    // spawned flusher task cannot be scheduled mid-probe — the channel fills to
+    // exactly `CAPACITY` deterministically before the overflow probes run.
+    #[tokio::test]
+    async fn push_drops_delta_but_surfaces_structural_on_full_channel() {
+        let (_dir, store) = fresh().await;
+        make_session(&store, "s").await;
+        let (sink, flusher) =
+            spawn_event_flusher(Some(store.clone() as Arc<dyn Store>), "s".into());
+
+        // Saturate the channel up to its capacity (flusher never runs: no await).
+        for _ in 0..CAPACITY {
+            let _ = sink.push(&SessionEvent::TextDelta("x".into()));
+        }
+        // Capacity+1 delta → channel full → silently dropped (Ok).
+        let r = sink.push(&SessionEvent::TextDelta("overflow".into()));
+        assert!(r.is_ok(), "delta under backpressure must be silently dropped");
+        // A structural event under the same backpressure must surface `Full`.
+        let r = sink.push(&SessionEvent::Done);
+        assert!(
+            matches!(r, Err(mpsc::error::TrySendError::Full(_))),
+            "structural event under backpressure must return Full"
+        );
+
         drop(sink);
         let _ = flusher.await;
     }

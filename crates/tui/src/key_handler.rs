@@ -46,7 +46,7 @@ pub(crate) fn handle_key(
     running: bool,
     agent: &str,
     show_help: &mut bool,
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: &mut bool,
     last_esc: &mut Option<Instant>,
     skill_menu: &mut Option<SkillMenu>,
@@ -170,6 +170,13 @@ pub(crate) fn handle_key(
             // keyboard protocol crossterm may report the raw control char
             // `\u{16}` (SYN) with the CONTROL modifier set.
             KeyCode::Char('v') | KeyCode::Char('\u{16}') => return KeyAction::Clip,
+            // B4: Ctrl+C cancels the running task (equivalent to double-Esc).
+            // Under raw mode Ctrl+C arrives as the ETX character (\u{3}),
+            // not SIGINT, so it does not conflict with the supervisor's
+            // signal handling. Also handled below via the raw-ETX fallback.
+            KeyCode::Char('c') => {
+                return if running { KeyAction::Cancel } else { KeyAction::None };
+            }
             _ => return KeyAction::None,
         }
     }
@@ -319,7 +326,7 @@ pub(crate) fn handle_key(
 
 /// Handle body-scroll keys (PageUp / PageDown) uniformly.
 /// Returns `true` when the key was consumed and scroll/follow updated.
-pub(crate) fn apply_scroll(k: &KeyEvent, scroll: &mut u16, follow: &mut bool) -> bool {
+pub(crate) fn apply_scroll(k: &KeyEvent, scroll: &mut u32, follow: &mut bool) -> bool {
     match k.code {
         KeyCode::PageUp => {
             *scroll = scroll.saturating_sub(20);
@@ -366,7 +373,7 @@ mod tests {
 
     #[test]
     fn apply_scroll_page_up() {
-        let mut scroll = 50u16;
+        let mut scroll = 50u32;
         let mut follow = true;
         let k = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
         assert!(apply_scroll(&k, &mut scroll, &mut follow));
@@ -376,7 +383,7 @@ mod tests {
 
     #[test]
     fn apply_scroll_page_down() {
-        let mut scroll = 50u16;
+        let mut scroll = 50u32;
         let mut follow = false;
         let k = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
         assert!(apply_scroll(&k, &mut scroll, &mut follow));
@@ -385,7 +392,7 @@ mod tests {
 
     #[test]
     fn apply_scroll_char_not_consumed() {
-        let mut scroll = 50u16;
+        let mut scroll = 50u32;
         let mut follow = true;
         let k = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         assert!(!apply_scroll(&k, &mut scroll, &mut follow));
@@ -400,7 +407,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -433,7 +440,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -465,7 +472,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 50u16;
+        let mut scroll = 50u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -499,7 +506,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -531,7 +538,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -563,7 +570,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -617,7 +624,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -714,7 +721,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -752,7 +759,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -786,7 +793,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -820,7 +827,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;
@@ -854,7 +861,7 @@ mod tests {
         let history: Vec<String> = Vec::new();
         let mut hist_idx: Option<usize> = None;
         let mut show_help = false;
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut follow = true;
         let mut last_esc: Option<Instant> = None;
         let mut skill_menu: Option<SkillMenu> = None;

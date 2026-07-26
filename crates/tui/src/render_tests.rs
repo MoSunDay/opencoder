@@ -17,14 +17,14 @@ fn thinking_view() -> ChatView {
 #[test]
 fn collapsed_header_visible_gets_hit_rect() {
     let v = thinking_view();
-    let lines = v.flatten();
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     // Header is the first line (line index 0).
     let headers = v.thinking_headers();
     assert_eq!(headers.len(), 1);
     assert_eq!(headers[0].header_line_idx, 0);
 
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].block_idx, headers[0].block_idx);
     // screen_y = y0 + (0 - 0) = 2; full text width.
@@ -38,8 +38,9 @@ fn expanded_header_row_unchanged() {
     let mut v = thinking_view();
     v.toggle_thinking_at(v.thinking_headers()[0].block_idx);
     let lines = v.flatten();
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
     // Content lines are now present in the flattened output.
@@ -53,10 +54,10 @@ fn expanded_header_row_unchanged() {
 #[test]
 fn header_scrolled_above_is_not_hittable() {
     let v = thinking_view();
-    let lines = v.flatten();
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
     // scroll_y = 1 pushes the row-0 header above the viewport.
-    record_thinking_hits(&v, &lines, 40, 1, 10, 1, 2, &mut hits);
+    record_thinking_hits(&v, &cache, 40, 1, 10, 1, 2, &mut hits);
     assert!(
         hits.is_empty(),
         "header above viewport should not be hittable"
@@ -69,9 +70,9 @@ fn no_thinking_blocks_means_no_hits() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("just text".into()));
     v.apply(&SessionEvent::Done);
-    let lines = v.flatten();
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert!(hits.is_empty());
 }
 
@@ -79,9 +80,9 @@ fn no_thinking_blocks_means_no_hits() {
 #[test]
 fn hit_rect_matches_click_on_header_row() {
     let v = thinking_view();
-    let lines = v.flatten();
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &lines, 40, 0, 10, 1, 2, &mut hits);
+    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     let rect = hits[0].rect;
     // Click anywhere on the header row (y == 2) within x..x+width hits.
     assert!(in_rect(rect, 5, 2));
@@ -367,7 +368,7 @@ fn body_follow_indicator_when_not_following() {
     let mut jump_btn: Option<Rect> = None;
     let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     terminal
         .draw(|f| {
             render_body(
@@ -384,6 +385,7 @@ fn body_follow_indicator_when_not_following() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
+                &mut None,
             );
         })
         .unwrap();
@@ -415,7 +417,7 @@ fn body_follow_label_when_following() {
     let mut jump_btn: Option<Rect> = None;
     let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     terminal
         .draw(|f| {
             render_body(
@@ -432,6 +434,7 @@ fn body_follow_label_when_following() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
+                &mut None,
             );
         })
         .unwrap();
@@ -462,7 +465,7 @@ fn body_top_arrow_when_scrolled_down() {
     let mut jump_btn: Option<Rect> = None;
     let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
-    let mut scroll = 5u16;
+    let mut scroll = 5u32;
     terminal
         .draw(|f| {
             render_body(
@@ -479,6 +482,7 @@ fn body_top_arrow_when_scrolled_down() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
+                &mut None,
             );
         })
         .unwrap();
@@ -509,7 +513,7 @@ fn body_no_top_arrow_when_at_top() {
     let mut jump_btn: Option<Rect> = None;
     let mut top_btn: Option<Rect> = None;
     let mut body_out: Option<Rect> = None;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     terminal
         .draw(|f| {
             render_body(
@@ -526,6 +530,7 @@ fn body_no_top_arrow_when_at_top() {
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
+                &mut None,
             );
         })
         .unwrap();
@@ -868,7 +873,7 @@ async fn render_then_click_arrow_targets_jump_view() {
     // --- jump-to-bottom arrow: rendered only when follow == false ---
     {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
-        let mut scroll = 0u16;
+        let mut scroll = 0u32;
         let mut hits = MouseHits::default();
         render(
             &mut terminal,
@@ -896,6 +901,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             &mut hits,
+            &mut None,
             None,
             None,
             &[],
@@ -909,9 +915,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             .expect("render must export jump-bottom arrow when not following");
 
         let mut follow = false;
-        let mut sel: Option<(u16, u16)> = None;
+        let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
-        let mut parent_scroll = 0u16;
+        let mut parent_scroll = 0u32;
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
@@ -951,7 +957,7 @@ async fn render_then_click_arrow_targets_jump_view() {
     {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         // follow=false keeps the supplied scroll (clamped to max_rows).
-        let mut scroll = 30u16;
+        let mut scroll = 30u32;
         let mut hits = MouseHits::default();
         render(
             &mut terminal,
@@ -979,6 +985,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             None,
             &mut hits,
+            &mut None,
             None,
             None,
             &[],
@@ -993,9 +1000,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             .expect("render must export jump-top arrow when scrolled");
 
         let mut follow = true;
-        let mut sel: Option<(u16, u16)> = None;
+        let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
-        let mut parent_scroll = 0u16;
+        let mut parent_scroll = 0u32;
         let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();

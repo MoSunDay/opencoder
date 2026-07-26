@@ -43,7 +43,7 @@ pub(crate) async fn switch_session(
     running: &mut bool,
     chat: &mut ChatView,
     history: &mut Vec<String>,
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: &mut bool,
     sys_tokens: &mut u64,
     queue_items: &mut Vec<(i64, String)>,

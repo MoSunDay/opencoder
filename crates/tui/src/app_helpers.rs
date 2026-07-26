@@ -789,5 +789,5 @@ pub(crate) fn poll_idle_resize(terminal: &mut Term, last_size: &mut Option<(u16,
 }
 
 #[cfg(test)]
-#[path = "app_helpers_tests.rs"]
+#[path = "app_helpers_tests/mod.rs"]
 mod tests;

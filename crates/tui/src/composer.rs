@@ -102,7 +102,17 @@ pub fn insert_char(text: &str, idx: usize, ch: char) -> (String, usize) {
 /// Insert a string at the cursor index, returning (new_text, new_idx). The
 /// cursor advances by the number of chars in `s` (not bytes), staying on a
 /// char boundary for multi-byte insertions.
+/// Maximum input size (256 KiB in chars) to prevent unbounded memory from
+/// pasting huge text blobs. Inserts that would exceed this are silently
+/// rejected (the input stays unchanged).
+pub const MAX_INPUT_CHARS: usize = 256 * 1024;
+
 pub fn insert_str(text: &str, idx: usize, s: &str) -> (String, usize) {
+    // C3: reject inserts that would exceed the input limit.
+    let new_chars = text.chars().count().saturating_add(s.chars().count());
+    if new_chars > MAX_INPUT_CHARS {
+        return (text.to_string(), idx);
+    }
     let mut out = String::with_capacity(text.len() + s.len());
     let byte = byte_offset_for_char(text, idx);
     out.push_str(&text[..byte]);
@@ -781,5 +791,22 @@ bbbbb";
         assert_eq!(char_width('⬅'), 2); // U+2B05 left arrow
         assert_eq!(char_width('📋'), 2); // U+1F4CB clipboard (existing range)
         assert_eq!(char_width('\u{20000}'), 2); // CJK extension B (plane 2)
+    }
+
+    #[test]
+    fn insert_str_rejects_oversized_paste() {
+        // C3: insert_str must silently reject pastes that would exceed
+        // MAX_INPUT_CHARS to prevent unbounded memory growth.
+        let big = "x".repeat(MAX_INPUT_CHARS);
+        let (result, idx) = insert_str(&big, 0, "y");
+        // Original text unchanged, cursor unchanged.
+        assert_eq!(result.len(), big.len());
+        assert_eq!(idx, 0);
+
+        // Just under the limit is fine.
+        let small = "x".repeat(MAX_INPUT_CHARS - 1);
+        let (result, idx) = insert_str(&small, 0, "y");
+        assert_eq!(result, format!("y{small}"));
+        assert_eq!(idx, 1);
     }
 }

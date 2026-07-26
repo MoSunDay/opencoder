@@ -10,7 +10,9 @@ use opencoder_core::{
     message::now_ms, resolve_agent, Agent, Config, ContentBlock, Message, MessageUsage, Role,
 };
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
-use opencoder_store::{Delivery, SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{
+    Delivery, EventKind, SessionEventRecord, Store, SubagentStatus, SubagentTaskRecord,
+};
 
 use crate::SessionState;
 use tokio_util::sync::CancellationToken;
@@ -432,7 +434,8 @@ async fn replay_child(
     // `run_subagent`): events reach the DB as they are produced so a second
     // interruption still leaves partial child progress reconstructable.
     let child_id = task.child_session_id.clone();
-    let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEventRecord>();
+    let (ev_tx, ev_rx) =
+        tokio::sync::mpsc::channel::<SessionEventRecord>(crate::event_sink::CAPACITY);
     let flush_store = Some(store.clone());
     // Batched, lossless drain (shared with TUI/web/subagent surfaces).
     let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
@@ -454,8 +457,17 @@ async fn replay_child(
                 seq: None,
                 sse_kind: Some(cev.sse_kind().to_string()),
             };
-            if let Err(e) = ev_tx.send(rec) {
-                tracing::warn!(error = %e, "replay: child event channel full/closed, dropping event");
+            // `try_send` is sync/non-blocking; on a full channel (slow-DB
+            // backpressure) delta fragments are silently dropped (display-only
+            // — the child's authoritative text lands via its messages append),
+            // everything else is logged and dropped.
+            match ev_tx.try_send(rec) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(rec))
+                    if rec.kind == EventKind::TextDelta => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "replay: child event channel full/closed, dropping event");
+                }
             }
         },
     ))

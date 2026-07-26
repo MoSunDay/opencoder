@@ -24,7 +24,6 @@ use crate::queue_panel;
 use crate::render::{in_rect, MouseHits};
 use crate::selection::SelRange;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::widgets::{Paragraph, Wrap};
 
 /// Maximum interval (ms) between two left-clicks to count as a double-click.
 const DBL_CLICK_MS: u64 = 400;
@@ -112,14 +111,14 @@ pub(crate) async fn initial_chat_view(
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,
     subagent_focus: &mut Option<usize>,
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: &mut bool,
     selection: &mut Option<SelRange>,
     last_esc: &mut Option<Instant>,
     chat: &mut ChatView,
     input: &mut String,
     cursor_idx: &mut usize,
-    parent_scroll: u16,
+    parent_scroll: u32,
     parent_follow: bool,
 ) -> bool {
     // Subagent ctx-switch: Esc exits to parent view.
@@ -501,12 +500,12 @@ pub(crate) enum MouseOutcome {
 pub(crate) async fn handle_mouse(
     m: MouseEvent,
     hits: &MouseHits,
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: &mut bool,
     selection: &mut Option<SelRange>,
     chat: &mut ChatView,
     subagent_focus: &mut Option<usize>,
-    parent_scroll: &mut u16,
+    parent_scroll: &mut u32,
     parent_follow: &mut bool,
     subagent_sys: &mut u64,
     workdir: &Path,
@@ -721,22 +720,9 @@ pub(crate) async fn handle_mouse(
             if let Some(r) = hits.body {
                 if in_rect(r, m.column, m.row) {
                     let visible_h = r.height.saturating_sub(2) as usize;
-                    let inner_w = r.width.saturating_sub(3);
-                    // When a subagent perspective is focused, the scrollbar
-                    // and max-rows must reflect the CHILD view's content, not
-                    // the parent's. Using `chat.flatten()` (the parent) here
-                    // made `follow` trip early/late whenever parent and child
-                    // had different lengths — breaking wheel-scroll inside a
-                    // subagent view. This mirrors the resolution the MouseUp
-                    // copy path already performs below.
-                    let viewed: &ChatView =
-                        match (*subagent_focus).and_then(|idx| chat.blocks.get(idx)) {
-                            Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
-                            _ => &*chat,
-                        };
-                    let total_rows = Paragraph::new(viewed.flatten())
-                        .wrap(Wrap { trim: false })
-                        .line_count(inner_w);
+                    // Use cached total_rows from the last render_body call instead
+                    // of re-flattening the entire transcript on every wheel event.
+                    let total_rows = hits.total_rows;
                     let max_rows = total_rows.saturating_sub(visible_h);
                     *scroll = scroll.saturating_add(3);
                     if (*scroll as usize) >= max_rows {

@@ -150,14 +150,16 @@ pub(super) async fn run_subagent(
     let parent_sink = Arc::clone(sink);
     let call_id_for_cb = call_id.clone();
     let has_store = child_store.is_some();
-    // Incremental child-event persistence: a single flusher task drains an
-    // mpsc channel and awaits `append_event` per record in emission order (one
-    // consumer → DB seq stays aligned with emission order). Events reach the DB
-    // as they are produced, so a hard interruption mid-subagent leaves partial
-    // progress persisted (reconstruct_child_view reads events_after(child, 0))
-    // instead of losing everything. The flusher is awaited before return so a
-    // normal completion flushes 100% of buffered events.
-    let (ev_tx, ev_rx) = tokio::sync::mpsc::unbounded_channel::<SessionEventRecord>();
+    // Incremental child-event persistence: a single flusher task drains a
+    // bounded mpsc channel and awaits `append_event` per record in emission
+    // order (one consumer → DB seq stays aligned with emission order). Events
+    // reach the DB as they are produced, so a hard interruption mid-subagent
+    // leaves partial progress persisted (reconstruct_child_view reads
+    // events_after(child, 0)) instead of losing everything. The flusher is
+    // awaited before return so a normal completion flushes 100% of buffered
+    // events.
+    let (ev_tx, ev_rx) =
+        tokio::sync::mpsc::channel::<SessionEventRecord>(crate::event_sink::CAPACITY);
     let flush_store = child_store.clone();
     // Batched, lossless drain shared with the TUI/web surfaces: deltas are
     // coalesced into one transactional append_events; non-delta events flush
@@ -170,9 +172,11 @@ pub(super) async fn run_subagent(
         registry,
         move |cev| {
             // Incremental persist: push to the ordered flusher channel. The
-            // callback is sync (cannot await); the channel is unbounded, so
-            // send never blocks and can only fail if the flusher has exited
-            // (closed) — in which case the single event is logged and dropped.
+            // callback is sync (cannot await); `try_send` is non-blocking, so
+            // it can only fail if the channel is full (slow-DB backpressure)
+            // or the flusher has exited (closed). Under backpressure delta
+            // fragments are silently dropped (display-only); everything else
+            // is logged and dropped — same loss semantics as `EventSink::push`.
             if has_store {
                 let rec = SessionEventRecord {
                     session_id: child_id_for_cb.clone(),
@@ -182,8 +186,19 @@ pub(super) async fn run_subagent(
                     seq: None,
                     sse_kind: Some(cev.sse_kind().to_string()),
                 };
-                if let Err(e) = ev_tx.send(rec) {
-                    tracing::warn!(error = %e, "subagent: child event channel closed, dropping event");
+                match ev_tx.try_send(rec) {
+                    Ok(()) => {}
+                    // Delta fragments are safe to drop under backpressure —
+                    // the child's authoritative text lands via its messages
+                    // append, so only a momentary display gap results.
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(rec))
+                        if rec.kind == opencoder_store::EventKind::TextDelta => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "subagent: child event channel full/closed, dropping event"
+                        );
+                    }
                 }
             }
             match &cev {

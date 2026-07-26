@@ -22,7 +22,7 @@ use std::time::Duration;
 /// An active selection: an absolute content-row range `[a, b]` (inclusive,
 /// un-normalised — either end may be the anchor or the current drag position).
 /// `None` means no active selection. Absolute rows are `screen_row + scroll`.
-pub type SelRange = (u16, u16);
+pub type SelRange = (u32, u32);
 
 /// Report of a clipboard copy attempt, for building visible UI feedback.
 /// `lines`/`chars` describe how much text was copied; `osc52` indicates
@@ -74,7 +74,7 @@ fn under_tmux() -> bool {
 }
 
 /// Normalise a selection to `(lo, hi)` inclusive.
-pub fn sel_range(s: SelRange) -> (u16, u16) {
+pub fn sel_range(s: SelRange) -> (u32, u32) {
     (s.0.min(s.1), s.0.max(s.1))
 }
 
@@ -82,11 +82,11 @@ pub fn sel_range(s: SelRange) -> (u16, u16) {
 /// covers within the body's inner text area, accounting for `scroll`. Returns
 /// `None` when the row is outside the text area (borders / outside the body).
 /// Inner area = body rect minus its 1-cell border on every side.
-pub fn abs_row_at(body: Rect, row: u16, scroll: u16) -> Option<u16> {
+pub fn abs_row_at(body: Rect, row: u16, scroll: u32) -> Option<u32> {
     let inner_y = body.y.saturating_add(1);
     let inner_h = body.height.saturating_sub(2);
     if row >= inner_y && row < inner_y.saturating_add(inner_h) {
-        Some(row.saturating_sub(inner_y).saturating_add(scroll))
+        Some(row.saturating_sub(inner_y) as u32 + scroll)
     } else {
         None
     }
@@ -140,12 +140,12 @@ pub fn extract_text(chat: &ChatView, text_w: u16, sel: SelRange) -> String {
         let span_lo = row;
         let span_hi = row.saturating_add(h);
         // Intersection of [span_lo, span_hi) with [lo, hi].
-        if span_hi > lo as u32 && span_lo <= hi as u32 {
+        if span_hi > lo && span_lo <= hi {
             let s: String = line.spans.iter().map(|sp| sp.content.as_ref()).collect();
             out.push(s);
         }
         row = span_hi;
-        if span_lo > hi as u32 {
+        if span_lo > hi {
             break;
         }
     }
@@ -156,7 +156,7 @@ pub fn extract_text(chat: &ChatView, text_w: u16, sel: SelRange) -> String {
 /// `text_area`. `scroll_y` is the body's scroll offset; `sel` is the absolute
 /// content-row range. Rows outside the viewport are clipped. Drawn after the
 /// paragraph so the highlight sits on top of the text.
-pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u16, sel: Option<SelRange>) {
+pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u32, sel: Option<SelRange>) {
     let (lo, hi) = match sel.map(sel_range) {
         Some(r) => r,
         None => return,
@@ -165,7 +165,7 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u16, sel: Option
         return;
     }
     let view_top = scroll_y;
-    let view_bot = scroll_y.saturating_add(text_area.height);
+    let view_bot = scroll_y.saturating_add(text_area.height as u32);
     let s_lo = lo.max(view_top);
     // `view_bot` is exclusive; the last visible absolute row is `view_bot - 1`.
     let s_hi = hi.min(view_bot.saturating_sub(1));
@@ -176,7 +176,7 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u16, sel: Option
     let first = s_lo.saturating_sub(scroll_y);
     let last = s_hi.saturating_sub(scroll_y);
     for r in first..=last {
-        let y = text_area.y + r;
+        let y = text_area.y + r as u16;
         if y >= text_area.bottom() {
             break;
         }

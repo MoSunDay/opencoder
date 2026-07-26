@@ -18,6 +18,7 @@ use crate::composer;
 use crate::fmt as fmtmod;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
+use crate::render_viewport::ViewportCache;
 use crate::queue_panel::QueueBtn;
 use crate::task::TaskPicker;
 
@@ -61,6 +62,9 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
+    /// Cached total content rows from the last render_body call. Used by
+    /// the scroll-wheel handler to clamp scroll without re-flattening.
+    pub total_rows: usize,
 }
 
 /// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
@@ -100,7 +104,7 @@ pub(crate) fn render<B: Backend>(
     status: &str,
     steer_items: &[(i64, String)],
     queue_items: &[(i64, String)],
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: bool,
     anim_tick: u32,
     mode_flash: Option<&str>,
@@ -110,6 +114,7 @@ pub(crate) fn render<B: Backend>(
     model_menu: Option<&ModelMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     hits: &mut MouseHits,
+    viewport: &mut Option<ViewportCache>,
     selection: Option<crate::selection::SelRange>,
     copy_status: Option<&str>,
     pending_images: &[(String, String)],
@@ -184,7 +189,10 @@ pub(crate) fn render<B: Backend>(
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
                 selection,
+                viewport,
             );
+            // Expose cached total_rows for scroll-wheel clamping.
+            hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
         }
         ci += 1;
         if queue_h > 0 {
@@ -276,7 +284,7 @@ fn render_body(
     area: Rect,
     chat: &ChatView,
     title: &str,
-    scroll: &mut u16,
+    scroll: &mut u32,
     follow: bool,
     anim_tick: u32,
     body_out: &mut Option<Rect>,
@@ -285,6 +293,7 @@ fn render_body(
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
     selection: Option<crate::selection::SelRange>,
+    viewport: &mut Option<ViewportCache>,
 ) {
     *body_out = Some(area);
     let block = Block::default()
@@ -293,27 +302,39 @@ fn render_body(
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
-    let lines = chat.flatten_with(anim_tick);
-    let para = Paragraph::new(lines.clone()).wrap(Wrap { trim: false });
-    let total_rows = para.line_count(text_w);
+
+    // B5: Early exit for degenerate terminal sizes — prevents division-by-zero
+    // and empty-paragraph panics in a 1x1 terminal.
+    if text_w == 0 || visible_h == 0 {
+        f.render_widget(block, area);
+        return;
+    }
+
+    // A1: Build or refresh the viewport cache. Rebuilt when the cache is
+    // absent (first frame or invalidated by app.rs at body-refresh cadence)
+    // or when the terminal width changed (resize). Between rebuilds the
+    // cached flattened lines and row offsets are reused, making per-frame
+    // cost O(visible_h) instead of O(total_content).
+    let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
+    if needs_rebuild {
+        *viewport = Some(ViewportCache::build(chat, text_w, anim_tick));
+    }
+    let cache = viewport.as_ref().unwrap();
+    let total_rows = cache.total_rows();
+
     let max_rows = total_rows.saturating_sub(visible_h);
     if follow {
-        *scroll = max_rows as u16;
+        *scroll = max_rows as u32;
     }
-    *scroll = (*scroll as usize).min(max_rows) as u16;
-    let scroll_y = *scroll;
+    *scroll = (*scroll as usize).min(max_rows) as u32;
+    let scroll_y = *scroll as usize;
 
-    // Record click hit-rects for Thinking-block header lines that fall inside
-    // the viewport. We only need the wrapped-row offset of each header line;
-    // compute it lazily and skip headers that are clearly off-screen. Since a
-    // wrapped line occupies >= 1 screen row, logical line index is a lower
-    // bound on screen row, so a header whose line index is beyond the viewport
-    // is guaranteed off-screen below and is skipped without any wrapping math.
+    // Record click hit-rects using cached row offsets — O(headers), not O(n).
     record_thinking_hits(
         chat,
-        &lines,
+        cache,
         text_w,
-        scroll_y as usize,
+        scroll_y,
         visible_h,
         inner.x,
         inner.y,
@@ -321,9 +342,9 @@ fn render_body(
     );
     record_subagent_hits(
         chat,
-        &lines,
+        cache,
         text_w,
-        scroll_y as usize,
+        scroll_y,
         visible_h,
         inner.x,
         inner.y,
@@ -336,18 +357,25 @@ fn render_body(
         width: text_w,
         ..inner
     };
-    f.render_widget(para.scroll((scroll_y, 0)), text_area);
+
+    // A1: Virtualization — slice only the visible window from cached lines
+    // instead of passing the entire transcript to Paragraph. This avoids
+    // ratatui internally processing all lines for wrapping/rendering.
+    let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
+    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+    f.render_widget(para.scroll((top_skip as u16, 0)), text_area);
 
     if total_rows > visible_h {
         let scroll_area = Rect {
             height: visible_h as u16,
             ..inner
         };
-        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y as usize);
+        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
     }
 
     // Selection highlight — drawn last so it sits on top of the text.
-    crate::selection::render_overlay(f, text_area, scroll_y, selection);
+    crate::selection::render_overlay(f, text_area, *scroll, selection);
 
     // Follow indicator on the body's bottom-border row, right-aligned.
     let (label, style) = if follow {
@@ -436,23 +464,13 @@ fn draw_scrollbar(
     }
 }
 
-/// Number of screen rows `line` occupies when word-wrapped at width `w`,
-/// matching ratatui's `Paragraph` wrapping exactly. An empty line is 1 row.
-fn wrapped_rows(line: &Line<'_>, w: u16) -> usize {
-    Paragraph::new(line.clone())
-        .wrap(Wrap { trim: false })
-        .line_count(w)
-}
-
 /// Populate `out` with one `ThinkingBtn` per Thinking-block header line that is
-/// currently visible inside the body viewport. Walks flattened lines in order,
-/// accumulating wrapped screen rows; stops as soon as headers pass below the
-/// viewport. When there are no Thinking blocks the cost is one empty
-/// `thinking_headers()` call and nothing more.
+/// currently visible inside the body viewport. Uses the cached viewport layout
+/// for O(headers) row lookups instead of walking all flattened lines.
 #[allow(clippy::too_many_arguments)]
 fn record_thinking_hits(
     chat: &ChatView,
-    lines: &[Line<'_>],
+    cache: &ViewportCache,
     text_w: u16,
     scroll_y: usize,
     visible_h: usize,
@@ -461,26 +479,13 @@ fn record_thinking_hits(
     out: &mut Vec<ThinkingBtn>,
 ) {
     let headers = chat.thinking_headers();
-    if headers.is_empty() || visible_h == 0 || text_w == 0 {
+    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
         return;
     }
     let viewport_bottom = scroll_y + visible_h;
-    let mut row: usize = 0; // screen row of the next line to consume
-    let mut li: usize = 0; // current logical line index
     for h in headers {
-        let target = h.header_line_idx;
-        // Advance to the header's line, accumulating wrapped rows of the lines
-        // that precede it.
-        while li < target && li < lines.len() {
-            row += wrapped_rows(&lines[li], text_w);
-            li += 1;
-        }
-        if li >= lines.len() {
-            break;
-        }
-        let header_row = row;
+        let header_row = cache.row_of_line(h.header_line_idx);
         if header_row >= viewport_bottom {
-            // This and all later headers are below the viewport.
             break;
         }
         if header_row >= scroll_y {
@@ -490,9 +495,6 @@ fn record_thinking_hits(
                 rect: Rect::new(x, screen_y, text_w, 1),
             });
         }
-        // Consume the header line and advance to the next header.
-        row += wrapped_rows(&lines[li], text_w);
-        li += 1;
     }
 }
 
@@ -501,7 +503,7 @@ fn record_thinking_hits(
 #[allow(clippy::too_many_arguments)]
 fn record_subagent_hits(
     chat: &ChatView,
-    lines: &[Line<'_>],
+    cache: &ViewportCache,
     text_w: u16,
     scroll_y: usize,
     visible_h: usize,
@@ -510,22 +512,12 @@ fn record_subagent_hits(
     out: &mut Vec<SubagentBtn>,
 ) {
     let headers = chat.subagent_headers();
-    if headers.is_empty() || visible_h == 0 || text_w == 0 {
+    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
         return;
     }
     let viewport_bottom = scroll_y + visible_h;
-    let mut row: usize = 0;
-    let mut li: usize = 0;
     for h in headers {
-        let target = h.header_line_idx;
-        while li < target && li < lines.len() {
-            row += wrapped_rows(&lines[li], text_w);
-            li += 1;
-        }
-        if li >= lines.len() {
-            break;
-        }
-        let header_row = row;
+        let header_row = cache.row_of_line(h.header_line_idx);
         if header_row >= viewport_bottom {
             break;
         }
@@ -536,8 +528,6 @@ fn record_subagent_hits(
                 rect: Rect::new(x, screen_y, text_w, 1),
             });
         }
-        row += wrapped_rows(&lines[li], text_w);
-        li += 1;
     }
 }
 

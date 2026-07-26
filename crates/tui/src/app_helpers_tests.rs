@@ -211,6 +211,7 @@ fn empty_hits(body: Rect) -> MouseHits {
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        total_rows: 0,
     }
 }
 
@@ -252,12 +253,16 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
         "precondition: parent ({parent_rows}) fits viewport ({visible_h})"
     );
 
-    let hits = empty_hits(body);
-    let mut scroll = 0u16;
+    let mut hits = empty_hits(body);
+    // render_body caches the viewed content's row count in total_rows; when a
+    // subagent is focused that is the child view. Mirror it here so the
+    // scroll-wheel clamp sees real child content below the fold.
+    hits.total_rows = child_rows;
+    let mut scroll = 0u32;
     let mut follow = false;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus = Some(sub_idx);
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = false;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
@@ -308,11 +313,11 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
     );
 
     let hits = empty_hits(body);
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = false;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = false;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
@@ -366,11 +371,11 @@ async fn dbl_click_selects_line_and_copies_on_release() {
     let body = Rect::new(0, 0, 80, 12);
     let hits = empty_hits(body);
 
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = true;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
@@ -478,11 +483,11 @@ async fn submit_btn_returns_steer_submit() {
         rect: Rect::new(77, 0, 1, 1),
     });
 
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = true;
     let mut subagent_sys = 0u64;
     chat.steer_items = vec![(10, "redirect".into())];
@@ -548,11 +553,11 @@ async fn single_click_does_not_copy_on_release() {
     let body = Rect::new(0, 0, 80, 12);
     let hits = empty_hits(body);
 
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = true;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
@@ -638,13 +643,14 @@ async fn jump_btn_click_works_after_recent_body_click() {
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        total_rows: 0,
     };
 
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = false;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = false;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
@@ -742,11 +748,11 @@ async fn scrollup_advances_faster_than_default() {
     // toward the top via `saturating_sub`. Start part-way down so a single
     // notch lands on a value that proves the 8-line step: the new step
     // yields 16 - 8 = 8, whereas the old 3-step would have left 16 - 3 = 13.
-    let mut scroll = 16u16;
+    let mut scroll = 16u32;
     let mut follow = true;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = false;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
@@ -817,13 +823,14 @@ async fn thinking_header_toggles_even_right_after_another_click() {
             rect: header_rect,
         }],
         subagent_btns: Vec::new(),
+        total_rows: 0,
     };
 
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = false;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll = 0u16;
+    let mut parent_scroll = 0u32;
     let mut parent_follow = false;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
@@ -927,7 +934,7 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
     fn run(key: KeyEvent) -> (bool, String, usize) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
-        let mut scroll = 5u16;
+        let mut scroll = 5u32;
         let mut follow = true;
         let mut selection = None;
         let mut last_esc = None;

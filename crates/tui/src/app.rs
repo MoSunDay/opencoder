@@ -172,7 +172,7 @@ async fn run_app(
     let mut cancelled = false;
     let mut drain_pending = false;
     let mut show_help = false;
-    let mut scroll: u16 = 0;
+    let mut scroll: u32 = 0;
     let mut follow = true;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
@@ -191,7 +191,7 @@ async fn run_app(
     let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll: u16 = 0;
+    let mut parent_scroll: u32 = 0;
     let mut parent_follow: bool = true;
     // Active mouse text-selection in the body (absolute content-row range), or
     // None. Kept in absolute rows so it tracks the text while the viewport
@@ -259,6 +259,7 @@ async fn run_app(
     // rate; only the text layout in render_body is throttled.
     let mut body_refresh_pending = true;
     let mut display_chat_cached: Option<ChatView> = None;
+    let mut viewport: Option<crate::render_viewport::ViewportCache> = None; // A1: O(visible_h) render cache
     // Persisted across loop iterations: always equals the LAST rendered
     // layout (== what is on screen). The event loop forwards `&hits` to
     // `handle_mouse` on the SAME iteration a click arrives, and a click
@@ -292,6 +293,7 @@ async fn run_app(
         // driven by the real-time anim_tick, not the cached blocks.
         if dirty && (body_refresh_pending || display_chat_cached.is_none()) {
             display_chat_cached = Some(display_chat.clone());
+            viewport = None; // force viewport rebuild on next render
             body_refresh_pending = false;
         }
         let render_chat = display_chat_cached.as_ref().unwrap_or(display_chat);
@@ -324,6 +326,7 @@ async fn run_app(
                     model_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     &mut hits,
+                    &mut viewport,
                     selection,
                     &copy_status,
                     &pending_images,
@@ -541,6 +544,7 @@ async fn run_app(
                                         worker_dead(&mut chat);
                                         break;
                                     }
+                                    cancelled = false; // B3: clear stale flag from a prior cancel
                                     running = true;
                                     follow = true;
                                     if chat.agent == "plan" {
@@ -633,13 +637,13 @@ async fn run_app(
                                         active_skill = Some(name.clone());
                                         active_skill_body = Some(body.clone());
                                         sys_tokens = sys_tokens_for(&agent_name, &workdir, Some(&body));
-                                        *skill_handle.lock().unwrap() = Some(body);
+                                        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body);
                                     }
                                     None => {
                                         active_skill = None;
                                         active_skill_body = None;
                                         sys_tokens = sys_tokens_for(&agent_name, &workdir, None);
-                                        *skill_handle.lock().unwrap() = None;
+                                        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = None;
                                     }
                                 }
                                 // Persist the active skill so it survives

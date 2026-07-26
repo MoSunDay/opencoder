@@ -21,7 +21,7 @@ fn run_handle(
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
     let mut show_help = false;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
@@ -56,7 +56,7 @@ fn run_handle_disabled(
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
     let mut show_help = false;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
@@ -90,7 +90,7 @@ fn run_handle_menu(
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
     let mut show_help = false;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     handle_key(
@@ -1192,7 +1192,7 @@ fn double_esc_while_running_cancels() {
     let mut idx = 5;
     let mut hist_idx = None;
     let mut show_help = false;
-    let mut scroll = 0u16;
+    let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;

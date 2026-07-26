@@ -1298,3 +1298,22 @@ fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
     assert_eq!(ep.base_url, "https://legacy.example.com/v1");
     assert_eq!(ep.api_key, "legacy-key");
 }
+
+#[test]
+fn size_changed_detects_dimension_change() {
+    use crate::app::size_changed;
+    assert!(size_changed(Some((80, 24)), (80, 25)), "height change must count");
+    assert!(size_changed(Some((80, 24)), (81, 24)), "width change must count");
+}
+
+#[test]
+fn size_changed_false_when_unchanged() {
+    use crate::app::size_changed;
+    assert!(!size_changed(Some((80, 24)), (80, 24)));
+}
+
+#[test]
+fn size_changed_true_when_no_prior_reading() {
+    use crate::app::size_changed;
+    assert!(size_changed(None, (80, 24)));
+}

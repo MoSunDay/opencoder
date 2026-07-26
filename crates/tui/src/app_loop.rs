@@ -458,7 +458,6 @@ pub(crate) async fn dispatch_command(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     chat: &mut ChatView,
-    pending_images: &mut Vec<(String, String)>,
     running: &mut bool,
     follow: &mut bool,
     store: &Arc<dyn Store>,
@@ -514,31 +513,40 @@ pub(crate) async fn dispatch_command(
                 },
             );
         }
-        CommandOutcome::Dispatch(SlashAction::Clip) => {
-            match tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await {
-                Ok(Some(data_uri)) => {
-                    let n = pending_images.len() + 1;
-                    pending_images.push((data_uri, "clipboard.png".to_string()));
-                    chat.push_marker(Line::from(Span::styled(
-                        format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
-                        Style::default().fg(Color::Green),
-                    )));
-                }
-                Ok(None) => {
-                    chat.push_marker(Line::from(Span::styled(
-                        "[clip] no image in clipboard",
-                        Style::default().fg(Color::Yellow),
-                    )));
-                }
-                Err(e) => {
-                    chat.push_marker(Line::from(Span::styled(
-                        format!("[clip] clipboard read failed: {e}"),
-                        Style::default().fg(Color::Red),
-                    )));
-                }
-            }
-        }
         CommandOutcome::Idle => {}
+    }
+    LoopFlow::Proceed
+}
+
+/// Paste an image (screenshot bitmap) from the system clipboard into the
+/// composer's `pending_images`. Triggered by `Ctrl+V`. Replaces the former
+/// `/clip` slash command. The blocking `arboard` clipboard read runs on a
+/// background thread so it can't stall the async event loop.
+pub(crate) async fn paste_clipboard_image(
+    chat: &mut ChatView,
+    pending_images: &mut Vec<(String, String)>,
+) -> LoopFlow {
+    match tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await {
+        Ok(Some(data_uri)) => {
+            let n = pending_images.len() + 1;
+            pending_images.push((data_uri, "clipboard.png".to_string()));
+            chat.push_marker(Line::from(Span::styled(
+                format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
+                Style::default().fg(Color::Green),
+            )));
+        }
+        Ok(None) => {
+            chat.push_marker(Line::from(Span::styled(
+                "[clip] no image in clipboard",
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+        Err(e) => {
+            chat.push_marker(Line::from(Span::styled(
+                format!("[clip] clipboard read failed: {e}"),
+                Style::default().fg(Color::Red),
+            )));
+        }
     }
     LoopFlow::Proceed
 }

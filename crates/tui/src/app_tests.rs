@@ -1,6 +1,7 @@
 //! Tests for app::handle_key — split into a separate file to keep app.rs ≤800 lines.
 
-use crate::app::{flash_visible, handle_key, resume_hint, KeyAction};
+use crate::app::{handle_key, resume_hint, KeyAction};
+use crate::frame::flash_visible;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use std::time::Instant;
 

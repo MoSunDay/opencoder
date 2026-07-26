@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod command;
 pub mod composer;
 pub mod fmt;
+pub mod frame;
 pub mod image_render;
 pub mod image_util;
 pub mod input;
@@ -25,6 +26,7 @@ pub mod skill_token;
 pub mod supervisor;
 pub mod task;
 pub mod terminal;
+pub mod vim;
 pub mod worker;
 
 use std::path::PathBuf;

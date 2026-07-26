@@ -653,7 +653,7 @@ pub(crate) async fn handle_plan_edit_key(
         crate::plan_edit::PlanEditAction::Exit
     ) {
         if pe.is_modified() {
-            let text = pe.text.clone();
+            let text = pe.text().to_string();
             chat.update_plan_text(&text);
             let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await;
         }
@@ -664,109 +664,7 @@ pub(crate) async fn handle_plan_edit_key(
     LoopFlow::Redraw
 }
 
-/// Lifetime (in animation ticks) of a transient mode flash shown in the
-/// status line (plan-edit / mode-switch hints). Moved here from `app.rs`
-/// alongside the frame render that consumes it.
-const MODE_FLASH_TICKS: u32 = 15;
-
-/// Whether a transient flash started at `start` is still visible at `now`,
-/// given a lifetime of `ticks` anim ticks. Uses wrapping subtraction so it
-/// stays correct across the u32 wraparound of `anim_tick`. Re-exported from
-/// `app.rs` so existing `crate::app::flash_visible` test imports still resolve.
-pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
-    now.wrapping_sub(start) < ticks
-}
-
-/// Render the full TUI frame in one call. Extracted from `run_app`'s render
-/// block so that the plan-edit composer state, the transient mode-flash and
-/// copy-status closures, and the 30-argument `render()` invocation live in a
-/// single place; the call site in `app.rs` stays a thin one-liner. The plan
-/// edit modal owns the composer (its text + cursor) when active, otherwise the
-/// normal input line is shown.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_frame(
-    terminal: &mut crate::render::Term,
-    chat: &crate::chat::ChatView,
-    plan_edit: &Option<crate::plan_edit::PlanEdit>,
-    input: &str,
-    cursor_idx: usize,
-    title: &str,
-    agent: &str,
-    running: bool,
-    show_help: bool,
-    ctx: u64,
-    sys: u64,
-    context_limit: u64,
-    model: &str,
-    status: &str,
-    steer_items: &[(i64, String)],
-    queue_items: &[(i64, String)],
-    scroll: &mut u16,
-    follow: bool,
-    anim_tick: u32,
-    mode_flash: &Option<(String, u32)>,
-    skill_menu: Option<&crate::menu::SkillMenu>,
-    task_picker: Option<&crate::task::TaskPicker>,
-    command_menu: Option<&crate::command::CommandMenu>,
-    model_menu: Option<&crate::model_menu::ModelMenu>,
-    cache_salt_menu: Option<&crate::cache_salt_menu::CacheSaltMenu>,
-    hits: &mut crate::render::MouseHits,
-    selection: Option<crate::selection::SelRange>,
-    copy_status: &Option<(String, Instant)>,
-    pending_images: &[(String, String)],
-    input_disabled: bool,
-    run_ms: u64,
-) -> anyhow::Result<()> {
-    let (plan_mode, render_input, render_cursor) = match plan_edit {
-        Some(pe) => (Some(pe.mode_label()), pe.text.as_str(), pe.cursor),
-        None => (None, input, cursor_idx),
-    };
-    crate::render::render(
-        terminal,
-        chat,
-        render_input,
-        render_cursor,
-        title,
-        agent,
-        running,
-        show_help,
-        ctx,
-        sys,
-        context_limit,
-        model,
-        status,
-        steer_items,
-        queue_items,
-        scroll,
-        follow,
-        anim_tick,
-        mode_flash.as_ref().and_then(|(t, s)| {
-            if flash_visible(*s, anim_tick, MODE_FLASH_TICKS) {
-                Some(t.as_str())
-            } else {
-                None
-            }
-        }),
-        skill_menu,
-        task_picker,
-        command_menu,
-        model_menu,
-        cache_salt_menu,
-        hits,
-        selection,
-        copy_status.as_ref().and_then(|(msg, t)| {
-            if t.elapsed() < Duration::from_secs(2) {
-                Some(msg.as_str())
-            } else {
-                None
-            }
-        }),
-        pending_images,
-        input_disabled,
-        plan_mode,
-        run_ms,
-    )
-}
+pub(crate) use crate::frame::render_frame;
 
 /// Activate plan-edit mode using the text from the last Plan (or non-empty
 /// Assistant) block, flashing a hint that Esc saves the edit.

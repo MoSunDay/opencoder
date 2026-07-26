@@ -36,27 +36,9 @@ mod app_task;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
-/// How long the plan/act switch flash stays visible, in anim ticks (~100ms each).
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
 /// at this cadence (3 FPS), decoupling text layout from the fast spinner.
 const BODY_REFRESH_MS: u64 = 333;
-
-#[cfg(test)]
-pub(crate) use app_loop::flash_visible;
-/// Copy-paste-ready command to resume a session by id.
-pub(crate) fn resume_hint(id: &str) -> String {
-    format!("resume with: opencoder -s {id}")
-}
-
-/// Resolve the `(base_url, api_key)` pair used to build the LLM client at TUI
-/// startup. Selects the provider whose name matches the `model`'s `provider/`
-/// prefix via `Config::resolve_endpoint`, so a `model` like
-/// `deepseek/deepseek-chat` resolves against `providers["deepseek"]` rather
-/// than the legacy top-level `provider.base_url`. Extracted as a testable seam
-/// for the startup path, which otherwise only runs inside `run`.
-pub(crate) fn startup_endpoint(config: &Config) -> Result<opencoder_core::Endpoint> {
-    Ok(config.resolve_endpoint()?)
-}
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts
@@ -172,23 +154,7 @@ async fn run_app(
     let session = session.with_cancel(cancel.clone());
     let mut skill_handle = session.skill_prompt.clone();
 
-    let mut chat = if !session.messages.is_empty() {
-        // A resumed session carries persisted history: rebuild the chat view
-        // from it so the transcript is visible on startup (mirroring /task
-        // switch-back and TranscriptReset), instead of a blank view.
-        crate::session_ui::replay_into_chat(
-            &session.agent.name,
-            &session.messages,
-            &store,
-            &session.id,
-        )
-        .await
-    } else {
-        crate::chat::ChatView {
-            agent: session.agent.name.clone(),
-            ..Default::default()
-        }
-    };
+    let mut chat = initial_chat_view(&session, &store).await;
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
     let mut cursor_idx: usize = 0;
@@ -815,9 +781,9 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, mk_input_with_images,
-    pre_key_intercept, push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for,
-    worker_dead, MouseOutcome,
+    clear_pending_inputs, data_dir_for, handle_mouse, initial_chat_view, mk_input,
+    mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
+    skill_trigger, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
 };
 
 #[cfg(test)]

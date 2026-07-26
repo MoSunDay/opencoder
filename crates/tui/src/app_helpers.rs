@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use opencoder_core::{discover_skills, resolve_agent};
+use anyhow::Result;
+use opencoder_core::{discover_skills, resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
+use opencoder_session::SessionState;
 use opencoder_store::{Delivery, SessionInput, Store};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -26,6 +28,43 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 /// Maximum interval (ms) between two left-clicks to count as a double-click.
 const DBL_CLICK_MS: u64 = 400;
+
+/// Copy-paste-ready command to resume a session by id.
+pub(crate) fn resume_hint(id: &str) -> String {
+    format!("resume with: opencoder -s {id}")
+}
+
+/// Resolve the `(base_url, api_key)` pair used to build the LLM client at TUI
+/// startup. Selects the provider whose name matches the `model`'s `provider/`
+/// prefix via `Config::resolve_endpoint`, so a `model` like
+/// `deepseek/deepseek-chat` resolves against `providers["deepseek"]` rather
+/// than the legacy top-level `provider.base_url`. Extracted as a testable seam
+/// for the startup path, which otherwise only runs inside `run`.
+pub(crate) fn startup_endpoint(config: &Config) -> Result<Endpoint> {
+    Ok(config.resolve_endpoint()?)
+}
+
+/// Build the initial `ChatView` for `run_app`: replay persisted history for a
+/// resumed session so the transcript is visible on startup, else a blank view.
+pub(crate) async fn initial_chat_view(
+    session: &SessionState,
+    store: &Arc<dyn Store>,
+) -> crate::chat::ChatView {
+    if !session.messages.is_empty() {
+        crate::session_ui::replay_into_chat(
+            &session.agent.name,
+            &session.messages,
+            store,
+            &session.id,
+        )
+        .await
+    } else {
+        crate::chat::ChatView {
+            agent: session.agent.name.clone(),
+            ..Default::default()
+        }
+    }
+}
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
 /// subagent view, and Ctrl+L collapses all thinking blocks / exits a

@@ -1,6 +1,6 @@
 //! Tests for ProviderPatch, ProviderList CRUD, ProviderForm, and headers.
 
-use super::common::{enter, esc, key, provider_cfg};
+use super::common::{cfg, enter, esc, key, provider_cfg};
 use crate::model_menu::list::ProviderList;
 use crate::model_menu::provider_form::{ProviderField, ProviderForm};
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
@@ -94,6 +94,67 @@ fn provider_list_builds_from_config() {
     assert_eq!(list.entries[0].model_id, "deepseek-chat");
     assert_eq!(list.entries[0].headers.len(), 1);
     assert!(list.entries[0].active);
+}
+
+/// Regression: a provider without an explicit `model` field must default its
+/// list entry's `model_id` to the provider NAME, not the active model's id.
+/// Otherwise `/model` switching produces `"<provider>/<active-id>"` and the
+/// status bar never reflects the new model.
+#[test]
+fn provider_list_model_id_defaults_to_name_when_unset() {
+    let mut c = cfg();
+    c.model = "alpha/active-model".into();
+    c.providers.insert(
+        "alpha".into(),
+        opencoder_core::ProviderConfig {
+            base_url: "u".into(),
+            api_key: Some("k".into()),
+            model: None,
+            headers: Vec::new(),
+        },
+    );
+    c.providers.insert(
+        "beta".into(),
+        opencoder_core::ProviderConfig {
+            base_url: "u".into(),
+            api_key: Some("k".into()),
+            model: Some("beta-pro".into()),
+            headers: Vec::new(),
+        },
+    );
+    let list = ProviderList::new(&c);
+    let alpha = list.entries.iter().find(|e| e.name == "alpha").unwrap();
+    let beta = list.entries.iter().find(|e| e.name == "beta").unwrap();
+    assert_eq!(alpha.model_id, "alpha", "model-less provider defaults to its name");
+    assert_eq!(beta.model_id, "beta-pro", "explicit model honored");
+}
+
+/// Regression for the status-bar-not-updating bug: selecting a model-less
+/// provider must Save `"<name>/<name>"`, never `"<name>/<old-active-id>"`.
+#[test]
+fn list_enter_switches_model_less_provider_correctly() {
+    let mut c = cfg();
+    c.model = "alpha/alpha".into();
+    for n in ["alpha", "beta"] {
+        c.providers.insert(
+            n.into(),
+            opencoder_core::ProviderConfig {
+                base_url: "u".into(),
+                api_key: Some("k".into()),
+                model: None,
+                headers: Vec::new(),
+            },
+        );
+    }
+    let mut list = ProviderList::new(&c);
+    list.selected = list.entries.iter().position(|e| e.name == "beta").unwrap();
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(list));
+    match handle_model_key(&mut slot, enter()) {
+        ModelOutcome::Save(json) => {
+            assert_eq!(json["model"], serde_json::json!("beta/beta"));
+        }
+        _ => panic!("Enter should Save"),
+    }
 }
 
 #[test]

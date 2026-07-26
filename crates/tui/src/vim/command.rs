@@ -1,8 +1,8 @@
 //! Command-line mode (`:`) for the vim engine.
 //!
 //! Supports the subset of ex commands relevant to a single-buffer plan editor:
-//! `:q`/`:q!` discard & exit, `:w` save-in-place, `:wq`/`:x` save & exit. Any
-//! other command sets a transient `status` and returns to Normal mode.
+//! `:q`/`:q!` discard & exit, `:wq` save & exit. Any other command (including
+//! `:w` and `:x`) is treated as unknown and returns to Normal mode.
 
 use super::state::{VimAction, VimMode};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -37,13 +37,7 @@ pub fn handle_command(state: &mut super::state::VimState, k: KeyEvent) -> VimAct
                     state.clamp_cursor();
                     VimAction::Exit
                 }
-                "w" => {
-                    state.mark_saved();
-                    state.mode = VimMode::Normal;
-                    state.status.clear();
-                    VimAction::Continue
-                }
-                "wq" | "x" => {
+                "wq" => {
                     // save (text already holds edits) and exit.
                     VimAction::Exit
                 }
@@ -105,29 +99,35 @@ mod tests {
     }
 
     #[test]
-    fn wq_and_x_save_and_exit_keeping_text() {
+    fn wq_saves_and_exit_keeping_text() {
         let mut s = VimState::new("orig".to_string());
         s.text = "changed".to_string();
         type_cmd(&mut s, "wq");
         assert_eq!(handle_command(&mut s, enter()), VimAction::Exit);
         assert_eq!(s.text, "changed");
         assert!(s.is_modified());
-
-        let mut s = VimState::new("orig".to_string());
-        s.text = "changed2".to_string();
-        type_cmd(&mut s, "x");
-        assert_eq!(handle_command(&mut s, enter()), VimAction::Exit);
-        assert_eq!(s.text, "changed2");
     }
 
     #[test]
-    fn w_marks_saved_stays_in_normal() {
+    fn x_is_unknown_command() {
+        let mut s = VimState::new("orig".to_string());
+        s.text = "changed".to_string();
+        type_cmd(&mut s, "x");
+        assert_eq!(handle_command(&mut s, enter()), VimAction::Continue);
+        assert_eq!(s.mode, VimMode::Normal);
+        assert!(s.status.contains("Unknown command"));
+        assert!(s.is_modified());
+    }
+
+    #[test]
+    fn w_is_unknown_command() {
         let mut s = VimState::new("orig".to_string());
         s.text = "changed".to_string();
         type_cmd(&mut s, "w");
         assert_eq!(handle_command(&mut s, enter()), VimAction::Continue);
         assert_eq!(s.mode, VimMode::Normal);
-        assert!(!s.is_modified()); // mark_saved cleared modified
+        assert!(s.status.contains("Unknown command"));
+        assert!(s.is_modified());
     }
 
     #[test]
@@ -180,11 +180,11 @@ mod tests {
 
     #[test]
     fn trailing_spaces_are_trimmed() {
-        // ":w   " should be treated as ":w".
+        // ":q!   " should be treated as ":q!".
         let mut s = VimState::new("orig".to_string());
         s.text = "changed".to_string();
-        type_cmd(&mut s, "w   ");
-        assert_eq!(handle_command(&mut s, enter()), VimAction::Continue);
-        assert!(!s.is_modified());
+        type_cmd(&mut s, "q!   ");
+        assert_eq!(handle_command(&mut s, enter()), VimAction::Exit);
+        assert_eq!(s.text, "orig");
     }
 }

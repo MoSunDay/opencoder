@@ -1,9 +1,10 @@
 //! Normal-mode entry point for the vim engine.
 //!
-//! [`handle_normal`] runs the prefix pipeline (Ctrl+C discard, readline
-//! shortcuts, count digit prefix, Enter-save-exit) and then either dispatches
+//! [`handle_normal`] runs the prefix pipeline (Ctrl+C no-op, readline
+//! shortcuts, count digit prefix, Enter no-op) and then either dispatches
 //! a pending operator ([`super::ops::apply_operator`]) or a plain command
-//! ([`super::actions::dispatch_plain`]).
+//! ([`super::actions::dispatch_plain`]). Exiting the editor is only possible
+//! from Command mode via `:q`/`:q!`/`:wq`.
 
 use super::actions::dispatch_plain;
 use super::motion::line_start;
@@ -13,11 +14,11 @@ use crate::composer;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub fn handle_normal(state: &mut VimState, k: KeyEvent, inner_w: u16, prompt_w: u16) -> VimAction {
-    // 1. Ctrl+C: discard & exit.
+    // 1. Ctrl+C: no-op (intercepted so it is not treated as the `c` operator).
+    //    Exit only via Command mode (`:q`/`:q!`/`:wq`).
     if is_ctrl_c(&k) {
-        state.text = state.original.clone();
-        state.clamp_cursor();
-        return VimAction::Exit;
+        state.reset_pending();
+        return VimAction::Continue;
     }
     // 2. Readline shortcuts (shared with the composer input box).
     if k.modifiers.contains(KeyModifiers::CONTROL) {
@@ -57,10 +58,7 @@ pub fn handle_normal(state: &mut VimState, k: KeyEvent, inner_w: u16, prompt_w: 
             return VimAction::Continue;
         }
     }
-    // 4. Enter: save & exit.
-    if k.code == KeyCode::Enter {
-        return VimAction::Exit;
-    }
+    // 4. Enter: no-op (exit only via Command mode).
     // 5. Operator pending: this key is the motion.
     if let Some(op) = state.pending_op {
         let count = state.count.unwrap_or(1);
@@ -96,13 +94,14 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_discards_and_exits() {
+    fn ctrl_c_is_noop() {
         let mut s = norm("orig", 0);
         s.text = "changed".to_string();
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(handle_normal(&mut s, ctrl_c, 80, 2), VimAction::Exit);
-        assert_eq!(s.text, "orig");
-        assert!(!s.is_modified());
+        assert_eq!(handle_normal(&mut s, ctrl_c, 80, 2), VimAction::Continue);
+        // text unchanged, still modified
+        assert_eq!(s.text, "changed");
+        assert!(s.is_modified());
     }
 
     #[test]
@@ -151,9 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn plain_enter_exits() {
+    fn plain_enter_is_noop() {
         let mut s = norm("abc", 0);
-        assert_eq!(handle_normal(&mut s, enter(), 80, 2), VimAction::Exit);
+        assert_eq!(handle_normal(&mut s, enter(), 80, 2), VimAction::Continue);
+        assert_eq!(s.text, "abc");
     }
 
     #[test]

@@ -266,6 +266,58 @@ fn multiline_delta_splits_lines() {
 }
 
 #[test]
+fn streaming_trailing_newline_does_not_add_blank_line() {
+    let mut v = ChatView::default();
+    // A stream chunk ending in a newline must not render an extra trailing
+    // blank body line — consistency with `flush_code` in markdown.rs.
+    v.apply(&SessionEvent::TextDelta("only\n".into()));
+    let joined: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    // The final flattened line is the last assistant body line; it must carry
+    // real content, not be a bare indent.
+    let last = joined.last().expect("at least one line");
+    assert!(
+        last.trim_end().contains("only"),
+        "trailing newline must not add an empty body line; got {:?}",
+        joined
+    );
+}
+
+#[test]
+fn streaming_interior_blank_line_is_preserved() {
+    let mut v = ChatView::default();
+    // An interior blank line is genuine content and must be kept — only the
+    // single *trailing* empty split element is dropped.
+    v.apply(&SessionEvent::TextDelta("a\n\nb".into()));
+    let joined: Vec<String> = v
+        .flatten()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.clone()).collect())
+        .collect();
+    // Exactly two content lines (a, b) plus one interior indent-only blank line.
+    let content: Vec<&String> = joined
+        .iter()
+        .filter(|t| t.trim_end().ends_with('a') || t.trim_end().ends_with('b'))
+        .collect();
+    assert_eq!(content.len(), 2, "expected two content lines; got {:?}", joined);
+    let interior_blank = joined.iter().filter(|t| t.trim().is_empty()).count();
+    assert_eq!(
+        interior_blank, 1,
+        "expected one interior blank line; got {:?}",
+        joined
+    );
+    let last = joined.last().expect("at least one line");
+    assert!(
+        last.trim_end().contains('b'),
+        "no trailing blank expected; got {:?}",
+        joined
+    );
+}
+
+#[test]
 fn error_renders() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::Error("broke".into()));

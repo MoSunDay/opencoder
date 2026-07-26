@@ -893,11 +893,11 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
         .await
         .unwrap();
     let s_seq = store
-        .admit_input(&mk_input(sid, Delivery::Steer, "steer-1"))
+        .admit_input(&mk_input_with_images(sid, Delivery::Steer, "steer-1", &[]))
         .await
         .unwrap();
     let q_seq = store
-        .admit_input(&mk_input(sid, Delivery::Queue, "queue-1"))
+        .admit_input(&mk_input_with_images(sid, Delivery::Queue, "queue-1", &[]))
         .await
         .unwrap();
     let mut steer_items = vec![(s_seq, String::from("steer-1"))];
@@ -994,8 +994,41 @@ fn mk_input_with_images_passes_images_through() {
 }
 
 #[test]
-fn mk_input_without_images_defaults_empty() {
-    let input = crate::app_helpers::mk_input("s2", opencoder_store::Delivery::Queue, "plain");
+fn drain_pending_images_collects_and_clears() {
+    let mut pending: Vec<(String, String)> = vec![
+        ("data:image/png;base64,AAA".into(), "a.png".into()),
+        ("data:image/png;base64,BBB".into(), "b.png".into()),
+    ];
+    let uris = crate::app_helpers::drain_pending_images(&mut pending);
+    assert_eq!(
+        uris,
+        vec![
+            "data:image/png;base64,AAA".to_string(),
+            "data:image/png;base64,BBB".to_string(),
+        ]
+    );
+    assert!(
+        pending.is_empty(),
+        "pending buffer must be cleared after drain"
+    );
+}
+
+#[test]
+fn drain_pending_images_empty_yields_empty() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let uris = crate::app_helpers::drain_pending_images(&mut pending);
+    assert!(uris.is_empty());
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn mk_input_with_images_defaults_empty_when_none() {
+    let input = crate::app_helpers::mk_input_with_images(
+        "s2",
+        opencoder_store::Delivery::Queue,
+        "plain",
+        &[],
+    );
     assert!(input.images.is_empty());
 }
 

@@ -40,6 +40,14 @@ const ANIM_TICK_MS: u64 = 100;
 /// at this cadence (3 FPS), decoupling text layout from the fast spinner.
 const BODY_REFRESH_MS: u64 = 333;
 
+/// Pure: has the terminal size changed relative to the last-known dimensions?
+/// Returns `true` when there is no prior reading yet (first frame) or when
+/// either dimension differs. Factored out so the idle-resize detection logic
+/// is unit-testable without a live terminal.
+pub(crate) fn size_changed(prev: Option<(u16, u16)>, cur: (u16, u16)) -> bool {
+    prev.is_none_or(|p| p != cur)
+}
+
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts
         .workdir
@@ -268,6 +276,12 @@ async fn run_app(
     // no render runs (idle state, `dirty=false`) the rects are empty and
     // EVERY arrow click is silently dropped. Keep this OUTSIDE `loop {}`.
     let mut hits = MouseHits::default();
+
+    // Idle-resize safety net: tracks the last-known terminal (width, height).
+    // `frame_ticker` polls the kernel size every frame; if it differs from this
+    // (a Resize event lost by crossterm -- tmux, fast window drag) we force a
+    // ratatui autoresize + redraw so the screen never lingers at a stale size.
+    let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
 
     loop {
         app_loop::tick_clock(running, &mut last_clock, &mut run_elapsed_ms);
@@ -512,7 +526,7 @@ async fn run_app(
                                             // the skill body injected into the system prompt.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
-                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, Vec::new())).await
+                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, drain_pending_images(&mut pending_images))).await
                                             {
                                                 worker_dead(&mut chat);
                                                 break;
@@ -526,8 +540,7 @@ async fn run_app(
                                         }
                                     }
                                 } else if running {
-                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
-                                    pending_images.clear();
+                                    let image_uris = drain_pending_images(&mut pending_images);
                                     if let Ok(seq) = store
                                         .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, &image_uris))
                                         .await
@@ -537,8 +550,7 @@ async fn run_app(
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
-                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
-                                    pending_images.clear();
+                                    let image_uris = drain_pending_images(&mut pending_images);
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
                                     {
                                         worker_dead(&mut chat);
@@ -560,8 +572,7 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
-                                    pending_images.clear();
+                                    let image_uris = drain_pending_images(&mut pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, &image_uris)).await {
                                         chat.steer_items.push((seq, clean.to_string()));
                                     }
@@ -576,7 +587,7 @@ async fn run_app(
                                     // into the system prompt — is acted on via
                                     // the steer queue rather than being dropped.
                                     let trigger = skill_trigger(skill_name);
-                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Steer, &trigger)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &drain_pending_images(&mut pending_images))).await {
                                         chat.steer_items.push((seq, trigger));
                                     }
                                 }
@@ -589,8 +600,7 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    let image_uris: Vec<String> = pending_images.iter().map(|(u, _)| u.clone()).collect();
-                                    pending_images.clear();
+                                    let image_uris = drain_pending_images(&mut pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, &image_uris)).await {
                                         queue_items.push((seq, clean.to_string()));
                                     }
@@ -600,7 +610,7 @@ async fn run_app(
                                     // queue so the active skill is acted on
                                     // instead of being silently dropped.
                                     let trigger = skill_trigger(skill_name);
-                                    if let Ok(seq) = store.admit_input(&mk_input(&session_id, Delivery::Queue, &trigger)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &drain_pending_images(&mut pending_images))).await {
                                         queue_items.push((seq, trigger));
                                     }
                                 }
@@ -771,6 +781,19 @@ async fn run_app(
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;
+                // Idle-resize safety net: poll the kernel for the real terminal
+                // size every frame. If it differs from `last_size` (crossterm
+                // dropped a Resize event), force a ratatui autoresize + redraw.
+                // `terminal.size()` is a single ioctl (us-level), safe to skip
+                // on error via `.ok()` (e.g. stdout is not a tty).
+                if let Ok(cur) = terminal.size() {
+                    let dims = (cur.width, cur.height);
+                    if size_changed(last_size, dims) {
+                        let _ = terminal.autoresize();
+                        last_size = Some(dims);
+                        dirty = true;
+                    }
+                }
             }
             _ = body_ticker.tick() => {
                 body_refresh_pending = true;
@@ -791,7 +814,7 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, initial_chat_view, mk_input,
+    clear_pending_inputs, data_dir_for, drain_pending_images, handle_mouse, initial_chat_view,
     persist_session_model, reapply_session_model,
     mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
     skill_trigger, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,

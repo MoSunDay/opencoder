@@ -1,7 +1,8 @@
 //! Contract test: a tool that returns images (e.g. `view_image`) must cause
-//! the subsequent LLM request to carry those images as `image_url` parts in
-//! the `tool` message. This is the acceptance contract for multimodal TUI
-//! support under the qwen vision-model namespace — deterministic, zero-network.
+//! the subsequent LLM request to rehome those images as `image_url` parts on a
+//! `role:"user"` message (the `tool` role carries a plain string per the OpenAI
+//! spec). This is the acceptance contract for multimodal TUI support under the
+//! qwen vision-model namespace — deterministic, zero-network.
 
 use std::sync::Arc;
 
@@ -85,28 +86,46 @@ async fn tool_returned_image_reaches_request_body() {
         reqs.len()
     );
 
-    // The second request must carry the tool result with image_url parts.
+    // The second request must carry the tool result as a STRING-content `tool`
+    // message (OpenAI spec) ...
     let second = &reqs[1];
     let tool_msg = second
         .messages
         .iter()
         .find(|m| m["role"] == "tool")
         .unwrap_or_else(|| panic!("expected a 'tool' message in second request: {:?}", second.messages));
+    assert!(
+        tool_msg["content"].is_string(),
+        "tool content must be a plain string (OpenAI spec), got: {tool_msg:?}"
+    );
 
-    let content = tool_msg["content"]
+    // ... and the tool-returned image is rehomed onto a `role:"user"` message as
+    // a legal `image_url` part (images cannot live on the `tool` role).
+    let user_with_image = second
+        .messages
+        .iter()
+        .filter(|m| m["role"] == "user")
+        .find(|m| {
+            m["content"]
+                .as_array()
+                .map(|parts| parts.iter().any(|p| p["type"] == "image_url"))
+                .unwrap_or(false)
+        })
+        .unwrap_or_else(|| panic!("expected a 'user' message with an image_url part: {:?}", second.messages));
+
+    let content = user_with_image["content"]
         .as_array()
-        .unwrap_or_else(|| panic!("tool content with images must be an array: {tool_msg:?}"));
-
+        .expect("user image content must be an array");
     assert!(
         content.iter().any(|p| p["type"] == "image_url"
             && p["image_url"]["url"]
                 .as_str()
                 .map(|u| u.starts_with("data:image/"))
                 .unwrap_or(false)),
-        "tool message must contain an image_url part with a data URI: {content:?}"
+        "user message must contain an image_url part with a data URI: {content:?}"
     );
     assert!(
         content.iter().any(|p| p["type"] == "text"),
-        "tool message must also carry the text content part: {content:?}"
+        "user message must also carry a text part: {content:?}"
     );
 }

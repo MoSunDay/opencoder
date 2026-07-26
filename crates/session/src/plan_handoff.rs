@@ -13,6 +13,7 @@
 
 use crate::runner::new_id;
 use crate::SessionState;
+use opencoder_core::ContentBlock;
 use opencoder_core::{Message, Role};
 
 /// Instruction prepended to the extracted plan. Worded as a user directive so
@@ -58,7 +59,15 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
         display.push_str(extra);
     }
 
-    let msg = handoff_message(&display);
+    // Preserve recent images from the plan-mode transcript being discarded so
+    // they travel with the handoff instruction into act mode. Attaching them to
+    // the single handoff message keeps `messages.len() == 1`, so the store
+    // accounting in `after_handoff` is unchanged.
+    let preserved_images = crate::compaction::collect_head_images(&session.messages);
+    let mut msg = handoff_message(&display);
+    for url in &preserved_images {
+        msg.blocks.push(ContentBlock::Image { url: url.clone(), detail: None });
+    }
     session.messages = vec![msg];
     // Record the boundary so resume can reconstruct this focused transcript.
     session.after_handoff(store_msg_count as i64, display.clone());

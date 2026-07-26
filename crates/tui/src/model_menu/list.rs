@@ -38,7 +38,7 @@ impl ProviderList {
                 model_id: p
                     .model
                     .clone()
-                    .unwrap_or_else(|| name.clone()),
+                    .unwrap_or_else(|| config.model_id().to_string()),
                 api_key: p.api_key.clone().unwrap_or_default(),
                 headers: p
                     .headers

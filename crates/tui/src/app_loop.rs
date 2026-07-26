@@ -667,7 +667,7 @@ pub(crate) async fn handle_plan_edit_key(
 pub(crate) use crate::frame::render_frame;
 
 /// Activate plan-edit mode using the text from the last Plan (or non-empty
-/// Assistant) block, flashing a hint that Esc saves the edit.
+/// Assistant) block, flashing the save/discard hint.
 pub(crate) fn enter_plan_edit(
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     chat: &crate::chat::ChatView,
@@ -676,7 +676,7 @@ pub(crate) fn enter_plan_edit(
 ) {
     if let Some(text) = chat.last_plan_text() {
         *plan_edit = Some(crate::plan_edit::PlanEdit::new(text));
-        *mode_flash = Some(("edit plan \u{2014} enter to save".into(), anim_tick));
+        *mode_flash = Some(("edit plan \u{2014} :wq save, :q! discard".into(), anim_tick));
     }
 }
 

@@ -5,8 +5,12 @@
 //! for full vim navigation, operators, search, and command-line.
 //!
 //! Exits:
-//! - `Enter` (Normal/Insert) / `:wq` / `:x` — save & leave (text kept).
-//! - `:q!` / `:q` / Ctrl+C — discard & leave (engine restores the original).
+//! - `:wq` — save & leave (text kept).
+//! - `:q!` / `:q` — discard & leave (engine restores the original).
+//!
+//! `Enter`, `Ctrl+C`, and `:x`/`:w` are no longer exit paths: in Insert mode
+//! `Enter` inserts a newline and `Ctrl+C` returns to Normal; in Normal mode
+//! both are no-ops.
 //!
 //! The caller persists on [`PlanEditAction::Exit`] iff [`PlanEdit::is_modified`]
 //! is true; discard exits already restore the original so this is automatic.
@@ -133,20 +137,7 @@ mod tests {
         assert_eq!(pe.mode_label(), "INSERT");
     }
 
-    #[test]
-    fn enter_saves_and_exits() {
-        let mut pe = PlanEdit::new("plan".to_string());
-        handle_plan_edit_key(&mut pe, key('!'), W, 2);
-        assert_eq!(
-            handle_plan_edit_key(&mut pe, enter(), W, 2),
-            PlanEditAction::Exit
-        );
-        // text retained -> modified
-        assert_eq!(pe.text(), "plan!");
-        assert!(pe.is_modified());
-    }
-
-    #[test]
+#[test]
     fn wq_saves_and_exits() {
         let mut pe = PlanEdit::new("x".to_string());
         handle_plan_edit_key(&mut pe, key('a'), W, 2);
@@ -182,16 +173,18 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_discards_and_exits() {
+    fn ctrl_c_drops_to_normal() {
         let mut pe = PlanEdit::new("base".to_string());
-        handle_plan_edit_key(&mut pe, key('!'), W, 2);
+        handle_plan_edit_key(&mut pe, key('!'), W, 2); // Insert, text="base!"
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(
             handle_plan_edit_key(&mut pe, ctrl_c, W, 2),
-            PlanEditAction::Exit
+            PlanEditAction::Continue
         );
-        assert_eq!(pe.text(), "base");
-        assert!(!pe.is_modified());
+        assert_eq!(pe.mode_label(), "NORMAL");
+        // text retained, still modified
+        assert_eq!(pe.text(), "base!");
+        assert!(pe.is_modified());
     }
 
     #[test]

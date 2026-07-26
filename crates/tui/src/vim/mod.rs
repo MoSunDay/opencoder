@@ -6,8 +6,8 @@
 //! persistence on [`VimAction::Exit`] based on [`VimState::is_modified`].
 //!
 //! Modes: Normal (navigate/operators), Insert (type), Command-line (`:`),
-//! Search (`/` `?` + `n`/`N`). Exits: `:q!`/`:q`/Ctrl+C discard (restore
-//! original); `:wq`/`:x`/Enter save.
+//! Search (`/` `?` + `n`/`N`). Exits: `:q!`/`:q` discard (restore original);
+//! `:wq` save.
 
 pub mod command;
 pub mod insert;

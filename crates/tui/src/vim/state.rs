@@ -61,13 +61,7 @@ impl VimState {
         self.text != self.original
     }
 
-    /// Mark the current text as saved (used by `:w` so is_modified clears while
-    /// editing continues).
-    pub fn mark_saved(&mut self) {
-        self.original = self.text.clone();
-    }
-
-    /// Label shown in the editor border. For Command/Search modes the in-progress
+/// Label shown in the editor border. For Command/Search modes the in-progress
     /// input is included so the user sees what they are typing.
     pub fn mode_label(&self) -> String {
         match self.mode {
@@ -152,7 +146,7 @@ mod tests {
         assert!(!s.is_modified());
         s.text.push_str("def");
         assert!(s.is_modified());
-        s.mark_saved();
+        s.original = s.text.clone();
         assert!(!s.is_modified());
         s.text.clear();
         assert!(s.is_modified());

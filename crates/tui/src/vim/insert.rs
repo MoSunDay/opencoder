@@ -1,10 +1,11 @@
 //! Insert-mode key handling for the vim engine.
 //!
-//! Plain `Enter` saves & exits; newlines are inserted via Shift+Enter /
-//! Alt+Enter / Ctrl+J chords (mirroring the composer input box). `Esc` returns
-//! to Normal mode (moving the cursor one char left, as vim does). Up/Down are
-//! handled at the top level (they need `inner_w`/`prompt_w`) so this module
-//! does not touch them.
+//! `Enter` inserts a newline (plain Enter) so multi-line input is natural,
+//! matching vim; `Esc` and `Ctrl+C` both return to Normal mode (moving the
+//! cursor one char left, as vim does) without exiting. There is no direct
+//! exit from Insert mode — use `:wq`/`:q` in Command mode to leave the editor.
+//! Up/Down are handled at the top level (they need `inner_w`/`prompt_w`) so
+//! this module does not touch them.
 
 use super::state::{is_ctrl_c, VimAction, VimMode};
 use crate::composer;
@@ -18,11 +19,14 @@ pub(crate) fn is_newline_chord(k: &KeyEvent) -> bool {
 }
 
 pub fn handle_insert(state: &mut super::state::VimState, k: KeyEvent) -> VimAction {
-    // Ctrl+C: discard edits (restore original) and exit.
+    // Ctrl+C: drop to Normal mode (same as Esc); no exit, no discard.
     if is_ctrl_c(&k) {
-        state.text = state.original.clone();
-        state.clamp_cursor();
-        return VimAction::Exit;
+        state.mode = VimMode::Normal;
+        if state.cursor > 0 {
+            state.cursor -= 1;
+        }
+        state.reset_pending();
+        return VimAction::Continue;
     }
     // Newline chords (Shift/Ctrl+Enter, Ctrl+J) insert a newline and stay in
     // Insert. Checked before the Enter/Char arms because the chord may arrive
@@ -44,8 +48,12 @@ pub fn handle_insert(state: &mut super::state::VimState, k: KeyEvent) -> VimActi
             VimAction::Continue
         }
         KeyCode::Enter => {
-            // Enter (plain) saves & exits. Newlines are inserted via chords.
-            VimAction::Exit
+            // Plain Enter inserts a newline (vim behaviour). Exit only via
+            // Command mode (`:wq`/`:q`).
+            let (t, i) = composer::insert_newline(&state.text, state.cursor);
+            state.text = t;
+            state.cursor = i;
+            VimAction::Continue
         }
         KeyCode::Char(c) if !c.is_control() => {
             let (t, i) = composer::insert_char(&state.text, state.cursor, c);
@@ -134,10 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn plain_enter_exits() {
-        let mut s = VimState::new("abc".to_string());
-        s.cursor = 3;
-        assert_eq!(handle_insert(&mut s, enter()), VimAction::Exit);
+    fn plain_enter_inserts_newline() {
+        let mut s = VimState::new("ab".to_string());
+        s.cursor = 1;
+        assert_eq!(handle_insert(&mut s, enter()), VimAction::Continue);
+        assert_eq!(s.text, "a\nb");
+        assert_eq!(s.cursor, 2);
     }
 
     #[test]
@@ -150,14 +160,16 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_discards_and_exits() {
+    fn ctrl_c_drops_to_normal() {
         let mut s = VimState::new("orig".to_string());
         s.text = "changed".to_string();
         s.cursor = 7;
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(handle_insert(&mut s, ctrl_c), VimAction::Exit);
-        assert_eq!(s.text, "orig");
-        assert!(!s.is_modified());
+        assert_eq!(handle_insert(&mut s, ctrl_c), VimAction::Continue);
+        assert_eq!(s.mode, VimMode::Normal);
+        // text retained (no discard), still modified
+        assert_eq!(s.text, "changed");
+        assert!(s.is_modified());
     }
 
     #[test]

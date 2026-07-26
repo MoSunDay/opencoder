@@ -274,6 +274,63 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
             .alignment(Alignment::Left),
         popup,
     );
+
+    if list.confirm_save_default.is_some() {
+        render_save_default_confirm(f, area, list);
+    }
+}
+
+/// Centered overlay shown when the user has selected a model and we are asking
+/// whether to save it as the global default (vs session-only). Drawn on top of
+/// the provider-list popup so the prompt is unmistakable.
+fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
+    let w = 62u16.min(area.width.saturating_sub(4));
+    let h = 5u16;
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let popup = Rect::new(x, y, w, h);
+    f.render_widget(Clear, popup);
+
+    let (name, model) = list
+        .entries
+        .get(list.selected)
+        .map(|e| {
+            (
+                e.name.as_str(),
+                if e.model_id.is_empty() {
+                    "(unset)"
+                } else {
+                    e.model_id.as_str()
+                },
+            )
+        })
+        .unwrap_or(("?", "?"));
+
+    let title = " Save as default? ".to_string();
+    let lines = vec![
+        Line::styled(
+            format!(" Set {}/{} as global default? ", name, model),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(
+            " [y] global    [n]/Enter session-only    Esc cancel ",
+            Style::default().fg(Color::Cyan),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .alignment(Alignment::Left),
+        popup,
+    );
 }
 
 // ── /model provider form ──────────────────────────────────────────────────

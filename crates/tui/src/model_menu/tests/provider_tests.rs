@@ -3,7 +3,10 @@
 use super::common::{enter, esc, key, provider_cfg};
 use crate::model_menu::list::ProviderList;
 use crate::model_menu::provider_form::{ProviderField, ProviderForm};
+use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
 
 // ── ProviderPatch ─────────────────────────────────────────────────────────
 
@@ -492,4 +495,45 @@ fn list_enter_opens_form_when_model_id_unset() {
         }
         _ => panic!("expected Form after Enter on unset provider, got a non-Form variant"),
     }
+}
+
+/// When `confirm_save_default` is armed, a centered confirmation dialog with the
+/// model name and the y/global + n/session-only + Esc/cancel hints is rendered
+/// into the buffer (regression guard: previously only the title bar changed).
+#[test]
+fn save_default_confirm_renders_visible_dialog() {
+    let cfg = provider_cfg();
+    let mut list = ProviderList::new(&cfg);
+    list.confirm_save_default = Some(serde_json::json!({ "model": "deepseek/deepseek-chat" }));
+    let menu = ModelMenu::List(list);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_model_popup(f, area, 20, &menu);
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let mut all = String::new();
+    for y in 0..24u16 {
+        for x in 0..80u16 {
+            if let Some(c) = buf.cell((x, y)) {
+                all.push_str(c.symbol());
+            }
+        }
+        all.push('\n');
+    }
+    assert!(
+        all.contains("Save as default"),
+        "confirm title missing:\n{all}"
+    );
+    assert!(all.contains("global"), "global hint missing:\n{all}");
+    assert!(
+        all.contains("session-only"),
+        "session-only hint missing:\n{all}"
+    );
+    assert!(all.contains("deepseek-chat"), "model name missing:\n{all}");
 }

@@ -78,7 +78,6 @@ impl Tool for BashTool {
             "workdir".into(),
             json::prop_str("Optional working directory override."),
         );
-        props.insert("timeout".into(), serde_json::json!({ "type": "number", "description": "Maximum runtime in seconds before the command is auto-backgrounded. Default 120, hard-capped at 590. Exceeding the cap does NOT kill the command — it keeps running in the background with output captured to a file." }));
         json::object_schema(Value::Object(props), &["command"])
     }
 
@@ -356,6 +355,31 @@ mod tests {
         assert_eq!(
             resolve_timeout_secs(&json!({"timeout": u64::MAX})),
             BASH_MAX_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn parameters_schema_hides_timeout_from_model() {
+        // The `timeout` property was removed from the model-facing schema to
+        // stop models from inflating it past the runner safety net (see
+        // bash-timeout-clamp-handoff.md). `command`/`workdir` stay exposed;
+        // the default (120 s) + hard cap (590 s) still apply at runtime via
+        // `resolve_timeout_secs`. This guard prevents silent re-introduction.
+        let schema = BashTool.parameters();
+        let props = schema
+            .get("properties")
+            .expect("schema has a properties object");
+        assert!(
+            props.get("command").is_some(),
+            "command must remain in schema"
+        );
+        assert!(
+            props.get("workdir").is_some(),
+            "workdir must remain in schema"
+        );
+        assert!(
+            props.get("timeout").is_none(),
+            "timeout must NOT be exposed in the model-facing schema"
         );
     }
 }

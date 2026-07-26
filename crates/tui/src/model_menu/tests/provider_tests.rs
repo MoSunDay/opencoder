@@ -338,3 +338,103 @@ fn model_menu_paste_is_a_noop_in_list() {
     }
     assert!(matches!(slot, Some(ModelMenu::List(_))));
 }
+
+
+// ── model_id fallback for unset provider model ────────────────────────────
+//
+// Regression: a provider without an explicit `model` field used to fall back
+// to the active model's id for EVERY provider, producing wrong/misleading
+// rows. Now only the active provider derives its model_id from the top-level
+// config; non-active providers with no `model` field show as unset (empty).
+
+/// Config with two providers, neither carrying an explicit `model` field.
+/// Active model is "active/active-model".
+fn multi_provider_cfg() -> opencoder_core::Config {
+    let mut c = super::common::cfg();
+    c.model = "active/active-model".to_string();
+    c.providers.insert(
+        "active".to_string(),
+        opencoder_core::ProviderConfig {
+            base_url: "https://active.example.com/v1".to_string(),
+            api_key: Some("ak-active".to_string()),
+            model: None,
+            headers: Vec::new(),
+        },
+    );
+    c.providers.insert(
+        "other".to_string(),
+        opencoder_core::ProviderConfig {
+            base_url: "https://other.example.com/v1".to_string(),
+            api_key: None,
+            model: None,
+            headers: Vec::new(),
+        },
+    );
+    c
+}
+
+#[test]
+fn provider_list_model_id_empty_for_non_active_without_model() {
+    let list = ProviderList::new(&multi_provider_cfg());
+    let other = list
+        .entries
+        .iter()
+        .find(|e| e.name == "other")
+        .expect("other provider present");
+    assert!(
+        other.model_id.is_empty(),
+        "non-active provider without a model field must have an empty model_id, got {:?}",
+        other.model_id
+    );
+    assert!(!other.active);
+}
+
+#[test]
+fn provider_list_model_id_from_config_for_active_without_model() {
+    let list = ProviderList::new(&multi_provider_cfg());
+    let active = list
+        .entries
+        .iter()
+        .find(|e| e.name == "active")
+        .expect("active provider present");
+    assert_eq!(
+        active.model_id, "active-model",
+        "active provider without a model field must derive model_id from config"
+    );
+    assert!(active.active);
+}
+
+#[test]
+fn list_enter_opens_form_when_model_id_unset() {
+    // Selecting a provider whose model_id is empty must NOT emit a Save
+    // (which would produce a suspicious "name/" model), but instead open the
+    // edit form so the user can fill in a real model_id.
+    let mut list = ProviderList::new(&multi_provider_cfg());
+    list.selected = list
+        .entries
+        .iter()
+        .position(|e| e.name == "other")
+        .expect("other provider present");
+
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::List(list));
+    let outcome = handle_model_key(&mut slot, enter());
+    assert!(
+        matches!(outcome, ModelOutcome::Idle),
+        "Enter on an unset provider must not Save"
+    );
+    match &slot {
+        Some(ModelMenu::Form(f)) => {
+            assert_eq!(f.name, "other", "form should be for the selected provider");
+            assert!(
+                f.model_id.is_empty(),
+                "form model_id should start empty for the user to fill in"
+            );
+            assert_eq!(
+                f.focus,
+                ProviderField::ModelId,
+                "focus should land on the model_id field to guide the user"
+            );
+        }
+        _ => panic!("expected Form after Enter on unset provider, got a non-Form variant"),
+    }
+}

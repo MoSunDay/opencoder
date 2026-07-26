@@ -208,7 +208,7 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
     f.render_widget(Clear, popup);
 
     let title = if list.confirm_save_default.is_some() {
-        " /model \u{2014} SAVE AS DEFAULT? y=global, n/Enter=session-only ".to_string()
+        " /model \u{2014} SAVE AS DEFAULT? y/Enter=global, n=session-only ".to_string()
     } else {
         match &list.confirm_delete {
             Some(_) => " /model \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
@@ -316,7 +316,7 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
         ),
         Line::raw(""),
         Line::styled(
-            " [y] global    [n]/Enter session-only    Esc cancel ",
+            " [y]/Enter global    [n] session-only    Esc cancel ",
             Style::default().fg(Color::Cyan),
         ),
     ];

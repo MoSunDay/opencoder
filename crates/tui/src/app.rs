@@ -29,7 +29,7 @@ use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 
 #[path = "app_loop.rs"]
-mod app_loop;
+pub(crate) mod app_loop;
 
 #[path = "app_task.rs"]
 mod app_task;

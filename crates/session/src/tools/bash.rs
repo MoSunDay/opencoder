@@ -31,6 +31,35 @@ fn merge_streams(stdout: &str, stderr: &str) -> String {
     combined
 }
 
+/// Maximum per-command timeout (seconds) for the bash tool.
+///
+/// Must stay strictly below `DEFAULT_TOOL_TIMEOUT` (600 s) in
+/// [`crate::runner`] — the runner's outer `biased select!` polls the deadline
+/// arm before the exec arm, so if bash's own `tokio::time::timeout` were
+/// ≥ 600 s the safety net would fire first, drop the exec future, and
+/// `kill_on_drop(true)` would silently kill the child — bypassing handoff
+/// entirely (the "moved to background" path never runs). Capping at 590 s
+/// guarantees the handoff code path always wins the race.
+pub(crate) const BASH_MAX_TIMEOUT_SECS: u64 = 590;
+
+/// Compile-time guard: the bash cap must be strictly below the runner's outer
+/// safety-net timeout. If someone lowers `DEFAULT_TOOL_TIMEOUT` below 590,
+/// this assertion fails at compile time.
+const _: () = assert!(
+    BASH_MAX_TIMEOUT_SECS < crate::runner::DEFAULT_TOOL_TIMEOUT.as_secs(),
+    "BASH_MAX_TIMEOUT_SECS must be strictly below DEFAULT_TOOL_TIMEOUT"
+);
+
+/// Resolve the per-command timeout from tool input, applying the default
+/// (120 s) and the hard cap ([`BASH_MAX_TIMEOUT_SECS`]).
+fn resolve_timeout_secs(input: &Value) -> u64 {
+    input
+        .get("timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(120)
+        .min(BASH_MAX_TIMEOUT_SECS)
+}
+
 #[async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &str {
@@ -49,7 +78,7 @@ impl Tool for BashTool {
             "workdir".into(),
             json::prop_str("Optional working directory override."),
         );
-        props.insert("timeout".into(), serde_json::json!({ "type": "number", "description": "Optional timeout in seconds (default 120)." }));
+        props.insert("timeout".into(), serde_json::json!({ "type": "number", "description": "Maximum runtime in seconds before the command is auto-backgrounded. Default 120, hard-capped at 590. Exceeding the cap does NOT kill the command — it keeps running in the background with output captured to a file." }));
         json::object_schema(Value::Object(props), &["command"])
     }
 
@@ -63,7 +92,7 @@ impl Tool for BashTool {
             .and_then(|v| v.as_str())
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
-        let timeout_secs = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(120);
+        let timeout_secs = resolve_timeout_secs(&input);
 
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-lc")
@@ -292,5 +321,29 @@ mod tests {
         );
         // Clean up the temp file.
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn timeout_clamped_below_safety_net() {
+        // Default when absent.
+        assert_eq!(resolve_timeout_secs(&json!({})), 120);
+        // Sub-cap values pass through unchanged.
+        assert_eq!(resolve_timeout_secs(&json!({"timeout": 60})), 60);
+        assert_eq!(resolve_timeout_secs(&json!({"timeout": 300})), 300);
+        assert_eq!(resolve_timeout_secs(&json!({"timeout": 590})), 590);
+        // Values at or above the runner safety net (600 s) must be clamped
+        // so the bash handoff always fires before the biased outer deadline.
+        assert_eq!(
+            resolve_timeout_secs(&json!({"timeout": 600})),
+            BASH_MAX_TIMEOUT_SECS
+        );
+        assert_eq!(
+            resolve_timeout_secs(&json!({"timeout": 9999})),
+            BASH_MAX_TIMEOUT_SECS
+        );
+        assert_eq!(
+            resolve_timeout_secs(&json!({"timeout": u64::MAX})),
+            BASH_MAX_TIMEOUT_SECS
+        );
     }
 }

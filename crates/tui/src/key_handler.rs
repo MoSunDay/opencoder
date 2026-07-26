@@ -31,6 +31,7 @@ pub(crate) enum KeyAction {
     // row was removed, but the match arm in app.rs still handles it.
     #[allow(dead_code)]
     SetSkill(Option<(String, String)>),
+    Clip,
     OpenCommand,
     Quit,
 }
@@ -164,6 +165,11 @@ pub(crate) fn handle_key(
                 let next = if agent == "plan" { "act" } else { "plan" };
                 return KeyAction::SwitchAgentNoClear(next.into());
             }
+            // Ctrl+V: paste image (screenshot bitmap) from the system
+            // clipboard. Mirrors the legacy /clip command. Under kitty
+            // keyboard protocol crossterm may report the raw control char
+            // `\u{16}` (SYN) with the CONTROL modifier set.
+            KeyCode::Char('v') | KeyCode::Char('\u{16}') => return KeyAction::Clip,
             _ => return KeyAction::None,
         }
     }
@@ -516,6 +522,38 @@ mod tests {
             true,
         );
         assert!(matches!(action, KeyAction::Quit));
+    }
+
+    #[test]
+    fn ctrl_v_returns_clip() {
+        let mut input = String::new();
+        let mut cursor = 0usize;
+        let history: Vec<String> = Vec::new();
+        let mut hist_idx: Option<usize> = None;
+        let mut show_help = false;
+        let mut scroll = 0u16;
+        let mut follow = true;
+        let mut last_esc: Option<Instant> = None;
+        let mut skill_menu: Option<SkillMenu> = None;
+
+        let action = handle_key(
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
+        );
+        assert!(matches!(action, KeyAction::Clip));
     }
 
     #[test]

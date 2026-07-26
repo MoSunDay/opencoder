@@ -5,9 +5,10 @@ Keybindings:
   Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
   Ctrl+Shift+Tab  switch mode act <--> plan (keep context, no handoff reset)
   Ctrl+U          switch mode act <--> plan (same pure toggle; use when Ctrl+Shift+Tab is taken)
+  Ctrl+V          paste image from clipboard (screenshot)
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                pick skill anywhere -> {$name}; loaded on submit
-  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history), /clip (paste image from clipboard)
+  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history)
   Shift+I          edit plan (plan mode only, when idle)
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task

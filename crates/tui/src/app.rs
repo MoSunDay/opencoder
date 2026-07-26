@@ -470,7 +470,7 @@ async fn run_app(
                         if command_menu.is_some() {
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
-                                &mut pending_images, &mut running, &mut follow, &store,
+                                &mut running, &mut follow, &store,
                                 &session_id, &mut task_picker, &mut model_menu, &config,
                                 &mut cache_salt_menu, &agent_name,
                             )
@@ -716,6 +716,13 @@ async fn run_app(
                                 dirty = true;
                                 render_pending = true;
                                 quitting = true;
+                            }
+                            KeyAction::Clip => {
+                                app_loop::paste_clipboard_image(
+                                    &mut chat, &mut pending_images,
+                                )
+                                .await;
+                                dirty = true;
                             }
                             KeyAction::None => {}
                         }

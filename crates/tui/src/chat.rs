@@ -477,7 +477,16 @@ impl ChatView {
                             out.push(Line::from(spans));
                         }
                     } else {
-                        for l in raw.split('\n') {
+                        // Mirrors `flush_code` (markdown.rs): split the raw
+                        // stream on `\n` and drop only the single trailing
+                        // empty element produced by a terminating newline, so
+                        // it does not render as an extra blank body line.
+                        // Interior blank lines are preserved.
+                        let mut rows: Vec<&str> = raw.split('\n').collect();
+                        if rows.last().is_some_and(|s| s.is_empty()) {
+                            rows.pop();
+                        }
+                        for l in rows {
                             let l = l.strip_suffix('\r').unwrap_or(l);
                             out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));
                         }

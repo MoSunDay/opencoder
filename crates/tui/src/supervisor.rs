@@ -150,14 +150,16 @@ pub(crate) fn spawn(heartbeat: Heartbeat, active: Arc<AtomicBool>) {
             active.load(Ordering::Relaxed),
             wedge_ms,
         ) {
-            // The tty is likely gone; stderr is usually not visible, but try.
+            // Restore the terminal FIRST: while still in alt-screen + raw mode
+            // any stderr write lands as raw escape garbage overlaying the
+            // interface. Once `restore()` has left the alternate screen stderr
+            // is safely visible (or harmlessly discarded if the tty is gone).
+            TerminalGuard::restore();
             let _ = writeln!(
                 std::io::stderr(),
-                "opencode: input collector {reason:?} — restoring terminal and exiting. \
+                "opencode: input collector {reason:?} — terminal restored, exiting. \
                  Reopen with `opencode --continue` to resume this session."
             );
-            // Idempotent, tty-safe, swallows its own errors.
-            TerminalGuard::restore();
             std::process::exit(0);
         }
     });

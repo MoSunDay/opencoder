@@ -163,7 +163,7 @@ pub enum SessionSub {
 
 /// Path used to sink TUI logs so they never corrupt the alternate screen.
 /// `<data_local_dir>/opencoder/tui.log`. Returns `None` if the data dir is
-/// unavailable; the caller treats `None` as "log to stdout".
+/// unavailable; the caller then falls back to a temp file (never stdout).
 pub fn tui_log_path() -> Option<PathBuf> {
     let mut p = dirs::data_local_dir()?;
     p.push("opencoder");
@@ -175,9 +175,9 @@ pub fn tui_log_path() -> Option<PathBuf> {
 /// `file_sink`, when `Some`, directs log output to that file (truncated on
 /// start). This is required for the TUI: the alternate screen + raw mode mean
 /// any log written to stdout/stderr overlays the interface as garbage text
-/// (e.g. the "WARN stream finished early" line). Headless commands pass `None`
-/// to keep logging on stdout. Opening the file is best-effort — on failure we
-/// fall back to stdout so logging never breaks the app.
+/// (e.g. the "WARN stream finished early" line). Headless commands pass `None`,
+/// in which case logging goes to a best-effort temp file -- never stdout/stderr
+/// -- so the subscriber can never corrupt a terminal regardless of context.
 pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
     let default_filter = if verbose {
         "debug"
@@ -188,19 +188,70 @@ pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
 
     let file = file_sink.and_then(|p| std::fs::File::create(p).ok());
-    match file {
-        Some(f) => {
-            let _ = tracing_subscriber::fmt()
-                .with_writer(std::sync::Mutex::new(f))
-                .with_env_filter(env_filter)
-                .with_target(false)
-                .try_init();
-        }
-        None => {
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .with_target(false)
-                .try_init();
-        }
+    // Only attempt the temp fallback when the primary sink is unavailable, so
+    // the happy path never creates a stray file in the temp dir.
+    let temp = file
+        .is_none()
+        .then(|| std::fs::File::create(fallback_log_path()).ok())
+        .flatten();
+    let dest = log_dest(file.is_some(), temp.is_some());
+    let writer: Box<dyn std::io::Write + Send> = match dest {
+        LogDest::PrimaryFile => Box::new(file.expect("log_dest guarantees file is Some")),
+        LogDest::TempFallback => Box::new(temp.expect("log_dest guarantees temp is Some")),
+        LogDest::Discard => Box::new(std::io::sink()),
+    };
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(writer))
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init();
+}
+
+/// Best-effort fallback log file when no primary sink was provided/usable.
+fn fallback_log_path() -> PathBuf {
+    std::env::temp_dir().join("opencoder-tui.log")
+}
+
+/// Which log writer strategy to use -- pure decision extracted for testability.
+/// Crucially this type can represent ONLY non-tty destinations: stdout/stderr
+/// are deliberately unrepresentable so the subscriber can never pollute a
+/// terminal (alt-screen corruption).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LogDest {
+    PrimaryFile,
+    TempFallback,
+    Discard,
+}
+
+/// Pure decision: given whether the primary file and the temp fallback were
+/// opened successfully, pick the best non-tty destination.
+pub(crate) fn log_dest(file_ok: bool, temp_ok: bool) -> LogDest {
+    if file_ok {
+        LogDest::PrimaryFile
+    } else if temp_ok {
+        LogDest::TempFallback
+    } else {
+        LogDest::Discard
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_dest_prefers_primary_file() {
+        assert_eq!(log_dest(true, true), LogDest::PrimaryFile);
+        assert_eq!(log_dest(true, false), LogDest::PrimaryFile);
+    }
+
+    #[test]
+    fn log_dest_falls_back_to_temp_when_no_primary() {
+        assert_eq!(log_dest(false, true), LogDest::TempFallback);
+    }
+
+    #[test]
+    fn log_dest_discards_only_when_both_unavailable() {
+        assert_eq!(log_dest(false, false), LogDest::Discard);
     }
 }

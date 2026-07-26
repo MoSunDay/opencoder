@@ -65,7 +65,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
 
     // Resume an existing session if --session was given, otherwise start fresh.
     let replay_cancel = CancellationToken::new();
-    let session = if let Some(id) = &opts.session {
+    let mut session = if let Some(id) = &opts.session {
         // Try as a session ID first; if not found, try as a subagent
         // task_id to resolve the parent session.
         let effective_id = if store.get_session(id).await?.is_none() {
@@ -100,6 +100,12 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         )
         .with_store(store.clone())
     };
+
+    // Explicit --model wins over a resumed session's stored model and is
+    // re-persisted so later resumes honor it (headless run-path parity).
+    if let Some(m) = reapply_session_model(&mut session, &opts.model) {
+        persist_session_model(store.as_ref(), &session.id, m).await;
+    }
 
     let session_id = session.id.clone();
     let context_limit = session.config.context_limit();
@@ -782,6 +788,7 @@ async fn run_app(
 
 pub(crate) use crate::app_helpers::{
     clear_pending_inputs, data_dir_for, handle_mouse, initial_chat_view, mk_input,
+    persist_session_model, reapply_session_model,
     mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
     skill_trigger, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
 };

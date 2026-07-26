@@ -11,7 +11,7 @@ use anyhow::Result;
 use opencoder_core::{discover_skills, resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, SessionInput, Store};
+use opencoder_store::{Delivery, SessionInput, SessionPatch, Store};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
@@ -32,6 +32,40 @@ const DBL_CLICK_MS: u64 = 400;
 /// Copy-paste-ready command to resume a session by id.
 pub(crate) fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
+}
+
+/// Re-apply an explicit `--model` to a resumed/newly-built session. `resume()`
+/// restores the model stored in the session row into `session.config.model`,
+/// so an explicit `--model` must win here. Returns the new model string when
+/// the session changed (caller persists it), else `None`. Mirrors the headless
+/// path in `crates/cli/src/run.rs` -- the TUI previously lacked this and
+/// silently dropped `--model` on resume (chosen model not applied after restart).
+pub(crate) fn reapply_session_model(
+    session: &mut SessionState,
+    model: &Option<String>,
+) -> Option<String> {
+    let m = model.as_ref()?;
+    if session.config.model == *m {
+        return None;
+    }
+    session.config.model = m.clone();
+    session.model = session.config.model_id().to_string();
+    Some(m.clone())
+}
+
+/// Persist a model change (the `Some` returned by [`reapply_session_model`])
+/// back into the session row so subsequent resumes honor the new choice.
+pub(crate) async fn persist_session_model(store: &dyn Store, id: &str, model: String) {
+    let _ = store
+        .update_session(
+            id,
+            &SessionPatch {
+                model: Some(model),
+                updated_at: Some(opencoder_core::message::now_ms()),
+                ..Default::default()
+            },
+        )
+        .await;
 }
 
 /// Resolve the `(base_url, api_key)` pair used to build the LLM client at TUI

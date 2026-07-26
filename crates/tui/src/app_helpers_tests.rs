@@ -991,3 +991,31 @@ fn mk_input_without_images_defaults_empty() {
     let input = crate::app_helpers::mk_input("s2", opencoder_store::Delivery::Queue, "plain");
     assert!(input.images.is_empty());
 }
+
+#[test]
+fn reapply_session_model_overrides_resumed_model() {
+    use opencoder_core::resolve_agent;
+    use opencoder_llm::{ChatStream, MockChatClient};
+    use std::path::PathBuf;
+    // A session "resumed" with a stored model of gpt-4o-mini.
+    let cfg = Config {
+        model: "openai/gpt-4o-mini".into(),
+        ..Config::default()
+    };
+    let agent = resolve_agent("act").unwrap();
+    let mut s = SessionState::new(
+        "s1",
+        agent,
+        cfg,
+        std::sync::Arc::new(MockChatClient::new()) as std::sync::Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    );
+    // Explicit --model wins over the stored model; returns the value to persist.
+    let changed = reapply_session_model(&mut s, &Some("anthropic/claude-3".into()));
+    assert_eq!(changed.as_deref(), Some("anthropic/claude-3"));
+    assert_eq!(s.model, "claude-3");
+    assert_eq!(s.config.provider_id(), "anthropic");
+    // No-op when the override already matches or is absent.
+    assert_eq!(reapply_session_model(&mut s, &Some("anthropic/claude-3".into())), None);
+    assert_eq!(reapply_session_model(&mut s, &None), None);
+}

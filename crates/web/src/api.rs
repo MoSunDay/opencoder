@@ -219,11 +219,23 @@ pub async fn post_agent(
     Json(json!({ "ok": true, "agent": body.value }))
 }
 
+/// Request body for `POST /sessions/:id/model`.
+///
+/// `persist_default = true` additionally writes the model as the global
+/// default in `opencoder.json` via `Config::save` (defaults to false, i.e.
+/// session-only — matching the TUI's default).
+#[derive(Deserialize)]
+pub struct ModelBody {
+    pub value: String,
+    #[serde(default)]
+    pub persist_default: bool,
+}
+
 pub async fn post_model(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(body): Json<SwitchBody>,
-) -> impl IntoResponse {
+    Json(body): Json<ModelBody>,
+) -> Response {
     let _ = state
         .store
         .update_session(
@@ -238,7 +250,13 @@ pub async fn post_model(
     if let Some(h) = state.handles.lock().await.get(&id).cloned() {
         h.overrides.lock().await.model = Some(body.value.clone());
     }
-    Json(json!({ "ok": true, "model": body.value }))
+    if body.persist_default {
+        let patch = serde_json::json!({ "model": &body.value });
+        if let Err(e) = Config::save(&state.workdir, &patch) {
+            return error_500(format!("persist_default failed: {e:#}"));
+        }
+    }
+    Json(json!({ "ok": true, "model": body.value })).into_response()
 }
 
 pub async fn post_interrupt(

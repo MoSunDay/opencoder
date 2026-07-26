@@ -39,7 +39,8 @@ async fn session_with(
 
 /// Raw assistant output: prose with trailing whitespace + long blank runs,
 /// wrapped around a fenced code block whose interior must be left untouched.
-const RAW: &str = "line one   \n\n\n\n```rust\nfn x() {   \n\n    let y = 1;   \n}\n```\n\n\n\nfinal   \n";
+const RAW: &str =
+    "line one   \n\n\n\n```rust\nfn x() {   \n\n    let y = 1;   \n}\n```\n\n\n\nfinal   \n";
 
 fn first_assistant_text(s: &SessionState) -> &str {
     let msg = s

@@ -40,7 +40,12 @@ impl ChatView {
             }
         }
         for block in self.blocks.iter_mut().rev() {
-            if let ChatBlock::Assistant { raw, rendered, done } = block {
+            if let ChatBlock::Assistant {
+                raw,
+                rendered,
+                done,
+            } = block
+            {
                 if !raw.trim().is_empty() {
                     *raw = text.to_string();
                     *rendered = crate::markdown::render(text);

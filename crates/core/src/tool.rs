@@ -136,7 +136,10 @@ pub fn truncate_output_with_error(content: String, max: usize, is_error: bool) -
     }
 
     ToolOutput {
-        content: format!("{body}\n\n[output truncated, original {}]", parts.join(", ")),
+        content: format!(
+            "{body}\n\n[output truncated, original {}]",
+            parts.join(", ")
+        ),
         is_error,
         images: Vec::new(),
     }

@@ -207,9 +207,13 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
     let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
-    let title = match &list.confirm_delete {
-        Some(_) => " /model \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
-        None => " /model \u{2014} \u{2191}/\u{2193} select, Enter=switch, e=edit, n=new, d=delete, Esc cancel ".to_string(),
+    let title = if list.confirm_save_default.is_some() {
+        " /model \u{2014} SAVE AS DEFAULT? y=global, n/Enter=session-only ".to_string()
+    } else {
+        match &list.confirm_delete {
+            Some(_) => " /model \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
+            None => " /model \u{2014} \u{2191}/\u{2193} select, Enter=switch, e=edit, n=new, d=delete, Esc cancel ".to_string(),
+        }
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -231,8 +235,13 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
         for (i, entry) in list.entries.iter().enumerate() {
             let selected = i == list.selected;
             let confirming = list.confirm_delete == Some(i);
+            let asking_default = list.confirm_save_default.is_some() && selected;
             let mark = if entry.active { "\u{25cf}" } else { " " };
-            let prefix = if confirming { "?" } else { " " };
+            let prefix = if confirming || asking_default {
+                "?"
+            } else {
+                " "
+            };
             let model_display = if entry.model_id.is_empty() {
                 "(unset)"
             } else {
@@ -244,6 +253,10 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
             );
             let style = if confirming {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            } else if asking_default {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if selected {
                 focus_style()
             } else if entry.active {

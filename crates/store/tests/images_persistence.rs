@@ -50,17 +50,11 @@ async fn images_roundtrip_through_pending_inputs() {
     };
     store.admit_input(&input).await.unwrap();
 
-    let pending = store
-        .pending_inputs("s", Delivery::Steer)
-        .await
-        .unwrap();
+    let pending = store.pending_inputs("s", Delivery::Steer).await.unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(
         pending[0].images,
-        vec![
-            "data:image/png;base64,iVBORw0KGgo=",
-            "https://x.test/b.jpg"
-        ],
+        vec!["data:image/png;base64,iVBORw0KGgo=", "https://x.test/b.jpg"],
         "images must round-trip through pending_inputs"
     );
     assert_eq!(pending[0].prompt, "describe this");

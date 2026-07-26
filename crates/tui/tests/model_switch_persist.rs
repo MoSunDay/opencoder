@@ -73,8 +73,12 @@ async fn reload_config_persists_model_and_emits_model_switch_event() {
 
     assert_eq!(sess.model, "gpt-4o-mini", "precondition: default model");
 
-    let broke =
-        process_cmd(UiCmd::ReloadConfig(Box::new(switched_config())), &mut sess, &tx).await;
+    let broke = process_cmd(
+        UiCmd::ReloadConfig(Box::new(switched_config())),
+        &mut sess,
+        &tx,
+    )
+    .await;
     assert!(!broke, "ReloadConfig must not break the worker loop");
     assert_eq!(sess.model, "test-model", "in-memory model swapped");
 
@@ -130,7 +134,12 @@ async fn model_switch_survives_resume() {
     )
     .with_store(store.clone());
 
-    process_cmd(UiCmd::ReloadConfig(Box::new(switched_config())), &mut sess, &tx).await;
+    process_cmd(
+        UiCmd::ReloadConfig(Box::new(switched_config())),
+        &mut sess,
+        &tx,
+    )
+    .await;
     // drain the ModelSwitch event forwarded by the worker
     let _ = rx.recv().await.expect("ModelSwitch event forwarded");
 

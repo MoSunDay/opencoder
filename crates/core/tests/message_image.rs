@@ -75,8 +75,11 @@ fn estimate_chars_counts_image_attachment_without_dumping_base64() {
     let m = Message::user_with_images("u4", "x", &[big]);
     let chars = m.estimate_chars();
     // Fixed cost (~1024) + the short text "x"; far less than the 200k payload.
-    assert!(chars.len() > 1024 && chars.len() < 5_000,
-        "image estimate must be a fixed rough cost, got {} chars", chars.len());
+    assert!(
+        chars.len() > 1024 && chars.len() < 5_000,
+        "image estimate must be a fixed rough cost, got {} chars",
+        chars.len()
+    );
 }
 
 #[test]
@@ -86,7 +89,9 @@ fn old_blocks_json_without_image_still_deserializes() {
     let legacy = r#"[{"kind":"text","text":"hi"},{"kind":"tool_result","tool_use_id":"c1","content":"ok","is_error":false}]"#;
     let blocks: Vec<ContentBlock> = serde_json::from_str(legacy).unwrap();
     assert_eq!(blocks.len(), 2);
-    assert!(blocks.iter().all(|b| !matches!(b, ContentBlock::Image { .. })));
+    assert!(blocks
+        .iter()
+        .all(|b| !matches!(b, ContentBlock::Image { .. })));
 }
 
 // --- tool-result images ---
@@ -100,13 +105,15 @@ fn tool_result_with_images_serializes_the_images_key() {
         images: vec!["data:image/png;base64,iVBOR=".into()],
     };
     let v = serde_json::to_value(&block).unwrap();
-    assert_eq!(v["kind"], "tool_result", "discriminator must be tool_result");
+    assert_eq!(
+        v["kind"], "tool_result",
+        "discriminator must be tool_result"
+    );
     assert_eq!(v["tool_use_id"], "t1");
     assert_eq!(v["content"], "see image");
     assert_eq!(v["is_error"], false);
     assert_eq!(
-        v["images"][0],
-        "data:image/png;base64,iVBOR=",
+        v["images"][0], "data:image/png;base64,iVBOR=",
         "image URI must be serialized"
     );
 }

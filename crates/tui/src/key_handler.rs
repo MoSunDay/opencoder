@@ -83,11 +83,15 @@ pub(crate) fn handle_key(
         if k.modifiers.contains(KeyModifiers::CONTROL) {
             match k.code {
                 KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
-            // Ctrl+C: interrupt the running task (same as double-Esc), when one
-            // is active. When idle it is a no-op (use Ctrl+D to quit).
-            KeyCode::Char('c') => {
-                return if running { KeyAction::Cancel } else { KeyAction::None };
-            }
+                // Ctrl+C: interrupt the running task (same as double-Esc), when one
+                // is active. When idle it is a no-op (use Ctrl+D to quit).
+                KeyCode::Char('c') => {
+                    return if running {
+                        KeyAction::Cancel
+                    } else {
+                        KeyAction::None
+                    };
+                }
                 KeyCode::Char('h') => {
                     *show_help = !*show_help;
                     return KeyAction::None;
@@ -269,12 +273,7 @@ pub(crate) fn handle_key(
             // Shift+I (uppercase I) enters plan-edit mode — but ONLY when in
             // plan mode, idle, and the input box is empty. Once the user starts
             // typing, regular `I` insertion resumes.
-            if c == 'I'
-                && agent == "plan"
-                && !running
-                && !input_disabled
-                && input.is_empty()
-            {
+            if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {
                 return KeyAction::EnterPlanEdit;
             }
             // Fallback quit for terminals/crossterm configs that deliver Ctrl+D
@@ -288,7 +287,11 @@ pub(crate) fn handle_key(
             // Ctrl-block handling above); otherwise swallow it so it is not
             // inserted as a literal control char into the input buffer.
             if c == '\u{3}' {
-                return if running { KeyAction::Cancel } else { KeyAction::None };
+                return if running {
+                    KeyAction::Cancel
+                } else {
+                    KeyAction::None
+                };
             }
             if c == '$' {
                 *skill_menu = Some(SkillMenu::new(discover_skills()));
@@ -398,9 +401,20 @@ mod tests {
 
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
         assert!(input.is_empty());
@@ -420,9 +434,20 @@ mod tests {
 
         let action = handle_key(
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
     }
@@ -441,9 +466,20 @@ mod tests {
 
         let action = handle_key(
             KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
         assert_eq!(scroll, 30);
@@ -464,9 +500,20 @@ mod tests {
 
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::Quit));
     }
@@ -487,18 +534,40 @@ mod tests {
         // view) so the parent agent is not switched prematurely.
         let action = handle_key(
             KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
 
         // Alt+BackTab variant.
         let action = handle_key(
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::ALT),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
     }
@@ -519,18 +588,40 @@ mod tests {
         // disabled so the parent agent is not switched prematurely.
         let action = handle_key(
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::CONTROL),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
 
         // kitty: Tab+CONTROL+SHIFT.
         let action = handle_key(
             KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, true,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            true,
         );
         assert!(matches!(action, KeyAction::None));
     }
@@ -594,12 +685,26 @@ mod tests {
         // the plan-text editor.
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, false,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
         );
         assert!(matches!(action, KeyAction::EnterPlanEdit));
-        assert!(input.is_empty(), "input should be untouched on EnterPlanEdit");
+        assert!(
+            input.is_empty(),
+            "input should be untouched on EnterPlanEdit"
+        );
     }
 
     #[test]
@@ -617,9 +722,20 @@ mod tests {
         // Shift+I in act mode is a plain char insertion, not plan-edit entry.
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "act",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, false,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
         );
         assert!(!matches!(action, KeyAction::EnterPlanEdit));
         assert_eq!(input, "I", "should insert the character 'I'");
@@ -640,9 +756,20 @@ mod tests {
         // Even in plan mode, Shift+I while running just inserts the char.
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, true, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, false,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            true,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
         );
         assert!(!matches!(action, KeyAction::EnterPlanEdit));
         assert_eq!(input, "I", "should insert the character 'I'");
@@ -663,9 +790,20 @@ mod tests {
         // Once the user has started typing, Shift+I resumes normal insertion.
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, false,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
         );
         assert!(!matches!(action, KeyAction::EnterPlanEdit));
         assert_eq!(input, "helloI", "should append the character 'I'");
@@ -686,9 +824,20 @@ mod tests {
         // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
         let action = handle_key(
             KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx, false, "plan",
-            &mut show_help, &mut scroll, &mut follow, &mut last_esc,
-            &mut skill_menu, 80, 2, false,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "plan",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
         );
         assert!(matches!(action, KeyAction::None));
         assert_eq!(input, "i", "lowercase i should be inserted into input");

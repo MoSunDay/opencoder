@@ -302,7 +302,12 @@ fn streaming_interior_blank_line_is_preserved() {
         .iter()
         .filter(|t| t.trim_end().ends_with('a') || t.trim_end().ends_with('b'))
         .collect();
-    assert_eq!(content.len(), 2, "expected two content lines; got {:?}", joined);
+    assert_eq!(
+        content.len(),
+        2,
+        "expected two content lines; got {:?}",
+        joined
+    );
     let interior_blank = joined.iter().filter(|t| t.trim().is_empty()).count();
     assert_eq!(
         interior_blank, 1,
@@ -696,7 +701,10 @@ fn summarize_keeps_full_bash_command_no_truncation() {
     // ellipsis. summarize() must now return the full command text so the
     // body layer can wrap it to the terminal width.
     let long_cmd = format!("echo {}", "a".repeat(100));
-    assert!(long_cmd.chars().count() > 80, "test setup: command must exceed 80 cols");
+    assert!(
+        long_cmd.chars().count() > 80,
+        "test setup: command must exceed 80 cols"
+    );
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "t1".into(),
@@ -1106,8 +1114,15 @@ fn update_plan_text_updates_assistant_when_no_plan() {
     });
     v.update_plan_text("edited plan via assistant");
     match &v.blocks[0] {
-        ChatBlock::Assistant { raw, rendered, done } => {
-            assert_eq!(raw, "edited plan via assistant", "Assistant raw must be updated");
+        ChatBlock::Assistant {
+            raw,
+            rendered,
+            done,
+        } => {
+            assert_eq!(
+                raw, "edited plan via assistant",
+                "Assistant raw must be updated"
+            );
             assert_eq!(
                 rendered,
                 &crate::markdown::render("edited plan via assistant"),

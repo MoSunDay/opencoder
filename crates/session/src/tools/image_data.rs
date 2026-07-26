@@ -50,9 +50,7 @@ mod tests {
     const JPEG_BYTES: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
 
     const GIF_BYTES: &[u8] = b"GIF89a";
-    const WEBP_BYTES: &[u8] = &[
-        b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P',
-    ];
+    const WEBP_BYTES: &[u8] = &[b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P'];
     const BMP_BYTES: &[u8] = b"BM";
 
     #[test]

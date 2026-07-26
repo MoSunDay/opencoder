@@ -326,8 +326,8 @@ fn composer_renders_prompt_and_multiline_text() {
                 Rect::new(0, 0, 40, 5),
                 "hello\nworld",
                 0,
-                38, // inner_w: 40 - 2 borders
-                2,  // prompt_w: "❯ "
+                38,  // inner_w: 40 - 2 borders
+                2,   // prompt_w: "❯ "
                 &[], // no pending images
                 false,
                 None,

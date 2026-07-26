@@ -21,6 +21,9 @@ pub enum ModelOutcome {
     Idle,
     /// Save with a pre-built JSON merge-patch for `Config::save`.
     Save(serde_json::Value),
+    /// Apply the merge-patch to the in-memory config **without** persisting
+    /// to disk (session-only model switch).
+    SaveSessionOnly(serde_json::Value),
     Cancel,
     Quit,
 }

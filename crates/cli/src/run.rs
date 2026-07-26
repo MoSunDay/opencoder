@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio_util::sync::CancellationToken;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 use anyhow::{anyhow, Context, Result};
 use base64::Engine as _;
@@ -168,9 +168,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         // First Ctrl-C: ask the run loop to stop at the next await point it
         // can interrupt (turn boundary, LLM `rx.recv()`, or tool select!).
         if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!(
-                "\n\x1b[2m[interrupting\u{2026} press Ctrl-C again to force quit]\x1b[0m"
-            );
+            eprintln!("\n\x1b[2m[interrupting\u{2026} press Ctrl-C again to force quit]\x1b[0m");
             cancel_for_signal.cancel();
         }
         // Second Ctrl-C: graceful stop did not satisfy the user; bail out.
@@ -181,10 +179,8 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     if images.is_empty() {
         opencoder_session::run(&mut session, prompt, |ev| print_event(&ev)).await?;
     } else {
-        opencoder_session::run_with_images(&mut session, prompt, images, |ev| {
-            print_event(&ev)
-        })
-        .await?;
+        opencoder_session::run_with_images(&mut session, prompt, images, |ev| print_event(&ev))
+            .await?;
     }
 
     // cheap background title generation (small model) after the first round.
@@ -193,11 +189,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     // here. A 30 s cap is ample for a 64-token generation; on timeout/cancel
     // the session simply keeps its default (empty) title.
     if !cancel.is_cancelled() {
-        let _ = tokio::time::timeout(
-            Duration::from_secs(30),
-            generate_title(&session),
-        )
-        .await;
+        let _ = tokio::time::timeout(Duration::from_secs(30), generate_title(&session)).await;
     }
 
     eprintln!("\n\x1b[2m[session {}]\x1b[0m", session.id);
@@ -469,8 +461,8 @@ fn load_image_data_uris(paths: &[String]) -> Result<Vec<String>> {
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
         let path = std::path::Path::new(p);
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("--image {p}: cannot read file"))?;
+        let bytes =
+            std::fs::read(path).with_context(|| format!("--image {p}: cannot read file"))?;
         let mime = mime_from_ext(path);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
         out.push(format!("data:{mime};base64,{b64}"));
@@ -737,10 +729,10 @@ mod tests {
 
     #[test]
     fn reapply_resume_model_overrides_stored_model() {
-        use std::sync::Arc;
         use opencoder_core::resolve_agent;
         use opencoder_llm::{ChatStream, MockChatClient};
         use opencoder_session::SessionState;
+        use std::sync::Arc;
         // simulate a session resumed with stored model "openai/gpt-4o-mini"
         let cfg = Config {
             model: "openai/gpt-4o-mini".into(),

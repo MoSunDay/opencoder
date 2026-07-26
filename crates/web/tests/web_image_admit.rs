@@ -55,11 +55,13 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
 
 /// Mock that completes a single assistant turn replying `text`.
 fn mock_reply(text: &str) -> Arc<dyn ChatStream> {
-    Arc::new(MockChatClient::new().with_default(vec![LlmEvent::Completed {
-        text: text.into(),
-        tool_calls: vec![],
-        usage: None,
-    }]))
+    Arc::new(
+        MockChatClient::new().with_default(vec![LlmEvent::Completed {
+            text: text.into(),
+            tool_calls: vec![],
+            usage: None,
+        }]),
+    )
 }
 
 /// Block until the drain for `sid` goes idle (no longer `draining`), mirroring

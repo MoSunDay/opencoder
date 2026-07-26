@@ -386,3 +386,138 @@ async fn post_model_switches_stored_meta() {
         "model switch must persist"
     );
 }
+
+/// Build an app whose workdir is an isolated tempdir (so `Config::save` writes
+/// there, not to the shared temp dir or `~/.opencoder`).
+async fn app_with_workdir(workdir: std::path::PathBuf) -> (Router, Arc<opencoder_web::AppState>) {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let state = Arc::new(opencoder_web::AppState {
+        client_override: None,
+        store: store.clone(),
+        workdir,
+        handles: opencoder_web::handle::new_handle_map(),
+    });
+    let app = Router::new()
+        .route(
+            "/api/sessions/:id/model",
+            post(opencoder_web::api::post_model),
+        )
+        .with_state(state.clone());
+    (app, state)
+}
+
+#[tokio::test]
+async fn post_model_persist_default_writes_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workdir = tmp.path().to_path_buf();
+    // Pre-create opencoder.json with an editable key so save_target resolves to
+    // this project-local file (never touches ~/.opencoder).
+    std::fs::write(workdir.join("opencoder.json"), r#"{"model":"old-model"}"#).unwrap();
+
+    let (app, state) = app_with_workdir(workdir.clone()).await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "old-model").await;
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sid}/model"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"value":"openai/gpt-4o","persist_default":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Session row updated.
+    let meta = state.store.get_session(&sid).await.unwrap().unwrap();
+    assert_eq!(meta.model.as_deref(), Some("openai/gpt-4o"));
+
+    // Global config file written with the new model.
+    let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
+    let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(cfg["model"], "openai/gpt-4o");
+}
+
+#[tokio::test]
+async fn post_model_default_is_session_only_no_disk_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workdir = tmp.path().to_path_buf();
+
+    let (app, state) = app_with_workdir(workdir.clone()).await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "old-model").await;
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sid}/model"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"value":"new-model"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Session row updated (session-level).
+    let meta = state.store.get_session(&sid).await.unwrap().unwrap();
+    assert_eq!(meta.model.as_deref(), Some("new-model"));
+
+    // No disk write — opencoder.json must not exist.
+    assert!(
+        !workdir.join("opencoder.json").exists(),
+        "default (session-only) switch must not create opencoder.json"
+    );
+}
+
+#[tokio::test]
+async fn post_model_persist_default_malformed_returns_500() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workdir = tmp.path().to_path_buf();
+    std::fs::write(workdir.join("opencoder.json"), r#"{"model":"old-model"}"#).unwrap();
+
+    let (app, state) = app_with_workdir(workdir.clone()).await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "old-model").await;
+
+    // A suspicious model value ("x": unscoped, len 1 < 3) trips the
+    // is_suspicious_model guard inside Config::save, which returns Err
+    // *before* any disk write — deterministically, no fs-permission hacks.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sid}/model"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"value":"x","persist_default":true}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["ok"], false);
+    assert!(
+        v["error"]
+            .as_str()
+            .unwrap()
+            .contains("malformed `model` value `x`"),
+        "error body should explain the refused value: {v}"
+    );
+
+    // Config::save guard returned before std::fs::write, so the on-disk
+    // config is untouched.
+    let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
+    let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(cfg["model"], "old-model");
+}

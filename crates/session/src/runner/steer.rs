@@ -25,10 +25,7 @@ pub(super) async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String
         Some(s) => s,
         None => return Vec::new(),
     };
-    let pending = match store
-        .pending_inputs(&session.id, Delivery::Steer)
-        .await
-    {
+    let pending = match store.pending_inputs(&session.id, Delivery::Steer).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(error = %e, "claim_steers: pending_inputs failed");
@@ -62,7 +59,9 @@ pub(super) async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String
 }
 
 /// Claim exactly one queued input at idle. Returns its (row seq, prompt), or None.
-pub(super) async fn claim_one_queued(session: &mut SessionState) -> Option<(i64, String, Vec<String>)> {
+pub(super) async fn claim_one_queued(
+    session: &mut SessionState,
+) -> Option<(i64, String, Vec<String>)> {
     let store = session.store.clone()?;
     match store.claim_next_queue(&session.id).await {
         Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),

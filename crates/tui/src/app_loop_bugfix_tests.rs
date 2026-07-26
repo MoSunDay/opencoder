@@ -24,7 +24,11 @@ fn env_model_override_detects_silent_revert() {
     );
     // Env set but effective == intended (env matches the pick) => no override.
     assert_eq!(
-        env_model_override(Some("bigmodel/glm-5.2"), "bigmodel/glm-5.2", Some("bigmodel/glm-5.2")),
+        env_model_override(
+            Some("bigmodel/glm-5.2"),
+            "bigmodel/glm-5.2",
+            Some("bigmodel/glm-5.2")
+        ),
         None
     );
     // No `model` field in the patch (a `/config` generation-param save) => nothing.

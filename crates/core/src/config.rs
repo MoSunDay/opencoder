@@ -1,8 +1,8 @@
 use crate::error::{CoreError, Result};
+use crate::tool_guard_config::ToolGuardConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::tool_guard_config::ToolGuardConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -852,7 +852,10 @@ mod tests {
 
     #[test]
     fn stream_idle_timeout_defaults_to_120s() {
-        assert_eq!(Config::default().stream_idle_timeout(), std::time::Duration::from_secs(120));
+        assert_eq!(
+            Config::default().stream_idle_timeout(),
+            std::time::Duration::from_secs(120)
+        );
     }
 
     #[test]
@@ -866,7 +869,10 @@ mod tests {
 
     #[test]
     fn task_timeout_defaults_to_1800s() {
-        assert_eq!(Config::default().task_timeout(), std::time::Duration::from_secs(1800));
+        assert_eq!(
+            Config::default().task_timeout(),
+            std::time::Duration::from_secs(1800)
+        );
     }
 
     #[test]

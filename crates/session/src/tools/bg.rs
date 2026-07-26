@@ -157,19 +157,13 @@ pub fn handoff(
         // Bounded wait for drain tasks: after the group kill the pipe
         // write-ends close and the tasks resolve with EOF. A 2s ceiling
         // guards against a process that escaped the group kill.
-        let _ = tokio::time::timeout(
-            Duration::from_secs(2),
-            async {
-                let _ = stdout_task.await;
-                let _ = stderr_task.await;
-            },
-        )
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+        })
         .await;
 
-        let code = exit_status
-            .ok()
-            .and_then(|s| s.code())
-            .unwrap_or(-1);
+        let code = exit_status.ok().and_then(|s| s.code()).unwrap_or(-1);
 
         if let Ok(mut f) = OpenOptions::new().append(true).open(&path) {
             let _ = write!(f, "\n[exit code: {code}]");

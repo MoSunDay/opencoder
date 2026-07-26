@@ -65,7 +65,6 @@ fn user_role_error_tool_result_is_also_prefixed() {
     );
 }
 
-
 // --- multimodal (image) lowering ---
 
 #[test]
@@ -76,7 +75,10 @@ fn pure_text_user_message_keeps_string_content() {
     let out = lower_messages(&[msg]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0]["role"], "user");
-    assert!(out[0]["content"].is_string(), "pure text must stay a string");
+    assert!(
+        out[0]["content"].is_string(),
+        "pure text must stay a string"
+    );
     assert_eq!(out[0]["content"].as_str().unwrap(), "hello world");
 }
 
@@ -90,7 +92,9 @@ fn image_user_message_lowers_to_content_array() {
     let out = lower_messages(&[msg]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0]["role"], "user");
-    let content = out[0]["content"].as_array().expect("image msg -> content array");
+    let content = out[0]["content"]
+        .as_array()
+        .expect("image msg -> content array");
     // [text, image_url]
     assert_eq!(content.len(), 2);
     assert_eq!(content[0]["type"], "text");
@@ -154,7 +158,10 @@ fn tool_result_with_image_lowers_to_content_array() {
             { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBOR=" } }
         ]
     });
-    assert_eq!(out[0], expected, "image tool result must lower to content array");
+    assert_eq!(
+        out[0], expected,
+        "image tool result must lower to content array"
+    );
 }
 
 #[test]

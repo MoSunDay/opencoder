@@ -727,7 +727,6 @@ impl ChatView {
             })
         )
     }
-
 }
 
 pub(crate) fn summarize(input: &serde_json::Value) -> String {
@@ -769,8 +768,6 @@ pub fn block_text(view: &ChatView) -> String {
         .map(|s| s.content.clone())
         .collect()
 }
-
-
 
 #[cfg(test)]
 #[path = "chat_tests.rs"]

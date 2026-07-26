@@ -210,7 +210,11 @@ pub(crate) fn render<B: Backend>(
             composer_scroll,
             inner_w,
             prompt_w,
-            if plan_mode.is_some() { &[] } else { pending_images },
+            if plan_mode.is_some() {
+                &[]
+            } else {
+                pending_images
+            },
             input_disabled,
             plan_mode,
         );
@@ -595,7 +599,12 @@ fn render_composer(
             inner,
         );
         // Return area shifted down by 1 line for the input.
-        Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(1))
+        Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
+        )
     } else {
         inner
     };
@@ -626,7 +635,10 @@ fn render_composer(
         spans.push(Span::raw(text));
         lines.push(Line::from(spans));
     }
-    f.render_widget(Paragraph::new(Text::from(lines)).scroll((scroll, 0)), inner_input);
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).scroll((scroll, 0)),
+        inner_input,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

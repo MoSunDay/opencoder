@@ -326,14 +326,37 @@ async fn run_app(
         if dirty && render_pending {
             if !skip_next_render {
                 app_loop::render_frame(
-                    terminal, render_chat, &plan_edit, &input, cursor_idx,
-                    &display_title, &display_status_agent, running, show_help,
-                    display_ctx, display_sys, context_limit, &status_model, &status,
-                    &chat.steer_items, &queue_items, &mut scroll, follow, anim_tick,
-                    &mode_flash, skill_menu.as_ref(), task_picker.as_ref(),
-                    command_menu.as_ref(), model_menu.as_ref(), cache_salt_menu.as_ref(),
-                    &mut hits, selection, &copy_status, &pending_images,
-                    subagent_focus.is_some(), run_elapsed_ms,
+                    terminal,
+                    render_chat,
+                    &plan_edit,
+                    &input,
+                    cursor_idx,
+                    &display_title,
+                    &display_status_agent,
+                    running,
+                    show_help,
+                    display_ctx,
+                    display_sys,
+                    context_limit,
+                    &status_model,
+                    &status,
+                    &chat.steer_items,
+                    &queue_items,
+                    &mut scroll,
+                    follow,
+                    anim_tick,
+                    &mode_flash,
+                    skill_menu.as_ref(),
+                    task_picker.as_ref(),
+                    command_menu.as_ref(),
+                    model_menu.as_ref(),
+                    cache_salt_menu.as_ref(),
+                    &mut hits,
+                    selection,
+                    &copy_status,
+                    &pending_images,
+                    subagent_focus.is_some(),
+                    run_elapsed_ms,
                 )?;
             }
             dirty = false;
@@ -785,8 +808,9 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, mk_input_with_images, pre_key_intercept, push_user,
-    resolve_and_warn, skill_trigger, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    clear_pending_inputs, data_dir_for, handle_mouse, mk_input, mk_input_with_images,
+    pre_key_intercept, push_user, resolve_and_warn, skill_trigger, start_turn, sys_tokens_for,
+    worker_dead, MouseOutcome,
 };
 
 #[cfg(test)]

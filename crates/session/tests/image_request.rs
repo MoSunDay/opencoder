@@ -27,15 +27,20 @@ async fn session_with(client: Arc<dyn ChatStream>) -> (tempfile::TempDir, Sessio
         model: "qwen/qwen-vl-max".into(),
         ..Config::default()
     };
-    let s = SessionState::new("img-session", agent, config, client, dir.path().to_path_buf());
+    let s = SessionState::new(
+        "img-session",
+        agent,
+        config,
+        client,
+        dir.path().to_path_buf(),
+    );
     (dir, s)
 }
 
 #[tokio::test]
 async fn image_attachment_reaches_request_body() {
     let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![LlmEvent::TextDelta("a cat".into()), done("a cat")]),
+        MockChatClient::new().push_script(vec![LlmEvent::TextDelta("a cat".into()), done("a cat")]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let (_dir, mut s) = session_with(client).await;
@@ -66,8 +71,9 @@ async fn image_attachment_reaches_request_body() {
         "image_url part with the data URI must be in the request body: {content:?}"
     );
     assert!(
-        content.iter().any(|p| p["type"] == "text"
-            && p["text"] == "what is in this image?"),
+        content
+            .iter()
+            .any(|p| p["type"] == "text" && p["text"] == "what is in this image?"),
         "the text part must accompany the image"
     );
 }

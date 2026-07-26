@@ -218,7 +218,11 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
                 Err(_) => Vec::new(),
             };
             Ok(ToolOutput::ok_with_images(
-                format!("Screenshot of {} captured and saved to: {}", url, tmp.display()),
+                format!(
+                    "Screenshot of {} captured and saved to: {}",
+                    url,
+                    tmp.display()
+                ),
                 images,
             ))
         }

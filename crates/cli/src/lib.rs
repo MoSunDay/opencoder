@@ -125,6 +125,11 @@ pub enum Command {
 pub enum ConfigSub {
     /// Show the merged config as JSON.
     Show,
+    /// Set the global default model and persist it to opencoder.json.
+    Set {
+        /// Model as "provider/model_id" (e.g. "anthropic/claude-3" or "glm-5.2").
+        model: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

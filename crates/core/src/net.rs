@@ -50,11 +50,11 @@ pub fn build_http_client_with_read_timeout(
     b.build().context("build http client")
 }
 
-/// Build a proxy-aware reqwest client (rustls) with the default 300s
+/// Build a proxy-aware reqwest client (rustls) with the default 600s
 /// per-read idle timeout. `explicit` is the config `network.proxy` value;
 /// env fallbacks are applied via [`effective_proxy`].
 pub fn build_http_client(explicit: Option<&str>) -> Result<reqwest::Client> {
-    build_http_client_with_read_timeout(explicit, std::time::Duration::from_secs(300))
+    build_http_client_with_read_timeout(explicit, std::time::Duration::from_secs(600))
 }
 
 #[cfg(test)]

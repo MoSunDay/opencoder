@@ -1059,3 +1059,30 @@ fn reapply_session_model_overrides_resumed_model() {
     assert_eq!(reapply_session_model(&mut s, &Some("anthropic/claude-3".into())), None);
     assert_eq!(reapply_session_model(&mut s, &None), None);
 }
+
+#[tokio::test]
+async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
+    // `open_store` materializes the on-disk sqlite DB at
+    // `<data_local>/opencoder/<hash(workdir)>/opencoder.db`. A tempdir workdir
+    // hashes to a unique subdir, so it is isolated and safe to scrub. This
+    // guards the extraction (moved verbatim out of `app::run`) by asserting the
+    // observable side effect — the DB file is created — without needing a live
+    // terminal or a running session.
+    let workdir = tempfile::tempdir().expect("tempdir");
+    let data_dir = data_dir_for(workdir.path());
+    // Defensive: clear any stale subdir from a prior identical-hash run.
+    let _ = std::fs::remove_dir_all(&data_dir);
+
+    let store = open_store(workdir.path()).await.expect("open_store succeeds");
+    let db_file = data_dir.join("opencoder.db");
+    assert!(
+        db_file.exists(),
+        "open_store must create opencoder.db at {}",
+        db_file.display()
+    );
+
+    // Release the connection so we can clean up every artifact we created
+    // (db file + any -wal/-shm sidecars) without holding a lock.
+    drop(store);
+    let _ = std::fs::remove_dir_all(&data_dir);
+}

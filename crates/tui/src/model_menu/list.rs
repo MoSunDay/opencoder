@@ -90,13 +90,19 @@ pub fn handle_key(mut list: ProviderList, k: KeyEvent) -> (ModelOutcome, Option<
     // Save-as-default confirmation sub-state.
     if let Some(patch) = list.confirm_save_default.take() {
         match k.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                // Persist to disk as the new global default.
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                // Persist to disk as the new global default. `Enter` is the
+                // natural "confirm" key, so it saves globally — matching the
+                // dialog's promise that the model becomes the default.
                 return (ModelOutcome::Save(patch), None);
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Enter | KeyCode::Esc => {
+            KeyCode::Char('n') | KeyCode::Char('N') => {
                 // Session-only: swap the model without touching opencoder.json.
                 return (ModelOutcome::SaveSessionOnly(patch), None);
+            }
+            KeyCode::Esc => {
+                // Cancel: dismiss the prompt without switching, as the hint says.
+                return (ModelOutcome::Cancel, None);
             }
             _ => {
                 // Any other key re-arms the prompt and stays idle.

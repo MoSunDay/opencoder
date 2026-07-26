@@ -109,6 +109,10 @@ fn provider_patch_model_survives_save_load_cycle() {
     std::env::remove_var("OPENCODER_MODEL");
 
     let dir = tempfile::tempdir().unwrap();
+    // Isolate HOME/XDG_CONFIG_HOME so Config::save_target's global candidates
+    // (~~/.opencoder/config.json, XDG) resolve inside this tempdir instead of
+    // falling through to the real ~/.opencoder and clobbering the user config.
+    let _home = super::common::lock_home(dir.path());
     // Simulate adding a provider while a *different* model is active.
     let patch = crate::model_menu::patch::ProviderPatch {
         name: "qwen3".into(),
@@ -199,25 +203,28 @@ fn list_enter_then_n_is_session_only() {
 }
 
 #[test]
-fn list_enter_then_enter_is_session_only() {
+fn list_enter_then_enter_saves_as_default() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
     handle_model_key(&mut slot, enter());
     match handle_model_key(&mut slot, enter()) {
-        ModelOutcome::SaveSessionOnly(json) => {
+        ModelOutcome::Save(json) => {
             assert_eq!(json["model"], serde_json::json!("deepseek/deepseek-chat"));
         }
-        _ => panic!("second Enter should be SaveSessionOnly"),
+        _ => panic!("second Enter should Save (persist as global default)"),
     }
+    assert!(slot.is_none(), "menu closes after Save");
 }
 
 #[test]
-fn list_enter_then_esc_is_session_only() {
+fn list_confirm_then_esc_cancels_without_switching() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::List(ProviderList::new(&provider_cfg())));
-    handle_model_key(&mut slot, enter());
-    match handle_model_key(&mut slot, esc()) {
-        ModelOutcome::SaveSessionOnly(_) => {}
-        _ => panic!("Esc during prompt should be SaveSessionOnly"),
-    }
+    handle_model_key(&mut slot, enter()); // arm "save as default?" prompt
+    let outcome = handle_model_key(&mut slot, esc());
+    assert!(
+        matches!(outcome, ModelOutcome::Cancel),
+        "Esc in confirm-save-default should Cancel",
+    );
+    assert!(slot.is_none(), "menu closes after Cancel");
 }
 
 #[test]

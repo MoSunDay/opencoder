@@ -8,7 +8,7 @@ use crossterm::event::Event;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{estimate, ChatClient, ChatStream};
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, LibsqlStore, Store};
+use opencoder_store::{Delivery, Store};
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -40,14 +40,6 @@ const ANIM_TICK_MS: u64 = 100;
 /// at this cadence (3 FPS), decoupling text layout from the fast spinner.
 const BODY_REFRESH_MS: u64 = 333;
 
-/// Pure: has the terminal size changed relative to the last-known dimensions?
-/// Returns `true` when there is no prior reading yet (first frame) or when
-/// either dimension differs. Factored out so the idle-resize detection logic
-/// is unit-testable without a live terminal.
-pub(crate) fn size_changed(prev: Option<(u16, u16)>, cur: (u16, u16)) -> bool {
-    prev.is_none_or(|p| p != cur)
-}
-
 pub async fn run(opts: &TuiOpts) -> Result<()> {
     let workdir = opts
         .workdir
@@ -65,11 +57,7 @@ pub async fn run(opts: &TuiOpts) -> Result<()> {
         config.network.proxy.as_deref(),
     )?);
 
-    let store: Arc<dyn Store> = {
-        let data_dir = data_dir_for(&workdir);
-        tokio::fs::create_dir_all(&data_dir).await.ok();
-        Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?)
-    };
+    let store: Arc<dyn Store> = open_store(&workdir).await?;
 
     // Resume an existing session if --session was given, otherwise start fresh.
     let replay_cancel = CancellationToken::new();
@@ -739,14 +727,7 @@ async fn run_app(
                             follow = true;
                         }
                     }
-                    Event::Resize(_, _) => {
-                        // The input arm above already set `dirty=true`, so the
-                        // next frame re-renders and refreshes the persisted
-                        // `hits`. Also tell ratatui the size changed so its diff
-                        // buffer matches the new layout (prevents glitches and
-                        // keeps the persisted hit-rects valid after resize).
-                        let _ = terminal.autoresize();
-                    }
+                    Event::Resize(_, _) => on_resize_event(terminal),
                     Event::Paste(pasted) => {
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
@@ -781,18 +762,8 @@ async fn run_app(
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;
-                // Idle-resize safety net: poll the kernel for the real terminal
-                // size every frame. If it differs from `last_size` (crossterm
-                // dropped a Resize event), force a ratatui autoresize + redraw.
-                // `terminal.size()` is a single ioctl (us-level), safe to skip
-                // on error via `.ok()` (e.g. stdout is not a tty).
-                if let Ok(cur) = terminal.size() {
-                    let dims = (cur.width, cur.height);
-                    if size_changed(last_size, dims) {
-                        let _ = terminal.autoresize();
-                        last_size = Some(dims);
-                        dirty = true;
-                    }
+                if poll_idle_resize(terminal, &mut last_size) {
+                    dirty = true;
                 }
             }
             _ = body_ticker.tick() => {
@@ -814,8 +785,8 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, data_dir_for, drain_pending_images, handle_mouse, initial_chat_view,
-    persist_session_model, reapply_session_model,
+    clear_pending_inputs, drain_pending_images, handle_mouse, initial_chat_view,
+    on_resize_event, open_store, persist_session_model, poll_idle_resize, reapply_session_model,
     mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
     skill_trigger, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
 };

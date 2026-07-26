@@ -59,6 +59,7 @@ pub struct ProviderPatch {
 impl ProviderPatch {
     pub fn to_json(&self) -> serde_json::Value {
         let mut provider = serde_json::json!({ "base_url": self.base_url });
+        provider["model"] = serde_json::Value::String(self.model_id.clone());
         if let Some(v) = &self.api_key {
             let v = v.trim();
             let resolved = if v.is_empty() {

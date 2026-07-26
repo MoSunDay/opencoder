@@ -81,7 +81,7 @@ pub struct Config {
     #[serde(default)]
     pub tool_guard: ToolGuardConfig,
     /// Max idle duration (no LLM stream events received) before a streaming
-    /// call is considered stalled and aborted (seconds). Defaults to 120.
+    /// call is considered stalled and aborted (seconds). Defaults to 600.
     /// Independent of the HTTP read_timeout — catches stalls where the upstream
     /// keeps the connection alive with SSE comment frames but never delivers
     /// actual content.
@@ -379,7 +379,7 @@ impl Config {
     /// are received within this duration, the call is aborted to prevent
     /// indefinite hangs from stalled connections.
     pub fn stream_idle_timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.stream_idle_timeout_secs.unwrap_or(120))
+        std::time::Duration::from_secs(self.stream_idle_timeout_secs.unwrap_or(600))
     }
     /// Effective max wall-clock duration for a single `task` subagent.
     pub fn task_timeout(&self) -> std::time::Duration {
@@ -851,10 +851,10 @@ mod tests {
     }
 
     #[test]
-    fn stream_idle_timeout_defaults_to_120s() {
+    fn stream_idle_timeout_defaults_to_600s() {
         assert_eq!(
             Config::default().stream_idle_timeout(),
-            std::time::Duration::from_secs(120)
+            std::time::Duration::from_secs(600)
         );
     }
 

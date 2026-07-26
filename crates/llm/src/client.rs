@@ -26,10 +26,10 @@ pub struct ChatClient {
     headers: Vec<(String, String)>,
 }
 
-/// Default per-read idle timeout (5 minutes). A read that stalls for this
+/// Default per-read idle timeout (10 minutes). A read that stalls for this
 /// long without receiving any bytes is aborted; a stream that keeps
 /// delivering data resets the timer on every chunk and is never interrupted.
-pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(300);
+pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(600);
 
 impl ChatClient {
     /// Construct a client. `proxy` is an optional explicit proxy URL (e.g.
@@ -488,12 +488,12 @@ fn truncate(s: &str, n: usize) -> String {
 mod tests {
     use super::*;
 
-    /// Regression guard: the default read timeout must stay at 300 s (5 min).
+    /// Regression guard: the default read timeout must stay at 600 s (10 min).
     /// Accidentally changing it (e.g. to 30 s) would break long-running
     /// streaming turns from models that pause between chunks.
     #[test]
-    fn default_read_timeout_is_300s() {
-        assert_eq!(DEFAULT_READ_TIMEOUT, Duration::from_secs(300));
+    fn default_read_timeout_is_600s() {
+        assert_eq!(DEFAULT_READ_TIMEOUT, Duration::from_secs(600));
     }
 
     #[test]

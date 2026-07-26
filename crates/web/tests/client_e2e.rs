@@ -1,4 +1,5 @@
-//! End-to-end client ↔ server test. A real `opencoder server` router (with an
+//! End-to-end client ↔ server test (integration layer: mock LLM, no network
+//! beyond localhost). A real `opencoder server` router (with an
 //! injected `MockChatClient` so no real LLM is hit) is bound to an ephemeral
 //! TCP port; a real `opencoder_client::Remote` drives it over HTTP + SSE. We
 //! assert the client's echoed event sequence matches the events the server

@@ -169,7 +169,7 @@ opencoder session <list|show|delete>    # 会话管理（show --json 为深度�
 | 追加 1000 条消息（事务） | 30.5 ms → **0.031 ms/条** | < 2 ms/条 |
 | 加载 1000 条消息 | **2.4 ms** | < 50 ms |
 | 列出 200 个 session | **0.95 ms** | < 100 ms |
-| 全量确定性测试套件 | **~3 s / 384 测试** | — |
+| 全量确定性测试套件 | **~3 s / 1059 测试** | — |
 
 详见 [`docs/perf.md`](docs/perf.md)。
 

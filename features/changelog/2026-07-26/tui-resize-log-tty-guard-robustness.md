@@ -76,8 +76,10 @@ TUI 渲染/健壮性存在三处独立缺口（继 `tui-render-perf-bounded-even
   枚举，stdout/stderr 在类型层面不可表示。状态经参数/返回值传递，非对象内部状态。
 - **默认行为不变**：3FPS 渲染节流**未改动**；日志仍默认写主日志文件，仅在其不可用时
   回退临时文件、再不可用才丢弃——绝不会落 tty。
-- **范围外（提交排除）**：14 个既有前序会话脏改动（llm/session/tui 的 image/compaction/
-  vim/app_helpers 等）未纳入本轮提交，commit 仅含 4 个在范围内文件 + 本 changelog。
+- **提交边界**：会话进行中，既有自动化提交 `78de87f`（fix(image-pipeline)）已将
+  `app.rs`（Fix A）连同 image-pipeline 既有改动一并落盘；故本轮提交仅含 Fix B/C
+  （`crates/cli/src/lib.rs`、`crates/tui/src/supervisor.rs`）+ 测试（`crates/tui/src/app_tests.rs`）
+  + 本 changelog。仍未提交的 `app_loop_tests.rs`、`perf_long_session.rs` 属既有前序会话遗留，范围外。
 
 ## Related Docs
 - [agents/tui](../../agents/tui/index.md)

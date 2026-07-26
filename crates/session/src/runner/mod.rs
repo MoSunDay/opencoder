@@ -28,6 +28,7 @@ use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 use steer::{claim_one_queued, claim_steers};
 pub(crate) use steer::await_cancel;
+pub(crate) use execute::DEFAULT_TOOL_TIMEOUT;
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.

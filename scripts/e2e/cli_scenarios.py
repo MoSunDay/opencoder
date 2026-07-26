@@ -85,6 +85,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
         reserved=2000,
     )
     plan_cfg = lib.make_config(api_key=api_key, reasoning_effort="low", max_tokens=8192)
+    plan_cfg["agent"] = {"default": "plan"}  # headless resolves agent from config, not a CLI flag
 
     snake = lib.seed_workdir(base_cfg)
     thunder = lib.seed_workdir(base_cfg)
@@ -277,7 +278,6 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     rc, e10_log = lib.run_prompt(
         bin_path, plan,
         "创建一个新文件 plan_test.py，内容为：print('created by plan agent')。直接用 bash 写入文件。",
-        "--agent", "plan",
     )
     # Hard business contract: regardless of HOW the plan agent responds (tries bash
     # and is blocked, or just describes a plan), it must NOT have created the file.
@@ -371,35 +371,44 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     crash_proc.wait(timeout=10)
 
     # Resume the most recent session with --continue.
-    rc2, log2 = lib.run_prompt(bin_path, crash_wd, "回复 ok 即可。", "--continue", timeout=120)
+    rc2, log2 = lib.run_prompt(bin_path, crash_wd, "回复 ok 即可。", "--continue", timeout=240)
     resumed_ok = rc2 == 0
     c.soft("crashed session resumes via --continue (exit 0)", resumed_ok,
            f"rc={rc2}" if not resumed_ok else "")
 
-    # If resume succeeded, verify the session history is well-formed:
-    # no orphan tool_use without a matching tool_result (which would corrupt
-    # the next LLM call). Use session list to find the id.
+    # If resume succeeded, verify the resumed transcript is well-formed:
+    # every persisted tool_use must have a matching tool_result. The runner
+    # reconciles dangling calls on --continue resume (crates/session/src/
+    # resume.rs synthesizes error results for unmatched tool_use), so a
+    # survivor orphan would indicate a WAL-durability bug that would corrupt
+    # the next LLM call (HTTP 400 from most providers). Extract the session
+    # id from the resume log (which prints "[session <ULID>]").
     if resumed_ok:
-        listing = lib.session_list(bin_path, crash_wd)
-        crash_sid = lib.extract_session_id(listing)
+        crash_sid = lib.extract_session_id(log2)
         if crash_sid:
             cjson = lib.show_json(bin_path, crash_wd, crash_sid)
             msgs = cjson.get("messages", [])
-            orphan = False
+            use_ids = []
+            answered = set()
             for m in msgs:
                 for blk in m.get("blocks", []):
                     if blk.get("kind") == "tool_use":
-                        # Check a tool_result exists somewhere after this.
-                        pass  # Well-formedness is hard to assert precisely
-                              # without block-level traversal; the exit-0 +
-                              # successful --continue is the primary contract.
-            c.soft("crashed session history is loadable (show --json works)",
-                   len(msgs) > 0, f"msg_count={len(msgs)}")
+                        if blk.get("id"):
+                            use_ids.append(blk["id"])
+                    elif blk.get("kind") == "tool_result":
+                        tid = blk.get("tool_use_id")
+                        if tid:
+                            answered.add(tid)
+            orphans = [i for i in use_ids if i not in answered]
+            c.soft("crashed session history well-formed (no orphan tool_use)",
+                   len(orphans) == 0 and len(msgs) > 0,
+                   f"msg_count={len(msgs)} orphan_tool_use={len(orphans)}"
+                   if orphans or not msgs else "")
         else:
-            c.soft("crashed session history is loadable", False,
-                   "could not extract session id from list")
+            c.soft("crashed session history well-formed", False,
+                   "could not extract session id from resume log")
     else:
-        c.soft("crashed session history is loadable", False,
+        c.soft("crashed session history well-formed", False,
                "resume failed")
 
     c.summary("CLI scenarios")

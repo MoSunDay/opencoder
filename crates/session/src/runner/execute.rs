@@ -14,12 +14,13 @@ use super::subagent::run_subagent;
 /// (e.g. an ssh_pty tmux call that never returns, a stalled web_fetch, or a
 /// browser/computer-use tool whose future never resolves) from freezing the
 /// run loop forever. Generous enough that legitimate long-running tools are
-/// unaffected — `bash` caps itself at 120 s — and the `task` subagent is
+/// unaffected — `bash` self-limits to at most 590 s (strictly below this guard,
+/// so its handoff path always fires before the safety net) — and the `task` subagent is
 /// exempt entirely (it returns before this guard is reached, since a child
 /// session may legitimately run for many minutes). Pairs with the per-read
 /// LLM idle timeout (`DEFAULT_READ_TIMEOUT`); both are last-resort guards,
 /// not expected to fire in normal operation.
-pub(super) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
+pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub(super) async fn execute_call(
     tc: &CompletedToolCall,
@@ -232,5 +233,20 @@ mod tests {
                 .await;
         assert!(!out.is_error);
         assert_eq!(out.content, "done");
+    }
+
+    #[test]
+    fn bash_timeout_cap_is_strictly_below_safety_net() {
+        // The fundamental invariant: bash's clamped timeout must be strictly
+        // below the runner's outer safety net. This guarantees bash's internal
+        // tokio::time::timeout fires before the biased outer deadline in the
+        // select!, so handoff runs instead of kill_on_drop silently killing
+        // the child.
+        assert!(
+            crate::tools::bash::BASH_MAX_TIMEOUT_SECS < DEFAULT_TOOL_TIMEOUT.as_secs(),
+            "bash cap ({}) must be < safety net ({})",
+            crate::tools::bash::BASH_MAX_TIMEOUT_SECS,
+            DEFAULT_TOOL_TIMEOUT.as_secs()
+        );
     }
 }

@@ -127,6 +127,7 @@ fn empty_hits(body: Rect) -> MouseHits {
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        tool_btns: Vec::new(),
         total_rows: 0,
     }
 }
@@ -559,6 +560,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
+        tool_btns: Vec::new(),
         total_rows: 0,
     };
 
@@ -739,6 +741,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
             rect: header_rect,
         }],
         subagent_btns: Vec::new(),
+        tool_btns: Vec::new(),
         total_rows: 0,
     };
 

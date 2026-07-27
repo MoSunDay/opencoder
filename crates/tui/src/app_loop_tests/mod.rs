@@ -4,6 +4,47 @@
 use super::*;
 use crate::chat::ChatView;
 
+
+// ----- Shared test infrastructure (used by submodules) -----
+
+/// Single process-global lock serializing every test that either mutates the
+/// `HOME` env var or reads it indirectly via `sys_tokens_for` (->
+/// `global_instructions_text` -> `home_dir()`). `std::env::set_var` is not
+/// thread-safe at the libc level: without this lock a concurrent reader can
+/// observe a transiently-wrong/empty HOME and compute a different token
+/// estimate -- the classic `sys_tokens_counts_system_prompt` flake (0 vs 406).
+pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII guard that restores an env var to its prior value on drop,
+/// guaranteeing restoration even if a test assertion panics mid-`await`.
+struct EnvGuard {
+    key: &'static str,
+    old: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let old = std::env::var_os(key);
+        std::env::set_var(key, value);
+        EnvGuard { key, old }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let old = std::env::var_os(key);
+        std::env::remove_var(key);
+        EnvGuard { key, old }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.old {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 // ----- Existing route_paste tests -----
 
 /// No modal open + plain (non-file) text: the main-composer path inserts it
@@ -298,247 +339,8 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
     );
 }
 
-// ----- handle_model_outcome Err-branch tests -----
-//
-// `handle_model_outcome` walks the save→reload→resolve_endpoint→ChatClient::new
-// chain; the last two steps can fail. Each failure path must push a red error
-// marker into `chat`, then still send `UiCmd::ReloadConfig` and a green "saved"
-// marker (the reload/saved markers are pushed unconditionally after the inner
-// match — see `app_loop.rs`). These two tests pin the error-marker text and
-// the ReloadConfig dispatch for each Err branch.
 
-/// Single process-global lock serializing every test that either mutates the
-/// `HOME` env var or reads it indirectly via `sys_tokens_for` (->
-/// `global_instructions_text` -> `home_dir()`). `std::env::set_var` is not
-/// thread-safe at the libc level: without this lock a concurrent reader can
-/// observe a transiently-wrong/empty HOME and compute a different token
-/// estimate -- the classic `sys_tokens_counts_system_prompt` flake (0 vs 406).
-pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// RAII guard that restores an env var to its prior value on drop,
-/// guaranteeing restoration even if a test assertion panics mid-`await`.
-struct EnvGuard {
-    key: &'static str,
-    old: Option<std::ffi::OsString>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let old = std::env::var_os(key);
-        std::env::set_var(key, value);
-        EnvGuard { key, old }
-    }
-
-    fn remove(key: &'static str) -> Self {
-        let old = std::env::var_os(key);
-        std::env::remove_var(key);
-        EnvGuard { key, old }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match &self.old {
-            Some(v) => std::env::set_var(self.key, v),
-            None => std::env::remove_var(self.key),
-        }
-    }
-}
-
-/// `ChatClient::new` rejects an invalid proxy URL → the "client build failed"
-/// red marker is pushed. The project-local `opencoder.json` pre-supplies a valid
-/// api_key (so `resolve_endpoint` succeeds) plus a malformed proxy string; the
-/// form's JSON merge-patch preserves the proxy because it isn't part of the
-/// patch. A mutex guards against concurrent HOME-dependent tests.
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
-    use crate::chat::ChatBlock;
-    use crate::model_menu::{ConfigField, ConfigForm, ModelMenu};
-    use opencoder_core::Config;
-    use opencoder_llm::MockChatClient;
-
-    let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    let tmp = tempfile::tempdir().unwrap();
-    let workdir = tmp.path();
-
-    // Pre-write a config with api_key present but a bad proxy URL.
-    // `Config::save` merges the form's patch on top, preserving
-    // model/provider/proxy.
-    let config_json = serde_json::json!({
-        "model": "openai/bad-proxy-model",
-        "provider": { "api_key": "k" },
-        "network": { "proxy": "://nope" }
-    });
-    std::fs::write(workdir.join("opencoder.json"), config_json.to_string()).unwrap();
-
-    // Build a ConfigForm focused on the Save button.
-    let base_cfg = Config::default();
-    let mut form = ConfigForm::new(&base_cfg);
-    form.threshold = 80000; // ensure validation passes (>= 1000)
-    form.focus = ConfigField::Save;
-    let mut model_menu = Some(ModelMenu::Config(form));
-
-    // Set up the rest of `handle_model_outcome`'s parameters.
-    let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
-        std::sync::Arc::new(MockChatClient::new());
-    let mut config = base_cfg;
-    let mut model_label = String::new();
-    let mut context_limit = 0u64;
-    let mut frame_ms = 25u64;
-    let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
-    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(64);
-    let mut chat = crate::chat::ChatView::default();
-
-    let k = crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Enter,
-        crossterm::event::KeyModifiers::empty(),
-    );
-    let flow = handle_model_outcome(
-        &mut model_menu,
-        k,
-        &mut client,
-        &mut config,
-        &mut model_label,
-        &mut context_limit,
-        &mut frame_ms,
-        &mut frame_ticker,
-        &cmd_tx,
-        &mut chat,
-        workdir,
-    )
-    .await;
-
-    assert!(matches!(flow, LoopFlow::Proceed));
-    assert!(model_menu.is_none(), "modal should close on Save");
-
-    // Collect all marker blocks; expect at least the red error marker and the
-    // green "saved" marker.
-    let markers: Vec<&[ratatui::text::Line]> = chat
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            ChatBlock::Marker(lines) => Some(lines.as_slice()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        markers.len() >= 2,
-        "expected at least 2 markers (error + saved), got {}",
-        markers.len()
-    );
-
-    // The first marker is the red error; it must mention "client build failed".
-    let error_text: String = markers[0]
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .map(|span| span.content.as_ref())
-        .collect();
-    assert!(
-        error_text.contains("client build failed"),
-        "expected 'client build failed' in error marker, got: {error_text}"
-    );
-
-    // A `ReloadConfig` command must have been sent regardless of the error.
-    let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
-    assert!(matches!(cmd, crate::worker::UiCmd::ReloadConfig(_)));
-}
-
-/// `resolve_endpoint` fails when no api_key is available (neither the merged
-/// config nor `OPENAI_API_KEY` provides one) → the "endpoint resolve failed"
-/// red marker is pushed. HOME is redirected to a temp dir so the global config
-/// candidates can't smuggle in an api_key.
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
-    use crate::chat::ChatBlock;
-    use crate::model_menu::{ConfigField, ConfigForm, ModelMenu};
-    use opencoder_core::Config;
-    use opencoder_llm::MockChatClient;
-
-    let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    // Redirect HOME to a temp dir so no global config can supply an api_key,
-    // and clear any inherited `OPENAI_API_KEY`. RAII guards guarantee
-    // restoration even if an assertion panics mid-`await`.
-    let tmp = tempfile::tempdir().unwrap();
-    let _home_guard = EnvGuard::set("HOME", tmp.path());
-    let _key_guard = EnvGuard::remove("OPENAI_API_KEY");
-
-    let workdir = tmp.path();
-
-    // Pre-write a config with no api_key — `resolve_endpoint` will fail.
-    let config_json = serde_json::json!({
-        "model": "openai/no-key-model"
-    });
-    std::fs::write(workdir.join("opencoder.json"), config_json.to_string()).unwrap();
-
-    let base_cfg = Config::default();
-    let mut form = ConfigForm::new(&base_cfg);
-    form.threshold = 80000;
-    form.focus = ConfigField::Save;
-    let mut model_menu = Some(ModelMenu::Config(form));
-
-    let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
-        std::sync::Arc::new(MockChatClient::new());
-    let mut config = base_cfg;
-    let mut model_label = String::new();
-    let mut context_limit = 0u64;
-    let mut frame_ms = 25u64;
-    let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
-    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(64);
-    let mut chat = crate::chat::ChatView::default();
-
-    let k = crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Enter,
-        crossterm::event::KeyModifiers::empty(),
-    );
-    let flow = handle_model_outcome(
-        &mut model_menu,
-        k,
-        &mut client,
-        &mut config,
-        &mut model_label,
-        &mut context_limit,
-        &mut frame_ms,
-        &mut frame_ticker,
-        &cmd_tx,
-        &mut chat,
-        workdir,
-    )
-    .await;
-
-    assert!(matches!(flow, LoopFlow::Proceed));
-    assert!(model_menu.is_none(), "modal should close on Save");
-
-    let markers: Vec<&[ratatui::text::Line]> = chat
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            ChatBlock::Marker(lines) => Some(lines.as_slice()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        markers.len() >= 2,
-        "expected at least 2 markers (error + saved), got {}",
-        markers.len()
-    );
-
-    let error_text: String = markers[0]
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .map(|span| span.content.as_ref())
-        .collect();
-    assert!(
-        error_text.contains("endpoint resolve failed"),
-        "expected 'endpoint resolve failed' in error marker, got: {error_text}"
-    );
-
-    let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
-    assert!(matches!(cmd, crate::worker::UiCmd::ReloadConfig(_)));
-}
+mod model_outcome_tests;
 
 // ----- Done/Error queue_items clear tests -----
 //
@@ -657,6 +459,99 @@ async fn fold_done_clears_queue_items() {
     );
 }
 
+/// When a queued follow-up is consumed at the idle boundary, the view must
+/// embed a `queued: {prompt}` marker into the transcript (so the user sees
+/// WHEN it fired) and drop the pending entry by seq — mirroring the
+/// `SteerConsumed` marker behavior.
+#[tokio::test]
+async fn fold_queue_consumed_pushes_marker_and_drops_entry() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![
+        (30, "queued prompt X".into()),
+        (31, "queued prompt Y".into()),
+    ];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 30 })),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(
+        crate::chat::block_text(&chat).contains("queued: queued prompt X"),
+        "QueueConsumed must embed a queued marker with the prompt text"
+    );
+    assert_eq!(
+        queue_items.len(),
+        1,
+        "QueueConsumed must drop only the consumed entry from queue_items"
+    );
+    assert_eq!(queue_items[0].0, 31, "the unconsumed entry must remain");
+}
+
+/// A QueueConsumed whose seq does not match any pending entry must be a
+/// no-op for the marker (no spurious marker pushed) while still retaining
+/// all entries.
+#[tokio::test]
+async fn fold_queue_consumed_unknown_seq_is_noop() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = vec![(40, "queued prompt Z".into())];
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let before = crate::chat::block_text(&chat);
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 999 })),
+        &mut chat,
+        &store,
+        "test-session",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert_eq!(
+        crate::chat::block_text(&chat),
+        before,
+        "unknown seq must not push a marker"
+    );
+    assert_eq!(queue_items.len(), 1, "unknown seq must retain all entries");
+}
+
 /// Safety: when the turn was cancelled (`cancelled=true`), neither
 /// `Done` nor `Error` should touch `queue_items` — the event belongs to
 /// a stale turn and items may belong to a fresh turn.
@@ -755,9 +650,9 @@ fn compute_display_status_model_with_effort_strips_prefix() {
 }
 
 #[cfg(test)]
-#[path = "app_loop_plan_edit_tests.rs"]
+#[path = "../app_loop_plan_edit_tests.rs"]
 mod plan_edit_tests;
 
 #[cfg(test)]
-#[path = "app_loop_session_only_tests.rs"]
+#[path = "../app_loop_session_only_tests.rs"]
 mod session_only_tests;

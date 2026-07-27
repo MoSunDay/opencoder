@@ -62,6 +62,9 @@ pub(crate) struct MouseHits {
     pub thinking_btns: Vec<ThinkingBtn>,
     /// Clickable Subagent-block header rows; clicking toggles collapse.
     pub subagent_btns: Vec<SubagentBtn>,
+    /// Clickable Tool-block header rows; clicking toggles collapse.
+    /// One entry per Tool block currently visible in the body viewport.
+    pub tool_btns: Vec<ToolBtn>,
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
     pub total_rows: usize,
@@ -79,6 +82,14 @@ pub(crate) struct ThinkingBtn {
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SubagentBtn {
+    pub block_idx: usize,
+    pub rect: Rect,
+}
+
+/// A clickable Tool-block header.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ToolBtn {
     pub block_idx: usize,
     pub rect: Rect,
 }
@@ -124,6 +135,15 @@ pub(crate) fn render<B: Backend>(
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
+        // Fully clear the frame buffer every draw. The persistent widgets
+        // (status bar, body, composer) only paint their own glyphs — never the
+        // trailing cells they leave untouched — and `Buffer::resize` keeps
+        // truncated cells when the terminal shrinks. Untouched cells can thus
+        // hold stale content that resurfaces via the per-frame diff, producing
+        // the "remnants around the edges" artifact. Clearing the whole area
+        // first guarantees a clean slate each frame — matching the Clear every
+        // popup already performs.
+        f.render_widget(Clear, area);
         let prompt_w = 2u16;
         let inner_w = area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
@@ -174,6 +194,7 @@ pub(crate) fn render<B: Backend>(
         hits.queue_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
+        hits.tool_btns.clear();
         if !plan_active {
             render_body(
                 f,
@@ -188,6 +209,7 @@ pub(crate) fn render<B: Backend>(
                 &mut hits.top_btn,
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
+                &mut hits.tool_btns,
                 selection,
                 viewport,
             );
@@ -292,6 +314,7 @@ fn render_body(
     top_btn: &mut Option<Rect>,
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
+    tool_btns: &mut Vec<ToolBtn>,
     selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
 ) {
@@ -330,7 +353,7 @@ fn render_body(
     let scroll_y = *scroll as usize;
 
     // Record click hit-rects using cached row offsets — O(headers), not O(n).
-    record_thinking_hits(
+    hit_records::record_thinking_hits(
         chat,
         cache,
         text_w,
@@ -340,7 +363,7 @@ fn render_body(
         inner.y,
         thinking_btns,
     );
-    record_subagent_hits(
+    hit_records::record_subagent_hits(
         chat,
         cache,
         text_w,
@@ -349,6 +372,16 @@ fn render_body(
         inner.x,
         inner.y,
         subagent_btns,
+    );
+    hit_records::record_tool_hits(
+        chat,
+        cache,
+        text_w,
+        scroll_y,
+        visible_h,
+        inner.x,
+        inner.y,
+        tool_btns,
     );
 
     f.render_widget(block, area);
@@ -460,73 +493,6 @@ fn draw_scrollbar(
         } else {
             cell.set_char('\u{2502}');
             cell.set_style(Style::default().fg(Color::DarkGray));
-        }
-    }
-}
-
-/// Populate `out` with one `ThinkingBtn` per Thinking-block header line that is
-/// currently visible inside the body viewport. Uses the cached viewport layout
-/// for O(headers) row lookups instead of walking all flattened lines.
-#[allow(clippy::too_many_arguments)]
-fn record_thinking_hits(
-    chat: &ChatView,
-    cache: &ViewportCache,
-    text_w: u16,
-    scroll_y: usize,
-    visible_h: usize,
-    x: u16,
-    y0: u16,
-    out: &mut Vec<ThinkingBtn>,
-) {
-    let headers = chat.thinking_headers();
-    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
-        return;
-    }
-    let viewport_bottom = scroll_y + visible_h;
-    for h in headers {
-        let header_row = cache.row_of_line(h.header_line_idx);
-        if header_row >= viewport_bottom {
-            break;
-        }
-        if header_row >= scroll_y {
-            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
-            out.push(ThinkingBtn {
-                block_idx: h.block_idx,
-                rect: Rect::new(x, screen_y, text_w, 1),
-            });
-        }
-    }
-}
-
-/// Populate `out` with one `SubagentBtn` per Subagent-block header line that is
-/// currently visible inside the body viewport. Mirrors `record_thinking_hits`.
-#[allow(clippy::too_many_arguments)]
-fn record_subagent_hits(
-    chat: &ChatView,
-    cache: &ViewportCache,
-    text_w: u16,
-    scroll_y: usize,
-    visible_h: usize,
-    x: u16,
-    y0: u16,
-    out: &mut Vec<SubagentBtn>,
-) {
-    let headers = chat.subagent_headers();
-    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
-        return;
-    }
-    let viewport_bottom = scroll_y + visible_h;
-    for h in headers {
-        let header_row = cache.row_of_line(h.header_line_idx);
-        if header_row >= viewport_bottom {
-            break;
-        }
-        if header_row >= scroll_y {
-            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
-            out.push(SubagentBtn {
-                block_idx: h.block_idx,
-                rect: Rect::new(x, screen_y, text_w, 1),
-            });
         }
     }
 }
@@ -792,6 +758,13 @@ fn place_cursor(
     f.set_cursor_position((x, y));
 }
 
+#[path = "render_hits.rs"]
+mod hit_records;
+
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "render_clear_tests.rs"]
+mod clear_tests;

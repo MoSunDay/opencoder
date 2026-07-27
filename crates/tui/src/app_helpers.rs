@@ -100,7 +100,7 @@ pub(crate) async fn initial_chat_view(
 }
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
-/// subagent view, and Ctrl+L collapses all thinking blocks / exits a
+/// subagent view, and Ctrl+L collapses all thinking + tool-output blocks / exits a
 /// subagent view / clears the input. Returns `true` when the key was
 /// consumed (caller should `continue` to the next event).
 ///
@@ -130,13 +130,13 @@ pub(crate) fn pre_key_intercept(
         *last_esc = None;
         return true;
     }
-    // Ctrl+L: collapse all thinking blocks, exit subagent view if in one, and
-    // clear the input box. (Ctrl+U used to alias this but is now a pure
-    // act<->plan mode toggle handled in `handle_key`.)
+    // Ctrl+L: collapse all thinking + tool-output blocks, exit subagent view
+    // if in one, and clear the input box. (Ctrl+U used to alias this but is
+    // now a pure act<->plan mode toggle handled in `handle_key`.)
     if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
-                view.collapse_all_thinking();
+                view.collapse_all_collapsible();
             }
             *subagent_focus = None;
             *scroll = parent_scroll;
@@ -144,7 +144,7 @@ pub(crate) fn pre_key_intercept(
             *selection = None;
             *last_esc = None;
         }
-        chat.collapse_all_thinking();
+        chat.collapse_all_collapsible();
         input.clear();
         *cursor_idx = 0;
         return true;
@@ -496,6 +496,17 @@ pub(crate) enum MouseOutcome {
     SteerSubmit,
 }
 
+/// Which `ChatView` a header click toggles: the focused subagent's child view
+/// when one is active, else the parent. `None` (click still consumed) for a
+/// stale or non-Subagent focus index.
+fn collapse_view(chat: &mut ChatView, focus: Option<usize>) -> Option<&mut ChatView> {
+    let i = match focus { None => return Some(chat), Some(i) => i };
+    match chat.blocks.get_mut(i)? {
+        crate::chat::ChatBlock::Subagent { view, .. } => Some(view),
+        _ => None,
+    }
+}
+
 /// Mouse-event handler extracted from `app.rs`'s main event loop. Owns all the
 /// state it touches via mutable references, so most effects are side effects on
 /// the caller's locals; the exception is `SteerSubmit` which the caller must
@@ -605,25 +616,21 @@ pub(crate) async fn handle_mouse(
                 }
                 break;
             }
-            // Click on a Thinking-block header toggles its
-            // collapse state (default collapsed → expand).
-            // When viewing a subagent's perspective, toggle
-            // the CHILD view (the hit-rects are computed
-            // from the displayed child ChatView, so the
-            // block_idx refers to its blocks, not the
-            // parent's — toggling the parent here was the
-            // bug that made thinking unopenable in a
-            // subagent view).
+            // Click a Thinking/Tool header to toggle its collapse (subagent-aware:
+            // toggles the focused child view, not the parent).
             for btn in &hits.thinking_btns {
                 if in_rect(btn.rect, m.column, m.row) {
-                    if let Some(idx) = *subagent_focus {
-                        if let Some(crate::chat::ChatBlock::Subagent { view, .. }) =
-                            chat.blocks.get_mut(idx)
-                        {
-                            view.toggle_thinking_at(btn.block_idx);
-                        }
-                    } else {
-                        chat.toggle_thinking_at(btn.block_idx);
+                    if let Some(v) = collapse_view(chat, *subagent_focus) {
+                        ChatView::toggle_thinking_at(v, btn.block_idx);
+                    }
+                    consumed = true;
+                    break;
+                }
+            }
+            for btn in &hits.tool_btns {
+                if in_rect(btn.rect, m.column, m.row) {
+                    if let Some(v) = collapse_view(chat, *subagent_focus) {
+                        ChatView::toggle_tool_at(v, btn.block_idx);
                     }
                     consumed = true;
                     break;

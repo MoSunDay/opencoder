@@ -18,7 +18,7 @@ Keybindings:
   Ctrl+W           delete word before cursor (backward-kill-word)
   Ctrl+A / Ctrl+E  cursor to start / end
   PageUp/Down      scroll transcript  (PageDown = jump to bottom)
-  Ctrl+L           exit subagent view (if focused) / collapse all thinking / clear input
+  Ctrl+L           exit subagent view (if focused) / collapse all thinking & tool output / clear input
 Mouse:            scroll wheel to scroll transcript; click arrow to follow
                   drag in the body to select text and copy it to the clipboard (OSC52)
                   SHIFT+drag = terminal-native selection (fallback when OSC52 is blocked)

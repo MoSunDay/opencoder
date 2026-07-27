@@ -268,6 +268,7 @@ fn reapply_session_model_overrides_resumed_model() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // single-threaded test runtime; lock serializes env-var readers
 async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     // `open_store` materializes the on-disk sqlite DB at
     // `<data_local>/opencoder/<hash(workdir)>/opencoder.db`. A tempdir workdir
@@ -275,6 +276,13 @@ async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     // guards the extraction (moved verbatim out of `app::run`) by asserting the
     // observable side effect — the DB file is created — without needing a live
     // terminal or a running session.
+    // Serialize with HOME/XDG env-var mutators: `data_dir_for` resolves the
+    // data root via `dirs::data_local_dir()` (reads HOME/XDG_DATA_HOME). A
+    // concurrent env mutation in another test can make the computed path
+    // inconsistent, causing the assertion to flake under parallel load.
+    let _lock = crate::app::app_loop::tests::HOME_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let workdir = tempfile::tempdir().expect("tempdir");
     let data_dir = data_dir_for(workdir.path());
     // Defensive: clear any stale subdir from a prior identical-hash run.

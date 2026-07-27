@@ -789,7 +789,7 @@ pub fn block_text(view: &ChatView) -> String {
 }
 
 #[cfg(test)]
-#[path = "chat_tests.rs"]
+#[path = "chat_tests/mod.rs"]
 mod tests;
 
 #[cfg(test)]

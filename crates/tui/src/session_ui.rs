@@ -11,7 +11,7 @@ use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
+use crate::chat::{short, summarize, ChatBlock, ChatView};
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -164,6 +164,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                             Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
                         ]),
                         output: Vec::new(),
+                        collapsed: true,
                     });
                 }
             }
@@ -185,7 +186,6 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                     };
                     let out: Vec<Line<'static>> = content
                         .lines()
-                        .take(TOOL_OUTPUT_LINES)
                         .map(|l| {
                             Line::from(Span::styled(format!("  {l}"), Style::default().fg(color)))
                         })
@@ -212,6 +212,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                                     Style::default().fg(Color::Cyan),
                                 )),
                                 output: out,
+                                collapsed: true,
                             });
                         }
                     }
@@ -613,7 +614,7 @@ mod tests {
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+                ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
                 _ => None,
             })
             .collect();

@@ -573,7 +573,7 @@ fn parallel_tool_outputs_route_to_own_block() {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+            ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
             _ => None,
         })
         .collect();
@@ -618,7 +618,7 @@ fn orphan_tool_end_creates_synthetic_block() {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            ChatBlock::Tool { id, header, output } => Some((id, header, output)),
+            ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
             _ => None,
         })
         .collect();
@@ -667,7 +667,7 @@ fn tool_end_error_colors_output_red() {
 }
 
 #[test]
-fn tool_output_truncated_to_six_lines() {
+fn tool_output_retained_in_full_and_collapsed_by_default() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "t1".into(),
@@ -684,19 +684,146 @@ fn tool_output_truncated_to_six_lines() {
         is_error: false,
         images: Vec::new(),
     });
-    let tool = v
+    let (output, collapsed) = v
         .blocks
         .iter()
         .find_map(|b| match b {
-            ChatBlock::Tool { output, .. } => Some(output),
+            ChatBlock::Tool { output, collapsed, .. } => Some((output, *collapsed)),
             _ => None,
         })
         .expect("tool block");
+    // No truncation: all 20 lines are retained.
     assert_eq!(
-        tool.len(),
-        6,
-        "output must be truncated to TOOL_OUTPUT_LINES (6); got {}",
-        tool.len()
+        output.len(),
+        20,
+        "full output must be retained (was truncated to 6); got {}",
+        output.len()
+    );
+    // Tool blocks start collapsed by default.
+    assert!(collapsed, "tool block must default to collapsed");
+}
+
+#[test]
+fn toggle_tool_at_expands_then_collapses() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo hi"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "t1".into(),
+        name: "bash".into(),
+        output: "RESULT-42".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    assert!(
+        matches!(v.blocks.last(), Some(ChatBlock::Tool { collapsed: true, .. })),
+        "tool block should start collapsed"
+    );
+    // While collapsed, the output body must be hidden from flatten().
+    let flat_collapsed = v.flatten();
+    let body: String = flat_collapsed
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(
+        !body.contains("RESULT-42"),
+        "collapsed tool must hide its output; got: {body:?}"
+    );
+
+    let idx = v.blocks.len() - 1;
+    v.toggle_tool_at(idx);
+    let flat_expanded = v.flatten();
+    let body2: String = flat_expanded
+        .iter()
+        .flat_map(|l| l.spans.iter())
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(
+        body2.contains("RESULT-42"),
+        "expanded tool must show its output; got: {body2:?}"
+    );
+    assert!(
+        flat_expanded.len() > flat_collapsed.len(),
+        "expanded must render more lines than collapsed"
+    );
+
+    // Toggle back to collapsed.
+    v.toggle_tool_at(idx);
+    assert!(
+        matches!(v.blocks.last(), Some(ChatBlock::Tool { collapsed: true, .. })),
+        "second toggle must re-collapse"
+    );
+}
+
+#[test]
+fn toggle_tool_at_is_noop_for_non_tool_blocks() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello".into()));
+    v.apply(&SessionEvent::Done);
+    // Index 0 is an Assistant block, not a Tool — toggling must be a no-op.
+    v.toggle_tool_at(0);
+    assert!(block_text(&v).contains("hello"), "non-tool toggle must not corrupt state");
+}
+
+#[test]
+fn collapse_all_collapsible_collapses_tools_and_thinking() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("reason".into()));
+    v.apply(&SessionEvent::ToolStart {
+        id: "t".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "ls"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "t".into(),
+        name: "bash".into(),
+        output: "out".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+    // Expand both so they are observably NOT collapsed beforehand.
+    for h in v.thinking_headers() {
+        v.toggle_thinking_at(h.block_idx);
+    }
+    for h in v.tool_headers() {
+        v.toggle_tool_at(h.block_idx);
+    }
+    v.collapse_all_collapsible();
+    for b in &v.blocks {
+        match b {
+            ChatBlock::Thinking { collapsed, .. } | ChatBlock::Tool { collapsed, .. } => {
+                assert!(*collapsed, "every collapsible block must be collapsed");
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn tool_headers_line_index_lands_on_tool_header() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("preamble\nsecond".into()));
+    v.apply(&SessionEvent::Done);
+    v.apply(&SessionEvent::ToolStart {
+        id: "t".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo x"}),
+    });
+    let headers = v.tool_headers();
+    assert_eq!(headers.len(), 1, "expected exactly one tool header");
+    let flat = v.flatten();
+    let header_line: String = flat[headers[0].header_line_idx]
+        .spans
+        .iter()
+        .map(|s| s.content.clone())
+        .collect();
+    assert!(
+        header_line.contains("bash"),
+        "header_line_idx must land on the tool header line; got: {header_line:?}"
     );
 }
 
@@ -756,7 +883,7 @@ fn collapse_all_thinking_collapses_every_block() {
     assert!(block_text(&v).contains("think-b"));
 
     // Collapse all in one call.
-    v.collapse_all_thinking();
+    v.collapse_all_collapsible();
 
     // Every Thinking block is collapsed, regardless of sealed state.
     for b in &v.blocks {
@@ -775,7 +902,7 @@ fn collapse_all_thinking_noop_without_thinking_blocks() {
     v.apply(&SessionEvent::TextDelta("just text".into()));
     v.apply(&SessionEvent::Done);
     // No Thinking blocks present: must not panic and leaves state intact.
-    v.collapse_all_thinking();
+    v.collapse_all_collapsible();
     assert!(block_text(&v).contains("just text"));
 }
 

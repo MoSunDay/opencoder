@@ -24,7 +24,7 @@ fn collapsed_header_visible_gets_hit_rect() {
     assert_eq!(headers[0].header_line_idx, 0);
 
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
+    super::hit_records::record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].block_idx, headers[0].block_idx);
     // screen_y = y0 + (0 - 0) = 2; full text width.
@@ -40,7 +40,7 @@ fn expanded_header_row_unchanged() {
     let lines = v.flatten();
     let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
+    super::hit_records::record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].rect, Rect::new(1, 2, 40, 1));
     // Content lines are now present in the flattened output.
@@ -57,7 +57,7 @@ fn header_scrolled_above_is_not_hittable() {
     let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
     // scroll_y = 1 pushes the row-0 header above the viewport.
-    record_thinking_hits(&v, &cache, 40, 1, 10, 1, 2, &mut hits);
+    super::hit_records::record_thinking_hits(&v, &cache, 40, 1, 10, 1, 2, &mut hits);
     assert!(
         hits.is_empty(),
         "header above viewport should not be hittable"
@@ -72,7 +72,7 @@ fn no_thinking_blocks_means_no_hits() {
     v.apply(&SessionEvent::Done);
     let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
+    super::hit_records::record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert!(hits.is_empty());
 }
 
@@ -82,7 +82,7 @@ fn hit_rect_matches_click_on_header_row() {
     let v = thinking_view();
     let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
     let mut hits = Vec::new();
-    record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
+    super::hit_records::record_thinking_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     let rect = hits[0].rect;
     // Click anywhere on the header row (y == 2) within x..x+width hits.
     assert!(in_rect(rect, 5, 2));
@@ -384,6 +384,7 @@ fn body_follow_indicator_when_not_following() {
                 &mut top_btn,
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 None,
                 &mut None,
             );
@@ -431,6 +432,7 @@ fn body_follow_label_when_following() {
                 &mut body_out,
                 &mut jump_btn,
                 &mut top_btn,
+                &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,
@@ -481,6 +483,7 @@ fn body_top_arrow_when_scrolled_down() {
                 &mut top_btn,
                 &mut Vec::new(),
                 &mut Vec::new(),
+                &mut Vec::new(),
                 None,
                 &mut None,
             );
@@ -527,6 +530,7 @@ fn body_no_top_arrow_when_at_top() {
                 &mut body_out,
                 &mut jump_btn,
                 &mut top_btn,
+                &mut Vec::new(),
                 &mut Vec::new(),
                 &mut Vec::new(),
                 None,

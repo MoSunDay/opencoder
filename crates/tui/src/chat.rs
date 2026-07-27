@@ -42,6 +42,7 @@ impl ChatView {
                         Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
                     ]),
                     output: Vec::new(),
+                    collapsed: true,
                 });
             }
             SessionEvent::ToolEnd {
@@ -62,7 +63,6 @@ impl ChatView {
                 };
                 let out: Vec<Line<'static>> = output
                     .lines()
-                    .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
                 if let Some(ChatBlock::Tool { output: o, .. }) = self
@@ -80,6 +80,7 @@ impl ChatView {
                             Style::default().fg(Color::Cyan),
                         )),
                         output: out,
+                        collapsed: true,
                     });
                 }
                 // Render tool-returned images inline after the text output.
@@ -295,13 +296,24 @@ impl ChatView {
         }
     }
 
-    /// Collapse every Thinking block in this view. Bound to Ctrl+L: clears
-    /// any expanded reasoning blocks in one keystroke (also applied to a
-    /// child subagent view before exiting it).
-    pub fn collapse_all_thinking(&mut self) {
+    /// Toggle collapse on the tool-output block at `block_idx` (mouse click
+    /// handler). No-op if the index is out of range or not a Tool block.
+    pub fn toggle_tool_at(&mut self, block_idx: usize) {
+        if let Some(ChatBlock::Tool { collapsed, .. }) = self.blocks.get_mut(block_idx) {
+            *collapsed = !*collapsed;
+        }
+    }
+
+    /// Collapse every collapsible block (Thinking + Tool output) in this view.
+    /// Bound to Ctrl+L: clears any expanded reasoning/tool-output blocks in one
+    /// keystroke (also applied to a child subagent view before exiting it).
+    pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
-            if let ChatBlock::Thinking { collapsed, .. } = block {
-                *collapsed = true;
+            match block {
+                ChatBlock::Thinking { collapsed, .. } | ChatBlock::Tool { collapsed, .. } => {
+                    *collapsed = true;
+                }
+                _ => {}
             }
         }
     }
@@ -343,7 +355,29 @@ impl ChatView {
     /// the indices stay in sync with what is rendered. Used by `render_body`
     /// to build click hit-rects.
     pub fn thinking_headers(&self) -> Vec<ThinkingHeader> {
-        let mut out = Vec::new();
+        self.collect_headers().0
+    }
+
+    /// Return each Subagent block's `(block_idx, header_line_idx)`. Mirrors
+    /// `thinking_headers`; used to build click hit-rects for subagent headers.
+    pub fn subagent_headers(&self) -> Vec<SubagentHeader> {
+        self.collect_headers().1
+    }
+
+    /// Return each Tool block's `(block_idx, header_line_idx)`. Mirrors
+    /// `thinking_headers`; used to build click hit-rects for tool headers.
+    pub fn tool_headers(&self) -> Vec<ToolHeader> {
+        self.collect_headers().2
+    }
+
+    /// Single pass over all blocks computing the header line index of every
+    /// Thinking / Subagent / Tool block, using the identical per-block line
+    /// accounting that `flatten_with()` emits. Keeping the accounting in one
+    /// place guarantees hit-rect indices stay aligned with the live render.
+    fn collect_headers(&self) -> (Vec<ThinkingHeader>, Vec<SubagentHeader>, Vec<ToolHeader>) {
+        let mut think = Vec::new();
+        let mut sub = Vec::new();
+        let mut tool = Vec::new();
         let mut line_idx = 0usize;
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -369,7 +403,7 @@ impl ChatView {
                 ChatBlock::Thinking {
                     text, collapsed, ..
                 } => {
-                    out.push(ThinkingHeader {
+                    think.push(ThinkingHeader {
                         block_idx,
                         header_line_idx: line_idx,
                     });
@@ -379,63 +413,21 @@ impl ChatView {
                         line_idx += text.lines().count();
                     }
                 }
-                ChatBlock::Tool { output, .. } => {
-                    // header line + output lines + trailing blank line.
-                    line_idx += 1 + output.len() + 1;
+                ChatBlock::Tool {
+                    output, collapsed, ..
+                } => {
+                    tool.push(ToolHeader {
+                        block_idx,
+                        header_line_idx: line_idx,
+                    });
+                    // Header always rendered; output + trailing blank only when expanded.
+                    line_idx += 1 + if *collapsed { 0 } else { output.len() + 1 };
                 }
                 ChatBlock::Image { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;
                 }
                 ChatBlock::Subagent { .. } => {
-                    line_idx += 1; // header only — no inline expansion
-                }
-                ChatBlock::Plan { rendered, .. } => {
-                    line_idx += 1 + rendered.len() + 1;
-                }
-            }
-        }
-        out
-    }
-
-    /// Return each Subagent block's `(block_idx, header_line_idx)` for
-    /// mouse hit-testing, using the same line accounting as `flatten()`.
-    pub fn subagent_headers(&self) -> Vec<SubagentHeader> {
-        let mut out = Vec::new();
-        let mut line_idx = 0usize;
-        for (block_idx, block) in self.blocks.iter().enumerate() {
-            match block {
-                ChatBlock::Marker(lines) => line_idx += lines.len(),
-                ChatBlock::Assistant {
-                    raw,
-                    rendered,
-                    done,
-                } => {
-                    if self.is_withheld(block_idx) {
-                        continue;
-                    }
-                    line_idx += 1;
-                    line_idx += if *done {
-                        rendered.len()
-                    } else {
-                        raw.split('\n').count()
-                    };
-                }
-                ChatBlock::Thinking {
-                    text, collapsed, ..
-                } => {
-                    line_idx += 1;
-                    if !collapsed {
-                        line_idx += text.lines().count();
-                    }
-                }
-                ChatBlock::Tool { output, .. } => {
-                    line_idx += 1 + output.len() + 1;
-                }
-                ChatBlock::Image { rendered, .. } => {
-                    line_idx += 1 + rendered.len() + 1;
-                }
-                ChatBlock::Subagent { .. } => {
-                    out.push(SubagentHeader {
+                    sub.push(SubagentHeader {
                         block_idx,
                         header_line_idx: line_idx,
                     });
@@ -446,7 +438,7 @@ impl ChatView {
                 }
             }
         }
-        out
+        (think, sub, tool)
     }
 
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
@@ -526,10 +518,29 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Tool { header, output, .. } => {
-                    out.push(header.clone());
-                    out.extend(output.iter().cloned());
-                    out.push(Line::from(""));
+                ChatBlock::Tool {
+                    header, output, collapsed, ..
+                } => {
+                    if *collapsed {
+                        let n = output.len();
+                        let mut spans = header.spans.clone();
+                        if n > 0 {
+                            spans.push(Span::styled(
+                                format!(" [\u{2193} {n}]"),
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        }
+                        out.push(Line::from(spans));
+                    } else {
+                        let mut spans = header.spans.clone();
+                        spans.push(Span::styled(
+                            " [\u{2191}]",
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                        out.push(Line::from(spans));
+                        out.extend(output.iter().cloned());
+                        out.push(Line::from(""));
+                    }
                 }
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(

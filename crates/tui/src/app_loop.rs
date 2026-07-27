@@ -18,7 +18,7 @@ use opencoder_core::Config;
 use opencoder_llm::ChatStream;
 use opencoder_session::SessionEvent;
 use opencoder_store::Store;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -248,6 +248,22 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
                 if let SessionEvent::QueueConsumed { seq } = &sev {
+                    // Mirror the SteerConsumed marker: resolve seq->prompt,
+                    // embed a `queued: {prompt}` marker so the user sees WHEN
+                    // the queued follow-up fired, then drop the row.
+                    if let Some(prompt) = queue_items
+                        .iter()
+                        .find(|(s, _)| s == seq)
+                        .map(|(_, p)| p.clone())
+                    {
+                        chat.push_marker(Line::from(Span::styled(
+                            format!("queued: {prompt}"),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                        chat.push_marker(Line::from(""));
+                    }
                     queue_items.retain(|(s, _)| s != seq);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
@@ -697,7 +713,7 @@ pub(crate) async fn dispatch_plan_edit_key(
 }
 
 #[cfg(test)]
-#[path = "app_loop_tests.rs"]
+#[path = "app_loop_tests/mod.rs"]
 pub(crate) mod tests;
 
 #[cfg(test)]

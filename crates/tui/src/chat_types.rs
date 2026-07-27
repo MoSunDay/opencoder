@@ -1,7 +1,5 @@
 use ratatui::text::Line;
 
-pub(crate) const TOOL_OUTPUT_LINES: usize = 6;
-
 /// Braille spinner frames shown next to a running subagent header. Matches the
 /// status-bar spinner in `render.rs` so the UI has one consistent motion.
 pub(super) const SPINNER: [&str; 10] = [
@@ -30,11 +28,13 @@ pub enum ChatBlock {
         collapsed: bool,
         sealed: bool,
     },
-    /// Tool invocation: header line + truncated output lines.
+    /// Tool invocation: a header line plus its (full) output lines. `collapsed`
+    /// hides the output behind a click-to-expand header, mirroring Thinking.
     Tool {
         id: String,
         header: Line<'static>,
         output: Vec<Line<'static>>,
+        collapsed: bool,
     },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
@@ -117,6 +117,13 @@ pub struct ThinkingHeader {
 /// Locates a `Subagent` block's header line for mouse hit-testing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SubagentHeader {
+    pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
+/// Locates a `Tool` block's header line for mouse hit-testing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
 }

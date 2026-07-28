@@ -259,6 +259,15 @@ pub(crate) fn skill_trigger(skill_name: &str) -> String {
     format!("The `{skill_name}` skill is now active. Begin executing its instructions immediately.")
 }
 
+/// Display string for a pure-skill submission in the queue/steer panels and
+/// transcript markers. The full trigger (see [`skill_trigger`]) is still
+/// admitted to the store for the LLM; this returns the original `{$name}`
+/// token so the user sees what they actually submitted rather than the
+/// synthetic trigger description.
+pub(crate) fn skill_token_display(skill_name: &str) -> String {
+    format!("{{${skill_name}}}")
+}
+
 /// Drop every pending steer/queue input from the store and reset both
 /// in-memory mirrors. Used on double-Esc hard-abort (`KeyAction::Cancel`)
 /// so buffered inputs don't resurface on resume. `delete_input` only

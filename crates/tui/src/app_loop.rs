@@ -692,7 +692,7 @@ pub(crate) fn enter_plan_edit(
 ) {
     if let Some(text) = chat.last_plan_text() {
         *plan_edit = Some(crate::plan_edit::PlanEdit::new(text));
-        *mode_flash = Some(("edit plan \u{2014} :wq save, :q! discard".into(), anim_tick));
+        *mode_flash = Some(("\u{2192} plan mode".into(), anim_tick));
     }
 }
 

@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencoder_session::{run, SessionEvent, SessionState};
+use opencoder_session::{run, run_with_images, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
@@ -472,5 +472,92 @@ async fn skill_only_empty_prompt_records_user_trigger_message() {
         s.messages.last().unwrap().role,
         Role::Assistant,
         "the final message must be the assistant response acting on the trigger"
+    );
+}
+
+#[tokio::test]
+async fn image_only_turn_with_skill_records_both_user_image_and_trigger() {
+    // Gap 3: when an image-only turn (empty text + images) is submitted with
+    // an active skill, both the user image message AND the synthetic skill
+    // trigger must be recorded — they are no longer mutually exclusive.
+    let store = mem_store().await;
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("skill on image")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut s = SessionState::new(
+        "image-skill-trigger",
+        agent,
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone());
+
+    store
+        .create_session(&opencoder_store::SessionMeta {
+            id: "image-skill-trigger".into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+        })
+        .await
+        .unwrap();
+
+    s.set_skill(Some("MY-SKILL-BODY".into()));
+
+    // Image-only turn (empty text + one image) with an active skill.
+    run_with_images(
+        &mut s,
+        String::new(),
+        vec!["data:image/png;base64,AAAA".into()],
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    // The transcript should contain:
+    //   1. A user message with the image (non-synthetic).
+    //   2. A synthetic user trigger message ("active skill is now in effect").
+    //   3. An assistant response.
+    let user_msgs: Vec<_> = s.messages.iter().filter(|m| m.role == Role::User).collect();
+    assert!(
+        user_msgs.len() >= 2,
+        "expected at least 2 user messages (image + trigger), got {}",
+        user_msgs.len()
+    );
+
+    // The non-synthetic user message must carry the image.
+    let image_msg = user_msgs
+        .iter()
+        .find(|m| !m.synthetic)
+        .expect("expected a non-synthetic user message with the image");
+    assert!(
+        image_msg
+            .blocks
+            .iter()
+            .any(|b| matches!(b, opencoder_core::ContentBlock::Image { .. })),
+        "the user message must contain an Image block"
+    );
+
+    // The synthetic trigger must also be present.
+    let trigger_msg = user_msgs
+        .iter()
+        .find(|m| m.synthetic)
+        .expect("expected a synthetic skill trigger message");
+    assert!(
+        trigger_msg.text().contains("active skill is now in effect"),
+        "trigger must reference the active skill: {}",
+        trigger_msg.text()
     );
 }

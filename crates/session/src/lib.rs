@@ -1,3 +1,4 @@
+pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
 pub mod event_sink;
@@ -13,7 +14,7 @@ pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -22,6 +23,12 @@ use opencoder_core::{message::now_ms, Agent, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
+
+/// Shared, resettable cancellation token used for turn-level interrupts.
+/// Wrapping in `Mutex<CancellationToken>` allows resetting after each use
+/// (a bare `CancellationToken` is one-shot). The lock is held only briefly
+/// (clone-check-fire), never across an `.await`.
+pub type SharedCancel = Arc<Mutex<CancellationToken>>;
 
 pub struct SessionState {
     pub id: String,
@@ -47,6 +54,16 @@ pub struct SessionState {
     /// Optional cancellation token. The run loop checks it at each turn
     /// boundary and stops cleanly when cancelled (web interrupt support).
     pub cancel: Option<CancellationToken>,
+    /// Turn-level interrupt token (child sessions only). When fired, breaks
+    /// the current LLM/tool turn but does NOT end the `run_loop` -- the next
+    /// iteration absorbs pending steers and continues. `None` for parent
+    /// sessions where turn-level interrupt is not applicable.
+    pub turn_cancel: Option<SharedCancel>,
+    /// Registry of child subagent turn-cancel tokens, keyed by `call_id`.
+    /// Shared (via `Arc`) with the session handle so external code (TUI event
+    /// loop, web handler) can fire a specific child's turn interrupt without
+    /// going through the worker task.
+    pub child_turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
     /// Compaction summary text, persisted to the store so resume can
     /// reconstruct the compacted transcript.
     pub summary: Option<String>,
@@ -87,6 +104,8 @@ impl SessionState {
             persisted_count: 0,
             session_created: false,
             cancel: None,
+            turn_cancel: None,
+            child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
             summary: None,
             summary_seq: None,
             handoff_seq: None,

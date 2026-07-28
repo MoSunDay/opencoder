@@ -102,4 +102,3 @@ fn model_switch_marker_strips_provider_prefix() {
 // P0: Tool-returned images render inline in the transcript (live path).
 // When a ToolEnd carries `images`, each must produce a ChatBlock::Image.
 // ---------------------------------------------------------------------------
-

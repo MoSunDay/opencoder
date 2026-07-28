@@ -1,6 +1,7 @@
 //! Tests for app::handle_key — split into a separate file to keep app.rs ≤800 lines.
 
-use crate::app::{handle_key, resume_hint, KeyAction};
+use crate::app::{handle_key, KeyAction};
+use crate::app_helpers::resume_hint;
 use crate::frame::flash_visible;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use std::time::Instant;
@@ -41,6 +42,7 @@ fn run_handle(
         80,
         2,
         false,
+        false,
     )
 }
 
@@ -75,6 +77,7 @@ fn run_handle_disabled(
         &mut skill_menu,
         80,
         2,
+        false,
         true,
     )
 }
@@ -108,6 +111,7 @@ fn run_handle_menu(
         skill_menu,
         80,
         2,
+        false,
         false,
     )
 }
@@ -837,18 +841,18 @@ fn flash_visible_handles_wraparound() {
 #[test]
 fn skill_trigger_names_the_active_skill() {
     assert_eq!(
-        crate::app_helpers::skill_trigger("repo-memory"),
+        crate::skill_display::skill_trigger("repo-memory"),
         "The `repo-memory` skill is now active. Begin executing its instructions immediately."
     );
     // The trigger is identical across Submit/Steer/Queue so a pure-skill
     // submission behaves consistently regardless of the submit verb.
-    assert!(crate::app_helpers::skill_trigger("x").contains("`x`"));
+    assert!(crate::skill_display::skill_trigger("x").contains("`x`"));
 }
 
 #[test]
 fn skill_token_display_shows_dollar_token() {
     assert_eq!(
-        crate::app_helpers::skill_token_display("repo-memory"),
+        crate::skill_display::skill_token_display("repo-memory"),
         "{$repo-memory}",
     );
 }
@@ -1222,6 +1226,7 @@ fn double_esc_while_running_cancels() {
         80,
         2,
         false,
+        false,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -1244,6 +1249,7 @@ fn double_esc_while_running_cancels() {
         &mut skill_menu,
         80,
         2,
+        false,
         false,
     );
     assert!(
@@ -1280,7 +1286,7 @@ fn startup_endpoint_resolves_by_model_prefix_not_legacy_field() {
         providers,
         ..Default::default()
     };
-    let ep = crate::app::startup_endpoint(&cfg).unwrap();
+    let ep = crate::app_helpers::startup_endpoint(&cfg).unwrap();
     assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
     assert_eq!(ep.api_key, "dk-key");
 }
@@ -1302,7 +1308,7 @@ fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
         providers: HashMap::new(),
         ..Default::default()
     };
-    let ep = crate::app::startup_endpoint(&cfg).unwrap();
+    let ep = crate::app_helpers::startup_endpoint(&cfg).unwrap();
     assert_eq!(ep.base_url, "https://legacy.example.com/v1");
     assert_eq!(ep.api_key, "legacy-key");
 }
@@ -1310,8 +1316,14 @@ fn startup_endpoint_falls_back_to_legacy_when_prefix_absent() {
 #[test]
 fn size_changed_detects_dimension_change() {
     use crate::app_helpers::size_changed;
-    assert!(size_changed(Some((80, 24)), (80, 25)), "height change must count");
-    assert!(size_changed(Some((80, 24)), (81, 24)), "width change must count");
+    assert!(
+        size_changed(Some((80, 24)), (80, 25)),
+        "height change must count"
+    );
+    assert!(
+        size_changed(Some((80, 24)), (81, 24)),
+        "width change must count"
+    );
 }
 
 #[test]
@@ -1324,4 +1336,23 @@ fn size_changed_false_when_unchanged() {
 fn size_changed_true_when_no_prior_reading() {
     use crate::app_helpers::size_changed;
     assert!(size_changed(None, (80, 24)));
+}
+
+#[test]
+fn size_changed_false_for_zero_dimensions() {
+    // 0x0 is a transient glitch on minimize/detach; it should not be treated
+    // as a real resize target so we avoid spurious autoresize + re-render.
+    use crate::app_helpers::size_changed;
+    assert!(
+        !size_changed(Some((80, 24)), (0, 24)),
+        "zero width must not count as a resize"
+    );
+    assert!(
+        !size_changed(Some((80, 24)), (80, 0)),
+        "zero height must not count as a resize"
+    );
+    assert!(
+        !size_changed(None, (0, 0)),
+        "zero dims from first frame must not count"
+    );
 }

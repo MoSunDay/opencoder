@@ -1,4 +1,5 @@
 use super::*;
+use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
 /// by agent kind and the `tools_subagent` capability. Plan mode omits 'build';
@@ -93,6 +94,16 @@ pub(super) async fn run_subagent(
     // Propagate the parent's cancellation token so a double-Esc also stops a
     // running subagent at its next turn boundary.
     child.cancel = parent.cancel.clone();
+
+    // Create and register a turn-level interrupt token for the child. This
+    // allows subagent steer to interrupt the current turn without ending the
+    // child's run_loop. The token is shared via parent.child_turn_cancels so
+    // external code (TUI, web) can fire it by call_id.
+    let turn_token: crate::SharedCancel = Arc::new(std::sync::Mutex::new(CancellationToken::new()));
+    if let Ok(mut map) = parent.child_turn_cancels.lock() {
+        map.insert(call_id.clone(), turn_token.clone());
+    }
+    child.turn_cancel = Some(turn_token);
 
     // Attach the parent's store so the child's messages persist to libsql
     // under its own session id. Also record the parent-child relationship.
@@ -224,6 +235,12 @@ pub(super) async fn run_subagent(
     // and exits. Await it so this function returns only after every event is
     // durably persisted.
     let _ = flusher.await;
+
+    // Remove the turn-cancel token from the parent's registry now that the
+    // child has finished.
+    if let Ok(mut map) = parent.child_turn_cancels.lock() {
+        map.remove(&call_id);
+    }
 
     // Detect cancellation: the shared token fired (web interrupt / double-Esc),
     // so the child broke out of its run loop without a real result. Mark the

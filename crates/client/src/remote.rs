@@ -203,6 +203,35 @@ impl Remote {
         Ok(())
     }
 
+    /// Submit a steer to a running subagent. The steer is admitted to the child
+    /// session and the child's current turn is interrupted so the steer is
+    /// absorbed at the next turn boundary. Returns the `admitted_seq`.
+    pub async fn steer_subagent(
+        &self,
+        session_id: &str,
+        task_id: &str,
+        prompt: &str,
+        images: &[String],
+    ) -> Result<i64> {
+        let body = serde_json::json!({
+            "prompt": prompt,
+            "images": images,
+        });
+        let resp = self
+            .http
+            .post(self.url(&format!(
+                "/api/sessions/{session_id}/subagents/{task_id}/steer"
+            )))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .context("steer_subagent")?;
+        let resp = ensure_ok(resp, "steer_subagent").await?;
+        let v: serde_json::Value = resp.json().await.context("steer_subagent: decode")?;
+        Ok(v.get("admitted_seq").and_then(|n| n.as_i64()).unwrap_or(0))
+    }
+
     /// Subscribe to a session's SSE `/events` stream from `after`. Returns a
     /// channel of decoded `SseEvt`; the channel closes when the server ends the
     /// stream. The caller normally breaks on a `done`/`error` event rather than

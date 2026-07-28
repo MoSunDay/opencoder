@@ -10,7 +10,7 @@ use crate::tools::schema_for;
 use crate::SessionState;
 
 use super::event::SessionEvent;
-use super::steer::await_cancel;
+use super::steer::{await_cancel, await_turn_cancel};
 
 pub(super) async fn run_one_llm_call(
     session: &SessionState,
@@ -63,6 +63,7 @@ pub(super) async fn run_one_llm_call(
     // doesn't linger after recovery.
     let mut retried = false;
     let mut cancel_fut = std::pin::pin!(await_cancel(session));
+    let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
     let idle_dur = session.config.stream_idle_timeout();
     loop {
         // Recreated each iteration so every received event resets the idle
@@ -74,6 +75,13 @@ pub(super) async fn run_one_llm_call(
             biased;
             _ = &mut cancel_fut => {
                 on_event(SessionEvent::Status("interrupted".into()));
+                return Ok((String::new(), String::new(), Vec::new(), None));
+            }
+            _ = &mut turn_cancel_fut => {
+                // Turn interrupted by subagent steer "submit-now": return an
+                // empty turn. The caller (run_loop) detects this via
+                // is_turn_cancelled and continues the loop to absorb pending
+                // steers — it does NOT break like a real cancel.
                 return Ok((String::new(), String::new(), Vec::new(), None));
             }
             _ = &mut idle => {

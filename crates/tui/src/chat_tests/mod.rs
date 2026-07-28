@@ -1,4 +1,5 @@
 use super::*;
+use crate::composer;
 
 mod agent_switch;
 mod image_render;
@@ -285,4 +286,3 @@ fn short_truncates_by_display_width_not_char_count() {
     assert!(composer::str_width(&long_ascii) <= 10);
     assert!(long_ascii.ends_with('…'));
 }
-

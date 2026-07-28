@@ -58,7 +58,10 @@ pub async fn client_run(
 
     if interrupt {
         client.interrupt(&session_id).await?;
-        eprintln!("\n\x1b[2m[interrupted remote session {}]\x1b[0m", session_id);
+        eprintln!(
+            "\n\x1b[2m[interrupted remote session {}]\x1b[0m",
+            session_id
+        );
         return Ok(());
     }
 

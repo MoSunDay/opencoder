@@ -3,13 +3,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::event::Event;
-use opencoder_core::{resolve_agent, Config};
-use opencoder_llm::{estimate, ChatClient, ChatStream};
+use opencoder_core::Config;
+use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
@@ -24,7 +23,6 @@ use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::render::{MouseHits, Term};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
-use crate::terminal::TerminalGuard;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 
@@ -34,6 +32,12 @@ pub(crate) mod app_loop;
 #[path = "app_task.rs"]
 mod app_task;
 
+#[path = "app_bootstrap.rs"]
+mod app_bootstrap;
+
+#[path = "subagent_input.rs"]
+mod subagent_input;
+
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
@@ -41,104 +45,11 @@ const ANIM_TICK_MS: u64 = 100;
 const BODY_REFRESH_MS: u64 = 333;
 
 pub async fn run(opts: &TuiOpts) -> Result<()> {
-    let workdir = opts
-        .workdir
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let mut config = Config::load(&workdir)?;
-    if let Some(m) = &opts.model {
-        config.model = m.clone();
-    }
-    let ep = startup_endpoint(&config)?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.network.proxy.as_deref(),
-    )?);
-
-    let store: Arc<dyn Store> = open_store(&workdir).await?;
-
-    // Resume an existing session if --session was given, otherwise start fresh.
-    let replay_cancel = CancellationToken::new();
-    let mut session = if let Some(id) = &opts.session {
-        // Try as a session ID first; if not found, try as a subagent
-        // task_id to resolve the parent session.
-        let effective_id = if store.get_session(id).await?.is_none() {
-            if let Some(task) = store.get_subagent_task(id).await? {
-                task.parent_session_id
-            } else {
-                id.clone()
-            }
-        } else {
-            id.clone()
-        };
-        opencoder_session::resume::resume_and_replay(
-            store.clone(),
-            &effective_id,
-            config.clone(),
-            client.clone(),
-            workdir.clone(),
-            Some(replay_cancel.clone()),
-        )
-        .await?
-    } else {
-        let agent_name = config.agent.default.clone();
-        let agent = resolve_agent(&agent_name)
-            .or_else(|| resolve_agent("act"))
-            .context("agent")?;
-        SessionState::new(
-            opencoder_session::runner::new_id(),
-            agent,
-            config.clone(),
-            client.clone(),
-            workdir.clone(),
-        )
-        .with_store(store.clone())
-    };
-
-    // Explicit --model wins over a resumed session's stored model and is
-    // re-persisted so later resumes honor it (headless run-path parity).
-    if let Some(m) = reapply_session_model(&mut session, &opts.model) {
-        persist_session_model(store.as_ref(), &session.id, m).await;
-    }
-
-    let session_id = session.id.clone();
-    let context_limit = session.config.context_limit();
-    let model_label = session.config.model.clone();
-
-    // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
-    // hook it installs — restore raw/alt-screen/mouse/kitty state on ANY exit
-    // path (normal return, `?` error, or a panic that unwinds). This removes
-    // the old "cleanup only ran on the happy path" trap that bricked the
-    // terminal on any panic, leaving the user with a frozen last frame, no
-    // echo, and ineffective Ctrl+C/D.
-    let _guard = TerminalGuard::enter()?;
-    let backend = CrosstermBackend::new(std::io::stdout());
-    let mut terminal = Term::new(backend)?;
-
-    let final_id = run_app(
-        &mut terminal,
-        session,
-        store,
-        session_id,
-        context_limit,
-        model_label,
-        workdir,
-        config,
-        client,
-    )
-    .await?;
-
-    // Restore the real terminal *before* printing so the hint lands on the
-    // actual screen instead of being swallowed by the alt-screen buffer.
-    drop(_guard);
-    eprintln!("\n\x1b[2m{}\x1b[0m", resume_hint(&final_id));
-    Ok(())
+    app_bootstrap::run(opts).await
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_app(
+pub(super) async fn run_app(
     terminal: &mut Term,
     session: SessionState,
     store: Arc<dyn Store>,
@@ -154,6 +65,7 @@ async fn run_app(
     // `mut`: reassigned by `rebind_session` on every `/task` session switch.
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
+    let child_turn_cancels = session.child_turn_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
 
     let mut chat = initial_chat_view(&session, &store).await;
@@ -256,13 +168,13 @@ async fn run_app(
     let mut body_refresh_pending = true;
     let mut display_chat_cached: Option<ChatView> = None;
     let mut viewport: Option<crate::render_viewport::ViewportCache> = None; // A1: O(visible_h) render cache
-    // Persisted across loop iterations: always equals the LAST rendered
-    // layout (== what is on screen). The event loop forwards `&hits` to
-    // `handle_mouse` on the SAME iteration a click arrives, and a click
-    // sets `dirty=true` so `hits` refreshes next frame. Declaring this
-    // INSIDE the loop resets it to `MouseHits::default()` every turn; when
-    // no render runs (idle state, `dirty=false`) the rects are empty and
-    // EVERY arrow click is silently dropped. Keep this OUTSIDE `loop {}`.
+                                                                            // Persisted across loop iterations: always equals the LAST rendered
+                                                                            // layout (== what is on screen). The event loop forwards `&hits` to
+                                                                            // `handle_mouse` on the SAME iteration a click arrives, and a click
+                                                                            // sets `dirty=true` so `hits` refreshes next frame. Declaring this
+                                                                            // INSIDE the loop resets it to `MouseHits::default()` every turn; when
+                                                                            // no render runs (idle state, `dirty=false`) the rects are empty and
+                                                                            // EVERY arrow click is silently dropped. Keep this OUTSIDE `loop {}`.
     let mut hits = MouseHits::default();
 
     // Idle-resize safety net: tracks the last-known terminal (width, height).
@@ -299,6 +211,27 @@ async fn run_app(
             body_refresh_pending = false;
         }
         let render_chat = display_chat_cached.as_ref().unwrap_or(display_chat);
+        // When a running subagent is focused, show its child view's
+        // steer_items in the queue panel instead of the parent's.
+        let empty_queue: &[(i64, String)] = &[];
+        let (display_steers, display_queue) =
+            if let Some(idx) = subagent_focus {
+                match chat.blocks.get(idx) {
+                    Some(crate::chat::ChatBlock::Subagent {
+                        view, done: false, ..
+                    }) => (&view.steer_items, empty_queue),
+                    _ => (&chat.steer_items, &queue_items[..]),
+                }
+            } else {
+                (&chat.steer_items, &queue_items[..])
+            };
+        // Input is disabled only when a DONE subagent is focused
+        // (not when a running one is — the user can steer it).
+        let input_disabled = subagent_focus.is_some_and(|idx| {
+            chat.blocks.get(idx).is_none_or(|b| {
+                matches!(b, crate::chat::ChatBlock::Subagent { done: true, .. })
+            })
+        });
         if dirty && render_pending {
             if !skip_next_render {
                 app_loop::render_frame(
@@ -316,8 +249,8 @@ async fn run_app(
                     context_limit,
                     &status_model,
                     &status,
-                    &chat.steer_items,
-                    &queue_items,
+                    display_steers,
+                    display_queue,
                     &mut scroll,
                     follow,
                     anim_tick,
@@ -332,7 +265,7 @@ async fn run_app(
                     selection,
                     &copy_status,
                     &pending_images,
-                    subagent_focus.is_some(),
+                    input_disabled,
                     run_elapsed_ms,
                 )?;
             }
@@ -496,6 +429,7 @@ async fn run_app(
                                 .unwrap_or(78),
                             2,
                             subagent_focus.is_some(),
+                            input_disabled,
                         ) {
                             KeyAction::Submit(text) => {
                                 let (clean, _unresolved) = resolve_and_warn(
@@ -514,36 +448,55 @@ async fn run_app(
                                             // the skill body injected into the system prompt.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
-                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, drain_pending_images(&mut pending_images))).await
+                                            let image_uris = snapshot_image_uris(&pending_images);
+                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, image_uris)).await
                                             {
                                                 worker_dead(&mut chat);
                                                 break;
                                             }
+                                            pending_images.clear();
                                             running = true;
                                             follow = true;
                                             if chat.agent == "plan" {
                                                 chat.plan_submitted = true;
                                             }
                                             chat.begin_turn();
+                                        } else {
+                                            // Skill-only submit while a turn is running: admit the
+                                            // skill trigger as a queued input (mirrors the Queue/Steer
+                                            // pure-skill handling) and drain pending images so they
+                                            // don't leak into a later unrelated submit.
+                                            let skill_name = active_skill.as_deref().unwrap_or("");
+                                            let trigger = skill_trigger(skill_name);
+                                            let image_uris = snapshot_image_uris(&pending_images);
+                                            if let Ok(seq) = store
+                                                .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &image_uris))
+                                                .await
+                                            {
+                                                pending_images.clear();
+                                                queue_items.push((seq, skill_token_display(skill_name)));
+                                            }
                                         }
                                     }
                                 } else if running {
-                                    let image_uris = drain_pending_images(&mut pending_images);
+                                    let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store
                                         .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, &image_uris))
                                         .await
                                     {
+                                        pending_images.clear();
                                         queue_items.push((seq, clean.clone()));
                                     }
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
-                                    let image_uris = drain_pending_images(&mut pending_images);
+                                    let image_uris = snapshot_image_uris(&pending_images);
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
                                     {
                                         worker_dead(&mut chat);
                                         break;
                                     }
+                                    pending_images.clear();
                                     cancelled = false; // B3: clear stale flag from a prior cancel
                                     running = true;
                                     follow = true;
@@ -553,6 +506,19 @@ async fn run_app(
                                     chat.begin_turn();
                                 }
                             }
+                            KeyAction::SubagentSteer(text) => {
+                                let image_uris = snapshot_image_uris(&pending_images);
+                                subagent_input::admit_subagent_steer(
+                                    &store,
+                                    &mut chat,
+                                    subagent_focus,
+                                    &text,
+                                    &image_uris,
+                                )
+                                .await;
+                                pending_images.clear();
+                                follow = true;
+                            }
                             KeyAction::Steer(text) => {
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
@@ -560,8 +526,9 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    let image_uris = drain_pending_images(&mut pending_images);
+                                    let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, &image_uris)).await {
+                                        pending_images.clear();
                                         chat.steer_items.push((seq, clean.to_string()));
                                     }
                                     // Do NOT echo into the main transcript /
@@ -575,7 +542,9 @@ async fn run_app(
                                     // into the system prompt — is acted on via
                                     // the steer queue rather than being dropped.
                                     let trigger = skill_trigger(skill_name);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &drain_pending_images(&mut pending_images))).await {
+                                    let image_uris = snapshot_image_uris(&pending_images);
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &image_uris)).await {
+                                        pending_images.clear();
                                         chat.steer_items.push((seq, skill_token_display(skill_name)));
                                     }
                                 }
@@ -588,8 +557,9 @@ async fn run_app(
                                 );
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
-                                    let image_uris = drain_pending_images(&mut pending_images);
+                                    let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, &image_uris)).await {
+                                        pending_images.clear();
                                         queue_items.push((seq, clean.to_string()));
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
@@ -598,7 +568,9 @@ async fn run_app(
                                     // queue so the active skill is acted on
                                     // instead of being silently dropped.
                                     let trigger = skill_trigger(skill_name);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &drain_pending_images(&mut pending_images))).await {
+                                    let image_uris = snapshot_image_uris(&pending_images);
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &image_uris)).await {
+                                        pending_images.clear();
                                         queue_items.push((seq, skill_token_display(skill_name)));
                                     }
                                 }
@@ -714,7 +686,18 @@ async fn run_app(
                             copy_status = Some((msg, Instant::now()));
                         }
                         if outcome == MouseOutcome::SteerSubmit {
-                            if running {
+                            // When a running subagent is focused, fire its
+                            // turn-cancel to interrupt the current turn and
+                            // force immediate steer absorption. Do NOT change
+                            // the subagent's status — it continues running.
+                            let sub_focused = subagent_focus.is_some();
+                            if sub_focused {
+                                subagent_input::fire_subagent_turn_cancel(
+                                    &child_turn_cancels,
+                                    &chat,
+                                    subagent_focus,
+                                );
+                            } else if running {
                                 cancel.cancel();
                                 cancelled = true;
                                 drain_pending = true;
@@ -727,7 +710,7 @@ async fn run_app(
                             follow = true;
                         }
                     }
-                    Event::Resize(_, _) => on_resize_event(terminal),
+                    Event::Resize(_, _) => on_resize_event(terminal, &mut last_size),
                     Event::Paste(pasted) => {
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
@@ -785,11 +768,11 @@ async fn run_app(
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, drain_pending_images, handle_mouse, initial_chat_view,
-    on_resize_event, open_store, persist_session_model, poll_idle_resize, reapply_session_model,
-    mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
-    skill_trigger, skill_token_display, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
+    clear_pending_inputs, handle_mouse, initial_chat_view, mk_input_with_images, on_resize_event,
+    poll_idle_resize, pre_key_intercept, push_user, resolve_and_warn, snapshot_image_uris,
+    start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
+pub(crate) use crate::skill_display::{skill_token_display, skill_trigger};
 
 #[cfg(test)]
 #[path = "app_tests.rs"]

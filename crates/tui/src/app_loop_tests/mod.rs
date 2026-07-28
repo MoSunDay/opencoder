@@ -4,7 +4,6 @@
 use super::*;
 use crate::chat::ChatView;
 
-
 // ----- Shared test infrastructure (used by submodules) -----
 
 /// Single process-global lock serializing every test that either mutates the
@@ -338,7 +337,6 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
          reset it to false"
     );
 }
-
 
 mod model_outcome_tests;
 

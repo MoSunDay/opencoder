@@ -1,8 +1,9 @@
 //! Plan text editor — a vim-mode editor wrapping [`crate::vim`].
 //!
-//! Opened with Shift+I in plan mode (idle). Starts in Insert mode (cursor at
-//! the end) so the user can type immediately; pressing Esc drops to Normal mode
-//! for full vim navigation, operators, search, and command-line.
+//! Opened with Shift+I in plan mode (idle). Starts in Normal (view) mode,
+//! cursor at the top, so the user can review the plan first; pressing `i`/`a`
+//! enters Insert mode for editing, and Esc returns to Normal for full vim
+//! navigation, operators, search, and command-line.
 //!
 //! Exits:
 //! - `:wq` — save & leave (text kept).
@@ -17,7 +18,7 @@
 
 use crossterm::event::KeyEvent;
 
-use crate::vim::{self, VimState};
+use crate::vim::{self, VimMode, VimState};
 
 /// Plan editor — a thin adapter over [`VimState`] exposing the contract the app
 /// loop and renderer expect (text, cursor, mode label, modified flag).
@@ -27,11 +28,13 @@ pub struct PlanEdit {
 }
 
 impl PlanEdit {
-    /// Seed from existing plan text. Starts in Insert mode, cursor at the end.
+    /// Seed from existing plan text. Starts in Normal (view) mode, cursor at
+    /// the top, so the user can read the plan before pressing `i`/`a` to edit.
     pub fn new(text: String) -> Self {
-        Self {
-            vim: VimState::new(text),
-        }
+        let mut vim = VimState::new(text);
+        vim.mode = VimMode::Normal;
+        vim.cursor = 0;
+        Self { vim }
     }
 
     /// The current editor text.
@@ -98,17 +101,18 @@ mod tests {
     const W: u16 = 80;
 
     #[test]
-    fn new_starts_insert_cursor_at_end_unmodified() {
+    fn new_starts_normal_cursor_at_top_unmodified() {
         let pe = PlanEdit::new("hello".to_string());
         assert_eq!(pe.text(), "hello");
-        assert_eq!(pe.cursor(), 5);
-        assert_eq!(pe.mode_label(), "INSERT");
+        assert_eq!(pe.cursor(), 0);
+        assert_eq!(pe.mode_label(), "NORMAL");
         assert!(!pe.is_modified());
     }
 
     #[test]
     fn insert_appends_and_marks_modified() {
         let mut pe = PlanEdit::new("hi".to_string());
+        handle_plan_edit_key(&mut pe, key('A'), W, 2); // Normal -> Insert at end
         assert_eq!(
             handle_plan_edit_key(&mut pe, key('!'), W, 2),
             PlanEditAction::Continue
@@ -121,11 +125,11 @@ mod tests {
     #[test]
     fn backspace_in_insert_deletes() {
         let mut pe = PlanEdit::new("abc".to_string());
-        // cursor at end (3). move left twice then backspace.
-        handle_plan_edit_key(&mut pe, esc(), W, 2); // -> Normal
-        handle_plan_edit_key(&mut pe, key('i'), W, 2); // back to Insert, cursor left
-        handle_plan_edit_key(&mut pe, backspace(), W, 2);
-        assert_eq!(pe.text(), "ac");
+        // start in Normal (cursor 0); append at end then backspace.
+        handle_plan_edit_key(&mut pe, key('A'), W, 2); // -> Insert at end (cursor 3)
+        handle_plan_edit_key(&mut pe, backspace(), W, 2); // delete 'c'
+        assert_eq!(pe.text(), "ab");
+        assert_eq!(pe.cursor(), 2);
     }
 
     #[test]
@@ -137,10 +141,11 @@ mod tests {
         assert_eq!(pe.mode_label(), "INSERT");
     }
 
-#[test]
+    #[test]
     fn wq_saves_and_exits() {
         let mut pe = PlanEdit::new("x".to_string());
-        handle_plan_edit_key(&mut pe, key('a'), W, 2);
+        handle_plan_edit_key(&mut pe, key('A'), W, 2); // Normal -> Insert at end
+        handle_plan_edit_key(&mut pe, key('a'), W, 2); // type 'a' -> "xa"
         handle_plan_edit_key(&mut pe, esc(), W, 2); // Normal
                                                     // type :wq
         handle_plan_edit_key(&mut pe, key(':'), W, 2);
@@ -157,7 +162,8 @@ mod tests {
     #[test]
     fn q_bang_discards_and_exits_unmodified() {
         let mut pe = PlanEdit::new("orig".to_string());
-        handle_plan_edit_key(&mut pe, key('Z'), W, 2);
+        handle_plan_edit_key(&mut pe, key('A'), W, 2); // Normal -> Insert at end
+        handle_plan_edit_key(&mut pe, key('Z'), W, 2); // type 'Z' -> "origZ"
         assert!(pe.is_modified());
         handle_plan_edit_key(&mut pe, esc(), W, 2); // Normal
         handle_plan_edit_key(&mut pe, key(':'), W, 2);
@@ -175,7 +181,8 @@ mod tests {
     #[test]
     fn ctrl_c_drops_to_normal() {
         let mut pe = PlanEdit::new("base".to_string());
-        handle_plan_edit_key(&mut pe, key('!'), W, 2); // Insert, text="base!"
+        handle_plan_edit_key(&mut pe, key('A'), W, 2); // Normal -> Insert at end
+        handle_plan_edit_key(&mut pe, key('!'), W, 2); // text="base!"
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(
             handle_plan_edit_key(&mut pe, ctrl_c, W, 2),
@@ -205,8 +212,8 @@ mod tests {
     #[test]
     fn dd_deletes_current_line() {
         let mut pe = PlanEdit::new("line1\nline2".to_string());
-        // cursor at end (last char of line2). Move to Normal then dd.
-        handle_plan_edit_key(&mut pe, esc(), W, 2);
+        // start in Normal at cursor 0 (line1); jump to last line then dd.
+        handle_plan_edit_key(&mut pe, key('G'), W, 2); // cursor to last line
         handle_plan_edit_key(&mut pe, key('d'), W, 2);
         handle_plan_edit_key(&mut pe, key('d'), W, 2);
         // only line1 remains

@@ -411,6 +411,54 @@ fn save_env_var_api_key_roundtrips_through_resolve() {
 }
 
 #[test]
+fn autopilot_config_roundtrips_through_save() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+
+    // Write a config with autopilot enabled and all fields set.
+    let patch = serde_json::json!({
+        "model": "demo/model",
+        "autopilot": {
+            "enabled": true,
+            "max_iterations": 5,
+            "skill": "code-reviewer",
+            "verify_retries": 2
+        }
+    });
+    Config::save(dir.path(), &patch).unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert!(cfg.autopilot.enabled, "autopilot.enabled round-trips");
+    assert_eq!(
+        cfg.autopilot.max_iterations, 5,
+        "max_iterations round-trips"
+    );
+    assert_eq!(
+        cfg.autopilot.skill.as_deref(),
+        Some("code-reviewer"),
+        "skill round-trips"
+    );
+    assert_eq!(
+        cfg.autopilot.verify_retries, 2,
+        "verify_retries round-trips"
+    );
+
+    // Patching only one sub-key must deep-merge (not replace the object).
+    let patch2 = serde_json::json!({
+        "autopilot": { "max_iterations": 20 }
+    });
+    Config::save(dir.path(), &patch2).unwrap();
+    let cfg2 = Config::load(dir.path()).unwrap();
+    assert!(cfg2.autopilot.enabled, "enabled preserved by deep merge");
+    assert_eq!(cfg2.autopilot.max_iterations, 20, "max_iterations patched");
+    assert_eq!(
+        cfg2.autopilot.skill.as_deref(),
+        Some("code-reviewer"),
+        "skill preserved by deep merge"
+    );
+    assert_eq!(cfg2.autopilot.verify_retries, 2, "verify_retries preserved");
+}
+
+#[test]
 fn providers_map_resolves_endpoint_by_prefix() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();

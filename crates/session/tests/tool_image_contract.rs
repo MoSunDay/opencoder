@@ -14,10 +14,10 @@ use opencoder_session::{run, SessionState};
 /// `view_image` tool can read it.
 const TINY_PNG: &[u8] = &[
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15,
-    0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xff,
-    0x9f, 0xa1, 0x1e, 0x00, 0x07, 0x82, 0x02, 0x7f, 0x3d, 0xc8, 0x48, 0xef, 0x00, 0x00, 0x00,
-    0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc, 0xff, 0x9f, 0xa1,
+    0x1e, 0x00, 0x07, 0x82, 0x02, 0x7f, 0x3d, 0xc8, 0x48, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ];
 
 fn done(text: &str) -> LlmEvent {
@@ -71,13 +71,22 @@ async fn qwen_session(client: Arc<dyn ChatStream>) -> (tempfile::TempDir, Sessio
 async fn tool_returned_image_reaches_request_body() {
     // Script: turn 1 → view_image tool call; turn 2 → final text.
     let mock = Arc::new(
-        MockChatClient::new().push_script(vec![LlmEvent::TextDelta("looking".into()), view_image_turn()])
-            .push_script(vec![LlmEvent::TextDelta("it is a 1x1 image".into()), done("it is a 1x1 image")]),
+        MockChatClient::new()
+            .push_script(vec![
+                LlmEvent::TextDelta("looking".into()),
+                view_image_turn(),
+            ])
+            .push_script(vec![
+                LlmEvent::TextDelta("it is a 1x1 image".into()),
+                done("it is a 1x1 image"),
+            ]),
     );
     let client: Arc<dyn ChatStream> = mock.clone();
     let (_dir, mut s) = qwen_session(client).await;
 
-    run(&mut s, "analyze tiny.png".into(), |_| {}).await.unwrap();
+    run(&mut s, "analyze tiny.png".into(), |_| {})
+        .await
+        .unwrap();
 
     let reqs = mock.requests();
     assert!(
@@ -93,7 +102,12 @@ async fn tool_returned_image_reaches_request_body() {
         .messages
         .iter()
         .find(|m| m["role"] == "tool")
-        .unwrap_or_else(|| panic!("expected a 'tool' message in second request: {:?}", second.messages));
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a 'tool' message in second request: {:?}",
+                second.messages
+            )
+        });
     assert!(
         tool_msg["content"].is_string(),
         "tool content must be a plain string (OpenAI spec), got: {tool_msg:?}"
@@ -111,7 +125,12 @@ async fn tool_returned_image_reaches_request_body() {
                 .map(|parts| parts.iter().any(|p| p["type"] == "image_url"))
                 .unwrap_or(false)
         })
-        .unwrap_or_else(|| panic!("expected a 'user' message with an image_url part: {:?}", second.messages));
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a 'user' message with an image_url part: {:?}",
+                second.messages
+            )
+        });
 
     let content = user_with_image["content"]
         .as_array()

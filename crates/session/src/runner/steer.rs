@@ -1,4 +1,5 @@
 use opencoder_store::Delivery;
+use tokio_util::sync::CancellationToken;
 
 use crate::SessionState;
 
@@ -69,6 +70,41 @@ pub(super) async fn claim_one_queued(
         Err(e) => {
             tracing::warn!(error = %e, "claim_one_queued failed");
             None
+        }
+    }
+}
+
+/// Resolves when a turn-level interrupt is requested. Like `await_cancel` but
+/// for the separate `turn_cancel` token: resolves when a subagent steer
+/// "submit-now" (the `>` button) fires the token. Stays pending forever when
+/// no token is attached (parent sessions).
+pub(crate) async fn await_turn_cancel(session: &SessionState) {
+    let token = session
+        .turn_cancel
+        .as_ref()
+        .and_then(|t| t.lock().ok().map(|g| g.clone()));
+    match token {
+        Some(tc) => tc.cancelled().await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Check whether the turn-level interrupt token has been fired.
+pub(crate) fn is_turn_cancelled(session: &SessionState) -> bool {
+    session
+        .turn_cancel
+        .as_ref()
+        .and_then(|t| t.lock().ok())
+        .map(|g| g.is_cancelled())
+        .unwrap_or(false)
+}
+
+/// Reset the turn-level interrupt token (replace with a fresh one) so the next
+/// turn starts with a clean, uncancelled token.
+pub(crate) fn reset_turn_cancel(session: &mut SessionState) {
+    if let Some(tc) = &session.turn_cancel {
+        if let Ok(mut g) = tc.lock() {
+            *g = CancellationToken::new();
         }
     }
 }

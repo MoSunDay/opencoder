@@ -69,12 +69,15 @@ pub enum ConfigField {
     Browser,
     ComputerUse,
     ToolsSubagent,
+    ApEnabled,
+    ApMaxIter,
+    ApSkill,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 10] = [
+    const ORDER: [ConfigField; 13] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -83,6 +86,9 @@ impl ConfigField {
         ConfigField::Browser,
         ConfigField::ComputerUse,
         ConfigField::ToolsSubagent,
+        ConfigField::ApEnabled,
+        ConfigField::ApMaxIter,
+        ConfigField::ApSkill,
         ConfigField::Save,
         ConfigField::Cancel,
     ];
@@ -105,6 +111,9 @@ pub struct ConfigForm {
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
+    pub ap_enabled: bool,
+    pub ap_max_iter: u32,
+    pub ap_skill_input: String,
     pub focus: ConfigField,
     pub error: Option<String>,
 }
@@ -120,6 +129,9 @@ impl ConfigForm {
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
             capabilities_tools_subagent: config.capabilities.tools_subagent,
+            ap_enabled: config.autopilot.enabled,
+            ap_max_iter: config.autopilot.max_iterations,
+            ap_skill_input: config.autopilot.skill.clone().unwrap_or_default(),
             focus: ConfigField::Reasoning,
             error: None,
         }
@@ -132,6 +144,10 @@ impl ConfigForm {
 
     fn adjust_fps(&mut self, delta: i32) {
         self.fps = (self.fps as i32 + delta).clamp(1, 30) as u32;
+    }
+
+    fn adjust_ap_max_iter(&mut self, delta: i32) {
+        self.ap_max_iter = (self.ap_max_iter as i32 + delta).max(1) as u32;
     }
 
     pub fn build_patch(&self) -> ConfigPatch {
@@ -149,6 +165,13 @@ impl ConfigForm {
             capabilities_browser: self.capabilities_browser,
             capabilities_computer_use: self.capabilities_computer_use,
             capabilities_tools_subagent: self.capabilities_tools_subagent,
+            ap_enabled: self.ap_enabled,
+            ap_max_iter: self.ap_max_iter,
+            ap_skill: if self.ap_skill_input.trim().is_empty() {
+                None
+            } else {
+                Some(self.ap_skill_input.trim().to_string())
+            },
         }
     }
 
@@ -179,6 +202,13 @@ impl ConfigForm {
                         self.fps = n.clamp(1, 30);
                     }
                 }
+                ConfigField::ApMaxIter => {
+                    let s = format!("{}{}", self.ap_max_iter, c);
+                    if let Ok(n) = s.parse::<u32>() {
+                        self.ap_max_iter = n.max(1);
+                    }
+                }
+                ConfigField::ApSkill => self.ap_skill_input.push(c),
                 _ => {}
             }
         }
@@ -208,6 +238,8 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
+            ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
+            ConfigField::ApMaxIter => form.adjust_ap_max_iter(-1),
             _ => {}
         },
         KeyCode::Right => match form.focus {
@@ -224,6 +256,8 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
+            ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
+            ConfigField::ApMaxIter => form.adjust_ap_max_iter(1),
             _ => {}
         },
         KeyCode::Enter => match form.focus {
@@ -238,11 +272,15 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::Cancel => return (ModelOutcome::Cancel, None),
             _ => form.focus = form.focus.next(),
         },
-        KeyCode::Backspace => {
-            if matches!(form.focus, ConfigField::MaxTokens) {
+        KeyCode::Backspace => match form.focus {
+            ConfigField::MaxTokens => {
                 form.max_tokens_input.pop();
             }
-        }
+            ConfigField::ApSkill => {
+                form.ap_skill_input.pop();
+            }
+            _ => {}
+        },
         KeyCode::Char(c) => match form.focus {
             ConfigField::MaxTokens if c.is_ascii_digit() => {
                 form.max_tokens_input.push(c);
@@ -272,6 +310,14 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent if c == ' ' => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
+            ConfigField::ApEnabled if c == ' ' => form.ap_enabled = !form.ap_enabled,
+            ConfigField::ApMaxIter if c.is_ascii_digit() => {
+                let s = format!("{}{}", form.ap_max_iter, c);
+                if let Ok(n) = s.parse::<u32>() {
+                    form.ap_max_iter = n.max(1);
+                }
+            }
+            ConfigField::ApSkill if !c.is_control() => form.ap_skill_input.push(c),
             _ => {}
         },
         _ => {}

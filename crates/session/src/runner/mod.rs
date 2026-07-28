@@ -27,7 +27,7 @@ use execute::execute_call;
 pub(crate) use execute::DEFAULT_TOOL_TIMEOUT;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
-use steer::{claim_one_queued, claim_steers};
+use steer::{claim_one_queued, claim_steers, is_turn_cancelled, reset_turn_cancel};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -79,14 +79,19 @@ pub async fn run_with_registry(
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
     // claimed at turn boundaries to supply the actual user input, and the web
-    // has no skill support (`skill_prompt` is `None`). But for skill-only
-    // submits (empty prompt with an active skill), inject a synthetic trigger
-    // message so the model records a user turn and acts on the skill body in
-    // the system prompt instead of treating it passively.
-    if !user_text.trim().is_empty() || !images.is_empty() {
+    // has no skill support (`skill_prompt` is `None`). When an active skill is
+    // set and the user submitted no text (pure-skill submit or image-only),
+    // inject a synthetic trigger so the model records a user turn and acts on
+    // the skill body in the system prompt instead of treating the input
+    // passively. For text-bearing turns the user's own words drive execution.
+    let has_skill = session.skill_prompt_cloned().is_some();
+    let has_text = !user_text.trim().is_empty();
+    let has_images = !images.is_empty();
+    if has_text || has_images {
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
-    } else if session.skill_prompt_cloned().is_some() {
+    }
+    if has_skill && !has_text {
         let mut msg = Message::user(
             new_id(),
             "The active skill is now in effect. Begin executing it now.",
@@ -94,10 +99,16 @@ pub async fn run_with_registry(
         msg.synthetic = true;
         session.record(msg).await;
     }
-    run_loop(session, registry, &mut on_event).await
+    run_loop(session, registry, &mut on_event).await?;
+    // Autopilot: after the initial task completes, hand control to the
+    // PLAN -> ACT -> VERIFY loop so the agent self-drives toward the goal.
+    if session.config.autopilot.enabled {
+        crate::autopilot::drive(session, registry, &mut on_event).await?;
+    }
+    Ok(())
 }
 
-async fn run_loop(
+pub(crate) async fn run_loop(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
@@ -144,6 +155,14 @@ async fn run_loop(
                 return Err(e);
             }
         };
+        // Turn-level interrupt (subagent steer): the LLM call was cut short by
+        // a turn-cancel. Don't record the empty assistant message — just reset
+        // the token and continue to the top of the loop where claim_steers
+        // absorbs the pending steer.
+        if is_turn_cancelled(session) {
+            reset_turn_cancel(session);
+            continue;
+        }
         let (text, reasoning, tool_calls, usage) = turn;
         // Streamline the completed assistant text before it is persisted and
         // re-sent as context. The live TextDelta stream already delivered the
@@ -321,6 +340,13 @@ async fn run_loop(
                 })
                 .collect()
         };
+        // Turn-level interrupt (subagent steer): the tool batch was
+        // interrupted. Record the tool results normally for history
+        // integrity, then continue to absorb pending steers.
+        let turn_was_interrupted = is_turn_cancelled(session);
+        if turn_was_interrupted {
+            reset_turn_cancel(session);
+        }
         // If interrupted mid-tool-batch, drop the tool message entirely so a
         // cancelled subagent's `task` tool_use stays dangling (replayed on the
         // next user turn by run_with_registry). Other interrupted tool_uses are
@@ -345,6 +371,10 @@ async fn run_loop(
             synthetic: false,
         };
         session.record(tool_msg).await;
+
+        if turn_was_interrupted {
+            continue;
+        }
 
         // Tool-failure threshold: if any tool hit the consecutive-failure
         // limit, abort the turn to break the retry loop.

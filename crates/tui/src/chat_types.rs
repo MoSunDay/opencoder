@@ -7,6 +7,12 @@ pub(super) const SPINNER: [&str; 10] = [
     "\u{2807}", "\u{280f}",
 ];
 
+/// Maximum number of lines captured from a single tool-result event. Even
+/// when the user expands a tool-output block, memory and per-refresh
+/// `flatten_with` cost are bounded. Collapsed mode still renders only the
+/// header.
+pub(crate) const TOOL_OUTPUT_LINES: usize = 200;
+
 /// A single visual block in the transcript. Replaces the flat `Vec<Line>`
 /// model so we can have collapsible thinking blocks, streaming-vs-rendered
 /// assistant text, and tool blocks with structured output.

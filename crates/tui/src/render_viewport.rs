@@ -111,11 +111,7 @@ impl ViewportCache {
     /// Found via two binary searches over `cum_rows`, so it is O(log n)
     /// regardless of transcript length. Empty input or `visible_h == 0`
     /// yields `(0, 0, 0)`.
-    pub fn visible_window(
-        &self,
-        scroll_y: usize,
-        visible_h: usize,
-    ) -> (usize, usize, usize) {
+    pub fn visible_window(&self, scroll_y: usize, visible_h: usize) -> (usize, usize, usize) {
         if self.lines.is_empty() || visible_h == 0 {
             return (0, 0, 0);
         }

@@ -126,7 +126,10 @@ async fn resume_after_handoff_preserves_head_image() {
         assistant("a2"),
     ];
     store.append_messages("h1", &head).await.unwrap();
-    store.append_message("h1", &assistant("act1")).await.unwrap();
+    store
+        .append_message("h1", &assistant("act1"))
+        .await
+        .unwrap();
 
     store
         .update_session(

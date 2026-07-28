@@ -24,6 +24,7 @@ pub mod render_viewport;
 pub mod selection;
 pub mod session_ui;
 pub mod skill_token;
+pub mod skill_display;
 pub mod supervisor;
 pub mod task;
 pub mod terminal;

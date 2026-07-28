@@ -13,7 +13,6 @@ use crate::app::app_loop::*;
 // match — see `app_loop.rs`). These two tests pin the error-marker text and
 // the ReloadConfig dispatch for each Err branch.
 
-
 /// `ChatClient::new` rejects an invalid proxy URL → the "client build failed"
 /// red marker is pushed. The project-local `opencoder.json` pre-supplies a valid
 /// api_key (so `resolve_endpoint` succeeds) plus a malformed proxy string; the
@@ -208,4 +207,3 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
     assert!(matches!(cmd, crate::worker::UiCmd::ReloadConfig(_)));
 }
-

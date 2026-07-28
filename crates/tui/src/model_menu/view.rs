@@ -158,6 +158,28 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             form.focus == ConfigField::ToolsSubagent,
             "\u{2190}/\u{2192}/Space toggle",
         ),
+        field_line(
+            "autopilot:",
+            if form.ap_enabled { "[ on ]" } else { "[ off ]" },
+            form.focus == ConfigField::ApEnabled,
+            "\u{2190}/\u{2192}/Space toggle",
+        ),
+        field_line(
+            "ap max_iter:",
+            &form.ap_max_iter.to_string(),
+            form.focus == ConfigField::ApMaxIter,
+            "1+, digits/\u{2190}/\u{2192} \u{00b1}1",
+        ),
+        field_line(
+            "ap skill:",
+            if form.ap_skill_input.trim().is_empty() {
+                "(unset)"
+            } else {
+                &form.ap_skill_input
+            },
+            form.focus == ConfigField::ApSkill,
+            "type name, Backspace, Enter=next",
+        ),
         button_line_cfg(form),
         Line::raw(""),
     ];

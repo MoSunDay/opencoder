@@ -259,6 +259,9 @@ async fn switch_agent_updates_stored_meta_and_handle() {
         cancel: tokio::sync::Mutex::new(tokio_util::sync::CancellationToken::new()),
         overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
         draining: AtomicBool::new(false),
+        child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
     });
     state.handles.lock().await.insert(sid.clone(), handle);
 
@@ -294,6 +297,9 @@ async fn interrupt_cancels_running_drain_token() {
         cancel: tokio::sync::Mutex::new(cancel.clone()),
         overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
         draining: AtomicBool::new(false),
+        child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
     });
     state.handles.lock().await.insert(sid.into(), handle);
 
@@ -495,16 +501,16 @@ async fn post_model_persist_default_malformed_returns_500() {
                 .method("POST")
                 .uri(format!("/api/sessions/{sid}/model"))
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"value":"x","persist_default":true}"#,
-                ))
+                .body(Body::from(r#"{"value":"x","persist_default":true}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], false);
     assert!(

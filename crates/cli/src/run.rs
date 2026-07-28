@@ -406,6 +406,9 @@ pub(crate) fn print_event(ev: &SessionEvent) {
         SessionEvent::QueueConsumed { .. } => {}
         SessionEvent::SteerConsumed { .. } => {}
         SessionEvent::SubagentChild { .. } => {}
+        SessionEvent::AutoPilot { phase, iteration } => {
+            eprintln!("\n\x1b[35m\u{25c9} autopilot: {phase:?} (iteration {iteration})\x1b[0m");
+        }
     }
 }
 

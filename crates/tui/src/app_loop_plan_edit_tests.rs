@@ -79,7 +79,10 @@ async fn plan_edit_ctrl_c_etx_keeps_popup_open() {
 
     handle_plan_edit_key(&mut plan_edit, ctrl_c_etx(), &mut chat, &cmd_tx, 80).await;
 
-    assert!(plan_edit.is_some(), "raw ETX must NOT close the plan-edit popup");
+    assert!(
+        plan_edit.is_some(),
+        "raw ETX must NOT close the plan-edit popup"
+    );
     assert_eq!(plan_edit.as_ref().unwrap().mode_label(), "NORMAL");
 }
 
@@ -94,7 +97,10 @@ async fn plan_edit_esc_keeps_popup_open() {
 
     handle_plan_edit_key(&mut plan_edit, esc_key(), &mut chat, &cmd_tx, 80).await;
 
-    assert!(plan_edit.is_some(), "Esc must NOT close the plan-edit popup");
+    assert!(
+        plan_edit.is_some(),
+        "Esc must NOT close the plan-edit popup"
+    );
     assert_eq!(plan_edit.as_ref().unwrap().mode_label(), "NORMAL");
 }
 
@@ -108,8 +114,9 @@ async fn plan_edit_wq_exits_and_persists_modified_text() {
     let mut chat = ChatView::default();
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(8);
 
-    // Seed a modification in Insert (append 'z'), then Esc -> Normal,
+    // PlanEdit opens in Normal; 'A' -> Insert at end, append 'z', Esc -> Normal,
     // ':' -> Command, "wq", Enter -> Exit (persist).
+    handle_plan_edit_key(&mut plan_edit, char_key('A'), &mut chat, &cmd_tx, 80).await;
     handle_plan_edit_key(&mut plan_edit, char_key('z'), &mut chat, &cmd_tx, 80).await;
     handle_plan_edit_key(&mut plan_edit, esc_key(), &mut chat, &cmd_tx, 80).await;
     handle_plan_edit_key(&mut plan_edit, char_key(':'), &mut chat, &cmd_tx, 80).await;
@@ -126,5 +133,8 @@ async fn plan_edit_wq_exits_and_persists_modified_text() {
         Ok(_) => panic!("expected UiCmd::EditPlan, got a different variant"),
         Err(e) => panic!("expected UiCmd::EditPlan, but channel recv failed: {e:?}"),
     }
-    assert!(cmd_rx.try_recv().is_err(), "exactly one UiCmd should fire on :wq");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "exactly one UiCmd should fire on :wq"
+    );
 }

@@ -114,8 +114,10 @@ async fn empty_text_with_image_still_recorded() {
     );
     let content = user["content"].as_array().unwrap();
     assert!(
-        content.iter().any(|p| p["type"] == "image_url"
-            && p["image_url"]["url"] == "data:image/png;base64,iVBOR="),
+        content
+            .iter()
+            .any(|p| p["type"] == "image_url"
+                && p["image_url"]["url"] == "data:image/png;base64,iVBOR="),
         "image must reach the request even with empty text: {content:?}"
     );
 }

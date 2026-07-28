@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod autopilot;
+mod merge;
+
+pub use autopilot::AutoPilotConfig;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -91,6 +96,9 @@ pub struct Config {
     /// (seconds). Defaults to 1800 (30 min). Prevents indefinite subagent hangs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_timeout_secs: Option<u64>,
+    /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
+    #[serde(default)]
+    pub autopilot: AutoPilotConfig,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -335,6 +343,7 @@ impl Default for Config {
             tool_guard: ToolGuardConfig::default(),
             stream_idle_timeout_secs: None,
             task_timeout_secs: None,
+            autopilot: AutoPilotConfig::default(),
         }
     }
 }
@@ -352,7 +361,7 @@ impl Config {
             if p.exists() {
                 let raw = std::fs::read_to_string(&p)?;
                 let parsed: serde_json::Value = serde_json::from_str(&raw)?;
-                merge_into(&mut cfg, parsed);
+                merge::merge_into(&mut cfg, parsed);
             }
         }
         apply_env(&mut cfg);
@@ -472,7 +481,7 @@ impl Config {
             if p.exists() {
                 if let Ok(raw) = std::fs::read_to_string(p) {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                        if has_editable_key(&v) {
+                        if merge::has_editable_key(&v) {
                             return p.clone();
                         }
                     }
@@ -500,7 +509,7 @@ impl Config {
         } else {
             serde_json::json!({})
         };
-        merge_json(&mut root, patch);
+        merge::merge_json(&mut root, patch);
         // Guard: refuse to persist a malformed `model` (e.g. `m/g`). Such a value
         // would make every downstream request fail silently (`model_id()` resolves
         // to a single char). Surface the error so the caller shows it to the user
@@ -518,94 +527,6 @@ impl Config {
         let pretty = serde_json::to_string_pretty(&root)?;
         std::fs::write(&target, pretty)?;
         Ok(target)
-    }
-}
-
-/// `true` if `root` (a parsed config file) carries any of the editable
-/// top-level or nested keys the `/model` menu can write.
-fn has_editable_key(root: &serde_json::Value) -> bool {
-    let obj = match root.as_object() {
-        Some(o) => o,
-        None => return false,
-    };
-    if obj.contains_key("model")
-        || obj.contains_key("small_model")
-        || obj.contains_key("max_tokens")
-        || obj.contains_key("reasoning_effort")
-        || obj.contains_key("interleaved_thinking")
-        || obj.contains_key("context_limit")
-        || obj.contains_key("fps")
-    {
-        return true;
-    }
-    if obj
-        .get("provider")
-        .and_then(|v| v.as_object())
-        .is_some_and(|p| p.contains_key("base_url") || p.contains_key("api_key"))
-    {
-        return true;
-    }
-    if obj
-        .get("providers")
-        .and_then(|v| v.as_object())
-        .is_some_and(|p| !p.is_empty())
-    {
-        return true;
-    }
-    if obj
-        .get("compaction")
-        .and_then(|v| v.as_object())
-        .is_some_and(|c| c.contains_key("context_threshold") || c.contains_key("auto"))
-    {
-        return true;
-    }
-    if obj
-        .get("network")
-        .and_then(|v| v.as_object())
-        .is_some_and(|n| n.contains_key("proxy"))
-    {
-        return true;
-    }
-    if obj
-        .get("capabilities")
-        .and_then(|v| v.as_object())
-        .is_some_and(|c| {
-            c.contains_key("browser")
-                || c.contains_key("computer_use")
-                || c.contains_key("tools_subagent")
-        })
-    {
-        return true;
-    }
-    false
-}
-
-/// Recursive JSON object merge: `patch` wins; nested objects are merged
-/// key-by-key rather than replaced wholesale, so editing `compaction.context_threshold`
-/// preserves a sibling `tail_turns`.
-fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value) {
-    use serde_json::Value;
-    match (dst, patch) {
-        (Value::Object(d), Value::Object(p)) => {
-            for (k, pv) in p {
-                match (d.get_mut(k), pv) {
-                    (Some(Value::Object(_)), Value::Object(_)) => {
-                        if let Some(child) = d.get_mut(k) {
-                            merge_json(child, pv);
-                        }
-                    }
-                    (_, Value::Null) => {
-                        d.remove(k);
-                    }
-                    _ => {
-                        d.insert(k.clone(), pv.clone());
-                    }
-                }
-            }
-        }
-        (d, p) => {
-            *d = p.clone();
-        }
     }
 }
 
@@ -681,124 +602,7 @@ fn apply_env(cfg: &mut Config) {
     }
 }
 
-fn merge_into(cfg: &mut Config, value: serde_json::Value) {
-    if let Some(obj) = value.as_object() {
-        if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
-            cfg.model = model.to_string();
-        }
-        if let Some(small) = obj.get("small_model").and_then(|v| v.as_str()) {
-            cfg.small_model = Some(small.to_string());
-        }
-        if let Some(cl) = obj.get("context_limit").and_then(|v| v.as_u64()) {
-            cfg.context_limit = Some(cl);
-        }
-        if let Some(mt) = obj.get("max_tokens").and_then(|v| v.as_u64()) {
-            cfg.max_tokens = Some(mt);
-        }
-        if let Some(re) = obj.get("reasoning_effort").and_then(|v| v.as_str()) {
-            let trimmed = re.trim();
-            if trimmed.is_empty() {
-                cfg.reasoning_effort = None;
-            } else {
-                cfg.reasoning_effort = Some(trimmed.to_string());
-            }
-        }
-        if let Some(it) = obj.get("interleaved_thinking").and_then(|v| v.as_bool()) {
-            cfg.interleaved_thinking = Some(it);
-        }
-        if let Some(v) = obj.get("cache_salt").and_then(|v| v.as_bool()) {
-            cfg.cache_salt = Some(v);
-        }
-        if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
-            cfg.fps = Some(fps.clamp(1, 30) as u32);
-        }
-        if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
-            if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {
-                cfg.provider.base_url = b.to_string();
-            }
-            if let Some(k) = p.get("api_key").and_then(|v| v.as_str()) {
-                cfg.provider.api_key = Some(resolve_env(k));
-            }
-        }
-        if let Some(providers) = obj.get("providers").and_then(|v| v.as_object()) {
-            for (name, pv) in providers {
-                if let Some(pcfg) = pv.as_object() {
-                    let entry = cfg.providers.entry(name.clone()).or_default();
-                    if let Some(b) = pcfg.get("base_url").and_then(|v| v.as_str()) {
-                        entry.base_url = b.to_string();
-                    }
-                    if let Some(k) = pcfg.get("api_key").and_then(|v| v.as_str()) {
-                        entry.api_key = Some(resolve_env(k));
-                    }
-                    if let Some(m) = pcfg.get("model").and_then(|v| v.as_str()) {
-                        entry.model = Some(m.to_string());
-                    }
-                    if let Some(hs) = pcfg.get("headers").and_then(|v| v.as_array()) {
-                        entry.headers = hs
-                            .iter()
-                            .filter_map(|h| {
-                                let name = h.get("name")?.as_str()?.to_string();
-                                let value = h.get("value")?.as_str()?.to_string();
-                                Some(HttpHeader { name, value })
-                            })
-                            .collect();
-                    }
-                }
-            }
-        }
-        if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
-            if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
-                cfg.compaction.auto = v;
-            }
-            if let Some(v) = c.get("context_threshold").and_then(|v| v.as_u64()) {
-                cfg.compaction.context_threshold = v;
-            }
-            if let Some(v) = c.get("tail_turns").and_then(|v| v.as_u64()) {
-                cfg.compaction.tail_turns = v as u32;
-            }
-            if let Some(v) = c.get("reserved").and_then(|v| v.as_u64()) {
-                cfg.compaction.reserved = v;
-            }
-            if let Some(v) = c.get("buffer").and_then(|v| v.as_u64()) {
-                cfg.compaction.buffer = Some(v);
-            }
-        }
-        if let Some(a) = obj.get("agent").and_then(|v| v.as_object()) {
-            if let Some(d) = a.get("default").and_then(|v| v.as_str()) {
-                cfg.agent.default = d.to_string();
-            }
-        }
-        if let Some(n) = obj.get("network").and_then(|v| v.as_object()) {
-            if let Some(p) = n.get("proxy").and_then(|v| v.as_str()) {
-                let t = p.trim();
-                cfg.network.proxy = if t.is_empty() {
-                    None
-                } else {
-                    Some(t.to_string())
-                };
-            }
-        }
-        if let Some(c) = obj.get("capabilities").and_then(|v| v.as_object()) {
-            if let Some(b) = c.get("browser").and_then(|v| v.as_bool()) {
-                cfg.capabilities.browser = b;
-            }
-            if let Some(b) = c.get("computer_use").and_then(|v| v.as_bool()) {
-                cfg.capabilities.computer_use = b;
-            }
-            if let Some(b) = c.get("tools_subagent").and_then(|v| v.as_bool()) {
-                cfg.capabilities.tools_subagent = b;
-            }
-        }
-        if let Some(v) = obj.get("stream_idle_timeout_secs").and_then(|v| v.as_u64()) {
-            cfg.stream_idle_timeout_secs = Some(v);
-        }
-        if let Some(v) = obj.get("task_timeout_secs").and_then(|v| v.as_u64()) {
-            cfg.task_timeout_secs = Some(v);
-        }
-    }
-}
-
-fn resolve_env(raw: &str) -> String {
+pub(super) fn resolve_env(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
         let name = &trimmed[1..trimmed.len() - 1];

@@ -69,6 +69,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
         .route("/api/sessions/:id/agent", post(api::post_agent))
         .route("/api/sessions/:id/model", post(api::post_model))
         .route("/api/sessions/:id/interrupt", post(api::post_interrupt))
+        .route(
+            "/api/sessions/:id/subagents/:task_id/steer",
+            post(api::post_subagent_steer),
+        )
         .route("/api/health", get(api::health))
         .with_state(state);
     if let Some(t) = token {

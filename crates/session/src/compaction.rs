@@ -111,7 +111,13 @@ pub async fn compact(
     // images are preserved separately on the summary message below rather than
     // described in prose. Text/tool content is unchanged.
     let head_for_summary = strip_images(&head);
-    let summary = summarize(&head_for_summary, session, previous_summary.as_deref(), on_event).await?;
+    let summary = summarize(
+        &head_for_summary,
+        session,
+        previous_summary.as_deref(),
+        on_event,
+    )
+    .await?;
     let mut summary_msg = compaction_message(summary.clone());
     // Preserve recent images from the discarded head by attaching them to the
     // summary message. They then travel with the summary as legal `image_url`
@@ -122,9 +128,10 @@ pub async fn compact(
     let preserved = collect_head_images(&head);
     if !preserved.is_empty() {
         for url in &preserved {
-            summary_msg
-                .blocks
-                .push(ContentBlock::Image { url: url.clone(), detail: None });
+            summary_msg.blocks.push(ContentBlock::Image {
+                url: url.clone(),
+                detail: None,
+            });
         }
     }
     let tail_msgs: Vec<Message> = session.messages[split..].to_vec();
@@ -668,7 +675,10 @@ mod tests {
         let stripped = strip_images(&[m]);
         assert_eq!(stripped.len(), 1);
         assert!(
-            !stripped[0].blocks.iter().any(|b| matches!(b, ContentBlock::Image { .. })),
+            !stripped[0]
+                .blocks
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Image { .. })),
             "Image blocks must be stripped"
         );
         assert!(!stripped[0].has_image());
@@ -694,7 +704,9 @@ mod tests {
         };
         let stripped = strip_images(&[m]);
         match &stripped[0].blocks[0] {
-            ContentBlock::ToolResult { images, content, .. } => {
+            ContentBlock::ToolResult {
+                images, content, ..
+            } => {
                 assert!(images.is_empty(), "tool images must be cleared");
                 assert_eq!(content, "shot");
             }
@@ -710,8 +722,8 @@ mod tests {
         use std::sync::Arc;
 
         use opencoder_core::resolve_agent;
-        use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
         use opencoder_core::Config;
+        use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 
         let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
             LlmEvent::TextDelta("summary of talk".into()),
@@ -771,7 +783,9 @@ mod tests {
             .find(|m| m["role"] == "user" && m["content"].is_array())
             .expect("a lowered user message carrying an image");
         let content = user_img["content"].as_array().unwrap();
-        assert!(content.iter().any(|p| p["type"] == "image_url"
-            && p["image_url"]["url"] == "data:image/png;base64,AAAA"));
+        assert!(content
+            .iter()
+            .any(|p| p["type"] == "image_url"
+                && p["image_url"]["url"] == "data:image/png;base64,AAAA"));
     }
 }

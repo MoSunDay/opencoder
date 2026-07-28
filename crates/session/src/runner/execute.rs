@@ -7,7 +7,7 @@ use opencoder_llm::tool_call::CompletedToolCall;
 use crate::SessionState;
 
 use super::event::{Sink, MAX_OUTPUT};
-use super::steer::await_cancel;
+use super::steer::{await_cancel, await_turn_cancel};
 use super::subagent::run_subagent;
 
 /// Safety-net timeout for a single leaf-tool execution. Prevents a hung tool
@@ -50,10 +50,12 @@ pub(super) async fn execute_call_with_timeout(
         let task_dur = session.config.task_timeout();
         let sub = run_subagent(tc.input.clone(), tc.id.clone(), session, registry, sink);
         let mut cancel_fut = std::pin::pin!(await_cancel(session));
+        let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
         let mut deadline = std::pin::pin!(tokio::time::sleep(task_dur));
         return tokio::select! {
             biased;
             _ = &mut cancel_fut => ToolOutput::err("interrupted"),
+            _ = &mut turn_cancel_fut => ToolOutput::err("turn interrupted"),
             _ = &mut deadline => ToolOutput::err(format!(
                 "subagent timed out after {} without completing",
                 fmt_dur(task_dur)
@@ -89,11 +91,13 @@ pub(super) async fn execute_call_with_timeout(
     match registry.get(&tc.name) {
         Some(tool) => {
             let mut cancel_fut = std::pin::pin!(await_cancel(session));
+            let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
             let exec = tool.execute(tc.input.clone(), &ctx);
             let mut deadline = std::pin::pin!(tokio::time::sleep(timeout));
             tokio::select! {
                 biased;
                 _ = &mut cancel_fut => ToolOutput::err("interrupted"),
+                _ = &mut turn_cancel_fut => ToolOutput::err("turn interrupted"),
                 _ = &mut deadline => ToolOutput::err(format!(
                     "tool `{}` timed out after {} without producing a result",
                     tc.name, fmt_dur(timeout)

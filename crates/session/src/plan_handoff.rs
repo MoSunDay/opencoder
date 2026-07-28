@@ -66,7 +66,10 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
     let preserved_images = crate::compaction::collect_head_images(&session.messages);
     let mut msg = handoff_message(&display);
     for url in &preserved_images {
-        msg.blocks.push(ContentBlock::Image { url: url.clone(), detail: None });
+        msg.blocks.push(ContentBlock::Image {
+            url: url.clone(),
+            detail: None,
+        });
     }
     session.messages = vec![msg];
     // Record the boundary so resume can reconstruct this focused transcript.

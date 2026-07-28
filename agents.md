@@ -12,8 +12,8 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 - [agents/core](agents/core/index.md) — 共享类型与 Config（模型/压缩/上下文窗口/small_model 全配置化）。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理（prompt admit + 事件流 + 运行时切换 + interrupt）。
 - [agents/client](agents/client/index.md) — 远端 server 的瘦客户端（`opencode client`）：reqwest 转发每个请求到 server 并解码 SSE 事件流，本地不持数据、不调 LLM。
-- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/serve/config/models/session 子命令，--continue/--session/--fork/--agent/--small-model；`session show --json` 深度观测面）。
-- agents/tui — ratatui 交互界面。
+- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/server/client/config/models/session 子命令，`ts` 别名 `rs`；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
+- [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 
 ## 关键抽象
 

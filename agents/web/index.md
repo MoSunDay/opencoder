@@ -7,7 +7,7 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 
 ## 边界与非目标
 - 不持有 LLM 客户端单例——每个 prompt 按配置构建 `ChatClient`。
-- 非目标：鉴权 / CORS（tower-http 引入但未启用）/ 多 workdir 路由（当前单 workdir）。`serve` 默认仅绑 `127.0.0.1`（回环），需显式 `--host` 才对外。
+- 非目标：CORS（tower-http 引入但未启用）/ 多 workdir 路由（当前单 workdir）。鉴权**已实现**（`auth.rs`：bearer token 中间件，token 来自 `--token` / `OPENCODER_SERVER_TOKEN` / 自动生成）。`serve` 默认仅绑 `127.0.0.1`（回环），需显式 `--host` 才对外。
 
 ## 关键抽象
 - `AppState`（`src/lib.rs`）：`store: Arc<dyn Store>`、`workdir`、`handles: HandleMap`。
@@ -20,6 +20,7 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 ## 主流程
 POST /prompt（`src/api.rs`）：解析 body → load config → 建 ChatClient → `ensure_session_row` → `admit_and_drain` → 返回 `{admitted_seq}`（非阻塞）。
 GET /events：`events_after(after)` 重放 + 订阅 broadcast 实时转发（BroadcastStream，lag 客户端丢帧不阻塞 runner）。
+GET /api/sessions/:id/seq（`get_event_seq`）：返回该 session 最高已持久化事件 seq（无则 0），供远端 client snapshot 事件游标（只取本次 prompt 产生的事件）。
 POST /agent|/model：更新 store meta + handle.overrides（下一轮 drain 生效）。`POST /model` body 新增 `persist_default: bool`（`#[serde(default)]`=false）：false（默认）= session-only（**不写盘**，与 TUI `/model` 默认一致）；true=额外 `Config::save` 写全局默认到 opencoder.json，失败返 500。
 POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
 

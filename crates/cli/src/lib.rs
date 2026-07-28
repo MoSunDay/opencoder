@@ -61,7 +61,10 @@ pub enum Command {
     /// Start the interactive TUI.
     Tui,
     /// Run the TUI inside a tmux session that survives SSH disconnect.
-    /// Use `ts -l` to list managed sessions and `ts -r <id>` to reattach.
+    /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists managed
+    /// sessions and `rs -r <id>`/`ts -r <id>` reattaches one. A bare `ts`/`rs`
+    /// always starts a fresh tmux-managed session.
+    #[command(alias = "rs")]
     Ts {
         /// List managed tmux sessions (task-list with tmux id).
         #[arg(short, long)]
@@ -70,8 +73,9 @@ pub enum Command {
         /// `$index`, or bare opencode session id).
         #[arg(short, long)]
         resume: Option<String>,
-        /// Force a fresh tmux session even when a single managed one exists.
-        #[arg(long)]
+        /// No-op kept for backward compatibility: a bare `ts`/`rs` always
+        /// starts a fresh tmux-managed session now. Reattach with `-r <id>`.
+        #[arg(long, default_value_t = false)]
         new: bool,
     },
     /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),

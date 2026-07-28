@@ -49,6 +49,8 @@ async fn main() -> Result<()> {
             token,
             session,
             continue_,
+            agent,
+            interrupt,
             prompt,
         }) => {
             let parts = if prompt.is_empty() {
@@ -57,12 +59,17 @@ async fn main() -> Result<()> {
                 prompt.clone()
             };
             let p = join(parts);
-            require(&p)?;
+            if !*interrupt {
+                require(&p)?;
+            }
             opencoder_cli::client::client_run(
                 remote.clone(),
                 token.clone(),
                 session.clone(),
                 *continue_,
+                agent.clone(),
+                cli.model.clone(),
+                *interrupt,
                 p,
             )
             .await

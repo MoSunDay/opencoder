@@ -3,7 +3,7 @@
 //! by decoding the server's SSE `/events` stream. The client stores nothing
 //! locally and calls no LLM — it is a thin shell over the server.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use opencoder_client::Remote;
 use opencoder_session::SessionEvent;
 
@@ -22,18 +22,23 @@ pub fn resolve_token(token: Option<String>) -> Result<String> {
         .ok_or_else(|| anyhow!("no token: pass --token <T> or set OPENCODER_SERVER_TOKEN"))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn client_run(
     remote: String,
     token: Option<String>,
     session: Option<String>,
     continue_: bool,
+    agent: Option<String>,
+    model: Option<String>,
+    interrupt: bool,
     prompt: String,
 ) -> Result<()> {
     let token = resolve_token(token)?;
     let client = Remote::new(&remote, &token)?;
 
     // Resolve the target session: explicit id > --continue (most recent) >
-    // create a fresh one.
+    // create a fresh one. Interrupt mode never creates a session — cancelling
+    // one that doesn't exist yet is meaningless, so require a resolution.
     let session_id = if let Some(id) = session {
         id
     } else if continue_ {
@@ -43,9 +48,19 @@ pub async fn client_run(
             .and_then(|i| i.as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| anyhow!("no sessions on the server to --continue"))?
+    } else if interrupt {
+        bail!("--interrupt requires --session <id> or --continue");
     } else {
-        client.create_session(None, None).await?
+        client
+            .create_session(agent.as_deref(), model.as_deref())
+            .await?
     };
+
+    if interrupt {
+        client.interrupt(&session_id).await?;
+        eprintln!("\n\x1b[2m[interrupted remote session {}]\x1b[0m", session_id);
+        return Ok(());
+    }
 
     // Snapshot the current event cursor so we only stream events produced by
     // THIS prompt (not the whole prior transcript).
@@ -53,7 +68,13 @@ pub async fn client_run(
 
     eprintln!("\n\x1b[1muser\x1b[0m: {}\n", prompt.trim_end());
     let _admitted = client
-        .post_prompt(&session_id, &prompt, None, None, None)
+        .post_prompt(
+            &session_id,
+            &prompt,
+            None,
+            agent.as_deref(),
+            model.as_deref(),
+        )
         .await?;
 
     let mut rx = client.events(&session_id, after)?;

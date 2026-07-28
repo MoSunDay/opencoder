@@ -21,9 +21,13 @@ use crate::chat::ChatView;
 use crate::worker::UiCmd;
 
 use crate::queue_panel;
-use crate::render::{in_rect, MouseHits, Term};
+use crate::render::{in_rect, MouseHits};
 use crate::selection::SelRange;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+#[cfg(test)]
+pub(crate) use crate::resize::size_changed;
+pub(crate) use crate::resize::{on_resize_event, poll_idle_resize};
 
 /// Maximum interval (ms) between two left-clicks to count as a double-click.
 const DBL_CLICK_MS: u64 = 400;
@@ -751,19 +755,6 @@ pub(crate) async fn handle_mouse(
     MouseOutcome::None
 }
 
-/// Pure: has the terminal size changed relative to the last-known dimensions?
-/// Returns `true` when there is no prior reading yet (first frame) or when
-/// either dimension differs. Factored out so the idle-resize detection logic
-/// is unit-testable without a live terminal.
-pub(crate) fn size_changed(prev: Option<(u16, u16)>, cur: (u16, u16)) -> bool {
-    // Ignore 0x0 (transient glitch on minimize/detach) — it self-corrects on
-    // the next real Resize event.
-    if cur.0 == 0 || cur.1 == 0 {
-        return false;
-    }
-    prev.is_none_or(|p| p != cur)
-}
-
 /// Open (creating its data dir if needed) the on-disk sqlite store rooted at
 /// `workdir`. Best-effort dir creation: a mkdir failure is ignored via `.ok()`
 /// so the subsequent store-open surfaces the real error. Extracted from
@@ -774,42 +765,6 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
     Ok(Arc::new(
         LibsqlStore::open(data_dir.join("opencoder.db")).await?,
     ))
-}
-
-/// Handle a crossterm `Resize` event. The input pump arm already flagged the
-/// frame dirty, so here we just tell ratatui the size changed so its diff
-/// buffer matches the new layout (prevents glitches and keeps the persisted
-/// hit-rects valid after resize).
-pub(crate) fn on_resize_event(terminal: &mut Term, last_size: &mut Option<(u16, u16)>) {
-    let _ = terminal.autoresize();
-    // Keep last_size in sync so poll_idle_resize doesn't fire a redundant
-    // autoresize + spurious re-render on the very next frame tick.
-    if let Ok(rect) = terminal.size() {
-        let dims = (rect.width, rect.height);
-        if dims.0 > 0 && dims.1 > 0 {
-            *last_size = Some(dims);
-        }
-    }
-}
-
-/// Idle-resize safety net: poll the kernel for the real terminal size every
-/// frame and force a ratatui autoresize + redraw when it differs from
-/// `last_size` (crossterm may drop a Resize event). `terminal.size()` is a
-/// single ioctl (us-level); errors are ignored via `.ok()` (e.g. stdout is not
-/// a tty). Updates `last_size` and returns `true` when a resize was detected so
-/// the caller can mark the frame dirty.
-pub(crate) fn poll_idle_resize(terminal: &mut Term, last_size: &mut Option<(u16, u16)>) -> bool {
-    let Some(cur) = terminal.size().ok() else {
-        return false;
-    };
-    let dims = (cur.width, cur.height);
-    if size_changed(*last_size, dims) {
-        let _ = terminal.autoresize();
-        *last_size = Some(dims);
-        true
-    } else {
-        false
-    }
 }
 
 #[cfg(test)]

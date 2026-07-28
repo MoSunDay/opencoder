@@ -31,7 +31,7 @@ Commit: (working-tree, pre-initial-commit)
 ### Gap 5: 尺寸 0×0 瞬态事件去抖
 - **问题**：`size_changed` 对 0×0 维度返回 `true`（视为变化），导致 minimize/detach 瞬态事件触发伪 resize + 全量重绘。`on_resize_event` 未同步 `last_size`，导致下一帧 `poll_idle_resize` 冗余触发。
 - **修复**：`size_changed` 对 `cur.0 == 0 || cur.1 == 0` 返回 `false`。`on_resize_event` 新增 `&mut Option<(u16, u16)>` 参数，resize 后将新尺寸写回 `last_size`。
-- **文件**：`crates/tui/src/app_helpers.rs`、`crates/tui/src/app.rs`（call site 透传 `last_size`）
+- **文件**：`crates/tui/src/resize.rs`（`size_changed`、`on_resize_event`、`poll_idle_resize`）、`crates/tui/src/app.rs`（call site 透传 `last_size`）
 
 ## 测试
 
@@ -44,9 +44,16 @@ Commit: (working-tree, pre-initial-commit)
 | 5 | `image_only_turn_with_skill_records_both_user_image_and_trigger` | `session/tests/skill_mid_run.rs` | 图片+技能：user 图片消息 + synthetic 触发消息均记录，assistant 响应存在 |
 | 6 | `size_changed_false_for_zero_dimensions` | `app_tests.rs` | 0×0 返回 false（不触发伪 resize） |
 
+## 结构性调整
+
+为满足文件行数 ≤ 800 行规则，拆出两个新模块（纯提取，无行为变更）：
+
+- **`crates/tui/src/app_bootstrap.rs`**（118 行）：从 `app.rs` 提取 `run()` 启动流程（配置加载、session resume/create、终端初始化），`app.rs` 从 872→779 行。
+- **`crates/tui/src/resize.rs`**（52 行）：从 `app_helpers.rs` 提取 `size_changed`/`on_resize_event`/`poll_idle_resize`，`app_helpers.rs` 从 817→772 行。
+
 ## 验证
 
-隔离 worktree（clean HEAD `e003038` + 本范围 diff）全量跑通：
+全量验证（HEAD `b6f830e` + 本轮工作树 diff）：
 
 | 检查 | 结果 |
 |------|------|

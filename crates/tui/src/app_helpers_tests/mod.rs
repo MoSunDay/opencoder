@@ -263,7 +263,10 @@ fn reapply_session_model_overrides_resumed_model() {
     assert_eq!(s.model, "claude-3");
     assert_eq!(s.config.provider_id(), "anthropic");
     // No-op when the override already matches or is absent.
-    assert_eq!(reapply_session_model(&mut s, &Some("anthropic/claude-3".into())), None);
+    assert_eq!(
+        reapply_session_model(&mut s, &Some("anthropic/claude-3".into())),
+        None
+    );
     assert_eq!(reapply_session_model(&mut s, &None), None);
 }
 
@@ -288,7 +291,9 @@ async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     // Defensive: clear any stale subdir from a prior identical-hash run.
     let _ = std::fs::remove_dir_all(&data_dir);
 
-    let store = open_store(workdir.path()).await.expect("open_store succeeds");
+    let store = open_store(workdir.path())
+        .await
+        .expect("open_store succeeds");
     let db_file = data_dir.join("opencoder.db");
     assert!(
         db_file.exists(),
@@ -300,4 +305,109 @@ async fn open_store_creates_db_file_in_workdir_hashed_data_dir() {
     // (db file + any -wal/-shm sidecars) without holding a lock.
     drop(store);
     let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn snapshot_image_uris_returns_uris_without_clearing() {
+    // Gap 4: snapshot must NOT clear the buffer so images survive a failed
+    // store write or dead worker (only cleared on the success path).
+    let pending: Vec<(String, String)> = vec![
+        ("data:image/png;base64,AAA".into(), "a.png".into()),
+        ("data:image/png;base64,BBB".into(), "b.png".into()),
+    ];
+    let uris = crate::app_helpers::snapshot_image_uris(&pending);
+    assert_eq!(
+        uris,
+        vec![
+            "data:image/png;base64,AAA".to_string(),
+            "data:image/png;base64,BBB".to_string(),
+        ]
+    );
+    assert_eq!(
+        pending.len(),
+        2,
+        "snapshot must NOT clear the pending buffer"
+    );
+}
+
+#[test]
+fn snapshot_image_uris_empty_yields_empty() {
+    let pending: Vec<(String, String)> = Vec::new();
+    let uris = crate::app_helpers::snapshot_image_uris(&pending);
+    assert!(uris.is_empty());
+}
+
+/// Gap 1: when a skill-only submit happens while a turn is running, the skill
+/// trigger is admitted as a **queued** input with the snapshotted images, and
+/// `pending_images` is cleared only on success. This test exercises the exact
+/// sequence used by the `else` branch of the Submit handler in `app.rs`.
+#[tokio::test]
+async fn skill_only_submit_while_running_drains_images_via_queue() {
+    use opencoder_store::Delivery;
+    use opencoder_store::LibsqlStore;
+
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let sid = "gap1-session";
+    store
+        .create_session(&SessionMeta {
+            id: sid.into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+        })
+        .await
+        .unwrap();
+
+    // Simulate pending images from a paste/drop.
+    let mut pending_images: Vec<(String, String)> = vec![
+        ("data:image/png;base64,AAAA".into(), "img1.png".into()),
+    ];
+
+    // Step 1: snapshot WITHOUT clearing (images survive a failed admit).
+    let skill_name = "my-skill";
+    let trigger = crate::skill_display::skill_trigger(skill_name);
+    let image_uris = crate::app_helpers::snapshot_image_uris(&pending_images);
+
+    // Step 2: admit as a queued input (mirrors the else branch).
+    let input = crate::app_helpers::mk_input_with_images(
+        sid,
+        Delivery::Queue,
+        &trigger,
+        &image_uris,
+    );
+    let result = store.admit_input(&input).await;
+
+    // Step 3: on success, clear pending images.
+    assert!(result.is_ok(), "admit_input should succeed");
+    pending_images.clear();
+
+    // Verify: images drained (not leaked).
+    assert!(
+        pending_images.is_empty(),
+        "pending_images must be cleared after successful queue admit"
+    );
+
+    // Verify: the queued input carries the images and skill trigger.
+    let inputs = store.pending_inputs(sid, Delivery::Queue).await.unwrap();
+    let queued = inputs
+        .iter()
+        .find(|i| i.delivery == Delivery::Queue)
+        .expect("queued input must exist in store");
+    assert_eq!(
+        queued.prompt, trigger,
+        "queued prompt must be the skill trigger"
+    );
+    assert_eq!(
+        queued.images,
+        vec!["data:image/png;base64,AAAA".to_string()],
+        "queued input must carry the image URI"
+    );
 }

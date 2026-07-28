@@ -11,7 +11,7 @@ use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::chat::{short, summarize, ChatBlock, ChatView};
+use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -186,6 +186,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                     };
                     let out: Vec<Line<'static>> = content
                         .lines()
+                        .take(TOOL_OUTPUT_LINES)
                         .map(|l| {
                             Line::from(Span::styled(format!("  {l}"), Style::default().fg(color)))
                         })
@@ -614,7 +615,9 @@ mod tests {
             .blocks
             .iter()
             .filter_map(|b| match b {
-                ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
+                ChatBlock::Tool {
+                    id, header, output, ..
+                } => Some((id, header, output)),
                 _ => None,
             })
             .collect();

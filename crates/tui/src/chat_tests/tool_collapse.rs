@@ -37,7 +37,9 @@ fn parallel_tool_outputs_route_to_own_block() {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
+            ChatBlock::Tool {
+                id, header, output, ..
+            } => Some((id, header, output)),
             _ => None,
         })
         .collect();
@@ -82,7 +84,9 @@ fn orphan_tool_end_creates_synthetic_block() {
         .blocks
         .iter()
         .filter_map(|b| match b {
-            ChatBlock::Tool { id, header, output, .. } => Some((id, header, output)),
+            ChatBlock::Tool {
+                id, header, output, ..
+            } => Some((id, header, output)),
             _ => None,
         })
         .collect();
@@ -152,7 +156,9 @@ fn tool_output_retained_in_full_and_collapsed_by_default() {
         .blocks
         .iter()
         .find_map(|b| match b {
-            ChatBlock::Tool { output, collapsed, .. } => Some((output, *collapsed)),
+            ChatBlock::Tool {
+                output, collapsed, ..
+            } => Some((output, *collapsed)),
             _ => None,
         })
         .expect("tool block");
@@ -183,7 +189,13 @@ fn toggle_tool_at_expands_then_collapses() {
         images: Vec::new(),
     });
     assert!(
-        matches!(v.blocks.last(), Some(ChatBlock::Tool { collapsed: true, .. })),
+        matches!(
+            v.blocks.last(),
+            Some(ChatBlock::Tool {
+                collapsed: true,
+                ..
+            })
+        ),
         "tool block should start collapsed"
     );
     // While collapsed, the output body must be hidden from flatten().
@@ -218,7 +230,13 @@ fn toggle_tool_at_expands_then_collapses() {
     // Toggle back to collapsed.
     v.toggle_tool_at(idx);
     assert!(
-        matches!(v.blocks.last(), Some(ChatBlock::Tool { collapsed: true, .. })),
+        matches!(
+            v.blocks.last(),
+            Some(ChatBlock::Tool {
+                collapsed: true,
+                ..
+            })
+        ),
         "second toggle must re-collapse"
     );
 }
@@ -230,7 +248,10 @@ fn toggle_tool_at_is_noop_for_non_tool_blocks() {
     v.apply(&SessionEvent::Done);
     // Index 0 is an Assistant block, not a Tool — toggling must be a no-op.
     v.toggle_tool_at(0);
-    assert!(block_text(&v).contains("hello"), "non-tool toggle must not corrupt state");
+    assert!(
+        block_text(&v).contains("hello"),
+        "non-tool toggle must not corrupt state"
+    );
 }
 
 #[test]
@@ -328,3 +349,57 @@ fn summarize_keeps_full_bash_command_no_truncation() {
     );
 }
 
+#[test]
+fn tool_output_truncated_at_limit() {
+    // Gap 2: even when expanded, a single ToolEnd event must not capture
+    // an unbounded number of lines. The cap (TOOL_OUTPUT_LINES = 200)
+    // bounds memory and per-refresh flatten_with cost.
+    use crate::chat::TOOL_OUTPUT_LINES;
+    let big: String = (0..5000)
+        .map(|i| format!("line-{i}\n"))
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert!(
+        big.lines().count() > TOOL_OUTPUT_LINES,
+        "test setup: output must exceed the cap"
+    );
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "big".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "cat huge_file.txt"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "big".into(),
+        name: "bash".into(),
+        output: big,
+        is_error: false,
+        images: Vec::new(),
+    });
+    let tool = v
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::Tool { id, output, .. } if id == "big" => Some(output),
+            _ => None,
+        })
+        .expect("tool block");
+    assert_eq!(
+        tool.len(),
+        TOOL_OUTPUT_LINES,
+        "tool output must be capped at TOOL_OUTPUT_LINES ({}), got {}",
+        TOOL_OUTPUT_LINES,
+        tool.len()
+    );
+    // Sanity: first line is the beginning of the output, not truncated from the front.
+    let first: String = tool[0]
+        .spans
+        .iter()
+        .map(|s| s.content.to_string())
+        .collect();
+    assert!(
+        first.contains("line-0"),
+        "first captured line must be the start of the output: {first}"
+    );
+}

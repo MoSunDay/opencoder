@@ -171,8 +171,9 @@ fn tool_result_image_rehomes_to_user_message() {
     assert!(content
         .iter()
         .any(|p| p["type"] == "text" && p["text"] == "[image returned by tool]"));
-    assert!(content.iter().any(|p| p["type"] == "image_url"
-        && p["image_url"]["url"] == "data:image/png;base64,iVBOR="));
+    assert!(content.iter().any(
+        |p| p["type"] == "image_url" && p["image_url"]["url"] == "data:image/png;base64,iVBOR="
+    ));
 }
 
 #[test]
@@ -237,10 +238,7 @@ fn error_tool_result_image_rehomes_with_prefixed_string() {
     assert_eq!(out[0]["role"], "tool");
     assert!(out[0]["content"].is_string());
     assert!(
-        out[0]["content"]
-            .as_str()
-            .unwrap()
-            .starts_with("[error] "),
+        out[0]["content"].as_str().unwrap().starts_with("[error] "),
         "error text must be prefixed"
     );
     assert!(out[0]["content"]
@@ -251,8 +249,9 @@ fn error_tool_result_image_rehomes_with_prefixed_string() {
     let user = &out[1];
     assert_eq!(user["role"], "user");
     let content = user["content"].as_array().unwrap();
-    assert!(content.iter().any(|p| p["type"] == "image_url"
-        && p["image_url"]["url"] == "https://x.test/e.png"));
+    assert!(content
+        .iter()
+        .any(|p| p["type"] == "image_url" && p["image_url"]["url"] == "https://x.test/e.png"));
 }
 
 #[test]
@@ -348,12 +347,9 @@ fn user_embedded_tool_result_image_rehomes_to_user_message() {
     assert_eq!(tool["content"].as_str().unwrap(), "see image");
     // Exactly one user message carrying the rehomed image.
     let user_msgs: Vec<_> = out.iter().filter(|v| v["role"] == "user").collect();
-    assert_eq!(
-        user_msgs.len(),
-        1,
-        "exactly one rehomed user image message"
-    );
+    assert_eq!(user_msgs.len(), 1, "exactly one rehomed user image message");
     let content = user_msgs[0]["content"].as_array().unwrap();
-    assert!(content.iter().any(|p| p["type"] == "image_url"
-        && p["image_url"]["url"] == "data:image/png;base64,iVBOR="));
+    assert!(content.iter().any(
+        |p| p["type"] == "image_url" && p["image_url"]["url"] == "data:image/png;base64,iVBOR="
+    ));
 }

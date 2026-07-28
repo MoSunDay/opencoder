@@ -4,7 +4,7 @@ use std::io::Stdout;
 
 use anyhow::Result;
 use ratatui::backend::{Backend, CrosstermBackend};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
@@ -18,8 +18,8 @@ use crate::composer;
 use crate::fmt as fmtmod;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
-use crate::render_viewport::ViewportCache;
 use crate::queue_panel::QueueBtn;
+use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -374,14 +374,7 @@ fn render_body(
         subagent_btns,
     );
     hit_records::record_tool_hits(
-        chat,
-        cache,
-        text_w,
-        scroll_y,
-        visible_h,
-        inner.x,
-        inner.y,
-        tool_btns,
+        chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y, tool_btns,
     );
 
     f.render_widget(block, area);
@@ -516,7 +509,7 @@ fn render_composer(
         let block = Block::default().borders(Borders::ALL).border_style(dim);
         let inner = block.inner(area);
         f.render_widget(block, area);
-        let hint = "\u{2190} esc / Ctrl+L to return";
+        let hint = "subagent ended \u{2014} esc to return";
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("\u{276f} ", dim),
@@ -530,7 +523,8 @@ fn render_composer(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow))
-            .title(format!(" edit plan [{label}] "))
+            .title(" edit plan ")
+            .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left))
     } else {
         Block::default().borders(Borders::ALL)
     };

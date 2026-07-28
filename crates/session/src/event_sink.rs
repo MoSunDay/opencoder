@@ -434,7 +434,10 @@ mod tests {
         }
         // Capacity+1 delta → channel full → silently dropped (Ok).
         let r = sink.push(&SessionEvent::TextDelta("overflow".into()));
-        assert!(r.is_ok(), "delta under backpressure must be silently dropped");
+        assert!(
+            r.is_ok(),
+            "delta under backpressure must be silently dropped"
+        );
         // A structural event under the same backpressure must surface `Full`.
         let r = sink.push(&SessionEvent::Done);
         assert!(

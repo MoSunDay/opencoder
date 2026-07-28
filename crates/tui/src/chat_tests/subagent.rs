@@ -129,4 +129,3 @@ fn running_subagent_renders_spinner_not_dot() {
     // Tick 0 and tick 3 render different spinner frames (it animates).
     assert_ne!(text0, text3, "spinner frame must change with anim_tick");
 }
-

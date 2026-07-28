@@ -150,4 +150,3 @@ fn last_thinking_collapsed_false_when_last_block_not_thinking() {
     view.apply(&SessionEvent::TextDelta("answer".into()));
     assert!(!view.last_thinking_collapsed());
 }
-

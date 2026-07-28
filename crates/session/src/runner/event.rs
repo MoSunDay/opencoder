@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use opencoder_core::Message;
+
+use crate::autopilot::state::ApPhase;
 use opencoder_store::EventKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +79,12 @@ pub enum SessionEvent {
     SteerConsumed {
         seq: i64,
     },
+    /// Autopilot loop progress: which phase is starting and the
+    /// 0-based iteration index. Emitted by `autopilot::drive`.
+    AutoPilot {
+        phase: ApPhase,
+        iteration: u32,
+    },
     Done,
     Error(String),
 }
@@ -101,6 +109,7 @@ impl SessionEvent {
             SessionEvent::SubagentStart { .. } => "subagent_start",
             SessionEvent::SubagentEnd { .. } => "subagent_end",
             SessionEvent::SubagentChild { .. } => "subagent_child",
+            SessionEvent::AutoPilot { .. } => "autopilot",
             SessionEvent::PlanHandoff(_) => "plan_handoff",
             SessionEvent::TranscriptReset(_) => "transcript_reset",
             SessionEvent::QueueConsumed { .. } => "queue_consumed",
@@ -151,6 +160,9 @@ impl SessionEvent {
             }
             SessionEvent::SubagentChild { id, ev } => {
                 serde_json::json!({ "id": id, "event": ev })
+            }
+            SessionEvent::AutoPilot { phase, iteration } => {
+                serde_json::json!({ "phase": phase, "iteration": iteration })
             }
             SessionEvent::PlanHandoff(plan) => serde_json::json!({ "plan": plan }),
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
@@ -225,6 +237,11 @@ impl SessionEvent {
             "steer_consumed" => SessionEvent::SteerConsumed {
                 seq: data.get("seq")?.as_i64().unwrap_or(0),
             },
+            "autopilot" => {
+                let iteration = data.get("iteration")?.as_u64()? as u32;
+                let phase = serde_json::from_value(data.get("phase")?.clone()).ok()?;
+                SessionEvent::AutoPilot { phase, iteration }
+            }
             "done" => SessionEvent::Done,
             "error" => SessionEvent::Error(data.get("error")?.as_str()?.to_string()),
             _ => return None,
@@ -248,6 +265,7 @@ impl SessionEvent {
             | SessionEvent::SubagentEnd { .. }
             | SessionEvent::SubagentChild { .. }
             | SessionEvent::PlanHandoff(_)
+            | SessionEvent::AutoPilot { .. }
             | SessionEvent::QueueConsumed { .. }
             | SessionEvent::SteerConsumed { .. } => EventKind::Step,
             SessionEvent::TranscriptReset(_) => EventKind::Compaction,
@@ -321,6 +339,10 @@ mod from_sse_tests {
             SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
             SessionEvent::QueueConsumed { seq: 7 },
             SessionEvent::SteerConsumed { seq: 9 },
+            SessionEvent::AutoPilot {
+                phase: ApPhase::Plan,
+                iteration: 0,
+            },
             SessionEvent::Done,
             SessionEvent::Error("kaboom".into()),
         ];
@@ -329,8 +351,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            17,
-            "expected all 17 unique kinds, got {kinds:?}"
+            18,
+            "expected all 18 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {
@@ -400,7 +422,10 @@ mod from_sse_tests {
         let ev = SessionEvent::from_sse("tool_end", data).expect("old event");
         match ev {
             SessionEvent::ToolEnd { images, .. } => {
-                assert!(images.is_empty(), "missing images field must default to empty");
+                assert!(
+                    images.is_empty(),
+                    "missing images field must default to empty"
+                );
             }
             other => panic!("expected ToolEnd, got {other:?}"),
         }

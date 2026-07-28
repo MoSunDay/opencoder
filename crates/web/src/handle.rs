@@ -56,6 +56,15 @@ pub struct SessionHandle {
     /// CAS guard: the first caller to flip this `true` owns the drain spawn.
     /// Cleared by `DrainGuard` when the drain ends (normal/early/panic).
     pub draining: AtomicBool,
+    /// Registry of child subagent turn-cancel tokens, keyed by task_id (call_id).
+    /// Shared (via Arc) with the session's `SessionState.child_turn_cancels` so
+    /// the `post_subagent_steer` handler can fire a specific child's turn
+    /// interrupt to force immediate steer absorption.
+    ///
+    /// Uses `std::sync::Mutex` (not tokio's) to match
+    /// `SessionState.child_turn_cancels`, enabling the same `Arc` to be shared
+    /// between the handle and the live session state.
+    pub child_turn_cancels: Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
 }
 
 const BROADCAST_CAPACITY: usize = 256;
@@ -69,6 +78,7 @@ impl SessionHandle {
             cancel: Mutex::new(CancellationToken::new()),
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
+            child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 }
@@ -223,6 +233,10 @@ async fn drain_to_completion(
         }
     };
     session.cancel = Some(handle.cancel.lock().await.clone());
+    // Share the child turn-cancel registry with the session state so that when
+    // `run_subagent` inserts tokens into `session.child_turn_cancels`, the web
+    // handler can observe/fire them through the handle's `child_turn_cancels`.
+    session.child_turn_cancels = handle.child_turn_cancels.clone();
 
     let tx = handle.tx.clone();
     let sid = session_id.to_string();

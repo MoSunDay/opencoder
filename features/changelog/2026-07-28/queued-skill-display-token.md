@@ -14,15 +14,24 @@ instructions immediately.`）作为 admit 到 store 的 prompt。这段触发文
 
 ### 显示层：新增 `skill_token_display` 并替换 Steer/Queue 两处显示镜像
 
-- **`crates/tui/src/app_helpers.rs`**：新增纯函数 `skill_token_display(name) -> format!("{{${name}}}")`，
-  返回用户原始提交的 token 字符串。`skill_trigger` 的完整触发文本仍照常 admit 到 store
-  （LLM 需要它），仅显示镜像改用 token。
+- **`crates/tui/src/skill_display.rs`**（新模块）：抽离 `skill_trigger` 与
+  `skill_token_display` 两个纯函数到此独立模块。`skill_token_display(name)` 返回
+  `format!("{{${name}}}")`——用户原始提交的 token 字符串。`skill_trigger` 的完整触发
+  文本仍照常 admit 到 store（LLM 需要它），仅显示镜像改用 token。
+  - 抽离目的：`app_helpers.rs` 在引入 `skill_token_display` 后达到 809 行（>800 迭代上限），
+    将两个同族 skill 显示/触发 helper 移出后回到 790 行。
+- **`crates/tui/src/app_helpers.rs`**：移除 `skill_trigger` / `skill_token_display`
+  （已迁移至 `skill_display.rs`）。
+- **`crates/tui/src/lib.rs`**：新增 `pub mod skill_display;`。
 - **`crates/tui/src/app.rs`**：
   - Steer 纯技能路径：`steer_items.push((seq, trigger))` → `..skill_token_display(skill_name)`。
   - Queue 纯技能路径：`queue_items.push((seq, trigger))` → `..skill_token_display(skill_name)`。
-  - re-export 列表增加 `skill_token_display`。
+  - import 改为从 `crate::skill_display` 引入 `skill_token_display, skill_trigger`。
 - **`crates/tui/src/app_tests.rs`**：新增 `skill_token_display_shows_dollar_token`，
-  断言 `skill_token_display("repo-memory") == "{$repo-memory}"`。
+  断言 `skill_token_display("repo-memory") == "{$repo-memory}"`；既有
+  `skill_trigger` 测试引用改为 `crate::skill_display::skill_trigger`。
+- **`crates/tui/src/app_helpers_tests/mod.rs`**：`skill_trigger` 引用改为
+  `crate::skill_display::skill_trigger`。
 
 ### 不变项
 
@@ -32,15 +41,14 @@ instructions immediately.`）作为 admit 到 store 的 prompt。这段触发文
 
 ## 测试
 
-隔离 git worktree（clean HEAD `a0bbe42` + 仅本任务 5 处改动）验证：
+| 检查 | 范围 | 结果 |
+|------|------|------|
+| `cargo build --workspace` | 当次主树 | PASS — Finished |
+| `cargo test --workspace` | 当次主树 | PASS — **1267 passed; 0 failed**（含并发 agent 范围外测试） |
+| `cargo test -p opencoder-tui --lib` | 当次主树 | PASS — **565 passed; 0 failed** |
+| `cargo clippy -p opencoder-tui --all-targets` | 当次主树 | PASS — 本任务文件零警告（`key_handler_plan_edit_tests.rs` dead-code 来自并发 agent 未跟踪文件，非本 diff） |
+| 防修绿 diff 扫描 | 本任务 | PASS — 无 `#[ignore]`、无删除测试、无弱断言 |
 
-| 检查 | 结果 |
-|------|------|
-| `cargo build -p opencoder-tui --lib` | PASS — Finished |
-| `cargo test -p opencoder-tui --lib` | PASS — **548 passed; 0 failed**（含新增 `skill_token_display_shows_dollar_token`） |
-| `cargo clippy -p opencoder-tui --lib -- -D warnings` | PASS — 零警告 |
-
-> 注：主工作树被多个并发 agent 的范围外改动污染（TUI lib test target 有 26 处编译错误，
-> 涉及 AutoPilot config 字段 / SubagentSteer / API 签名变更等未完成特性），无法在主树
-> 取得干净基线。本验证在独立 worktree 中完成，diff 经核对仅含上述 5 处预期改动，
-> 无 `#[ignore]` / 删除测试 / 弱断言等修绿行为。
+> 注：本任务净增 +1 测试（`skill_token_display_shows_dollar_token`）。主工作树当前被
+> 多个并发 agent 改动（AutoPilot / SubagentSteer / API 签名等未完成特性），上述主树数字
+> 包含其范围外测试；本任务自身回归隔离验证基线 = 547 → 548（+1），数学成立。

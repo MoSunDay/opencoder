@@ -1,7 +1,7 @@
 //! Session recovery: reconstruct a `SessionState` from a durable store, and
 //! cheap background title generation (uses `small_model`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -78,9 +78,10 @@ pub async fn resume(
             }
             let mut plan_msg = crate::plan_handoff::handoff_message(plan_display);
             for url in &preserved_images {
-                plan_msg
-                    .blocks
-                    .push(ContentBlock::Image { url: url.clone(), detail: None });
+                plan_msg.blocks.push(ContentBlock::Image {
+                    url: url.clone(),
+                    detail: None,
+                });
             }
             messages.insert(0, plan_msg);
         }
@@ -101,9 +102,10 @@ pub async fn resume(
         if let Some(summary_text) = &meta.summary {
             let mut summary_msg = crate::compaction::compaction_message(summary_text.clone());
             for url in &preserved_images {
-                summary_msg
-                    .blocks
-                    .push(ContentBlock::Image { url: url.clone(), detail: None });
+                summary_msg.blocks.push(ContentBlock::Image {
+                    url: url.clone(),
+                    detail: None,
+                });
             }
             messages.insert(0, summary_msg);
         }
@@ -193,6 +195,8 @@ pub async fn resume(
         persisted_count: n,
         session_created: true,
         cancel: None,
+        turn_cancel: None,
+        child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
         summary: meta.summary,
         summary_seq: meta.summary_seq,
         handoff_seq: meta.handoff_seq,

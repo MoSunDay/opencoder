@@ -9,7 +9,7 @@ Keybindings:
   Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
   $                pick skill anywhere -> {$name}; loaded on submit
   /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history)
-  Shift+I          vim-edit plan (plan mode, idle): Esc=Normal, :wq save, :q/:q! discard, / search
+  Shift+I          view/edit plan (plan mode, idle): opens in Normal; i/a to edit, :wq save, :q! discard, / search
   Esc              close help (if open) / close popup / clear input
   Esc Esc          double-tap Esc to interrupt a running task
   Ctrl+C          interrupt a running task (same as Esc Esc)

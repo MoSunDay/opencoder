@@ -61,7 +61,7 @@ impl VimState {
         self.text != self.original
     }
 
-/// Label shown in the editor border. For Command/Search modes the in-progress
+    /// Label shown in the editor border. For Command/Search modes the in-progress
     /// input is included so the user sees what they are typing.
     pub fn mode_label(&self) -> String {
         match self.mode {

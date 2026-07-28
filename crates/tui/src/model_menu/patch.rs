@@ -16,6 +16,9 @@ pub struct ConfigPatch {
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
+    pub ap_enabled: bool,
+    pub ap_max_iter: u32,
+    pub ap_skill: Option<String>,
 }
 
 impl ConfigPatch {
@@ -31,6 +34,11 @@ impl ConfigPatch {
                 "browser": self.capabilities_browser,
                 "computer_use": self.capabilities_computer_use,
                 "tools_subagent": self.capabilities_tools_subagent,
+            },
+            "autopilot": {
+                "enabled": self.ap_enabled,
+                "max_iterations": self.ap_max_iter,
+                "skill": self.ap_skill,
             },
         });
         if let Some(mt) = self.max_tokens {

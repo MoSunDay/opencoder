@@ -243,29 +243,19 @@ pub(crate) fn mk_input_with_images(
 /// pending buffer in one step. Every submit path (text, pure-skill, steer,
 /// queue) uses this so an attached image is never silently dropped nor leaked
 /// onto a later, unrelated submission.
+#[cfg(test)]
 pub(crate) fn drain_pending_images(pending: &mut Vec<(String, String)>) -> Vec<String> {
     let uris: Vec<String> = pending.iter().map(|(u, _)| u.clone()).collect();
     pending.clear();
     uris
 }
 
-/// Build the synthetic prompt sent when a user submits ONLY a skill token
-/// (`{$name}` with no accompanying text) — i.e. a pure-skill submission. The
-/// skill body itself is injected into the system prompt; this trigger text just
-/// records a user turn and tells the model to begin acting on the skill. Used by
-/// the Submit (idle), Steer (running), and Queue (running) paths so a pure-skill
-/// submission is never silently dropped regardless of the submit verb.
-pub(crate) fn skill_trigger(skill_name: &str) -> String {
-    format!("The `{skill_name}` skill is now active. Begin executing its instructions immediately.")
-}
-
-/// Display string for a pure-skill submission in the queue/steer panels and
-/// transcript markers. The full trigger (see [`skill_trigger`]) is still
-/// admitted to the store for the LLM; this returns the original `{$name}`
-/// token so the user sees what they actually submitted rather than the
-/// synthetic trigger description.
-pub(crate) fn skill_token_display(skill_name: &str) -> String {
-    format!("{{${skill_name}}}")
+/// Snapshot image URIs from the pending buffer **without** clearing it. Pair
+/// with `pending_images.clear()` on the success path so images are only
+/// consumed when the store write or worker dispatch actually succeeds —
+/// avoiding silent data loss on store errors or dead workers.
+pub(crate) fn snapshot_image_uris(pending: &[(String, String)]) -> Vec<String> {
+    pending.iter().map(|(u, _)| u.clone()).collect()
 }
 
 /// Drop every pending steer/queue input from the store and reset both
@@ -509,7 +499,10 @@ pub(crate) enum MouseOutcome {
 /// when one is active, else the parent. `None` (click still consumed) for a
 /// stale or non-Subagent focus index.
 fn collapse_view(chat: &mut ChatView, focus: Option<usize>) -> Option<&mut ChatView> {
-    let i = match focus { None => return Some(chat), Some(i) => i };
+    let i = match focus {
+        None => return Some(chat),
+        Some(i) => i,
+    };
     match chat.blocks.get_mut(i)? {
         crate::chat::ChatBlock::Subagent { view, .. } => Some(view),
         _ => None,
@@ -763,6 +756,11 @@ pub(crate) async fn handle_mouse(
 /// either dimension differs. Factored out so the idle-resize detection logic
 /// is unit-testable without a live terminal.
 pub(crate) fn size_changed(prev: Option<(u16, u16)>, cur: (u16, u16)) -> bool {
+    // Ignore 0x0 (transient glitch on minimize/detach) — it self-corrects on
+    // the next real Resize event.
+    if cur.0 == 0 || cur.1 == 0 {
+        return false;
+    }
     prev.is_none_or(|p| p != cur)
 }
 
@@ -773,15 +771,25 @@ pub(crate) fn size_changed(prev: Option<(u16, u16)>, cur: (u16, u16)) -> bool {
 pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
     let data_dir = data_dir_for(workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
-    Ok(Arc::new(LibsqlStore::open(data_dir.join("opencoder.db")).await?))
+    Ok(Arc::new(
+        LibsqlStore::open(data_dir.join("opencoder.db")).await?,
+    ))
 }
 
 /// Handle a crossterm `Resize` event. The input pump arm already flagged the
 /// frame dirty, so here we just tell ratatui the size changed so its diff
 /// buffer matches the new layout (prevents glitches and keeps the persisted
 /// hit-rects valid after resize).
-pub(crate) fn on_resize_event(terminal: &mut Term) {
+pub(crate) fn on_resize_event(terminal: &mut Term, last_size: &mut Option<(u16, u16)>) {
     let _ = terminal.autoresize();
+    // Keep last_size in sync so poll_idle_resize doesn't fire a redundant
+    // autoresize + spurious re-render on the very next frame tick.
+    if let Ok(rect) = terminal.size() {
+        let dims = (rect.width, rect.height);
+        if dims.0 > 0 && dims.1 > 0 {
+            *last_size = Some(dims);
+        }
+    }
 }
 
 /// Idle-resize safety net: poll the kernel for the real terminal size every

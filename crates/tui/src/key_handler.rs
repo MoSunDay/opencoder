@@ -20,6 +20,8 @@ pub(crate) enum KeyAction {
     None,
     Submit(String),
     Steer(String),
+    /// Steer submitted to a focused subagent's child session (not the parent).
+    SubagentSteer(String),
     Queue(String),
     SwitchAgent(String),
     SwitchAgentNoClear(String),
@@ -52,6 +54,7 @@ pub(crate) fn handle_key(
     skill_menu: &mut Option<SkillMenu>,
     inner_w: u16,
     prompt_w: u16,
+    subagent_focused: bool,
     input_disabled: bool,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
@@ -175,7 +178,11 @@ pub(crate) fn handle_key(
             // not SIGINT, so it does not conflict with the supervisor's
             // signal handling. Also handled below via the raw-ETX fallback.
             KeyCode::Char('c') => {
-                return if running { KeyAction::Cancel } else { KeyAction::None };
+                return if running {
+                    KeyAction::Cancel
+                } else {
+                    KeyAction::None
+                };
             }
             _ => return KeyAction::None,
         }
@@ -203,9 +210,11 @@ pub(crate) fn handle_key(
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
-            // Enter = Steer when running (strong intervention, promoted at
-            // turn boundary); normal submit when idle.
-            if running {
+            // Enter = SubagentSteer when a running subagent is focused;
+            // Steer when the parent is running; Submit when idle.
+            if subagent_focused {
+                KeyAction::SubagentSteer(text)
+            } else if running {
                 KeyAction::Steer(text)
             } else {
                 KeyAction::Submit(text)
@@ -250,7 +259,7 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::Up => {
-            if input.contains('\n') {
+            if composer::display_rows(input, inner_w, prompt_w) > 1 {
                 *cursor_idx =
                     composer::move_cursor_vertical(input, *cursor_idx, -1, inner_w, prompt_w);
             } else {
@@ -259,7 +268,7 @@ pub(crate) fn handle_key(
             KeyAction::None
         }
         KeyCode::Down => {
-            if input.contains('\n') {
+            if composer::display_rows(input, inner_w, prompt_w) > 1 {
                 *cursor_idx =
                     composer::move_cursor_vertical(input, *cursor_idx, 1, inner_w, prompt_w);
             } else {
@@ -368,524 +377,9 @@ fn move_hist(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "key_handler_tests.rs"]
+mod tests;
 
-    #[test]
-    fn apply_scroll_page_up() {
-        let mut scroll = 50u32;
-        let mut follow = true;
-        let k = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
-        assert!(apply_scroll(&k, &mut scroll, &mut follow));
-        assert_eq!(scroll, 30);
-        assert!(!follow);
-    }
-
-    #[test]
-    fn apply_scroll_page_down() {
-        let mut scroll = 50u32;
-        let mut follow = false;
-        let k = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
-        assert!(apply_scroll(&k, &mut scroll, &mut follow));
-        assert!(follow);
-    }
-
-    #[test]
-    fn apply_scroll_char_not_consumed() {
-        let mut scroll = 50u32;
-        let mut follow = true;
-        let k = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
-        assert!(!apply_scroll(&k, &mut scroll, &mut follow));
-        assert_eq!(scroll, 50);
-        assert!(follow);
-    }
-
-    #[test]
-    fn handle_key_disabled_blocks_char() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-        assert!(input.is_empty());
-    }
-
-    #[test]
-    fn handle_key_disabled_blocks_enter() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-    }
-
-    #[test]
-    fn handle_key_disabled_allows_scroll() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 50u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        let action = handle_key(
-            KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-        assert_eq!(scroll, 30);
-        assert!(!follow);
-    }
-
-    #[test]
-    fn handle_key_disabled_allows_quit() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::Quit));
-    }
-
-    #[test]
-    fn ctrl_v_returns_clip() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(matches!(action, KeyAction::Clip));
-    }
-
-    #[test]
-    fn handle_key_disabled_blocks_alt_tab() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Alt+Tab must be blocked when input is disabled (subagent-focus
-        // view) so the parent agent is not switched prematurely.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-
-        // Alt+BackTab variant.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::ALT),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-    }
-
-    #[test]
-    fn handle_key_disabled_blocks_ctrl_shift_tab() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Ctrl+Shift+Tab (BackTab+CONTROL) must be blocked when input is
-        // disabled so the parent agent is not switched prematurely.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::BackTab, KeyModifiers::CONTROL),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-
-        // kitty: Tab+CONTROL+SHIFT.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            true,
-        );
-        assert!(matches!(action, KeyAction::None));
-    }
-
-    #[test]
-    fn move_hist_down_does_not_clear_input_when_not_browsing() {
-        let history = vec!["previous command".to_string()];
-        let mut hist_idx = None;
-        let mut input = "typing something".to_string();
-        let mut cursor = 5;
-        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, 1);
-        assert_eq!(
-            input, "typing something",
-            "Down should not clear input when not browsing history"
-        );
-        assert_eq!(hist_idx, None, "hist_idx should remain None");
-    }
-
-    #[test]
-    fn move_hist_up_loads_previous_entry() {
-        let history = vec!["cmd1".to_string(), "cmd2".to_string()];
-        let mut hist_idx = None;
-        let mut input = "current".to_string();
-        let mut cursor = 0;
-        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, -1);
-        assert_eq!(
-            input, "cmd2",
-            "Up should load the most recent history entry"
-        );
-        assert_eq!(hist_idx, Some(1));
-    }
-
-    #[test]
-    fn move_hist_down_after_up_restores_blank() {
-        let history = vec!["cmd1".to_string()];
-        let mut hist_idx = None;
-        let mut input = "original".to_string();
-        let mut cursor = 0;
-        // Up loads history
-        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, -1);
-        assert_eq!(input, "cmd1");
-        // Down goes past the end → clears
-        move_hist(&history, &mut hist_idx, &mut input, &mut cursor, 1);
-        assert_eq!(input, "", "Down past newest should clear input");
-        assert_eq!(hist_idx, None);
-    }
-
-    #[test]
-    fn shift_i_in_plan_mode_idle_enters_plan_edit() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Shift+I (uppercase I) on empty input while idle in plan mode enters
-        // the plan-text editor.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(matches!(action, KeyAction::EnterPlanEdit));
-        assert!(
-            input.is_empty(),
-            "input should be untouched on EnterPlanEdit"
-        );
-    }
-
-    #[test]
-    fn shift_i_in_act_mode_does_not_enter_plan_edit() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Shift+I in act mode is a plain char insertion, not plan-edit entry.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "act",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(!matches!(action, KeyAction::EnterPlanEdit));
-        assert_eq!(input, "I", "should insert the character 'I'");
-    }
-
-    #[test]
-    fn shift_i_while_running_does_not_enter_plan_edit() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Even in plan mode, Shift+I while running just inserts the char.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            true,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(!matches!(action, KeyAction::EnterPlanEdit));
-        assert_eq!(input, "I", "should insert the character 'I'");
-    }
-
-    #[test]
-    fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
-        let mut input = "hello".to_string();
-        let mut cursor = 5usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Once the user has started typing, Shift+I resumes normal insertion.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(!matches!(action, KeyAction::EnterPlanEdit));
-        assert_eq!(input, "helloI", "should append the character 'I'");
-    }
-
-    #[test]
-    fn lowercase_i_in_plan_mode_inserts_normally() {
-        let mut input = String::new();
-        let mut cursor = 0usize;
-        let history: Vec<String> = Vec::new();
-        let mut hist_idx: Option<usize> = None;
-        let mut show_help = false;
-        let mut scroll = 0u32;
-        let mut follow = true;
-        let mut last_esc: Option<Instant> = None;
-        let mut skill_menu: Option<SkillMenu> = None;
-
-        // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
-        let action = handle_key(
-            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
-            &mut input,
-            &mut cursor,
-            &history,
-            &mut hist_idx,
-            false,
-            "plan",
-            &mut show_help,
-            &mut scroll,
-            &mut follow,
-            &mut last_esc,
-            &mut skill_menu,
-            80,
-            2,
-            false,
-        );
-        assert!(matches!(action, KeyAction::None));
-        assert_eq!(input, "i", "lowercase i should be inserted into input");
-        assert_eq!(cursor, 1);
-    }
-}
+#[cfg(test)]
+#[path = "key_handler_plan_edit_tests.rs"]
+mod plan_edit_tests;

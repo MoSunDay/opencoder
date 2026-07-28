@@ -39,9 +39,38 @@ fn draw_frame(
     // which is exactly what the per-frame Clear exists to defeat.
     *viewport = None;
     render(
-        terminal, chat, "", 0, "title", "agent", false, false, 0, 0, 200_000, "model", "idle",
-        &[], &[], scroll, true, 0, None, None, None, None, None, None, hits, viewport, None, None,
-        &[], false, None, 0,
+        terminal,
+        chat,
+        "",
+        0,
+        "title",
+        "agent",
+        false,
+        false,
+        0,
+        0,
+        200_000,
+        "model",
+        "idle",
+        &[],
+        &[],
+        scroll,
+        true,
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        hits,
+        viewport,
+        None,
+        None,
+        &[],
+        false,
+        None,
+        0,
     )
     .unwrap();
 }
@@ -63,7 +92,13 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
     let mut chat_a = ChatView::default();
     chat_a.apply(&SessionEvent::TextDelta("markerword\n".into()));
     chat_a.apply(&SessionEvent::Done);
-    draw_frame(&mut terminal, &chat_a, &mut scroll, &mut hits, &mut viewport);
+    draw_frame(
+        &mut terminal,
+        &chat_a,
+        &mut scroll,
+        &mut hits,
+        &mut viewport,
+    );
     assert!(
         buffer_text(terminal.backend().buffer()).contains("markerword"),
         "frame 1 must paint the marker into the body (else the regression \
@@ -74,8 +109,20 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
     // glyphs becomes current again; only the per-frame Clear prevents them
     // from re-emerging via the diff.
     let chat_b = ChatView::default();
-    draw_frame(&mut terminal, &chat_b, &mut scroll, &mut hits, &mut viewport);
-    draw_frame(&mut terminal, &chat_b, &mut scroll, &mut hits, &mut viewport);
+    draw_frame(
+        &mut terminal,
+        &chat_b,
+        &mut scroll,
+        &mut hits,
+        &mut viewport,
+    );
+    draw_frame(
+        &mut terminal,
+        &chat_b,
+        &mut scroll,
+        &mut hits,
+        &mut viewport,
+    );
 
     let text = buffer_text(terminal.backend().buffer());
     assert!(

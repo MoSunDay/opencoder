@@ -1,13 +1,17 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::composer;
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
 
 #[path = "chat_types.rs"]
 mod types;
 pub use types::*;
+
+#[path = "chat_helpers.rs"]
+mod helpers;
+pub(crate) use helpers::{short, summarize};
+pub use helpers::block_text;
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
@@ -63,6 +67,7 @@ impl ChatView {
                 };
                 let out: Vec<Line<'static>> = output
                     .lines()
+                    .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
                 if let Some(ChatBlock::Tool { output: o, .. }) = self
@@ -241,6 +246,9 @@ impl ChatView {
                     self.push_marker(Line::from(""));
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
+            }
+            SessionEvent::AutoPilot { phase, iteration } => {
+                self.status = format!("autopilot: {:?} #{}", phase, iteration);
             }
         }
     }
@@ -519,7 +527,10 @@ impl ChatView {
                     }
                 }
                 ChatBlock::Tool {
-                    header, output, collapsed, ..
+                    header,
+                    output,
+                    collapsed,
+                    ..
                 } => {
                     if *collapsed {
                         let n = output.len();
@@ -746,46 +757,6 @@ impl ChatView {
             })
         )
     }
-}
-
-pub(crate) fn summarize(input: &serde_json::Value) -> String {
-    // The full value is returned verbatim (trimmed); the transcript body
-    // renders with `Paragraph::wrap(Wrap { trim: false })`, so the terminal
-    // wraps long commands to its actual width. Never truncate here — an
-    // 80-column cut hid the real command behind an ellipsis.
-    match input {
-        serde_json::Value::Object(m) => {
-            for k in ["command", "path", "description", "pattern", "prompt"] {
-                if let Some(s) = m.get(k).and_then(|v| v.as_str()) {
-                    return s.trim().to_string();
-                }
-            }
-            serde_json::to_string(input)
-                .unwrap_or_default()
-                .trim()
-                .to_string()
-        }
-        o => serde_json::to_string(o)
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-    }
-}
-
-/// Truncate `s` to at most `n` *display columns* (not characters), appending
-/// an ellipsis when trimmed. Uses composer's width-aware truncation so CJK /
-/// emoji text no longer overflows its visual budget.
-pub(crate) fn short(s: &str, n: usize) -> String {
-    composer::truncate_to_width(s.trim(), n)
-}
-
-/// Read the concatenated text content of all blocks (for testing).
-pub fn block_text(view: &ChatView) -> String {
-    view.flatten()
-        .iter()
-        .flat_map(|l| l.spans.iter())
-        .map(|s| s.content.clone())
-        .collect()
 }
 
 #[cfg(test)]

@@ -107,6 +107,13 @@ pub struct PromptBody {
     pub model: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct SubagentSteerBody {
+    pub prompt: String,
+    #[serde(default)]
+    pub images: Vec<String>,
+}
+
 /// Admit a prompt durably, ensure a drain is running, return immediately with
 /// the admitted seq. The client then streams `/events` for the live result.
 pub async fn post_prompt(
@@ -267,6 +274,68 @@ pub async fn post_interrupt(
         h.cancel.lock().await.cancel();
     }
     Json(json!({ "ok": true }))
+}
+
+/// Steer a running subagent: admit a steer input to the child session and fire
+/// the child's turn-cancel token so the steer is absorbed at the next turn
+/// boundary. Requires the subagent task to exist and be `Running`.
+pub async fn post_subagent_steer(
+    State(state): State<Arc<AppState>>,
+    Path((id, task_id)): Path<(String, String)>,
+    Json(body): Json<SubagentSteerBody>,
+) -> Response {
+    use opencoder_store::{Delivery, SessionInput, SubagentStatus};
+
+    // Guard: task must exist and be running.
+    let task = match state.store.get_subagent_task(&task_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            return (
+                axum::http::StatusCode::NOT_FOUND,
+                Json(json!({ "ok": false, "error": "subagent task not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => return error_500(format!("get_subagent_task: {e:#}")),
+    };
+    if task.status != SubagentStatus::Running {
+        return (
+            axum::http::StatusCode::CONFLICT,
+            Json(json!({ "ok": false, "error": "subagent is not running" })),
+        )
+            .into_response();
+    }
+
+    // Admit the steer to the child session (no drain — the child's run_loop
+    // is already running inside the parent's tool execution).
+    let input = SessionInput {
+        seq: None,
+        id: uuid::Uuid::new_v4().to_string(),
+        session_id: task.child_session_id.clone(),
+        delivery: Delivery::Steer,
+        prompt: body.prompt,
+        images: body.images,
+        admitted_seq: 0,
+        promoted_seq: None,
+    };
+    let seq = match state.store.admit_input(&input).await {
+        Ok(s) => s,
+        Err(e) => return error_500(format!("admit: {e:#}")),
+    };
+
+    // Fire the child's turn-cancel token to interrupt the current turn,
+    // forcing the steer to be absorbed at the next turn boundary.
+    if let Some(h) = state.handles.lock().await.get(&id).cloned() {
+        if let Ok(g) = h.child_turn_cancels.lock() {
+            if let Some(token) = g.get(&task_id).cloned() {
+                if let Ok(t) = token.lock() {
+                    t.cancel();
+                }
+            }
+        }
+    }
+
+    Json(json!({ "admitted_seq": seq, "ok": true })).into_response()
 }
 
 #[derive(Deserialize, Default)]

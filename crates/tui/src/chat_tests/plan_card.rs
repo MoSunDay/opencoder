@@ -307,4 +307,3 @@ fn update_plan_text_updates_assistant_when_no_plan() {
         other => panic!("expected Assistant block, got {other:?}"),
     }
 }
-

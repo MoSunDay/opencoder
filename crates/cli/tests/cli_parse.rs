@@ -306,3 +306,44 @@ fn client_subcommand_parses_agent_model_interrupt() {
     // the global --model is populated, not a client-local field
     assert_eq!(cli.model.as_deref(), Some("glm-5.2"));
 }
+
+#[test]
+fn ts_has_rs_alias() {
+    // `rs` is an alias for the `ts` command, so `rs -l` works.
+    let cli = parse(&["opencode", "rs", "-l"]);
+    match cli.command {
+        Some(Command::Ts { list, .. }) => assert!(list),
+        _ => panic!("expected Ts via rs alias"),
+    }
+}
+
+#[test]
+fn rs_alias_long_list_flag() {
+    let cli = parse(&["opencode", "rs", "--list"]);
+    match cli.command {
+        Some(Command::Ts { list, .. }) => assert!(list),
+        _ => panic!("expected Ts via rs alias"),
+    }
+}
+
+#[test]
+fn rs_alias_resume_target() {
+    let cli = parse(&["opencode", "rs", "-r", "01HZ"]);
+    match cli.command {
+        Some(Command::Ts { resume, .. }) => assert_eq!(resume.as_deref(), Some("01HZ")),
+        _ => panic!("expected Ts via rs alias"),
+    }
+}
+
+#[test]
+fn rs_alias_defaults() {
+    let cli = parse(&["opencode", "rs"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new }) => {
+            assert!(!list);
+            assert!(resume.is_none());
+            assert!(!new);
+        }
+        _ => panic!("expected Ts via rs alias"),
+    }
+}

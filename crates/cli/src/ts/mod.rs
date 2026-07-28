@@ -1,7 +1,8 @@
-//! `opencode ts` -- run the TUI inside a tmux session that survives SSH
-//! disconnect, with `ts -l` (list) and `ts -r <id>` (resume/attach).
+//! `opencode ts` (alias `rs`) -- run the TUI inside a tmux session that
+//! survives SSH disconnect. A bare `ts`/`rs` always starts a fresh managed
+//! session; `ts -l`/`rs -l` lists them and `ts -r <id>`/`rs -r <id>` reattaches.
 //!
-//! tmux is engaged ONLY when `opencode ts` is used. Plain `tui`, `run`,
+//! tmux is engaged ONLY when `opencode ts`/`rs` is used. Plain `tui`, `run`,
 //! headless and server commands are completely unaffected.
 //!
 //! Safety: every tmux argument is passed via `Command::arg(...)` -- tmux runs

@@ -15,37 +15,21 @@ use super::env::tmux_available;
 use super::naming::{fresh_id, resolve_target, session_name};
 use super::tmux::{attach, list_managed, session_exists, tmux_bin};
 
-/// `opencode ts` (no flags). See module docs for the auto-reattach rule.
-/// Caller (`main.rs`) diverts the already-inside-tmux case before calling this.
-pub(crate) async fn ts_start(cli: &Cli, force_new: bool) -> Result<()> {
+/// `opencode ts`/`rs` (no `-r`). A bare invocation always starts a fresh
+/// tmux-managed session; reattaching an existing one is opt-in via
+/// `ts -r <id>`. The caller (`main.rs`) diverts the already-inside-tmux case
+/// before calling this. `force_new` is retained for backward compatibility but
+/// is now a no-op: the "always create new" behavior is the default.
+pub(crate) async fn ts_start(cli: &Cli, _force_new: bool) -> Result<()> {
     if !tmux_available() {
         bail!(
             "tmux is not installed. Install it (e.g. `apt install tmux`), or run \
              `opencode tui` for a non-persistent session."
         );
     }
-    // An explicit --session always means "fresh tmux for this session".
-    if cli.session.is_some() {
-        return start_new(cli).await;
-    }
-    let managed = list_managed()?;
-    if !force_new && managed.len() == 1 {
-        eprintln!(
-            "ts: reattaching the single managed session {}",
-            managed[0].name
-        );
-        return attach(&managed[0].name);
-    }
-    if !force_new && managed.len() > 1 {
-        eprintln!(
-            "ts: {} managed sessions already exist -- resume one with `ts -r <id>` \
-             or start another with `--new`:",
-            managed.len()
-        );
-        for m in &managed {
-            eprintln!("  {}  ({})", m.name, m.tmux_id);
-        }
-    }
+    // Previously bare `ts` auto-reattached the single managed session, or
+    // listed-and-stopped when more than one existed. That implicit takeover is
+    // removed: a fresh session is always created here.
     start_new(cli).await
 }
 

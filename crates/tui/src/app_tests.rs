@@ -845,6 +845,14 @@ fn skill_trigger_names_the_active_skill() {
     assert!(crate::app_helpers::skill_trigger("x").contains("`x`"));
 }
 
+#[test]
+fn skill_token_display_shows_dollar_token() {
+    assert_eq!(
+        crate::app_helpers::skill_token_display("repo-memory"),
+        "{$repo-memory}",
+    );
+}
+
 /// `start_turn` must report failure when the worker command channel has no
 /// consumer — the exact signature of a dead worker task (panic or unexpected
 /// exit). The main loop relies on this `false` to surface a marker and exit

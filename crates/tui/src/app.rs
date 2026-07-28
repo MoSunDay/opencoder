@@ -576,7 +576,7 @@ async fn run_app(
                                     // the steer queue rather than being dropped.
                                     let trigger = skill_trigger(skill_name);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &drain_pending_images(&mut pending_images))).await {
-                                        chat.steer_items.push((seq, trigger));
+                                        chat.steer_items.push((seq, skill_token_display(skill_name)));
                                     }
                                 }
                                 follow = true;
@@ -599,7 +599,7 @@ async fn run_app(
                                     // instead of being silently dropped.
                                     let trigger = skill_trigger(skill_name);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &drain_pending_images(&mut pending_images))).await {
-                                        queue_items.push((seq, trigger));
+                                        queue_items.push((seq, skill_token_display(skill_name)));
                                     }
                                 }
                                 follow = true;
@@ -788,7 +788,7 @@ pub(crate) use crate::app_helpers::{
     clear_pending_inputs, drain_pending_images, handle_mouse, initial_chat_view,
     on_resize_event, open_store, persist_session_model, poll_idle_resize, reapply_session_model,
     mk_input_with_images, pre_key_intercept, push_user, resolve_and_warn, resume_hint,
-    skill_trigger, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
+    skill_trigger, skill_token_display, start_turn, startup_endpoint, sys_tokens_for, worker_dead, MouseOutcome,
 };
 
 #[cfg(test)]

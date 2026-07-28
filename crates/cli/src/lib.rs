@@ -104,6 +104,14 @@ pub enum Command {
         /// Resume the most recent remote session.
         #[arg(long, default_value_t = false)]
         continue_: bool,
+        /// Set the agent (e.g. plan/build/explore) for the remote session.
+        /// Applied on session creation and as a per-prompt override.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Interrupt (cancel) the running drain on the resolved session, then
+        /// exit. Requires --session <id> or --continue; no prompt needed.
+        #[arg(long, default_value_t = false)]
+        interrupt: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         prompt: Vec<String>,
     },

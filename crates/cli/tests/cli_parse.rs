@@ -172,6 +172,8 @@ fn client_subcommand_parses() {
             token,
             session,
             continue_,
+            agent,
+            interrupt,
             prompt,
         }) => {
             assert_eq!(remote, "http://127.0.0.1:8080");
@@ -179,6 +181,8 @@ fn client_subcommand_parses() {
             assert!(session.is_none());
             assert!(!continue_);
             assert_eq!(prompt, vec!["do".to_string(), "the thing".to_string()]);
+            assert!(agent.is_none());
+            assert!(!interrupt);
         }
         _ => panic!("expected Client"),
     }
@@ -268,4 +272,37 @@ fn ts_subcommand_defaults_to_no_flags() {
         }
         _ => panic!("expected Ts"),
     }
+}
+
+#[test]
+fn client_subcommand_parses_agent_model_interrupt() {
+    use opencoder_cli::Command;
+    // --agent / --interrupt are client-local; --model is the global flag reused.
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--agent",
+        "build",
+        "--model",
+        "glm-5.2",
+        "--interrupt",
+        "--continue",
+    ]);
+    match cli.command {
+        Some(Command::Client {
+            agent,
+            interrupt,
+            continue_,
+            ..
+        }) => {
+            assert_eq!(agent.as_deref(), Some("build"));
+            assert!(interrupt);
+            assert!(continue_);
+        }
+        _ => panic!("expected Client"),
+    }
+    // the global --model is populated, not a client-local field
+    assert_eq!(cli.model.as_deref(), Some("glm-5.2"));
 }

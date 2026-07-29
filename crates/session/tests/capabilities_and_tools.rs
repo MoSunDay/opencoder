@@ -133,7 +133,7 @@ async fn capability_gate_hides_computer_use_when_disabled() {
         !names.iter().any(|n| n == "computer_use"),
         "computer_use must be hidden when capability is disabled, got: {names:?}"
     );
-    for required in ["read", "glob", "grep", "ls"] {
+    for required in ["read", "search", "ls"] {
         assert!(
             names.iter().any(|n| n == required),
             "always-on tool '{required}' must remain exposed, got: {names:?}"

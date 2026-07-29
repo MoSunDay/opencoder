@@ -15,16 +15,16 @@ fn tool_filter_all_allows_everything() {
 
 #[test]
 fn tool_filter_allow_list_gates_tools() {
-    let filter = ToolFilter::Allow(vec!["read".into(), "glob".into(), "grep".into()]);
+    let filter = ToolFilter::Allow(vec!["read".into(), "search".into(), "ls".into()]);
     assert!(filter.allows("read"));
-    assert!(filter.allows("glob"));
-    assert!(filter.allows("grep"));
+    assert!(filter.allows("search"));
+    assert!(filter.allows("ls"));
     assert!(
         !filter.allows("bash"),
         "bash should be blocked by plan-agent filter"
     );
     assert!(!filter.allows("edit"), "edit should be blocked");
-    assert!(!filter.allows("write"), "write should be blocked");
+    assert!(!filter.allows("task"), "task should be blocked");
 }
 
 #[test]

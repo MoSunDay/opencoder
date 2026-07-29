@@ -76,14 +76,22 @@ pub async fn resume(
             } else {
                 messages = Vec::new();
             }
-            let mut plan_msg = crate::plan_handoff::handoff_message(plan_display);
+            // Distinguish a ClearContext fresh-start marker from a plan->act
+            // handoff: the sentinel stored by control_cmd::ClearContext.
+            let mut head_msg = if plan_display.as_str()
+                == crate::control_cmd::CLEAR_CONTEXT_SENTINEL
+            {
+                crate::control_cmd::fresh_start_message()
+            } else {
+                crate::plan_handoff::handoff_message(plan_display)
+            };
             for url in &preserved_images {
-                plan_msg.blocks.push(ContentBlock::Image {
+                head_msg.blocks.push(ContentBlock::Image {
                     url: url.clone(),
                     detail: None,
                 });
             }
-            messages.insert(0, plan_msg);
+            messages.insert(0, head_msg);
         }
     } else if let Some(skip) = meta.summary_seq {
         let mut preserved_images: Vec<String> = Vec::new();

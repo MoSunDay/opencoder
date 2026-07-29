@@ -69,6 +69,14 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
+    // Control commands (/act, /plan, /act_clear_context) take effect
+    // immediately without consuming an LLM turn. Short-circuit when the idle
+    // prompt is one so CLI/Web/TUI free-text idle use skips run_loop entirely.
+    if let Some(cmd) = crate::control_cmd::parse(&user_text) {
+        crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
+        on_event(SessionEvent::Done);
+        return Ok(());
+    }
     // Replay any subagent tasks left cancelled from a prior interrupted run
     // BEFORE the user's new input enters the loop: resume each cancelled child,
     // run it to completion, backfill the parent tool_result, and flip the task
@@ -130,10 +138,17 @@ pub(crate) async fn run_loop(
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
             for (seq, p, imgs) in &steer_prompts {
+                on_event(SessionEvent::SteerConsumed { seq: *seq });
+                // Defensive: a steered control command is applied immediately
+                // and NOT recorded as a user message, so "/plan" never leaks
+                // to the LLM as literal text.
+                if let Some(cmd) = crate::control_cmd::parse(p) {
+                    crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+                    continue;
+                }
                 let mut m = Message::user_with_images(new_id(), p.clone(), imgs);
                 m.synthetic = true;
                 session.record(m).await;
-                on_event(SessionEvent::SteerConsumed { seq: *seq });
             }
         }
 
@@ -201,17 +216,33 @@ pub(crate) async fn run_loop(
         session.record(assistant).await;
 
         if tool_calls.is_empty() {
-            // Idle boundary: consume exactly ONE queued follow-up, if any. A
-            // queued input only fires when the session would otherwise go idle.
-            if let Some((seq, q, imgs)) = claim_one_queued(session).await {
-                let mut m = Message::user_with_images(new_id(), q, &imgs);
-                m.synthetic = true;
-                session.record(m).await;
-                on_event(SessionEvent::QueueConsumed { seq });
-                continue;
+            // Idle boundary: drain queued follow-ups. Control commands
+            // (/act, /plan, /act_clear_context) are applied immediately
+            // without an LLM turn, so multiple can be drained in sequence. A
+            // real prompt breaks the inner loop so the outer loop processes it.
+            let mut got_real_prompt = false;
+            loop {
+                if let Some((seq, q, imgs)) = claim_one_queued(session).await {
+                    on_event(SessionEvent::QueueConsumed { seq });
+                    if let Some(cmd) = crate::control_cmd::parse(&q) {
+                        crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+                        continue; // drain next queued item, no LLM turn
+                    }
+                    // Real prompt: record it and let the outer loop process it.
+                    let mut m = Message::user_with_images(new_id(), q, &imgs);
+                    m.synthetic = true;
+                    session.record(m).await;
+                    got_real_prompt = true;
+                    break;
+                }
+                // Queue empty: go idle.
+                on_event(SessionEvent::Done);
+                break;
             }
-            on_event(SessionEvent::Done);
-            break;
+            if got_real_prompt {
+                continue; // outer loop: LLM processes the recorded prompt
+            }
+            break; // outer loop: idle (Done emitted)
         }
 
         // ---- Tool execution: independent tool calls run concurrently so that,

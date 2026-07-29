@@ -1,6 +1,7 @@
 pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
+pub mod control_cmd;
 pub mod event_sink;
 pub mod plan_handoff;
 pub mod prompt;
@@ -13,6 +14,7 @@ pub mod tools;
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
+pub use control_cmd::{apply as apply_control_cmd, parse as parse_control_cmd, ControlCmd};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -217,6 +219,17 @@ impl SessionState {
         store.append_message(&self.id, msg).await?;
         self.persisted_count = self.messages.len();
         Ok(())
+    }
+
+    /// Count of messages persisted to the store, accounting for any in-memory-only
+    /// synthetic summary at the head. Mirrors the accounting in compaction and
+    /// plan_handoff: if a prior compaction set summary_seq, the synthetic
+    /// summary message is NOT in the store, so the store count is
+    /// summary_seq + (messages.len() - 1).
+    pub fn store_message_count(&self) -> usize {
+        let prior_skip = self.summary_seq.unwrap_or(0) as usize;
+        let has_prior_summary = self.summary_seq.is_some();
+        prior_skip + self.messages.len() - if has_prior_summary { 1 } else { 0 }
     }
 
     /// Update bookkeeping after compaction. Sets the summary metadata and

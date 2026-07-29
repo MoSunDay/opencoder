@@ -385,7 +385,7 @@ pub(super) async fn run_app(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
                                 &session_id, &mut task_picker, &mut model_menu, &config,
-                                &mut cache_salt_menu, &agent_name,
+                                &mut cache_salt_menu, &agent_name, &mut queue_items,
                             )
                             .await
                             {
@@ -493,8 +493,14 @@ pub(super) async fn run_app(
                                         queue_items.push((seq, clean.clone()));
                                     }
                                 } else {
-                                    push_user(&mut chat, &mut history, &mut hist_idx, &text);
-                                    chat.context_used += estimate(&clean) as u64;
+                                    // Control commands (/act, /plan, /act_clear_context) apply
+                                    // without recording a user message — skip the echo so they
+                                    // don't appear as literal text in the transcript.
+                                    let is_control = opencoder_session::parse_control_cmd(&clean).is_some();
+                                    if !is_control {
+                                        push_user(&mut chat, &mut history, &mut hist_idx, &text);
+                                        chat.context_used += estimate(&clean) as u64;
+                                    }
                                     let image_uris = snapshot_image_uris(&pending_images);
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
                                     {

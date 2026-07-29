@@ -483,6 +483,7 @@ pub(crate) async fn dispatch_command(
     config: &Config,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
+    queue_items: &mut Vec<(i64, String)>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -528,6 +529,66 @@ pub(crate) async fn dispatch_command(
                     Err(_) => CacheSaltMenu::parent_only(agent_name, session_id, enabled),
                 },
             );
+        }
+        // Control commands (/act, /plan, /act_clear_context): dispatch as a
+        // prompt via the worker. run_with_registry short-circuits them (no LLM
+        // call) and emits AgentSwitch / TranscriptReset + Done. No user echo —
+        // the popup path never calls push_user.
+        CommandOutcome::Dispatch(SlashAction::Act) => {
+            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new())).await {
+                worker_dead(chat);
+                return LoopFlow::Quit;
+            }
+            *running = true;
+            *follow = true;
+            chat.begin_turn();
+        }
+        CommandOutcome::Dispatch(SlashAction::Plan) => {
+            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/plan".into(), Vec::new())).await {
+                worker_dead(chat);
+                return LoopFlow::Quit;
+            }
+            *running = true;
+            *follow = true;
+            chat.begin_turn();
+        }
+        CommandOutcome::Dispatch(SlashAction::ClearContext) => {
+            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act_clear_context".into(), Vec::new()))
+                .await
+            {
+                worker_dead(chat);
+                return LoopFlow::Quit;
+            }
+            *running = true;
+            *follow = true;
+            chat.begin_turn();
+        }
+        // Queue a control command behind a running turn (Tab in popup). When
+        // idle, fall back to immediate dispatch.
+        CommandOutcome::Queue(s) => {
+            if *running {
+                let input = opencoder_store::SessionInput {
+                    seq: None,
+                    id: opencoder_session::runner::new_id(),
+                    session_id: session_id.to_string(),
+                    delivery: opencoder_store::Delivery::Queue,
+                    prompt: s.clone(),
+                    images: Vec::new(),
+                    admitted_seq: 0,
+                    promoted_seq: None,
+                };
+                if let Ok(seq) = store.admit_input(&input).await {
+                    queue_items.push((seq, s));
+                }
+            } else {
+                if !start_turn(cmd_tx, cancel, UiCmd::Prompt(s, Vec::new())).await {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
+                }
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
+            }
         }
         CommandOutcome::Idle => {}
     }

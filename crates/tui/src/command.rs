@@ -30,6 +30,12 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "/compact",
         "手动压缩对话历史（总结早期消息，释放上下文窗口）",
     ),
+    ("/act", "切换到 act 模式（不重置上下文）"),
+    ("/plan", "切换到 plan 模式（不重置上下文）"),
+    (
+        "/act_clear_context",
+        "清空对话上下文并切换到 act 模式（重新开始）",
+    ),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -40,13 +46,21 @@ pub enum SlashAction {
     Config,
     Compact,
     CacheSalt,
+    Act,
+    Plan,
+    ClearContext,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
 /// the chosen action and closes the popup; `Idle` leaves it open.
+#[derive(Debug)]
 pub enum CommandOutcome {
     Idle,
     Dispatch(SlashAction),
+    /// Queue a control command string behind a running turn (Tab on a
+    /// control command in the popup). Carries the canonical command text
+    /// (e.g. "/plan").
+    Queue(String),
 }
 
 /// Picker state for the `/` command menu.
@@ -143,6 +157,9 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "model" | "mdl" => Some(SlashAction::Model),
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
+        "act" => Some(SlashAction::Act),
+        "plan" => Some(SlashAction::Plan),
+        "act_clear_context" => Some(SlashAction::ClearContext),
         _ => None,
     }
 }
@@ -153,6 +170,21 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/model" => Some(SlashAction::Model),
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
+        "/act" => Some(SlashAction::Act),
+        "/plan" => Some(SlashAction::Plan),
+        "/act_clear_context" => Some(SlashAction::ClearContext),
+        _ => None,
+    }
+}
+
+/// Map a [`SlashAction`] to its canonical control-command string, or `None`
+/// for non-control actions. Used to queue a control command (Tab) or dispatch
+/// it immediately (Enter) without echoing it as user text.
+pub fn control_cmd_string(action: &SlashAction) -> Option<&'static str> {
+    match action {
+        SlashAction::Act => Some("/act"),
+        SlashAction::Plan => Some("/plan"),
+        SlashAction::ClearContext => Some("/act_clear_context"),
         _ => None,
     }
 }
@@ -199,6 +231,17 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
                 CommandOutcome::Dispatch(act)
             }
             None => CommandOutcome::Idle,
+        },
+        // Tab on a control command queues it behind a running turn (the only
+        // way to queue a `/`-command, since `/` opens the popup). Non-control
+        // commands ignore Tab.
+        KeyCode::Tab => match m.selected_action() {
+            Some(act) if control_cmd_string(&act).is_some() => {
+                let s = control_cmd_string(&act).unwrap();
+                *menu = None;
+                CommandOutcome::Queue(s.to_string())
+            }
+            _ => CommandOutcome::Idle,
         },
         KeyCode::Esc => {
             *menu = None;
@@ -359,5 +402,108 @@ mod tests {
             m.visible_count() < all,
             "refilter should narrow the visible list"
         );
+    }
+
+    #[test]
+    fn parse_control_commands() {
+        assert_eq!(parse("/act"), Some(SlashAction::Act));
+        assert_eq!(parse("/plan"), Some(SlashAction::Plan));
+        assert_eq!(parse("/act_clear_context"), Some(SlashAction::ClearContext));
+        assert_eq!(parse(" /plan "), Some(SlashAction::Plan));
+    }
+
+    #[test]
+    fn control_cmd_string_maps_correctly() {
+        assert_eq!(control_cmd_string(&SlashAction::Act), Some("/act"));
+        assert_eq!(control_cmd_string(&SlashAction::Plan), Some("/plan"));
+        assert_eq!(
+            control_cmd_string(&SlashAction::ClearContext),
+            Some("/act_clear_context")
+        );
+        assert_eq!(control_cmd_string(&SlashAction::Task), None);
+        assert_eq!(control_cmd_string(&SlashAction::Compact), None);
+    }
+
+    #[test]
+    fn tab_on_control_command_queues() {
+        let mut menu = Some(CommandMenu::new());
+        // Filter to /plan
+        for c in "plan".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) = handle_command_key(
+            &mut menu,
+            key(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        match outcome {
+            CommandOutcome::Queue(s) => assert_eq!(s, "/plan"),
+            other => panic!("expected Queue, got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Tab-queue");
+    }
+
+    #[test]
+    fn tab_on_non_control_command_is_idle() {
+        let mut menu = Some(CommandMenu::new());
+        // Filter to /task (non-control)
+        for c in "task".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) = handle_command_key(
+            &mut menu,
+            key(KeyCode::Tab, KeyModifiers::NONE),
+        );
+        assert!(matches!(outcome, CommandOutcome::Idle), "non-control Tab ignored");
+        assert!(menu.is_some(), "popup stays open for non-control Tab");
+    }
+
+    #[test]
+    fn enter_on_control_command_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        // Type "act" — matches /compact, /act, /act_clear_context.
+        for c in "act".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        // Move down to /act (index 1 after /compact).
+        if let Some(m) = menu.as_mut() {
+            m.move_down();
+        }
+        let (outcome, _quit) = handle_command_key(
+            &mut menu,
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Act) => {}
+            other => panic!("expected Dispatch(Act), got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Enter-dispatch");
+    }
+
+    #[test]
+    fn enter_on_clear_context_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "act_clear_context".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) = handle_command_key(
+            &mut menu,
+            key(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::ClearContext) => {}
+            other => panic!("expected Dispatch(ClearContext), got {:?}", other),
+        }
+    }
+
+    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
     }
 }

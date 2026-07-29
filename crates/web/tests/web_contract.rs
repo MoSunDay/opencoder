@@ -41,7 +41,7 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
             "/api/sessions",
             post(opencoder_web::api::create_session).get(opencoder_web::api::list_sessions),
         )
-        .route("/api/sessions/:id", get(opencoder_web::api::get_session))
+        .route("/api/sessions/:id", get(opencoder_web::api::get_session).delete(opencoder_web::api::delete_session))
         .route(
             "/api/sessions/:id/prompt",
             post(opencoder_web::api::post_prompt),
@@ -526,4 +526,40 @@ async fn post_model_persist_default_malformed_returns_500() {
     let raw = std::fs::read_to_string(workdir.join("opencoder.json")).unwrap();
     let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(cfg["model"], "old-model");
+}
+
+#[tokio::test]
+async fn delete_session_removes_session_and_is_idempotent() {
+    let (app, state) = app().await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "m").await;
+    assert!(state.store.get_session(&sid).await.unwrap().is_some());
+
+    // First DELETE: 200, session gone.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/sessions/{sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(state.store.get_session(&sid).await.unwrap().is_none());
+
+    // Second DELETE on the now-absent id: 404 (distinguishes absent from deleted).
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/sessions/{sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

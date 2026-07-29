@@ -72,13 +72,12 @@ pub enum ConfigField {
     ToolsSubagent,
     ApEnabled,
     ApMaxIter,
-    ApSkill,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 14] = [
+    const ORDER: [ConfigField; 13] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -90,7 +89,6 @@ impl ConfigField {
         ConfigField::ToolsSubagent,
         ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
-        ConfigField::ApSkill,
         ConfigField::Save,
         ConfigField::Cancel,
     ];
@@ -104,19 +102,23 @@ impl ConfigField {
     }
 }
 
+/// Parse a numeric field's String buffer. Empty/unparseable → `None`.
+fn parse_field(s: &str) -> Option<u64> {
+    s.trim().parse::<u64>().ok()
+}
+
 pub struct ConfigForm {
     pub reasoning: Reasoning,
     pub interleaved_thinking: bool,
     pub max_tokens_input: String,
-    pub threshold: u64,
-    pub context_size: u64,
-    pub fps: u32,
+    pub threshold_input: String,
+    pub context_size_input: String,
+    pub fps_input: String,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
     pub ap_enabled: bool,
-    pub ap_max_iter: u32,
-    pub ap_skill_input: String,
+    pub ap_max_iter_input: String,
     pub focus: ConfigField,
     pub error: Option<String>,
 }
@@ -127,36 +129,37 @@ impl ConfigForm {
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
             max_tokens_input: config.max_tokens.map(|v| v.to_string()).unwrap_or_default(),
-            threshold: config.compaction.context_threshold,
-            context_size: config.context_limit(),
-            fps: config.tui_fps(),
+            threshold_input: config.compaction.context_threshold.to_string(),
+            context_size_input: config.context_limit().to_string(),
+            fps_input: config.tui_fps().to_string(),
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
             capabilities_tools_subagent: config.capabilities.tools_subagent,
             ap_enabled: config.autopilot.enabled,
-            ap_max_iter: config.autopilot.max_iterations,
-            ap_skill_input: config.autopilot.skill.clone().unwrap_or_default(),
+            ap_max_iter_input: config.autopilot.max_iterations.to_string(),
             focus: ConfigField::Reasoning,
             error: None,
         }
     }
 
     fn adjust_threshold(&mut self, delta: i64) {
-        let next = self.threshold as i64 + delta;
-        self.threshold = next.max(1000) as u64;
+        let cur = self.threshold_input.parse::<i64>().unwrap_or(0);
+        self.threshold_input = (cur + delta).max(0).to_string();
     }
 
     fn adjust_context_size(&mut self, delta: i64) {
-        let next = self.context_size as i64 + delta;
-        self.context_size = next.max(1) as u64;
+        let cur = self.context_size_input.parse::<i64>().unwrap_or(0);
+        self.context_size_input = (cur + delta).max(0).to_string();
     }
 
     fn adjust_fps(&mut self, delta: i32) {
-        self.fps = (self.fps as i32 + delta).clamp(1, 30) as u32;
+        let cur = self.fps_input.parse::<i32>().unwrap_or(0);
+        self.fps_input = (cur + delta).max(0).to_string();
     }
 
     fn adjust_ap_max_iter(&mut self, delta: i32) {
-        self.ap_max_iter = (self.ap_max_iter as i32 + delta).max(1) as u32;
+        let cur = self.ap_max_iter_input.parse::<i32>().unwrap_or(0);
+        self.ap_max_iter_input = (cur + delta).max(0).to_string();
     }
 
     pub fn build_patch(&self) -> ConfigPatch {
@@ -165,31 +168,58 @@ impl ConfigForm {
         } else {
             self.max_tokens_input.trim().parse::<u64>().ok()
         };
+        // Empty/unparseable → fall back to safe defaults (validate() blocks
+        // empties on the save path; this is the safety net for direct callers).
+        let threshold = parse_field(&self.threshold_input).unwrap_or(1000).max(1000);
+        let context_size = parse_field(&self.context_size_input).unwrap_or(128_000).max(1);
+        let fps = self
+            .fps_input
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(10)
+            .clamp(1, 30);
+        let ap_max_iter = self
+            .ap_max_iter_input
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(10)
+            .max(1);
         ConfigPatch {
             reasoning_effort: self.reasoning.to_option(),
             interleaved_thinking: Some(self.interleaved_thinking),
             max_tokens,
-            context_threshold: self.threshold,
-            context_limit: self.context_size,
-            fps: self.fps,
+            context_threshold: threshold,
+            context_limit: context_size,
+            fps,
             capabilities_browser: self.capabilities_browser,
             capabilities_computer_use: self.capabilities_computer_use,
             capabilities_tools_subagent: self.capabilities_tools_subagent,
             ap_enabled: self.ap_enabled,
-            ap_max_iter: self.ap_max_iter,
-            ap_skill: if self.ap_skill_input.trim().is_empty() {
-                None
-            } else {
-                Some(self.ap_skill_input.trim().to_string())
-            },
+            ap_max_iter,
         }
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.threshold < 1000 {
+        if self.context_size_input.trim().is_empty() {
+            return Err("context_size cannot be empty".into());
+        }
+        if self.threshold_input.trim().is_empty() {
+            return Err("context_threshold cannot be empty".into());
+        }
+        if self.fps_input.trim().is_empty() {
+            return Err("fps cannot be empty".into());
+        }
+        if self.ap_max_iter_input.trim().is_empty() {
+            return Err("ap_max_iter cannot be empty".into());
+        }
+        let threshold = parse_field(&self.threshold_input)
+            .ok_or_else(|| "context_threshold is not a number".to_string())?;
+        let context_size = parse_field(&self.context_size_input)
+            .ok_or_else(|| "context_size is not a number".to_string())?;
+        if threshold < 1000 {
             return Err("context_threshold must be >= 1000".into());
         }
-        if self.threshold > self.context_size {
+        if threshold > context_size {
             return Err("context_threshold must not exceed context size".into());
         }
         Ok(())
@@ -203,31 +233,10 @@ impl ConfigForm {
             }
             match self.focus {
                 ConfigField::MaxTokens => self.max_tokens_input.push(c),
-                ConfigField::ContextSize => {
-                    let s = format!("{}{}", self.context_size, c);
-                    if let Ok(n) = s.parse::<u64>() {
-                        self.context_size = n.max(1);
-                    }
-                }
-                ConfigField::Threshold => {
-                    let s = format!("{}{}", self.threshold, c);
-                    if let Ok(n) = s.parse::<u64>() {
-                        self.threshold = n.max(1000);
-                    }
-                }
-                ConfigField::Fps => {
-                    let s = format!("{}{}", self.fps, c);
-                    if let Ok(n) = s.parse::<u32>() {
-                        self.fps = n.clamp(1, 30);
-                    }
-                }
-                ConfigField::ApMaxIter => {
-                    let s = format!("{}{}", self.ap_max_iter, c);
-                    if let Ok(n) = s.parse::<u32>() {
-                        self.ap_max_iter = n.max(1);
-                    }
-                }
-                ConfigField::ApSkill => self.ap_skill_input.push(c),
+                ConfigField::ContextSize => self.context_size_input.push(c),
+                ConfigField::Threshold => self.threshold_input.push(c),
+                ConfigField::Fps => self.fps_input.push(c),
+                ConfigField::ApMaxIter => self.ap_max_iter_input.push(c),
                 _ => {}
             }
         }
@@ -298,19 +307,16 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.max_tokens_input.pop();
             }
             ConfigField::ContextSize => {
-                form.context_size = (form.context_size / 10).max(1);
+                form.context_size_input.pop();
             }
             ConfigField::Threshold => {
-                form.threshold = (form.threshold / 10).max(1000);
+                form.threshold_input.pop();
             }
             ConfigField::Fps => {
-                form.fps = (form.fps / 10).max(1);
+                form.fps_input.pop();
             }
             ConfigField::ApMaxIter => {
-                form.ap_max_iter = (form.ap_max_iter / 10).max(1);
-            }
-            ConfigField::ApSkill => {
-                form.ap_skill_input.pop();
+                form.ap_max_iter_input.pop();
             }
             _ => {}
         },
@@ -319,22 +325,13 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.max_tokens_input.push(c);
             }
             ConfigField::ContextSize if c.is_ascii_digit() => {
-                let s = format!("{}{}", form.context_size, c);
-                if let Ok(n) = s.parse::<u64>() {
-                    form.context_size = n.max(1);
-                }
+                form.context_size_input.push(c);
             }
             ConfigField::Threshold if c.is_ascii_digit() => {
-                let s = format!("{}{}", form.threshold, c);
-                if let Ok(n) = s.parse::<u64>() {
-                    form.threshold = n.max(1000);
-                }
+                form.threshold_input.push(c);
             }
             ConfigField::Fps if c.is_ascii_digit() => {
-                let s = format!("{}{}", form.fps, c);
-                if let Ok(n) = s.parse::<u32>() {
-                    form.fps = n.clamp(1, 30);
-                }
+                form.fps_input.push(c);
             }
             ConfigField::Reasoning if c == ' ' => form.reasoning = form.reasoning.next(),
             ConfigField::InterleavedThinking if c == ' ' => {
@@ -351,12 +348,8 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             }
             ConfigField::ApEnabled if c == ' ' => form.ap_enabled = !form.ap_enabled,
             ConfigField::ApMaxIter if c.is_ascii_digit() => {
-                let s = format!("{}{}", form.ap_max_iter, c);
-                if let Ok(n) = s.parse::<u32>() {
-                    form.ap_max_iter = n.max(1);
-                }
+                form.ap_max_iter_input.push(c);
             }
-            ConfigField::ApSkill if !c.is_control() => form.ap_skill_input.push(c),
             _ => {}
         },
         _ => {}

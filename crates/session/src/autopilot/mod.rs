@@ -102,6 +102,7 @@ pub async fn drive(
         let verdict = verify(session, &state, verify_retries).await;
         match should_stop(verdict, state.iteration, max_iterations) {
             Some(ApOutcome::Complete) => {
+                session.set_skill(None);
                 on_event(SessionEvent::Done);
                 return Ok(ApOutcome::Complete);
             }

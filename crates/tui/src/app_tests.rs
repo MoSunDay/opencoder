@@ -26,6 +26,8 @@ fn run_handle(
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
     handle_key(
         k,
         input,
@@ -43,6 +45,8 @@ fn run_handle(
         2,
         false,
         false,
+        &mut undo_state,
+        &mut help_scroll,
     )
 }
 
@@ -62,6 +66,8 @@ fn run_handle_disabled(
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
     handle_key(
         k,
         input,
@@ -79,6 +85,47 @@ fn run_handle_disabled(
         2,
         false,
         true,
+        &mut undo_state,
+        &mut help_scroll,
+    )
+}
+
+/// Like `run_handle` but simulates a *focused running subagent*: input is
+/// enabled (`input_disabled = false`) but `subagent_focused = true`.
+fn run_handle_subagent(
+    k: KeyEvent,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    agent: &str,
+) -> KeyAction {
+    let history: Vec<String> = vec![];
+    let mut hist_idx = None;
+    let mut show_help = false;
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
+    handle_key(
+        k,
+        input,
+        cursor_idx,
+        &history,
+        &mut hist_idx,
+        true,
+        agent,
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        true,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     )
 }
 
@@ -96,6 +143,8 @@ fn run_handle_menu(
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
     handle_key(
         k,
         input,
@@ -113,6 +162,8 @@ fn run_handle_menu(
         2,
         false,
         false,
+        &mut undo_state,
+        &mut help_scroll,
     )
 }
 
@@ -238,6 +289,56 @@ fn tab_while_idle_submits() {
         "act",
     );
     assert!(matches!(action, KeyAction::Submit(ref t) if t == "hello"));
+}
+
+#[test]
+fn tab_on_focused_subagent_rejected_not_queued() {
+    // Focusing a *running* subagent enables input (Enter => steer) but Tab
+    // must NOT queue: a queue is admitted to the parent session and would
+    // affect the parent agent. Instead the input is preserved untouched.
+    let mut input = String::from("keep this text");
+    let mut idx = 14usize;
+    let action = run_handle_subagent(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::QueueUnsupported));
+    assert_eq!(input, "keep this text");
+    assert_eq!(idx, 14);
+}
+
+#[test]
+fn enter_on_focused_subagent_still_steers() {
+    // Regression: Enter must keep producing SubagentSteer (child session)
+    // even though Tab is now rejected in the same focus state.
+    let mut input = String::from("steer it");
+    let mut idx = 8usize;
+    let action = run_handle_subagent(
+        key(KeyCode::Enter, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer it"));
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
+}
+
+#[test]
+fn tab_empty_input_on_focused_subagent_is_noop() {
+    // Empty input + Tab on a focused subagent is a no-op (consistent with
+    // the normal empty-input guard), not a QueueUnsupported.
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let action = run_handle_subagent(
+        key(KeyCode::Tab, KeyModifiers::NONE),
+        &mut input,
+        &mut idx,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
 }
 
 #[test]
@@ -1208,6 +1309,8 @@ fn double_esc_while_running_cancels() {
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
     let esc = key(KeyCode::Esc, KeyModifiers::NONE);
 
     let first = handle_key(
@@ -1227,6 +1330,8 @@ fn double_esc_while_running_cancels() {
         2,
         false,
         false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -1251,6 +1356,8 @@ fn double_esc_while_running_cancels() {
         2,
         false,
         false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

@@ -64,7 +64,6 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
             a.contains_key("enabled")
                 || a.contains_key("max_iterations")
                 || a.contains_key("verify_retries")
-                || a.contains_key("skill")
         })
     {
         return true;

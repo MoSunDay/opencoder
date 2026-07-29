@@ -141,6 +141,7 @@ impl Remote {
         delivery: Option<&str>,
         agent: Option<&str>,
         model: Option<&str>,
+        images: &[String],
     ) -> Result<i64> {
         let mut body = serde_json::json!({ "prompt": prompt });
         if let Some(d) = delivery {
@@ -151,6 +152,9 @@ impl Remote {
         }
         if let Some(m) = model {
             body["model"] = serde_json::json!(m);
+        }
+        if !images.is_empty() {
+            body["images"] = serde_json::json!(images);
         }
         let resp = self
             .http

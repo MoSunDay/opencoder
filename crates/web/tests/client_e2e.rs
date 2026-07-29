@@ -76,7 +76,7 @@ async fn client_echo_matches_server_persisted_events() {
 
     // 3. post the prompt
     let seq = remote
-        .post_prompt(&id, "ping", None, None, None)
+        .post_prompt(&id, "ping", None, None, None, &[])
         .await
         .unwrap();
     assert!(seq > 0);
@@ -139,7 +139,7 @@ async fn client_get_messages_returns_transcript() {
     let id = remote.create_session(None, None).await.unwrap();
     let after = remote.last_event_seq(&id).await.unwrap();
     let _ = remote
-        .post_prompt(&id, "hello", None, None, None)
+        .post_prompt(&id, "hello", None, None, None, &[])
         .await
         .unwrap();
 

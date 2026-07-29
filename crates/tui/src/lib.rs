@@ -8,6 +8,7 @@ pub mod command;
 pub mod composer;
 pub mod fmt;
 pub mod frame;
+pub mod help;
 pub mod image_render;
 pub mod image_util;
 pub mod input;
@@ -29,7 +30,9 @@ pub mod skill_display;
 pub mod supervisor;
 pub mod task;
 pub mod terminal;
+pub mod undo;
 pub mod vim;
+pub mod welcome;
 pub mod worker;
 
 use std::path::PathBuf;

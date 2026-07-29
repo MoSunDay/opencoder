@@ -172,7 +172,6 @@ fn client_subcommand_parses() {
             token,
             session,
             continue_,
-            agent,
             interrupt,
             prompt,
         }) => {
@@ -181,7 +180,8 @@ fn client_subcommand_parses() {
             assert!(session.is_none());
             assert!(!continue_);
             assert_eq!(prompt, vec!["do".to_string(), "the thing".to_string()]);
-            assert!(agent.is_none());
+            // --agent is now a global flag (not a client-local field)
+            assert!(cli.agent.is_none());
             assert!(!interrupt);
         }
         _ => panic!("expected Client"),
@@ -277,7 +277,7 @@ fn ts_subcommand_defaults_to_no_flags() {
 #[test]
 fn client_subcommand_parses_agent_model_interrupt() {
     use opencoder_cli::Command;
-    // --agent / --interrupt are client-local; --model is the global flag reused.
+    // --agent and --model are both global flags; --interrupt is client-local.
     let cli = parse(&[
         "opencoder",
         "client",
@@ -292,18 +292,17 @@ fn client_subcommand_parses_agent_model_interrupt() {
     ]);
     match cli.command {
         Some(Command::Client {
-            agent,
             interrupt,
             continue_,
             ..
         }) => {
-            assert_eq!(agent.as_deref(), Some("build"));
             assert!(interrupt);
             assert!(continue_);
         }
         _ => panic!("expected Client"),
     }
-    // the global --model is populated, not a client-local field
+    // the global --agent and --model are populated, not client-local fields
+    assert_eq!(cli.agent.as_deref(), Some("build"));
     assert_eq!(cli.model.as_deref(), Some("glm-5.2"));
 }
 
@@ -346,4 +345,25 @@ fn rs_alias_defaults() {
         }
         _ => panic!("expected Ts via rs alias"),
     }
+}
+
+#[test]
+fn run_subcommand_accepts_global_agent_flag() {
+    // --agent is global, so it works on `run`, the bare path, and `client`.
+    let cli = parse(&["opencoder", "run", "--agent", "plan", "design the api"]);
+    match cli.command {
+        Some(opencoder_cli::Command::Run { prompt }) => {
+            assert_eq!(prompt, vec!["design the api".to_string()]);
+        }
+        _ => panic!("expected Run"),
+    }
+    assert_eq!(cli.agent.as_deref(), Some("plan"));
+}
+
+#[test]
+fn bare_prompt_accepts_global_agent_flag() {
+    // bare `opencode --agent explore "..."` also populates the global flag.
+    let cli = parse(&["opencoder", "--agent", "explore", "explain it"]);
+    assert_eq!(cli.agent.as_deref(), Some("explore"));
+    assert!(!cli.prompt.is_empty());
 }

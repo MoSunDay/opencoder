@@ -44,7 +44,7 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
     // Build a ConfigForm focused on the Save button.
     let base_cfg = Config::default();
     let mut form = ConfigForm::new(&base_cfg);
-    form.threshold = 80000; // ensure validation passes (>= 1000)
+    form.threshold_input = "80000".into(); // ensure validation passes (>= 1000)
     form.focus = ConfigField::Save;
     let mut model_menu = Some(ModelMenu::Config(form));
 
@@ -144,7 +144,7 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
 
     let base_cfg = Config::default();
     let mut form = ConfigForm::new(&base_cfg);
-    form.threshold = 80000;
+    form.threshold_input = "80000".into();
     form.focus = ConfigField::Save;
     let mut model_menu = Some(ModelMenu::Config(form));
 

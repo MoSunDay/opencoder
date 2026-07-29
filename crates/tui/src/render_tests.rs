@@ -548,6 +548,95 @@ fn body_no_top_arrow_when_at_top() {
     assert!(top_btn.is_none(), "top_btn should be None when at the top");
 }
 
+// ----- Tutorial: empty-session welcome text shows & auto-hides -----
+
+/// An empty session renders the in-body tutorial (`render_tutorial_in_body`)
+/// whose first content line includes the "OpenCoder" brand token. As soon as
+/// the first block appears the tutorial disappears. This covers the
+/// `chat.blocks.is_empty()` early-return branch in `render_body`.
+#[test]
+fn empty_session_shows_tutorial_then_hides_on_first_block() {
+    let backend = TestBackend::new(60, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let area = terminal.backend().buffer().area;
+
+    // --- State 1: empty session → tutorial visible ---
+    let v = ChatView::default();
+    let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
+    let mut body_out: Option<Rect> = None;
+    let mut scroll = 0u32;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                "test",
+                &mut scroll,
+                false,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut top_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+                &mut None,
+            );
+        })
+        .unwrap();
+
+    let full: String = (0..area.height)
+        .map(|y| row_text(terminal.backend().buffer(), y, area.width))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        full.contains("OpenCoder"),
+        "empty session should render the tutorial containing 'OpenCoder'; got:\n{full}"
+    );
+
+    // --- State 2: first block appears → tutorial gone ---
+    let mut v2 = ChatView::default();
+    v2.apply(&SessionEvent::TextDelta("hello".into()));
+    v2.apply(&SessionEvent::Done);
+    let mut jump_btn2: Option<Rect> = None;
+    let mut top_btn2: Option<Rect> = None;
+    let mut body_out2: Option<Rect> = None;
+    let mut scroll2 = 0u32;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v2,
+                "test",
+                &mut scroll2,
+                false,
+                0,
+                &mut body_out2,
+                &mut jump_btn2,
+                &mut top_btn2,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+                &mut None,
+            );
+        })
+        .unwrap();
+
+    let full2: String = (0..area.height)
+        .map(|y| row_text(terminal.backend().buffer(), y, area.width))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !full2.contains("OpenCoder"),
+        "non-empty session should NOT render the tutorial; got:\n{full2}"
+    );
+}
+
 // ----- Guard (B): cursor placement with multi-line + soft-wrap input -----
 
 /// Row 0 cursor: x = composer.x + border + prompt_w + col.
@@ -576,8 +665,8 @@ fn place_cursor_second_line() {
         })
         .unwrap();
     // cursor_row_col("hello\nworld", 8, 36, 2) = (1, 2)
-    // row>0 → x = 0+1+2 = 3, y = 5+1+1-0 = 7.
-    terminal.backend_mut().assert_cursor_position((3, 7));
+    // row>0, uniform prompt_w → x = 0+1+2+2 = 5, y = 5+1+1-0 = 7.
+    terminal.backend_mut().assert_cursor_position((5, 7));
 }
 
 /// Soft-wrap at the inner width boundary advances the cursor to the next
@@ -592,8 +681,8 @@ fn place_cursor_soft_wrap_advances_row() {
         })
         .unwrap();
     // cursor_row_col("aaaaaa", 6, 5, 2) = (1, 3)
-    // first_w = 5-2 = 3, rest_w = 5; row>0 → x = 0+1+3 = 4, y = 5+1+1-0 = 7.
-    terminal.backend_mut().assert_cursor_position((4, 7));
+    // row_w = 5-2 = 3; uniform prompt_w → x = 0+1+2+3 = 6, y = 5+1+1-0 = 7.
+    terminal.backend_mut().assert_cursor_position((6, 7));
 }
 
 /// Scrolling the composer shifts the cursor's screen row by `scroll`.
@@ -615,8 +704,8 @@ fn place_cursor_with_scroll() {
         })
         .unwrap();
     // cursor_row_col("line1\nline2\nline3", 12, 80, 2) = (2, 0)
-    // row>0 → x = 0+1+0 = 1, y = 5+1+2-1 = 7.
-    terminal.backend_mut().assert_cursor_position((1, 7));
+    // row>0, uniform prompt_w → x = 0+1+2+0 = 3, y = 5+1+2-1 = 7.
+    terminal.backend_mut().assert_cursor_position((3, 7));
 }
 
 /// Cross-check (Fix #4): text with a space so WORD-wrap diverges from the
@@ -648,13 +737,13 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
     assert!(r2.contains("cdefgh"), "cdefgh must wrap to row 2: {r2}");
 
     // Cursor at char_idx 5 ('e') is on visual row 1: cursor_row_col gives
-    // (1, 2), so x = border + col = 1 + 2 = 3, y = border + row = 1 + 1 = 2.
+    // (1, 2), so x = border + prompt_w + col = 1 + 2 + 2 = 5, y = border + row = 1 + 1 = 2.
     terminal
         .draw(|f| {
             place_cursor(f, Rect::new(0, 0, 12, 6), input, 5, 8, 2, 0);
         })
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((3, 2));
+    terminal.backend_mut().assert_cursor_position((5, 2));
 }
 
 /// Issue #6: the `[agent]` status chip is Yellow in plan mode and Cyan
@@ -912,6 +1001,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             false,
             None,
             0,
+            0u16,
         )
         .unwrap();
         let btn = hits
@@ -996,6 +1086,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             false,
             None,
             0,
+            0u16,
         )
         .unwrap();
         assert!(scroll > 0, "precondition: body must be scrolled");

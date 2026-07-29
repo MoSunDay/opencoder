@@ -421,7 +421,6 @@ fn autopilot_config_roundtrips_through_save() {
         "autopilot": {
             "enabled": true,
             "max_iterations": 5,
-            "skill": "code-reviewer",
             "verify_retries": 2
         }
     });
@@ -431,11 +430,6 @@ fn autopilot_config_roundtrips_through_save() {
     assert_eq!(
         cfg.autopilot.max_iterations, 5,
         "max_iterations round-trips"
-    );
-    assert_eq!(
-        cfg.autopilot.skill.as_deref(),
-        Some("code-reviewer"),
-        "skill round-trips"
     );
     assert_eq!(
         cfg.autopilot.verify_retries, 2,
@@ -450,11 +444,6 @@ fn autopilot_config_roundtrips_through_save() {
     let cfg2 = Config::load(dir.path()).unwrap();
     assert!(cfg2.autopilot.enabled, "enabled preserved by deep merge");
     assert_eq!(cfg2.autopilot.max_iterations, 20, "max_iterations patched");
-    assert_eq!(
-        cfg2.autopilot.skill.as_deref(),
-        Some("code-reviewer"),
-        "skill preserved by deep merge"
-    );
     assert_eq!(cfg2.autopilot.verify_retries, 2, "verify_retries preserved");
 }
 

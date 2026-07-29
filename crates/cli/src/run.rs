@@ -9,10 +9,11 @@ use base64::Engine as _;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
-    generate_title, resume_and_replay as resume_session, run_once, SessionEvent, SessionState,
+    generate_title, resume_and_replay as resume_session, run_once, SessionState,
 };
 use opencoder_store::{SessionFilter, SessionPatch, Store};
 
+use crate::display::{print_event, truncate};
 use crate::Cli;
 
 /// Apply a `--model` override (format `provider/model_id`) to the config.
@@ -44,10 +45,45 @@ pub(crate) fn reapply_resume_model(
     Some(m.clone())
 }
 
+/// Apply an `--agent` override (builtin name like plan/explore/build) to the
+/// config. Sets `config.agent.default` so the fresh-session path resolves it.
+/// Returns true when the config changed.
+pub(crate) fn apply_agent_override(config: &mut Config, agent: &Option<String>) -> bool {
+    if let Some(a) = agent {
+        if config.agent.default != *a {
+            config.agent.default = a.clone();
+            return true;
+        }
+    }
+    false
+}
+
+/// Re-apply an explicit `--agent` to a resumed session. `resume()` restores the
+/// stored agent into the session, so an explicit `--agent` must win here. Returns
+/// the new agent name when the session was changed (caller persists it), else None.
+pub(crate) fn reapply_resume_agent(
+    session: &mut SessionState,
+    agent: &Option<String>,
+) -> Result<Option<String>> {
+    let name = match agent.as_ref() {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+    if session.agent.name == *name {
+        return Ok(None);
+    }
+    let resolved = resolve_agent(name)
+        .or_else(|| resolve_agent("act"))
+        .ok_or_else(|| anyhow!("agent not found: {name}"))?;
+    session.agent = resolved;
+    Ok(Some(name.clone()))
+}
+
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     let workdir = resolve_workdir(cli)?;
     let mut config = Config::load(&workdir)?;
     apply_model_override(&mut config, &cli.model);
+    apply_agent_override(&mut config, &cli.agent);
     let ep = config.resolve_endpoint()?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
         &ep.base_url,
@@ -105,6 +141,23 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
                     &session.id,
                     &SessionPatch {
                         model: Some(new_model),
+                        updated_at: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+    }
+
+    // Likewise, an explicit --agent wins over the resumed session's stored
+    // agent and is re-persisted so subsequent resumes honor the new choice.
+    if let Some(new_agent) = reapply_resume_agent(&mut session, &cli.agent)? {
+        if let Some(st) = &store {
+            let _ = st
+                .update_session(
+                    &session.id,
+                    &SessionPatch {
+                        agent: Some(new_agent),
                         updated_at: Some(opencoder_core::message::now_ms()),
                         ..Default::default()
                     },
@@ -347,111 +400,6 @@ fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
 }
 
-pub(crate) fn print_event(ev: &SessionEvent) {
-    match ev {
-        SessionEvent::TextDelta(t) => {
-            print!("{t}");
-            use std::io::Write;
-            let _ = std::io::stdout().flush();
-        }
-        SessionEvent::ReasoningDelta(_) => {}
-        SessionEvent::ToolStart { name, input, .. } => {
-            if name == "task" {
-                return;
-            }
-            eprintln!(
-                "\n\x1b[36m\u{25b8} {name}\x1b[0m {}",
-                summarize_input(input)
-            );
-        }
-        SessionEvent::ToolEnd {
-            name,
-            output,
-            is_error,
-            ..
-        } => {
-            let color = if *is_error { "31" } else { "2" };
-            eprintln!("\x1b[{color}m  {}\x1b[0m", indent_first(output, 2));
-            let _ = name;
-        }
-        SessionEvent::AgentSwitch(to) => {
-            eprintln!("\n\x1b[35m[switched to {to} mode]\x1b[0m");
-        }
-        SessionEvent::ModelSwitch(to) => {
-            eprintln!("\n\x1b[35m[switched to model: {to}]\x1b[0m");
-        }
-        SessionEvent::Compaction(s) => {
-            eprintln!("\n\x1b[33m[context compacted]\x1b[0m {}", truncate(s, 160));
-        }
-        SessionEvent::Status(s) => {
-            eprintln!("\x1b[2m[{s}]\x1b[0m");
-        }
-        SessionEvent::Done => {
-            println!("\n");
-        }
-        SessionEvent::Error(e) => {
-            eprintln!("\n\x1b[31merror: {e}\x1b[0m");
-        }
-        SessionEvent::SubagentStart { kind, prompt, .. } => {
-            eprintln!("\x1b[34m\u{2937} subagent [{kind}] {prompt}\x1b[0m");
-        }
-        SessionEvent::SubagentEnd { ok, summary, .. } => {
-            let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-            eprintln!("\x1b[34m  {mark} {summary}\x1b[0m");
-        }
-        SessionEvent::PlanHandoff(plan) => {
-            eprintln!("\n\x1b[33m\u{2500}\u{2500} plan \u{2500}\u{2500}\x1b[0m\n{plan}\n");
-        }
-        SessionEvent::TranscriptReset(_) => {}
-        SessionEvent::QueueConsumed { .. } => {}
-        SessionEvent::SteerConsumed { .. } => {}
-        SessionEvent::SubagentChild { .. } => {}
-        SessionEvent::AutoPilot { phase, iteration } => {
-            eprintln!("\n\x1b[35m\u{25c9} autopilot: {phase:?} (iteration {iteration})\x1b[0m");
-        }
-    }
-}
-
-fn summarize_input(input: &serde_json::Value) -> String {
-    match input {
-        serde_json::Value::Object(map) => {
-            if let Some(c) = map.get("command").and_then(|v| v.as_str()) {
-                return truncate(c, 100);
-            }
-            if let Some(c) = map.get("path").and_then(|v| v.as_str()) {
-                return truncate(c, 100);
-            }
-            if let Some(c) = map.get("description").and_then(|v| v.as_str()) {
-                return truncate(c, 100);
-            }
-            let s = serde_json::to_string(input).unwrap_or_default();
-            truncate(&s, 100)
-        }
-        other => {
-            let s = serde_json::to_string(other).unwrap_or_default();
-            truncate(&s, 100)
-        }
-    }
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    let t = s.trim();
-    if t.chars().count() <= n {
-        t.to_string()
-    } else {
-        let cut: String = t.chars().take(n).collect();
-        format!("{cut}...")
-    }
-}
-
-fn indent_first(s: &str, n: usize) -> String {
-    let pad = " ".repeat(n);
-    s.lines()
-        .map(|l| format!("{pad}{l}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[allow(dead_code)]
 pub fn _duration() -> Duration {
     Duration::from_secs(0)
@@ -460,7 +408,7 @@ pub fn _duration() -> Duration {
 /// Read each `--image` file path into a `data:image/<fmt>;base64,<...>` URI
 /// suitable for the `ContentBlock::Image` / OpenAI `image_url` field. Returns
 /// an empty vec when no paths were given. A missing/unreadable file errors.
-fn load_image_data_uris(paths: &[String]) -> Result<Vec<String>> {
+pub(crate) fn load_image_data_uris(paths: &[String]) -> Result<Vec<String>> {
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
         let path = std::path::Path::new(p);
@@ -494,37 +442,6 @@ fn mime_from_ext(path: &std::path::Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn summarize_input_extracts_command() {
-        let input = serde_json::json!({"command": "ls -la"});
-        assert_eq!(summarize_input(&input), "ls -la");
-    }
-
-    #[test]
-    fn summarize_input_extracts_path_when_no_command() {
-        let input = serde_json::json!({"path": "/tmp/foo.rs"});
-        assert_eq!(summarize_input(&input), "/tmp/foo.rs");
-    }
-
-    #[test]
-    fn truncate_adds_ellipsis() {
-        let long = "a".repeat(120);
-        let t = truncate(&long, 10);
-        assert!(t.ends_with("..."));
-        assert_eq!(t.chars().count(), 13); // 10 + "..."
-    }
-
-    #[test]
-    fn truncate_short_returns_as_is() {
-        assert_eq!(truncate("hello", 10), "hello");
-    }
-
-    #[test]
-    fn indent_first_pads_each_line() {
-        let s = "line1\nline2";
-        assert_eq!(indent_first(s, 2), "  line1\n  line2");
-    }
 
     #[test]
     fn resume_hint_is_copyable_command() {
@@ -756,5 +673,49 @@ mod tests {
         assert_eq!(s.config.provider_id(), "anthropic");
         // no override -> no change, returns None
         assert_eq!(reapply_resume_model(&mut s, &None), None);
+    }
+
+    #[test]
+    fn apply_agent_override_sets_default() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.agent.default, "act");
+        assert!(apply_agent_override(&mut cfg, &Some("plan".into())));
+        assert_eq!(cfg.agent.default, "plan");
+        // same value -> no change (returns false)
+        assert!(!apply_agent_override(&mut cfg, &Some("plan".into())));
+        // no override -> no change
+        let mut cfg2 = Config::default();
+        let before = cfg2.agent.default.clone();
+        assert!(!apply_agent_override(&mut cfg2, &None));
+        assert_eq!(cfg2.agent.default, before);
+    }
+
+    #[test]
+    fn reapply_resume_agent_overrides_stored_agent() {
+        use opencoder_core::resolve_agent;
+        use opencoder_llm::{ChatStream, MockChatClient};
+        use opencoder_session::SessionState;
+        use std::sync::Arc;
+        // simulate a session resumed with the default "act" agent
+        let cfg = Config::default();
+        let agent = resolve_agent("act").unwrap();
+        let mut s = SessionState::new(
+            "s1",
+            agent,
+            cfg,
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            std::path::PathBuf::from("/tmp"),
+        );
+        // explicit --agent plan wins over the resumed "act"
+        let changed = reapply_resume_agent(&mut s, &Some("plan".into())).unwrap();
+        assert_eq!(changed.as_deref(), Some("plan"));
+        assert_eq!(s.agent.name, "plan");
+        // same value -> no change, returns None
+        assert_eq!(
+            reapply_resume_agent(&mut s, &Some("plan".into())).unwrap(),
+            None
+        );
+        // no override -> no change, returns None
+        assert_eq!(reapply_resume_agent(&mut s, &None).unwrap(), None);
     }
 }

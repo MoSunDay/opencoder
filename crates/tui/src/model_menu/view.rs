@@ -68,16 +68,14 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    let threshold_hint = format!(
-        "{} tokens (\u{2248}{}k)",
-        form.threshold,
-        form.threshold / 1000
-    );
-    let context_size_hint = format!(
-        "{} tokens (\u{2248}{}k)",
-        form.context_size,
-        form.context_size / 1000
-    );
+    let threshold_hint = match form.threshold_input.trim().parse::<u64>() {
+        Ok(v) => format!("{} tokens (\u{2248}{}k)", v, v / 1000),
+        Err(_) => "(empty)".to_string(),
+    };
+    let context_size_hint = match form.context_size_input.trim().parse::<u64>() {
+        Ok(v) => format!("{} tokens (\u{2248}{}k)", v, v / 1000),
+        Err(_) => "(empty)".to_string(),
+    };
     let reasoning_val = format!("[ {} ]", form.reasoning.label());
     let interleave_val = format!(
         "[ {} ]",
@@ -126,7 +124,11 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         ),
         field_line(
             "fps:",
-            &format!("{} FPS", form.fps),
+            &if form.fps_input.is_empty() {
+                "(empty)".to_string()
+            } else {
+                format!("{} FPS", form.fps_input)
+            },
             form.focus == ConfigField::Fps,
             "1-30, digits/\u{2190}\u{2192} \u{00b1}1, Backspace",
         ),
@@ -177,19 +179,13 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         ),
         field_line(
             "ap max_iter:",
-            &form.ap_max_iter.to_string(),
+            &if form.ap_max_iter_input.is_empty() {
+                "(empty)".to_string()
+            } else {
+                form.ap_max_iter_input.clone()
+            },
             form.focus == ConfigField::ApMaxIter,
             "1+, digits/\u{2190}/\u{2192} \u{00b1}1, Backspace",
-        ),
-        field_line(
-            "ap skill:",
-            if form.ap_skill_input.trim().is_empty() {
-                "(unset)"
-            } else {
-                &form.ap_skill_input
-            },
-            form.focus == ConfigField::ApSkill,
-            "type name, Backspace, Enter=next",
         ),
         button_line_cfg(form),
         Line::raw(""),
@@ -201,6 +197,38 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             .alignment(Alignment::Left),
         popup,
     );
+    // Place terminal cursor at end of raw input for text fields.
+    if let Some(row) = text_field_row(form.focus) {
+        if let Some(raw) = focused_raw_input(form) {
+            let cx = popup.x + 1 + 15 + raw.chars().count() as u16;
+            let cy = popup.y + 1 + row as u16;
+            f.set_cursor_position((cx, cy));
+        }
+    }
+}
+
+/// Row index in the config-form `lines` vec for text-edit fields (0-based).
+fn text_field_row(field: ConfigField) -> Option<usize> {
+    match field {
+        ConfigField::MaxTokens => Some(2),
+        ConfigField::ContextSize => Some(3),
+        ConfigField::Threshold => Some(4),
+        ConfigField::Fps => Some(5),
+        ConfigField::ApMaxIter => Some(10),
+        _ => None,
+    }
+}
+
+/// Raw input buffer for the currently-focused text field, if any.
+fn focused_raw_input(form: &ConfigForm) -> Option<&str> {
+    match form.focus {
+        ConfigField::MaxTokens => Some(&form.max_tokens_input),
+        ConfigField::ContextSize => Some(&form.context_size_input),
+        ConfigField::Threshold => Some(&form.threshold_input),
+        ConfigField::Fps => Some(&form.fps_input),
+        ConfigField::ApMaxIter => Some(&form.ap_max_iter_input),
+        _ => None,
+    }
 }
 
 fn button_line_cfg(form: &ConfigForm) -> Line<'_> {

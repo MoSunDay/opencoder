@@ -1,26 +1,30 @@
 pub const HELP: &str = "\
-Keybindings:
-  Shift+Tab        switch mode act <--> plan  (Alt+Tab fallback)
-  Enter            submit (idle) / steer (running \u{2014} promoted at turn boundary)
-  Tab              submit (idle) / follow-up queue (running \u{2014} after completion)
-  Ctrl+Shift+Tab  switch mode act <--> plan (keep context, no handoff reset)
-  Ctrl+U          switch mode act <--> plan (same pure toggle; use when Ctrl+Shift+Tab is taken)
-  Ctrl+V          paste image from clipboard (screenshot)
-  Shift+Enter / Alt+Enter / Ctrl+J   insert newline (multi-line input)
-  $                pick skill anywhere -> {$name}; loaded on submit
-  /                slash command picker: /task (sessions), /config (settings), /model (providers), /compact (compress history)
-  Shift+I          view/edit plan (plan mode, idle): opens in Normal; i/a to edit, :wq save, :q! discard, / search
-  Esc              close help (if open) / close popup / clear input
-  Esc Esc          double-tap Esc to interrupt a running task
-  Ctrl+C          interrupt a running task (same as Esc Esc)
-  Ctrl+D           quit
-  Ctrl+H           toggle this help
-  Ctrl+W           delete word before cursor (backward-kill-word)
-  Ctrl+A / Ctrl+E  cursor to start / end
-  PageUp/Down      scroll transcript  (PageDown = jump to bottom)
-  Ctrl+L           exit subagent view (if focused) / collapse all thinking & tool output / clear input
-Mouse:            scroll wheel to scroll transcript; click arrow to follow
-                  drag in the body to select text and copy it to the clipboard (OSC52)
-                  SHIFT+drag = terminal-native selection (fallback when OSC52 is blocked)
-                  steer panel: \u{2715} delete, > submit now (interrupt & promote)
+快捷键列表：
+
+  Shift+Tab        切换模式 act <--> plan（plan→act 清空上下文；Alt+Tab 同效）
+  Enter            提交（空闲） / 转向（运行中，下一轮生效）
+  Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
+  Ctrl+Shift+Tab  切换模式（保留上下文，不重置）
+  Ctrl+U          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
+  Ctrl+V          粘贴剪贴板图片（截图）
+  Shift+Enter / Ctrl+J   插入换行（多行输入）
+  $                选择并插入技能 -> {$name}；提交时加载
+  /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
+  Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
+  Esc              关闭帮助/弹窗/清空输入
+  Esc Esc          双击 Esc 中断运行中的任务
+  Ctrl+C          中断运行中的任务（同 Esc Esc）
+  Ctrl+D           退出
+  Ctrl+H           打开/关闭此帮助
+  Ctrl+W           删除光标前的单词
+  Ctrl+A / Ctrl+E  光标移到行首/行尾
+  Ctrl+Z / Ctrl+Y  撤销 / 重做输入编辑
+  ↑ / ↓            多行时移动光标；单行时浏览历史记录
+  PageUp/Down      滚动对话记录  （PageDown = 跳到底部）
+  Ctrl+L           退出子代理视图 / 折叠所有输出 / 清空输入
+
+鼠标:            滚轮滚动对话记录；点击箭头跟随最新
+                  拖拽选择文本并复制到剪贴板（OSC52）
+                  SHIFT+拖拽 = 终端原生选择（OSC52 被拦截时的备用方案）
+                  转向面板: ✕ 删除, > 立即提交（中断并提升）
 ";

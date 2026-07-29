@@ -544,6 +544,16 @@ impl ChatView {
                         out.push(Line::from(spans));
                     } else {
                         let mut spans = header.spans.clone();
+                        // Expanded: flip the header's leading prefix arrow
+                        // from U+25B8 (right-pointing) to U+25BE (down-
+                        // pointing) so the prefix mirrors the toggle state.
+                        if let Some(first) = spans.first_mut() {
+                            let flipped = match first.content.strip_prefix('\u{25b8}') {
+                                Some(rest) => format!("\u{25be}{rest}"),
+                                None => first.content.to_string(),
+                            };
+                            first.content = flipped.into();
+                        }
                         spans.push(Span::styled(
                             " [\u{2191}]",
                             Style::default().fg(Color::DarkGray),

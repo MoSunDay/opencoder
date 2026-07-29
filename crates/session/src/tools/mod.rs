@@ -9,17 +9,15 @@ pub mod bg;
 pub mod chrome_headless;
 pub mod computer_use;
 pub mod edit;
-pub mod glob;
-pub mod grep;
 pub mod image_data;
 pub mod latent;
 pub mod ls;
+pub mod search;
 pub mod read;
 pub mod ssh_pty;
 pub mod task;
 pub mod view_image;
 pub mod web_read;
-pub mod write;
 
 #[cfg(feature = "browser")]
 pub mod web_fetch;
@@ -34,10 +32,8 @@ pub fn registry() -> HashMap<String, ToolArc> {
             Arc::new(bash::BashTool) as ToolArc,
             Arc::new(read::ReadTool) as ToolArc,
             Arc::new(view_image::ViewImageTool) as ToolArc,
-            Arc::new(write::WriteTool) as ToolArc,
             Arc::new(edit::EditTool) as ToolArc,
-            Arc::new(glob::GlobTool) as ToolArc,
-            Arc::new(grep::GrepTool) as ToolArc,
+            Arc::new(search::SearchTool) as ToolArc,
             Arc::new(ls::ListTool) as ToolArc,
             Arc::new(task::TaskTool) as ToolArc,
             Arc::new(computer_use::ComputerUseTool) as ToolArc,

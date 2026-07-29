@@ -27,9 +27,11 @@ thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 dirs.workspace = true
-glob.workspace = true
-regex.workspace = true
 libc = "0.2"
+# Ripgrep in-process search engine for the `search` tool: no external `rg` binary needed.
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
 ulid.workspace = true
 base64.workspace = true
 # Content-extraction (ported from agent-browser read.rs) — light, always-on so

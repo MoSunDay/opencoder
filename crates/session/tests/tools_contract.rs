@@ -5,7 +5,7 @@ use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
 use opencoder_session::tools::{
-    bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool, ls::ListTool, write::WriteTool,
+    bash::BashTool, edit::EditTool, ls::ListTool, search::SearchTool,
 };
 use serde_json::json;
 
@@ -18,34 +18,6 @@ fn ctx(dir: &Path) -> ToolContext {
         max_output: 4096,
         proxy: None,
     }
-}
-
-#[tokio::test]
-async fn write_tool_creates_file_with_content() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(dir.path());
-    let out = WriteTool
-        .execute(json!({"path": "hello.txt", "content": "line1\nline2"}), &c)
-        .await
-        .unwrap();
-    assert!(!out.is_error);
-    let written = std::fs::read_to_string(dir.path().join("hello.txt")).unwrap();
-    assert_eq!(written, "line1\nline2");
-}
-
-#[tokio::test]
-async fn write_tool_creates_parent_dirs() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(dir.path());
-    let out = WriteTool
-        .execute(
-            json!({"path": "sub/dir/file.rs", "content": "fn main() {}"}),
-            &c,
-        )
-        .await
-        .unwrap();
-    assert!(!out.is_error);
-    assert!(dir.path().join("sub/dir/file.rs").exists());
 }
 
 #[tokio::test]
@@ -114,23 +86,6 @@ async fn edit_tool_replace_all() {
         std::fs::read_to_string(dir.path().join("f.txt")).unwrap(),
         "bar bar bar"
     );
-}
-
-#[tokio::test]
-async fn glob_tool_matches_pattern() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.rs"), "").unwrap();
-    std::fs::write(dir.path().join("b.rs"), "").unwrap();
-    std::fs::write(dir.path().join("c.txt"), "").unwrap();
-    let c = ctx(dir.path());
-    let out = GlobTool
-        .execute(json!({"pattern": "*.rs"}), &c)
-        .await
-        .unwrap();
-    assert!(!out.is_error);
-    assert!(out.content.contains("a.rs"));
-    assert!(out.content.contains("b.rs"));
-    assert!(!out.content.contains("c.txt"));
 }
 
 #[tokio::test]
@@ -352,182 +307,131 @@ async fn bash_tool_output_file_captures_output_on_timeout() {
     let _ = std::fs::remove_file(&path);
 }
 
-#[cfg(unix)]
 #[tokio::test]
-async fn grep_follows_symlink_but_breaks_cycle() {
-    // A self-referencing symlink (loop -> .) must not cause infinite recursion.
-    // The canonical-path guard deduplicates the real directory, so the match is
-    // found exactly once instead of up to the 1000-result cap.
-    use std::os::unix::fs::symlink;
+async fn search_finds_matching_lines() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("real.txt"), "UNIQUE_NEEDLE here").unwrap();
-    symlink(".", dir.path().join("loop")).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn alpha() {}\nfn beta() {}").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "beta beta").unwrap();
     let c = ctx(dir.path());
-    let out = GrepTool
-        .execute(json!({"pattern": "UNIQUE_NEEDLE"}), &c)
+    let out = SearchTool
+        .execute(json!({"pattern": "beta"}), &c)
         .await
         .unwrap();
-    let count = out.content.matches("UNIQUE_NEEDLE").count();
-    assert_eq!(
-        count, 1,
-        "expected exactly one match (cycle not broken): {out:?}"
-    );
+    assert!(!out.is_error, "{}", out.content);
+    // Both files contain "beta"; output is `relpath:line: content`.
+    assert!(out.content.contains("a.rs:2: fn beta() {}"), "{}", out.content);
+    assert!(out.content.contains("b.txt:1: beta beta"), "{}", out.content);
+    // Non-matching content must not appear.
+    assert!(!out.content.contains("alpha"));
 }
 
-#[cfg(unix)]
 #[tokio::test]
-async fn grep_includes_symlinked_directory() {
-    // The real directory lives outside the search root and is reachable only
-    // through a symlink — proving grep follows symlinked directories.
-    use std::os::unix::fs::symlink;
+async fn search_returns_no_matches_cleanly() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("realdir")).unwrap();
-    std::fs::write(dir.path().join("realdir").join("deep.txt"), "DEEP_NEEDLE").unwrap();
-    std::fs::create_dir(dir.path().join("search")).unwrap();
-    symlink("../realdir", dir.path().join("search").join("alias")).unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn alpha() {}").unwrap();
     let c = ctx(dir.path());
-    let out = GrepTool
+    let out = SearchTool
+        .execute(json!({"pattern": "zzz_nomatch"}), &c)
+        .await
+        .unwrap();
+    assert!(!out.is_error, "{}", out.content);
+    assert_eq!(out.content, "no matches");
+}
+
+#[tokio::test]
+async fn search_include_filter_restricts_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "NEEDLE").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "NEEDLE").unwrap();
+    let c = ctx(dir.path());
+    let out = SearchTool
+        .execute(json!({"pattern": "NEEDLE", "include": "*.rs"}), &c)
+        .await
+        .unwrap();
+    assert!(!out.is_error, "{}", out.content);
+    assert!(out.content.contains("a.rs"), "{}", out.content);
+    assert!(!out.content.contains("b.txt"), "{}", out.content);
+}
+
+#[tokio::test]
+async fn search_searches_subdirectories() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub/deep")).unwrap();
+    std::fs::write(dir.path().join("sub/deep/c.rs"), "DEEP_NEEDLE").unwrap();
+    let c = ctx(dir.path());
+    let out = SearchTool
+        .execute(json!({"pattern": "DEEP_NEEDLE"}), &c)
+        .await
+        .unwrap();
+    assert!(!out.is_error, "{}", out.content);
+    assert!(out.content.contains("c.rs"), "{}", out.content);
+    assert!(out.content.contains("DEEP_NEEDLE"), "{}", out.content);
+}
+
+#[tokio::test]
+async fn search_invalid_regex_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let out = SearchTool
+        .execute(json!({"pattern": "*"}), &c)
+        .await
+        .unwrap();
+    assert!(out.is_error, "invalid regex must error: {out:?}");
+    assert!(out.content.contains("invalid regex"), "{}", out.content);
+}
+
+#[tokio::test]
+async fn search_single_file_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn foo() {}\nfn bar() {}").unwrap();
+    std::fs::write(dir.path().join("b.rs"), "fn bar() {}").unwrap();
+    let c = ctx(dir.path());
+    let out = SearchTool
         .execute(
-            json!({"pattern": "DEEP_NEEDLE", "path": dir.path().join("search").to_str().unwrap()}),
+            json!({"pattern": "bar", "path": "a.rs"}),
             &c,
         )
         .await
         .unwrap();
-    assert!(
-        out.content.contains("DEEP_NEEDLE"),
-        "symlinked dir not searched: {out:?}"
-    );
+    assert!(!out.is_error, "{}", out.content);
+    assert!(out.content.contains("a.rs:2: fn bar()"), "{}", out.content);
+    // b.rs must not be searched: only the single file was targeted.
+    assert!(!out.content.contains("b.rs"), "{}", out.content);
+}
+
+#[tokio::test]
+async fn search_regex_anchors_work() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn begin\nbegin middle\nend begin").unwrap();
+    let c = ctx(dir.path());
+    let out = SearchTool
+        .execute(json!({"pattern": "^fn"}), &c)
+        .await
+        .unwrap();
+    assert!(!out.is_error, "{}", out.content);
+    // Only the line starting with "fn".
+    assert!(out.content.contains("a.rs:1: fn begin"), "{}", out.content);
+    let count = out.content.matches("a.rs:").count();
+    assert_eq!(count, 1, "anchored pattern matches once: {out:?}");
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn grep_includes_symlinked_file() {
-    // A symlink to a file outside the search root — grep must read through it.
+async fn search_follows_symlinked_file() {
     use std::os::unix::fs::symlink;
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("realfile.txt"), "FILE_NEEDLE").unwrap();
+    std::fs::write(dir.path().join("real.txt"), "LINK_NEEDLE").unwrap();
     std::fs::create_dir(dir.path().join("search")).unwrap();
-    symlink(
-        "../realfile.txt",
-        dir.path().join("search").join("link.txt"),
-    )
-    .unwrap();
+    symlink("../real.txt", dir.path().join("search").join("link.txt")).unwrap();
     let c = ctx(dir.path());
-    let out = GrepTool
+    let out = SearchTool
         .execute(
-            json!({"pattern": "FILE_NEEDLE", "path": dir.path().join("search").to_str().unwrap()}),
+            json!({"pattern": "LINK_NEEDLE", "path": dir.path().join("search").to_str().unwrap()}),
             &c,
         )
         .await
         .unwrap();
-    assert!(
-        out.content.contains("FILE_NEEDLE"),
-        "symlinked file not searched: {out:?}"
-    );
+    assert!(!out.is_error, "{}", out.content);
+    assert!(out.content.contains("LINK_NEEDLE"), "symlinked file not searched: {out:?}");
 }
 
-#[cfg(unix)]
-#[tokio::test]
-async fn glob_survives_self_referencing_symlink() {
-    // Defensive: confirm glob's `**` does not hang on a self-referencing symlink.
-    // If glob 0.3.x lacks cycle detection this test would never complete.
-    use std::os::unix::fs::symlink;
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.rs"), "").unwrap();
-    symlink(".", dir.path().join("loop")).unwrap();
-    let c = ctx(dir.path());
-    let out = GlobTool
-        .execute(json!({"pattern": "**/*.rs"}), &c)
-        .await
-        .unwrap();
-    assert!(out.content.contains("a.rs"), "glob result: {out:?}");
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn glob_survives_multiple_self_referencing_symlinks() {
-    // The real regression point. A single self-loop (`loop -> .`) is a linear
-    // chain the kernel cuts off via ELOOP, so it gives a false sense of safety.
-    // Two or more self-referencing symlinks in one directory (`a -> .`, `b -> .`)
-    // cause branching recursion: 2^depth paths, i.e. a real hang / IO explosion.
-    // The canonical-path `seen` set must dedup the real directory so each is
-    // visited exactly once. Asserts completion under 5s (would hang without fix).
-    use std::os::unix::fs::symlink;
-    use std::time::Instant;
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("target.rs"), "").unwrap();
-    symlink(".", dir.path().join("a")).unwrap();
-    symlink(".", dir.path().join("b")).unwrap();
-    symlink(".", dir.path().join("c")).unwrap();
-    let c = ctx(dir.path());
-    let start = Instant::now();
-    let out = GlobTool
-        .execute(json!({"pattern": "**/*.rs"}), &c)
-        .await
-        .unwrap();
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed.as_secs() < 5,
-        "glob took {:?} on triple self-loop; cycle not broken",
-        elapsed
-    );
-    assert!(
-        out.content.contains("target.rs"),
-        "expected target.rs in results: {out:?}"
-    );
-    // Result must not blow up toward the 500 cap — the deduped real dir is
-    // entered once, so target.rs appears exactly once.
-    let count = out.content.matches("target.rs").count();
-    assert_eq!(
-        count, 1,
-        "target.rs should appear once, got {count}: {out:?}"
-    );
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn glob_matches_normal_tree_parity_with_crate() {
-    // On a symlink-free mixed tree, the self-written walker (matches_path_with)
-    // must produce exactly the same result set as the glob crate's own
-    // `glob::glob()` iterator. Guards against matching-semantics drift,
-    // including `**`, trailing-`**` (dir-only), and `.hidden` handling.
-    use std::path::PathBuf;
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    std::fs::create_dir_all(root.join("sub/deep")).unwrap();
-    std::fs::write(root.join("a.rs"), "").unwrap();
-    std::fs::write(root.join("sub/b.rs"), "").unwrap();
-    std::fs::write(root.join("sub/deep/c.rs"), "").unwrap();
-    std::fs::write(root.join(".hidden.rs"), "").unwrap();
-    std::fs::write(root.join("d.txt"), "").unwrap();
-    let c = ctx(root);
-    for pat in &[
-        "**/*.rs",
-        "**/*.txt",
-        "*.rs",
-        "sub/**/*.rs",
-        "a.rs",
-        "**/.hidden.rs",
-        "**/*",
-        "sub/**",
-    ] {
-        let mut crate_results: Vec<String> = glob::glob(&format!("{}/{}", root.display(), pat))
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .map(|p: PathBuf| p.display().to_string())
-            .collect();
-        crate_results.sort();
-        let out = GlobTool.execute(json!({"pattern": pat}), &c).await.unwrap();
-        let mut tool_results: Vec<String> = if out.content == "no matches" {
-            Vec::new()
-        } else {
-            out.content.lines().map(String::from).collect()
-        };
-        tool_results.sort();
-        assert_eq!(
-            tool_results, crate_results,
-            "parity drift for pattern {:?}:\n  tool : {:?}\n  crate: {:?}",
-            pat, tool_results, crate_results
-        );
-    }
-}

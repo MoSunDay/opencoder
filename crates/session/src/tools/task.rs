@@ -15,7 +15,7 @@ impl Tool for TaskTool {
         // through [`description_for`] / [`parameters_for`] which adapt to the
         // owning agent's kind and the `tools_subagent` capability; this trait
         // method is a fallback for any direct `tool.description()` consumer.
-        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (read/glob/grep/ls/bash), \"build\" for implementation work (read/write/edit/bash/glob/grep/ls), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities plus read-only filesystem tools."
+        "Launch a subagent to handle a delegated task in isolation. The subagent has its own message history and tools, and returns a final summary. Use subagent_type \"explore\" for read-only codebase investigation (search/read), \"build\" for implementation work (bash/edit), or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities plus read-only filesystem tools."
     }
     fn parameters(&self) -> Value {
         parameters_for(false, true)
@@ -42,11 +42,11 @@ pub fn description_for(plan: bool, tools_on: bool) -> String {
     let prefix = "Launch a subagent to handle a delegated task in isolation. \
                   The subagent has its own message history and tools, and returns a final summary. \
                   Use subagent_type \"explore\" for read-only codebase investigation \
-                  (read/glob/grep/ls/bash)";
+                  (search/read)";
     let build_clause = if plan {
         String::new()
     } else {
-        ", \"build\" for implementation work (read/write/edit/bash/glob/grep/ls)".to_string()
+        ", \"build\" for implementation work (bash/edit)".to_string()
     };
     let suffix = if tools_on {
         ", or \"tools\" for browser (web_fetch/web_search) and computer-use capabilities \

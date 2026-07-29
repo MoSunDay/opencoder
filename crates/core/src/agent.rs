@@ -79,32 +79,31 @@ pub fn builtin_agents() -> Vec<Agent> {
             name: "explore".into(),
             kind: AgentKind::Subagent,
             mode: AgentMode::Subagent,
-            description: "Read-only subagent for exploring codebases: find files, search code, answer questions. Cannot modify files.".into(),
+            description: "Read-only subagent for exploring codebases: find files, search code, read files, answer questions. Cannot modify files.".into(),
             prompt: base_prompt_explore(),
             tools: ToolFilter::Allow(vec![
-                "read".into(), "glob".into(), "grep".into(), "ls".into(), "bash".into(),
+                "search".into(), "read".into(),
             ]),
         },
         Agent {
             name: "build".into(),
             kind: AgentKind::Subagent,
             mode: AgentMode::Subagent,
-            description: "Implementation subagent with full file tools: read, write, edit, bash, glob, grep. Use for making code changes.".into(),
+            description: "Implementation subagent: bash (terminal ops, reading files) and edit (precise code changes). Use for making code changes.".into(),
             prompt: base_prompt_build(),
             tools: ToolFilter::Allow(vec![
-                "read".into(), "write".into(), "edit".into(), "bash".into(),
-                "glob".into(), "grep".into(), "ls".into(),
+                "bash".into(), "edit".into(),
             ]),
         },
         Agent {
             name: "tools".into(),
             kind: AgentKind::Subagent,
             mode: AgentMode::Subagent,
-            description: "Umbrella subagent for optional capabilities: browser (web_fetch, web_search) and computer_use, plus read-only filesystem tools (read, glob, grep, ls). Use for web research or computer-use tasks.".into(),
+            description: "Umbrella subagent for optional capabilities: browser (web_fetch, web_search) and computer_use, plus read-only filesystem tools (read, search, ls). Use for web research or computer-use tasks.".into(),
             prompt: base_prompt_tools(),
             tools: ToolFilter::Allow(vec![
                 "web_fetch".into(), "web_search".into(), "computer_use".into(),
-                "read".into(), "glob".into(), "grep".into(), "ls".into(),
+                "read".into(), "search".into(), "ls".into(),
             ]),
         },
         Agent {
@@ -151,15 +150,16 @@ pub fn base_prompt_plan() -> String {
 
 pub fn base_prompt_explore() -> String {
     "You are a read-only exploration subagent. Your job is to investigate the codebase and report findings. \
-     You have read, glob, grep, ls, and bash (read-only) tools. You CANNOT edit or write files. \
+     You have search (ripgrep code search) and read tools. You CANNOT edit or write files. \
      Complete the specific task delegated to you, then return a concise summary of your findings. \
      Do not ask questions; infer reasonable defaults and proceed."
         .to_string()
 }
 
 pub fn base_prompt_build() -> String {
-    "You are an implementation subagent with full file tools. Complete the specific task delegated to you: \
-     read code, make edits, write new files, run bash commands, and verify your work. \
+    "You are an implementation subagent. You have bash (terminal ops; use cat/grep/sed to read files) \
+     and edit (precise string replacement) tools. Complete the specific task delegated to you: \
+     inspect code, make edits, run bash commands, and verify your work. \
      Do not ask questions; infer reasonable defaults and proceed. \
      After finishing, briefly state what you changed and the key file paths."
         .to_string()
@@ -167,7 +167,7 @@ pub fn base_prompt_build() -> String {
 
 pub fn base_prompt_tools() -> String {
     "You are the tools subagent: the home of optional capabilities — browser (web_fetch, web_search) \
-     and computer-use (computer_use) — plus read-only filesystem tools (read, glob, grep, ls). \
+     and computer-use (computer_use) — plus read-only filesystem tools (read, search, ls). \
      Complete the specific task delegated to you. Browser and computer-use tools are only present when \
      the user has enabled the corresponding capability, so fall back to read-only investigation if a \
      tool is unavailable. Do not ask questions; infer reasonable defaults and proceed. \
@@ -285,8 +285,7 @@ mod tests {
             "web_search",
             "computer_use",
             "read",
-            "glob",
-            "grep",
+            "search",
             "ls",
         ] {
             assert!(
@@ -317,5 +316,44 @@ mod tests {
             p.contains("'tools' subagent"),
             "tool_preamble must advertise the 'tools' subagent"
         );
+    }
+
+    /// Pin down the `explore` subagent's exact tool set: it must carry
+    /// **only** `search` + `read` — the read-only pair. This is a structural
+    /// guard (rules/01): if the tool list drifts (e.g. an old `glob`/`grep`
+    /// creeps back, or a mutating tool leaks in) the test fails loudly.
+    #[test]
+    fn explore_subagent_carries_search_and_read_only() {
+        let explore = resolve_agent("explore").expect("explore subagent registered");
+        assert_eq!(explore.mode, AgentMode::Subagent);
+        // Positive: the two read-only tools must be present.
+        assert!(
+            explore.tools.allows("search"),
+            "explore must allow 'search'"
+        );
+        assert!(explore.tools.allows("read"), "explore must allow 'read'");
+        // Negative: no mutating, delegation, or removed tools may leak in.
+        for blocked in &["bash", "edit", "task", "write", "glob", "grep", "ls"] {
+            assert!(
+                !explore.tools.allows(blocked),
+                "explore (read-only) must not allow '{blocked}'"
+            );
+        }
+    }
+
+    /// Pin down the `build` subagent's exact tool set: it must carry
+    /// **only** `bash` + `edit` — the implementation pair.
+    #[test]
+    fn build_subagent_carries_bash_and_edit_only() {
+        let build = resolve_agent("build").expect("build subagent registered");
+        assert_eq!(build.mode, AgentMode::Subagent);
+        assert!(build.tools.allows("bash"), "build must allow 'bash'");
+        assert!(build.tools.allows("edit"), "build must allow 'edit'");
+        for blocked in &["search", "read", "task", "write", "glob", "grep", "ls"] {
+            assert!(
+                !build.tools.allows(blocked),
+                "build (implementation) must not allow '{blocked}'"
+            );
+        }
     }
 }

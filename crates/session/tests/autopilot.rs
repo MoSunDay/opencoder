@@ -39,7 +39,6 @@ fn autopilot_config(max_iterations: u32, verify_retries: u32) -> Config {
         autopilot: AutoPilotConfig {
             enabled: true,
             max_iterations,
-            skill: None,
             verify_retries,
         },
         ..Config::default()
@@ -314,4 +313,105 @@ async fn doom_loop_guard_terminates_act_phase() {
     let outcome = drive(&mut session, &reg, &mut on_event).await.unwrap();
     // The doom guard broke the act phase; verify then said Complete.
     assert_eq!(outcome, ApOutcome::Complete);
+}
+
+#[tokio::test]
+async fn act_phase_handoff_resets_transcript_and_clears_skill() {
+    // PLAN produces an assistant message ("plan-0"), ACT resets via handoff
+    // (emitting TranscriptReset), then VERIFY says Complete.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![completed("plan-0", vec![])])
+            .push_script(vec![completed("act-0", vec![])])
+            .push_script(vec![completed("no", vec![])]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
+    session
+        .record(Message::user("u1", "implement feature X"))
+        .await;
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    drive(&mut session, &reg, &mut on_event).await.unwrap();
+
+    // ACT phase handoff must have emitted TranscriptReset.
+    let has_reset = buf
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|ev| matches!(ev, SessionEvent::TranscriptReset(_)));
+    assert!(
+        has_reset,
+        "ACT phase must emit TranscriptReset (plan->act handoff)"
+    );
+
+    // Skill must be cleared after the loop completes.
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "skill must be cleared after drive completes"
+    );
+
+    // The original task message must not survive the handoff reset.
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|m| m.text().contains("implement feature X")),
+        "handoff must have removed plan-phase messages from transcript"
+    );
+}
+
+#[tokio::test]
+async fn act_phase_fallback_injects_execute_prompt_when_plan_has_no_text() {
+    // PLAN produces an empty assistant message, so handoff returns None and
+    // run_act_phase falls back to injecting execute_prompt. VERIFY says Complete.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![completed("", vec![])])
+            .push_script(vec![completed("act-0", vec![])])
+            .push_script(vec![completed("no", vec![])]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
+    session
+        .record(Message::user("u1", "implement feature X"))
+        .await;
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    drive(&mut session, &reg, &mut on_event).await.unwrap();
+
+    // Fallback path must NOT emit TranscriptReset.
+    let has_reset = buf
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|ev| matches!(ev, SessionEvent::TranscriptReset(_)));
+    assert!(
+        !has_reset,
+        "fallback path must not emit TranscriptReset"
+    );
+
+    // execute_prompt must have been injected into the transcript.
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.text().contains("Execute the plan you just produced")),
+        "fallback must inject execute_prompt into the transcript"
+    );
+
+    // The original task message survives the fallback (transcript not reset).
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.text().contains("implement feature X")),
+        "fallback must preserve the original plan-phase transcript"
+    );
+
+    // Skill must still be cleared after the loop completes.
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "skill must be cleared after drive completes (fallback path)"
+    );
 }

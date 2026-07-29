@@ -132,6 +132,7 @@ pub(crate) fn render<B: Backend>(
     input_disabled: bool,
     plan_mode: Option<&str>,
     run_ms: u64,
+    help_scroll: u16,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -264,7 +265,7 @@ pub(crate) fn render<B: Backend>(
         );
 
         if show_help {
-            render_help_popup(f, area);
+            crate::help::render_help(f, area, help_scroll);
         }
         if let Some(tp) = task_picker {
             crate::task::render_task_picker(f, area, tp);
@@ -285,7 +286,7 @@ pub(crate) fn render<B: Backend>(
         if let Some(text) = copy_status {
             render_status_chip(f, composer_area, text, Color::Green);
         }
-        if !input_disabled {
+        if !input_disabled && model_menu.is_none() {
             place_cursor(
                 f,
                 composer_area,
@@ -330,6 +331,14 @@ fn render_body(
     // and empty-paragraph panics in a 1x1 terminal.
     if text_w == 0 || visible_h == 0 {
         f.render_widget(block, area);
+        return;
+    }
+
+    // Empty session: show the in-body tutorial instead of a blank transcript.
+    // It vanishes automatically once the first block appears.
+    if chat.blocks.is_empty() {
+        f.render_widget(block, area);
+        crate::welcome::render_tutorial_in_body(f, inner);
         return;
     }
 
@@ -581,6 +590,9 @@ fn render_composer(
                     .add_modifier(Modifier::BOLD),
             ));
         }
+        if ri > 0 {
+            spans.push(Span::raw(" ".repeat(prompt_w as usize)));
+        }
         let text: String = chars[vr.start..vr.end].iter().collect();
         spans.push(Span::raw(text));
         lines.push(Line::from(spans));
@@ -719,19 +731,6 @@ fn render_status(
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_help_popup(f: &mut Frame, area: Rect) {
-    let h = 20u16.min(area.height.saturating_sub(2));
-    let w = 60u16.min(area.width.saturating_sub(4));
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.y + (area.height.saturating_sub(h)) / 2;
-    let popup = Rect::new(x, y, w, h);
-    f.render_widget(Clear, popup);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Help (Ctrl+H, Esc to close) ");
-    f.render_widget(Paragraph::new(crate::keybind::HELP).block(block), popup);
-}
-
 fn place_cursor(
     f: &mut Frame,
     composer_area: Rect,
@@ -743,11 +742,7 @@ fn place_cursor(
 ) {
     let border = 1u16;
     let (row, col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
-    let x = if row == 0 {
-        composer_area.x + border + prompt_w + col as u16
-    } else {
-        composer_area.x + border + col as u16
-    };
+    let x = composer_area.x + border + prompt_w + col as u16;
     let y = composer_area.y + border + (row as u16).saturating_sub(scroll);
     f.set_cursor_position((x, y));
 }

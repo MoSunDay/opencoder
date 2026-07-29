@@ -49,7 +49,6 @@ async fn main() -> Result<()> {
             token,
             session,
             continue_,
-            agent,
             interrupt,
             prompt,
         }) => {
@@ -67,9 +66,10 @@ async fn main() -> Result<()> {
                 token.clone(),
                 session.clone(),
                 *continue_,
-                agent.clone(),
+                cli.agent.clone(),
                 cli.model.clone(),
                 *interrupt,
+                cli.image.clone(),
                 p,
             )
             .await

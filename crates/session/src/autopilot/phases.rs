@@ -4,10 +4,13 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use opencoder_core::message::now_ms;
 use opencoder_core::{resolve_agent, Message, ToolArc};
+use opencoder_store::SessionPatch;
 
 use crate::autopilot::prompts::{continuation_prompt, execute_prompt};
 use crate::autopilot::state::ApState;
+use crate::plan_handoff;
 use crate::runner::{new_id, run_loop, SessionEvent};
 use crate::SessionState;
 
@@ -24,20 +27,19 @@ fn switch_agent(
     on_event(SessionEvent::AgentSwitch(session.agent.name.clone()));
 }
 
-/// Best-effort: resolve a configured skill name to its body and activate it.
-/// Skills are discovered from `~/.opencoder/skills`; a missing skill is a no-op.
-fn maybe_activate_skill(session: &SessionState) {
-    if let Some(name) = &session.config.autopilot.skill {
-        let body = opencoder_core::skill::discover()
-            .into_iter()
-            .find(|s| &s.name == name)
-            .map(|s| s.body);
-        session.set_skill(body);
-    }
+/// Hardcode the review skill for the PLAN phase. Always discovers the
+/// `"review"` skill from `~/.opencoder/skills`; a missing skill body is a
+/// no-op (skill set to `None`).
+fn activate_review_skill(session: &SessionState) {
+    let body = opencoder_core::skill::discover()
+        .into_iter()
+        .find(|s| s.name == "review")
+        .map(|s| s.body);
+    session.set_skill(body);
 }
 
-/// PLAN phase: switch to the plan agent, (optionally) activate the configured
-/// skill, inject the continuation prompt, and run one loop.
+/// PLAN phase: switch to the plan agent, activate the review skill, inject the
+/// continuation prompt, and run one loop.
 pub async fn run_plan_phase(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
@@ -45,24 +47,50 @@ pub async fn run_plan_phase(
     state: &ApState,
 ) -> Result<()> {
     switch_agent(session, "plan", on_event);
-    maybe_activate_skill(session);
+    activate_review_skill(session);
     let mut msg = Message::user(new_id(), continuation_prompt(&state.goal));
     msg.synthetic = true;
     session.record(msg).await;
     run_loop(session, registry, on_event).await
 }
 
-/// ACT phase: switch to the act agent, inject the execute prompt, and run one
-/// loop. Context is carried over from PLAN (no handoff reset) so VERIFY can
-/// inspect the complete work record.
+/// ACT phase: reset the transcript via plan→act handoff so ACT only sees the
+/// review output as its sole execution instruction, then run one loop. If the
+/// handoff cannot find a plan (no assistant text), fall back to injecting an
+/// explicit execute prompt.
 pub async fn run_act_phase(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<()> {
-    switch_agent(session, "act", on_event);
-    let mut msg = Message::user(new_id(), execute_prompt());
-    msg.synthetic = true;
-    session.record(msg).await;
-    run_loop(session, registry, on_event).await
+    if plan_handoff::handoff(session, "").is_some() {
+        // Persist the handoff boundary so resume can reconstruct the focused
+        // transcript. Best-effort: non-fatal if the store is absent.
+        if let Some(store) = &session.store {
+            let _ = store
+                .update_session(
+                    &session.id,
+                    &SessionPatch {
+                        handoff_seq: session.handoff_seq,
+                        handoff_plan: session.handoff_plan.clone(),
+                        updated_at: Some(now_ms()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        on_event(SessionEvent::TranscriptReset(session.messages.clone()));
+        session.set_skill(None);
+        switch_agent(session, "act", on_event);
+        // The handoff message already carries execution directives
+        // (HANDOFF_PREFIX), so no separate execute_prompt is injected.
+        run_loop(session, registry, on_event).await
+    } else {
+        session.set_skill(None);
+        switch_agent(session, "act", on_event);
+        let mut msg = Message::user(new_id(), execute_prompt());
+        msg.synthetic = true;
+        session.record(msg).await;
+        run_loop(session, registry, on_event).await
+    }
 }

@@ -23,6 +23,11 @@ pub(crate) enum KeyAction {
     /// Steer submitted to a focused subagent's child session (not the parent).
     SubagentSteer(String),
     Queue(String),
+    /// Tab-queue attempted while a running subagent is focused. A queue
+    /// normally targets the *parent* session, which would leak input into
+    /// the parent agent — so it is rejected here. The input box is left
+    /// untouched so the user can press Enter to steer the subagent instead.
+    QueueUnsupported,
     SwitchAgent(String),
     SwitchAgentNoClear(String),
     Cancel,
@@ -56,6 +61,8 @@ pub(crate) fn handle_key(
     prompt_w: u16,
     subagent_focused: bool,
     input_disabled: bool,
+    undo_state: &mut crate::undo::UndoState,
+    help_scroll: &mut u16,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -70,10 +77,33 @@ pub(crate) fn handle_key(
                 let (s, i) = composer::insert_str(input, *cursor_idx, &token);
                 *input = s;
                 *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 KeyAction::None
             }
             MenuOutcome::Idle => KeyAction::None,
         };
+    }
+    // Help popup scroll: when help is open, intercept scroll keys.
+    if *show_help {
+        match k.code {
+            KeyCode::Up => {
+                *help_scroll = help_scroll.saturating_sub(1);
+                return KeyAction::None;
+            }
+            KeyCode::Down => {
+                *help_scroll = help_scroll.saturating_add(1);
+                return KeyAction::None;
+            }
+            KeyCode::PageUp => {
+                *help_scroll = help_scroll.saturating_sub(10);
+                return KeyAction::None;
+            }
+            KeyCode::PageDown => {
+                *help_scroll = help_scroll.saturating_add(10);
+                return KeyAction::None;
+            }
+            _ => {}
+        }
     }
     // Body scroll keys (PageUp / PageDown) — shared between enabled
     // and disabled (subagent-focus) states so scrolling always works.
@@ -140,6 +170,7 @@ pub(crate) fn handle_key(
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s;
                 *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 return KeyAction::None;
             }
             // Ctrl+A / Ctrl+E: cursor to start / end of the input buffer.
@@ -157,6 +188,7 @@ pub(crate) fn handle_key(
                 if let Some((s, i)) = composer::delete_word_back(input, *cursor_idx) {
                     *input = s;
                     *cursor_idx = i;
+                    crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 }
                 return KeyAction::None;
             }
@@ -184,6 +216,22 @@ pub(crate) fn handle_key(
                     KeyAction::None
                 };
             }
+            // Ctrl+Z: undo last edit.
+            KeyCode::Char('z') => {
+                if let Some((s, i)) = crate::undo::undo(undo_state, input, *cursor_idx) {
+                    *input = s;
+                    *cursor_idx = i;
+                }
+                return KeyAction::None;
+            }
+            // Ctrl+Y: redo last undone edit.
+            KeyCode::Char('y') => {
+                if let Some((s, i)) = crate::undo::redo(undo_state, input, *cursor_idx) {
+                    *input = s;
+                    *cursor_idx = i;
+                }
+                return KeyAction::None;
+            }
             _ => return KeyAction::None,
         }
     }
@@ -201,6 +249,7 @@ pub(crate) fn handle_key(
                 let (s, i) = composer::insert_newline(input, *cursor_idx);
                 *input = s;
                 *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 return KeyAction::None;
             }
             if input.trim().is_empty() {
@@ -210,6 +259,7 @@ pub(crate) fn handle_key(
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
+            crate::undo::reset(undo_state, input, *cursor_idx);
             // Enter = SubagentSteer when a running subagent is focused;
             // Steer when the parent is running; Submit when idle.
             if subagent_focused {
@@ -225,10 +275,17 @@ pub(crate) fn handle_key(
             if input.trim().is_empty() {
                 return KeyAction::None;
             }
+            // Focused running subagent: a queue would be admitted to the parent
+            // session and affect the parent agent — reject it instead, leaving
+            // the typed text so Enter can submit it as a subagent steer.
+            if subagent_focused {
+                return KeyAction::QueueUnsupported;
+            }
             let text = input.trim().to_string();
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
+            crate::undo::reset(undo_state, input, *cursor_idx);
             if running {
                 KeyAction::Queue(text)
             } else {
@@ -255,24 +312,30 @@ pub(crate) fn handle_key(
                 input.clear();
                 *cursor_idx = 0;
                 *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
                 KeyAction::None
             }
         }
         KeyCode::Up => {
-            if composer::display_rows(input, inner_w, prompt_w) > 1 {
+            let (row, _) = composer::cursor_row_col(input, *cursor_idx, inner_w, prompt_w);
+            if row > 0 {
                 *cursor_idx =
                     composer::move_cursor_vertical(input, *cursor_idx, -1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, -1);
+                crate::undo::reset(undo_state, input, *cursor_idx);
             }
             KeyAction::None
         }
         KeyCode::Down => {
-            if composer::display_rows(input, inner_w, prompt_w) > 1 {
+            let total = composer::display_rows(input, inner_w, prompt_w) as usize;
+            let (row, _) = composer::cursor_row_col(input, *cursor_idx, inner_w, prompt_w);
+            if row + 1 < total {
                 *cursor_idx =
                     composer::move_cursor_vertical(input, *cursor_idx, 1, inner_w, prompt_w);
             } else {
                 move_hist(history, hist_idx, input, cursor_idx, 1);
+                crate::undo::reset(undo_state, input, *cursor_idx);
             }
             KeyAction::None
         }
@@ -288,6 +351,7 @@ pub(crate) fn handle_key(
             if let Some((s, i)) = composer::backspace(input, *cursor_idx) {
                 *input = s;
                 *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
             }
             KeyAction::None
         }
@@ -327,6 +391,7 @@ pub(crate) fn handle_key(
             let (s, i) = composer::insert_char(input, *cursor_idx, c);
             *input = s;
             *cursor_idx = i;
+            crate::undo::snapshot(undo_state, input, *cursor_idx, true);
             KeyAction::None
         }
         _ => KeyAction::None,

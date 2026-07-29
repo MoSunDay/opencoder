@@ -81,6 +81,28 @@ pub async fn get_session(
     messages_response(&state, &id).await
 }
 
+/// DELETE /api/sessions/:id — delete a session. Cascades to its messages,
+/// inputs, events, and subagent tasks via `ON DELETE CASCADE`. Returns 404 when
+/// no session exists for `id`, 200 on success (idempotent for absent ids).
+pub async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    // Distinguish "did not exist" from "deleted" so callers get a real 404.
+    let existed = state.store.get_session(&id).await.unwrap_or(None);
+    if existed.is_none() {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(json!({ "ok": false, "error": format!("session not found: {id}") })),
+        )
+            .into_response();
+    }
+    match state.store.delete_session(&id).await {
+        Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Err(e) => error_500(format!("delete_session: {e:#}")),
+    }
+}
+
 pub async fn get_messages(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

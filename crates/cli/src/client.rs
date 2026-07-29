@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Result};
 use opencoder_client::Remote;
 use opencoder_session::SessionEvent;
 
-use crate::run::print_event;
+use crate::display::print_event;
 
 /// Resolve the client bearer token: `--token` flag, then
 /// `OPENCODER_SERVER_TOKEN` env. Unlike the server, the client does NOT
@@ -31,6 +31,7 @@ pub async fn client_run(
     agent: Option<String>,
     model: Option<String>,
     interrupt: bool,
+    images: Vec<String>,
     prompt: String,
 ) -> Result<()> {
     let token = resolve_token(token)?;
@@ -70,6 +71,7 @@ pub async fn client_run(
     let after = client.last_event_seq(&session_id).await?;
 
     eprintln!("\n\x1b[1muser\x1b[0m: {}\n", prompt.trim_end());
+    let image_uris = crate::run::load_image_data_uris(&images)?;
     let _admitted = client
         .post_prompt(
             &session_id,
@@ -77,6 +79,7 @@ pub async fn client_run(
             None,
             agent.as_deref(),
             model.as_deref(),
+            &image_uris,
         )
         .await?;
 

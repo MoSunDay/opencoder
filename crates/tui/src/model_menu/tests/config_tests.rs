@@ -3,7 +3,11 @@
 use super::common::{backspace, cfg, enter, key, left, right};
 use crate::model_menu::config_form::{ConfigField, ConfigForm};
 use crate::model_menu::patch::ConfigPatch;
+use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
+use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
+use ratatui::Terminal;
 
 // ── ConfigPatch ───────────────────────────────────────────────────────────
 
@@ -21,7 +25,6 @@ fn config_patch_serializes_all_fields() {
         capabilities_tools_subagent: false,
         ap_enabled: true,
         ap_max_iter: 15,
-        ap_skill: Some("commit".into()),
     };
     let v = p.to_json();
     assert_eq!(v["reasoning_effort"], serde_json::json!("high"));
@@ -36,7 +39,6 @@ fn config_patch_serializes_all_fields() {
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["enabled"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
-    assert_eq!(v["autopilot"]["skill"], serde_json::json!("commit"));
 }
 
 #[test]
@@ -53,7 +55,6 @@ fn config_patch_omits_max_tokens_when_none() {
         capabilities_tools_subagent: false,
         ap_enabled: false,
         ap_max_iter: 10,
-        ap_skill: None,
     };
     let v = p.to_json();
     assert!(
@@ -67,7 +68,7 @@ fn config_patch_omits_max_tokens_when_none() {
 #[test]
 fn config_form_defaults_fps_to_ten() {
     let f = ConfigForm::new(&cfg());
-    assert_eq!(f.fps, 10);
+    assert_eq!(f.fps_input, "10");
     assert_eq!(f.build_patch().fps, 10);
 }
 
@@ -98,7 +99,6 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::ToolsSubagent,
         ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
-        ConfigField::ApSkill,
         ConfigField::Save,
     ];
     for expect in &order {
@@ -167,14 +167,14 @@ fn typing_digits_sets_fps() {
             _ => unreachable!(),
         };
         f.focus = ConfigField::Fps;
-        f.fps = 2;
+        f.fps_input = "2".into();
     }
     handle_model_key(&mut slot, key('4'));
-    let fps = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.fps,
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
         _ => unreachable!(),
     };
-    assert_eq!(fps, 24, "from fps=2, typing '4' yields 24");
+    assert_eq!(f.fps_input, "24", "from \"2\", typing '4' yields \"24\"");
 }
 
 #[test]
@@ -221,21 +221,22 @@ fn config_form_paste_filters_non_digits_in_max_tokens() {
 fn config_form_paste_into_fps_clamps_at_30() {
     let mut f = ConfigForm::new(&cfg());
     f.focus = ConfigField::Fps;
-    f.fps = 2;
+    f.fps_input = "2".into();
     f.paste_into("4");
-    assert_eq!(f.fps, 24, "2 -> append 4 -> 24");
-    f.fps = 2;
+    assert_eq!(f.fps_input, "24", "2 -> append 4 -> 24");
+    f.fps_input = "2".into();
     f.paste_into("99");
-    assert_eq!(f.fps, 30, "clamped to 30");
+    assert_eq!(f.fps_input, "299", "paste appends without clamp");
+    assert_eq!(f.build_patch().fps, 30, "clamped to 30 at build time");
 }
 
 #[test]
 fn config_form_paste_into_threshold() {
     let mut f = ConfigForm::new(&cfg());
     f.focus = ConfigField::Threshold;
-    f.threshold = 1000;
+    f.threshold_input = "1000".into();
     f.paste_into("000");
-    assert_eq!(f.threshold, 1_000_000, "1000 -> append 000 -> 1000000");
+    assert_eq!(f.threshold_input, "1000000", "1000 -> append 000 -> 1000000");
 }
 
 #[test]
@@ -243,22 +244,12 @@ fn config_form_inits_autopilot_from_config() {
     let mut c = cfg();
     c.autopilot.enabled = true;
     c.autopilot.max_iterations = 7;
-    c.autopilot.skill = Some("reviewer".into());
     let f = ConfigForm::new(&c);
     assert!(f.ap_enabled);
-    assert_eq!(f.ap_max_iter, 7);
-    assert_eq!(f.ap_skill_input, "reviewer");
+    assert_eq!(f.ap_max_iter_input, "7");
     let p = f.build_patch();
     assert!(p.ap_enabled);
     assert_eq!(p.ap_max_iter, 7);
-    assert_eq!(p.ap_skill.as_deref(), Some("reviewer"));
-}
-
-#[test]
-fn config_form_empty_skill_produces_none() {
-    let f = ConfigForm::new(&cfg());
-    assert!(f.ap_skill_input.is_empty());
-    assert!(f.build_patch().ap_skill.is_none());
 }
 
 #[test]
@@ -286,12 +277,12 @@ fn config_form_toggle_ap_enabled() {
 #[test]
 fn config_form_inits_context_size_from_config() {
     let f = ConfigForm::new(&cfg());
-    assert_eq!(f.context_size, 128_000, "default context size is 128k");
+    assert_eq!(f.context_size_input, "128000", "default context size is 128k");
 
     let mut c = cfg();
     c.context_limit = Some(200_000);
     let f = ConfigForm::new(&c);
-    assert_eq!(f.context_size, 200_000);
+    assert_eq!(f.context_size_input, "200000");
 }
 
 #[test]
@@ -303,47 +294,48 @@ fn typing_digits_sets_context_size() {
             _ => unreachable!(),
         };
         f.focus = ConfigField::ContextSize;
-        f.context_size = 0;
+        f.context_size_input = "0".into();
     }
     handle_model_key(&mut slot, key('2'));
     let f = match slot.as_ref().unwrap() {
         ModelMenu::Config(f) => f,
         _ => unreachable!(),
     };
-    assert_eq!(f.context_size, 2);
+    assert_eq!(f.context_size_input, "02");
+    assert_eq!(f.build_patch().context_limit, 2);
 }
 
 #[test]
 fn backspace_pops_digit_from_threshold() {
     let mut f = ConfigForm::new(&cfg());
     f.focus = ConfigField::Threshold;
-    f.threshold = 50_000;
+    f.threshold_input = "50000".into();
     let (_outcome, next) = crate::model_menu::config_form::handle_key(f, backspace());
     let f = match next {
         Some(ModelMenu::Config(f)) => f,
         _ => panic!("expected Config menu"),
     };
-    assert_eq!(f.threshold, 5_000, "50_000 / 10 = 5_000");
+    assert_eq!(f.threshold_input, "5000", "\"50000\" pop -> \"5000\"");
 }
 
 #[test]
 fn backspace_pops_digit_from_context_size() {
     let mut f = ConfigForm::new(&cfg());
     f.focus = ConfigField::ContextSize;
-    f.context_size = 50_000;
+    f.context_size_input = "50000".into();
     let (_outcome, next) = crate::model_menu::config_form::handle_key(f, backspace());
     let f = match next {
         Some(ModelMenu::Config(f)) => f,
         _ => panic!("expected Config menu"),
     };
-    assert_eq!(f.context_size, 5_000, "50_000 / 10 = 5_000");
+    assert_eq!(f.context_size_input, "5000", "\"50000\" pop -> \"5000\"");
 }
 
 #[test]
 fn validate_rejects_threshold_above_context_size() {
     let mut f = ConfigForm::new(&cfg());
-    f.threshold = 200_000;
-    f.context_size = 128_000;
+    f.threshold_input = "200000".into();
+    f.context_size_input = "128000".into();
     // validate is private, so trigger it via handle_key on Save.
     f.focus = ConfigField::Save;
     let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
@@ -355,7 +347,159 @@ fn validate_rejects_threshold_above_context_size() {
 #[test]
 fn config_patch_writes_context_limit() {
     let mut f = ConfigForm::new(&cfg());
-    f.context_size = 96_000;
+    f.context_size_input = "96000".into();
     let v = f.build_patch().to_json();
     assert_eq!(v["context_limit"], serde_json::json!(96_000));
+}
+
+// ── String-buffer numeric fields (Issue 2: clearable inputs) ───────────────
+
+#[test]
+fn backspace_clears_threshold_to_empty() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::Threshold;
+        f.threshold_input = "1000".into();
+    }
+    // Backspace 4 times should fully clear the field (no floor stuck).
+    for _ in 0..4 {
+        handle_model_key(&mut slot, backspace());
+    }
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.threshold_input, "", "backspace must clear threshold to empty");
+}
+
+#[test]
+fn type_digits_replaces_value() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::ContextSize;
+        f.context_size_input = "999".into();
+    }
+    // Clear the old value, then type a fresh one.
+    for _ in 0..3 {
+        handle_model_key(&mut slot, backspace());
+    }
+    for c in "42".chars() {
+        handle_model_key(&mut slot, key(c));
+    }
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.context_size_input, "42", "clear then type replaces value");
+    assert_eq!(f.build_patch().context_limit, 42);
+}
+
+#[test]
+fn save_empty_field_shows_error() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::Save;
+        f.threshold_input = "".into();
+    }
+    let outcome = handle_model_key(&mut slot, enter());
+    assert!(
+        matches!(outcome, ModelOutcome::Idle),
+        "empty field must block save"
+    );
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(f.error.is_some(), "an error message should be shown");
+}
+
+// ── config form cursor placement ──────────────────────────────────────────
+
+#[test]
+fn config_form_cursor_on_max_tokens() {
+    let mut form = ConfigForm::new(&cfg());
+    form.focus = ConfigField::MaxTokens;
+    form.max_tokens_input = "8192".into();
+    let menu = ModelMenu::Config(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // popup: x=4, y=6; max_tokens is row 2; "8192" has 4 chars
+    // cx = 4 + 1(border) + 15(label) + 4 = 24, cy = 6 + 1(border) + 2 = 9
+    terminal.backend_mut().assert_cursor_position((24, 9));
+}
+
+#[test]
+fn config_form_cursor_on_context_size() {
+    let mut form = ConfigForm::new(&cfg());
+    form.focus = ConfigField::ContextSize;
+    form.context_size_input = "128000".into();
+    let menu = ModelMenu::Config(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // popup: x=4, y=6; ctx size is row 3; "128000" has 6 chars
+    // cx = 4 + 1 + 15 + 6 = 26, cy = 6 + 1 + 3 = 10
+    // cursor sits at end of raw "128000", before decorative " tokens" suffix
+    terminal.backend_mut().assert_cursor_position((26, 10));
+}
+
+#[test]
+fn config_form_cursor_hidden_on_toggle() {
+    let mut form = ConfigForm::new(&cfg());
+    form.focus = ConfigField::Reasoning;
+    let menu = ModelMenu::Config(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // No set_cursor_position called for non-text fields
+    // cursor stays at initial (0,0) and terminal hides it
+    terminal.backend_mut().assert_cursor_position((0, 0));
+}
+
+#[test]
+fn config_form_cursor_hidden_on_save_button() {
+    let mut form = ConfigForm::new(&cfg());
+    form.focus = ConfigField::Save;
+    let menu = ModelMenu::Config(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    terminal.backend_mut().assert_cursor_position((0, 0));
 }

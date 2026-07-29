@@ -1,4 +1,5 @@
 pub mod client;
+pub mod display;
 pub mod exit_tips;
 pub mod run;
 pub mod server;
@@ -33,6 +34,12 @@ pub struct Cli {
     /// wins over the stored model) and re-persists so later resumes honor it.
     #[arg(long, global = true, value_name = "MODEL")]
     pub model: Option<String>,
+    /// Override the agent for this run, as a builtin name (act/plan/explore/build).
+    /// New sessions use it as the primary agent and persist the choice; resuming
+    /// with --agent re-applies it (explicit choice wins over the stored agent)
+    /// and re-persists so later resumes honor it.
+    #[arg(long, global = true, value_name = "AGENT")]
+    pub agent: Option<String>,
     /// Resume the most recent session for this workdir.
     #[arg(long, global = true, default_value_t = false)]
     pub continue_: bool,
@@ -108,10 +115,6 @@ pub enum Command {
         /// Resume the most recent remote session.
         #[arg(long, default_value_t = false)]
         continue_: bool,
-        /// Set the agent (e.g. plan/build/explore) for the remote session.
-        /// Applied on session creation and as a per-prompt override.
-        #[arg(long)]
-        agent: Option<String>,
         /// Interrupt (cancel) the running drain on the resolved session, then
         /// exit. Requires --session <id> or --continue; no prompt needed.
         #[arg(long, default_value_t = false)]

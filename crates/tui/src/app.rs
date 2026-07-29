@@ -80,6 +80,8 @@ pub(super) async fn run_app(
     let mut cancelled = false;
     let mut drain_pending = false;
     let mut show_help = false;
+    let mut help_scroll: u16 = 0;
+    let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
@@ -267,6 +269,7 @@ pub(super) async fn run_app(
                     &pending_images,
                     input_disabled,
                     run_elapsed_ms,
+                    help_scroll,
                 )?;
             }
             dirty = false;
@@ -430,6 +433,8 @@ pub(super) async fn run_app(
                             2,
                             subagent_focus.is_some(),
                             input_disabled,
+                            &mut undo_state,
+                            &mut help_scroll,
                         ) {
                             KeyAction::Submit(text) => {
                                 let (clean, _unresolved) = resolve_and_warn(
@@ -575,6 +580,15 @@ pub(super) async fn run_app(
                                     }
                                 }
                                 follow = true;
+                            }
+                            KeyAction::QueueUnsupported => {
+                                // Tab-queue was rejected because a running
+                                // subagent is focused: show a transient hint
+                                // and do NOT touch the parent session.
+                                mode_flash = Some((
+                                    "\u{26a0} tab queue not supported for subagents \u{2014} press Enter to steer".into(),
+                                    anim_tick,
+                                ));
                             }
                             KeyAction::SwitchAgent(name) => {
                                 if matches!(

@@ -69,6 +69,7 @@ pub(crate) fn render_frame(
     pending_images: &[(String, String)],
     input_disabled: bool,
     run_ms: u64,
+    help_scroll: u16,
 ) -> anyhow::Result<()> {
     let plan_label = plan_edit.as_ref().map(|pe| pe.mode_label());
     let (render_input, render_cursor) = match plan_edit {
@@ -109,5 +110,6 @@ pub(crate) fn render_frame(
         input_disabled,
         plan_mode,
         run_ms,
+        help_scroll,
     )
 }

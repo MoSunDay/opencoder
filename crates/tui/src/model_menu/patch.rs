@@ -12,6 +12,7 @@ pub struct ConfigPatch {
     /// `None` = omit from patch (leave existing); `Some(v)` = write `v`.
     pub max_tokens: Option<u64>,
     pub context_threshold: u64,
+    pub context_limit: u64,
     pub fps: u32,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
@@ -25,6 +26,7 @@ impl ConfigPatch {
     pub fn to_json(&self) -> serde_json::Value {
         let mut root = serde_json::json!({
             "reasoning_effort": self.reasoning_effort,
+            "context_limit": self.context_limit,
             "interleaved_thinking": self.interleaved_thinking,
             "compaction": {
                 "context_threshold": self.context_threshold,

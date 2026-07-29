@@ -54,7 +54,7 @@ fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'stat
 // ── /config form ──────────────────────────────────────────────────────────
 
 fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &ConfigForm) {
-    let want_h = 16u16;
+    let want_h = 17u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -72,6 +72,11 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         "{} tokens (\u{2248}{}k)",
         form.threshold,
         form.threshold / 1000
+    );
+    let context_size_hint = format!(
+        "{} tokens (\u{2248}{}k)",
+        form.context_size,
+        form.context_size / 1000
     );
     let reasoning_val = format!("[ {} ]", form.reasoning.label());
     let interleave_val = format!(
@@ -108,16 +113,22 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "digits, Backspace, empty=unset, Enter=next",
         ),
         field_line(
+            "ctx size:",
+            &context_size_hint,
+            form.focus == ConfigField::ContextSize,
+            "digits/\u{2190}\u{2192} \u{00b1}1k, Backspace, Enter=next",
+        ),
+        field_line(
             "ctx threshold:",
             &threshold_hint,
             form.focus == ConfigField::Threshold,
-            "digits/\u{2190}\u{2192} \u{00b1}1k, Enter=next",
+            "digits/\u{2190}\u{2192} \u{00b1}1k, Backspace, Enter=next",
         ),
         field_line(
             "fps:",
             &format!("{} FPS", form.fps),
             form.focus == ConfigField::Fps,
-            "1-30, digits/\u{2190}\u{2192} \u{00b1}1",
+            "1-30, digits/\u{2190}\u{2192} \u{00b1}1, Backspace",
         ),
         field_line(
             "browser:",
@@ -168,7 +179,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "ap max_iter:",
             &form.ap_max_iter.to_string(),
             form.focus == ConfigField::ApMaxIter,
-            "1+, digits/\u{2190}/\u{2192} \u{00b1}1",
+            "1+, digits/\u{2190}/\u{2192} \u{00b1}1, Backspace",
         ),
         field_line(
             "ap skill:",

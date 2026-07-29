@@ -1,6 +1,6 @@
 //! Tests for ConfigPatch serialization and ConfigForm key handling.
 
-use super::common::{cfg, enter, key, left, right};
+use super::common::{backspace, cfg, enter, key, left, right};
 use crate::model_menu::config_form::{ConfigField, ConfigForm};
 use crate::model_menu::patch::ConfigPatch;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
@@ -14,6 +14,7 @@ fn config_patch_serializes_all_fields() {
         interleaved_thinking: Some(true),
         max_tokens: Some(8192),
         context_threshold: 80_000,
+        context_limit: 128_000,
         fps: 25,
         capabilities_browser: true,
         capabilities_computer_use: false,
@@ -31,6 +32,7 @@ fn config_patch_serializes_all_fields() {
         v["compaction"]["context_threshold"],
         serde_json::json!(80_000)
     );
+    assert_eq!(v["context_limit"], serde_json::json!(128_000));
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["enabled"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
@@ -44,6 +46,7 @@ fn config_patch_omits_max_tokens_when_none() {
         interleaved_thinking: None,
         max_tokens: None,
         context_threshold: 1000,
+        context_limit: 128_000,
         fps: 10,
         capabilities_browser: false,
         capabilities_computer_use: false,
@@ -87,6 +90,7 @@ fn enter_chains_through_config_fields_to_save() {
     let order = [
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
+        ConfigField::ContextSize,
         ConfigField::Threshold,
         ConfigField::Fps,
         ConfigField::Browser,
@@ -277,4 +281,81 @@ fn config_form_toggle_ap_enabled() {
         _ => unreachable!(),
     };
     assert_eq!(after, !before, "Right toggles ap_enabled");
+}
+
+#[test]
+fn config_form_inits_context_size_from_config() {
+    let f = ConfigForm::new(&cfg());
+    assert_eq!(f.context_size, 128_000, "default context size is 128k");
+
+    let mut c = cfg();
+    c.context_limit = Some(200_000);
+    let f = ConfigForm::new(&c);
+    assert_eq!(f.context_size, 200_000);
+}
+
+#[test]
+fn typing_digits_sets_context_size() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::ContextSize;
+        f.context_size = 0;
+    }
+    handle_model_key(&mut slot, key('2'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.context_size, 2);
+}
+
+#[test]
+fn backspace_pops_digit_from_threshold() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::Threshold;
+    f.threshold = 50_000;
+    let (_outcome, next) = crate::model_menu::config_form::handle_key(f, backspace());
+    let f = match next {
+        Some(ModelMenu::Config(f)) => f,
+        _ => panic!("expected Config menu"),
+    };
+    assert_eq!(f.threshold, 5_000, "50_000 / 10 = 5_000");
+}
+
+#[test]
+fn backspace_pops_digit_from_context_size() {
+    let mut f = ConfigForm::new(&cfg());
+    f.focus = ConfigField::ContextSize;
+    f.context_size = 50_000;
+    let (_outcome, next) = crate::model_menu::config_form::handle_key(f, backspace());
+    let f = match next {
+        Some(ModelMenu::Config(f)) => f,
+        _ => panic!("expected Config menu"),
+    };
+    assert_eq!(f.context_size, 5_000, "50_000 / 10 = 5_000");
+}
+
+#[test]
+fn validate_rejects_threshold_above_context_size() {
+    let mut f = ConfigForm::new(&cfg());
+    f.threshold = 200_000;
+    f.context_size = 128_000;
+    // validate is private, so trigger it via handle_key on Save.
+    f.focus = ConfigField::Save;
+    let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
+    // Should NOT save; should stay as Config with an error.
+    assert!(matches!(outcome, ModelOutcome::Idle), "save should be blocked");
+    assert!(next.is_some(), "menu should stay open on validation error");
+}
+
+#[test]
+fn config_patch_writes_context_limit() {
+    let mut f = ConfigForm::new(&cfg());
+    f.context_size = 96_000;
+    let v = f.build_patch().to_json();
+    assert_eq!(v["context_limit"], serde_json::json!(96_000));
 }

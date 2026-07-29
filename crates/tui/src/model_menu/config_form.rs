@@ -64,6 +64,7 @@ pub enum ConfigField {
     Reasoning,
     InterleavedThinking,
     MaxTokens,
+    ContextSize,
     Threshold,
     Fps,
     Browser,
@@ -77,10 +78,11 @@ pub enum ConfigField {
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 13] = [
+    const ORDER: [ConfigField; 14] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
+        ConfigField::ContextSize,
         ConfigField::Threshold,
         ConfigField::Fps,
         ConfigField::Browser,
@@ -107,6 +109,7 @@ pub struct ConfigForm {
     pub interleaved_thinking: bool,
     pub max_tokens_input: String,
     pub threshold: u64,
+    pub context_size: u64,
     pub fps: u32,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
@@ -125,6 +128,7 @@ impl ConfigForm {
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
             max_tokens_input: config.max_tokens.map(|v| v.to_string()).unwrap_or_default(),
             threshold: config.compaction.context_threshold,
+            context_size: config.context_limit(),
             fps: config.tui_fps(),
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
@@ -140,6 +144,11 @@ impl ConfigForm {
     fn adjust_threshold(&mut self, delta: i64) {
         let next = self.threshold as i64 + delta;
         self.threshold = next.max(1000) as u64;
+    }
+
+    fn adjust_context_size(&mut self, delta: i64) {
+        let next = self.context_size as i64 + delta;
+        self.context_size = next.max(1) as u64;
     }
 
     fn adjust_fps(&mut self, delta: i32) {
@@ -161,6 +170,7 @@ impl ConfigForm {
             interleaved_thinking: Some(self.interleaved_thinking),
             max_tokens,
             context_threshold: self.threshold,
+            context_limit: self.context_size,
             fps: self.fps,
             capabilities_browser: self.capabilities_browser,
             capabilities_computer_use: self.capabilities_computer_use,
@@ -179,6 +189,9 @@ impl ConfigForm {
         if self.threshold < 1000 {
             return Err("context_threshold must be >= 1000".into());
         }
+        if self.threshold > self.context_size {
+            return Err("context_threshold must not exceed context size".into());
+        }
         Ok(())
     }
 
@@ -190,6 +203,12 @@ impl ConfigForm {
             }
             match self.focus {
                 ConfigField::MaxTokens => self.max_tokens_input.push(c),
+                ConfigField::ContextSize => {
+                    let s = format!("{}{}", self.context_size, c);
+                    if let Ok(n) = s.parse::<u64>() {
+                        self.context_size = n.max(1);
+                    }
+                }
                 ConfigField::Threshold => {
                     let s = format!("{}{}", self.threshold, c);
                     if let Ok(n) = s.parse::<u64>() {
@@ -229,6 +248,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
+            ConfigField::ContextSize => form.adjust_context_size(-1000),
             ConfigField::Threshold => form.adjust_threshold(-1000),
             ConfigField::Fps => form.adjust_fps(-1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
@@ -247,6 +267,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
+            ConfigField::ContextSize => form.adjust_context_size(1000),
             ConfigField::Threshold => form.adjust_threshold(1000),
             ConfigField::Fps => form.adjust_fps(1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
@@ -276,6 +297,18 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::MaxTokens => {
                 form.max_tokens_input.pop();
             }
+            ConfigField::ContextSize => {
+                form.context_size = (form.context_size / 10).max(1);
+            }
+            ConfigField::Threshold => {
+                form.threshold = (form.threshold / 10).max(1000);
+            }
+            ConfigField::Fps => {
+                form.fps = (form.fps / 10).max(1);
+            }
+            ConfigField::ApMaxIter => {
+                form.ap_max_iter = (form.ap_max_iter / 10).max(1);
+            }
             ConfigField::ApSkill => {
                 form.ap_skill_input.pop();
             }
@@ -284,6 +317,12 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
         KeyCode::Char(c) => match form.focus {
             ConfigField::MaxTokens if c.is_ascii_digit() => {
                 form.max_tokens_input.push(c);
+            }
+            ConfigField::ContextSize if c.is_ascii_digit() => {
+                let s = format!("{}{}", form.context_size, c);
+                if let Ok(n) = s.parse::<u64>() {
+                    form.context_size = n.max(1);
+                }
             }
             ConfigField::Threshold if c.is_ascii_digit() => {
                 let s = format!("{}{}", form.threshold, c);

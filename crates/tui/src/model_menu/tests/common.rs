@@ -57,6 +57,9 @@ pub(crate) fn right() -> crossterm::event::KeyEvent {
 pub(crate) fn esc() -> crossterm::event::KeyEvent {
     crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::empty())
 }
+pub(crate) fn backspace() -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty())
+}
 
 // ── HOME isolation ─────────────────────────────────────────────────────────
 //

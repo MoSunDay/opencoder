@@ -403,3 +403,57 @@ fn tool_output_truncated_at_limit() {
         "first captured line must be the start of the output: {first}"
     );
 }
+
+#[test]
+fn expanded_tool_header_prefix_arrow_flips_down() {
+    // Regression: `flatten_with` rewrites the tool header's prefix arrow from
+    // ▸ (U+25B8, points right) to ▾ (U+25BE, points down) when the block is
+    // expanded, and reverts to ▸ when collapsed. The arrow is the visual cue
+    // for whether the tool body is visible.
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ToolStart {
+        id: "t1".into(),
+        name: "bash".into(),
+        input: serde_json::json!({"command": "echo hi"}),
+    });
+    v.apply(&SessionEvent::ToolEnd {
+        id: "t1".into(),
+        name: "bash".into(),
+        output: "RESULT-42".into(),
+        is_error: false,
+        images: Vec::new(),
+    });
+
+    let first_span_char = |lines: &[Line]| -> Option<char> {
+        lines
+            .first()?
+            .spans
+            .first()?
+            .content
+            .chars()
+            .next()
+    };
+
+    // Collapsed (default): header keeps ▸.
+    assert_eq!(
+        first_span_char(&v.flatten()),
+        Some('\u{25b8}'),
+        "collapsed tool header must start with ▸ (U+25B8)"
+    );
+
+    // Expand — arrow flips to ▾.
+    v.toggle_tool_at(v.blocks.len() - 1);
+    assert_eq!(
+        first_span_char(&v.flatten()),
+        Some('\u{25be}'),
+        "expanded tool header must start with ▾ (U+25BE)"
+    );
+
+    // Collapse again — arrow reverts to ▸.
+    v.toggle_tool_at(v.blocks.len() - 1);
+    assert_eq!(
+        first_span_char(&v.flatten()),
+        Some('\u{25b8}'),
+        "re-collapsed tool header must start with ▸ (U+25B8) again"
+    );
+}

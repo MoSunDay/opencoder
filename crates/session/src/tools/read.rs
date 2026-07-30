@@ -39,7 +39,7 @@ impl Tool for ReadTool {
         "read"
     }
     fn description(&self) -> &str {
-        "Reads a UTF-8 text file from the filesystem. Returns up to 200 lines by default (max 1000 per call). Appends a metadata footer (total_lines, offset, lines_read)."
+        "Reads a UTF-8 text file from the filesystem. Returns up to 200 lines by default (max 1000 per call). Appends a metadata footer (total_lines, offset, lines_read); a notice is shown only when the token limit truncates the requested range."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
@@ -90,12 +90,19 @@ impl Tool for ReadTool {
         }
 
         let lines_read = actual_end - start;
+        let token_capped = actual_end < requested_end;
 
         if out.is_empty() {
             out.push_str("(empty)\n");
         }
 
         out.push('\n');
+        if token_capped {
+            out.push_str(&format!(
+                "[INCOMPLETE READ] output truncated at token limit; re-read with offset={} to continue.\n",
+                actual_end + 1
+            ));
+        }
         out.push_str("--- metadata ---\n");
         out.push_str(&format!("total_lines: {}\n", total_lines));
         out.push_str(&format!("offset: {}\n", start + 1));
@@ -231,9 +238,10 @@ mod tests {
         // Must stop before reaching 1000 lines because of token cap.
         let lines_read: usize = meta.get("lines_read").unwrap().parse().unwrap();
         assert!(lines_read < 1000, "lines_read={}", lines_read);
-        let content_end = out.find("\n\n--- metadata ---").unwrap();
+        let content_end = out.find("\n\n").unwrap();
         assert!(opencoder_llm::estimate(&out[..content_end]) <= 5000);
-        assert!(!out.contains("[INCOMPLETE READ]"));
+        assert!(out.contains("[INCOMPLETE READ]"));
+        assert!(out.contains("offset="));
     }
 
     #[tokio::test]
@@ -266,5 +274,27 @@ mod tests {
         // first content line should be line 201
         let first_line = out.lines().next().unwrap();
         assert!(first_line.starts_with("  201:"), "{}", first_line);
+        // offset read with no token-cap must not emit a redundant notice.
+        assert!(!out.contains("[INCOMPLETE READ]"));
+    }
+
+    #[tokio::test]
+    async fn test_offset_remaining_content_no_notice() {
+        // Reading a slice that stops at the line limit (not token cap) while
+        // content remains afterwards: this is expected pagination, NOT an
+        // incomplete read, so no notice should be emitted.
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("f.txt")).unwrap();
+        for i in 0..500 {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        let ctx = ctx_for(&dir);
+        let tool = super::ReadTool;
+        let out = run_read(&tool, &ctx, json!({ "path": "f.txt", "offset": 51, "limit": 100 })).await;
+        let meta = parse_metadata(&out);
+        assert_eq!(meta.get("offset"), Some(&"51"));
+        assert_eq!(meta.get("lines_read"), Some(&"100"));
+        // 400 lines still remain, but this is a normal line-limit stop.
+        assert!(!out.contains("[INCOMPLETE READ]"));
     }
 }

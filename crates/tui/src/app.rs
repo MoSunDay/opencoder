@@ -776,5 +776,5 @@ pub(crate) use crate::app_helpers::{
 pub(crate) use crate::skill_display::{skill_token_display, skill_trigger};
 
 #[cfg(test)]
-#[path = "app_tests.rs"]
+#[path = "app_tests/mod.rs"]
 mod tests;

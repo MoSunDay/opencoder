@@ -415,6 +415,78 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
     );
 }
 
+/// Combined-content submit while running: when a prompt contains BOTH a
+/// `{$skill}` token AND other text, the skill is resolved (body injected into
+/// the system prompt) while the **clean text** — not the skill trigger — is what
+/// reaches the queue. This is the critical contract for "skill + other input".
+#[tokio::test]
+async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
+    use opencoder_core::extract_skill_tokens;
+    use opencoder_store::Delivery;
+    use opencoder_store::LibsqlStore;
+
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let sid = "combined-session";
+    store
+        .create_session(&SessionMeta {
+            id: sid.into(),
+            title: Some("t".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            task_type: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+        })
+        .await
+        .unwrap();
+
+    // The raw prompt a user typed: a skill token interleaved with prose.
+    let raw = "{$repo-memory} fix the bug in main.rs";
+    let (clean, names) = extract_skill_tokens(raw);
+
+    // Precondition: the token parsed and clean text carries the real task.
+    assert_eq!(names, vec!["repo-memory"]);
+    assert_eq!(clean.trim(), "fix the bug in main.rs");
+
+    // Mirrors the `else if running` branch in app.rs Submit: the *clean* text
+    // (not the trigger) is admitted as a queued input.
+    let trimmed = clean.trim();
+    assert!(
+        !trimmed.is_empty(),
+        "combined content must not collapse to a pure-skill trigger"
+    );
+    let input = crate::app_helpers::mk_input_with_images(
+        sid,
+        Delivery::Queue,
+        trimmed,
+        &[],
+    );
+    store.admit_input(&input).await.unwrap();
+
+    // Verify: the queued prompt is the user's task text, NOT a skill trigger.
+    let queued = store
+        .pending_inputs(sid, Delivery::Queue)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|i| i.delivery == Delivery::Queue)
+        .expect("queued input must exist");
+    assert_eq!(
+        queued.prompt, "fix the bug in main.rs",
+        "combined-content submit must queue the clean task text"
+    );
+    assert!(
+        !queued.prompt.contains("skill is now active"),
+        "the skill trigger must NOT be queued when there is other text"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // apply_force_redraw — Ctrl+L force-redraw helper
 // ---------------------------------------------------------------------------
@@ -496,3 +568,5 @@ fn apply_force_redraw_is_a_noop_when_needs_clear_false() {
         "needs_clear=false must not clear the terminal"
     );
 }
+
+mod skill_apply;

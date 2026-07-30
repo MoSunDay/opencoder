@@ -593,4 +593,52 @@ mod tests {
         let content = std::fs::read_to_string(&script).unwrap();
         assert_eq!(content, "SENTINEL");
     }
+
+    // ------------------------------------------------------------------
+    // Combined-content cases: skill token mixed with other input text.
+    // These lock in the guarantee that `{$name}` is parsed correctly even
+    // when surrounded by arbitrary user prose.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn extract_tokens_token_at_end_after_text() {
+        // Skill at the very end, after other content.
+        let (clean, names) = extract_skill_tokens("do stuff {$alpha}");
+        assert_eq!(clean, "do stuff ");
+        assert_eq!(names, vec!["alpha"]);
+    }
+
+    #[test]
+    fn extract_tokens_realistic_combined_input() {
+        // A realistic prompt: skill token + a natural-language task.
+        let (clean, names) =
+            extract_skill_tokens("{$repo-memory} Summarize the recent changes.");
+        assert_eq!(clean, " Summarize the recent changes.");
+        assert_eq!(names, vec!["repo-memory"]);
+    }
+
+    #[test]
+    fn extract_tokens_curly_brace_in_other_content_preserved() {
+        // Other content with `{...}` that is NOT a skill token must survive.
+        let (clean, names) = extract_skill_tokens("use {x} then {$skill} now");
+        assert_eq!(clean, "use {x} then  now");
+        assert_eq!(names, vec!["skill"]);
+    }
+
+    #[test]
+    fn extract_tokens_dollar_in_other_content_preserved() {
+        // A lone `$` in the surrounding text is not a token delimiter.
+        let (clean, names) = extract_skill_tokens("price is $5 {$skill} done");
+        assert_eq!(clean, "price is $5  done");
+        assert_eq!(names, vec!["skill"]);
+    }
+
+    #[test]
+    fn extract_tokens_multiple_skills_split_by_text() {
+        // Two skill tokens separated by substantial prose.
+        let (clean, names) =
+            extract_skill_tokens("{$a} first task then {$b} second task");
+        assert_eq!(clean, " first task then  second task");
+        assert_eq!(names, vec!["a", "b"]);
+    }
 }

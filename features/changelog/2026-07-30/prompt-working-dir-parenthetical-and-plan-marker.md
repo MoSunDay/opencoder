@@ -47,4 +47,4 @@
 - `cargo build --workspace` -> **Finished**（干净）。
 - `cargo clippy --workspace --all-targets -- -D warnings` -> **0 warnings**。
 - `cargo test -p opencoder-session --test prompt` -> **23 passed / 0 failed / 0 ignored**。
-- `cargo test --workspace` -> **1380 passed / 0 failed / 0 ignored**。
+- `cargo test --workspace` -> **1396 passed / 0 failed / 0 ignored**。

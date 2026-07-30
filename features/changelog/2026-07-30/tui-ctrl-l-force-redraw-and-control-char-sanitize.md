@@ -55,6 +55,8 @@ ratatui 通过 diff buffer 增量绘制：每帧只重绘变化的单元格。�
 | insert_str 粘贴时 sanitize | `insert_str_sanitizes_pasted_text` | 同上 |
 | insert_char 跳过控制字符 | `insert_char_skips_control_chars` | 同上 |
 | Ctrl+L 触发 needs_clear + 清空输入；Ctrl+U 不拦截 | `ctrl_u_not_intercepted_ctrl_l_clears_input` | `crates/tui/src/app_helpers.rs`（unit） |
+| apply_force_redraw：needs_clear=true 清空 diff buffer + 置位 render_pending / 清 skip_next_render | `apply_force_redraw_clears_terminal_and_sets_flags_when_needs_clear` | `crates/tui/src/app_helpers_tests/mod.rs`（unit） |
+| apply_force_redraw：needs_clear=false 严格 no-op（flags 与终端均不变） | `apply_force_redraw_is_a_noop_when_needs_clear_false` | `crates/tui/src/app_helpers_tests/mod.rs`（unit） |
 
 > 全部为 unit 层（源文件内联 `#[cfg(test)] mod tests`），零 I/O / DB / 网络依赖，
 > 执行时间 < 10ms。用 `assert_eq!` 断言具体值，未复制实现逻辑自证。
@@ -63,7 +65,7 @@ ratatui 通过 diff buffer 增量绘制：每帧只重绘变化的单元格。�
 
 | 检查 | 结果 |
 |------|------|
-| `cargo test --workspace` | PASS — 1380 passed / 0 failed / 0 ignored |
+| `cargo test --workspace` | PASS — 1396 passed / 0 failed / 0 ignored |
 | `cargo clippy --workspace --all-targets -- -D warnings` | PASS — 零警告 |
 | `cargo build --workspace` | PASS — Finished |
 | 防修绿扫描 | PASS — 无 `#[ignore]`、无删测试、无弱断言、无调试输出、无 TODO/FIXME、无硬编码密钥 |
@@ -82,5 +84,6 @@ ratatui 通过 diff buffer 增量绘制：每帧只重绘变化的单元格。�
 | 文件 | 行数 | 限制 | 合规 |
 |------|------|------|------|
 | `crates/tui/src/composer.rs` | 409 | ≤ 800（迭代中） | ✓ |
-| `crates/tui/src/app.rs` | 794 | ≤ 800（迭代中） | ✓ |
-| `crates/tui/src/app_helpers.rs` | 794 | ≤ 800（迭代中） | ✓ |
+| `crates/tui/src/app.rs` | 758 | ≤ 800（迭代中） | ✓ |
+| `crates/tui/src/app_helpers.rs` | 795 | ≤ 800（迭代中） | ✓ |
+| `crates/tui/src/app_helpers_tests/mod.rs` | 498 | ≤ 800（迭代中） | ✓ |

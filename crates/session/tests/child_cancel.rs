@@ -115,7 +115,7 @@ async fn parent_steer_cancels_running_child() {
     }
 
     // Let the child reach the bash command before cancelling.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     let any_cancelled = fire_child_cancels(&child_cancels);
     assert!(any_cancelled, "expected at least one child registered");

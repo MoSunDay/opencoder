@@ -414,3 +414,85 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
         "queued input must carry the image URI"
     );
 }
+
+// ---------------------------------------------------------------------------
+// apply_force_redraw — Ctrl+L force-redraw helper
+// ---------------------------------------------------------------------------
+
+/// Concatenate every cell symbol of a ratatui buffer into one searchable
+/// string. Mirrors the helper in `render_clear_tests.rs`; used to make the
+/// "terminal was cleared" assertion non-vacuous.
+fn redraw_buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+    let area = buf.area;
+    let mut s = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            s.push_str(buf[(x, y)].symbol());
+        }
+    }
+    s
+}
+
+/// `needs_clear = true` must (a) clear the terminal's diff buffer so the next
+/// frame repaints every cell, and (b) authorise the render by raising
+/// `render_pending` and clearing `skip_next_render`.
+#[test]
+fn apply_force_redraw_clears_terminal_and_sets_flags_when_needs_clear() {
+    use ratatui::backend::TestBackend;
+    use ratatui::widgets::Paragraph;
+
+    let mut terminal = ratatui::Terminal::new(TestBackend::new(20, 4)).unwrap();
+    // Paint a distinctive marker so the clear assertion below is not vacuous.
+    terminal
+        .draw(|f| f.render_widget(Paragraph::new("markerword"), f.area()))
+        .unwrap();
+    assert!(
+        redraw_buffer_text(terminal.backend().buffer()).contains("markerword"),
+        "precondition: the marker must be painted before clear"
+    );
+
+    let mut render_pending = false;
+    let mut skip_next_render = true;
+    apply_force_redraw(
+        true,
+        &mut terminal,
+        &mut render_pending,
+        &mut skip_next_render,
+    );
+
+    assert!(render_pending, "render_pending must be raised");
+    assert!(!skip_next_render, "skip_next_render must be cleared");
+    assert!(
+        !redraw_buffer_text(terminal.backend().buffer()).contains("markerword"),
+        "terminal.clear() must wipe the painted marker so the next frame repaints every cell"
+    );
+}
+
+/// `needs_clear = false` is a strict no-op: neither flag changes and the
+/// terminal is left untouched.
+#[test]
+fn apply_force_redraw_is_a_noop_when_needs_clear_false() {
+    use ratatui::backend::TestBackend;
+    use ratatui::widgets::Paragraph;
+
+    let mut terminal = ratatui::Terminal::new(TestBackend::new(20, 4)).unwrap();
+    terminal
+        .draw(|f| f.render_widget(Paragraph::new("markerword"), f.area()))
+        .unwrap();
+
+    let mut render_pending = false;
+    let mut skip_next_render = true;
+    apply_force_redraw(
+        false,
+        &mut terminal,
+        &mut render_pending,
+        &mut skip_next_render,
+    );
+
+    assert!(!render_pending, "render_pending must stay untouched");
+    assert!(skip_next_render, "skip_next_render must stay untouched");
+    assert!(
+        redraw_buffer_text(terminal.backend().buffer()).contains("markerword"),
+        "needs_clear=false must not clear the terminal"
+    );
+}

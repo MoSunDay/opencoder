@@ -25,9 +25,12 @@ TUI 状态栏中 `[agent]` 与 `ctx` 之间的进度条（`▰▰▰▱▱` 可�
 | model_outcome 客户端构建失败推红标记 | `handle_model_outcome_client_build_failure_pushes_red_marker` | `app_loop_tests/model_outcome_tests.rs` |
 | model_outcome endpoint 解析失败推红标记 | `handle_model_outcome_endpoint_resolve_failure_pushes_red_marker` | `app_loop_tests/model_outcome_tests.rs` |
 | session-only 切换不写盘 | `handle_model_outcome_session_only_skips_disk_write` | `app_loop_session_only_tests.rs` |
+| 状态栏显示 ctx 百分比 | `status_bar_shows_ctx_percent` | `render_tests/status_ctx.rs` |
+| 高使用率时 ctx 变红 | `status_bar_ctx_red_at_high_usage` | `render_tests/status_ctx.rs` |
 
-- 全量回归：`cargo test --workspace` → 全绿（652+ tests passed）
+- 全量回归：`cargo test --workspace` → 全绿（1406 tests passed）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
+- build：`cargo build --workspace` → 编译干净
 - 行数：所有文件均远低于 400/800 行限制
 
 ## Impact Surface

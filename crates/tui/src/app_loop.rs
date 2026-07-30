@@ -18,7 +18,7 @@ use opencoder_core::Config;
 use opencoder_llm::ChatStream;
 use opencoder_session::SessionEvent;
 use opencoder_store::Store;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -32,6 +32,7 @@ use crate::local_cmd;
 use crate::model_menu::{handle_model_key, ConfigForm, ModelMenu, ModelOutcome, ProviderList};
 use crate::model_session_switch::switch_session;
 use crate::task::TaskPicker;
+use crate::theme;
 use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
@@ -260,7 +261,7 @@ pub(crate) async fn fold_ui_events(
                         chat.push_marker(Line::from(Span::styled(
                             format!("queued: {prompt}"),
                             Style::default()
-                                .fg(Color::Yellow)
+                                .fg(theme::warn_color())
                                 .add_modifier(Modifier::BOLD),
                         )));
                         chat.push_marker(Line::from(""));
@@ -383,7 +384,7 @@ pub(crate) async fn handle_model_outcome(
                                                 "[/config] client build failed: {e:#} — \
                                                  live session keeps previous client"
                                             ),
-                                            Style::default().fg(Color::Red),
+                                            Style::default().fg(theme::err_color()),
                                         )));
                                     }
                                 },
@@ -393,7 +394,7 @@ pub(crate) async fn handle_model_outcome(
                                             "[/config] endpoint resolve failed: {e:#} — \
                                              live session keeps previous client"
                                         ),
-                                        Style::default().fg(Color::Red),
+                                        Style::default().fg(theme::err_color()),
                                     )));
                                 }
                             }
@@ -414,7 +415,7 @@ pub(crate) async fn handle_model_outcome(
                             let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
                             chat.push_marker(Line::from(Span::styled(
                                 format!("[/config] saved \u{2192} {}", path.display()),
-                                Style::default().fg(Color::Green),
+                                Style::default().fg(theme::ok_color()),
                             )));
                             // Issue #2: if an exported OPENCODER_MODEL silently
                             // reverted this /model switch, surface it instead of
@@ -429,14 +430,14 @@ pub(crate) async fn handle_model_outcome(
                                         "[config] OPENCODER_MODEL is set ({env_val}) \u{2014} \
                                          /model switch overridden by env"
                                     ),
-                                    Style::default().fg(Color::Red),
+                                    Style::default().fg(theme::err_color()),
                                 )));
                             }
                         }
                         Err(e) => {
                             chat.push_marker(Line::from(Span::styled(
                                 format!("[/config] reload failed: {e:#}"),
-                                Style::default().fg(Color::Red),
+                                Style::default().fg(theme::err_color()),
                             )));
                         }
                     }
@@ -444,7 +445,7 @@ pub(crate) async fn handle_model_outcome(
                 Err(e) => {
                     chat.push_marker(Line::from(Span::styled(
                         format!("[/config] save failed: {e:#}"),
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(theme::err_color()),
                     )));
                 }
             }
@@ -519,7 +520,7 @@ pub(crate) async fn dispatch_command(
             CompactGate::SkipRunning => {
                 chat.push_marker(Line::from(Span::styled(
                     "[compact] busy \u{2014} retry when idle",
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(theme::warn_color()),
                 )));
             }
         },
@@ -624,19 +625,19 @@ pub(crate) async fn paste_clipboard_image(
             pending_images.push((data_uri, "clipboard.png".to_string()));
             chat.push_marker(Line::from(Span::styled(
                 format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
-                Style::default().fg(Color::Green),
+                Style::default().fg(theme::ok_color()),
             )));
         }
         Ok(None) => {
             chat.push_marker(Line::from(Span::styled(
                 "[clip] no image in clipboard",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::warn_color()),
             )));
         }
         Err(e) => {
             chat.push_marker(Line::from(Span::styled(
                 format!("[clip] clipboard read failed: {e}"),
-                Style::default().fg(Color::Red),
+                Style::default().fg(theme::err_color()),
             )));
         }
     }
@@ -716,7 +717,7 @@ pub(crate) async fn handle_quit(
         cancel.cancel();
         chat.push_marker(Line::from(Span::styled(
             "[exiting…]",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::warn_color()),
         )));
     }
     let _ = cmd_tx.send(UiCmd::Quit).await;

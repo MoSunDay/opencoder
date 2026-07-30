@@ -287,7 +287,7 @@ pub(crate) fn render<B: Backend>(
             render_status_chip(f, composer_area, text, mode_flash_bg(is_plan));
         }
         if let Some(text) = copy_status {
-            render_status_chip(f, composer_area, text, Color::Green);
+            render_status_chip(f, composer_area, text, theme::ok_color());
         }
         if !input_disabled && model_menu.is_none() {
             place_cursor(
@@ -418,13 +418,13 @@ fn render_body(
     let (label, style) = if follow {
         (
             " \u{8ddf}\u{968f}\u{4e2d}\u{2026} ",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::accent()),
         )
     } else {
         (
             "    \u{2b07}    ",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::warn_color())
                 .add_modifier(Modifier::BOLD),
         )
     };
@@ -449,7 +449,7 @@ fn render_body(
     if scroll_y > 0 {
         let top_label = "    \u{2b06}    ";
         let top_style = Style::default()
-            .fg(Color::Yellow)
+            .fg(theme::warn_color())
             .add_modifier(Modifier::BOLD);
         let top_w: u16 = top_label.chars().map(composer::char_width).sum::<usize>() as u16;
         let top_w = top_w.min(area.width);
@@ -493,10 +493,10 @@ fn draw_scrollbar(
         let cell = &mut buf[(sb_x, inner.y + y)];
         if y >= thumb_off && y < thumb_off + thumb_h {
             cell.set_char('\u{2588}');
-            cell.set_style(Style::default().fg(Color::Gray));
+            cell.set_style(Style::default().fg(theme::subtle()));
         } else {
             cell.set_char('\u{250a}');
-            cell.set_style(Style::default().fg(Color::DarkGray));
+            cell.set_style(Style::default().fg(theme::muted()));
         }
     }
 }
@@ -515,7 +515,7 @@ fn render_composer(
 ) {
     if disabled {
         let dim = Style::default()
-            .fg(Color::DarkGray)
+            .fg(theme::muted())
             .add_modifier(Modifier::DIM);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -537,14 +537,14 @@ fn render_composer(
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Yellow))
+            .border_style(Style::default().fg(theme::warn_color()))
             .title(" edit plan ")
             .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left))
     } else {
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_style(Style::default().fg(theme::muted()))
     };
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -562,7 +562,7 @@ fn render_composer(
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 label,
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::warn_color()),
             ))),
             inner,
         );
@@ -588,9 +588,9 @@ fn render_composer(
         let mut spans: Vec<Span> = Vec::new();
         if ri == 0 {
             let prompt_color = if plan_mode.is_some() {
-                Color::Yellow
+                theme::warn_color()
             } else {
-                Color::Cyan
+                theme::accent()
             };
             spans.push(Span::styled(
                 "\u{276f} ",
@@ -655,9 +655,9 @@ fn render_status_chip(f: &mut Frame, composer_area: Rect, text: &str, bg: Color)
 /// plan, Cyan for act. Extracted pure so the theme mapping is testable.
 fn mode_flash_bg(is_plan: bool) -> Color {
     if is_plan {
-        Color::Yellow
+        theme::warn_color()
     } else {
-        Color::Cyan
+        theme::accent()
     }
 }
 
@@ -676,7 +676,7 @@ fn render_status(
 ) {
     let mut spans = vec![
         Span::raw(" "),
-        Span::styled(model.to_string(), Style::default().fg(Color::White)),
+        Span::styled(model.to_string(), Style::default().fg(theme::text())),
         Span::raw(" \u{00b7} "),
         Span::styled(
             format!("[{agent}]"),
@@ -709,9 +709,9 @@ fn render_status(
         spans.push(Span::styled(
             format_run_duration(run_ms),
             Style::default().fg(if running {
-                Color::Yellow
+                theme::warn_color()
             } else {
-                Color::DarkGray
+                theme::muted()
             }),
         ));
     }
@@ -721,12 +721,12 @@ fn render_status(
         let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
         spans.push(Span::styled(
             format!("{spin} {status}"),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::warn_color()),
         ));
     } else if !status.is_empty() {
         spans.push(Span::styled(
             format!("\u{00b7} {status}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         ));
     }
 

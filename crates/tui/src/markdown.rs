@@ -5,8 +5,10 @@
 //! completion (never during streaming) so the hot path stays cheap.
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+
+use crate::theme;
 
 /// Render a markdown string into styled ratatui lines.
 pub fn render(text: &str) -> Vec<Line<'static>> {
@@ -76,14 +78,14 @@ impl MdRenderer {
                 }
                 Event::Code(c) => {
                     self.spans
-                        .push(Span::styled(format!("`{c}`"), self.style().fg(Color::Cyan)));
+                        .push(Span::styled(format!("`{c}`"), self.style().fg(theme::accent())));
                 }
                 Event::SoftBreak | Event::HardBreak => self.flush(),
                 Event::Rule => {
                     self.flush();
                     self.lines.push(Line::from(Span::styled(
                         "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-                        Style::default().fg(Color::DarkGray))));
+                        Style::default().fg(theme::muted()))));
                 }
                 Event::Start(tag) => self.start_tag(tag),
                 Event::End(tag) => self.end_tag(tag),
@@ -98,13 +100,13 @@ impl MdRenderer {
             Tag::Heading { level, .. } => {
                 let s = match level {
                     pulldown_cmark::HeadingLevel::H1 => Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme::warn_color())
                         .add_modifier(Modifier::BOLD),
                     pulldown_cmark::HeadingLevel::H2 => Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                     _ => Style::default()
-                        .fg(Color::Blue)
+                        .fg(theme::info_color())
                         .add_modifier(Modifier::BOLD),
                 };
                 self.style_stack.push(s);
@@ -128,7 +130,7 @@ impl MdRenderer {
                 .style_stack
                 .push(Style::default().add_modifier(Modifier::CROSSED_OUT)),
             Tag::BlockQuote(_) => {
-                self.style_stack.push(Style::default().fg(Color::DarkGray));
+                self.style_stack.push(Style::default().fg(theme::muted()));
                 self.push_str("\u{258e} ".to_string());
             }
             Tag::List(None) => self.list_stack.push((ListKind::Unordered, 0)),
@@ -152,7 +154,7 @@ impl MdRenderer {
             Tag::Link { .. } => {
                 self.style_stack.push(
                     self.style()
-                        .fg(Color::Blue)
+                        .fg(theme::info_color())
                         .add_modifier(Modifier::UNDERLINED),
                 );
                 self.push_str("[".to_string());
@@ -209,7 +211,7 @@ impl MdRenderer {
         };
         self.lines.push(Line::from(Span::styled(
             format!("\u{250c} {label} "),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         )));
         // A fenced code block can arrive as a single `Event::Text` whose
         // string contains embedded newlines (pulldown-cmark returns the whole
@@ -231,18 +233,18 @@ impl MdRenderer {
             if t.is_empty() {
                 self.lines.push(Line::from(Span::styled(
                     "\u{2502}",
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::muted()),
                 )));
             } else {
                 self.lines.push(Line::from(vec![
-                    Span::styled("\u{2502} ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("\u{2502} ", Style::default().fg(theme::muted())),
                     Span::raw(t.to_string()),
                 ]));
             }
         }
         self.lines.push(Line::from(Span::styled(
             "\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-            Style::default().fg(Color::DarkGray))));
+            Style::default().fg(theme::muted()))));
         self.lines.push(Line::from(""));
         self.code_buf.clear();
     }

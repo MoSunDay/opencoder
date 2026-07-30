@@ -10,7 +10,7 @@ use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::ChatStream;
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::app_helpers::sys_tokens_for;
 use crate::chat::ChatView;
 use crate::task::TaskPicker;
+use crate::theme;
 use crate::worker::{gate_clear_all, process_cmd, rebind_session, ClearAllGate, UiCmd, UiEvent};
 
 /// The `TaskOutcome::Pick(pick)` arm: perform a session switch. Builds a new
@@ -230,7 +231,7 @@ pub(crate) async fn handle_clear_all(
             }
             chat.push_marker(Line::from(Span::styled(
                 "[task] clear busy \u{2014} retry when idle (subagents still running)",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(theme::warn_color()),
             )));
         }
         ClearAllGate::Run => {
@@ -249,7 +250,7 @@ pub(crate) async fn handle_clear_all(
                     }
                     chat.push_marker(Line::from(Span::styled(
                         format!("[/task] cleared {n} of {before} task(s)"),
-                        Style::default().fg(Color::Green),
+                        Style::default().fg(theme::ok_color()),
                     )));
                 }
                 Err(e) => {
@@ -258,7 +259,7 @@ pub(crate) async fn handle_clear_all(
                     }
                     chat.push_marker(Line::from(Span::styled(
                         format!("[/task] clear failed: {e:#}"),
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(theme::err_color()),
                     )));
                 }
             }

@@ -73,6 +73,7 @@ fn plan_card_line_count_matches_flatten() {
 fn plan_card_flatten_structure() {
     use ratatui::style::{Color, Modifier};
 
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     let mut v = ChatView::default();
     v.apply(&SessionEvent::PlanHandoff("## Goal\nShip it".into()));
 

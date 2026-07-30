@@ -2,8 +2,9 @@
 //! blocks yet. It disappears automatically once the first prompt is
 //! submitted (blocks become non-empty), so no key is required to dismiss it.
 
+use crate::theme;
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
@@ -30,10 +31,10 @@ const TUTORIAL: &str = "\
 /// replaced by real conversation content as soon as the first block appears.
 pub fn render_tutorial_in_body(f: &mut Frame, inner: Rect) {
     let header_st = Style::default()
-        .fg(Color::Green)
+        .fg(theme::ok_color())
         .add_modifier(Modifier::BOLD);
-    let op_st = Style::default().fg(Color::Cyan);
-    let hint_st = Style::default().fg(Color::DarkGray);
+    let op_st = Style::default().fg(theme::accent());
+    let hint_st = Style::default().fg(theme::muted());
     let lines: Vec<Line> = TUTORIAL
         .lines()
         .map(|s| {

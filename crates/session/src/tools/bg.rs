@@ -1,9 +1,13 @@
-//! Global background-process registry for the bash tool.
+//! Global process registry for the bash tool.
 //!
-//! When a bash command exceeds its timeout, instead of SIGKILL-ing the
-//! process group we hand it off to a detached supervisor that keeps the
-//! command running in the background, streams its output to a temp file, and
-//! cleans up the whole process group when the command exits naturally.
+//! Every bash command registers itself on spawn so the display-only `/ps`
+//! command can list the running process and `/stop` can kill its process
+//! group. A bash command runs in the foreground until it exits naturally;
+//! [`register`] adds the entry, [`unregister`] removes it on completion, and
+//! [`stop`]/[`kill_all`] terminate the group on user demand. The legacy
+//! [`handoff`] path (detached background supervisor that streamed output to a
+//! temp file) is retained for reference but is no longer reached from the
+//! foreground tool.
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -61,7 +65,7 @@ impl Default for BgState {
 
 /// Path of the background output file for a given pid.
 pub fn output_path(pid: u32) -> PathBuf {
-    PathBuf::from(format!("/tmp/opencode_bg_{pid}.output"))
+    PathBuf::from(format!("/tmp/opencoder_bg_{pid}.output"))
 }
 
 struct BgEntry {
@@ -165,8 +169,12 @@ pub fn handoff(
 
         let code = exit_status.ok().and_then(|s| s.code()).unwrap_or(-1);
 
-        if let Ok(mut f) = OpenOptions::new().append(true).open(&path) {
-            let _ = write!(f, "\n[exit code: {code}]");
+        // Only annotate non-zero exits; success (code == 0) is implicit and
+        // would just add noise to the background output file.
+        if code != 0 {
+            if let Ok(mut f) = OpenOptions::new().append(true).open(&path) {
+                let _ = write!(f, "\n[exit code: {code}]");
+            }
         }
 
         let mut reg = registry().lock().unwrap();
@@ -174,13 +182,75 @@ pub fn handoff(
     });
 }
 
+/// Public snapshot of one registered background process, for display-only
+/// commands such as the TUI `/ps`. Carries only the public fields — never the
+/// raw `Child`/handles owned by the detached supervisor.
+#[derive(Clone, Debug)]
+pub struct BgInfo {
+    pub pid: u32,
+    pub output_path: PathBuf,
+}
+
+/// Snapshot every registered background process into public [`BgInfo`]s.
+pub fn list() -> Vec<BgInfo> {
+    let reg = registry().lock().unwrap();
+    reg.iter()
+        .map(|(pid, e)| BgInfo {
+            pid: *pid,
+            output_path: e.output_path.clone(),
+        })
+        .collect()
+}
+
+/// Register a freshly-spawned bash command so `/ps` can list it and `/stop`
+/// can kill its process group. The command keeps running in the foreground
+/// (the tool future owns the `Child` and `wait()`s directly); the entry is
+/// removed by [`unregister`] when `wait()` returns, or by [`stop`]/[`kill_all`]
+/// when the user intervenes.
+pub fn register(pid: u32, pgid: libc::pid_t, session_id: String) {
+    registry().lock().unwrap().insert(
+        pid,
+        BgEntry {
+            pgid,
+            session_id,
+            output_path: output_path(pid),
+        },
+    );
+}
+
+/// Remove a registry entry for a command that completed naturally (or whose
+/// foreground future otherwise resolved). Idempotent: a no-op if `pid` was
+/// already removed by [`stop`]/[`kill_all`].
+pub fn unregister(pid: u32) {
+    registry().lock().unwrap().remove(&pid);
+}
+
+/// Kill the process group of a single registered command by pid and remove its
+/// registry entry. Returns `true` if `pid` was registered (and thus
+/// signalled), `false` if it was already gone. The `/stop` command currently
+/// calls [`kill_all`]; this per-pid variant is exposed for finer control.
+pub fn stop(pid: u32) -> bool {
+    let entry = registry().lock().unwrap().remove(&pid);
+    if let Some(entry) = entry {
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::kill(-entry.pgid, libc::SIGKILL);
+        }
+        true
+    } else {
+        false
+    }
+}
+
 /// Kill every registered background process group and remove temp files.
-/// Called at program shutdown.
-pub fn cleanup_all() {
+/// Returns the number of process groups killed. Used by [`cleanup_all`] at
+/// program shutdown and by the display-only `/stop` command
+pub fn kill_all() -> usize {
     let entries: Vec<BgEntry> = {
         let mut reg = registry().lock().unwrap();
         reg.drain().map(|(_, e)| e).collect()
     };
+    let count = entries.len();
     for entry in entries {
         #[cfg(unix)]
         unsafe {
@@ -188,8 +258,26 @@ pub fn cleanup_all() {
         }
         let _ = std::fs::remove_file(&entry.output_path);
     }
+    count
 }
 
+/// Kill every registered background process group and remove temp files.
+/// Called at program shutdown.
+pub fn cleanup_all() {
+    let _ = kill_all();
+}
+
+/// Serialize all tests that touch the process-global registry.
+///
+/// Under parallel test execution a global-draining [`kill_all`] in one
+/// test can SIGKILL another test's registered command mid-flight. Holding
+/// this shared mutex for the whole duration of every registry-touching
+/// test removes that race; it is a `tokio::sync::Mutex` so async tests (e.g. the bash tool tests) can hold it across `.await` too, serializing every registry-touching test.
+#[cfg(test)]
+pub(crate) fn test_registry_mutex() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,7 +285,120 @@ mod tests {
     #[test]
     fn output_path_format() {
         let p = output_path(12345);
-        assert_eq!(p.to_str().unwrap(), "/tmp/opencode_bg_12345.output");
+        assert_eq!(p.to_str().unwrap(), "/tmp/opencoder_bg_12345.output");
+    }
+
+    /// `register` adds a live entry that `list` exposes; `unregister` removes
+    /// it while leaving the process alive (verified by `stop`-free kill).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn register_unregister_roundtrip() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let _g = test_registry_mutex().lock().await;
+        let mut child = Command::new("setsid")
+            .args(["sleep", "60"])
+            .spawn()
+            .expect("spawn setsid sleep");
+        let pid = child.id();
+        let pgid = pid as libc::pid_t;
+        std::thread::sleep(Duration::from_millis(50));
+
+        register(pid, pgid, "test".to_string());
+        assert!(
+            list().iter().any(|info| info.pid == pid),
+            "list should expose the registered pid"
+        );
+
+        // unregister removes the entry without touching the process.
+        unregister(pid);
+        assert!(
+            !list().iter().any(|info| info.pid == pid),
+            "list should no longer contain the pid after unregister"
+        );
+        // idempotent: unregistering again is a no-op.
+        unregister(pid);
+
+        // Reap the still-alive child directly (never registered for /stop).
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        let _ = child.wait();
+    }
+
+    /// `stop(pid)` kills the registered process group, removes the entry, and
+    /// reports `false` once the entry is gone.
+    #[cfg(unix)]
+    #[test]
+    fn stop_kills_registered_process() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let _g = test_registry_mutex().blocking_lock();
+        let mut child = Command::new("setsid")
+            .args(["sleep", "60"])
+            .spawn()
+            .expect("spawn setsid sleep");
+        let pid = child.id();
+        let pgid = pid as libc::pid_t;
+        std::thread::sleep(Duration::from_millis(50));
+
+        register(pid, pgid, "test".to_string());
+        assert!(stop(pid), "stop should find the registered pid");
+        assert!(
+            !list().iter().any(|info| info.pid == pid),
+            "stop should remove the registry entry"
+        );
+        assert!(!stop(pid), "second stop finds nothing");
+
+        // The child was killed by stop(); reap the zombie.
+        let _ = child.wait();
+    }
+
+    /// `kill_all()` drains the whole registry: it SIGKILLs every registered
+    /// process group, removes every entry, and returns the number killed.
+    #[cfg(unix)]
+    #[test]
+    fn kill_all_terminates_every_registered_process() {
+        use std::process::Command;
+        use std::time::Duration;
+
+        let _g = test_registry_mutex().blocking_lock();
+        // Drain entries any earlier test may have leaked so the count below is
+        // deterministic. The mutex guarantees no other registry test is live,
+        // and SIGKILLing already-orphaned `sleep` groups is harmless.
+        let leaked = kill_all();
+        assert!(
+            list().is_empty(),
+            "registry must be empty after drain (leaked {leaked})"
+        );
+
+        let mut children: Vec<std::process::Child> = Vec::new();
+        for _ in 0..2 {
+            let child = Command::new("setsid")
+                .args(["sleep", "60"])
+                .spawn()
+                .expect("spawn setsid sleep");
+            let pid = child.id();
+            let pgid = pid as libc::pid_t;
+            std::thread::sleep(Duration::from_millis(50));
+            register(pid, pgid, "test".to_string());
+            children.push(child);
+        }
+        assert_eq!(list().len(), 2, "both processes should be registered");
+
+        let killed = kill_all();
+        assert_eq!(killed, 2, "kill_all should report the number it killed");
+        assert!(
+            list().is_empty(),
+            "kill_all should drain the entire registry"
+        );
+
+        // Reap the children that kill_all() SIGKILLed.
+        for child in children.iter_mut() {
+            let _ = child.wait();
+        }
     }
 
     #[test]

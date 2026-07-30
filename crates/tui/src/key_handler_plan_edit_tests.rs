@@ -323,8 +323,8 @@ fn enter_produces_subagent_steer_when_focused() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        78, // inner_w
-        2,  // prompt_w
+        78,    // inner_w
+        2,     // prompt_w
         true,  // subagent_focused
         false, // input_disabled
         &mut undo_state,

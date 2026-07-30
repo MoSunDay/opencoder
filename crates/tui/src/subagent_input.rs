@@ -118,6 +118,7 @@ mod tests {
                 agent: Some("explore".into()),
                 model: Some("m/g".into()),
                 workdir_hash: None,
+                task_type: None,
                 created_at: 0,
                 updated_at: 0,
                 summary: None,
@@ -138,7 +139,10 @@ mod tests {
         assert!(ok);
 
         // Verify steer was admitted to child session.
-        let pending = store.pending_inputs(child_sid, Delivery::Steer).await.unwrap();
+        let pending = store
+            .pending_inputs(child_sid, Delivery::Steer)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].prompt, "change direction");
 

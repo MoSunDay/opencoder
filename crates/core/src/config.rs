@@ -38,7 +38,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
     /// OpenAI-style reasoning effort sent as a top-level `reasoning_effort`
-    /// field on the chat request body. Accepted values: `low|medium|high`.
+    /// field on the chat request body. Accepted values: `low|medium|high|xhigh|max`.
     /// When `None` the field is omitted (provider default / no extended
     /// thinking). Edited at runtime via the TUI `/model` menu.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +96,11 @@ pub struct Config {
     /// (seconds). Defaults to 1800 (30 min). Prevents indefinite subagent hangs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_timeout_secs: Option<u64>,
+    /// Max wall-clock duration for replaying a single interrupted subagent
+    /// during session recovery (seconds). Defaults to 300 (5 min). Shorter than
+    /// `task_timeout_secs` because recovery should not block the user for 30 min.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_timeout_secs: Option<u64>,
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
@@ -343,6 +348,7 @@ impl Default for Config {
             tool_guard: ToolGuardConfig::default(),
             stream_idle_timeout_secs: None,
             task_timeout_secs: None,
+            replay_timeout_secs: None,
             autopilot: AutoPilotConfig::default(),
         }
     }
@@ -393,6 +399,12 @@ impl Config {
     /// Effective max wall-clock duration for a single `task` subagent.
     pub fn task_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.task_timeout_secs.unwrap_or(1800))
+    }
+    /// Effective max wall-clock duration for replaying a single interrupted
+    /// subagent during session recovery. Caps how long `resume_and_replay` /
+    /// `replay_cancelled_tasks` will block the user while re-running a child.
+    pub fn replay_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.replay_timeout_secs.unwrap_or(300))
     }
     /// Model id used for low-cost background calls (title generation, compaction
     /// summarization). Returns the id (after the `/`) so the request body carries
@@ -686,5 +698,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(c.task_timeout(), std::time::Duration::from_secs(300));
+    }
+    #[test]
+    fn replay_timeout_defaults_to_300s() {
+        assert_eq!(
+            Config::default().replay_timeout(),
+            std::time::Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn replay_timeout_is_configurable() {
+        let c = Config {
+            replay_timeout_secs: Some(60),
+            ..Default::default()
+        };
+        assert_eq!(c.replay_timeout(), std::time::Duration::from_secs(60));
     }
 }

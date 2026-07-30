@@ -16,4 +16,5 @@ pub use store::Store;
 pub use types::{
     Delivery, EventKind, ImportReport, SessionEventRecord, SessionFilter, SessionInput,
     SessionListItem, SessionMeta, SessionPatch, SubagentStatus, SubagentTaskRecord,
+    TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
 };

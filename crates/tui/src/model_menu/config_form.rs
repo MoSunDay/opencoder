@@ -14,6 +14,8 @@ pub enum Reasoning {
     Low,
     Medium,
     High,
+    XHigh,
+    Max,
 }
 
 impl Reasoning {
@@ -23,6 +25,8 @@ impl Reasoning {
             Reasoning::Low => "low",
             Reasoning::Medium => "medium",
             Reasoning::High => "high",
+            Reasoning::XHigh => "xhigh",
+            Reasoning::Max => "max",
         }
     }
     pub fn next(self) -> Self {
@@ -30,15 +34,19 @@ impl Reasoning {
             Reasoning::Off => Reasoning::Low,
             Reasoning::Low => Reasoning::Medium,
             Reasoning::Medium => Reasoning::High,
-            Reasoning::High => Reasoning::Off,
+            Reasoning::High => Reasoning::XHigh,
+            Reasoning::XHigh => Reasoning::Max,
+            Reasoning::Max => Reasoning::Off,
         }
     }
     pub fn prev(self) -> Self {
         match self {
-            Reasoning::Off => Reasoning::High,
+            Reasoning::Off => Reasoning::Max,
             Reasoning::Low => Reasoning::Off,
             Reasoning::Medium => Reasoning::Low,
             Reasoning::High => Reasoning::Medium,
+            Reasoning::XHigh => Reasoning::High,
+            Reasoning::Max => Reasoning::XHigh,
         }
     }
     pub fn from_config(v: Option<&str>) -> Self {
@@ -46,6 +54,8 @@ impl Reasoning {
             Some("low") => Reasoning::Low,
             Some("medium") => Reasoning::Medium,
             Some("high") => Reasoning::High,
+            Some("xhigh") => Reasoning::XHigh,
+            Some("max") => Reasoning::Max,
             _ => Reasoning::Off,
         }
     }
@@ -55,6 +65,8 @@ impl Reasoning {
             Reasoning::Low => Some("low".into()),
             Reasoning::Medium => Some("medium".into()),
             Reasoning::High => Some("high".into()),
+            Reasoning::XHigh => Some("xhigh".into()),
+            Reasoning::Max => Some("max".into()),
         }
     }
 }
@@ -171,7 +183,9 @@ impl ConfigForm {
         // Empty/unparseable → fall back to safe defaults (validate() blocks
         // empties on the save path; this is the safety net for direct callers).
         let threshold = parse_field(&self.threshold_input).unwrap_or(1000).max(1000);
-        let context_size = parse_field(&self.context_size_input).unwrap_or(128_000).max(1);
+        let context_size = parse_field(&self.context_size_input)
+            .unwrap_or(128_000)
+            .max(1);
         let fps = self
             .fps_input
             .trim()

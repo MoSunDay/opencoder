@@ -1,6 +1,11 @@
 use opencoder_core::Message;
 use serde::{Deserialize, Serialize};
 
+/// Normal top-level session.
+pub const TASK_TYPE_PARENT: &str = "parent";
+/// Child session spawned by a `task` subagent invocation.
+pub const TASK_TYPE_SUBAGENT: &str = "subagent";
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionMeta {
     pub id: String,
@@ -26,6 +31,12 @@ pub struct SessionMeta {
     pub handoff_plan: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
+    /// Lifecycle role of this session: `"parent"` for normal top-level
+    /// sessions, `"subagent"` for child sessions spawned by a `task` subagent.
+    /// `None` (in-memory default) is treated as `"parent"`. Stored as a
+    /// NOT NULL column in the DB so it can be indexed and filtered cheaply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

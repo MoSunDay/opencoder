@@ -72,6 +72,7 @@ fn draw_frame(
         None,
         0,
         0u16,
+        true,
     )
     .unwrap();
 }

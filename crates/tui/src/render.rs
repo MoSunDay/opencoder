@@ -7,7 +7,7 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
@@ -21,6 +21,7 @@ use crate::model_menu::ModelMenu;
 use crate::queue_panel::QueueBtn;
 use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
+use crate::theme;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -133,6 +134,7 @@ pub(crate) fn render<B: Backend>(
     plan_mode: Option<&str>,
     run_ms: u64,
     help_scroll: u16,
+    is_top_level: bool,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -213,6 +215,7 @@ pub(crate) fn render<B: Backend>(
                 &mut hits.tool_btns,
                 selection,
                 viewport,
+                is_top_level,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -318,11 +321,10 @@ fn render_body(
     tool_btns: &mut Vec<ToolBtn>,
     selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
+    is_top_level: bool,
 ) {
     *body_out = Some(area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", title));
+    let block = theme::rounded_block(title);
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -336,7 +338,7 @@ fn render_body(
 
     // Empty session: show the in-body tutorial instead of a blank transcript.
     // It vanishes automatically once the first block appears.
-    if chat.blocks.is_empty() {
+    if is_top_level && chat.blocks.is_empty() {
         f.render_widget(block, area);
         crate::welcome::render_tutorial_in_body(f, inner);
         return;
@@ -490,10 +492,10 @@ fn draw_scrollbar(
     for y in 0..inner.height {
         let cell = &mut buf[(sb_x, inner.y + y)];
         if y >= thumb_off && y < thumb_off + thumb_h {
-            cell.set_char('\u{2592}');
+            cell.set_char('\u{2588}');
             cell.set_style(Style::default().fg(Color::Gray));
         } else {
-            cell.set_char('\u{2502}');
+            cell.set_char('\u{250a}');
             cell.set_style(Style::default().fg(Color::DarkGray));
         }
     }
@@ -515,7 +517,10 @@ fn render_composer(
         let dim = Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::DIM);
-        let block = Block::default().borders(Borders::ALL).border_style(dim);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(dim);
         let inner = block.inner(area);
         f.render_widget(block, area);
         let hint = "subagent ended \u{2014} esc to return";
@@ -531,11 +536,15 @@ fn render_composer(
     let block = if let Some(label) = plan_mode {
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Yellow))
             .title(" edit plan ")
             .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left))
     } else {
-        Block::default().borders(Borders::ALL)
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::DarkGray))
     };
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -609,11 +618,7 @@ fn render_composer(
 /// Shared by the status bar and the `/task` picker so the two stay
 /// visually consistent.
 pub(crate) fn agent_chip_fg(agent: &str) -> Color {
-    if agent == "plan" {
-        Color::Yellow
-    } else {
-        Color::Cyan
-    }
+    theme::agent_chip_fg(agent)
 }
 
 /// Render a 1-row chip (status bubble) at the top-right of the composer area.
@@ -672,27 +677,24 @@ fn render_status(
     let mut spans = vec![
         Span::raw(" "),
         Span::styled(model.to_string(), Style::default().fg(Color::White)),
-        Span::raw(" | "),
-        // Agent chip: plan = Yellow (read-only caution), otherwise Cyan (issue
-        // #6 — was uniformly Magenta, clashing with the Cyan theme).
+        Span::raw(" \u{00b7} "),
         Span::styled(
             format!("[{agent}]"),
             Style::default().fg(agent_chip_fg(agent)),
         ),
     ];
 
-    // Context-window usage indicator, placed right after the agent chip.
+    // Context-window usage with a visual progress meter.
     let pct = fmtmod::context_percent(used, limit, CONTEXT_BASELINE);
-    let ctx_color = if pct >= 85 {
-        Color::Red
-    } else if pct >= 60 {
-        Color::Yellow
-    } else {
-        Color::Green
-    };
+    let (meter, ctx_color) = theme::context_meter(pct);
+    spans.push(Span::raw(" \u{00b7} "));
+    spans.push(Span::styled(
+        format!("{meter} "),
+        Style::default().fg(ctx_color),
+    ));
     spans.push(Span::styled(
         format!(
-            " ctx {}% ({}/{})",
+            "ctx {}% ({}/{})",
             pct,
             fmtmod::format_tokens_compact(used),
             fmtmod::format_tokens_compact(limit)
@@ -723,7 +725,7 @@ fn render_status(
         ));
     } else if !status.is_empty() {
         spans.push(Span::styled(
-            format!("| {status}"),
+            format!("\u{00b7} {status}"),
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -751,7 +753,7 @@ fn place_cursor(
 mod hit_records;
 
 #[cfg(test)]
-#[path = "render_tests.rs"]
+#[path = "render_tests/mod.rs"]
 mod tests;
 
 #[cfg(test)]

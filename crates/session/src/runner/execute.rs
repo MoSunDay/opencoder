@@ -14,10 +14,11 @@ use super::subagent::run_subagent;
 /// (e.g. an ssh_pty tmux call that never returns, a stalled web_fetch, or a
 /// browser/computer-use tool whose future never resolves) from freezing the
 /// run loop forever. Generous enough that legitimate long-running tools are
-/// unaffected — `bash` self-limits to at most 590 s (strictly below this guard,
-/// so its handoff path always fires before the safety net) — and the `task` subagent is
-/// exempt entirely (it returns before this guard is reached, since a child
-/// session may legitimately run for many minutes). Pairs with the per-read
+/// unaffected. `bash` is exempt entirely: it passes `None` and runs in the
+/// foreground until the command exits (with `/stop` as the kill path), so the
+/// safety net never fires for it. The `task` subagent early-returns before this
+/// guard is reached (a child session may legitimately run for many minutes).
+/// Pairs with the per-read
 /// LLM idle timeout (`DEFAULT_READ_TIMEOUT`); both are last-resort guards,
 /// not expected to fire in normal operation.
 pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
@@ -28,7 +29,14 @@ pub(super) async fn execute_call(
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
 ) -> ToolOutput {
-    execute_call_with_timeout(tc, session, registry, sink, DEFAULT_TOOL_TIMEOUT).await
+    // `bash` runs in the foreground until it exits (killed via `/stop`), so it
+    // is exempt from the leaf-tool safety net; every other tool keeps it.
+    let timeout = if tc.name == "bash" {
+        None
+    } else {
+        Some(DEFAULT_TOOL_TIMEOUT)
+    };
+    execute_call_with_timeout(tc, session, registry, sink, timeout).await
 }
 
 /// Like [`execute_call`] but with an injectable timeout, so the safety net is
@@ -38,7 +46,7 @@ pub(super) async fn execute_call_with_timeout(
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> ToolOutput {
     if tc.name == "task" {
         // The subagent runs as a child session and may legitimately take many
@@ -93,14 +101,23 @@ pub(super) async fn execute_call_with_timeout(
             let mut cancel_fut = std::pin::pin!(await_cancel(session));
             let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
             let exec = tool.execute(tc.input.clone(), &ctx);
-            let mut deadline = std::pin::pin!(tokio::time::sleep(timeout));
+            // `None` exempts the tool from the safety net: the deadline future
+            // never resolves, so only a cancel or the tool's own completion ends
+            // the call. `bash` uses this — it runs in the foreground until it
+            // exits and is killed via `/stop`, never timed out.
+            let mut deadline: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+                match timeout {
+                    Some(d) => Box::pin(tokio::time::sleep(d)),
+                    None => Box::pin(std::future::pending()),
+                };
             tokio::select! {
                 biased;
                 _ = &mut cancel_fut => ToolOutput::err("interrupted"),
                 _ = &mut turn_cancel_fut => ToolOutput::err("turn interrupted"),
                 _ = &mut deadline => ToolOutput::err(format!(
                     "tool `{}` timed out after {} without producing a result",
-                    tc.name, fmt_dur(timeout)
+                    tc.name,
+                    fmt_dur(timeout.unwrap_or_default())
                 )),
                 o = exec => o.unwrap_or_else(|e| ToolOutput::err(format!("{e:#}"))),
             }
@@ -205,9 +222,14 @@ mod tests {
             name: "hang".into(),
             input: json!({}),
         };
-        let out =
-            execute_call_with_timeout(&tc, &session, &registry, &sink, Duration::from_millis(50))
-                .await;
+        let out = execute_call_with_timeout(
+            &tc,
+            &session,
+            &registry,
+            &sink,
+            Some(Duration::from_millis(50)),
+        )
+        .await;
         assert!(out.is_error);
         assert!(
             out.content.contains("timed out"),
@@ -232,25 +254,41 @@ mod tests {
         };
         // A short timeout that would trip if the tool hung; a fast tool must
         // still return its real result, not the timeout error.
-        let out =
-            execute_call_with_timeout(&tc, &session, &registry, &sink, Duration::from_secs(30))
-                .await;
+        let out = execute_call_with_timeout(
+            &tc,
+            &session,
+            &registry,
+            &sink,
+            Some(Duration::from_secs(30)),
+        )
+        .await;
         assert!(!out.is_error);
         assert_eq!(out.content, "done");
     }
 
-    #[test]
-    fn bash_timeout_cap_is_strictly_below_safety_net() {
-        // The fundamental invariant: bash's clamped timeout must be strictly
-        // below the runner's outer safety net. This guarantees bash's internal
-        // tokio::time::timeout fires before the biased outer deadline in the
-        // select!, so handoff runs instead of kill_on_drop silently killing
-        // the child.
-        assert!(
-            crate::tools::bash::BASH_MAX_TIMEOUT_SECS < DEFAULT_TOOL_TIMEOUT.as_secs(),
-            "bash cap ({}) must be < safety net ({})",
-            crate::tools::bash::BASH_MAX_TIMEOUT_SECS,
-            DEFAULT_TOOL_TIMEOUT.as_secs()
-        );
+    /// With `timeout: None` the safety net must never fire: a perpetually-pending
+    /// tool stays pending (responds only to a cancel), rather than erroring with a
+    /// "timed out" message. This is the bash exemption — bash runs in the
+    /// foreground until it exits and is killed via `/stop`.
+    #[tokio::test]
+    async fn none_timeout_never_fires_for_hung_tool() {
+        let session = make_session();
+        let registry: HashMap<String, ToolArc> =
+            [("hang".to_string(), Arc::new(HangingTool) as ToolArc)]
+                .into_iter()
+                .collect();
+        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
+        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
+        let tc = CompletedToolCall {
+            id: "tc-3".into(),
+            name: "hang".into(),
+            input: json!({}),
+        };
+        let call = execute_call_with_timeout(&tc, &session, &registry, &sink, None);
+        // The call should NOT resolve on its own (no deadline, hung tool). Race it
+        // against a short outer deadline and confirm it was still pending.
+        if let Ok(out) = tokio::time::timeout(Duration::from_millis(120), call).await {
+            panic!("None deadline should never fire; got: {}", out.content);
+        }
     }
 }

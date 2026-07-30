@@ -1,4 +1,4 @@
-use opencoder_core::{message::now_ms, CapabilitiesConfig, Message};
+use opencoder_core::{message::now_ms, AgentKind, CapabilitiesConfig, Message};
 use std::path::{Path, PathBuf};
 
 pub fn build_system(
@@ -19,7 +19,7 @@ pub fn build_system(
         text.push_str(&instructions);
     }
 
-    let env = environment_block(working_dir);
+    let env = environment_block(working_dir, agent.kind);
     text.push_str("\n\n");
     text.push_str(&env);
 
@@ -145,17 +145,25 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-pub fn environment_block(working_dir: &Path) -> String {
+pub fn environment_block(working_dir: &Path, kind: AgentKind) -> String {
     let platform = std::env::consts::OS;
     let arch = std::env::consts::ARCH;
     let date = chrono::Utc::now().format("%a %b %d %Y").to_string();
     let mut s = String::new();
     s.push_str("# Environment\n");
-    s.push_str(&format!("- Working directory: {}\n", working_dir.display()));
-    s.push_str("- Stay within the working directory: you may work in its subdirectories, but do not access or modify anything outside it.\n");
+    s.push_str(&format!(
+        "- Working directory: {} (may enter subdirectories, do not go outside it)\n",
+        working_dir.display()
+    ));
     s.push_str(&format!("- Platform: {platform}-{arch}\n"));
     s.push_str(&format!("- Date: {date}\n"));
     s.push_str("- You have file system and shell access via your tools. Run tools in parallel when independent.\n");
+    // In PLAN mode the environment block carries a read-only marker so the
+    // model is discouraged from attempting edits/writes (mutating bash is
+    // intercepted anyway). Omitted in ACT mode to save tokens.
+    if kind == AgentKind::Plan {
+        s.push_str("- IN_PLAN_MODE: read-only — do not edit/write files; mutating bash is intercepted. Investigate read-only and output a plan only.\n");
+    }
     s
 }
 

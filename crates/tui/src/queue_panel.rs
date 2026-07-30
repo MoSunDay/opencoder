@@ -173,7 +173,7 @@ pub(crate) fn render_queue_panel(
         } else {
             avail_w
         };
-        let head = format!(" {}: {}", e.prefix, e.text);
+        let head = format!("\u{2502} {}: {}", e.prefix, e.text);
         let head_display = composer::truncate_to_width(&head, cap);
         let head_len = composer::str_width(&head_display);
         let mut spans: Vec<Span> = vec![Span::styled(head_display, Style::default().fg(e.color))];

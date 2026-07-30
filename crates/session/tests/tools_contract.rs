@@ -4,9 +4,7 @@
 use std::path::Path;
 
 use opencoder_core::{Tool, ToolContext};
-use opencoder_session::tools::{
-    bash::BashTool, edit::EditTool, ls::ListTool, search::SearchTool,
-};
+use opencoder_session::tools::{bash::BashTool, edit::EditTool, ls::ListTool, search::SearchTool};
 use serde_json::json;
 
 fn ctx(dir: &Path) -> ToolContext {
@@ -166,145 +164,107 @@ async fn bash_tool_detaches_controlling_terminal() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn bash_tool_hands_off_on_timeout() {
-    // On timeout the bash tool must NOT kill the command — instead it hands
-    // off to a background supervisor and returns a guidance message with the
-    // PID and output file path. The process stays alive.
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(dir.path());
-    let heartbeat = dir.path().join("heartbeat");
-    let pidfile = dir.path().join("gpid");
-    let command = format!(
-        "sh -c 'echo $$ > {pid}; while true; do echo x >> {hb}; sleep 0.2; done' & sleep 4",
-        pid = pidfile.display(),
-        hb = heartbeat.display(),
-    );
-
-    let out = BashTool
-        .execute(json!({"command": command, "timeout": 1}), &c)
-        .await
-        .unwrap();
-    // Handoff is not an error.
-    assert!(!out.is_error, "expected ok, got: {out:?}");
-    assert!(
-        out.content.contains("Moved to background"),
-        "missing handoff text: {out:?}"
-    );
-    assert!(
-        out.content.contains("/tmp/opencode_bg_"),
-        "missing output path: {out:?}"
-    );
-
-    // The grandchild should be alive and producing a heartbeat.
-    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-    assert!(
-        heartbeat.exists(),
-        "grandchild never ran — test setup invalid"
-    );
-    let s1 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
-    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-    let s2 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
-    assert!(
-        s2 > s1,
-        "grandchild heartbeat stopped ({} -> {} bytes) — process killed prematurely",
-        s1,
-        s2
-    );
-
-    // Extract pid and wait for the output file to get [exit code:].
-    let pid_str = out
-        .content
-        .split("PID: ")
-        .nth(1)
-        .and_then(|s| s.split('.').next())
-        .unwrap_or("");
-    let pid: u32 = pid_str.parse().unwrap_or(0);
-    assert!(pid > 0, "could not parse pid: {out:?}");
-    let path = std::path::PathBuf::from(format!("/tmp/opencode_bg_{pid}.output"));
-
-    // Wait for the command (sleep 4) to exit and the supervisor to clean up.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    let mut got_exit_code = false;
-    while std::time::Instant::now() < deadline {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if content.contains("[exit code:") {
-                got_exit_code = true;
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-    assert!(got_exit_code, "output file never got [exit code:]");
-
-    // After exit + supervisor kill, the heartbeat should be static.
-    let s3 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
-    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
-    let s4 = std::fs::metadata(&heartbeat).map(|m| m.len()).unwrap_or(0);
-    assert_eq!(
-        s3, s4,
-        "heartbeat kept growing ({} -> {}) — supervisor failed to kill group",
-        s3, s4
-    );
-
-    // Cleanup.
-    let _ = std::fs::remove_file(&path);
-    if let Ok(txt) = std::fs::read_to_string(&pidfile) {
-        if let Ok(gpid) = txt.trim().parse::<i32>() {
-            unsafe { libc::kill(gpid, libc::SIGKILL) };
-        }
-    }
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn bash_tool_output_file_captures_output_on_timeout() {
-    // On timeout, the command's output is streamed to the background output
-    // file. We print a unique marker, block briefly, and verify the file
-    // contains the marker and the exit code.
+async fn bash_tool_runs_long_command_without_handoff() {
+    // A command that would previously exceed the 1 s timeout (and get handed
+    // off to a background supervisor) now just runs to completion in the
+    // foreground: the tool returns the command's own output, never a
+    // "Moved to background" message, and no background output file is left
+    // behind. The `timeout` input is now ignored.
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     let out = BashTool
         .execute(
-            json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 3", "timeout": 1}),
+            json!({"command": "echo PARTIAL-MARKER-9f3a; sleep 2; echo done", "timeout": 1}),
             &c,
         )
         .await
         .unwrap();
-    assert!(!out.is_error, "expected ok on handoff: {out:?}");
+    assert!(!out.is_error, "expected success, got: {out:?}");
     assert!(
-        out.content.contains("Moved to background"),
-        "missing handoff text: {out:?}"
+        out.content.contains("PARTIAL-MARKER-9f3a"),
+        "expected streamed stdout, got: {out:?}"
     );
+    assert!(
+        out.content.contains("done"),
+        "expected final echo, got: {out:?}"
+    );
+    assert!(
+        !out.content.contains("Moved to background"),
+        "foreground bash must never hand off: {out:?}"
+    );
+    // Registry must be empty after the command finishes (entry unregistered).
+    assert!(
+        opencoder_session::tools::bg::list().is_empty()
+            || !opencoder_session::tools::bg::list()
+                .iter()
+                .any(|i| out.content.contains(&format!("{}", i.pid))),
+        "no stale registry entry after foreground completion"
+    );
+}
 
-    let pid_str = out
-        .content
-        .split("PID: ")
-        .nth(1)
-        .and_then(|s| s.split('.').next())
-        .unwrap_or("");
-    let pid: u32 = pid_str.parse().unwrap_or(0);
-    assert!(pid > 0, "could not parse pid: {out:?}");
-    let path = std::path::PathBuf::from(format!("/tmp/opencode_bg_{pid}.output"));
+#[tokio::test]
+#[cfg(unix)]
+async fn bash_tool_registered_and_stoppable() {
+    // While a long bash is running it is registered so `/stop` can kill its
+    // process group. We start a long sleep, confirm it appears in the bg
+    // registry, then kill it via `bg::stop` (the primitive `/stop` uses) and
+    // confirm the foreground tool call returns with a non-zero exit.
+    use std::time::Duration;
 
-    // Wait for the command to exit and the supervisor to append [exit code:].
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
-    let mut got = false;
-    while std::time::Instant::now() < deadline {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if content.contains("PARTIAL-MARKER-9f3a") && content.contains("[exit code: 0]") {
-                got = true;
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let pidfile = dir.path().join("pid");
+    let command = format!("echo $$ > {pf}; sleep 30", pf = pidfile.display());
+
+    let handle = tokio::spawn(async move {
+        BashTool
+            .execute(json!({"command": command}), &c)
+            .await
+            .unwrap()
+    });
+
+    // Wait for the command to start and publish its pid.
+    let mut pid: u32 = 0;
+    for _ in 0..100 {
+        if let Ok(txt) = std::fs::read_to_string(&pidfile) {
+            if let Ok(p) = txt.trim().parse::<u32>() {
+                pid = p;
                 break;
             }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    assert!(pid > 0, "pidfile never written: command did not start");
+
+    // The running command must be registered (visible to `/ps`, killable by `/stop`).
     assert!(
-        got,
-        "output file missing marker or exit code: {:?}",
-        std::fs::read_to_string(&path).ok()
+        opencoder_session::tools::bg::list()
+            .iter()
+            .any(|i| i.pid == pid),
+        "running bash pid {pid} should be registered"
     );
 
-    let _ = std::fs::remove_file(&path);
+    // Kill it the way `/stop` does (per-pid). The foreground call must then
+    // return (the group-kill makes `wait()` resolve with a signal exit).
+    assert!(
+        opencoder_session::tools::bg::stop(pid),
+        "stop should find and kill the registered pid"
+    );
+
+    let out = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("foreground call did not return after /stop")
+        .unwrap();
+    assert!(
+        out.is_error,
+        "killed bash should report a non-zero exit: {out:?}"
+    );
+    assert!(
+        !opencoder_session::tools::bg::list()
+            .iter()
+            .any(|i| i.pid == pid),
+        "killed bash should be unregistered"
+    );
 }
 
 #[tokio::test]
@@ -319,8 +279,16 @@ async fn search_finds_matching_lines() {
         .unwrap();
     assert!(!out.is_error, "{}", out.content);
     // Both files contain "beta"; output is `relpath:line: content`.
-    assert!(out.content.contains("a.rs:2: fn beta() {}"), "{}", out.content);
-    assert!(out.content.contains("b.txt:1: beta beta"), "{}", out.content);
+    assert!(
+        out.content.contains("a.rs:2: fn beta() {}"),
+        "{}",
+        out.content
+    );
+    assert!(
+        out.content.contains("b.txt:1: beta beta"),
+        "{}",
+        out.content
+    );
     // Non-matching content must not appear.
     assert!(!out.content.contains("alpha"));
 }
@@ -387,10 +355,7 @@ async fn search_single_file_target() {
     std::fs::write(dir.path().join("b.rs"), "fn bar() {}").unwrap();
     let c = ctx(dir.path());
     let out = SearchTool
-        .execute(
-            json!({"pattern": "bar", "path": "a.rs"}),
-            &c,
-        )
+        .execute(json!({"pattern": "bar", "path": "a.rs"}), &c)
         .await
         .unwrap();
     assert!(!out.is_error, "{}", out.content);
@@ -432,5 +397,8 @@ async fn search_follows_symlinked_file() {
         .await
         .unwrap();
     assert!(!out.is_error, "{}", out.content);
-    assert!(out.content.contains("LINK_NEEDLE"), "symlinked file not searched: {out:?}");
+    assert!(
+        out.content.contains("LINK_NEEDLE"),
+        "symlinked file not searched: {out:?}"
+    );
 }

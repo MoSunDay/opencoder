@@ -12,10 +12,7 @@ use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
-use opencoder_session::{
-    resume, run, SessionEvent,
-    SessionState,
-};
+use opencoder_session::{resume, run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
@@ -97,7 +94,8 @@ async fn idle_short_circuit_switches_with_no_llm_call() {
         let evs = events.lock().unwrap();
         assert_eq!(session.agent.name, "plan", "agent switched to plan");
         assert!(
-            evs.iter().any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
             "AgentSwitch(plan) emitted"
         );
         assert!(
@@ -246,11 +244,16 @@ async fn clear_context_survives_resume() {
     // (clippy::await_holding_lock).
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.messages.len(), 1, "transcript collapsed to 1 marker");
+        assert_eq!(
+            session.messages.len(),
+            1,
+            "transcript collapsed to 1 marker"
+        );
         assert_eq!(session.agent.name, "act", "switched to act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         assert!(
-            evs.iter().any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
             "TranscriptReset emitted"
         );
     }
@@ -330,4 +333,3 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
     );
     assert_eq!(session.agent.name, "plan", "steered /plan switched agent");
 }
-

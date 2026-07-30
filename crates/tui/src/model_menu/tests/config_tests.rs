@@ -236,7 +236,10 @@ fn config_form_paste_into_threshold() {
     f.focus = ConfigField::Threshold;
     f.threshold_input = "1000".into();
     f.paste_into("000");
-    assert_eq!(f.threshold_input, "1000000", "1000 -> append 000 -> 1000000");
+    assert_eq!(
+        f.threshold_input, "1000000",
+        "1000 -> append 000 -> 1000000"
+    );
 }
 
 #[test]
@@ -277,7 +280,10 @@ fn config_form_toggle_ap_enabled() {
 #[test]
 fn config_form_inits_context_size_from_config() {
     let f = ConfigForm::new(&cfg());
-    assert_eq!(f.context_size_input, "128000", "default context size is 128k");
+    assert_eq!(
+        f.context_size_input, "128000",
+        "default context size is 128k"
+    );
 
     let mut c = cfg();
     c.context_limit = Some(200_000);
@@ -340,7 +346,10 @@ fn validate_rejects_threshold_above_context_size() {
     f.focus = ConfigField::Save;
     let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
     // Should NOT save; should stay as Config with an error.
-    assert!(matches!(outcome, ModelOutcome::Idle), "save should be blocked");
+    assert!(
+        matches!(outcome, ModelOutcome::Idle),
+        "save should be blocked"
+    );
     assert!(next.is_some(), "menu should stay open on validation error");
 }
 
@@ -373,7 +382,10 @@ fn backspace_clears_threshold_to_empty() {
         ModelMenu::Config(f) => f,
         _ => unreachable!(),
     };
-    assert_eq!(f.threshold_input, "", "backspace must clear threshold to empty");
+    assert_eq!(
+        f.threshold_input, "",
+        "backspace must clear threshold to empty"
+    );
 }
 
 #[test]

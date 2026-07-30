@@ -41,7 +41,10 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
             "/api/sessions",
             post(opencoder_web::api::create_session).get(opencoder_web::api::list_sessions),
         )
-        .route("/api/sessions/:id", get(opencoder_web::api::get_session).delete(opencoder_web::api::delete_session))
+        .route(
+            "/api/sessions/:id",
+            get(opencoder_web::api::get_session).delete(opencoder_web::api::delete_session),
+        )
         .route(
             "/api/sessions/:id/prompt",
             post(opencoder_web::api::post_prompt),
@@ -90,6 +93,7 @@ async fn seed(
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -262,6 +266,7 @@ async fn switch_agent_updates_stored_meta_and_handle() {
         child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),
+        child_cancels: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     state.handles.lock().await.insert(sid.clone(), handle);
 
@@ -300,6 +305,7 @@ async fn interrupt_cancels_running_drain_token() {
         child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),
+        child_cancels: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     });
     state.handles.lock().await.insert(sid.into(), handle);
 

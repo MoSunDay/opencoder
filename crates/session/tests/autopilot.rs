@@ -293,17 +293,15 @@ async fn autopilot_enabled_via_run_with_registry_completes() {
 
 #[tokio::test]
 async fn doom_loop_guard_terminates_act_phase() {
-    // The act phase's run_loop gets 3 identical bash calls -> doom-loop break.
-    // plan (1, idle), act (3 bash -> doom), verify (no -> Complete).
-    let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![completed("plan-0", vec![])])
-            .push_script(vec![bash_turn(1)])
-            .push_script(vec![bash_turn(2)])
-            .push_script(vec![bash_turn(3)])
-            .push_script(vec![completed("no", vec![])]),
-    ) as Arc<dyn ChatStream>;
-    let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
+    // The act phase's run_loop gets 20 identical bash calls -> doom-loop break
+    // (DOOM_THRESHOLD=20). plan (1, idle), act (20 bash -> doom),
+    // verify (no -> Complete).
+    let mut builder = MockChatClient::new().push_script(vec![completed("plan-0", vec![])]);
+    for i in 1..=20u32 {
+        builder = builder.push_script(vec![bash_turn(i)]);
+    }
+    let mock = Arc::new(builder.push_script(vec![completed("no", vec![])])) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(40, 3));
     session
         .record(Message::user("u1", "implement feature X"))
         .await;
@@ -386,10 +384,7 @@ async fn act_phase_fallback_injects_execute_prompt_when_plan_has_no_text() {
         .unwrap()
         .iter()
         .any(|ev| matches!(ev, SessionEvent::TranscriptReset(_)));
-    assert!(
-        !has_reset,
-        "fallback path must not emit TranscriptReset"
-    );
+    assert!(!has_reset, "fallback path must not emit TranscriptReset");
 
     // execute_prompt must have been injected into the transcript.
     assert!(

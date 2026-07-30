@@ -3,7 +3,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::composer;
@@ -84,10 +84,9 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16) {
         .map(|s| Line::from(Span::styled(s.as_str(), Style::default().fg(Color::Gray))))
         .collect();
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" \u{5e2e}\u{52a9} (Ctrl+H \u{6253}\u{5f00}/\u{5173}\u{95ed}, Esc \u{5173}\u{95ed}, \u{2191}\u{2193} \u{6eda}\u{52a8}) ")
-        .border_style(Style::default().fg(Color::Cyan));
+    let block = crate::theme::rounded_block_focus(
+        "\u{5e2e}\u{52a9} (Ctrl+H \u{6253}\u{5f00}/\u{5173}\u{95ed}, Esc \u{5173}\u{95ed}, \u{2191}\u{2193} \u{6eda}\u{52a8})",
+    );
     f.render_widget(
         Paragraph::new(lines).scroll((scroll, 0)).block(block),
         popup,

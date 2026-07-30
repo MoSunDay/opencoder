@@ -6,7 +6,7 @@ use opencoder_store::SessionListItem;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+use ratatui::widgets::{Clear, List, ListItem, ListState};
 use ratatui::Frame;
 
 /// What the user picked from the task picker.
@@ -256,12 +256,8 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     };
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .block(crate::theme::rounded_block_plain().title(title))
+        .highlight_style(crate::theme::list_highlight())
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();

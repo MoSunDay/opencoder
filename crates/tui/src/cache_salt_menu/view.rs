@@ -3,7 +3,7 @@
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::state::CacheSaltMenu;
@@ -21,9 +21,8 @@ pub fn render_cache_salt_popup(f: &mut Frame, area: Rect, menu: &CacheSaltMenu) 
     f.render_widget(Clear, popup);
 
     let state_word = if menu.enabled { "enabled" } else { "DISABLED" };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" Prefix-cache salt (cache_salt: {state_word}) "));
+    let block =
+        crate::theme::rounded_block(&format!("Prefix-cache salt (cache_salt: {state_word})"));
 
     let parent_st = Style::default()
         .fg(Color::Yellow)

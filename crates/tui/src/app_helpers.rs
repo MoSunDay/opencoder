@@ -124,7 +124,9 @@ pub(crate) fn pre_key_intercept(
     cursor_idx: &mut usize,
     parent_scroll: u32,
     parent_follow: bool,
+    needs_clear: &mut bool,
 ) -> bool {
+    *needs_clear = false;
     // Subagent ctx-switch: Esc exits to parent view.
     if subagent_focus.is_some() && k.code == KeyCode::Esc {
         *subagent_focus = None;
@@ -151,6 +153,9 @@ pub(crate) fn pre_key_intercept(
         chat.collapse_all_collapsible();
         input.clear();
         *cursor_idx = 0;
+        // Force a full-screen redraw: the caller resets the terminal's diff
+        // buffer via `terminal.clear()` so the next draw repaints every cell.
+        *needs_clear = true;
         return true;
     }
     false

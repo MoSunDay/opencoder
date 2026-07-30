@@ -46,3 +46,5 @@ __pycache__/
 
 # Cloned external reference repos (obscura / agent-browser / cua)
 reference/
+target-rev/
+target-clean/

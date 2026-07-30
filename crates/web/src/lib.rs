@@ -61,7 +61,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
             "/api/sessions",
             get(api::list_sessions).post(api::create_session),
         )
-        .route("/api/sessions/:id", get(api::get_session).delete(api::delete_session))
+        .route(
+            "/api/sessions/:id",
+            get(api::get_session).delete(api::delete_session),
+        )
         .route("/api/sessions/:id/messages", get(api::get_messages))
         .route("/api/sessions/:id/prompt", post(api::post_prompt))
         .route("/api/sessions/:id/events", get(api::get_events))

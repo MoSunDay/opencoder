@@ -138,7 +138,7 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
 /// the collapse/clear behaviour.
 #[test]
 fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
-    fn run(key: KeyEvent) -> (bool, String, usize) {
+    fn run(key: KeyEvent) -> (bool, String, usize, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
         let mut scroll = 5u32;
@@ -147,6 +147,7 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
         let mut last_esc = None;
         let mut input = "hello world".to_string();
         let mut cursor = 5usize;
+        let mut needs_clear = false;
         let consumed = pre_key_intercept(
             key,
             &mut subagent_focus,
@@ -159,15 +160,16 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
             &mut cursor,
             0,
             true,
+            &mut needs_clear,
         );
-        (consumed, input, cursor)
+        (consumed, input, cursor, needs_clear)
     }
 
     let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
     let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
 
     // Ctrl+U must pass through untouched (handled downstream as a mode toggle).
-    let (u_consumed, u_input, u_cursor) = run(ctrl_u);
+    let (u_consumed, u_input, u_cursor, u_clear) = run(ctrl_u);
     assert!(
         !u_consumed,
         "Ctrl+U must NOT be consumed by pre_key_intercept"
@@ -177,12 +179,17 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
         "Ctrl+U must leave the input untouched"
     );
     assert_eq!(u_cursor, 5, "Ctrl+U must not move the cursor");
+    assert!(!u_clear, "Ctrl+U must not request a forced clear/redraw");
 
     // Ctrl+L still collapses thinking / clears the input.
-    let (l_consumed, l_input, l_cursor) = run(ctrl_l);
+    let (l_consumed, l_input, l_cursor, l_clear) = run(ctrl_l);
     assert!(l_consumed, "Ctrl+L must be consumed by pre_key_intercept");
     assert!(l_input.is_empty(), "Ctrl+L must clear the input");
     assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
+    assert!(
+        l_clear,
+        "Ctrl+L must request a forced full-screen redraw (needs_clear == true)"
+    );
 }
 
 #[test]
@@ -355,6 +362,7 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
             agent: Some("act".into()),
             model: Some("m".into()),
             workdir_hash: None,
+            task_type: None,
             created_at: 0,
             updated_at: 0,
             summary: None,
@@ -367,9 +375,8 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
         .unwrap();
 
     // Simulate pending images from a paste/drop.
-    let mut pending_images: Vec<(String, String)> = vec![
-        ("data:image/png;base64,AAAA".into(), "img1.png".into()),
-    ];
+    let mut pending_images: Vec<(String, String)> =
+        vec![("data:image/png;base64,AAAA".into(), "img1.png".into())];
 
     // Step 1: snapshot WITHOUT clearing (images survive a failed admit).
     let skill_name = "my-skill";
@@ -377,12 +384,8 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
     let image_uris = crate::app_helpers::snapshot_image_uris(&pending_images);
 
     // Step 2: admit as a queued input (mirrors the else branch).
-    let input = crate::app_helpers::mk_input_with_images(
-        sid,
-        Delivery::Queue,
-        &trigger,
-        &image_uris,
-    );
+    let input =
+        crate::app_helpers::mk_input_with_images(sid, Delivery::Queue, &trigger, &image_uris);
     let result = store.admit_input(&input).await;
 
     // Step 3: on success, clear pending images.

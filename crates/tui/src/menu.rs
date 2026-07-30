@@ -11,7 +11,7 @@ use opencoder_core::Skill;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 /// Outcome of a keystroke while the skill menu is open. The caller maps this to
@@ -224,8 +224,8 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     let popup = centered_popup(area, menu.visible_count());
     f.render_widget(Clear, popup);
 
-    let block = Block::default().borders(Borders::ALL).title(
-        " Select skill (\u{2191}/\u{2193} move, type to filter, Enter/Tab=confirm, Esc=cancel) ",
+    let block = crate::theme::rounded_block(
+        "Select skill (\u{2191}/\u{2193} move, type to filter, Enter/Tab=confirm, Esc=cancel)",
     );
 
     let skill_rows: Vec<ListItem> = menu
@@ -265,11 +265,7 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(crate::theme::list_highlight())
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();
@@ -307,9 +303,9 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
 /// above the composer, not centered). Used by the new layout.
 pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
     f.render_widget(Clear, rect);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Skills (\u{2191}/\u{2193} select, type to filter, Enter/Tab=confirm) ");
+    let block = crate::theme::rounded_block(
+        "Skills (\u{2191}/\u{2193} select, type to filter, Enter/Tab=confirm)",
+    );
 
     let skill_rows: Vec<ListItem> = menu
         .rows
@@ -342,11 +338,7 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(crate::theme::list_highlight())
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();

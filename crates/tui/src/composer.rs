@@ -63,6 +63,29 @@ pub fn str_width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
 
+/// Whether a char is a terminal-corrupting control character: C0 controls
+/// (except TAB and LF), DEL, and C1 controls. These bytes, when rendered via
+/// `Span::raw`, are executed by the terminal as control codes (move cursor,
+/// ring bell, switch charset…) rather than drawn, scrambling the display and
+/// desynchronising the diff buffer. TAB and LF are kept: they are legitimate
+/// text the composer handles explicitly. CR is stripped so `\r\n` collapses
+/// to `\n`.
+fn is_corrupting_control(ch: char) -> bool {
+    let cp = ch as u32;
+    (cp <= 0x1F && cp != 0x09 && cp != 0x0A) // C0 except 	 
+
+        || cp == 0x7F // DEL
+        || (0x80..=0x9F).contains(&cp) // C1 control characters
+}
+
+/// Remove all terminal-corrupting control characters from `s`, preserving
+/// TAB, LF, and all printable text (ASCII, CJK, emoji). Applied at every
+/// input/paste entry point to keep the diff buffer consistent with what the
+/// terminal actually displays.
+pub fn sanitize(s: &str) -> String {
+    s.chars().filter(|&c| !is_corrupting_control(c)).collect()
+}
+
 /// Truncate `s` to fit `max_w` display columns, appending an ellipsis (`…`,
 /// width 1) when truncated. Returns the string unchanged if it already fits.
 pub fn truncate_to_width(s: &str, max_w: usize) -> String {
@@ -91,6 +114,9 @@ pub fn clamp_idx(idx: usize, len: usize) -> usize {
 
 /// Insert a char at the cursor index, returning (new_text, new_idx).
 pub fn insert_char(text: &str, idx: usize, ch: char) -> (String, usize) {
+    if is_corrupting_control(ch) {
+        return (text.to_string(), idx);
+    }
     let mut s = String::with_capacity(text.len() + ch.len_utf8());
     let byte = byte_offset_for_char(text, idx);
     s.push_str(&text[..byte]);
@@ -108,17 +134,20 @@ pub fn insert_char(text: &str, idx: usize, ch: char) -> (String, usize) {
 pub const MAX_INPUT_CHARS: usize = 256 * 1024;
 
 pub fn insert_str(text: &str, idx: usize, s: &str) -> (String, usize) {
+    // Strip terminal-corrupting control characters (C0/DEL/C1) so pasted text
+    // can never scramble the display via `Span::raw`.
+    let clean = sanitize(s);
     // C3: reject inserts that would exceed the input limit.
-    let new_chars = text.chars().count().saturating_add(s.chars().count());
+    let new_chars = text.chars().count().saturating_add(clean.chars().count());
     if new_chars > MAX_INPUT_CHARS {
         return (text.to_string(), idx);
     }
-    let mut out = String::with_capacity(text.len() + s.len());
+    let mut out = String::with_capacity(text.len() + clean.len());
     let byte = byte_offset_for_char(text, idx);
     out.push_str(&text[..byte]);
-    out.push_str(s);
+    out.push_str(&clean);
     out.push_str(&text[byte..]);
-    (out, idx + s.chars().count())
+    (out, idx + clean.chars().count())
 }
 
 /// Delete the char before the cursor; returns (new_text, new_idx) or None if
@@ -375,7 +404,6 @@ fn byte_offset_for_char(text: &str, char_idx: usize) -> usize {
         .map(|(b, _)| b)
         .unwrap_or(text.len())
 }
-
 
 #[cfg(test)]
 #[path = "composer_tests.rs"]

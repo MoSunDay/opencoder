@@ -3,7 +3,7 @@
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
 use super::config_form::{ConfigField, ConfigForm};
@@ -66,7 +66,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
         Some(e) => format!(" /config \u{2014} ERROR: {e} "),
         None => " /config \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} change, Enter=next, [Save] commits, Esc cancel ".to_string(),
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = crate::theme::rounded_block_plain().title(title);
 
     let threshold_hint = match form.threshold_input.trim().parse::<u64>() {
         Ok(v) => format!("{} tokens (\u{2248}{}k)", v, v / 1000),
@@ -276,7 +276,7 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
             None => " /model \u{2014} \u{2191}/\u{2193} select, Enter=switch, e=edit, n=new, d=delete, Esc cancel ".to_string(),
         }
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = crate::theme::rounded_block_plain().title(title);
 
     let mut lines: Vec<Line> = Vec::new();
     if list.entries.is_empty() {
@@ -384,8 +384,7 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
     f.render_widget(
         Paragraph::new(lines)
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
+                crate::theme::rounded_block_plain()
                     .title(title)
                     .border_style(Style::default().fg(Color::Yellow)),
             )
@@ -413,7 +412,7 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
             format!(" /model {mode} \u{2014} type values, Enter=next, [Save] commits, Esc cancel ")
         }
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = crate::theme::rounded_block_plain().title(title);
 
     let name_display = if form.name_readonly {
         format!("{} (read-only)", form.name)

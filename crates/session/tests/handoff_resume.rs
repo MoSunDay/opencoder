@@ -46,6 +46,7 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();

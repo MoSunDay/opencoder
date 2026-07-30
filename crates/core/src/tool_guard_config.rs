@@ -17,7 +17,7 @@ pub struct ToolGuardConfig {
 }
 
 fn default_tool_failure_threshold() -> u32 {
-    5
+    20
 }
 fn default_tool_backoff_base() -> u64 {
     200

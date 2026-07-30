@@ -11,10 +11,10 @@ pub mod streamline;
 pub mod tool_guard;
 pub mod tools;
 
+pub use control_cmd::{apply as apply_control_cmd, parse as parse_control_cmd, ControlCmd};
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
-pub use control_cmd::{apply as apply_control_cmd, parse as parse_control_cmd, ControlCmd};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -31,6 +31,24 @@ use tokio_util::sync::CancellationToken;
 /// (a bare `CancellationToken` is one-shot). The lock is held only briefly
 /// (clone-check-fire), never across an `.await`.
 pub type SharedCancel = Arc<Mutex<CancellationToken>>;
+
+/// Cancel all registered child subagents. Returns `true` if at least one child
+/// was cancelled (i.e. the registry was non-empty). This unblocks the parent's
+/// `run_loop` by causing `run_subagent` to return early with `err("cancelled")`,
+/// allowing a pending steer to be absorbed at the next turn boundary.
+pub fn fire_child_cancels(child_cancels: &Arc<Mutex<HashMap<String, CancellationToken>>>) -> bool {
+    let map = match child_cancels.lock() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if map.is_empty() {
+        return false;
+    }
+    for token in map.values() {
+        token.cancel();
+    }
+    true
+}
 
 pub struct SessionState {
     pub id: String,
@@ -66,6 +84,12 @@ pub struct SessionState {
     /// loop, web handler) can fire a specific child's turn interrupt without
     /// going through the worker task.
     pub child_turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
+    /// Registry of child subagent hard-cancel tokens, keyed by `call_id`.
+    /// Each entry is a `child_token()` derived from the parent's cancel token,
+    /// so a parent double-Esc cascades to children, but a parent steer
+    /// (TUI `>` or web POST /prompt) can cancel running children without
+    /// ending the parent's own `run_loop`.
+    pub child_cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
     /// Compaction summary text, persisted to the store so resume can
     /// reconstruct the compacted transcript.
     pub summary: Option<String>,
@@ -108,6 +132,7 @@ impl SessionState {
             cancel: None,
             turn_cancel: None,
             child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
+            child_cancels: Arc::new(Mutex::new(HashMap::new())),
             summary: None,
             summary_seq: None,
             handoff_seq: None,
@@ -212,6 +237,7 @@ impl SessionState {
                 handoff_seq: self.handoff_seq,
                 handoff_plan: self.handoff_plan.clone(),
                 skill: self.skill_prompt_cloned(),
+                task_type: None,
             };
             store.create_session(&meta).await?;
             self.session_created = true;

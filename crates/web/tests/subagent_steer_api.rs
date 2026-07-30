@@ -20,7 +20,9 @@ use axum::Router;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
+use opencoder_store::{
+    Delivery, LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
+};
 
 /// Build a thin test router exposing only the subagent steer route over a
 /// shared in-memory store (mirrors the `app()` pattern in web_contract.rs).
@@ -59,6 +61,7 @@ async fn seed_session(state: &opencoder_web::AppState, sid: &str) {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -175,7 +178,10 @@ async fn steer_completed_subagent_returns_409() {
         .pending_inputs(&child_sid, Delivery::Steer)
         .await
         .unwrap();
-    assert!(pending.is_empty(), "no steer should be admitted for a completed task");
+    assert!(
+        pending.is_empty(),
+        "no steer should be admitted for a completed task"
+    );
 }
 
 #[tokio::test]
@@ -207,7 +213,10 @@ async fn steer_failed_subagent_returns_409() {
         .pending_inputs(&child_sid, Delivery::Steer)
         .await
         .unwrap();
-    assert!(pending.is_empty(), "no steer should be admitted for a failed task");
+    assert!(
+        pending.is_empty(),
+        "no steer should be admitted for a failed task"
+    );
 }
 
 #[tokio::test]

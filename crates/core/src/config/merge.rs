@@ -216,6 +216,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(v) = obj.get("task_timeout_secs").and_then(|v| v.as_u64()) {
             cfg.task_timeout_secs = Some(v);
         }
+        if let Some(v) = obj.get("replay_timeout_secs").and_then(|v| v.as_u64()) {
+            cfg.replay_timeout_secs = Some(v);
+        }
         if let Some(a) = obj.get("autopilot").and_then(|v| v.as_object()) {
             super::autopilot::merge(&mut cfg.autopilot, a);
         }

@@ -10,8 +10,8 @@ pub use types::*;
 
 #[path = "chat_helpers.rs"]
 mod helpers;
-pub(crate) use helpers::{short, summarize};
 pub use helpers::block_text;
+pub(crate) use helpers::{short, summarize};
 
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
@@ -268,6 +268,14 @@ impl ChatView {
         self.blocks.push(ChatBlock::Marker(vec![line]));
     }
 
+    /// Push several non-streamed lines as a single marker block and ensure the
+    /// next TextDelta starts a fresh assistant block. Used by display-only
+    /// commands (e.g. `/ps`) whose multi-line echo never reaches the model.
+    pub fn push_marker_lines(&mut self, lines: Vec<Line<'static>>) {
+        self.finalize_assistant();
+        self.blocks.push(ChatBlock::Marker(lines));
+    }
+
     /// Render the current assistant block's raw text as markdown (idempotent).
     /// Also seals a trailing unsealed Thinking block so its tokens are counted
     /// exactly once at the turn boundary (covers reasoning-only turns).
@@ -472,7 +480,7 @@ impl ChatView {
                     // Visual header so assistant output has its own labelled region,
                     // mirroring the `user:` marker on user prompts.
                     out.push(Line::from(Span::styled(
-                        "say:",
+                        "\u{276f} say:",
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
@@ -585,7 +593,7 @@ impl ChatView {
                 }
                 ChatBlock::Plan { rendered, .. } => {
                     out.push(Line::from(Span::styled(
-                        "\u{2500}\u{2500} plan \u{2500}\u{2500}",
+                        "\u{2576}\u{2500} plan \u{2500}\u{2574}",
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD),

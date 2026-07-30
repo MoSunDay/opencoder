@@ -187,7 +187,7 @@ async fn bash_tool_hands_off_on_timeout() {
     // Handoff is not an error.
     assert!(!out.is_error, "expected ok, got: {out:?}");
     assert!(
-        out.content.contains("moved to background"),
+        out.content.contains("Moved to background"),
         "missing handoff text: {out:?}"
     );
     assert!(
@@ -272,7 +272,7 @@ async fn bash_tool_output_file_captures_output_on_timeout() {
         .unwrap();
     assert!(!out.is_error, "expected ok on handoff: {out:?}");
     assert!(
-        out.content.contains("moved to background"),
+        out.content.contains("Moved to background"),
         "missing handoff text: {out:?}"
     );
 
@@ -434,4 +434,3 @@ async fn search_follows_symlinked_file() {
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("LINK_NEEDLE"), "symlinked file not searched: {out:?}");
 }
-

@@ -28,6 +28,7 @@ use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::composer;
+use crate::local_cmd;
 use crate::model_menu::{handle_model_key, ConfigForm, ModelMenu, ModelOutcome, ProviderList};
 use crate::model_session_switch::switch_session;
 use crate::task::TaskPicker;
@@ -553,8 +554,12 @@ pub(crate) async fn dispatch_command(
             chat.begin_turn();
         }
         CommandOutcome::Dispatch(SlashAction::ClearContext) => {
-            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act_clear_context".into(), Vec::new()))
-                .await
+            if !start_turn(
+                cmd_tx,
+                cancel,
+                UiCmd::Prompt("/act_clear_context".into(), Vec::new()),
+            )
+            .await
             {
                 worker_dead(chat);
                 return LoopFlow::Quit;
@@ -562,6 +567,15 @@ pub(crate) async fn dispatch_command(
             *running = true;
             *follow = true;
             chat.begin_turn();
+        }
+        // Display-only commands: inspect / kill background bash. Never start a
+        // turn and never reach session.messages — the result is pushed as a
+        // purple marker. Work in any state (idle + mid-turn).
+        CommandOutcome::Dispatch(SlashAction::Ps) => {
+            local_cmd::run("/ps", chat);
+        }
+        CommandOutcome::Dispatch(SlashAction::Stop) => {
+            local_cmd::run("/stop", chat);
         }
         // Queue a control command behind a running turn (Tab in popup). When
         // idle, fall back to immediate dispatch.

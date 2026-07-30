@@ -96,6 +96,10 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         .ok()
         .map(|s| Arc::new(s) as Arc<dyn Store>);
 
+    // Create the cancellation token up front so recovery (resume_and_replay) is
+    // itself interruptible: a Ctrl-C during replay cancels the token, which
+    // replay_child races against, instead of freezing until the child finishes.
+    let cancel = CancellationToken::new();
     let mut session = if let Some(id) = pick_resume_id(cli, store.as_deref()).await? {
         let st = store
             .clone()
@@ -111,7 +115,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             config.clone(),
             client.clone(),
             workdir.clone(),
-            None,
+            Some(cancel.clone()),
         )
         .await?
     } else {
@@ -214,7 +218,8 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     // a graceful stop at the next turn boundary / select! cancel arm; a second
     // Ctrl-C forces an immediate exit. Without this, `run_headless` would
     // block forever on a tool whose future never resolves.
-    let cancel = CancellationToken::new();
+    // Reuse the token created before resume so Ctrl-C also interrupts the run
+    // loop (the session already holds it from resume; re-affirm for fresh ones).
     session.cancel = Some(cancel.clone());
     let cancel_for_signal = cancel.clone();
     tokio::spawn(async move {
@@ -305,6 +310,7 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         skill: meta.skill.clone(),
+        task_type: None,
     };
     store.create_session(&forked).await?;
     if !messages.is_empty() {
@@ -545,6 +551,7 @@ mod tests {
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
+                task_type: None,
             })
             .await
             .unwrap();
@@ -564,6 +571,7 @@ mod tests {
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
+                task_type: None,
             })
             .await
             .unwrap();
@@ -618,6 +626,7 @@ mod tests {
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
+                task_type: None,
             })
             .await
             .unwrap();

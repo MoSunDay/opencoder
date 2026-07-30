@@ -14,7 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 /// Registered slash commands: `(invocation, description)`. The first entry is
@@ -36,6 +36,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "/act_clear_context",
         "清空对话上下文并切换到 act 模式（重新开始）",
     ),
+    ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
+    ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -49,6 +51,10 @@ pub enum SlashAction {
     Act,
     Plan,
     ClearContext,
+    /// Display-only: list background bash (never enters model context).
+    Ps,
+    /// Display-only: kill all background bash (never enters model context).
+    Stop,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -160,6 +166,8 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "act" => Some(SlashAction::Act),
         "plan" => Some(SlashAction::Plan),
         "act_clear_context" => Some(SlashAction::ClearContext),
+        "ps" => Some(SlashAction::Ps),
+        "stop" => Some(SlashAction::Stop),
         _ => None,
     }
 }
@@ -173,6 +181,8 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/act" => Some(SlashAction::Act),
         "/plan" => Some(SlashAction::Plan),
         "/act_clear_context" => Some(SlashAction::ClearContext),
+        "/ps" => Some(SlashAction::Ps),
+        "/stop" => Some(SlashAction::Stop),
         _ => None,
     }
 }
@@ -270,9 +280,9 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
     let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" /commands (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel) ");
+    let block = crate::theme::rounded_block(
+        "/commands (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel)",
+    );
 
     let items: Vec<ListItem> = menu
         .rows
@@ -303,11 +313,7 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(crate::theme::list_highlight())
         .highlight_symbol("\u{276f} ");
 
     let mut state = ListState::default();
@@ -422,6 +428,8 @@ mod tests {
         );
         assert_eq!(control_cmd_string(&SlashAction::Task), None);
         assert_eq!(control_cmd_string(&SlashAction::Compact), None);
+        assert_eq!(control_cmd_string(&SlashAction::Ps), None);
+        assert_eq!(control_cmd_string(&SlashAction::Stop), None);
     }
 
     #[test]
@@ -433,10 +441,7 @@ mod tests {
                 m.on_char(c);
             }
         }
-        let (outcome, _quit) = handle_command_key(
-            &mut menu,
-            key(KeyCode::Tab, KeyModifiers::NONE),
-        );
+        let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
         match outcome {
             CommandOutcome::Queue(s) => assert_eq!(s, "/plan"),
             other => panic!("expected Queue, got {:?}", other),
@@ -453,11 +458,11 @@ mod tests {
                 m.on_char(c);
             }
         }
-        let (outcome, _quit) = handle_command_key(
-            &mut menu,
-            key(KeyCode::Tab, KeyModifiers::NONE),
+        let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome, CommandOutcome::Idle),
+            "non-control Tab ignored"
         );
-        assert!(matches!(outcome, CommandOutcome::Idle), "non-control Tab ignored");
         assert!(menu.is_some(), "popup stays open for non-control Tab");
     }
 
@@ -474,10 +479,8 @@ mod tests {
         if let Some(m) = menu.as_mut() {
             m.move_down();
         }
-        let (outcome, _quit) = handle_command_key(
-            &mut menu,
-            key(KeyCode::Enter, KeyModifiers::NONE),
-        );
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         match outcome {
             CommandOutcome::Dispatch(SlashAction::Act) => {}
             other => panic!("expected Dispatch(Act), got {:?}", other),
@@ -493,14 +496,68 @@ mod tests {
                 m.on_char(c);
             }
         }
-        let (outcome, _quit) = handle_command_key(
-            &mut menu,
-            key(KeyCode::Enter, KeyModifiers::NONE),
-        );
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         match outcome {
             CommandOutcome::Dispatch(SlashAction::ClearContext) => {}
             other => panic!("expected Dispatch(ClearContext), got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_local_commands() {
+        assert_eq!(parse("/ps"), Some(SlashAction::Ps));
+        assert_eq!(parse("/stop"), Some(SlashAction::Stop));
+        assert_eq!(parse(" /ps "), Some(SlashAction::Ps));
+    }
+
+    #[test]
+    fn enter_on_ps_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "ps".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Ps) => {}
+            other => panic!("expected Dispatch(Ps), got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Enter-dispatch");
+    }
+
+    #[test]
+    fn enter_on_stop_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "stop".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Stop) => {}
+            other => panic!("expected Dispatch(Stop), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tab_on_local_command_is_idle() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "ps".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(
+            matches!(outcome, CommandOutcome::Idle),
+            "Ps is non-control: Tab is Idle"
+        );
+        assert!(menu.is_some(), "popup stays open for non-control Tab");
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 ### Configuration
 
-Place an `opencoder.json` in the project root or `~/.opencode/` (env vars and CLI flags take higher precedence):
+Place an `opencoder.json` in the project root or `~/.opencoder/` (env vars and CLI flags take higher precedence):
 
 ```jsonc
 {

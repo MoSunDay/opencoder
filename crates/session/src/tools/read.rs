@@ -176,7 +176,11 @@ mod tests {
         }
     }
 
-    async fn run_read(tool: &super::ReadTool, ctx: &ToolContext, input: serde_json::Value) -> String {
+    async fn run_read(
+        tool: &super::ReadTool,
+        ctx: &ToolContext,
+        input: serde_json::Value,
+    ) -> String {
         tool.execute(input, ctx).await.unwrap().content
     }
 
@@ -290,7 +294,12 @@ mod tests {
         }
         let ctx = ctx_for(&dir);
         let tool = super::ReadTool;
-        let out = run_read(&tool, &ctx, json!({ "path": "f.txt", "offset": 51, "limit": 100 })).await;
+        let out = run_read(
+            &tool,
+            &ctx,
+            json!({ "path": "f.txt", "offset": 51, "limit": 100 }),
+        )
+        .await;
         let meta = parse_metadata(&out);
         assert_eq!(meta.get("offset"), Some(&"51"));
         assert_eq!(meta.get("lines_read"), Some(&"100"));

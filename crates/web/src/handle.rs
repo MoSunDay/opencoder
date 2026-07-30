@@ -65,6 +65,11 @@ pub struct SessionHandle {
     /// `SessionState.child_turn_cancels`, enabling the same `Arc` to be shared
     /// between the handle and the live session state.
     pub child_turn_cancels: Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
+    /// Registry of child subagent cancel tokens (derived via `child_token()`),
+    /// keyed by task_id (call_id). Shared with `SessionState.child_cancels` so
+    /// that a parent steer (POST /prompt or TUI `>`) can cancel all running
+    /// children without ending the parent's run_loop.
+    pub child_cancels: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
 }
 
 const BROADCAST_CAPACITY: usize = 256;
@@ -79,6 +84,7 @@ impl SessionHandle {
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
             child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            child_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 }
@@ -176,6 +182,11 @@ pub async fn admit_and_drain(
             .await;
         });
     }
+    // If a drain is already running with child subagents in flight, cancel
+    // them so the parent's run_loop returns from run_subagent and absorbs
+    // this newly-admitted steer at the next turn boundary. When no drain is
+    // running (fresh spawn), the registry is empty so this is a no-op.
+    let _ = opencoder_session::fire_child_cancels(&handle.child_cancels);
     Ok(seq)
 }
 
@@ -237,6 +248,7 @@ async fn drain_to_completion(
     // `run_subagent` inserts tokens into `session.child_turn_cancels`, the web
     // handler can observe/fire them through the handle's `child_turn_cancels`.
     session.child_turn_cancels = handle.child_turn_cancels.clone();
+    session.child_cancels = handle.child_cancels.clone();
 
     let tx = handle.tx.clone();
     let sid = session_id.to_string();

@@ -133,10 +133,47 @@ fn reasoning_cycle_is_circular() {
         Reasoning::Low,
         Reasoning::Medium,
         Reasoning::High,
+        Reasoning::XHigh,
+        Reasoning::Max,
         Reasoning::Off,
     ];
     for expect in seq {
         r = r.next();
         assert_eq!(r, expect);
     }
+}
+
+#[test]
+fn reasoning_new_levels_round_trip() {
+    // from_config parses the extended effort values xhigh / max.
+    assert_eq!(Reasoning::from_config(Some("xhigh")), Reasoning::XHigh);
+    assert_eq!(Reasoning::from_config(Some("max")), Reasoning::Max);
+    // case-insensitive + trimmed, like the other levels.
+    assert_eq!(Reasoning::from_config(Some("  XHigh ")), Reasoning::XHigh);
+    // unknown strings still fall back to Off (field omitted).
+    assert_eq!(Reasoning::from_config(Some("ultra")), Reasoning::Off);
+
+    // to_option emits the literal provider tokens.
+    assert_eq!(Reasoning::XHigh.to_option().as_deref(), Some("xhigh"));
+    assert_eq!(Reasoning::Max.to_option().as_deref(), Some("max"));
+    assert_eq!(Reasoning::Off.to_option(), None);
+
+    // Full parse -> serialize round-trip for the whole scale.
+    for variant in [
+        Reasoning::Off,
+        Reasoning::Low,
+        Reasoning::Medium,
+        Reasoning::High,
+        Reasoning::XHigh,
+        Reasoning::Max,
+    ] {
+        let s = variant.to_option();
+        assert_eq!(Reasoning::from_config(s.as_deref()), variant);
+    }
+
+    // prev inverts next across the new variants.
+    assert_eq!(Reasoning::XHigh.prev(), Reasoning::High);
+    assert_eq!(Reasoning::Max.prev(), Reasoning::XHigh);
+    assert_eq!(Reasoning::High.next(), Reasoning::XHigh);
+    assert_eq!(Reasoning::XHigh.next(), Reasoning::Max);
 }

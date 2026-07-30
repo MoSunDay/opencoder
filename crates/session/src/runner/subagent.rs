@@ -91,9 +91,17 @@ pub(super) async fn run_subagent(
         parent.client.clone(),
         parent.working_dir.clone(),
     );
-    // Propagate the parent's cancellation token so a double-Esc also stops a
-    // running subagent at its next turn boundary.
-    child.cancel = parent.cancel.clone();
+    // Derive a child token from the parent's hard-cancel token. A parent
+    // double-Esc (parent cancelled) cascades to the child via the parent-child
+    // link; but the child can also be independently cancelled through
+    // `parent.child_cancels` (a parent steer) without ending the parent's own
+    // run_loop.
+    child.cancel = parent.cancel.as_ref().map(|pc| pc.child_token());
+    if let Some(ct) = &child.cancel {
+        if let Ok(mut map) = parent.child_cancels.lock() {
+            map.insert(call_id.clone(), ct.clone());
+        }
+    }
 
     // Create and register a turn-level interrupt token for the child. This
     // allows subagent steer to interrupt the current turn without ending the
@@ -124,6 +132,7 @@ pub(super) async fn run_subagent(
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
+                task_type: Some(opencoder_store::TASK_TYPE_SUBAGENT.to_string()),
             })
             .await;
         // Mark the child session as already created so persist() doesn't
@@ -236,9 +245,12 @@ pub(super) async fn run_subagent(
     // durably persisted.
     let _ = flusher.await;
 
-    // Remove the turn-cancel token from the parent's registry now that the
-    // child has finished.
+    // Remove the turn-cancel and cancel tokens from the parent's registries
+    // now that the child has finished.
     if let Ok(mut map) = parent.child_turn_cancels.lock() {
+        map.remove(&call_id);
+    }
+    if let Ok(mut map) = parent.child_cancels.lock() {
         map.remove(&call_id);
     }
 
@@ -247,7 +259,7 @@ pub(super) async fn run_subagent(
     // task cancelled and leave the parent tool_use open (no tool_result) so the
     // child can be replayed on the next user turn. run_loop skips recording the
     // tool message when cancelled, keeping this tool_use dangling.
-    let cancelled = parent
+    let cancelled = child
         .cancel
         .as_ref()
         .map(|c| c.is_cancelled())

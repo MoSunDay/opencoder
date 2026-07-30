@@ -358,6 +358,7 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
             handoff_seq,
             handoff_plan: handoff_plan.map(str::to_string),
             skill: None,
+            task_type: None,
         }
     }
 

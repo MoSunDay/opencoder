@@ -38,6 +38,9 @@ mod app_bootstrap;
 #[path = "subagent_input.rs"]
 mod subagent_input;
 
+#[path = "app_display.rs"]
+mod app_display;
+
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
@@ -66,6 +69,7 @@ pub(super) async fn run_app(
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
     let child_turn_cancels = session.child_turn_cancels.clone();
+    let child_cancels = session.child_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
 
     let mut chat = initial_chat_view(&session, &store).await;
@@ -169,14 +173,8 @@ pub(super) async fn run_app(
     // rate; only the text layout in render_body is throttled.
     let mut body_refresh_pending = true;
     let mut display_chat_cached: Option<ChatView> = None;
-    let mut viewport: Option<crate::render_viewport::ViewportCache> = None; // A1: O(visible_h) render cache
-                                                                            // Persisted across loop iterations: always equals the LAST rendered
-                                                                            // layout (== what is on screen). The event loop forwards `&hits` to
-                                                                            // `handle_mouse` on the SAME iteration a click arrives, and a click
-                                                                            // sets `dirty=true` so `hits` refreshes next frame. Declaring this
-                                                                            // INSIDE the loop resets it to `MouseHits::default()` every turn; when
-                                                                            // no render runs (idle state, `dirty=false`) the rects are empty and
-                                                                            // EVERY arrow click is silently dropped. Keep this OUTSIDE `loop {}`.
+    let mut viewport: Option<crate::render_viewport::ViewportCache> = None;
+    // `hits` persists outside `loop {}` — resetting inside drops idle clicks.
     let mut hits = MouseHits::default();
 
     // Idle-resize safety net: tracks the last-known terminal (width, height).
@@ -213,27 +211,10 @@ pub(super) async fn run_app(
             body_refresh_pending = false;
         }
         let render_chat = display_chat_cached.as_ref().unwrap_or(display_chat);
-        // When a running subagent is focused, show its child view's
-        // steer_items in the queue panel instead of the parent's.
-        let empty_queue: &[(i64, String)] = &[];
         let (display_steers, display_queue) =
-            if let Some(idx) = subagent_focus {
-                match chat.blocks.get(idx) {
-                    Some(crate::chat::ChatBlock::Subagent {
-                        view, done: false, ..
-                    }) => (&view.steer_items, empty_queue),
-                    _ => (&chat.steer_items, &queue_items[..]),
-                }
-            } else {
-                (&chat.steer_items, &queue_items[..])
-            };
-        // Input is disabled only when a DONE subagent is focused
-        // (not when a running one is — the user can steer it).
-        let input_disabled = subagent_focus.is_some_and(|idx| {
-            chat.blocks.get(idx).is_none_or(|b| {
-                matches!(b, crate::chat::ChatBlock::Subagent { done: true, .. })
-            })
-        });
+            app_display::steer_queue_sources(&chat, subagent_focus, &queue_items);
+        let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
+
         if dirty && render_pending {
             if !skip_next_render {
                 app_loop::render_frame(
@@ -270,6 +251,7 @@ pub(super) async fn run_app(
                     input_disabled,
                     run_elapsed_ms,
                     help_scroll,
+                    subagent_focus.is_none(),
                 )?;
             }
             dirty = false;
@@ -395,6 +377,7 @@ pub(super) async fn run_app(
                             }
                             continue;
                         }
+                        let mut needs_clear = false;
                         if pre_key_intercept(
                             k,
                             &mut subagent_focus,
@@ -407,7 +390,16 @@ pub(super) async fn run_app(
                             &mut cursor_idx,
                             parent_scroll,
                             parent_follow,
+                            &mut needs_clear,
                         ) {
+                            if needs_clear {
+                                // Reset the terminal's diff buffer so the next
+                                // draw repaints every cell — recovers from any
+                                // rendering corruption (the point of Ctrl+L).
+                                let _ = terminal.clear();
+                                render_pending = true;
+                                skip_next_render = false;
+                            }
                             continue;
                         }
                         match handle_key(
@@ -442,7 +434,8 @@ pub(super) async fn run_app(
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
                                 );
                                 let clean = clean.trim().to_string();
-                                if clean.is_empty() {
+                                if crate::local_cmd::run(&clean, &mut chat) { // /ps /stop: display-only
+                                } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {
                                             push_user(&mut chat, &mut history, &mut hist_idx, &text);
@@ -718,9 +711,16 @@ pub(super) async fn run_app(
                                     subagent_focus,
                                 );
                             } else if running {
-                                cancel.cancel();
-                                cancelled = true;
-                                drain_pending = true;
+                                if opencoder_session::fire_child_cancels(&child_cancels) {
+                                    // Children cancelled — parent's run_loop will
+                                    // get err("cancelled") tool results and absorb
+                                    // the pending steer at the next turn boundary.
+                                    // No need to hard-cancel the parent itself.
+                                } else {
+                                    cancel.cancel();
+                                    cancelled = true;
+                                    drain_pending = true;
+                                }
                             } else {
                                 start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new()))
                                     .await;

@@ -108,6 +108,7 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         handoff_seq: None,
         handoff_plan: None,
         skill: None,
+        task_type: None,
     };
     store.create_session(&meta).await?;
     store.append_messages(session_id, &msgs).await?;

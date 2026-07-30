@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use opencoder_core::{
@@ -78,13 +79,12 @@ pub async fn resume(
             }
             // Distinguish a ClearContext fresh-start marker from a plan->act
             // handoff: the sentinel stored by control_cmd::ClearContext.
-            let mut head_msg = if plan_display.as_str()
-                == crate::control_cmd::CLEAR_CONTEXT_SENTINEL
-            {
-                crate::control_cmd::fresh_start_message()
-            } else {
-                crate::plan_handoff::handoff_message(plan_display)
-            };
+            let mut head_msg =
+                if plan_display.as_str() == crate::control_cmd::CLEAR_CONTEXT_SENTINEL {
+                    crate::control_cmd::fresh_start_message()
+                } else {
+                    crate::plan_handoff::handoff_message(plan_display)
+                };
             for url in &preserved_images {
                 head_msg.blocks.push(ContentBlock::Image {
                     url: url.clone(),
@@ -205,6 +205,7 @@ pub async fn resume(
         cancel: None,
         turn_cancel: None,
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
+        child_cancels: Arc::new(Mutex::new(HashMap::new())),
         summary: meta.summary,
         summary_seq: meta.summary_seq,
         handoff_seq: meta.handoff_seq,
@@ -254,7 +255,15 @@ pub async fn resume_and_replay(
                 break;
             }
         }
-        let outcome = replay_child(store.clone(), task, &config, &client, &working_dir).await;
+        let outcome = replay_child(
+            store.clone(),
+            task,
+            &config,
+            &client,
+            &working_dir,
+            replay_cancel.as_ref(),
+        )
+        .await;
         let (text, ok) = match outcome {
             Ok(v) => v,
             Err(e) => {
@@ -365,6 +374,7 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
             &session.config,
             &session.client,
             &session.working_dir,
+            cancel.as_ref(),
         )
         .await;
         let (text, ok) = match outcome {
@@ -446,12 +456,18 @@ async fn abandon_cancelled_tasks(
 /// Resume a single child task and run it to completion with an empty prompt
 /// ("continue"). The child's continuation messages and events are persisted to
 /// its own session, mirroring `run_subagent`. Returns `(result_text, ok)`.
+///
+/// Bounded by `config.replay_timeout()` and abortable via `parent_cancel` so
+/// recovery can never freeze the parent indefinitely: an interrupted subagent
+/// is re-run, but a wedged child (slow-but-alive LLM stream, near-doom loop)
+/// is cut off and its partial result backfilled instead.
 async fn replay_child(
     store: Arc<dyn Store>,
     task: &SubagentTaskRecord,
     config: &Config,
     client: &Arc<dyn ChatStream>,
     working_dir: &Path,
+    parent_cancel: Option<&CancellationToken>,
 ) -> Result<(String, bool)> {
     // Children never carry subagent tasks of their own (no `task` tool), so
     // resume()'s stuck-task path is a no-op here; its dangling-`tool_use`
@@ -465,6 +481,12 @@ async fn replay_child(
     )
     .await?;
 
+    // resume() leaves `cancel` as `None`; without a token the run loop's
+    // interrupt check is skipped entirely, so a parent cancel or the replay
+    // timeout could never break the child out of its loop. Install one.
+    let child_token = CancellationToken::new();
+    child.cancel = Some(child_token.clone());
+
     // Incremental child-event persistence (same ordered-flusher pattern as
     // `run_subagent`): events reach the DB as they are produced so a second
     // interruption still leaves partial child progress reconstructable.
@@ -475,10 +497,16 @@ async fn replay_child(
     // Batched, lossless drain (shared with TUI/web/subagent surfaces).
     let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
     let registry = crate::tools::registry();
+
+    // Overall replay deadline. Recovery must not block the user indefinitely:
+    // the only internal cap on `run_with_registry` is the per-LLM-turn idle
+    // timeout, so a child could otherwise run across many turns for hours.
+    let run_dur = config.replay_timeout();
+
     // Boxed to break the run_with_registry -> replay_cancelled_tasks ->
     // replay_child -> run_with_registry recursion (children hold no task tool,
     // so replay_cancelled_tasks is a no-op there, but the type must be finite).
-    let res = Box::pin(crate::runner::run_with_registry(
+    let run = Box::pin(crate::runner::run_with_registry(
         &mut child,
         String::new(),
         Vec::new(),
@@ -505,11 +533,47 @@ async fn replay_child(
                 }
             }
         },
-    ))
-    .await;
-    // The callback owned `ev_tx`; once `run_with_registry` returns the closure
-    // is dropped, closing the channel so the flusher drains and exits.
-    let _ = flusher.await;
+    ));
+
+    // Race the child run against the replay deadline and parent cancellation.
+    // Whichever non-run branch wins cancels the child token (graceful stop at
+    // the next turn boundary) and the `run` future is dropped (hard cancel of
+    // any in-flight LLM/tool call). The authoritative child text is already
+    // persisted via `session.record()`, so partial completion is recoverable.
+    let res = tokio::select! {
+        biased;
+        _ = async {
+            match parent_cancel {
+                Some(t) => t.cancelled().await,
+                None => std::future::pending::<()>().await,
+            }
+        } => {
+            child_token.cancel();
+            tracing::info!(
+                task_id = %task.task_id,
+                child = %task.child_session_id,
+                "replay cancelled by parent during recovery"
+            );
+            Err(anyhow!("replay cancelled"))
+        }
+        _ = tokio::time::sleep(run_dur) => {
+            child_token.cancel();
+            tracing::warn!(
+                task_id = %task.task_id,
+                child = %task.child_session_id,
+                timeout_secs = run_dur.as_secs(),
+                "replay timed out during recovery; backfilling partial result"
+            );
+            Err(anyhow!("replay timed out after {}s", run_dur.as_secs()))
+        }
+        r = run => r,
+    };
+
+    // The callback owned `ev_tx`; once `run_with_registry` returns (or is
+    // cancelled) the closure is dropped, closing the channel so the flusher
+    // drains and exits. Bound the wait so a wedged DB flusher cannot freeze
+    // recovery; the authoritative child text is already persisted.
+    let _ = tokio::time::timeout(Duration::from_secs(30), flusher).await;
 
     let ok = res.is_ok();
     let text = child

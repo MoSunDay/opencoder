@@ -81,9 +81,10 @@ pub async fn apply(
             let preserved_images = crate::compaction::collect_head_images(&session.messages);
             let mut marker = fresh_start_message();
             for url in &preserved_images {
-                marker
-                    .blocks
-                    .push(ContentBlock::Image { url: url.clone(), detail: None });
+                marker.blocks.push(ContentBlock::Image {
+                    url: url.clone(),
+                    detail: None,
+                });
             }
             session.messages = vec![marker];
             // Record the boundary so resume reconstructs the fresh marker, not
@@ -181,8 +182,14 @@ mod tests {
 
     #[test]
     fn parse_trims_whitespace() {
-        assert_eq!(parse("  /plan  "), Some(ControlCmd::SwitchAgent("plan".into())));
-        assert_eq!(parse("\t/act\n"), Some(ControlCmd::SwitchAgent("act".into())));
+        assert_eq!(
+            parse("  /plan  "),
+            Some(ControlCmd::SwitchAgent("plan".into()))
+        );
+        assert_eq!(
+            parse("\t/act\n"),
+            Some(ControlCmd::SwitchAgent("act".into()))
+        );
     }
 
     #[test]
@@ -195,10 +202,7 @@ mod tests {
         assert_eq!(parse("/compact"), None);
     }
 
-    fn collect_events(
-        session: &mut SessionState,
-        cmd: ControlCmd,
-    ) -> Vec<SessionEvent> {
+    fn collect_events(session: &mut SessionState, cmd: ControlCmd) -> Vec<SessionEvent> {
         let mut evs = Vec::new();
         let mut on_event = |ev: SessionEvent| evs.push(ev);
         let _ = futures::executor::block_on(apply(session, &cmd, &mut on_event));
@@ -207,7 +211,8 @@ mod tests {
 
     #[tokio::test]
     async fn apply_switch_agent_changes_agent_and_emits() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        let store =
+            Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-ctrl".into(),
@@ -222,7 +227,9 @@ mod tests {
 
         let evs = collect_events(&mut session, ControlCmd::SwitchAgent("plan".into()));
         assert_eq!(session.agent.name, "plan");
-        assert!(evs.iter().any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")));
 
         // Persisted to the store.
         let meta = store.get_session(&session.id).await.unwrap().unwrap();
@@ -231,7 +238,8 @@ mod tests {
 
     #[tokio::test]
     async fn apply_clear_context_collapses_and_emits() {
-        let store = Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        let store =
+            Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-ctrl".into(),
@@ -252,7 +260,11 @@ mod tests {
 
         let evs = collect_events(&mut session, ControlCmd::ClearContext);
 
-        assert_eq!(session.messages.len(), 1, "transcript collapses to 1 marker");
+        assert_eq!(
+            session.messages.len(),
+            1,
+            "transcript collapses to 1 marker"
+        );
         assert_eq!(session.agent.name, "act", "switches to act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         assert_eq!(
@@ -260,13 +272,21 @@ mod tests {
             Some(CLEAR_CONTEXT_SENTINEL),
         );
 
-        let has_switch = evs.iter().any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act"));
-        let has_reset = evs.iter().any(|e| matches!(e, SessionEvent::TranscriptReset(_)));
+        let has_switch = evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act"));
+        let has_reset = evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::TranscriptReset(_)));
         assert!(has_switch, "AgentSwitch(act) emitted");
         assert!(has_reset, "TranscriptReset emitted");
         // AgentSwitch must come before TranscriptReset.
-        let switch_idx = evs.iter().position(|e| matches!(e, SessionEvent::AgentSwitch(_)));
-        let reset_idx = evs.iter().position(|e| matches!(e, SessionEvent::TranscriptReset(_)));
+        let switch_idx = evs
+            .iter()
+            .position(|e| matches!(e, SessionEvent::AgentSwitch(_)));
+        let reset_idx = evs
+            .iter()
+            .position(|e| matches!(e, SessionEvent::TranscriptReset(_)));
         assert!(switch_idx < reset_idx, "AgentSwitch before TranscriptReset");
     }
 

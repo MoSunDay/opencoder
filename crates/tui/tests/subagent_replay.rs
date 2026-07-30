@@ -36,6 +36,7 @@ async fn make_session(store: &LibsqlStore, id: &str) {
         handoff_seq: None,
         handoff_plan: None,
         skill: None,
+        task_type: None,
     };
     store.create_session(&meta).await.unwrap();
 }

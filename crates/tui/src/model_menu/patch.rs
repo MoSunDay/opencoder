@@ -13,6 +13,7 @@ pub struct ConfigPatch {
     pub capabilities_tools_subagent: bool,
     pub ap_enabled: bool,
     pub ap_max_iter: u32,
+    pub theme: String,
 }
 
 impl ConfigPatch {
@@ -23,6 +24,7 @@ impl ConfigPatch {
             "interleaved_thinking": self.interleaved_thinking,
             "compaction": { "context_threshold": self.context_threshold },
             "fps": self.fps,
+            "theme": self.theme,
             "capabilities": {
                 "browser": self.capabilities_browser,
                 "computer_use": self.capabilities_computer_use,

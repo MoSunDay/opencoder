@@ -337,4 +337,25 @@ mod cache_salt_tests {
         let s = make_session(None);
         assert_eq!(cache_salt_for(&s), None);
     }
+
+    #[test]
+    fn fire_child_cancels_returns_false_on_empty_registry() {
+        let registry: Arc<Mutex<HashMap<String, CancellationToken>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        assert!(!fire_child_cancels(&registry));
+    }
+
+    #[test]
+    fn fire_child_cancels_cancels_all_registered_tokens() {
+        let t1 = CancellationToken::new();
+        let t2 = CancellationToken::new();
+        let mut map = HashMap::new();
+        map.insert("child-1".to_string(), t1.clone());
+        map.insert("child-2".to_string(), t2.clone());
+        let registry = Arc::new(Mutex::new(map));
+
+        assert!(fire_child_cancels(&registry));
+        assert!(t1.is_cancelled());
+        assert!(t2.is_cancelled());
+    }
 }

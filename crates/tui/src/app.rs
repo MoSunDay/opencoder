@@ -63,9 +63,8 @@ pub(super) async fn run_app(
     mut config: Config,
     mut client: Arc<dyn ChatStream>,
 ) -> Result<String> {
-    // Wire a cancellation token into the session so double-Esc can hard-abort
-    // the running turn (mid-stream / mid-tool). The UI keeps a clone to signal.
-    // `mut`: reassigned by `rebind_session` on every `/task` session switch.
+    // Cancellation token for double-Esc hard-abort (mid-stream/mid-tool).
+    // Reassigned by `rebind_session` on every `/task` session switch.
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
     let child_turn_cancels = session.child_turn_cancels.clone();
@@ -111,10 +110,8 @@ pub(super) async fn run_app(
     // None. Kept in absolute rows so it tracks the text while the viewport
     // scrolls. Cleared on copy (mouse-up) and on subagent ctx-switch.
     let mut selection: Option<crate::selection::SelRange> = None;
-    // Transient copy-feedback message shown for ~2s after a mouse-drag copy,
-    // stamped with the instant it was set for timeout-based expiry. Uses
-    // `Instant` rather than `anim_tick` because the latter only advances while
-    // `running` is true, so a copy during idle would never expire.
+    // Transient copy-feedback (~2s) after a mouse-drag copy. Uses `Instant`
+    // (not `anim_tick`, which only advances while running) so idle copies expire.
     let mut copy_status: Option<(String, Instant)> = None;
     // Double-click detection: timestamp of the last left-click and whether the
     // current selection originated from a double-click (forces copy even for a
@@ -137,15 +134,10 @@ pub(super) async fn run_app(
         }
     });
 
-    // Terminal input is collected by a dedicated OS thread (bounded
-    // `poll`+`read`) and delivered here over `input_rx` — see `crate::input`.
-    //
-    // Liveness supervisor: crossterm 0.28's mio source busy-loops forever
-    // when the pty master closes (SSH drop / pane kill) — it holds the global
-    // event mutex, so our `poll(150ms)` never returns and the collector thread
-    // stops bumping its heartbeat. The supervisor (a separate OS thread, immune
-    // to runtime starvation) detects the stall + termination signals and restores
-    // the terminal + exits cleanly instead of leaving a frozen screen.
+    // Input is collected on a dedicated OS thread and delivered over `input_rx`.
+    // Liveness supervisor: when crossterm 0.28's mio source busy-loops on pty
+    // close (holding the event mutex so `poll` never returns), a separate
+    // supervisor thread detects the stall, restores the terminal, exits cleanly.
     let heartbeat = crate::supervisor::Heartbeat::new();
     let supervisor_active = Arc::new(AtomicBool::new(true));
     crate::supervisor::spawn(heartbeat.clone(), Arc::clone(&supervisor_active));
@@ -162,10 +154,8 @@ pub(super) async fn run_app(
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut quitting = false; // render "shutting down…" frame before worker-shutdown wait
     let mut skip_next_render = false;
-    // `dirty` = state changed since the last render. `render_pending` = a
-    // frame-tick boundary authorized a render. A redraw happens only when
-    // BOTH are true, so no matter how fast tokens arrive the screen refreshes
-    // at most at the rate set by `/config` fps (default 10).
+    // `dirty` = state changed since last render; `render_pending` = a frame tick
+    // authorized it. Redraw needs BOTH, capping refresh at `/config` fps (default 10).
     let mut dirty = true;
     let mut render_pending = true;
     // Body cache: a cloned snapshot of the active ChatView, rebuilt at 3 FPS.
@@ -177,10 +167,8 @@ pub(super) async fn run_app(
     // `hits` persists outside `loop {}` — resetting inside drops idle clicks.
     let mut hits = MouseHits::default();
 
-    // Idle-resize safety net: tracks the last-known terminal (width, height).
-    // `frame_ticker` polls the kernel size every frame; if it differs from this
-    // (a Resize event lost by crossterm -- tmux, fast window drag) we force a
-    // ratatui autoresize + redraw so the screen never lingers at a stale size.
+    // Idle-resize safety net: `frame_ticker` polls the kernel size each frame;
+    // on mismatch (a lost Resize event — tmux, fast drag) we force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
 
     loop {
@@ -202,9 +190,6 @@ pub(super) async fn run_app(
             &config,
             &workdir,
         );
-        // Refresh the body cache at BODY_REFRESH_MS cadence (3 FPS). Between
-        // refreshes the spinner still animates at full frame rate because it is
-        // driven by the real-time anim_tick, not the cached blocks.
         if dirty && (body_refresh_pending || display_chat_cached.is_none()) {
             display_chat_cached = Some(display_chat.clone());
             viewport = None; // force viewport rebuild on next render
@@ -392,14 +377,12 @@ pub(super) async fn run_app(
                             parent_follow,
                             &mut needs_clear,
                         ) {
-                            if needs_clear {
-                                // Reset the terminal's diff buffer so the next
-                                // draw repaints every cell — recovers from any
-                                // rendering corruption (the point of Ctrl+L).
-                                let _ = terminal.clear();
-                                render_pending = true;
-                                skip_next_render = false;
-                            }
+                            apply_force_redraw(
+                                needs_clear,
+                                &mut *terminal,
+                                &mut render_pending,
+                                &mut skip_next_render,
+                            );
                             continue;
                         }
                         match handle_key(
@@ -460,10 +443,9 @@ pub(super) async fn run_app(
                                             }
                                             chat.begin_turn();
                                         } else {
-                                            // Skill-only submit while a turn is running: admit the
-                                            // skill trigger as a queued input (mirrors the Queue/Steer
-                                            // pure-skill handling) and drain pending images so they
-                                            // don't leak into a later unrelated submit.
+                                            // Skill-only submit while running: admit the skill trigger
+                                            // as a queued input and drain pending images so they don't
+                                            // leak into a later unrelated submit.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
                                             let image_uris = snapshot_image_uris(&pending_images);
@@ -535,16 +517,11 @@ pub(super) async fn run_app(
                                         pending_images.clear();
                                         chat.steer_items.push((seq, clean.to_string()));
                                     }
-                                    // Do NOT echo into the main transcript /
-                                    // execution area. Steer input is surfaced
-                                    // only in the side queue panel + status bar
-                                    // badge, consistent with queued inputs.
+                                    // Steer input isn't echoed in the transcript; it's surfaced only
+                                    // in the side queue panel + status bar badge (like queued inputs).
                                 } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit (only a `{$name}` token,
-                                    // no text): admit the skill trigger as a
-                                    // steer so the skill body — already injected
-                                    // into the system prompt — is acted on via
-                                    // the steer queue rather than being dropped.
+                                    // Pure-skill submit (only a `{$name}` token): admit the trigger
+                                    // as a steer so the injected skill body is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &image_uris)).await {
@@ -567,10 +544,8 @@ pub(super) async fn run_app(
                                         queue_items.push((seq, clean.to_string()));
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit (only a `{$name}` token,
-                                    // no text): admit the skill trigger to the
-                                    // queue so the active skill is acted on
-                                    // instead of being silently dropped.
+                                    // Pure-skill submit (only a `{$name}` token): admit the trigger
+                                    // to the queue so the active skill is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &image_uris)).await {
@@ -604,10 +579,8 @@ pub(super) async fn run_app(
                                 }
                             }
                             KeyAction::SwitchAgentNoClear(name) => {
-                                // t+Tab chord: switch agent mode but skip the
-                                // plan->act handoff / TranscriptReset — the
-                                // transcript is preserved in full, unlike
-                                // Shift+Tab which collapses to the final plan.
+                                // t+Tab chord: switch agent mode but skip the plan->act handoff /
+                                // TranscriptReset — transcript preserved in full (Shift+Tab collapses it).
                                 mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
                                 sys_tokens =
                                     sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
@@ -629,10 +602,8 @@ pub(super) async fn run_app(
                                         *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = None;
                                     }
                                 }
-                                // Persist the active skill so it survives
-                                // resume/restart (best-effort; the in-memory
-                                // mutex write above keeps the in-flight turn
-                                // immediate).
+                                // Persist the active skill (best-effort) so it survives resume/restart;
+                                // the in-memory mutex write above keeps the in-flight turn immediate.
                                 let _ = store
                                     .update_session(
                                         &session_id,
@@ -699,10 +670,8 @@ pub(super) async fn run_app(
                             copy_status = Some((msg, Instant::now()));
                         }
                         if outcome == MouseOutcome::SteerSubmit {
-                            // When a running subagent is focused, fire its
-                            // turn-cancel to interrupt the current turn and
-                            // force immediate steer absorption. Do NOT change
-                            // the subagent's status — it continues running.
+                            // When a running subagent is focused, fire its turn-cancel to interrupt
+                            // the current turn and force immediate steer absorption (status unchanged).
                             let sub_focused = subagent_focus.is_some();
                             if sub_focused {
                                 subagent_input::fire_subagent_turn_cancel(
@@ -712,10 +681,8 @@ pub(super) async fn run_app(
                                 );
                             } else if running {
                                 if opencoder_session::fire_child_cancels(&child_cancels) {
-                                    // Children cancelled — parent's run_loop will
-                                    // get err("cancelled") tool results and absorb
-                                    // the pending steer at the next turn boundary.
-                                    // No need to hard-cancel the parent itself.
+                                    // Children cancelled — the parent's run_loop gets err("cancelled")
+                                    // tool results and absorbs the steer at the next turn boundary.
                                 } else {
                                     cancel.cancel();
                                     cancelled = true;
@@ -779,18 +746,16 @@ pub(super) async fn run_app(
     // stops advancing, which is expected during shutdown — not a wedge.
     supervisor_active.store(false, Ordering::Relaxed);
     drop(cmd_tx);
-    // The cancel issued on Quit should make the worker finish promptly. As a
-    // last-resort guard against a tool/subagent that ignores cancellation,
-    // bound the wait so the terminal is restored (TerminalGuard::drop leaves
-    // the alt-screen) instead of freezing indefinitely on a blocked worker.
+    // Last-resort guard against a tool/subagent ignoring the Quit cancel: bound
+    // the worker wait so the terminal is restored instead of freezing on a blocked worker.
     let _ = tokio::time::timeout(Duration::from_secs(5), worker).await;
     Ok(session_id)
 }
 
 pub(crate) use crate::app_helpers::{
-    clear_pending_inputs, handle_mouse, initial_chat_view, mk_input_with_images, on_resize_event,
-    poll_idle_resize, pre_key_intercept, push_user, resolve_and_warn, snapshot_image_uris,
-    start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    apply_force_redraw, clear_pending_inputs, handle_mouse, initial_chat_view,
+    mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_user,
+    resolve_and_warn, snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::{skill_token_display, skill_trigger};
 

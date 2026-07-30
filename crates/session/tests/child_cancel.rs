@@ -129,13 +129,16 @@ async fn parent_steer_cancels_running_child() {
 
     let evs = events.lock().unwrap();
 
-    let cancelled_end = evs
-        .iter()
-        .any(|e| matches!(e, SessionEvent::SubagentEnd { cancelled: true, .. }));
-    assert!(
-        cancelled_end,
-        "expected SubagentEnd with cancelled=true"
-    );
+    let cancelled_end = evs.iter().any(|e| {
+        matches!(
+            e,
+            SessionEvent::SubagentEnd {
+                cancelled: true,
+                ..
+            }
+        )
+    });
+    assert!(cancelled_end, "expected SubagentEnd with cancelled=true");
 
     let task_error = evs.iter().any(|e| {
         matches!(

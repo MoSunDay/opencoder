@@ -14,6 +14,7 @@ use opencoder_session::SessionState;
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionPatch, Store};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -770,6 +771,23 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
     Ok(Arc::new(
         LibsqlStore::open(data_dir.join("opencoder.db")).await?,
     ))
+}
+
+/// Force a full-screen redraw when `needs_clear` is set: clears the terminal
+/// diff buffer so the next frame repaints every cell, then authorises the
+/// render. Called after `pre_key_intercept` reports Ctrl+L. Extracted from
+/// `app::run_app` to keep that file under the 800-line iteration cap.
+pub(crate) fn apply_force_redraw<B: ratatui::backend::Backend>(
+    needs_clear: bool,
+    terminal: &mut Terminal<B>,
+    render_pending: &mut bool,
+    skip_next_render: &mut bool,
+) {
+    if needs_clear {
+        let _ = terminal.clear();
+        *render_pending = true;
+        *skip_next_render = false;
+    }
 }
 
 #[cfg(test)]

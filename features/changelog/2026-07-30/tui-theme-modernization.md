@@ -59,7 +59,7 @@ TUI 各渲染模块（render / chat / welcome / help / command / menu / task / q
 
 | 检查 | 结果 |
 |------|------|
-| `cargo test --workspace` | PASS — 1368 passed / 0 failed / 0 ignored（TUI lib 632 passed，含本变更 +14 新增 theme.rs 测试） |
+| `cargo test --workspace` | PASS — 1380 passed / 0 failed / 0 ignored（TUI lib 632 passed，含本变更 +14 新增 theme.rs 测试） |
 | `cargo clippy --workspace --all-targets -- -D warnings` | PASS — 零警告 |
 | `cargo build --workspace` | PASS — Finished |
 | 防修绿扫描 | PASS — 无 `#[ignore]`、无删测试、无弱断言、无调试输出、无 TODO/FIXME、无硬编码密钥 |

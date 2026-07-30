@@ -72,8 +72,7 @@ pub fn str_width(s: &str) -> usize {
 /// to `\n`.
 fn is_corrupting_control(ch: char) -> bool {
     let cp = ch as u32;
-    (cp <= 0x1F && cp != 0x09 && cp != 0x0A) // C0 except 	 
-
+    (cp <= 0x1F && cp != 0x09 && cp != 0x0A) // C0 except TAB and LF
         || cp == 0x7F // DEL
         || (0x80..=0x9F).contains(&cp) // C1 control characters
 }

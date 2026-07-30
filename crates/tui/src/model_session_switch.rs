@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use opencoder_core::Config;
 use opencoder_llm::ChatStream;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 
 use crate::chat::ChatView;
+use crate::theme;
 use crate::worker::UiCmd;
 
 /// Apply a session-only model switch: update the in-memory `config`, rebuild
@@ -46,14 +47,14 @@ pub(crate) async fn switch_session(
                     format!(
                         "[/model] client build failed: {e:#} \u{2014}                         live session keeps previous client"
                     ),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(theme::err_color()),
                 )));
             }
         },
         Err(e) => {
             chat.push_marker(Line::from(Span::styled(
                 format!("[/model] endpoint resolve failed: {e:#}"),
-                Style::default().fg(Color::Red),
+                Style::default().fg(theme::err_color()),
             )));
         }
     }
@@ -63,6 +64,6 @@ pub(crate) async fn switch_session(
             "[/model] switched (session only) \u{2192} {}",
             config.model_id()
         ),
-        Style::default().fg(Color::Cyan),
+        Style::default().fg(theme::accent()),
     )));
 }

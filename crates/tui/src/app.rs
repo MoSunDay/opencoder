@@ -9,7 +9,7 @@ use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -24,6 +24,7 @@ use crate::model_menu::ModelMenu;
 use crate::render::{MouseHits, Term};
 use crate::skill_persist::resolve_persist;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
+use crate::theme;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 
@@ -631,7 +632,7 @@ pub(super) async fn run_app(
                                 )
                                 .await;
                                 chat.push_marker(Line::from(Span::styled(
-                                    "[interrupted] stopping…", Style::default().fg(Color::Yellow))));
+                                    "[interrupted] stopping…", Style::default().fg(theme::warn_color()))));
                                 running = false;
                                 cancelled = true;
                                 follow = true;

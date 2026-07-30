@@ -9,6 +9,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::composer;
+use crate::theme;
 
 /// Which control glyph a queue row's click landed on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -123,7 +124,7 @@ pub(crate) fn render_queue_panel(
         entries.push(E {
             prefix: "\u{21b3} steer",
             text: s.as_str(),
-            color: Color::Blue,
+            color: theme::info_color(),
             seq: Some(*seq),
             is_steer: true,
         });
@@ -132,7 +133,7 @@ pub(crate) fn render_queue_panel(
         entries.push(E {
             prefix: "[queued]",
             text: q.as_str(),
-            color: Color::Yellow,
+            color: theme::warn_color(),
             seq: Some(*seq),
             is_steer: false,
         });
@@ -157,7 +158,7 @@ pub(crate) fn render_queue_panel(
     if overflow {
         lines.push(Line::from(Span::styled(
             format!(" \u{2191}{} more ", start),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         )));
     }
     // Clickable rows reserve a trailing control strip. Queue rows use a
@@ -190,7 +191,7 @@ pub(crate) fn render_queue_panel(
                 // Steer row: " ✕ >" — delete + submit-now.
                 spans.push(Span::styled(
                     " \u{2715} >".to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::muted()),
                 ));
                 let [del_x, sub_x] = steer_btn_x_offsets(area.width);
                 btns.push(QueueBtn {
@@ -207,7 +208,7 @@ pub(crate) fn render_queue_panel(
                 // Queue row: " ▲ ▼ ✕" — up/down/delete.
                 spans.push(Span::styled(
                     " \u{25b2} \u{25bc} \u{2715}".to_string(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::muted()),
                 ));
                 let [up_x, down_x, del_x] = btn_x_offsets(area.width);
                 btns.push(QueueBtn {

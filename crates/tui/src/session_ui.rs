@@ -8,10 +8,11 @@ use std::sync::Arc;
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_session::SessionEvent;
 use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
+use crate::theme;
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are
@@ -158,10 +159,10 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                             Span::styled(
                                 format!("\u{25b8} {name} "),
                                 Style::default()
-                                    .fg(Color::Cyan)
+                                    .fg(theme::accent())
                                     .add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
+                            Span::styled(summarize(input), Style::default().fg(theme::muted())),
                         ]),
                         output: Vec::new(),
                         collapsed: true,
@@ -180,9 +181,9 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                 } = b
                 {
                     let color = if *is_error {
-                        Color::Red
+                        theme::err_color()
                     } else {
-                        Color::DarkGray
+                        theme::muted()
                     };
                     let out: Vec<Line<'static>> = content
                         .lines()
@@ -210,7 +211,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
                                 id: tool_use_id.clone(),
                                 header: Line::from(Span::styled(
                                     "\u{25b8} (output)",
-                                    Style::default().fg(Color::Cyan),
+                                    Style::default().fg(theme::accent()),
                                 )),
                                 output: out,
                                 collapsed: true,

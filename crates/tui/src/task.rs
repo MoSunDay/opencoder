@@ -1,10 +1,11 @@
 //! `/task` session picker — switch between or create new conversations.
 
 use crate::composer;
+use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_store::SessionListItem;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, ListState};
 use ratatui::Frame;
@@ -185,10 +186,10 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     // "+ New task" row
     let new_style = if picker.selected == 0 {
         Style::default()
-            .fg(Color::Green)
+            .fg(theme::ok_color())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Green)
+        Style::default().fg(theme::ok_color())
     };
     items.push(ListItem::new(Line::from(vec![
         Span::styled("+ ", new_style),
@@ -203,7 +204,7 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         let title = s.title.as_deref().unwrap_or("(untitled)");
         let style = if selected {
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::warn_color())
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
@@ -216,13 +217,13 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
             Span::styled(title.to_string(), style),
             Span::styled(
                 format!("  {}", short_preview(&s.preview)),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::muted()),
             ),
         ];
         if is_current {
             spans.push(Span::styled(
                 "  (current)".to_string(),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(theme::accent()),
             ));
         }
         items.push(ListItem::new(Line::from(spans)));
@@ -232,9 +233,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     if let Some(clear_idx) = picker.clear_row_index() {
         let deletable = picker.deletable_count();
         let clear_style = if picker.selected == clear_idx {
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::err_color()).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Red)
+            Style::default().fg(theme::err_color())
         };
         items.push(ListItem::new(Line::from(vec![
             Span::styled("\u{2715} ", clear_style),
@@ -249,7 +250,7 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
                 " \u{26a0} Clear ALL {} task(s)? Enter=confirm, Esc=cancel ",
                 picker.deletable_count()
             ),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::err_color()).add_modifier(Modifier::BOLD),
         ))
     } else {
         Line::from(" Tasks (\u{2191}/\u{2193} select, Enter=switch, Esc=cancel) ")

@@ -6,10 +6,11 @@
 //! `app.rs` stays a flat `match`. [`render_skill_popup`] draws the centered
 //! overlay, reusing the `Clear` + centered-`Rect` pattern from the help popup.
 
+use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Skill;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
@@ -238,11 +239,11 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
                     Span::styled(
                         s.name.clone(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme::accent())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" \u{2014} "),
-                    Span::styled(s.description.clone(), Style::default().fg(Color::Gray)),
+                    Span::styled(s.description.clone(), Style::default().fg(theme::subtle())),
                 ]))
             }
         })
@@ -251,7 +252,7 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     let no_skills_row = if menu.skills.is_empty() {
         Some(ListItem::new(Line::from(Span::styled(
             "  no skills \u{2014} add *.md or <name>/SKILL.md under ~/.opencoder/skills",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         ))))
     } else {
         None
@@ -283,11 +284,11 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
     );
     if footer.height > 0 {
         let footer_line = Line::from(vec![
-            Span::styled(" filter: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" filter: ", Style::default().fg(theme::muted())),
             Span::styled(
                 menu.query(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::warn_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("_"),
@@ -317,11 +318,11 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
                     Span::styled(
                         s.name.clone(),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme::accent())
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" \u{2014} "),
-                    Span::styled(s.description.clone(), Style::default().fg(Color::Gray)),
+                    Span::styled(s.description.clone(), Style::default().fg(theme::subtle())),
                 ]))
             }
         })
@@ -330,7 +331,7 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
     let items = if skill_rows.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "  no skills \u{2014} add *.md under ~/.opencoder/skills",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         )))]
     } else {
         skill_rows

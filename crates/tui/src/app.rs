@@ -58,7 +58,7 @@ pub(super) async fn run_app(
     session: SessionState,
     store: Arc<dyn Store>,
     mut session_id: String,
-    mut context_limit: u64,
+    mut compaction_threshold: u64,
     mut model_label: String,
     workdir: PathBuf,
     mut config: Config,
@@ -215,7 +215,7 @@ pub(super) async fn run_app(
                     show_help,
                     display_ctx,
                     display_sys,
-                    context_limit,
+                    compaction_threshold,
                     &status_model,
                     &status,
                     display_steers,
@@ -325,7 +325,7 @@ pub(super) async fn run_app(
                         if model_menu.is_some() {
                             match app_loop::handle_model_outcome(
                                 &mut model_menu, k, &mut client, &mut config, &mut model_label,
-                                &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx,
+                                &mut compaction_threshold, &mut frame_ms, &mut frame_ticker, &cmd_tx,
                                 &mut chat, &workdir,
                             )
                             .await

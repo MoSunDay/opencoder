@@ -49,7 +49,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
     let mut client: std::sync::Arc<dyn opencoder_llm::ChatStream> =
         std::sync::Arc::new(MockChatClient::new());
     let mut model_label = config.model.clone();
-    let mut context_limit = config.context_limit();
+    let mut compaction_threshold = config.compaction.context_threshold;
     let mut frame_ms = 25u64;
     let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
@@ -71,7 +71,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         &mut client,
         &mut config,
         &mut model_label,
-        &mut context_limit,
+        &mut compaction_threshold,
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,
@@ -88,7 +88,7 @@ async fn handle_model_outcome_session_only_skips_disk_write() {
         &mut client,
         &mut config,
         &mut model_label,
-        &mut context_limit,
+        &mut compaction_threshold,
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,

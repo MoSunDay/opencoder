@@ -39,7 +39,7 @@ impl Tool for ReadTool {
         "read"
     }
     fn description(&self) -> &str {
-        "Reads a UTF-8 text file from the filesystem. Returns up to 200 lines by default (max 1000 per call). Appends a metadata footer (total_lines, offset, lines_read). When the file is not fully read, an [INCOMPLETE READ] hint with the next offset is appended."
+        "Reads a UTF-8 text file from the filesystem. Returns up to 200 lines by default (max 1000 per call). Appends a metadata footer (total_lines, offset, lines_read)."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
@@ -100,27 +100,6 @@ impl Tool for ReadTool {
         out.push_str(&format!("total_lines: {}\n", total_lines));
         out.push_str(&format!("offset: {}\n", start + 1));
         out.push_str(&format!("lines_read: {}\n", lines_read));
-
-        if actual_end < total_lines {
-            // Determine the reason for stopping when the file wasn't fully read.
-            // `stopped_by_tokens` is true when we broke out of the loop before
-            // reaching the requested line count because of the token budget.
-            let stopped_by_tokens = actual_end < requested_end;
-            // `stopped_by_line_limit` is true when we read all requested lines but
-            // there are still more lines in the file.
-            let stopped_by_line_limit = actual_end == requested_end && requested_end < total_lines;
-            let reason = match (stopped_by_tokens, stopped_by_line_limit) {
-                (true, true) => "both token and line limits reached",
-                (true, false) => "token limit (5000) reached",
-                (false, true) => "line limit reached",
-                _ => "file ended unexpectedly",
-            };
-            let next_offset = actual_end + 1;
-            out.push_str(&format!(
-                "[INCOMPLETE READ] The file has not been fully read. Stopped because: {}. To continue reading, call read again with offset={}.\n",
-                reason, next_offset
-            ));
-        }
 
         Ok(ToolOutput::ok(out))
     }
@@ -220,6 +199,7 @@ mod tests {
         let meta = parse_metadata(&out);
         assert_eq!(meta.get("total_lines"), Some(&"500"));
         assert_eq!(meta.get("lines_read"), Some(&"200"));
+        assert!(!out.contains("[INCOMPLETE READ]"));
     }
 
     #[tokio::test]
@@ -253,6 +233,7 @@ mod tests {
         assert!(lines_read < 1000, "lines_read={}", lines_read);
         let content_end = out.find("\n\n--- metadata ---").unwrap();
         assert!(opencoder_llm::estimate(&out[..content_end]) <= 5000);
+        assert!(!out.contains("[INCOMPLETE READ]"));
     }
 
     #[tokio::test]

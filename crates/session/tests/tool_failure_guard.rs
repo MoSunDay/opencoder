@@ -1,7 +1,7 @@
 //! Integration tests for the tool-failure threshold guard.
 //!
-//! NOTE: the pre-existing doom-loop guard (`DOOM_THRESHOLD=3`) keys on the
-//! `name:input` signature and fires on 3 identical signatures *before* tool
+//! NOTE: the pre-existing doom-loop guard (`DOOM_THRESHOLD=20`) keys on the
+//! `name:input` signature and fires on 20 identical signatures *before* tool
 //! execution. To isolate the tool-failure guard, every fixture below uses a
 //! distinct `input` per call (so the doom signature differs each turn) while
 //! keeping the same tool *name* (so the per-name consecutive-failure counter
@@ -73,35 +73,30 @@ async fn make_session(config: Config, client: Arc<dyn ChatStream>) -> SessionSta
 }
 
 #[tokio::test]
-async fn threshold_stops_after_five_consecutive_failures() {
-    let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![failing_tool_call(1)])
-            .push_script(vec![failing_tool_call(2)])
-            .push_script(vec![failing_tool_call(3)])
-            .push_script(vec![failing_tool_call(4)])
-            .push_script(vec![failing_tool_call(5)])
-            .push_script(vec![done()]),
-    );
+async fn threshold_stops_after_max_consecutive_failures() {
+    // Default max_consecutive_failures = 20.
+    let mut builder = MockChatClient::new();
+    for n in 1..=20u32 {
+        builder = builder.push_script(vec![failing_tool_call(n)]);
+    }
+    let mock = Arc::new(builder.push_script(vec![done()]));
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
 
     run(&mut s, "test".into(), |_| {}).await.unwrap();
 
-    // Loop stopped after 5 failures — 6th script never consumed.
-    assert_eq!(mock.call_count(), 5);
+    // Loop stopped after 20 failures — 21st script never consumed.
+    assert_eq!(mock.call_count(), 20);
 }
 
 #[tokio::test]
 async fn emits_error_event_on_threshold() {
-    let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![failing_tool_call(1)])
-            .push_script(vec![failing_tool_call(2)])
-            .push_script(vec![failing_tool_call(3)])
-            .push_script(vec![failing_tool_call(4)])
-            .push_script(vec![failing_tool_call(5)]),
-    );
+    // Default max_consecutive_failures = 20.
+    let mut builder = MockChatClient::new();
+    for n in 1..=20u32 {
+        builder = builder.push_script(vec![failing_tool_call(n)]);
+    }
+    let mock = Arc::new(builder);
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
 
@@ -124,26 +119,24 @@ async fn emits_error_event_on_threshold() {
 async fn success_between_failures_resets_counter() {
     // All calls target the SAME tool name (`bash`); the success (`echo ok`,
     // exit 0) resets the per-name counter. Distinct commands keep the doom-loop
-    // `name:input` signature unique each turn.
-    let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![bash_call("exit 1")]) // fail 1
-            .push_script(vec![bash_call("exit 2")]) // fail 2
-            .push_script(vec![bash_call("echo ok")]) // success → reset
-            .push_script(vec![bash_call("exit 3")]) // fail 1 again
-            .push_script(vec![bash_call("exit 4")]) // fail 2
-            .push_script(vec![bash_call("exit 5")]) // fail 3
-            .push_script(vec![bash_call("exit 6")]) // fail 4
-            .push_script(vec![bash_call("exit 7")]) // fail 5 → trip
-            .push_script(vec![done()]), // should NOT reach
-    );
+    // `name:input` signature unique each turn. After the reset, 20 fresh
+    // failures trip the guard (default max_consecutive_failures = 20).
+    let mut builder = MockChatClient::new()
+        .push_script(vec![bash_call("exit 1")]) // fail 1
+        .push_script(vec![bash_call("exit 2")]) // fail 2
+        .push_script(vec![bash_call("echo ok")]); // success → reset
+    for n in 3..=22u32 {
+        // fails 1..20 after reset → trip on the 20th
+        builder = builder.push_script(vec![bash_call(&format!("exit {n}"))]);
+    }
+    let mock = Arc::new(builder.push_script(vec![done()])); // should NOT reach
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
 
     run(&mut s, "test".into(), |_| {}).await.unwrap();
 
-    // 8 tool-call turns consumed; 9th (done) not reached.
-    assert_eq!(mock.call_count(), 8);
+    // 3 + 20 = 23 tool-call turns consumed; 24th (done) not reached.
+    assert_eq!(mock.call_count(), 23);
 }
 
 #[tokio::test]

@@ -43,7 +43,11 @@ pub fn snapshot(state: &mut UndoState, text: &str, cursor: usize, is_char_insert
 
 /// Undo the last edit. The current state is pushed to the redo stack.
 /// Returns the state to restore, or `None` if already at the initial state.
-pub fn undo(state: &mut UndoState, current_text: &str, current_cursor: usize) -> Option<(String, usize)> {
+pub fn undo(
+    state: &mut UndoState,
+    current_text: &str,
+    current_cursor: usize,
+) -> Option<(String, usize)> {
     if state.undo.len() <= 1 {
         return None;
     }
@@ -54,7 +58,11 @@ pub fn undo(state: &mut UndoState, current_text: &str, current_cursor: usize) ->
 
 /// Redo the last undone edit. The current state is pushed to the undo stack.
 /// Returns the state to restore, or `None` if there is nothing to redo.
-pub fn redo(state: &mut UndoState, current_text: &str, current_cursor: usize) -> Option<(String, usize)> {
+pub fn redo(
+    state: &mut UndoState,
+    current_text: &str,
+    current_cursor: usize,
+) -> Option<(String, usize)> {
     let entry = state.redo.pop()?;
     state.undo.push((current_text.to_string(), current_cursor));
     Some(entry)

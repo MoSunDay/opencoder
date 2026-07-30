@@ -75,6 +75,7 @@ async fn setup_session(id: &str) -> Arc<dyn Store> {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();

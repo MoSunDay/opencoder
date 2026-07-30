@@ -161,6 +161,7 @@ async fn ensure_session(workdir: &Path, id: &str) -> Result<()> {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .context("seed session for tmux")?;

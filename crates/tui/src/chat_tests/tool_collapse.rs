@@ -424,15 +424,8 @@ fn expanded_tool_header_prefix_arrow_flips_down() {
         images: Vec::new(),
     });
 
-    let first_span_char = |lines: &[Line]| -> Option<char> {
-        lines
-            .first()?
-            .spans
-            .first()?
-            .content
-            .chars()
-            .next()
-    };
+    let first_span_char =
+        |lines: &[Line]| -> Option<char> { lines.first()?.spans.first()?.content.chars().next() };
 
     // Collapsed (default): header keeps ▸.
     assert_eq!(

@@ -44,6 +44,7 @@ async fn append_1000_messages_under_2ms_avg() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -74,6 +75,7 @@ async fn load_1000_messages_under_50ms() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -109,6 +111,7 @@ async fn list_200_sessions_under_100ms() {
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
+                task_type: None,
             })
             .await
             .unwrap();

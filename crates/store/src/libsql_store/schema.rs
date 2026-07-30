@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   summary_seq  INTEGER,
   handoff_seq  INTEGER,
   handoff_plan TEXT,
-  skill        TEXT
+  skill        TEXT,
+  task_type    TEXT NOT NULL DEFAULT 'parent'
 )";
 const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (
@@ -87,6 +88,8 @@ const CREATE_INDEX_SA_PARENT: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_parent ON subagent_tasks(parent_session_id, seq)";
 const CREATE_INDEX_SA_CHILD: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_child ON subagent_tasks(child_session_id)";
+const CREATE_INDEX_SESSION_TASK_TYPE: &str =
+    "CREATE INDEX IF NOT EXISTS idx_sessions_task_type ON sessions(task_type)";
 
 /// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
 ///
@@ -141,6 +144,11 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     } else {
         set_version(conn, SCHEMA_VERSION).await?;
     }
+    // The task_type index depends on a column that only physically exists in
+    // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
+    // older databases, so it must run AFTER `migrate` rather than in the
+    // pre-migration index batch above.
+    conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
     Ok(())
 }
 
@@ -182,6 +190,28 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
             "TEXT NOT NULL DEFAULT '[]'",
         )
         .await?;
+    }
+    if from < 5 {
+        // v5: task_type column on sessions distinguishes parent (top-level)
+        // sessions from subagent child sessions. NOT NULL with a default of
+        // 'parent' so existing rows are valid parents. Backfill any rows that
+        // are already linked as subagent children, then create the filter
+        // index. (CREATE TABLE already carries the column for fresh DBs, so
+        // add_column_if_absent keeps this idempotent.)
+        add_column_if_absent(
+            conn,
+            "sessions",
+            "task_type",
+            "TEXT NOT NULL DEFAULT 'parent'",
+        )
+        .await?;
+        conn.execute(
+            "UPDATE sessions SET task_type = 'subagent' WHERE id IN (SELECT child_session_id FROM subagent_tasks)",
+            (),
+        )
+        .await
+        .context("backfill task_type")?;
+        conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
     }
     Ok(())
 }

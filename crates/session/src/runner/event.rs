@@ -274,7 +274,7 @@ impl SessionEvent {
 }
 
 pub(super) const MAX_OUTPUT: usize = 4096;
-pub(super) const DOOM_THRESHOLD: usize = 3;
+pub(super) const DOOM_THRESHOLD: usize = 20;
 
 /// Shared event sink for concurrent tool dispatch. Wraps the borrowed `FnMut`
 /// closure in a `Mutex` so multiple in-flight tool/subagent futures can emit

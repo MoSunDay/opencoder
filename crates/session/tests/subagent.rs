@@ -271,6 +271,7 @@ async fn subagent_persists_parent_child_to_store() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -363,6 +364,7 @@ async fn subagent_persists_child_events_to_store() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();
@@ -491,6 +493,7 @@ async fn subagent_child_events_persisted_before_return() {
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await
         .unwrap();

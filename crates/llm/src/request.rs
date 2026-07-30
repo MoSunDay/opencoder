@@ -10,7 +10,7 @@ pub struct ChatRequest {
     pub tool_choice: Option<String>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
-    /// OpenAI-style reasoning effort (`low|medium|high`). Forwarded verbatim
+    /// OpenAI-style reasoning effort (`low|medium|high|xhigh|max`). Forwarded verbatim
     /// as a top-level `reasoning_effort` field on the request body. `None`
     /// omits the field so providers that don't support it stay unaffected.
     pub reasoning_effort: Option<String>,

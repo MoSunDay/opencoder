@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 ### 配置
 
-在项目根目录或 `~/.opencode/` 放置 `opencoder.json`（环境变量与 CLI flag 优先级更高）：
+在项目根目录或 `~/.opencoder/` 放置 `opencoder.json`（环境变量与 CLI flag 优先级更高）：
 
 ```jsonc
 {
@@ -111,10 +111,10 @@ opencoder run "用 Rust 实现一个 LRU cache 并写测试"
 opencoder server --host 0.0.0.0 --port 8080
 opencoder client --remote http://127.0.0.1:8080 "总结这个仓库的架构"
 
-# 4) 在 tmux 里跑 TUI：SSH 断线后会话存活，重连后 opencode ts 自动 reattach
-opencode ts            # 新建/恢复 tmux 会话
-opencode ts -l         # 列出受管会话（tmux 名 + 任务信息）
-opencode ts -r <id>    # 恢复指定会话
+# 4) 在 tmux 里跑 TUI：SSH 断线后会话存活，重连后 opencoder ts 自动 reattach
+opencoder ts            # 新建/恢复 tmux 会话
+opencoder ts -l         # 列出受管会话（tmux 名 + 任务信息）
+opencoder ts -r <id>    # 恢复指定会话
 ```
 
 ## 🧱 架构

@@ -47,6 +47,7 @@ pub async fn create_session(
         handoff_seq: None,
         handoff_plan: None,
         skill: None,
+        task_type: None,
     };
     let _ = state.store.create_session(&meta).await;
     Json(json!({ "id": id })).into_response()
@@ -217,6 +218,7 @@ async fn ensure_session_row(state: &AppState, id: &str, prompt: &str, config: &C
             handoff_seq: None,
             handoff_plan: None,
             skill: None,
+            task_type: None,
         })
         .await;
 }

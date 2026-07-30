@@ -33,7 +33,9 @@ impl ConfigPatch {
                 "max_iterations": self.ap_max_iter,
             },
         });
-        if let Some(mt) = self.max_tokens { root["max_tokens"] = serde_json::json!(mt); }
+        if let Some(mt) = self.max_tokens {
+            root["max_tokens"] = serde_json::json!(mt);
+        }
         root
     }
 }
@@ -63,7 +65,8 @@ impl ProviderPatch {
             provider["api_key"] = resolved;
         }
         provider["headers"] = serde_json::Value::Array(
-            self.headers.iter()
+            self.headers
+                .iter()
                 .map(|(n, v)| serde_json::json!({ "name": n, "value": v }))
                 .collect(),
         );

@@ -1,7 +1,7 @@
 //! Prompt construction tests — verifies build_system, environment_block,
 //! and compaction prompts produce correct content.
 
-use opencoder_core::{resolve_agent, CapabilitiesConfig};
+use opencoder_core::{resolve_agent, AgentKind, CapabilitiesConfig};
 use opencoder_session::prompt::{
     build_system, compaction_system_prompt, compaction_user_prompt, environment_block,
     global_instructions_text,
@@ -47,7 +47,7 @@ fn build_system_omits_skill_section_when_empty() {
 
 #[test]
 fn environment_block_contains_cwd_and_platform() {
-    let block = environment_block(std::path::Path::new("/home/user/repo"));
+    let block = environment_block(std::path::Path::new("/home/user/repo"), AgentKind::Act);
     assert!(block.contains("Working directory: /home/user/repo"));
     assert!(block.contains("Platform:"));
     assert!(block.contains("Date:"));
@@ -92,10 +92,9 @@ fn compaction_user_prompt_without_previous_summary_says_create_new() {
 
 #[test]
 fn environment_block_constrains_to_working_directory() {
-    let block = environment_block(std::path::Path::new("/home/user/repo"));
-    assert!(block.contains("Stay within the working directory"));
-    assert!(block.contains("subdirectories"));
-    assert!(block.contains("do not access or modify anything outside it"));
+    let block = environment_block(std::path::Path::new("/home/user/repo"), AgentKind::Act);
+    assert!(block.contains("may enter subdirectories"));
+    assert!(block.contains("do not go outside it"));
 }
 
 // ---------------------------------------------------------------------------
@@ -319,4 +318,19 @@ fn global_instructions_ignores_git_root_and_working_dir_files() {
     with_home(home.path(), || {
         assert_eq!(global_instructions_text(working.path()), None);
     });
+}
+
+#[test]
+fn environment_block_marks_plan_mode_readonly() {
+    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Plan);
+    assert!(block.contains("IN_PLAN_MODE"));
+    assert!(block.contains("read-only"));
+    assert!(block.contains("do not edit/write files"));
+}
+
+#[test]
+fn environment_block_omits_plan_marker_in_act() {
+    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Act);
+    assert!(!block.contains("IN_PLAN_MODE"));
+    assert!(block.contains("Working directory: /repo"));
 }

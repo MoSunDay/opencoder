@@ -12,8 +12,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkMatch};
-use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
+use ignore::WalkBuilder;
 use opencoder_core::{json, tool::truncate_output, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 
@@ -77,7 +77,9 @@ impl Tool for SearchTool {
         let mut searcher = SearcherBuilder::new().line_number(true).build();
 
         if base.is_file() {
-            collector.rel = path_str.clone().unwrap_or_else(|| base.display().to_string());
+            collector.rel = path_str
+                .clone()
+                .unwrap_or_else(|| base.display().to_string());
             let _ = searcher.search_path(&matcher, &base, &mut collector);
         } else {
             let mut wb = WalkBuilder::new(&base);
@@ -141,18 +143,15 @@ struct Collector {
 
 impl Sink for Collector {
     type Error = io::Error;
-    fn matched(
-        &mut self,
-        _searcher: &Searcher,
-        mat: &SinkMatch<'_>,
-    ) -> Result<bool, io::Error> {
+    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, io::Error> {
         if self.results.len() >= self.max {
             return Ok(false);
         }
         let line = mat.line_number().unwrap_or(0);
         let text = String::from_utf8_lossy(mat.bytes());
         let text = text.trim_end_matches(['\r', '\n']);
-        self.results.push(format!("{}:{}: {}", self.rel, line, text));
+        self.results
+            .push(format!("{}:{}: {}", self.rel, line, text));
         Ok(true)
     }
 }

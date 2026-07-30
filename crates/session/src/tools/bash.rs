@@ -1,6 +1,5 @@
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -8,7 +7,9 @@ use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
-use super::bg::{handoff, BgState};
+#[cfg(test)]
+use super::bg::{list, test_registry_mutex};
+use super::bg::{register, unregister, BgState};
 
 pub struct BashTool;
 
@@ -31,35 +32,6 @@ fn merge_streams(stdout: &str, stderr: &str) -> String {
     combined
 }
 
-/// Maximum per-command timeout (seconds) for the bash tool.
-///
-/// Must stay strictly below `DEFAULT_TOOL_TIMEOUT` (600 s) in
-/// [`crate::runner`] — the runner's outer `biased select!` polls the deadline
-/// arm before the exec arm, so if bash's own `tokio::time::timeout` were
-/// ≥ 600 s the safety net would fire first, drop the exec future, and
-/// `kill_on_drop(true)` would silently kill the child — bypassing handoff
-/// entirely (the "moved to background" path never runs). Capping at 590 s
-/// guarantees the handoff code path always wins the race.
-pub(crate) const BASH_MAX_TIMEOUT_SECS: u64 = 590;
-
-/// Compile-time guard: the bash cap must be strictly below the runner's outer
-/// safety-net timeout. If someone lowers `DEFAULT_TOOL_TIMEOUT` below 590,
-/// this assertion fails at compile time.
-const _: () = assert!(
-    BASH_MAX_TIMEOUT_SECS < crate::runner::DEFAULT_TOOL_TIMEOUT.as_secs(),
-    "BASH_MAX_TIMEOUT_SECS must be strictly below DEFAULT_TOOL_TIMEOUT"
-);
-
-/// Resolve the per-command timeout from tool input, applying the default
-/// (120 s) and the hard cap ([`BASH_MAX_TIMEOUT_SECS`]).
-fn resolve_timeout_secs(input: &Value) -> u64 {
-    input
-        .get("timeout")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(120)
-        .min(BASH_MAX_TIMEOUT_SECS)
-}
-
 #[async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &str {
@@ -76,7 +48,7 @@ impl Tool for BashTool {
         );
         props.insert(
             "workdir".into(),
-            json::prop_str("Optional working directory override."),
+            json::prop_str("Optional working directory override. Defaults to the session working directory, so only pass this to run a command in a different directory; no need for a manual `cd`."),
         );
         json::object_schema(Value::Object(props), &["command"])
     }
@@ -91,7 +63,6 @@ impl Tool for BashTool {
             .and_then(|v| v.as_str())
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.working_dir.clone());
-        let timeout_secs = resolve_timeout_secs(&input);
 
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-lc")
@@ -130,6 +101,16 @@ impl Tool for BashTool {
         let pid = child.id().unwrap_or(0);
         #[cfg(unix)]
         let pgid = pid as libc::pid_t;
+        // On non-unix there is no process group; `pid` only feeds the registry
+        // below, so sink it to avoid an unused-variable warning.
+        #[cfg(not(unix))]
+        let _ = pid;
+
+        // Register the live process so the display-only `/ps` can list it and
+        // `/stop` can kill its process group while it runs in the foreground.
+        // The entry is removed below once `wait()` returns (or by `/stop`).
+        #[cfg(unix)]
+        register(pid, pgid, ctx.session_id.clone());
 
         // Shared capture state: incremental drain tasks push 8 KiB chunks here.
         // In the foreground phase this only buffers; after `handoff` the file
@@ -176,40 +157,18 @@ impl Tool for BashTool {
             })
         };
 
-        let exit_status =
-            match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
-                Ok(r) => r?,
-                Err(_) => {
-                    // Timed out: instead of killing the group, hand the child
-                    // (and its drain tasks + capture state) off to a detached
-                    // background supervisor. The supervisor keeps the command
-                    // running, streams output to /tmp/opencode_bg_<pid>.output,
-                    // and cleans up the process group when the command exits.
-                    #[cfg(unix)]
-                    {
-                        handoff(
-                            pid,
-                            pgid,
-                            ctx.session_id.clone(),
-                            child,
-                            stdout_task,
-                            stderr_task,
-                            state,
-                        );
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = (pid, child, stdout_task, stderr_task, state);
-                    }
-                    let path = super::bg::output_path(pid);
-                    let msg = format!(
-                        "Moved to background. PID: {pid}. Check progress: cat {}. \
-                         Never run >{timeout_secs}s commands in foreground.",
-                        path.display()
-                    );
-                    return Ok(ToolOutput::ok(msg));
-                }
-            };
+        // Wait for the command to exit naturally — no foreground timeout, no
+        // background handoff. The command keeps running (and stays registered
+        // for `/ps` / `/stop`) for as long as it needs; the user kills a
+        // runaway command with `/stop` (or an interrupt). The runner does not
+        // impose its 600 s leaf-tool deadline on bash either (see
+        // `runner::execute`).
+        let exit_status = child.wait().await?;
+        // Natural completion (or a `/stop` group-kill, which makes `wait()`
+        // return a signal exit): remove the registry entry. Idempotent — a
+        // `/stop` that already removed it is a harmless no-op.
+        #[cfg(unix)]
+        unregister(pid);
 
         // Normal completion: await drain tasks (they resolve at EOF when the
         // child exits) then read the captured buffers.
@@ -224,7 +183,16 @@ impl Tool for BashTool {
         };
         let code = exit_status.code().unwrap_or(-1);
         let streams = merge_streams(&stdout, &stderr);
-        let combined = if streams.is_empty() {
+        // Success (code == 0): no exit-code annotation — success is implicit.
+        // Failure (code != 0): append `[exit code: N]` so the model sees the
+        // failure and can react to it.
+        let combined = if code == 0 {
+            if streams.is_empty() {
+                "(no output)".to_string()
+            } else {
+                streams
+            }
+        } else if streams.is_empty() {
             format!("(no output)\n[exit code: {code}]")
         } else {
             format!("{streams}\n[exit code: {code}]")
@@ -273,97 +241,107 @@ mod tests {
             out.content
         );
         assert!(
-            out.content.contains("[exit code: 0]"),
-            "exit code: {}",
+            !out.content.contains("[exit code:"),
+            "success must not annotate exit code: {}",
             out.content
         );
     }
 
     #[tokio::test]
-    async fn bash_handoff_on_timeout() {
+    async fn bash_failure_appends_exit_code() {
         let tool = BashTool;
-        // Use a 1-second timeout on a 10-second sleep to trigger handoff fast.
+        let input = json!({"command": "echo oops; exit 7"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(
+            out.is_error,
+            "expected error for non-zero exit: {}",
+            out.content
+        );
+        assert!(out.content.contains("oops"), "stdout: {}", out.content);
+        assert!(
+            out.content.contains("[exit code: 7]"),
+            "failure must annotate exit code: {}",
+            out.content
+        );
+    }
+
+    /// A long-running command completes normally in the foreground: no
+    /// timeout, no "Moved to background" handoff message — bash waits until the
+    /// command exits on its own. (A 3 s command would previously have been
+    /// handed off after the 1 s timeout; now it just runs to completion.)
+    #[tokio::test]
+    async fn bash_long_command_completes_without_handoff() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
         let input = json!({"command": "sleep 3; echo done", "timeout": 1});
         let out = tool.execute(input, &ctx()).await.unwrap();
-        // Handoff is not an error — the model gets a guidance message.
+        assert!(!out.is_error, "expected success, got: {}", out.content);
         assert!(
-            !out.is_error,
-            "handoff should be ToolOutput::ok, got: {}",
+            out.content.contains("done"),
+            "expected the command's own output, got: {}",
             out.content
         );
         assert!(
-            out.content.contains("Moved to background"),
-            "missing handoff text: {}",
+            !out.content.contains("Moved to background"),
+            "foreground bash must never emit the handoff message: {}",
             out.content
         );
-        // Extract pid from the message and check the output path is mentioned.
-        assert!(
-            out.content.contains("/tmp/opencode_bg_"),
-            "missing output path: {}",
-            out.content
-        );
-        // The background supervisor writes [exit code: N] when the child exits.
-        // Wait for the output file to contain it (the sleep is 3s, so poll).
-        let pid_str = out
-            .content
-            .split("PID: ")
-            .nth(1)
-            .and_then(|s| s.split('.').next())
-            .unwrap_or("");
-        let pid: u32 = pid_str.parse().unwrap_or(0);
-        assert!(pid > 0, "could not parse pid from: {}", out.content);
-        let path = super::super::bg::output_path(pid);
-        let deadline = std::time::Instant::now() + Duration::from_secs(6);
-        let mut got_exit_code = false;
-        while std::time::Instant::now() < deadline {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if content.contains("[exit code:") {
-                    got_exit_code = true;
+    }
+
+    /// While a command is running it is registered in the background registry
+    /// (so `/ps` lists it / `/stop` can kill it); once it exits the entry is
+    /// removed. Verified by writing the child pid (`$$` == the setsid leader
+    /// the tool spawned) to a file and inspecting the registry mid-flight.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_registers_while_running_unregisters_after() {
+        let _g = test_registry_mutex().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let tool = BashTool;
+        let mut c = ctx();
+        c.working_dir = dir.path().to_path_buf();
+        let input = json!({
+            "command": format!("echo $$ > {pf}; sleep 2; echo done", pf = pidfile.display())
+        });
+        // Run the tool concurrently so we can inspect the registry mid-flight.
+        let handle = tokio::spawn(async move { tool.execute(input, &c).await.unwrap() });
+
+        // Wait for the command to start and write its pid.
+        let mut pid: u32 = 0;
+        for _ in 0..60 {
+            if let Ok(txt) = std::fs::read_to_string(&pidfile) {
+                if let Ok(p) = txt.trim().parse::<u32>() {
+                    pid = p;
                     break;
                 }
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        assert!(
-            got_exit_code,
-            "output file never received [exit code:]: {:?}",
-            std::fs::read_to_string(&path).ok()
-        );
-        // Clean up the temp file.
-        let _ = std::fs::remove_file(&path);
-    }
+        assert!(pid > 0, "pidfile never written: command did not start");
 
-    #[test]
-    fn timeout_clamped_below_safety_net() {
-        // Default when absent.
-        assert_eq!(resolve_timeout_secs(&json!({})), 120);
-        // Sub-cap values pass through unchanged.
-        assert_eq!(resolve_timeout_secs(&json!({"timeout": 60})), 60);
-        assert_eq!(resolve_timeout_secs(&json!({"timeout": 300})), 300);
-        assert_eq!(resolve_timeout_secs(&json!({"timeout": 590})), 590);
-        // Values at or above the runner safety net (600 s) must be clamped
-        // so the bash handoff always fires before the biased outer deadline.
-        assert_eq!(
-            resolve_timeout_secs(&json!({"timeout": 600})),
-            BASH_MAX_TIMEOUT_SECS
+        // While running, the live pid must be registered for `/ps` / `/stop`.
+        assert!(
+            list().iter().any(|i| i.pid == pid),
+            "running bash pid {pid} should be registered"
         );
-        assert_eq!(
-            resolve_timeout_secs(&json!({"timeout": 9999})),
-            BASH_MAX_TIMEOUT_SECS
-        );
-        assert_eq!(
-            resolve_timeout_secs(&json!({"timeout": u64::MAX})),
-            BASH_MAX_TIMEOUT_SECS
+
+        let out = handle.await.unwrap();
+        assert!(out.content.contains("done"), "{}", out.content);
+
+        // After completion the registry entry is removed.
+        assert!(
+            !list().iter().any(|i| i.pid == pid),
+            "completed bash should have unregistered pid {pid}"
         );
     }
 
     #[test]
     fn parameters_schema_hides_timeout_from_model() {
-        // The `timeout` property was removed from the model-facing schema to
-        // stop models from inflating it past the runner safety net (see
-        // bash-timeout-clamp-handoff.md). `command`/`workdir` stay exposed;
-        // the default (120 s) + hard cap (590 s) still apply at runtime via
-        // `resolve_timeout_secs`. This guard prevents silent re-introduction.
+        // `timeout` is intentionally not a model-facing property: bash no longer
+        // self-times-out (it runs in the foreground until it exits, with `/stop`
+        // as the kill path), so exposing `timeout` would mislead the model.
+        // `command`/`workdir` stay exposed. This guard prevents re-introduction.
         let schema = BashTool.parameters();
         let props = schema
             .get("properties")

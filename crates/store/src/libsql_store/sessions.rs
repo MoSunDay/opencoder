@@ -4,8 +4,8 @@ use libsql::{params, params_from_iter, Connection, Value};
 use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill, task_type)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
@@ -23,6 +23,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
             meta.handoff_seq,
             meta.handoff_plan.as_deref(),
             meta.skill.as_deref(),
+            meta.task_type.as_deref().unwrap_or("parent"),
         ],
     )
     .await
@@ -32,7 +33,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill FROM sessions WHERE id = ?")
+        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill, task_type FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -65,6 +66,7 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         }
     }
     if !filter.include_subagents {
+        where_clauses.push("s.task_type = 'parent'".into());
         where_clauses.push(
             "NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)".into(),
         );
@@ -178,6 +180,7 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
         handoff_seq: r.get::<Option<i64>>(9)?,
         handoff_plan: r.get::<Option<String>>(10)?,
         skill: r.get::<Option<String>>(11)?,
+        task_type: r.get::<Option<String>>(12)?,
     })
 }
 

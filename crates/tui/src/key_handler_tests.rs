@@ -345,7 +345,6 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
     assert!(matches!(action, KeyAction::None));
 }
 
-
 // ---------------------------------------------------------------------------
 // Undo/redo (Ctrl+Z / Ctrl+Y)
 // ---------------------------------------------------------------------------
@@ -368,10 +367,23 @@ fn undo_restores_previous_text() {
     for ch in ['h', 'i'] {
         handle_key(
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
-            &mut input, &mut cursor, &history, &mut hist_idx,
-            false, "act", &mut show_help, &mut scroll, &mut follow,
-            &mut last_esc, &mut skill_menu, 80, 2, false, false,
-            &mut undo_state, &mut help_scroll,
+            &mut input,
+            &mut cursor,
+            &history,
+            &mut hist_idx,
+            false,
+            "act",
+            &mut show_help,
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
+            false,
+            &mut undo_state,
+            &mut help_scroll,
         );
     }
     assert_eq!(input, "hi");
@@ -379,20 +391,46 @@ fn undo_restores_previous_text() {
     // Ctrl+Z undoes both chars (collapsed) back to ""
     handle_key(
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert_eq!(input, "");
 
     // Ctrl+Y redoes
     handle_key(
         KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert_eq!(input, "hi");
 }
@@ -414,20 +452,46 @@ fn undo_after_backspace() {
     // Backspace
     handle_key(
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert_eq!(input, "hell");
 
     // Undo
     handle_key(
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert_eq!(input, "hello");
 }
@@ -452,10 +516,23 @@ fn help_open_down_arrow_increments_scroll() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(help_scroll, 1);
@@ -477,10 +554,23 @@ fn help_open_page_down_jumps_scroll() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(help_scroll, 0); // 5 - 10 saturated to 0
@@ -507,10 +597,23 @@ fn up_arrow_browses_history_when_single_row() {
     // Single-row input (7 chars < row_w=78), so Up browses history.
     handle_key(
         KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
@@ -536,10 +639,23 @@ fn up_arrow_moves_cursor_when_multi_row() {
     let cursor_before = cursor;
     handle_key(
         KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-        &mut input, &mut cursor, &history, &mut hist_idx,
-        false, "act", &mut show_help, &mut scroll, &mut follow,
-        &mut last_esc, &mut skill_menu, 80, 2, false, false,
-        &mut undo_state, &mut help_scroll,
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
     );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");

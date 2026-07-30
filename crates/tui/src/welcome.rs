@@ -3,7 +3,7 @@
 //! submitted (blocks become non-empty), so no key is required to dismiss it.
 
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
@@ -29,9 +29,24 @@ const TUTORIAL: &str = "\
 /// No overlay/popup: the text lives within the normal body block and is
 /// replaced by real conversation content as soon as the first block appears.
 pub fn render_tutorial_in_body(f: &mut Frame, inner: Rect) {
+    let header_st = Style::default()
+        .fg(Color::Green)
+        .add_modifier(Modifier::BOLD);
+    let op_st = Style::default().fg(Color::Cyan);
+    let hint_st = Style::default().fg(Color::DarkGray);
     let lines: Vec<Line> = TUTORIAL
         .lines()
-        .map(|s| Line::from(Span::styled(s, Style::default().fg(Color::Cyan))))
+        .map(|s| {
+            if s.contains('\u{2022}') {
+                Line::from(Span::styled(s, op_st))
+            } else if s.contains('\u{1f4a1}') {
+                Line::from(Span::styled(s, hint_st))
+            } else if s.trim().is_empty() {
+                Line::from(Span::raw(s))
+            } else {
+                Line::from(Span::styled(s, header_st))
+            }
+        })
         .collect();
     f.render_widget(
         Paragraph::new(lines)

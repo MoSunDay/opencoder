@@ -24,7 +24,6 @@ mod subagent;
 pub use event::SessionEvent;
 use event::{Sink, DOOM_THRESHOLD};
 use execute::execute_call;
-pub(crate) use execute::DEFAULT_TOOL_TIMEOUT;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
 use steer::{claim_one_queued, claim_steers, is_turn_cancelled, reset_turn_cancel};
@@ -264,7 +263,10 @@ pub(crate) async fn run_loop(
                 if doom.len() == DOOM_THRESHOLD && doom.iter().all(|s| s == &sig) {
                     emit(
                         &sink,
-                        SessionEvent::Error("doom-loop: same tool repeated 3x, stopping".into()),
+                        SessionEvent::Error(format!(
+                            "doom-loop: same tool repeated {}x, stopping",
+                            DOOM_THRESHOLD
+                        )),
                     );
                     // The assistant message carrying these `tool_use` blocks
                     // was already persisted above (line ~207). The chat API

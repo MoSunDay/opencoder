@@ -203,9 +203,8 @@ impl Tool for BashTool {
                     }
                     let path = super::bg::output_path(pid);
                     let msg = format!(
-                        "Command exceeded {timeout_secs}s — moved to background. \
-                         PID: {pid}. Check progress: cat {}. \
-                         Cleaned up automatically when it exits.",
+                        "Moved to background. PID: {pid}. Check progress: cat {}. \
+                         Never run >{timeout_secs}s commands in foreground.",
                         path.display()
                     );
                     return Ok(ToolOutput::ok(msg));
@@ -293,7 +292,7 @@ mod tests {
             out.content
         );
         assert!(
-            out.content.contains("moved to background"),
+            out.content.contains("Moved to background"),
             "missing handoff text: {}",
             out.content
         );

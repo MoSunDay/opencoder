@@ -288,7 +288,7 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
     if list.entries.is_empty() {
         lines.push(Line::styled(
             " No providers configured.",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(crate::theme::warn_color()),
         ));
         lines.push(Line::styled(
             " Press 'n' to add one, or edit opencoder.json.",
@@ -297,7 +297,7 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
     } else {
         lines.push(Line::styled(
             format!(" {:<14} {:<30} {}", "provider", "base_url", "model"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::theme::muted()),
         ));
         for (i, entry) in list.entries.iter().enumerate() {
             let selected = i == list.selected;
@@ -322,12 +322,12 @@ fn render_provider_list(f: &mut Frame, area: Rect, composer_top: u16, list: &Pro
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else if asking_default {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(crate::theme::warn_color())
                     .add_modifier(Modifier::BOLD)
             } else if selected {
                 focus_style()
             } else if entry.active {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(crate::theme::accent())
             } else {
                 val_style()
             };
@@ -378,13 +378,13 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
         Line::styled(
             format!(" Set {}/{} as global default? ", name, model),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(crate::theme::warn_color())
                 .add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
         Line::styled(
             " [y]/Enter global    [n] session-only    Esc cancel ",
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(crate::theme::accent()),
         ),
     ];
     f.render_widget(
@@ -392,7 +392,7 @@ fn render_save_default_confirm(f: &mut Frame, area: Rect, list: &ProviderList) {
             .block(
                 crate::theme::rounded_block_plain()
                     .title(title)
-                    .border_style(Style::default().fg(Color::Yellow)),
+                    .border_style(Style::default().fg(crate::theme::warn_color())),
             )
             .alignment(Alignment::Left),
         popup,
@@ -495,7 +495,7 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
         if form.headers.pairs.is_empty() {
             lines.push(Line::styled(
                 "     (no headers, press + to add)",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(crate::theme::muted()),
             ));
         }
         for (i, (hn, hv)) in form.headers.pairs.iter().enumerate() {

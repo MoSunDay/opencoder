@@ -1,11 +1,12 @@
 //! Rendering for the `/cache_salt` read-only panel. State in [`super::state`].
 
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::theme;
 use super::state::CacheSaltMenu;
 
 /// Draw the salt panel as a centered modal: parent row first (highlighted with
@@ -25,10 +26,10 @@ pub fn render_cache_salt_popup(f: &mut Frame, area: Rect, menu: &CacheSaltMenu) 
         crate::theme::rounded_block(&format!("Prefix-cache salt (cache_salt: {state_word})"));
 
     let parent_st = Style::default()
-        .fg(Color::Yellow)
+        .fg(theme::warn_color())
         .add_modifier(Modifier::BOLD);
-    let val = Style::default().fg(Color::White);
-    let dim = Style::default().fg(Color::DarkGray);
+    let val = Style::default().fg(theme::text());
+    let dim = Style::default().fg(theme::muted());
 
     let mut lines: Vec<Line> = Vec::new();
     for e in &menu.entries {
@@ -46,7 +47,7 @@ pub fn render_cache_salt_popup(f: &mut Frame, area: Rect, menu: &CacheSaltMenu) 
     if !menu.enabled {
         lines.push(Line::from(Span::styled(
             " cache_salt disabled \u{2014} these salts are NOT sent on requests.",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::warn_color()),
         )));
     }
     lines.push(Line::from(Span::styled(

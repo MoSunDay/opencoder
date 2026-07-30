@@ -1,5 +1,7 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+
+use crate::theme;
 
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
@@ -40,10 +42,10 @@ impl ChatView {
                         Span::styled(
                             format!("\u{25b8} {name} "),
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(theme::accent())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(summarize(input), Style::default().fg(Color::DarkGray)),
+                        Span::styled(summarize(input), Style::default().fg(theme::muted())),
                     ]),
                     output: Vec::new(),
                     collapsed: true,
@@ -61,9 +63,9 @@ impl ChatView {
                 }
                 self.finalize_assistant();
                 let color = if *is_error {
-                    Color::Red
+                    theme::err_color()
                 } else {
-                    Color::DarkGray
+                    theme::muted()
                 };
                 let out: Vec<Line<'static>> = output
                     .lines()
@@ -82,7 +84,7 @@ impl ChatView {
                         id: id.clone(),
                         header: Line::from(Span::styled(
                             "\u{25b8} (output)",
-                            Style::default().fg(Color::Cyan),
+                            Style::default().fg(theme::accent()),
                         )),
                         output: out,
                         collapsed: true,
@@ -113,7 +115,7 @@ impl ChatView {
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
                         format!("[model] {bare}"),
-                        Style::default().fg(Color::Magenta),
+                        Style::default().fg(theme::local_color()),
                     ))]));
             }
             SessionEvent::Compaction(c) => {
@@ -121,7 +123,7 @@ impl ChatView {
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
                         format!("[context compacted] {}", short(c, 100)),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme::warn_color()),
                     ))]));
             }
             SessionEvent::Status(s) => self.status = s.clone(),
@@ -205,7 +207,7 @@ impl ChatView {
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
                         format!("error: {e}"),
-                        Style::default().fg(Color::Red),
+                        Style::default().fg(theme::err_color()),
                     ))]));
             }
             SessionEvent::PlanHandoff(plan) => {
@@ -240,7 +242,7 @@ impl ChatView {
                     self.push_marker(Line::from(Span::styled(
                         format!("steer: {prompt}"),
                         Style::default()
-                            .fg(Color::Cyan)
+                            .fg(theme::accent())
                             .add_modifier(Modifier::BOLD),
                     )));
                     self.push_marker(Line::from(""));
@@ -482,7 +484,7 @@ impl ChatView {
                     out.push(Line::from(Span::styled(
                         "\u{276f} say:",
                         Style::default()
-                            .fg(Color::Green)
+                            .fg(theme::ok_color())
                             .add_modifier(Modifier::BOLD),
                     )));
                     let indent = Span::raw("    ");
@@ -515,20 +517,20 @@ impl ChatView {
                     if *collapsed {
                         out.push(Line::from(Span::styled(
                             format!("\u{1f4ad} Thinking ({count} lines) [\u{2193} expand]"),
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::muted()),
                         )));
                     } else {
                         out.push(Line::from(Span::styled(
                             "\u{1f4ad} Thinking [\u{2191} collapse]",
                             Style::default()
-                                .fg(Color::DarkGray)
+                                .fg(theme::muted())
                                 .add_modifier(Modifier::ITALIC | Modifier::BOLD),
                         )));
                         for l in text.lines() {
                             out.push(Line::from(Span::styled(
                                 format!("  {l}"),
                                 Style::default()
-                                    .fg(Color::DarkGray)
+                                    .fg(theme::muted())
                                     .add_modifier(Modifier::ITALIC),
                             )));
                         }
@@ -546,7 +548,7 @@ impl ChatView {
                         if n > 0 {
                             spans.push(Span::styled(
                                 format!(" [\u{2193} {n}]"),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(theme::muted()),
                             ));
                         }
                         out.push(Line::from(spans));
@@ -564,7 +566,7 @@ impl ChatView {
                         }
                         spans.push(Span::styled(
                             " [\u{2191}]",
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::muted()),
                         ));
                         out.push(Line::from(spans));
                         out.extend(output.iter().cloned());
@@ -574,12 +576,12 @@ impl ChatView {
                 ChatBlock::Image { filename, rendered } => {
                     out.push(Line::from(Span::styled(
                         format!("[image: {filename}]"),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme::muted()),
                     )));
                     if rendered.is_empty() {
                         out.push(Line::from(Span::styled(
                             "  (unable to render)",
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::muted()),
                         )));
                     } else {
                         let indent = Span::raw("    ");
@@ -595,7 +597,7 @@ impl ChatView {
                     out.push(Line::from(Span::styled(
                         "\u{2576}\u{2500} plan \u{2500}\u{2574}",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme::warn_color())
                             .add_modifier(Modifier::BOLD),
                     )));
                     let indent = Span::raw("  ");
@@ -624,17 +626,17 @@ impl ChatView {
                     // Status badge: animated spinner/check/cross/cancelled +
                     // word. The running spinner uses the live anim_tick.
                     let (mark, mark_color, status_word) = if *cancelled {
-                        ("\u{2298}", Color::DarkGray, "cancelled")
+                        ("\u{2298}", theme::muted(), "cancelled")
                     } else if *done {
                         if *ok {
-                            ("\u{2714}", Color::Green, "done")
+                            ("\u{2714}", theme::ok_color(), "done")
                         } else {
-                            ("\u{2718}", Color::Red, "failed")
+                            ("\u{2718}", theme::err_color(), "failed")
                         }
                     } else {
                         (
                             SPINNER[(anim_tick as usize) % SPINNER.len()],
-                            Color::Yellow,
+                            theme::warn_color(),
                             "running",
                         )
                     };
@@ -642,25 +644,25 @@ impl ChatView {
                         Span::styled(
                             "\u{2937} subagent ",
                             Style::default()
-                                .fg(Color::Blue)
+                                .fg(theme::info_color())
                                 .add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(format!("[{kind}] "), Style::default().fg(Color::Cyan)),
-                        Span::styled(prompt.clone(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("[{kind}] "), Style::default().fg(theme::accent())),
+                        Span::styled(prompt.clone(), Style::default().fg(theme::muted())),
                         Span::raw(" "),
                         Span::styled(
                             format!("{mark} {status_word}, {tool_count} tools"),
                             Style::default().fg(mark_color),
                         ),
-                        Span::styled(" [\u{2192} view]", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" [\u{2192} view]", Style::default().fg(theme::muted())),
                     ];
                     if *done && !summary.is_empty() {
                         spans.push(Span::styled(
                             format!("  {summary}"),
                             Style::default().fg(if *cancelled || *ok {
-                                Color::DarkGray
+                                theme::muted()
                             } else {
-                                Color::Red
+                                theme::err_color()
                             }),
                         ));
                     }
@@ -708,15 +710,15 @@ impl ChatView {
             *smry = summary.to_string();
         } else {
             let (mark, color) = if cancelled {
-                ("\u{2298}", Color::DarkGray)
+                ("\u{2298}", theme::muted())
             } else if ok {
-                ("\u{2714}", Color::Green)
+                ("\u{2714}", theme::ok_color())
             } else {
-                ("\u{2718}", Color::Red)
+                ("\u{2718}", theme::err_color())
             };
             self.blocks.push(ChatBlock::Marker(vec![Line::from(vec![
                 Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
-                Span::styled(short(summary, 110), Style::default().fg(Color::DarkGray)),
+                Span::styled(short(summary, 110), Style::default().fg(theme::muted())),
             ])]));
         }
     }

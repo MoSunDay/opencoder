@@ -1,12 +1,13 @@
 //! Help popup rendering with display-width-aware word wrapping and scroll.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::composer;
+use crate::theme;
 
 /// Word-wrap a single source line into multiple display lines that each fit
 /// `max_w` display columns. Uses `composer::char_width` so CJK / wide chars
@@ -81,7 +82,7 @@ pub fn render_help(f: &mut Frame, area: Rect, scroll: u16) {
     let wrapped = build_wrapped_lines(inner_w);
     let lines: Vec<Line> = wrapped
         .iter()
-        .map(|s| Line::from(Span::styled(s.as_str(), Style::default().fg(Color::Gray))))
+        .map(|s| Line::from(Span::styled(s.as_str(), Style::default().fg(theme::subtle()))))
         .collect();
 
     let block = crate::theme::rounded_block_focus(

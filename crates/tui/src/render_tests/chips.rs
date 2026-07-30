@@ -7,6 +7,7 @@ use opencoder_session::SessionEvent;
 /// Magenta.
 #[test]
 fn agent_chip_color_is_yellow_for_plan_cyan_otherwise() {
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     assert_eq!(agent_chip_fg("plan"), Color::Yellow);
     assert_eq!(agent_chip_fg("act"), Color::Cyan);
     assert_eq!(agent_chip_fg("explore"), Color::Cyan);
@@ -18,6 +19,7 @@ fn agent_chip_color_is_yellow_for_plan_cyan_otherwise() {
 /// mapping, so they never visually disagree.
 #[test]
 fn mode_flash_bg_matches_plan_yellow_act_cyan() {
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     assert_eq!(mode_flash_bg(true), Color::Yellow);
     assert_eq!(mode_flash_bg(false), Color::Cyan);
     // The two theme helpers agree on plan/act, so the chip and flash

@@ -11,7 +11,7 @@ fn status_chip_width_accounts_for_wide_emoji() {
     terminal
         .draw(|f| {
             let area = Rect::new(0, 0, 60, 1);
-            render_status_chip(f, area, text, Color::Green);
+            render_status_chip(f, area, text, crate::theme::ok_color());
         })
         .unwrap();
     let row = row_text(terminal.backend().buffer(), 0, 60);
@@ -54,6 +54,7 @@ fn status_bar_shows_ctx_percent() {
 /// High context usage renders the status bar ctx% indicator in red.
 #[test]
 fn status_bar_ctx_red_at_high_usage() {
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     let backend = TestBackend::new(120, 3);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal

@@ -12,13 +12,14 @@ use opencoder_core::{discover_skills, resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionPatch, Store};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
+use crate::theme;
 use crate::worker::UiCmd;
 
 use crate::queue_panel;
@@ -319,7 +320,7 @@ pub(crate) async fn start_turn(
 pub(crate) fn worker_dead(chat: &mut ChatView) {
     chat.push_marker(Line::from(Span::styled(
         "[worker stopped] session engine exited unexpectedly — please restart",
-        Style::default().fg(Color::Red),
+        Style::default().fg(theme::err_color()),
     )));
 }
 
@@ -463,7 +464,7 @@ pub(crate) fn resolve_and_warn(
     if !unresolved.is_empty() {
         chat.push_marker(Line::from(Span::styled(
             format!("\u{26a0} unknown skill: {}", unresolved.join(", ")),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::warn_color()),
         )));
     }
     (clean, unresolved)

@@ -10,9 +10,10 @@
 //! [`COMMANDS`] and a branch to [`parse`] / [`CommandMenu::dispatch`] to teach
 //! the TUI a new `/xxx` command.
 
+use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
@@ -293,11 +294,11 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
                 Span::styled(
                     name.to_string(),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::accent())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" \u{2014} "),
-                Span::styled(desc.to_string(), Style::default().fg(Color::Gray)),
+                Span::styled(desc.to_string(), Style::default().fg(theme::subtle())),
             ]))
         })
         .collect();
@@ -305,7 +306,7 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
     let items = if items.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "  no matching command",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::muted()),
         )))]
     } else {
         items
@@ -331,11 +332,11 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
     );
     if footer.height > 0 {
         let line = Line::from(vec![
-            Span::styled(" /", Style::default().fg(Color::DarkGray)),
+            Span::styled(" /", Style::default().fg(theme::muted())),
             Span::styled(
                 menu.query().to_string(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::warn_color())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("_"),

@@ -96,7 +96,7 @@ app_loop.rs 792 · app.rs 800（均 ≤ 800）。
 | Tab 对 Ps 为 Idle（弹窗保持） | `tab_on_local_command_is_idle` | `crates/tui/src/command.rs` |
 | `control_cmd_string(Ps/Stop)` => None | `control_cmd_string_maps_correctly` | `crates/tui/src/command.rs` |
 
-- 全量回归：`cargo test --workspace` → **1380 passed / 0 failed / 0 ignored**
+- 全量回归：`cargo test --workspace` → **1396 passed / 0 failed / 0 ignored**
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
 

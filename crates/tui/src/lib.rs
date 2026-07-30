@@ -27,6 +27,7 @@ pub mod resize;
 pub mod selection;
 pub mod session_ui;
 pub mod skill_display;
+pub mod skill_persist;
 pub mod skill_token;
 pub mod supervisor;
 pub mod task;

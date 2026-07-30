@@ -22,6 +22,7 @@ use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::render::{MouseHits, Term};
+use crate::skill_persist::persist_skill;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
@@ -412,10 +413,15 @@ pub(super) async fn run_app(
                             &mut help_scroll,
                         ) {
                             KeyAction::Submit(text) => {
+                                let prev_skill = skill_handle
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .clone();
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
                                 );
+                                persist_skill(&store, &session_id, &prev_skill, &skill_handle).await;
                                 let clean = clean.trim().to_string();
                                 if crate::local_cmd::run(&clean, &mut chat) { // /ps /stop: display-only
                                 } else if clean.is_empty() {
@@ -506,10 +512,15 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Steer(text) => {
+                                let prev_skill = skill_handle
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .clone();
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
                                 );
+                                persist_skill(&store, &session_id, &prev_skill, &skill_handle).await;
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let image_uris = snapshot_image_uris(&pending_images);
@@ -532,10 +543,15 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
+                                let prev_skill = skill_handle
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .clone();
                                 let (clean, _unresolved) = resolve_and_warn(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
                                 );
+                                persist_skill(&store, &session_id, &prev_skill, &skill_handle).await;
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let image_uris = snapshot_image_uris(&pending_images);

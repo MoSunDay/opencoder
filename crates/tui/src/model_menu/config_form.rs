@@ -84,12 +84,13 @@ pub enum ConfigField {
     ToolsSubagent,
     ApEnabled,
     ApMaxIter,
+    Theme,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 13] = [
+    const ORDER: [ConfigField; 14] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -101,6 +102,7 @@ impl ConfigField {
         ConfigField::ToolsSubagent,
         ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
+        ConfigField::Theme,
         ConfigField::Save,
         ConfigField::Cancel,
     ];
@@ -131,6 +133,7 @@ pub struct ConfigForm {
     pub capabilities_tools_subagent: bool,
     pub ap_enabled: bool,
     pub ap_max_iter_input: String,
+    pub theme: crate::theme::ThemeKind,
     pub focus: ConfigField,
     pub error: Option<String>,
 }
@@ -149,6 +152,7 @@ impl ConfigForm {
             capabilities_tools_subagent: config.capabilities.tools_subagent,
             ap_enabled: config.autopilot.enabled,
             ap_max_iter_input: config.autopilot.max_iterations.to_string(),
+            theme: crate::theme::ThemeKind::from_label(&config.theme),
             focus: ConfigField::Reasoning,
             error: None,
         }
@@ -210,6 +214,7 @@ impl ConfigForm {
             capabilities_tools_subagent: self.capabilities_tools_subagent,
             ap_enabled: self.ap_enabled,
             ap_max_iter,
+            theme: self.theme.label().to_string(),
         }
     }
 
@@ -283,6 +288,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             }
             ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
             ConfigField::ApMaxIter => form.adjust_ap_max_iter(-1),
+            ConfigField::Theme => form.theme = form.theme.next(),
             _ => {}
         },
         KeyCode::Right => match form.focus {
@@ -302,6 +308,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             }
             ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
             ConfigField::ApMaxIter => form.adjust_ap_max_iter(1),
+            ConfigField::Theme => form.theme = form.theme.next(),
             _ => {}
         },
         KeyCode::Enter => match form.focus {
@@ -361,6 +368,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::ApEnabled if c == ' ' => form.ap_enabled = !form.ap_enabled,
+            ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
             ConfigField::ApMaxIter if c.is_ascii_digit() => {
                 form.ap_max_iter_input.push(c);
             }

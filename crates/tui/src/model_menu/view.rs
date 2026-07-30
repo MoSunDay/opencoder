@@ -22,16 +22,16 @@ pub fn render_model_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &M
 
 fn focus_style() -> Style {
     Style::default()
-        .fg(Color::Yellow)
+        .fg(crate::theme::warn_color())
         .add_modifier(Modifier::BOLD)
 }
 
 fn dim_style() -> Style {
-    Style::default().fg(Color::Gray)
+    Style::default().fg(crate::theme::subtle())
 }
 
 fn val_style() -> Style {
-    Style::default().fg(Color::White)
+    Style::default().fg(crate::theme::text())
 }
 
 fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'static> {
@@ -45,7 +45,7 @@ fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'stat
     if focused {
         spans.push(Span::styled(
             format!("  {hint}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(crate::theme::muted()),
         ));
     }
     Line::from(spans)
@@ -186,6 +186,12 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             },
             form.focus == ConfigField::ApMaxIter,
             "1+, digits/\u{2190}/\u{2192} \u{00b1}1, Backspace",
+        ),
+        field_line(
+            "theme:",
+            &format!("[ {} ]", form.theme.label()),
+            form.focus == ConfigField::Theme,
+            "\u{2190}/\u{2192}/Space cycle",
         ),
         button_line_cfg(form),
         Line::raw(""),

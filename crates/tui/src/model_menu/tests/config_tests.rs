@@ -25,6 +25,7 @@ fn config_patch_serializes_all_fields() {
         capabilities_tools_subagent: false,
         ap_enabled: true,
         ap_max_iter: 15,
+        theme: "dark".into(),
     };
     let v = p.to_json();
     assert_eq!(v["reasoning_effort"], serde_json::json!("high"));
@@ -39,6 +40,7 @@ fn config_patch_serializes_all_fields() {
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["enabled"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
+    assert_eq!(v["theme"], serde_json::json!("dark"));
 }
 
 #[test]
@@ -55,6 +57,7 @@ fn config_patch_omits_max_tokens_when_none() {
         capabilities_tools_subagent: false,
         ap_enabled: false,
         ap_max_iter: 10,
+        theme: "dark".into(),
     };
     let v = p.to_json();
     assert!(
@@ -99,6 +102,7 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::ToolsSubagent,
         ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
+        ConfigField::Theme,
         ConfigField::Save,
     ];
     for expect in &order {
@@ -156,6 +160,25 @@ fn left_right_toggle_interleave() {
         _ => unreachable!(),
     };
     assert_eq!(after, !before, "Right toggles interleave");
+}
+
+#[test]
+fn config_form_theme_cycles_with_space() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        assert_eq!(f.theme, crate::theme::ThemeKind::Dark);
+        f.focus = ConfigField::Theme;
+    }
+    handle_model_key(&mut slot, key(' '));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.theme, crate::theme::ThemeKind::Light);
 }
 
 #[test]

@@ -26,6 +26,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let mut config = Config::load(&workdir)?;
+    crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }

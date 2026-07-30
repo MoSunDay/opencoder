@@ -10,10 +10,14 @@
 //! [`persist_skill`] mirrors the `SetSkill` path: a best-effort
 //! `update_session(skill=…)` whenever the skill body changed.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::message::now_ms;
 use opencoder_store::{SessionPatch, Store};
+
+use crate::app_helpers::resolve_and_warn;
+use crate::chat::ChatView;
 
 /// Persist the active skill to the store when it differs from `prev`.
 ///
@@ -48,6 +52,42 @@ pub(crate) async fn persist_skill(
             },
         )
         .await;
+}
+
+
+#[allow(clippy::too_many_arguments)]
+/// Resolve `{$skill}` tokens in `text` (activating the skill in-memory) **and**
+/// persist the result to the store when it changed — the single composition
+/// `run_app` relies on for every Submit / Steer / Queue. Extracted so the
+/// three call sites stay byte-identical and the wiring itself is testable.
+pub(crate) async fn resolve_persist(
+    text: &str,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+    skill_handle: &Arc<Mutex<Option<String>>>,
+    chat: &mut ChatView,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) -> (String, Vec<String>) {
+    let prev = skill_handle
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let (clean, unresolved) = resolve_and_warn(
+        text,
+        active_skill,
+        active_skill_body,
+        sys_tokens,
+        agent_name,
+        workdir,
+        skill_handle,
+        chat,
+    );
+    persist_skill(store, session_id, &prev, skill_handle).await;
+    (clean, unresolved)
 }
 
 #[cfg(test)]
@@ -167,5 +207,87 @@ mod tests {
 
         let persisted = store.get_session("s").await.unwrap().unwrap();
         assert_eq!(persisted.skill.as_deref(), Some("body-b"));
+    }
+
+    /// RAII: restore `HOME` on drop (even if the test panics mid-await).
+    struct HomeRestore(Option<std::ffi::OsString>);
+    impl Drop for HomeRestore {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    /// End-to-end composition: `{$alpha} fix the bug` through `resolve_persist`
+    /// activates the skill in-memory AND persists it to the store — the exact
+    /// wiring `run_app`'s Submit/Steer/Queue branches rely on. Pins that the
+    /// three call sites' "snapshot -> resolve -> persist" sequence is correct,
+    /// not just the two halves in isolation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(clippy::await_holding_lock)]
+    async fn resolve_persist_activates_and_stores_combined_skill_token() {
+        // A temp HOME holding a discoverable skill file.
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join(".opencoder").join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::write(skills_dir.join("alpha.md"), "the alpha body").unwrap();
+
+        // resolve_and_warn -> sys_tokens_for reads home_dir(); serialize + guard.
+        let _lock = crate::app::app_loop::tests::HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _home = HomeRestore(std::env::var_os("HOME"));
+        std::env::set_var("HOME", dir.path());
+
+        let store = fresh_store().await;
+        let skill_handle = handle(None);
+        let mut active_skill = None;
+        let mut active_skill_body = None;
+        let mut sys_tokens = 0u64;
+        let mut chat = crate::chat::ChatView {
+            agent: "act".into(),
+            ..Default::default()
+        };
+        let workdir = std::path::PathBuf::from("/tmp");
+
+        let (clean, unresolved) = resolve_persist(
+            "{$alpha} fix the bug",
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            &workdir,
+            &skill_handle,
+            &mut chat,
+            &store,
+            "s",
+        )
+        .await;
+
+        // Clean text carries the task; token resolved; skill activated + persisted.
+        assert_eq!(clean.trim(), "fix the bug");
+        assert!(unresolved.is_empty());
+        assert_eq!(active_skill.as_deref(), Some("alpha"));
+        assert_eq!(
+            skill_handle
+                .lock()
+                .unwrap()
+                .as_deref(),
+            Some("the alpha body"),
+            "skill_prompt (in-memory) must carry the resolved body"
+        );
+        assert_eq!(
+            store
+                .get_session("s")
+                .await
+                .unwrap()
+                .unwrap()
+                .skill
+                .as_deref(),
+            Some("the alpha body"),
+            "resolve_persist must persist the skill for resume"
+        );
     }
 }

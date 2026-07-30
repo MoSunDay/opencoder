@@ -21,13 +21,15 @@ skill 本身只活在 `SessionState::skill_prompt` 这把内存 `Arc<Mutex>` 里
 
 ### skill 持久化（镜像 SetSkill 菜单路径）
 
-- **`crates/tui/src/skill_persist.rs`**（新文件，51 行）：抽出 `persist_skill(store,
-  session_id, prev, skill_handle)` 异步纯函数。`prev` 为提交前 `skill_prompt` 的快照，
-  `skill_handle` 为提交后（即 `resolve_and_warn` 写入后）的值；二者相等即为 no-op
-  （纯文字提交 / 重复激活同一 skill 都不产生多余写）。store 错误 best-effort 吞掉——
-  内存写入已让当前 turn 立即生效。
-- **`crates/tui/src/app.rs`**：在 `KeyAction::Submit` / `Steer` / `Queue` 三处
-  `resolve_and_warn` 前快照 `prev_skill`、之后 `persist_skill(...).await`。三处对称，
+- **`crates/tui/src/skill_persist.rs`**（新文件，293 行）：两个纯函数——
+  `persist_skill(store, session_id, prev, skill_handle)` 异步函数：`prev` 为提交前
+  `skill_prompt` 的快照，`skill_handle` 为提交后（即 `resolve_and_warn` 写入后）的值；
+  二者相等即为 no-op（纯文字提交 / 重复激活同一 skill 都不产生多余写）。store 错误
+  best-effort 吞掉——内存写入已让当前 turn 立即生效。
+  `resolve_persist(...)` 异步函数：把 `resolve_and_warn`（token 解析 + 内存激活）与
+  `persist_skill`（落盘）合并为单一调用，消除三处调用点重复的快照+persist 样板代码。
+- **`crates/tui/src/app.rs`**：在 `KeyAction::Submit` / `Steer` / `Queue` 三处统一调用
+  `resolve_persist(...)`，一次完成 token 解析、内存激活、落盘。三处对称，
   确保任何「token 激活/切换 skill」的提交都把 skill 落到 store 行。
 - **`crates/tui/src/lib.rs`**：注册 `pub mod skill_persist;`。
 
@@ -47,11 +49,12 @@ skill 本身只活在 `SessionState::skill_prompt` 这把内存 `Arc<Mutex>` 里
 | 无 token 的纯文字提交 → no-op | `persist_skill_noop_when_no_skill_token` | `crates/tui/src/skill_persist.rs` |
 | skill 切换 → 持久化新 body | `persist_skill_updates_when_skill_changes` | `crates/tui/src/skill_persist.rs` |
 | 回归：排队 `{$skill} 文字` skill 存活 | `persist_skill_survives_combined_queued_skill_submission` | `crates/tui/src/skill_persist.rs` |
+| resolve+persist 合并：token 激活+落盘 | `resolve_persist_activates_and_stores_combined_skill_token` | `crates/tui/src/skill_persist.rs` |
 
 - 全量回归：`cargo test --workspace` → 全绿（0 failed / 0 ignored）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
-- 行数：`skill_persist.rs` 141 ≤ 400（新文件上限）
+- 行数：`skill_persist.rs` 293 ≤ 400（新文件上限）
 
 ## Impact Surface
 

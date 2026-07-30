@@ -53,4 +53,4 @@
 - `crates/session/src/lib.rs`：顶层会话 `task_type: None`。
 - 其余全字段 `SessionMeta {` 构造补 `task_type: None`。
 
-回归：`cargo test --workspace` -> 1376 passed / 0 failed；`cargo clippy --workspace --all-targets -- -D warnings` -> clean；`cargo build --workspace` -> clean。
+回归：`cargo test --workspace` -> 1396 passed / 0 failed；`cargo clippy --workspace --all-targets -- -D warnings` -> clean；`cargo build --workspace` -> clean。

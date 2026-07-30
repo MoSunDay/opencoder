@@ -349,7 +349,7 @@ pub(crate) async fn handle_model_outcome(
     client: &mut Arc<dyn ChatStream>,
     config: &mut Config,
     model_label: &mut String,
-    context_limit: &mut u64,
+    compaction_threshold: &mut u64,
     frame_ms: &mut u64,
     frame_ticker: &mut tokio::time::Interval,
     cmd_tx: &mpsc::Sender<UiCmd>,
@@ -363,7 +363,7 @@ pub(crate) async fn handle_model_outcome(
                     match Config::load(workdir) {
                         Ok(reloaded) => {
                             *model_label = reloaded.model.clone();
-                            *context_limit = reloaded.context_limit();
+                            *compaction_threshold = reloaded.compaction.context_threshold;
                             // Rebuild the outer `client` too so subsequent
                             // `/task` new sessions pick up the new endpoint
                             // (the worker only swaps its own sess.client).
@@ -451,7 +451,7 @@ pub(crate) async fn handle_model_outcome(
         ModelOutcome::SaveSessionOnly(json) => {
             switch_session(json, config, client, cmd_tx, chat).await;
             *model_label = config.model.clone();
-            *context_limit = config.context_limit();
+            *compaction_threshold = config.compaction.context_threshold;
         }
         ModelOutcome::Cancel | ModelOutcome::Idle => {}
         ModelOutcome::Quit => {

@@ -34,6 +34,7 @@ fn status_bar_shows_run_duration() {
                 0,
                 5000,
                 200000,
+                200000,
                 42000,
             );
         })
@@ -53,7 +54,7 @@ fn status_bar_hides_duration_when_zero() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 0, 200000, 0);
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
         })
         .unwrap();
 

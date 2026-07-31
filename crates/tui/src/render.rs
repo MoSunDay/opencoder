@@ -112,6 +112,7 @@ pub(crate) fn render<B: Backend>(
     context_used: u64,
     sys_tokens: u64,
     compaction_threshold: u64,
+    context_limit: u64,
     model: &str,
     status: &str,
     steer_items: &[(i64, String)],
@@ -264,6 +265,7 @@ pub(crate) fn render<B: Backend>(
             anim_tick,
             context_used + sys_tokens,
             compaction_threshold,
+            context_limit,
             run_ms,
         );
 
@@ -672,6 +674,7 @@ fn render_status(
     anim_tick: u32,
     used: u64,
     compaction_threshold: u64,
+    context_limit: u64,
     run_ms: u64,
 ) {
     let mut spans = vec![
@@ -684,9 +687,14 @@ fn render_status(
         ),
     ];
 
-    // Compression-threshold usage with a visual progress meter.
-    let pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
-    let (meter, ctx_color) = theme::context_meter(pct);
+    // The progress meter + its colour track the compaction threshold (the
+    // bar fills toward red as auto-compression nears). The trailing ctx text
+    // reports against the model full context window instead, so the user sees
+    // absolute usage over the real budget: the bar is a compression dial, the
+    // number is a budget gauge.
+    let bar_pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
+    let (meter, ctx_color) = theme::context_meter(bar_pct);
+    let win_pct = fmtmod::context_percent(used, context_limit, CONTEXT_BASELINE);
     spans.push(Span::raw(" \u{00b7} "));
     spans.push(Span::styled(
         format!("{meter} "),
@@ -695,9 +703,9 @@ fn render_status(
     spans.push(Span::styled(
         format!(
             "ctx {}% ({}/{})",
-            pct,
+            win_pct,
             fmtmod::format_tokens_compact(used),
-            fmtmod::format_tokens_compact(compaction_threshold)
+            fmtmod::format_tokens_compact(context_limit)
         ),
         Style::default().fg(ctx_color),
     ));

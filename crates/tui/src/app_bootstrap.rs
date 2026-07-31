@@ -86,6 +86,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
 
     let session_id = session.id.clone();
     let compaction_threshold = session.config.compaction.context_threshold;
+    let context_limit = session.config.context_limit();
     let model_label = session.config.model.clone();
 
     // Terminal enter/restore is RAII: `TerminalGuard`'s Drop — and the panic
@@ -104,6 +105,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         store,
         session_id,
         compaction_threshold,
+        context_limit,
         model_label,
         workdir,
         config,

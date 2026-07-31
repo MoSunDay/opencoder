@@ -40,19 +40,6 @@ agent 的清理路径。后果：
   cancel。与 `fire_turn_cancel`（全局）互补——后者是广播，前者精准定位
   单个子 agent。
 
-
-### `crates/session/src/runner/subagent.rs` — steer vs hard-abort 区分
-- `run_subagent` 检测到子 token 被取消时，新增 `parent_aborted` 判断：
-  **父 cancel 是否也被取消**。
-- **父未取消（steer）**：仅子 token 被取消（TUI `>` / web steer），将任务
-  标记终态 `Failed`（`complete_subagent_task`），emit `SubagentEnd`，
-  返回真实 `ToolOutput::err`——transcript 良构，任务不再被 replay。
-- **父已取消（hard-abort）**：父 cancel 级联到子 token，保持旧行为——
-  标记 `Cancelled`，留 tool_use dangling（无 tool_result），`run_loop`
-  跳过记录，子 agent 可在下个 turn 被 replay。
-- 区分依据：`child.cancel` 是父 cancel 的 `child_token()`，steer 只取消
-  子 token，hard-abort 取消父 token（子也观测到）。
-
 ### `crates/session/src/resume.rs` — abandon 路径
 - `replay_cancelled_tasks` 签名新增 `has_new_input: bool` 参数。
 - 当 `has_new_input` 为真，**或**存在 pending steers / pending queue 时，

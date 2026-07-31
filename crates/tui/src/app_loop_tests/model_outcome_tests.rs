@@ -54,6 +54,7 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
     let mut config = base_cfg;
     let mut model_label = String::new();
     let mut compaction_threshold = 0u64;
+    let mut context_limit = 0u64;
     let mut frame_ms = 25u64;
     let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(64);
@@ -70,6 +71,7 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
         &mut config,
         &mut model_label,
         &mut compaction_threshold,
+        &mut context_limit,
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,
@@ -153,6 +155,7 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
     let mut config = base_cfg;
     let mut model_label = String::new();
     let mut compaction_threshold = 0u64;
+    let mut context_limit = 0u64;
     let mut frame_ms = 25u64;
     let mut frame_ticker = tokio::time::interval(std::time::Duration::from_millis(frame_ms));
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(64);
@@ -169,6 +172,7 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
         &mut config,
         &mut model_label,
         &mut compaction_threshold,
+        &mut context_limit,
         &mut frame_ms,
         &mut frame_ticker,
         &cmd_tx,

@@ -114,13 +114,34 @@ pub(super) async fn execute_call_with_timeout(
         // breaks at its next check-point. A turn-level interrupt uses an
         // independent token (not cascaded), so fire it explicitly so the child
         // can drain promptly instead of waiting for its LLM turn to finish.
+        // A timeout fires no token of its own in Phase 1, so fire the child's
+        // hard-cancel here so it stops promptly instead of running blind
+        // through the drain window (and silently marking itself Completed).
         if matches!(signal, TaskSignal::TurnCancel) {
             crate::fire_child_turn_cancel(&child_turn_cancels, &call_id);
+        }
+        if matches!(signal, TaskSignal::Timeout) {
+            crate::fire_child_cancel(&child_cancels, &call_id);
         }
         return match tokio::time::timeout(drain, &mut sub).await {
             // Subagent finished its cleanup: task is Cancelled (or Completed),
             // SubagentEnd was emitted, registries pruned. Return its result.
-            Ok(o) => o,
+            Ok(o) => {
+                // On timeout the child's cleanup may have marked the task
+                // Completed or Failed (it had no way to know a timeout
+                // occurred). Override to Cancelled so the status reflects
+                // reality, and surface the timeout error to the parent.
+                if matches!(signal, TaskSignal::Timeout) {
+                    if let Some(store) = &store {
+                        let _ = store.cancel_subagent_task(&call_id).await;
+                    }
+                    return ToolOutput::err(format!(
+                        "subagent timed out after {} without completing",
+                        fmt_dur(task_dur)
+                    ));
+                }
+                o
+            }
             // Grace expired: the child is wedged. Force the task to Cancelled
             // so it is never stuck Running, prune the stale entries, and emit a
             // terminal SubagentEnd so the UI clears the subagent panel.

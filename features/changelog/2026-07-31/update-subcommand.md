@@ -34,7 +34,8 @@ the update is performed by the LLM agent executing the embedded prompt.
 
 ## 测试覆盖
 
-`cargo test -p opencoder-cli --test cli_parse` -> **25 passed; 0 failed; 0 ignored** (this session; full `cargo test -p opencoder-cli` = 64 passed across binaries). `cargo build -p opencoder` clean. `opencoder update --help` shows the
+`cargo test -p opencoder-cli` -> **25 passed; 0 failed; 0 ignored** (this
+session). `cargo build -p opencoder` clean. `opencoder update --help` shows the
 new subcommand + doc text.
 
 | 功能 | 测试名 | 文件 |

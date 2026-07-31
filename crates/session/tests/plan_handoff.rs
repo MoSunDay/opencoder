@@ -410,7 +410,7 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
     session.handoff_seq = Some(1);
     session.messages = vec![Message::user("handoff", "## Plan\n1. do X")];
 
-    replay_cancelled_tasks(&mut session).await;
+    replay_cancelled_tasks(&mut session, false).await;
 
     // Orphan is skipped: no child replay, no Tool backfill, task stays Cancelled.
     assert_eq!(mock.call_count(), 0, "orphaned task must not be replayed");

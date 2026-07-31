@@ -486,7 +486,7 @@ async fn replay_cancelled_tasks_skips_children_when_cancel_token_fired() {
     token.cancel();
     session.cancel = Some(token);
 
-    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+    opencoder_session::resume::replay_cancelled_tasks(&mut session, false).await;
 
     assert_eq!(
         mock.call_count(),
@@ -560,7 +560,7 @@ async fn replay_cancelled_tasks_runs_children_when_token_not_fired() {
 
     session.cancel = Some(CancellationToken::new());
 
-    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+    opencoder_session::resume::replay_cancelled_tasks(&mut session, false).await;
 
     assert_eq!(
         mock.call_count(),
@@ -661,7 +661,7 @@ async fn replay_cancelled_tasks_abandons_when_steer_pending() {
     // Fresh (uncancelled) token — this is the drain turn after a steer-submit.
     session.cancel = Some(CancellationToken::new());
 
-    opencoder_session::resume::replay_cancelled_tasks(&mut session).await;
+    opencoder_session::resume::replay_cancelled_tasks(&mut session, false).await;
 
     // The child must NOT be replayed.
     assert_eq!(
@@ -684,10 +684,97 @@ async fn replay_cancelled_tasks_abandons_when_steer_pending() {
         dangling.is_empty(),
         "no dangling tool_use after abandon: {dangling:?}"
     );
-    // The backfilled result must mention the steer/redirect.
+    // The backfilled result must mention the redirect.
     assert!(
-        tasks[0].result.as_deref().unwrap().contains("steer"),
-        "result must mention the steer redirect: {:?}",
+        tasks[0].result.as_deref().unwrap().contains("redirect"),
+        "result must mention the redirect: {:?}",
         tasks[0].result
+    );
+}
+
+/// Regression for the TUI path: when the user submits a new prompt directly
+/// (not via a store steer/queue) after a cancelled subagent, `has_new_input`
+/// must trigger abandon (not replay). Without this, the cancelled child would be
+/// re-run for up to `replay_timeout` (300s), blocking the user.
+#[tokio::test]
+async fn replay_cancelled_tasks_abandons_when_new_input_submitted() {
+    use opencoder_session::SessionState;
+    use tokio_util::sync::CancellationToken;
+
+    let store = mem_store().await;
+    store
+        .create_session(&session_meta("parent-ni", "act"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session_meta("child-ni", "explore"))
+        .await
+        .unwrap();
+    store
+        .append_message("parent-ni", &Message::user("u1", "explore"))
+        .await
+        .unwrap();
+    store
+        .append_message("parent-ni", &parent_task_turn(&["task-ni"]))
+        .await
+        .unwrap();
+    store
+        .append_message("child-ni", &Message::user("cu", "explore"))
+        .await
+        .unwrap();
+    store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-ni".into(),
+            parent_session_id: "parent-ni".into(),
+            child_session_id: "child-ni".into(),
+            parent_message_id: None,
+            agent: "explore".into(),
+            prompt: "explore".into(),
+            result: None,
+            status: SubagentStatus::Cancelled,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        })
+        .await
+        .unwrap();
+    // No pending steers or queues in the store — this is the TUI path where the
+    // prompt travels directly as user_text.
+
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_event("should not run")]));
+    let agent = opencoder_core::resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "parent-ni",
+        agent,
+        config("m"),
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+    )
+    .with_store(store.clone());
+    session.messages.push(parent_task_turn(&["task-ni"]));
+    session.cancel = Some(CancellationToken::new());
+
+    // has_new_input=true simulates the TUI submitting a new prompt.
+    opencoder_session::resume::replay_cancelled_tasks(&mut session, true).await;
+
+    // The child must NOT be replayed.
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "has_new_input must prevent child replay (TUI path)"
+    );
+    // The task must be terminal (Failed), not Cancelled or Running.
+    let tasks = store.list_subagent_tasks("parent-ni").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        matches!(tasks[0].status, SubagentStatus::Failed),
+        "task must be Failed (abandoned via has_new_input), got {:?}",
+        tasks[0].status
+    );
+    // A terminal tool_result must be backfilled.
+    let dangling = dangling_tool_uses(&session.messages);
+    assert!(
+        dangling.is_empty(),
+        "no dangling tool_use after abandon: {dangling:?}"
     );
 }

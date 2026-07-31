@@ -1,6 +1,6 @@
 Commit: (working-tree, pre-initial-commit)
 
-# fix(session): subagent 30min 超时后正确标记 Cancelled 而非 Completed
+# fix(session): subagent 超时后正确标记 Cancelled + 防止重复 replay
 
 ## 背景
 
@@ -14,6 +14,13 @@ Commit: (working-tree, pre-initial-commit)
 后果：超时后子 agent 在 15 s drain 窗口内继续盲跑。若碰巧在窗口内完成，
 子 agent 的清理路径走正常完成分支，将 DB 任务标记为 **Completed** —
 超时被静默吞掉。用户看到的是"30 分钟超时了，任务还是 running/completed"。
+
+此外，超时修复暴露了一个连带 bug：超时的 subagent 任务被标记为 `Cancelled`，
+但同时父会话的 transcript 中已回填了超时错误 `tool_result`（因为父 cancel 未
+触发，`run_loop` 正常记录了 tool message）。而 `replay_cancelled_tasks` 的
+过滤条件仅检查 `status == Cancelled`，不检查 `tool_use` 是否已有匹配的
+`tool_result`。于是在下一个 drain turn，超时任务被错误地重跑或 abandon，
+追加了一条**重复的 `tool_result`** → provider HTTP 400。
 
 ## 变更
 
@@ -33,15 +40,23 @@ Commit: (working-tree, pre-initial-commit)
   与 `fire_child_cancels`（广播全部）互补，与 `fire_child_turn_cancel`
   （turn-level token）对称。
 
+### `crates/session/src/resume.rs` — `replay_cancelled_tasks` 防 duplicate tool_result
+
+- **新增 `answered` 过滤**（:331-344）：在收集待 replay 的 Cancelled 任务前，
+  先计算 transcript 中已有匹配 `ContentBlock::ToolResult` 的 `tool_use_id` 集合。
+  过滤条件增加 `!answered.contains(t.task_id)`，排除已有结果的 Cancelled 任务
+  （如超时 subagent），防止重跑/abandon 追加重复 `tool_result` → HTTP 400。
+
 ## 测试覆盖
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
 | 超时后任务标记 Cancelled（非 Completed） | `timeout_marks_subagent_cancelled` | `crates/session/tests/subagent_timeout_cancel.rs` |
+| 超时 Cancelled 任务不被重复 replay | `replay_skips_cancelled_task_with_existing_tool_result` | `crates/session/tests/replay_skips_answered_cancelled.rs` |
 
-- 全量回归：`cargo test --workspace` → 全绿（0 failures）
+- 全量回归：`cargo test --workspace` → 全绿（1467 passed, 0 failures）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
-- 行数：`execute.rs` 554 ≤ 800；`lib.rs` 466 ≤ 800；`subagent_timeout_cancel.rs` 131 ≤ 400
+- 行数：`execute.rs` 554 ≤ 800；`lib.rs` 466 ≤ 800；`resume.rs` 751 ≤ 800；`subagent_timeout_cancel.rs` 131 ≤ 400；`replay_skips_answered_cancelled.rs` 194 ≤ 400
 
 ## Impact Surface
 
@@ -49,6 +64,7 @@ Commit: (working-tree, pre-initial-commit)
   Running。父会话收到清晰的超时错误信息。
 - **不影响**：HardCancel / TurnCancel 路径（已有正确的 cancel 传播）；
   Store 抽象层；CLI/Web/TUI 前端。
+- **防回归**：超时的 Cancelled 任务不会被 `replay_cancelled_tasks` 错误重跑，避免重复 tool_result 触发 HTTP 400。
 
 ## Related Docs
 

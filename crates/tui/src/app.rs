@@ -335,6 +335,7 @@ pub(super) async fn run_app(
                             {
                                 app_loop::LoopFlow::Quit => break,
                                 app_loop::LoopFlow::Proceed => {}
+                                app_loop::LoopFlow::InstallTools => {}
                                 app_loop::LoopFlow::Redraw => continue,
                             }
                             continue;
@@ -362,6 +363,12 @@ pub(super) async fn run_app(
                             {
                                 app_loop::LoopFlow::Quit => break,
                                 app_loop::LoopFlow::Proceed => {}
+                                app_loop::LoopFlow::InstallTools => {
+                                    crate::install_tools::run(terminal, &mut chat);
+                                    dirty = true;
+                                    render_pending = true;
+                                    continue;
+                                }
                                 app_loop::LoopFlow::Redraw => continue,
                             }
                             continue;
@@ -728,6 +735,7 @@ pub(super) async fn run_app(
                 {
                     app_loop::LoopFlow::Quit => break,
                     app_loop::LoopFlow::Proceed => dirty = true,
+                    app_loop::LoopFlow::InstallTools => dirty = true,
                     app_loop::LoopFlow::Redraw => continue,
                 }
             }

@@ -134,6 +134,38 @@ impl Drop for TerminalGuard {
     }
 }
 
+/// Leave TUI mode temporarily: disable raw mode and emit the inverse of
+/// [`TerminalGuard::enter`] so an external process can take over the real
+/// terminal with full stdio. Mirrors [`TerminalGuard::restore`] but is
+/// callable without owning the guard and surfaces errors.
+pub(crate) fn suspend_screen() -> Result<()> {
+    disable_raw_mode()?;
+    let mut out = std::io::stdout();
+    let mut buf = String::new();
+    write_restore(&mut buf)?;
+    out.write_all(buf.as_bytes())?;
+    out.flush()?;
+    Ok(())
+}
+
+/// Re-enter TUI mode after [`suspend_screen`]: verbatim mirror of
+/// [`TerminalGuard::enter`] minus the panic-hook install (still active).
+/// The caller should invoke [`ratatui::Terminal::clear`] afterwards so the
+/// next draw is a full repaint (ratatui otherwise diffs a stale buffer).
+pub(crate) fn resume_screen() -> Result<()> {
+    let mut stdout = std::io::stdout();
+    {
+        use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+        let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+            | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
+        let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
+    }
+    execute!(stdout, EnterAlternateScreen, SetCursorStyle::SteadyBar,
+             EnableMouseCapture, EnableBracketedPaste)?;
+    enable_raw_mode()?;
+    Ok(())
+}
+
 /// Write the ANSI restoration sequences (pop Kitty enhancement, disable mouse
 /// capture, disable bracketed paste, leave the alternate screen) to `w`. Single
 /// source of truth for what `TerminalGuard::restore` emits — factored out so

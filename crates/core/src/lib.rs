@@ -8,6 +8,7 @@ pub mod net;
 pub mod skill;
 pub mod sse;
 pub mod tool;
+pub mod tool_deps;
 pub mod tool_guard_config;
 
 pub use agent::{
@@ -23,6 +24,7 @@ pub use config::{
     Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig, ProviderConfig,
     DEFAULT_CONTEXT_LIMIT,
 };
+pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;
 
 pub use error::{CoreError, Result};

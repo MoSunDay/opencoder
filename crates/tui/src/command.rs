@@ -39,6 +39,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
+    ("/install_tools", "检测并安装所有 tools 依赖（tmux + chromium）"),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -56,6 +57,8 @@ pub enum SlashAction {
     Ps,
     /// Display-only: kill all background bash (never enters model context).
     Stop,
+    /// `/install_tools`: detect + install optional tool deps (tmux + chromium).
+    InstallTools,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -169,6 +172,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "act_clear_context" => Some(SlashAction::ClearContext),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
+        "install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
 }
@@ -184,6 +188,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
+        "/install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
 }
@@ -559,6 +564,34 @@ mod tests {
             "Ps is non-control: Tab is Idle"
         );
         assert!(menu.is_some(), "popup stays open for non-control Tab");
+    }
+
+
+    #[test]
+    fn parse_install_tools() {
+        assert_eq!(parse("/install_tools"), Some(SlashAction::InstallTools));
+        assert_eq!(parse("install_tools"), None); // bare name (no slash) -> None
+        assert_eq!(parse(" /install_tools "), Some(SlashAction::InstallTools));
+    }
+
+    #[test]
+    fn dispatch_install_tools() {
+        assert_eq!(dispatch("/install_tools"), Some(SlashAction::InstallTools));
+    }
+
+    #[test]
+    fn enter_on_install_tools_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "install_tools".chars() {
+            if let Some(m) = menu.as_mut() { m.on_char(c); }
+        }
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::InstallTools) => {}
+            other => panic!("expected Dispatch(InstallTools), got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Enter-dispatch");
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

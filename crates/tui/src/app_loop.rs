@@ -42,6 +42,9 @@ pub(crate) enum LoopFlow {
     Proceed,
     /// Used by extracted blocks that previously did `continue` (re-render).
     Redraw,
+    /// `/install_tools`: run the deps installer (handled one frame up in
+    /// `run_app` since `dispatch_command` lacks the terminal handle).
+    InstallTools,
     Quit,
 }
 
@@ -455,6 +458,11 @@ pub(crate) async fn dispatch_command(
         }
         CommandOutcome::Dispatch(SlashAction::Stop) => {
             local_cmd::run("/stop", chat);
+        }
+        // `/install_tools`: handled one frame up in `run_app` (needs the
+        // terminal handle to suspend/resume the screen). Decision only.
+        CommandOutcome::Dispatch(SlashAction::InstallTools) => {
+            return LoopFlow::InstallTools;
         }
         // Queue a control command behind a running turn (Tab in popup). When
         // idle, fall back to immediate dispatch.

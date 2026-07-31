@@ -165,11 +165,10 @@ async fn bash_tool_detaches_controlling_terminal() {
 #[tokio::test]
 #[cfg(unix)]
 async fn bash_tool_runs_long_command_without_handoff() {
-    // A command that would previously exceed the 1 s timeout (and get handed
-    // off to a background supervisor) now just runs to completion in the
-    // foreground: the tool returns the command's own output, never a
-    // "Moved to background" message, and no background output file is left
-    // behind. The `timeout` input is now ignored.
+    // A command that finishes well under the 130 s foreground timeout completes
+    // normally in the foreground: the tool returns the command's own output,
+    // never a bash-timeout marker, and no background output file is left
+    // behind. The `timeout` input is ignored (bash uses a fixed internal value).
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     let out = BashTool

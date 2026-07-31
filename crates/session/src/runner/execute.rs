@@ -14,10 +14,11 @@ use super::subagent::run_subagent;
 /// (e.g. an ssh_pty tmux call that never returns, a stalled web_fetch, or a
 /// browser/computer-use tool whose future never resolves) from freezing the
 /// run loop forever. Generous enough that legitimate long-running tools are
-/// unaffected. `bash` is exempt entirely: it passes `None` and runs in the
-/// foreground until the command exits (with `/stop` as the kill path), so the
-/// safety net never fires for it. The `task` subagent early-returns before this
-/// guard is reached (a child session may legitimately run for many minutes).
+/// unaffected. `bash` is exempt entirely: it passes `None` and relies on its
+/// own internal foreground timeout (`tools::bash::BASH_TIMEOUT_SECS`): when
+/// exceeded the command is moved to the background rather than killed, so the
+/// two deadlines never race. The `task` subagent early-returns before this guard
+/// is reached (a child session may legitimately run for many minutes).
 /// Pairs with the per-read
 /// LLM idle timeout (`DEFAULT_READ_TIMEOUT`); both are last-resort guards,
 /// not expected to fire in normal operation.
@@ -29,8 +30,9 @@ pub(super) async fn execute_call(
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
 ) -> ToolOutput {
-    // `bash` runs in the foreground until it exits (killed via `/stop`), so it
-    // is exempt from the leaf-tool safety net; every other tool keeps it.
+    // `bash` has its own internal foreground timeout (BASH_TIMEOUT_SECS) that
+    // hands long-running commands to the background, so it is exempt from the
+    // leaf-tool safety net; every other tool keeps it.
     let timeout = if tc.name == "bash" {
         None
     } else {
@@ -268,8 +270,8 @@ mod tests {
 
     /// With `timeout: None` the safety net must never fire: a perpetually-pending
     /// tool stays pending (responds only to a cancel), rather than erroring with a
-    /// "timed out" message. This is the bash exemption — bash runs in the
-    /// foreground until it exits and is killed via `/stop`.
+    /// "timed out" message. This is the bash exemption — bash has its own internal
+    /// timeout (BASH_TIMEOUT_SECS) and does not rely on this safety net.
     #[tokio::test]
     async fn none_timeout_never_fires_for_hung_tool() {
         let session = make_session();

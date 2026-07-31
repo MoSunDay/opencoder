@@ -1,5 +1,6 @@
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -8,8 +9,28 @@ use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
 #[cfg(test)]
-use super::bg::{list, test_registry_mutex};
-use super::bg::{register, unregister, BgState};
+use super::bg::{kill_all, list, test_registry_mutex};
+use super::bg::{handoff, output_path, register, unregister, BgState};
+
+/// Foreground timeout for a bash command (seconds). When exceeded the command
+/// is moved to the background (see [`super::bg::handoff`]) instead of being
+/// killed — long-running builds keep going and their output lands in a temp
+/// file the model can read later. The runner keeps bash exempt from its own
+/// 600 s leaf-tool safety net (`runner::execute`) so the two deadlines never
+/// race; bash has its own shorter internal timeout.
+///
+/// Overridden to 1 s in unit tests so the handoff path is exercisable without
+/// a 130 s wait. Integration tests (`tests/`) link the non-`cfg(test)` build
+/// and see the real 130 s value.
+#[cfg(not(test))]
+pub(crate) const BASH_TIMEOUT_SECS: u64 = 130;
+#[cfg(test)]
+pub(crate) const BASH_TIMEOUT_SECS: u64 = 1;
+
+/// Marker prefix the runner looks for to deduplicate consecutive bash-timeout
+/// tool results (see `runner::dedup_consecutive_bash_timeouts`). The closing
+/// `]` is part of the full message, not the marker itself.
+pub(crate) const BASH_TIMEOUT_MARKER: &str = "[bash-timeout:";
 
 pub struct BashTool;
 
@@ -157,13 +178,66 @@ impl Tool for BashTool {
             })
         };
 
-        // Wait for the command to exit naturally — no foreground timeout, no
-        // background handoff. The command keeps running (and stays registered
-        // for `/ps` / `/stop`) for as long as it needs; the user kills a
-        // runaway command with `/stop` (or an interrupt). The runner does not
-        // impose its 600 s leaf-tool deadline on bash either (see
-        // `runner::execute`).
-        let exit_status = child.wait().await?;
+        // Race the natural exit against a foreground timeout. When the command
+        // exceeds BASH_TIMEOUT_SECS it is moved to the background (not killed)
+        // so long-running builds keep going; the model is told where to find
+        // the output. The runner does not impose its 600 s leaf-tool deadline
+        // on bash either (see `runner::execute`) — bash has its own shorter
+        // internal timeout, avoiding a race between the two deadlines.
+        let exit_status = match tokio::time::timeout(
+            Duration::from_secs(BASH_TIMEOUT_SECS),
+            child.wait(),
+        )
+        .await
+        {
+            Ok(r) => r?,
+            Err(_) => {
+                // Timeout — hand the still-running command to the background
+                // supervisor so it keeps running. Capture whatever output has
+                // accumulated so far to include in the message.
+                #[cfg(unix)]
+                {
+                    let captured = {
+                        let st = state.lock().unwrap();
+                        let stdout = String::from_utf8_lossy(&st.stdout_buf);
+                        let stderr = String::from_utf8_lossy(&st.stderr_buf);
+                        merge_streams(&stdout, &stderr)
+                    };
+                    handoff(
+                        pid,
+                        pgid,
+                        ctx.session_id.clone(),
+                        child,
+                        stdout_task,
+                        stderr_task,
+                        state,
+                    );
+                    return Ok(ToolOutput {
+                        content: format!(
+                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_SECS}s \u{2014} moved to background]\n\
+                             pid: {pid}\noutput: {}\n\n{captured}",
+                            output_path(pid).display()
+                        ),
+                        // Not an error — the command is still running in the
+                        // background. This keeps the tool-failure guard from
+                        // tripping on legitimate long-running builds.
+                        is_error: false,
+                        images: vec![],
+                    });
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child.kill().await;
+                    return Ok(ToolOutput {
+                        content: format!(
+                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_SECS}s \u{2014} killed]",
+                        ),
+                        is_error: false,
+                        images: vec![],
+                    });
+                }
+            }
+        };
         // Natural completion (or a `/stop` group-kill, which makes `wait()`
         // return a signal exit): remove the registry entry. Idempotent — a
         // `/stop` that already removed it is a harmless no-op.
@@ -265,15 +339,13 @@ mod tests {
         );
     }
 
-    /// A long-running command completes normally in the foreground: no
-    /// timeout, no "Moved to background" handoff message — bash waits until the
-    /// command exits on its own. (A 3 s command would previously have been
-    /// handed off after the 1 s timeout; now it just runs to completion.)
+    /// A short command (completes well under the test timeout of 1 s) returns
+    /// its own output without triggering the timeout/handoff path.
     #[tokio::test]
-    async fn bash_long_command_completes_without_handoff() {
+    async fn bash_short_command_completes_normally() {
         let _g = test_registry_mutex().lock().await;
         let tool = BashTool;
-        let input = json!({"command": "sleep 3; echo done", "timeout": 1});
+        let input = json!({"command": "echo done"});
         let out = tool.execute(input, &ctx()).await.unwrap();
         assert!(!out.is_error, "expected success, got: {}", out.content);
         assert!(
@@ -282,10 +354,52 @@ mod tests {
             out.content
         );
         assert!(
-            !out.content.contains("Moved to background"),
-            "foreground bash must never emit the handoff message: {}",
+            !out.content.contains(BASH_TIMEOUT_MARKER),
+            "short command must not trigger timeout handoff: {}",
             out.content
         );
+    }
+
+    /// A command that exceeds the foreground timeout is handed off to the
+    /// background supervisor: the output contains the timeout marker, the pid,
+    /// and the background output file path. The command keeps running (not
+    /// killed) and is registered for `/ps` / `/stop`.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_timeout_triggers_handoff() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        // sleep 3 exceeds the 1 s test timeout (BASH_TIMEOUT_SECS == 1 under
+        // cfg(test)).
+        let input = json!({"command": "sleep 3"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(
+            !out.is_error,
+            "timeout is not an error — command still runs in background: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains(BASH_TIMEOUT_MARKER),
+            "timeout output must contain the marker: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("pid:"),
+            "timeout output must contain the pid: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("output:"),
+            "timeout output must contain the output path label: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("/tmp/opencoder_bg_"),
+            "timeout output must reference the background output file: {}",
+            out.content
+        );
+        // Clean up: kill the backgrounded process so it does not linger.
+        kill_all();
     }
 
     /// While a command is running it is registered in the background registry
@@ -301,8 +415,11 @@ mod tests {
         let tool = BashTool;
         let mut c = ctx();
         c.working_dir = dir.path().to_path_buf();
+        // sleep 0.5 finishes well within the 1 s test timeout
+        // (BASH_TIMEOUT_SECS == 1 under cfg(test)) so the command completes
+        // in the foreground — no handoff, no timeout marker.
         let input = json!({
-            "command": format!("echo $$ > {pf}; sleep 2; echo done", pf = pidfile.display())
+            "command": format!("echo $$ > {pf}; sleep 0.5; echo done", pf = pidfile.display())
         });
         // Run the tool concurrently so we can inspect the registry mid-flight.
         let handle = tokio::spawn(async move { tool.execute(input, &c).await.unwrap() });
@@ -338,10 +455,11 @@ mod tests {
 
     #[test]
     fn parameters_schema_hides_timeout_from_model() {
-        // `timeout` is intentionally not a model-facing property: bash no longer
-        // self-times-out (it runs in the foreground until it exits, with `/stop`
-        // as the kill path), so exposing `timeout` would mislead the model.
-        // `command`/`workdir` stay exposed. This guard prevents re-introduction.
+        // `timeout` is intentionally not a model-facing property: bash uses a
+        // fixed internal timeout (BASH_TIMEOUT_SECS) that hands long-running
+        // commands to the background. Exposing `timeout` would let the model
+        // raise it arbitrarily (a known past failure mode); `command`/`workdir`
+        // stay exposed. This guard prevents re-introduction.
         let schema = BashTool.parameters();
         let props = schema
             .get("properties")

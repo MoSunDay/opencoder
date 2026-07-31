@@ -115,6 +115,36 @@ pub async fn run_with_registry(
     Ok(())
 }
 
+/// Deduplicate consecutive bash-timeout tool results.
+///
+/// When bash times out repeatedly (e.g. the model keeps running long commands
+/// across turns), only the first timeout's full message is kept \u{2014} subsequent
+/// ones are replaced with the first's content (same PID, same output file
+/// path, so the model reads the same file regardless). A non-timeout bash
+/// result resets the consecutive count. Non-bash tool calls do NOT reset it
+/// (they run independently and don't affect the bash timeout streak).
+///
+/// `first` persists across turns (it lives in `run_loop`'s scope) so the
+/// dedup applies across turn boundaries, not just within a single batch.
+fn dedup_consecutive_bash_timeouts(
+    tool_calls: &[opencoder_llm::CompletedToolCall],
+    results: &mut [(usize, ToolOutput)],
+    first: &mut Option<String>,
+) {
+    for (i, out) in results.iter_mut() {
+        let is_bash = tool_calls.get(*i).is_some_and(|tc| tc.name == "bash");
+        if is_bash && out.content.starts_with(crate::tools::bash::BASH_TIMEOUT_MARKER) {
+            if first.is_some() {
+                out.content = first.clone().unwrap();
+            } else {
+                *first = Some(out.content.clone());
+            }
+        } else if is_bash {
+            *first = None;
+        }
+    }
+}
+
 pub(crate) async fn run_loop(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
@@ -122,6 +152,9 @@ pub(crate) async fn run_loop(
 ) -> Result<()> {
     let mut doom: VecDeque<String> = VecDeque::new();
     let mut tool_failures: crate::tool_guard::FailureMap = HashMap::new();
+    // Tracks the first bash-timeout output in a consecutive run so that
+    // subsequent timeouts can be deduplicated (same PID / output file).
+    let mut bash_timeout_first: Option<String> = None;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -338,6 +371,10 @@ pub(crate) async fn run_loop(
                 // and the run halts at the next run_loop top-of-loop check.
             }
             results.sort_by_key(|(i, _)| *i);
+            // Deduplicate consecutive bash-timeout results: only the first
+            // timeout in a streak shows its full message; subsequent ones
+            // reuse the first content (same PID, same output file).
+            dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut bash_timeout_first);
             // Tool-failure guard: track consecutive failures per tool name
             // and apply exponential backoff before continuing.
             {
@@ -442,4 +479,113 @@ pub async fn run_once(
     let mut session = SessionState::new(new_id(), agent, config, client, working_dir);
     run(&mut session, prompt, on_event).await?;
     Ok(session)
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::dedup_consecutive_bash_timeouts;
+    use opencoder_core::ToolOutput;
+    use opencoder_llm::CompletedToolCall;
+    use serde_json::json;
+
+    fn bash_tc(id: &str) -> CompletedToolCall {
+        CompletedToolCall {
+            id: id.into(),
+            name: "bash".into(),
+            input: json!({}),
+        }
+    }
+
+    fn other_tc(name: &str, id: &str) -> CompletedToolCall {
+        CompletedToolCall {
+            id: id.into(),
+            name: name.into(),
+            input: json!({}),
+        }
+    }
+
+    fn timeout_output(pid: u32) -> ToolOutput {
+        ToolOutput {
+            content: format!(
+                "[bash-timeout: command timed out after 1s \u{2014} moved to background]\n\
+                 pid: {pid}\noutput: /tmp/opencoder_bg_{pid}.output\n\n"
+            ),
+            is_error: false,
+            images: vec![],
+        }
+    }
+
+    fn normal_output(text: &str) -> ToolOutput {
+        ToolOutput::ok(text)
+    }
+
+    #[test]
+    fn first_timeout_stored_subsequent_replaced() {
+        let tool_calls = vec![bash_tc("1"), bash_tc("2")];
+        let mut results = vec![(0, timeout_output(100)), (1, timeout_output(200))];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
+        assert_eq!(
+            results[0].1.content, results[1].1.content,
+            "second timeout content must match first"
+        );
+        assert!(results[0].1.content.contains("pid: 100"));
+        assert!(
+            results[1].1.content.contains("pid: 100"),
+            "second must be replaced with first content (pid 100)"
+        );
+    }
+
+    #[test]
+    fn non_timeout_bash_resets_count() {
+        let tool_calls = vec![bash_tc("1"), bash_tc("2"), bash_tc("3")];
+        let mut results = vec![
+            (0, timeout_output(100)),
+            (1, normal_output("done")),
+            (2, timeout_output(300)),
+        ];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
+        assert!(results[0].1.content.contains("pid: 100"));
+        assert!(results[1].1.content.contains("done"));
+        assert!(
+            results[2].1.content.contains("pid: 300"),
+            "third timeout must have own content after reset"
+        );
+    }
+
+    #[test]
+    fn non_bash_tool_does_not_reset_count() {
+        let tool_calls = vec![bash_tc("1"), other_tc("edit", "2"), bash_tc("3")];
+        let mut results = vec![
+            (0, timeout_output(100)),
+            (1, normal_output("edited")),
+            (2, timeout_output(300)),
+        ];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
+        assert!(results[0].1.content.contains("pid: 100"));
+        assert!(results[1].1.content.contains("edited"));
+        assert!(
+            results[2].1.content.contains("pid: 100"),
+            "third timeout must reuse first content (non-bash didn't reset)"
+        );
+    }
+
+    #[test]
+    fn first_persists_across_batches() {
+        let tool_calls_a = vec![bash_tc("1")];
+        let mut results_a = vec![(0, timeout_output(100))];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls_a, &mut results_a, &mut first);
+
+        let tool_calls_b = vec![bash_tc("2")];
+        let mut results_b = vec![(0, timeout_output(200))];
+        dedup_consecutive_bash_timeouts(&tool_calls_b, &mut results_b, &mut first);
+
+        assert!(
+            results_b[0].1.content.contains("pid: 100"),
+            "second-batch timeout must reuse first-batch content"
+        );
+    }
 }

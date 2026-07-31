@@ -2,12 +2,12 @@
 //!
 //! Every bash command registers itself on spawn so the display-only `/ps`
 //! command can list the running process and `/stop` can kill its process
-//! group. A bash command runs in the foreground until it exits naturally;
+//! group. A bash command runs in the foreground until it exits or until
+//! `BASH_TIMEOUT_SECS` elapses (see `tools::bash`); on timeout the still-
+//! running command is handed to the detached background supervisor via
+//! [`handoff`], which streams output to a temp file the model can read.
 //! [`register`] adds the entry, [`unregister`] removes it on completion, and
-//! [`stop`]/[`kill_all`] terminate the group on user demand. The legacy
-//! [`handoff`] path (detached background supervisor that streamed output to a
-//! temp file) is retained for reference but is no longer reached from the
-//! foreground tool.
+//! [`stop`]/[`kill_all`] terminate the group on user demand.
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;

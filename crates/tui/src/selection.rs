@@ -16,6 +16,9 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
 use crate::chat::ChatView;
 
 /// An active selection: an absolute content-row range `[a, b]` (inclusive,
@@ -198,14 +201,11 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u32, sel: Option
 /// - A local clipboard command covers local terminals that ignore OSC52
 ///   (e.g. some Linux terminal emulators with the feature disabled).
 ///
-/// OSC52 runs synchronously (it is just a fast stdout write — the primary path
-/// for SSH). The local clipboard command runs on a **background thread** because
-/// it spawns an external process (`pbcopy`/`wl-copy`/`xclip`/`xsel`/`clip.exe`)
-/// that may block for seconds if, say, `xclip` stalls on an unresponsive X
-/// server. Keeping that off the event loop prevents a hung helper from
-/// freezing the TUI. The background spawn enforces its own timeout so the worker
-/// thread always terminates. Errors are swallowed: a clipboard failure must
-/// never crash the UI.
+/// OSC52 runs synchronously (a fast stdout write — the primary path for SSH).
+/// The local clipboard command also runs synchronously via `try_spawn`, which
+/// enforces a 3-second timeout so a stalled helper cannot hang the TUI
+/// indefinitely. Errors are swallowed: a clipboard failure must never crash
+/// the UI.
 pub fn copy_to_clipboard(text: &str) -> CopyReport {
     let probe = crate::clip_probe::probe_clipboard();
     // OSC52 is still always sent (best-effort primary path for SSH / capable
@@ -227,7 +227,7 @@ pub fn copy_to_clipboard(text: &str) -> CopyReport {
 /// iTerm2, Windows Terminal). Best-effort: a failed write is swallowed — a
 /// clipboard error must never crash the UI.
 pub fn copy_osc52(text: &str) {
-    let payload = base64_encode(text.as_bytes());
+    let payload = STANDARD.encode(text.as_bytes());
     // ESC ] 52 ; <clipboard=c> ; <base64> BEL
     let mut seq = String::with_capacity(payload.len() + 16);
     seq.push_str("\u{1b}]52;c;");
@@ -237,32 +237,6 @@ pub fn copy_osc52(text: &str) {
     let mut out = std::io::stdout();
     let _ = out.write_all(seq.as_bytes());
     let _ = out.flush();
-}
-
-/// Minimal RFC-4648 base64 encoder (standard alphabet, `=` padding). Vendored
-/// to avoid pulling in a dependency for the one place clipboard copy needs it.
-fn base64_encode(input: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let block = (b0 << 16) | (b1 << 8) | b2;
-        out.push(T[((block >> 18) & 0x3f) as usize] as char);
-        out.push(T[((block >> 12) & 0x3f) as usize] as char);
-        if chunk.len() >= 2 {
-            out.push(T[((block >> 6) & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() == 3 {
-            out.push(T[(block & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -283,15 +257,15 @@ mod tests {
 
     #[test]
     fn base64_matches_known_vectors() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(STANDARD.encode(b""), "");
+        assert_eq!(STANDARD.encode(b"f"), "Zg==");
+        assert_eq!(STANDARD.encode(b"fo"), "Zm8=");
+        assert_eq!(STANDARD.encode(b"foo"), "Zm9v");
+        assert_eq!(STANDARD.encode(b"foob"), "Zm9vYg==");
+        assert_eq!(STANDARD.encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(STANDARD.encode(b"foobar"), "Zm9vYmFy");
         // UTF-8 bytes are encoded verbatim.
-        assert_eq!(base64_encode("中".as_bytes()), "5Lit");
+        assert_eq!(STANDARD.encode("中".as_bytes()), "5Lit");
     }
 
     #[test]
@@ -357,7 +331,7 @@ mod tests {
         // "hi" -> base64 "aGk="; the encoder backs the payload embedded in the
         // OSC52 framing. We can't intercept stdout here, but we assert the
         // encoder and that copy_osc52 must not panic on arbitrary unicode.
-        assert_eq!(base64_encode(b"hi"), "aGk=");
+        assert_eq!(STANDARD.encode(b"hi"), "aGk=");
         copy_osc52("hello 世界 \u{1f600}");
     }
 
@@ -373,7 +347,7 @@ mod tests {
         };
         assert!(report.status_message().contains("3 line"));
         assert!(report.status_message().contains("xclip"));
-        assert!(!report.status_message().contains("No clipboard"));
+        assert!(!report.status_message().contains("Copy unreliable"));
     }
 
     #[test]

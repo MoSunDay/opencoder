@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::ChatStream;
-use opencoder_session::SessionState;
+use opencoder_session::{SessionState, SharedCancel};
 use opencoder_store::{Delivery, Store};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -55,9 +55,13 @@ pub(crate) async fn switch_session(
     cursor_idx: &mut usize,
     hist_idx: &mut Option<usize>,
     cancel: &mut CancellationToken,
+    turn_cancel: &mut SharedCancel,
     skill_handle: &mut Arc<Mutex<Option<String>>>,
 ) -> Result<()> {
     // Perform session switch.
+    // Cancel the in-flight turn before Quit so the worker sees it promptly
+    // instead of blocking until the current LLM stream / tool batch finishes.
+    cancel.cancel();
     let _ = cmd_tx.send(UiCmd::Quit).await;
     let new_session = match &pick {
         crate::task::TaskPick::New => {
@@ -93,6 +97,12 @@ pub(crate) async fn switch_session(
     *model_label = new_session.config.model.clone();
     let new_cancel = CancellationToken::new();
     let new_session = new_session.with_cancel(new_cancel.clone());
+    // Mirror `cancel`: the switched session's parent turn-cancel handle must
+    // point at the new session so the TUI `>` steer button can interrupt it.
+    let new_turn_cancel = new_session
+        .turn_cancel
+        .clone()
+        .unwrap_or_else(|| Arc::new(Mutex::new(CancellationToken::new())));
     let new_skill_handle = new_session.skill_prompt.clone();
     let resumed_messages = if let crate::task::TaskPick::Resume(_) = &pick {
         new_session.messages.clone()
@@ -191,10 +201,12 @@ pub(crate) async fn switch_session(
         evt_rx,
         session_id,
         cancel,
+        turn_cancel,
         n_cmd_tx,
         nrx,
         new_session_id,
         new_cancel,
+        new_turn_cancel,
     );
     // The freshly-spawned worker starts with no
     // skill prompt; re-sync the sticky skill so a

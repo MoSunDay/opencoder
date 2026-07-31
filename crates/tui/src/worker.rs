@@ -7,6 +7,7 @@ use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
     run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState,
+    SharedCancel,
 };
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
@@ -61,15 +62,18 @@ pub fn rebind_session(
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     session_id: &mut String,
     cancel: &mut CancellationToken,
+    turn_cancel: &mut SharedCancel,
     new_cmd_tx: mpsc::Sender<UiCmd>,
     new_evt_rx: mpsc::Receiver<UiEvent>,
     new_session_id: String,
     new_cancel: CancellationToken,
+    new_turn_cancel: SharedCancel,
 ) {
     *cmd_tx = new_cmd_tx;
     *evt_rx = new_evt_rx;
     *session_id = new_session_id;
     *cancel = new_cancel;
+    *turn_cancel = new_turn_cancel;
 }
 
 /// `/compact` dispatch policy: only run when idle. Kept as a pure function so
@@ -390,6 +394,7 @@ pub async fn process_cmd(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tokio::sync::mpsc;
 
     static API_KEY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -417,45 +422,33 @@ mod tests {
         assert_eq!(gate_clear_all(true), ClearAllGate::SkipRunning);
     }
 
-    // Regression guard for F1: after a `/task` session switch the loop's active
-    // cancellation token must be the NEW session's token, so double-Esc still
-    // interrupts the live session. If `rebind_session` stops reassigning
-    // `cancel`, this test fails.
+    // F1 + G1 guard: after a `/task` switch, both the hard-abort `cancel` and
+    // the turn-level `turn_cancel` must point at the NEW session's tokens.
     #[test]
     fn rebind_session_swaps_the_active_cancel_token() {
-        // Initial loop state bound to the first session.
-        let (mut cmd_tx, _first_cmd_rx) = mpsc::channel::<UiCmd>(8);
-        let (_first_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(8);
+        let (mut cmd_tx, _) = mpsc::channel::<UiCmd>(8);
+        let (_, mut evt_rx) = mpsc::channel::<UiEvent>(8);
+        let (new_cmd_tx, _) = mpsc::channel::<UiCmd>(8);
+        let (_, new_evt_rx) = mpsc::channel::<UiEvent>(8);
         let mut session_id = String::from("s1");
         let first_cancel = CancellationToken::new();
         let mut cancel = first_cancel.clone();
-
-        // `/task` switch produces fresh channels + a brand-new token.
-        let (new_cmd_tx, _new_cmd_rx) = mpsc::channel::<UiCmd>(8);
-        let (_new_evt_tx, new_evt_rx) = mpsc::channel::<UiEvent>(8);
+        let mut turn_cancel: SharedCancel = Arc::new(Mutex::new(CancellationToken::new()));
         let new_cancel = CancellationToken::new();
         let new_cancel_probe = new_cancel.clone();
+        let new_turn_cancel: SharedCancel = Arc::new(Mutex::new(CancellationToken::new()));
+        let new_tc_probe = new_turn_cancel.lock().unwrap().clone();
 
         rebind_session(
-            &mut cmd_tx,
-            &mut evt_rx,
-            &mut session_id,
-            &mut cancel,
-            new_cmd_tx,
-            new_evt_rx,
-            "s2".into(),
-            new_cancel,
+            &mut cmd_tx, &mut evt_rx, &mut session_id, &mut cancel, &mut turn_cancel,
+            new_cmd_tx, new_evt_rx, "s2".into(), new_cancel, new_turn_cancel,
         );
 
         cancel.cancel();
-        assert!(
-            new_cancel_probe.is_cancelled(),
-            "active loop token must target the switched session"
-        );
-        assert!(
-            !first_cancel.is_cancelled(),
-            "old session token must be orphaned, not the active one"
-        );
+        turn_cancel.lock().unwrap().cancel();
+        assert!(new_cancel_probe.is_cancelled(), "active cancel targets switched session");
+        assert!(!first_cancel.is_cancelled(), "old session cancel orphaned");
+        assert!(new_tc_probe.is_cancelled(), "turn_cancel targets switched session");
         assert_eq!(session_id, "s2");
     }
 

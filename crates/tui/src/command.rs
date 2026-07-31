@@ -67,10 +67,9 @@ pub enum SlashAction {
 pub enum CommandOutcome {
     Idle,
     Dispatch(SlashAction),
-    /// Queue a control command string behind a running turn (Tab on a
-    /// control command in the popup). Carries the canonical command text
-    /// (e.g. "/plan").
-    Queue(String),
+    /// Fill the main input with the selected command name and close the popup
+    /// (Tab in the popup). The user can then edit and submit from the composer.
+    FillInput(String),
 }
 
 /// Picker state for the `/` command menu.
@@ -131,6 +130,12 @@ impl CommandMenu {
     pub fn selected_action(&self) -> Option<SlashAction> {
         let idx = *self.rows.get(self.selected)?;
         dispatch(COMMANDS[idx].0)
+    }
+
+    /// Resolve the highlighted row to its invocation name (e.g. "/config").
+    pub fn selected_name(&self) -> Option<&'static str> {
+        let idx = *self.rows.get(self.selected)?;
+        Some(COMMANDS[idx].0)
     }
 
     fn refilter(&mut self) {
@@ -248,16 +253,14 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
             }
             None => CommandOutcome::Idle,
         },
-        // Tab on a control command queues it behind a running turn (the only
-        // way to queue a `/`-command, since `/` opens the popup). Non-control
-        // commands ignore Tab.
-        KeyCode::Tab => match m.selected_action() {
-            Some(act) if control_cmd_string(&act).is_some() => {
-                let s = control_cmd_string(&act).unwrap();
+        // Tab fills the input with the highlighted command name and closes the
+        // popup. The user can then edit and submit (Enter) from the composer.
+        KeyCode::Tab => match m.selected_name() {
+            Some(name) => {
                 *menu = None;
-                CommandOutcome::Queue(s.to_string())
+                CommandOutcome::FillInput(name.to_string())
             }
-            _ => CommandOutcome::Idle,
+            None => CommandOutcome::Idle,
         },
         KeyCode::Esc => {
             *menu = None;
@@ -439,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_on_control_command_queues() {
+    fn tab_fills_input_with_command_name() {
         let mut menu = Some(CommandMenu::new());
         // Filter to /plan
         for c in "plan".chars() {
@@ -449,14 +452,14 @@ mod tests {
         }
         let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
         match outcome {
-            CommandOutcome::Queue(s) => assert_eq!(s, "/plan"),
-            other => panic!("expected Queue, got {:?}", other),
+            CommandOutcome::FillInput(s) => assert_eq!(s, "/plan"),
+            other => panic!("expected FillInput, got {:?}", other),
         }
-        assert!(menu.is_none(), "popup closed after Tab-queue");
+        assert!(menu.is_none(), "popup closed after Tab-fill");
     }
 
     #[test]
-    fn tab_on_non_control_command_is_idle() {
+    fn tab_on_non_control_command_fills_input() {
         let mut menu = Some(CommandMenu::new());
         // Filter to /task (non-control)
         for c in "task".chars() {
@@ -465,11 +468,11 @@ mod tests {
             }
         }
         let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
-        assert!(
-            matches!(outcome, CommandOutcome::Idle),
-            "non-control Tab ignored"
-        );
-        assert!(menu.is_some(), "popup stays open for non-control Tab");
+        match outcome {
+            CommandOutcome::FillInput(s) => assert_eq!(s, "/task"),
+            other => panic!("expected FillInput, got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Tab-fill");
     }
 
     #[test]
@@ -551,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_on_local_command_is_idle() {
+    fn tab_on_local_command_fills_input() {
         let mut menu = Some(CommandMenu::new());
         for c in "ps".chars() {
             if let Some(m) = menu.as_mut() {
@@ -559,13 +562,12 @@ mod tests {
             }
         }
         let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
-        assert!(
-            matches!(outcome, CommandOutcome::Idle),
-            "Ps is non-control: Tab is Idle"
-        );
-        assert!(menu.is_some(), "popup stays open for non-control Tab");
+        match outcome {
+            CommandOutcome::FillInput(s) => assert_eq!(s, "/ps"),
+            other => panic!("expected FillInput, got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Tab-fill");
     }
-
 
     #[test]
     fn parse_install_tools() {
@@ -592,6 +594,20 @@ mod tests {
             other => panic!("expected Dispatch(InstallTools), got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Enter-dispatch");
+    }
+
+    #[test]
+    fn tab_on_install_tools_fills_input() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "install_tools".chars() {
+            if let Some(m) = menu.as_mut() { m.on_char(c); }
+        }
+        let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::FillInput(name) => assert_eq!(name, "/install_tools"),
+            other => panic!("expected FillInput, got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Tab-fill");
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

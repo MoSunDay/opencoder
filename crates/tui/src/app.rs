@@ -43,6 +43,9 @@ mod subagent_input;
 #[path = "app_display.rs"]
 mod app_display;
 
+#[path = "steer_dispatch.rs"]
+mod steer_dispatch;
+
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
 /// Body (info area) refresh interval -- the cached ChatView snapshot is rebuilt
@@ -70,6 +73,14 @@ pub(super) async fn run_app(
     // Reassigned by `rebind_session` on every `/task` session switch.
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
+    // Parent turn-level interrupt handle. The TUI `>` steer button fires
+    // this (instead of a hard `cancel`) to interrupt the parent's current
+    // LLM/tool turn so a pending steer is absorbed at the next boundary --
+    // the run loop continues rather than aborting like double-Esc.
+    // Reassigned by `rebind_session` on every `/task` switch.
+    let mut turn_cancel = session.turn_cancel.clone().unwrap_or_else(|| {
+        Arc::new(std::sync::Mutex::new(CancellationToken::new()))
+    });
     let child_turn_cancels = session.child_turn_cancels.clone();
     let child_cancels = session.child_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
@@ -91,7 +102,9 @@ pub(super) async fn run_app(
     let mut scroll: u32 = 0;
     let mut follow = true;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
-    let mut sys_tokens: u64 = sys_tokens_for(session.agent.name.as_str(), &workdir, None);
+    let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
+    let mut sys_tokens: u64 =
+        sys_tokens_for(session.agent.name.as_str(), &workdir, initial_skill_body.as_deref());
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
@@ -305,6 +318,7 @@ pub(super) async fn run_app(
                                         &mut cursor_idx,
                                         &mut hist_idx,
                                         &mut cancel,
+                                        &mut turn_cancel,
                                         &mut skill_handle,
                                     )
                                     .await?;
@@ -357,7 +371,8 @@ pub(super) async fn run_app(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
                                 &session_id, &mut task_picker, &mut model_menu, &config,
-                                &mut cache_salt_menu, &agent_name, &mut queue_items,
+                                &mut cache_salt_menu, &agent_name,
+                                &mut input, &mut cursor_idx,
                             )
                             .await
                             {
@@ -684,29 +699,35 @@ pub(super) async fn run_app(
                             copy_status = Some((msg, Instant::now()));
                         }
                         if outcome == MouseOutcome::SteerSubmit {
-                            // When a running subagent is focused, fire its turn-cancel to interrupt
-                            // the current turn and force immediate steer absorption (status unchanged).
                             let sub_focused = subagent_focus.is_some();
-                            if sub_focused {
-                                subagent_input::fire_subagent_turn_cancel(
-                                    &child_turn_cancels,
-                                    &chat,
-                                    subagent_focus,
-                                );
-                            } else if running {
-                                if opencoder_session::fire_child_cancels(&child_cancels) {
-                                    // Children cancelled — the parent's run_loop gets err("cancelled")
-                                    // tool results and absorbs the steer at the next turn boundary.
-                                } else {
-                                    cancel.cancel();
-                                    cancelled = true;
-                                    drain_pending = true;
+                            // fire_child_cancels both checks AND cancels children — only call it
+                            // when the parent is running and no subagent row is focused.
+                            let has_children = !sub_focused && running
+                                && opencoder_session::fire_child_cancels(&child_cancels);
+                            match steer_dispatch::resolve(
+                                sub_focused, running, has_children, !chat.steer_items.is_empty(),
+                            ) {
+                                steer_dispatch::Action::Subagent => {
+                                    subagent_input::fire_subagent_turn_cancel(
+                                        &child_turn_cancels, &chat, subagent_focus,
+                                    );
                                 }
-                            } else {
-                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new()))
-                                    .await;
-                                running = true;
-                                chat.begin_turn();
+                                steer_dispatch::Action::CancelChildren => {
+                                    // Children cancelled — run_loop absorbs the steer at the next
+                                    // turn boundary via err("cancelled") tool results.
+                                }
+                                steer_dispatch::Action::SteerParent => {
+                                    // G1: no running children but a steer is pending — interrupt the
+                                    // parent's current LLM/tool turn (soft cancel, not hard abort).
+                                    opencoder_session::fire_turn_cancel(&turn_cancel);
+                                }
+                                steer_dispatch::Action::StartTurn => {
+                                    start_turn(&cmd_tx, &mut cancel,
+                                        UiCmd::Prompt(String::new(), Vec::new())).await;
+                                    running = true;
+                                    chat.begin_turn();
+                                }
+                                steer_dispatch::Action::Noop => {}
                             }
                             follow = true;
                         }

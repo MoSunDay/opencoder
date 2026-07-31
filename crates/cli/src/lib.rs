@@ -5,6 +5,7 @@ pub mod run;
 pub mod server;
 pub mod session_cmd;
 pub mod ts;
+pub mod update;
 
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,8 @@ pub enum Command {
     },
     /// List known models from the resolved config.
     Models,
+    /// Self-update: clone latest main, rebuild, and swap the PATH binary.
+    Update,
     /// Session management (list / show / delete). Uses the local store.
     Session {
         #[command(subcommand)]

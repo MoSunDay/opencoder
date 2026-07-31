@@ -95,6 +95,7 @@ async fn main() -> Result<()> {
         Some(Command::Session { sub }) => {
             opencoder_cli::session_cmd::session_dispatch(sub, &cli).await
         }
+        Some(Command::Update) => opencoder_cli::update::update_run(&cli).await,
         None => {
             if !cli.prompt.is_empty() {
                 let p = join(cli.prompt.clone());

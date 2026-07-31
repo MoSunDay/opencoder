@@ -32,7 +32,11 @@ pub(crate) use crate::resize::size_changed;
 pub(crate) use crate::resize::{on_resize_event, poll_idle_resize};
 
 /// Maximum interval (ms) between two left-clicks to count as a double-click.
-const DBL_CLICK_MS: u64 = 400;
+const DBL_CLICK_MS: u64 = 500;
+
+pub(crate) fn is_within_dbl_click_window(prev: Instant, now: Instant) -> bool {
+    now.duration_since(prev) < Duration::from_millis(DBL_CLICK_MS)
+}
 
 /// Copy-paste-ready command to resume a session by id.
 pub(crate) fn resume_hint(id: &str) -> String {
@@ -682,12 +686,9 @@ pub(crate) async fn handle_mouse(
                 return MouseOutcome::None;
             }
 
-            // ── Double-click detection (body text only) ──
-            // If this click follows a previous one within DBL_CLICK_MS, treat
-            // it as the second half of a double-click: select the current line
-            // and flag the selection so finish_copy copies it even though lo==hi.
+            // Double-click within DBL_CLICK_MS: select current line & copy it.
             let is_dbl = last_click
-                .map(|t| now.duration_since(t) < Duration::from_millis(DBL_CLICK_MS))
+                .map(|t| is_within_dbl_click_window(t, now))
                 .unwrap_or(false);
             *last_click = Some(now);
 
@@ -729,6 +730,9 @@ pub(crate) async fn handle_mouse(
                     crate::selection::finish_copy(viewed, hits.body, sel, *dbl_click)
                 {
                     *copy_msg = Some(report.status_message());
+                // Real drag/dbl-click that found nothing; bare click stays silent.
+                } else if sel.0 != sel.1 || *dbl_click {
+                    *copy_msg = Some("Nothing to copy at this position".to_string());
                 }
                 *selection = None;
             }

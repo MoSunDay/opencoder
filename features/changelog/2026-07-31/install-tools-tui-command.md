@@ -42,7 +42,7 @@ exit-tips probe to reuse the shared dependency check.
 - `("/install_tools", ...)` entry in `COMMANDS`.
 - `SlashAction::InstallTools` variant.
 - `parse()` arm (`install_tools`), `dispatch()` arm (`/install_tools`).
-- 4 tests: parse (slash/trim), dispatch, Enter-dispatches, Tab-fills-input.
+- 3 tests: parse (slash/trim), dispatch, Enter-dispatches.
 
 ### `crates/tui/src/app_loop.rs` + `app.rs`
 - `LoopFlow::InstallTools` variant (between `Redraw` and `Quit`).

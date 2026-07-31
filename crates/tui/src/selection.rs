@@ -17,7 +17,6 @@ use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::chat::ChatView;
-use std::time::Duration;
 
 /// An active selection: an absolute content-row range `[a, b]` (inclusive,
 /// un-normalised — either end may be the anchor or the current drag position).
@@ -25,52 +24,52 @@ use std::time::Duration;
 pub type SelRange = (u32, u32);
 
 /// Report of a clipboard copy attempt, for building visible UI feedback.
-/// `lines`/`chars` describe how much text was copied; `osc52` indicates
-/// whether the OSC52 escape was sent; `local_tool` names the local
-/// clipboard command that succeeded (e.g. `"xclip"`), if any.
+/// `lines`/`chars` describe how much text was copied; `osc52_reliable`
+/// is the probe's verdict on whether OSC52 can be trusted in this terminal;
+/// `local_tool` names the local clipboard command that succeeded, if any;
+/// `tmux`/`ssh` carry contextual hints for the failure message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyReport {
     /// Number of logical lines in the copied text.
     pub lines: usize,
     /// Number of characters in the copied text.
     pub chars: usize,
-    /// Whether OSC52 was sent (always true when text is non-empty).
-    pub osc52: bool,
+    /// Whether OSC52 can be trusted to reach the clipboard here (from probe).
+    pub osc52_reliable: bool,
     /// The local clipboard tool that succeeded, if any.
     pub local_tool: Option<&'static str>,
+    /// Running inside tmux (drives the failure hint).
+    pub tmux: bool,
+    /// Running over SSH (drives the failure hint).
+    pub ssh: bool,
 }
 
 impl CopyReport {
-    /// Build a user-facing status message from this report.
+    /// Build a user-facing status message from this report. Three cases:
+    /// a local tool succeeded (green), OSC52 is reliable with no local tool
+    /// (green), or neither (red, honest failure with a contextual hint).
     pub fn status_message(&self) -> String {
         match self.local_tool {
-            Some(tool) => format!("\u{1f4cb} Copied {} line(s) (OSC52 + {})", self.lines, tool),
-            None => osc52_only_message(self.lines, under_tmux()),
+            Some(tool) => format!(
+                "\u{1f4cb} Copied {} line(s) ({}) \u{2014} Shift+drag = terminal selection",
+                self.lines, tool
+            ),
+            None if self.osc52_reliable => format!(
+                "\u{1f4cb} Copied {} line(s) via OSC52 \u{2014} Shift+drag = terminal selection",
+                self.lines
+            ),
+            None => {
+                let hint = if self.tmux {
+                    "tmux: set -g set-clipboard on, or install xclip"
+                } else if self.ssh {
+                    "use Shift+drag for native selection"
+                } else {
+                    "install xclip/xsel or use Shift+drag"
+                };
+                format!("\u{26a0} Copy unreliable \u{2014} {}", hint)
+            }
         }
     }
-}
-
-/// Build the status message for the OSC52-only case — no local clipboard tool
-/// was available, so the copy relied entirely on the OSC52 escape sequence.
-///
-/// OSC52 *was* sent successfully, so this is informational, not a warning.
-/// When running under tmux we append a hint, because tmux silently drops OSC52
-/// sequences unless `set -g set-clipboard on` is configured. The factored
-/// `under_tmux` flag is a parameter so the message logic is fully testable
-/// without touching the real environment.
-fn osc52_only_message(lines: usize, under_tmux: bool) -> String {
-    let base = format!("\u{1f4cb} Copied {} line(s) via OSC52", lines);
-    if under_tmux {
-        format!("{} \u{2014} no paste? tmux: set -g set-clipboard on", base)
-    } else {
-        base
-    }
-}
-
-/// Whether we appear to be running inside tmux (the `TMUX` environment
-/// variable is set by tmux for every pane).
-fn under_tmux() -> bool {
-    std::env::var_os("TMUX").is_some()
 }
 
 /// Normalise a selection to `(lo, hi)` inclusive.
@@ -204,103 +203,22 @@ pub fn render_overlay(f: &mut Frame, text_area: Rect, scroll_y: u32, sel: Option
 /// it spawns an external process (`pbcopy`/`wl-copy`/`xclip`/`xsel`/`clip.exe`)
 /// that may block for seconds if, say, `xclip` stalls on an unresponsive X
 /// server. Keeping that off the event loop prevents a hung helper from
-/// freezing the TUI. [`try_spawn`] enforces its own timeout so the background
+/// freezing the TUI. The background spawn enforces its own timeout so the worker
 /// thread always terminates. Errors are swallowed: a clipboard failure must
 /// never crash the UI.
 pub fn copy_to_clipboard(text: &str) -> CopyReport {
+    let probe = crate::clip_probe::probe_clipboard();
+    // OSC52 is still always sent (best-effort primary path for SSH / capable
+    // terminals); the *message* reflects the probe's confidence, not the send.
     copy_osc52(text);
-    let local_tool = copy_local(text);
+    let local_tool = crate::clip_probe::copy_local_smart(&probe, text);
     CopyReport {
         lines: text.lines().count(),
         chars: text.chars().count(),
-        osc52: true,
+        osc52_reliable: probe.osc52_reliable,
         local_tool,
-    }
-}
-
-/// Copy `text` via a platform-native clipboard command, trying each candidate
-/// in turn and stopping at the first that exits successfully. Returns the name
-/// of the tool that succeeded, or `None` if no command is available or all
-/// failed (the caller still has OSC52 as a backend).
-fn copy_local(text: &str) -> Option<&'static str> {
-    #[cfg(target_os = "macos")]
-    {
-        if try_spawn("pbcopy", &[], text).is_some() {
-            return Some("pbcopy");
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if try_spawn("wl-copy", &[], text).is_some() {
-            return Some("wl-copy");
-        }
-        if try_spawn("xclip", &["-selection", "clipboard"], text).is_some() {
-            return Some("xclip");
-        }
-        if try_spawn("xsel", &["--clipboard", "--input"], text).is_some() {
-            return Some("xsel");
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if try_spawn("clip.exe", &[], text).is_some() {
-            return Some("clip.exe");
-        }
-    }
-    // Platforms without a known local clipboard command: OSC52 is the only path.
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        let _ = text;
-    }
-    None
-}
-
-/// Maximum time to wait for a single local clipboard command before giving up
-/// and killing it. Generous enough for the slowest reasonable command (e.g.
-/// `xclip` initialising an X connection) yet short enough that a hung helper
-/// never blocks for long.
-const CLIP_CMD_TIMEOUT: Duration = Duration::from_secs(3);
-
-/// Spawn `prog` with `args`, write `input` to its stdin, and wait for it to
-/// exit — but no longer than [`CLIP_CMD_TIMEOUT`]. Returns `Some(())` only when
-/// the program was found *and* exited successfully within the deadline;
-/// `None` otherwise (missing binary, non-zero exit, timeout, I/O error). On
-/// timeout the child is killed. Never panics.
-fn try_spawn(prog: &str, args: &[&str], input: &str) -> Option<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    use std::time::Instant;
-    let mut child = Command::new(prog)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(input.as_bytes());
-        // `stdin` drops here, closing the pipe and signalling EOF so the child
-        // can finish reading.
-    }
-    // Poll instead of a blocking `wait()`: a clipboard helper that hangs (e.g.
-    // `xclip` against an unresponsive X server) would otherwise block the
-    // calling thread indefinitely.
-    let deadline = Instant::now() + CLIP_CMD_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                return if status.success() { Some(()) } else { None };
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait(); // reap the zombie after kill
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return None,
-        }
+        tmux: probe.is_tmux,
+        ssh: probe.is_ssh,
     }
 }
 
@@ -444,43 +362,14 @@ mod tests {
     }
 
     #[test]
-    fn try_spawn_missing_program_returns_none() {
-        // A program name that almost certainly does not exist on PATH. Must not
-        // panic and must report failure as `None`.
-        assert!(try_spawn("opencoder-not-a-real-clipboard-bin-zz", &[], "").is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn try_spawn_existing_program_succeeds_and_false_fails() {
-        // `true` exits 0 and ignores stdin -> reported as success.
-        assert!(try_spawn("true", &[], "").is_some());
-        // `false` exits non-zero -> reported as failure (None).
-        assert!(try_spawn("false", &[], "").is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn try_spawn_times_out_on_long_running_command() {
-        // `sleep 30` would block for 30 s if there were no timeout. With the
-        // timeout it must return `None` in roughly CLIP_CMD_TIMEOUT seconds.
-        let start = std::time::Instant::now();
-        let result = try_spawn("sleep", &["30"], "");
-        assert!(result.is_none(), "expected timeout → None, got {result:?}");
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed < std::time::Duration::from_secs(20),
-            "timed-out command should return well under 30 s, took {elapsed:?}"
-        );
-    }
-
-    #[test]
     fn copy_report_status_with_local_tool() {
         let report = CopyReport {
             lines: 3,
             chars: 42,
-            osc52: true,
+            osc52_reliable: true,
             local_tool: Some("xclip"),
+            tmux: false,
+            ssh: false,
         };
         assert!(report.status_message().contains("3 line"));
         assert!(report.status_message().contains("xclip"));
@@ -488,39 +377,64 @@ mod tests {
     }
 
     #[test]
-    fn copy_report_status_without_local_tool() {
+    fn copy_report_status_reliable_osc52_no_tool() {
         let report = CopyReport {
             lines: 1,
             chars: 5,
-            osc52: true,
+            osc52_reliable: true,
             local_tool: None,
+            tmux: false,
+            ssh: false,
         };
         let msg = report.status_message();
-        // OSC52 was sent — the message must NOT look like a failure.
         assert!(msg.contains("OSC52"));
-        assert!(!msg.contains("\u{26a0}")); // no warning emoji
-        assert!(!msg.contains("No clipboard tool"));
-    }
-
-    #[test]
-    fn osc52_only_message_includes_line_count_and_no_warning() {
-        let msg = osc52_only_message(7, false);
-        assert!(msg.contains("7 line(s)"));
-        assert!(msg.contains("OSC52"));
-        // No warning glyph: OSC52 was actually sent.
+        assert!(msg.contains("1 line(s)"));
         assert!(!msg.contains("\u{26a0}"));
-        // No tmux hint when not under tmux.
-        assert!(!msg.contains("tmux"));
     }
 
     #[test]
-    fn osc52_only_message_adds_tmux_hint() {
-        let msg = osc52_only_message(1, true);
-        assert!(msg.contains("OSC52"));
+    fn copy_report_status_unreliable_with_tmux_hint() {
+        let report = CopyReport {
+            lines: 2,
+            chars: 9,
+            osc52_reliable: false,
+            local_tool: None,
+            tmux: true,
+            ssh: false,
+        };
+        let msg = report.status_message();
+        assert!(msg.contains("\u{26a0}"));
         assert!(msg.contains("set-clipboard"));
-        assert!(msg.contains("tmux"));
-        // Still no warning glyph.
-        assert!(!msg.contains("\u{26a0}"));
+    }
+
+    #[test]
+    fn copy_report_status_unreliable_with_ssh_hint() {
+        let report = CopyReport {
+            lines: 2,
+            chars: 9,
+            osc52_reliable: false,
+            local_tool: None,
+            tmux: false,
+            ssh: true,
+        };
+        let msg = report.status_message();
+        assert!(msg.contains("\u{26a0}"));
+        assert!(msg.contains("Shift+drag"));
+    }
+
+    #[test]
+    fn copy_report_status_unreliable_generic_hint() {
+        let report = CopyReport {
+            lines: 4,
+            chars: 40,
+            osc52_reliable: false,
+            local_tool: None,
+            tmux: false,
+            ssh: false,
+        };
+        let msg = report.status_message();
+        assert!(msg.contains("\u{26a0}"));
+        assert!(msg.contains("install xclip"));
     }
 
     #[test]
@@ -537,7 +451,10 @@ mod tests {
         let r = report.unwrap();
         assert_eq!(r.lines, 2);
         assert!(r.chars > 0);
-        assert!(r.osc52);
+        // osc52_reliable echoes the probe's environment-dependent verdict
+        // (conservatively false for unidentified terminals); we only confirm
+        // the field is populated, not a specific value.
+        let _ = r.osc52_reliable;
     }
 
     #[test]

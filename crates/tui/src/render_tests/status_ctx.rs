@@ -28,7 +28,7 @@ fn status_bar_shows_ctx_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 200000, 0);
+            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 5000, 80000, 200000, 0);
         })
         .unwrap();
 
@@ -47,7 +47,11 @@ fn status_bar_shows_ctx_percent() {
     );
     assert!(
         row.contains("200K"),
-        "should show compact limit tokens; got: {row}"
+        "ctx denominator should be the model window, not the threshold; got: {row}"
+    );
+    assert!(
+        !row.contains("80K"),
+        "ctx denominator must NOT show the compaction threshold; got: {row}"
     );
 }
 
@@ -68,6 +72,7 @@ fn status_bar_ctx_red_at_high_usage() {
                 "act",
                 0,
                 180000,
+                200000,
                 200000,
                 0,
             );

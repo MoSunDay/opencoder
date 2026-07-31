@@ -50,6 +50,27 @@ pub fn fire_child_cancels(child_cancels: &Arc<Mutex<HashMap<String, Cancellation
     true
 }
 
+/// Fire the hard-cancel token for a single child subagent, keyed by its
+/// `call_id`. Unlike `fire_child_cancels` (which cancels ALL children), this
+/// targets one child so it can be stopped individually — e.g. when a task
+/// timeout fires. Returns `true` if the child was found.
+pub fn fire_child_cancel(
+    child_cancels: &Arc<Mutex<HashMap<String, CancellationToken>>>,
+    call_id: &str,
+) -> bool {
+    let map = match child_cancels.lock() {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    match map.get(call_id) {
+        Some(token) => {
+            token.cancel();
+            true
+        }
+        None => false,
+    }
+}
+
 /// Fire the turn-level cancel token for a single child subagent, keyed by its
 /// `call_id`. Unlike `fire_child_cancels` (which cascades all hard-cancel
 /// tokens), this targets one child's independent turn token. Used when a

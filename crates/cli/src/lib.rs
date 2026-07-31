@@ -130,13 +130,15 @@ pub enum Command {
     },
     /// List known models from the resolved config.
     Models,
-    /// Self-update: clone latest main, rebuild, and swap the PATH binary.
-    Update,
     /// Session management (list / show / delete). Uses the local store.
     Session {
         #[command(subcommand)]
         sub: SessionSub,
     },
+    /// Self-update: clone latest main, rebuild, and swap the PATH binary.
+    /// Runs a built-in prompt through the headless agent so the agent itself
+    /// performs the clone/build/replace steps (handling the busy case).
+    Update,
 }
 
 #[derive(Subcommand, Debug)]

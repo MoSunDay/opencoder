@@ -2,31 +2,12 @@
 //! are not yet set up (missing tmux, missing skill dependencies). Only shown
 //! after the TUI exits, and only for TUI/ts command paths (never headless).
 
-use std::process::Command;
-
-/// True when a `tmux` binary is on PATH.
-fn tmux_available() -> bool {
-    Command::new("tmux")
-        .arg("-V")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// True when the skills-deps sentinel file exists.
-fn deps_sentinel_exists() -> bool {
-    opencoder_core::skills_dir()
-        .join(opencoder_core::DEPS_SENTINEL)
-        .exists()
-}
-
 /// Print optional-feature tips to stderr after the TUI exits.
 /// No-op when everything is already set up.
 pub fn print_exit_tips() {
-    let missing_tmux = !tmux_available();
-    let missing_deps = !deps_sentinel_exists();
+    let status = opencoder_core::check_tool_deps();
+    let missing_tmux = !status.tmux;
+    let missing_deps = !status.sentinel;
 
     if !missing_tmux && !missing_deps {
         return;
@@ -76,11 +57,9 @@ pub fn print_exit_tips() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn sentinel_check_does_not_panic() {
-        // Just verify the function doesn't panic regardless of environment.
-        let _ = deps_sentinel_exists();
+        // Just verify the shared probe doesn't panic regardless of environment.
+        let _ = opencoder_core::check_tool_deps();
     }
 }

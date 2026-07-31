@@ -328,6 +328,20 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
         Some(s) => s,
         None => return,
     };
+    // tool_use_ids that already have a matching tool_result in the transcript.
+    // A Cancelled task whose result is already present (e.g. a timed-out
+    // subagent, whose parent recorded the "timed out" tool_result) must NOT be
+    // replayed — doing so would append a duplicate tool_result that providers
+    // reject with HTTP 400.
+    let answered: HashSet<&str> = session
+        .messages
+        .iter()
+        .flat_map(|m| m.blocks.iter())
+        .filter_map(|b| match b {
+            ContentBlock::ToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
+            _ => None,
+        })
+        .collect();
     let cancelled: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(&session.id)
         .await
@@ -335,6 +349,7 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
         .into_iter()
         .filter(|t| {
             t.status == SubagentStatus::Cancelled
+                && !answered.contains(t.task_id.as_str())
                 && (session.handoff_seq.is_none()
                     || session.messages.iter().any(|m| {
                         m.blocks.iter().any(

@@ -6,6 +6,7 @@ use super::*;
 use opencoder_store::SessionMeta;
 
 mod mouse_tests;
+mod mouse_clip_tests;
 
 #[test]
 fn paste_existing_absolute_file_echoes_full_path() {

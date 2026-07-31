@@ -11,7 +11,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - 非目标：CLI 不直接暴露 steer/queue 两段式 delivery（那是 web `POST /prompt` 的 `delivery` 字段）；CLI headless 单 prompt。
 
 ## 关键抽象
-- `Cli`（`src/lib.rs`）：全局 flag `--model/--image/--workdir/--session/--continue/--fork/--verbose/--prompt-file` + `Command::{Run, Tui, Ts, Server, Client, Config, Models, Session, Update}`（`Ts` 别名 `rs`；裸 `ts`/`rs` 恒新建 tmux 托管 session，`-r <id>` 重连）+ trailing `prompt`。
+- `Cli`（`src/lib.rs`）：全局 flag `--model/--image/--workdir/--session/--continue/--fork/--verbose/--prompt-file` + `Command::{Run, Tui, Ts, Server, Client, Config, Models, Session, Update}`（`Update` 无参，用内置提示词经 `run_headless` 委托代理执行自更新：clone latest main → build → 原子替换 PATH 二进制）（`Ts` 别名 `rs`；裸 `ts`/`rs` 恒新建 tmux 托管 session，`-r <id>` 重连）+ trailing `prompt`。
 - `SessionSub::{List, Show{id, json}, Delete, Export{id, out}, Import{input}}`（`src/lib.rs`）。`Show --json` 是深度观测面（见下）。
 - `ConfigSub::{Show, Set{model}}`（`src/lib.rs`）。`Config Show` 输出合并后配置 JSON；`Config Set <model>` 经 `config_dispatch` → `Config::save` 把 `provider/model_id` 写回 opencoder.json（设全局默认模型的脚本化入口；与 TUI `/model` 的 `y=global` / Web `POST /model persist_default=true` 语义一致）。
 - `run_headless`（`src/run.rs`）：建/恢复 SessionState → `run(session, prompt, print_event)` → 异步 `generate_title`。`--continue` 取最新 session；`--session <id>` 指定；`--fork` 在 resume 前调 `fork_session` 复制（原 session 零修改）。**resume 摘要**：resume 后调 `print_resume_summary(&session).await`，蓝字单行 `⤷ resumed session: done/total subagents done — ✔explore … ✘build …`（空→不打印）；格式逻辑抽出为纯函数 `pub(crate) fn format_resume_summary(&[SubagentTaskRecord]) -> Option<String>` 便于单测。

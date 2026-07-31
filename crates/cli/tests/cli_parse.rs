@@ -367,3 +367,9 @@ fn bare_prompt_accepts_global_agent_flag() {
     assert_eq!(cli.agent.as_deref(), Some("explore"));
     assert!(!cli.prompt.is_empty());
 }
+
+#[test]
+fn update_subcommand() {
+    let cli = parse(&["opencoder", "update"]);
+    assert!(matches!(cli.command, Some(Command::Update)));
+}

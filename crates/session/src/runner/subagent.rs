@@ -254,17 +254,52 @@ pub(super) async fn run_subagent(
         map.remove(&call_id);
     }
 
-    // Detect cancellation: the shared token fired (web interrupt / double-Esc),
-    // so the child broke out of its run loop without a real result. Mark the
-    // task cancelled and leave the parent tool_use open (no tool_result) so the
-    // child can be replayed on the next user turn. run_loop skips recording the
-    // tool message when cancelled, keeping this tool_use dangling.
+    // Detect cancellation: the child's hard-cancel token fired. This happens in
+    // two scenarios that must be handled differently:
+    //
+    //  1. Parent STEER (TUI `>` / web POST /prompt with running children): the
+    //     user redirected the parent away from this subagent. Only the child
+    //     token fired -- the parent's own `cancel` is intact. Make the task
+    //     TERMINAL (Failed) and record a real tool_result so the transcript
+    //     stays well-formed and the task is never silently replayed on resume.
+    //  2. Parent HARD-ABORT (double-Esc / web POST /interrupt): the parent's
+    //     `cancel` fired and cascaded to the child token. Keep the task
+    //     Cancelled and leave the parent tool_use dangling (no tool_result) so
+    //     run_loop skips recording the tool message and the child can be
+    //     replayed on the next user turn.
+    //
+    // The two are distinguishable because `child.cancel` is a `child_token()`
+    // of the parent's cancel: a steer cancels only the child token, while a
+    // hard-abort cancels the parent token (which the child observes too).
     let cancelled = child
         .cancel
         .as_ref()
         .map(|c| c.is_cancelled())
         .unwrap_or(false);
     if cancelled {
+        let parent_aborted = parent
+            .cancel
+            .as_ref()
+            .map(|c| c.is_cancelled())
+            .unwrap_or(false);
+        if !parent_aborted {
+            const STEER_MSG: &str = "cancelled: redirected by parent steer";
+            if let Some(store) = &parent.store {
+                let _ = store
+                    .complete_subagent_task(&call_id, STEER_MSG, false)
+                    .await;
+            }
+            emit(
+                sink,
+                SessionEvent::SubagentEnd {
+                    id: call_id.clone(),
+                    ok: false,
+                    cancelled: true,
+                    summary: STEER_MSG.to_string(),
+                },
+            );
+            return ToolOutput::err(STEER_MSG);
+        }
         if let Some(store) = &parent.store {
             let _ = store.cancel_subagent_task(&call_id).await;
         }

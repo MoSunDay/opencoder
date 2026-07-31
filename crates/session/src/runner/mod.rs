@@ -82,7 +82,11 @@ pub async fn run_with_registry(
     // to Completed. The model then sees [user input + subagent result] together
     // and the interrupted call is transparently resumed. No-op for children
     // (they hold no `task` tool, so they have no subagent tasks).
-    crate::resume::replay_cancelled_tasks(session).await;
+    // The TUI passes prompts directly as `user_text` (not via store Delivery),
+    // so we check that here: when the user typed new input, cancelled subagents
+    // should be abandoned rather than silently replayed.
+    let has_new_input = !user_text.is_empty() || !images.is_empty();
+    crate::resume::replay_cancelled_tasks(session, has_new_input).await;
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
     // claimed at turn boundaries to supply the actual user input, and the web

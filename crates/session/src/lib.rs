@@ -50,6 +50,44 @@ pub fn fire_child_cancels(child_cancels: &Arc<Mutex<HashMap<String, Cancellation
     true
 }
 
+/// Fire the turn-level cancel token for a single child subagent, keyed by its
+/// `call_id`. Unlike `fire_child_cancels` (which cascades all hard-cancel
+/// tokens), this targets one child's independent turn token. Used when a
+/// turn-level interrupt must break a nested subagent's current LLM/tool turn
+/// without ending the parent's run loop. Returns `true` if the child was found.
+pub fn fire_child_turn_cancel(
+    child_turn_cancels: &Arc<Mutex<HashMap<String, SharedCancel>>>,
+    call_id: &str,
+) -> bool {
+    // Clone the token out of the map before locking it, to avoid nested locks.
+    let token = {
+        let map = match child_turn_cancels.lock() {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        match map.get(call_id) {
+            Some(tc) => tc.clone(),
+            None => return false,
+        }
+    };
+    if let Ok(g) = token.lock() {
+        g.cancel();
+    }
+    true
+}
+
+/// Fire the turn-level interrupt for the parent session's own `turn_cancel`
+/// token. Unlike [`fire_child_turn_cancel`] (which targets one child by
+/// `call_id`), the parent owns a single token. Used by interactive front-ends
+/// (TUI `>` steer button) to interrupt the parent's current LLM/tool turn
+/// WITHOUT ending the `run_loop` -- the next iteration absorbs a pending steer
+/// and continues. No-op if the token is already cancelled.
+pub fn fire_turn_cancel(token: &SharedCancel) {
+    if let Ok(g) = token.lock() {
+        g.cancel();
+    }
+}
+
 pub struct SessionState {
     pub id: String,
     pub messages: Vec<Message>,
@@ -74,10 +112,12 @@ pub struct SessionState {
     /// Optional cancellation token. The run loop checks it at each turn
     /// boundary and stops cleanly when cancelled (web interrupt support).
     pub cancel: Option<CancellationToken>,
-    /// Turn-level interrupt token (child sessions only). When fired, breaks
-    /// the current LLM/tool turn but does NOT end the `run_loop` -- the next
-    /// iteration absorbs pending steers and continues. `None` for parent
-    /// sessions where turn-level interrupt is not applicable.
+    /// Turn-level interrupt token. When fired, breaks the current LLM/tool
+    /// turn but does NOT end the `run_loop` -- the next iteration absorbs
+    /// pending steers and continues. Every session (including the parent) is
+    /// constructed with a fresh token so an interactive front-end (TUI `>`
+    /// steer) can interrupt the current turn and force steer absorption.
+    /// `run_subagent` replaces it with a registered token for children.
     pub turn_cancel: Option<SharedCancel>,
     /// Registry of child subagent turn-cancel tokens, keyed by `call_id`.
     /// Shared (via `Arc`) with the session handle so external code (TUI event
@@ -130,7 +170,7 @@ impl SessionState {
             persisted_count: 0,
             session_created: false,
             cancel: None,
-            turn_cancel: None,
+            turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
             child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
             child_cancels: Arc::new(Mutex::new(HashMap::new())),
             summary: None,
@@ -157,6 +197,17 @@ impl SessionState {
     /// Attach a cancellation token so the run loop stops at the next turn boundary.
     pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
         self.cancel = Some(cancel);
+        self
+    }
+
+    /// Attach a turn-level interrupt token. When fired, the current LLM/tool
+    /// turn is interrupted (the `run_loop` continues to absorb pending steers
+    /// rather than breaking like a hard cancel). Every session is constructed
+    /// with a fresh token already set; this builder lets a caller supply a
+    /// specific token it also holds a clone of (e.g. the TUI keeps a handle so
+    /// the `>` steer button can fire it).
+    pub fn with_turn_cancel(mut self, token: SharedCancel) -> Self {
+        self.turn_cancel = Some(token);
         self
     }
 
@@ -338,6 +389,16 @@ mod cache_salt_tests {
         assert_eq!(cache_salt_for(&s), None);
     }
 
+    /// Build a fresh SharedCancel (turn-level token wrapper) for tests.
+    fn new_shared_cancel() -> SharedCancel {
+        Arc::new(std::sync::Mutex::new(CancellationToken::new()))
+    }
+
+    /// Check whether a SharedCancel token has been fired.
+    fn is_shared_cancelled(tc: &SharedCancel) -> bool {
+        tc.lock().map(|g| g.is_cancelled()).unwrap_or(false)
+    }
+
     #[test]
     fn fire_child_cancels_returns_false_on_empty_registry() {
         let registry: Arc<Mutex<HashMap<String, CancellationToken>>> =
@@ -357,5 +418,46 @@ mod cache_salt_tests {
         assert!(fire_child_cancels(&registry));
         assert!(t1.is_cancelled());
         assert!(t2.is_cancelled());
+    }
+
+    #[test]
+    fn fire_child_turn_cancel_returns_false_on_empty_registry() {
+        let registry: Arc<Mutex<HashMap<String, SharedCancel>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        assert!(!fire_child_turn_cancel(&registry, "child-x"));
+    }
+
+    #[test]
+    fn fire_child_turn_cancel_returns_false_for_unknown_call_id() {
+        let t1 = new_shared_cancel();
+        let mut map = HashMap::new();
+        map.insert("child-1".to_string(), t1);
+        let registry = Arc::new(Mutex::new(map));
+        assert!(!fire_child_turn_cancel(&registry, "child-2"));
+    }
+
+    #[test]
+    fn fire_child_turn_cancel_fires_only_targeted_token() {
+        let t1 = new_shared_cancel();
+        let t2 = new_shared_cancel();
+        let mut map = HashMap::new();
+        map.insert("child-1".to_string(), t1.clone());
+        map.insert("child-2".to_string(), t2.clone());
+        let registry = Arc::new(Mutex::new(map));
+
+        assert!(fire_child_turn_cancel(&registry, "child-1"));
+        assert!(is_shared_cancelled(&t1), "targeted token must be cancelled");
+        assert!(
+            !is_shared_cancelled(&t2),
+            "non-targeted token must stay uncancelled"
+        );
+    }
+
+    #[test]
+    fn fire_turn_cancel_fires_supplied_token() {
+        let token: SharedCancel = Arc::new(Mutex::new(CancellationToken::new()));
+        assert!(!token.lock().unwrap().is_cancelled());
+        fire_turn_cancel(&token);
+        assert!(token.lock().unwrap().is_cancelled());
     }
 }

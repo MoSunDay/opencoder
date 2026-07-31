@@ -105,6 +105,11 @@ pub struct Config {
     /// `task_timeout_secs` because recovery should not block the user for 30 min.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_timeout_secs: Option<u64>,
+    /// Grace window (seconds) given to a subagent to finish its cleanup after an
+    /// interrupt (hard cancel / turn cancel / timeout) before the runner forces
+    /// the task into the Cancelled state. Defaults to 15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_drain_secs: Option<u64>,
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
@@ -358,6 +363,7 @@ impl Default for Config {
             stream_idle_timeout_secs: None,
             task_timeout_secs: None,
             replay_timeout_secs: None,
+            subagent_drain_secs: None,
             autopilot: AutoPilotConfig::default(),
         }
     }
@@ -414,6 +420,10 @@ impl Config {
     /// `replay_cancelled_tasks` will block the user while re-running a child.
     pub fn replay_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.replay_timeout_secs.unwrap_or(300))
+    }
+    /// Effective grace window for a subagent to drain after an interrupt.
+    pub fn subagent_drain(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.subagent_drain_secs.unwrap_or(15))
     }
     /// Model id used for low-cost background calls (title generation, compaction
     /// summarization). Returns the id (after the `/`) so the request body carries
@@ -723,6 +733,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(c.replay_timeout(), std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn subagent_drain_defaults_to_15s() {
+        assert_eq!(
+            Config::default().subagent_drain(),
+            std::time::Duration::from_secs(15)
+        );
+    }
+
+    #[test]
+    fn subagent_drain_is_configurable() {
+        let c = Config {
+            subagent_drain_secs: Some(5),
+            ..Default::default()
+        };
+        assert_eq!(c.subagent_drain(), std::time::Duration::from_secs(5));
     }
 
     #[test]

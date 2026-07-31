@@ -203,7 +203,9 @@ pub async fn resume(
         persisted_count: n,
         session_created: true,
         cancel: None,
-        turn_cancel: None,
+        turn_cancel: Some(Arc::new(Mutex::new(
+            CancellationToken::new(),
+        ))),
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
         child_cancels: Arc::new(Mutex::new(HashMap::new())),
         summary: meta.summary,
@@ -321,7 +323,7 @@ pub async fn resume_and_replay(
 /// `Completed`. The model then sees [user input + subagent result] together and
 /// the interrupted call is transparently resumed. No-op when there is no store
 /// or no cancelled tasks (e.g. children, which hold no `task` tool).
-pub async fn replay_cancelled_tasks(session: &mut SessionState) {
+pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: bool) {
     let store = match session.store.clone() {
         Some(s) => s,
         None => return,
@@ -344,19 +346,28 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
     if cancelled.is_empty() {
         return;
     }
-    // A pending steer means the user explicitly redirected this turn (e.g.
-    // clicked the steer-submit button while a subagent was running). Abandon
-    // the cancelled subagents instead of replaying them: the user wants to move
-    // on, not silently resume the child they just interrupted. Backfill a
-    // terminal "cancelled" tool_result so the transcript stays well-formed, and
-    // mark each task Failed so it is never replayed again. This unblocks the
-    // steer (claimed next in run_loop) without re-running the cancelled child.
+    // Abandon (don't replay) the cancelled subagents when the user is moving
+    // on to new input. Three signals trigger this:
+    //  1. has_new_input — the TUI submits user_text directly (not via the store
+    //     queue), so we pass a flag from run_loop instead of querying rows.
+    //  2. pending steers — the web layer admits to the store first, then drains;
+    //     a steer means the user explicitly redirected mid-subagent.
+    //  3. pending queue — a queued prompt is waiting to be claimed.
+    // In all three cases the user wants to move on, not silently resume the
+    // interrupted child. Backfill a terminal "cancelled" tool_result so the
+    // transcript stays well-formed, and mark each task Failed so it is never
+    // replayed again.
     let has_pending_steers = store
         .pending_inputs(&session.id, Delivery::Steer)
         .await
         .map(|v| !v.is_empty())
         .unwrap_or(false);
-    if has_pending_steers {
+    let has_pending_queue = store
+        .pending_inputs(&session.id, Delivery::Queue)
+        .await
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    if has_new_input || has_pending_steers || has_pending_queue {
         abandon_cancelled_tasks(session, &store, &cancelled).await;
         return;
     }
@@ -415,14 +426,14 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState) {
 /// Each task's `tool_use` gets a terminal error `tool_result` so the transcript
 /// stays well-formed (no dangling ids that providers reject with HTTP 400), and
 /// the task is marked Failed so `replay_cancelled_tasks` never picks it up
-/// again. Used when the user steers to redirect mid-subagent: they want to move
-/// on, not resume the interrupted child.
+/// again. Used when the user steers or submits new input mid-subagent: they
+/// want to move on, not resume the interrupted child.
 async fn abandon_cancelled_tasks(
     session: &mut SessionState,
     store: &Arc<dyn Store>,
     tasks: &[SubagentTaskRecord],
 ) {
-    const MSG: &str = "cancelled: the user redirected this turn (steer).";
+    const MSG: &str = "cancelled: the user moved on to new input (redirect).";
     let mut backfill: Vec<ContentBlock> = Vec::with_capacity(tasks.len());
     for task in tasks {
         let _ = store
@@ -437,7 +448,7 @@ async fn abandon_cancelled_tasks(
         tracing::info!(
             task_id = %task.task_id,
             child = %task.child_session_id,
-            "abandoning cancelled subagent (user steered) instead of replaying"
+            "abandoning cancelled subagent (user moved on) instead of replaying"
         );
     }
     let tool_msg = Message {

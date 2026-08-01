@@ -41,13 +41,17 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
     let plan = final_plan_text(&session.messages)?;
 
     // Total store messages that predate the handoff (the plan-mode history to
-    // trim on resume). Mirrors compaction's head_store_msgs accounting: if a
-    // prior compaction left a synthetic summary at the head, that message is
-    // NOT in the store, so the store count is summary_seq + (messages.len()-1).
-    let prior_skip = session.summary_seq.unwrap_or(0) as usize;
-    let has_prior_summary = session.summary_seq.is_some();
-    let store_msg_count =
-        prior_skip + session.messages.len() - if has_prior_summary { 1 } else { 0 };
+    // trim on resume). The in-memory head may hold a synthetic message absent
+    // from the store — a prior compaction summary (summary_seq) or a prior
+    // plan->act handoff / clear-context marker (handoff_seq) — in which case
+    // the store count is `skip + len - 1`. Mirrors SessionState::store_message_count.
+    let store_msg_count = if let Some(skip) = session.summary_seq {
+        skip as usize + session.messages.len() - 1
+    } else if let Some(skip) = session.handoff_seq {
+        skip as usize + session.messages.len() - 1
+    } else {
+        session.messages.len()
+    };
 
     // Display text for the UI plan card: the plan plus any text the user
     // left in the plan-mode input box. This is what the user sees — NOT the

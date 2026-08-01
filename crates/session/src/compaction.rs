@@ -129,11 +129,15 @@ pub async fn compact(
     if let Some(store) = &session.store {
         let prev_skip = session.summary_seq.unwrap_or(0);
         // The head in the in-memory list is messages[0..split].
-        // If there was a previous compaction, the first message is the old
-        // summary (not in the store), so the number of STORE messages in
-        // the head is split-1. Otherwise all split head messages are in
-        // the store.
-        let head_store_msgs = if prev_skip > 0 { split - 1 } else { split };
+        // If the first message is synthetic (a previous compaction summary OR
+        // a plan->act handoff / clear-context marker), it is not in the store,
+        // so the head holds split-1 STORE messages. Otherwise all split head
+        // messages are in the store.
+        let head_store_msgs = if prev_skip > 0 || session.handoff_seq.is_some() {
+            split - 1
+        } else {
+            split
+        };
         let new_skip = prev_skip + head_store_msgs as i64;
         let _ = store
             .update_session(

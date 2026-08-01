@@ -144,7 +144,11 @@ fn dedup_consecutive_bash_timeouts(
 ) {
     for (i, out) in results.iter_mut() {
         let is_bash = tool_calls.get(*i).is_some_and(|tc| tc.name == "bash");
-        if is_bash && out.content.starts_with(crate::tools::bash::BASH_TIMEOUT_MARKER) {
+        if is_bash
+            && out
+                .content
+                .starts_with(crate::tools::bash::BASH_TIMEOUT_MARKER)
+        {
             if first.is_some() {
                 out.content = first.clone().unwrap();
             } else {

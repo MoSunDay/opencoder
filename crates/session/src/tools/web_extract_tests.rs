@@ -2,13 +2,7 @@ use super::*;
 
 /// Build a page with a `Fallback Title` `<title>` and run `extract_article`,
 /// asserting title / content-substrings / content-absences in one call.
-fn check(
-    url: &str,
-    body: &str,
-    want_title: &str,
-    want_contains: &[&str],
-    want_absent: &[&str],
-) {
+fn check(url: &str, body: &str, want_title: &str, want_contains: &[&str], want_absent: &[&str]) {
     let html =
         format!("<html><head><title>Fallback Title</title></head><body>{body}</body></html>");
     let a = extract_article(&html, &Url::parse(url).unwrap());

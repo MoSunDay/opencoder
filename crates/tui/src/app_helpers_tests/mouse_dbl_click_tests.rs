@@ -30,6 +30,7 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<std::time::Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     // Two quick clicks at screen row 2 -> content row 1 (the blank line).
     for _ in 0..2 {
@@ -44,6 +45,7 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
             &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
             &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
             &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
         )
         .await;
     }
@@ -61,6 +63,7 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 

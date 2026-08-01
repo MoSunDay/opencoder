@@ -51,6 +51,7 @@ pub(crate) async fn switch_session(
     history: &mut Vec<String>,
     scroll: &mut u32,
     follow: &mut bool,
+    queue_scroll: &mut u32,
     sys_tokens: &mut u64,
     queue_items: &mut Vec<(i64, String)>,
     active_skill: &mut Option<String>,
@@ -140,6 +141,7 @@ pub(crate) async fn switch_session(
             history,
             *scroll,
             *follow,
+            *queue_scroll,
             *sys_tokens,
             queue_items,
             active_skill,
@@ -175,6 +177,7 @@ pub(crate) async fn switch_session(
         *history = st.history;
         *scroll = st.scroll;
         *follow = st.follow;
+        *queue_scroll = st.queue_scroll;
         *sys_tokens = st.sys_tokens;
         chat.steer_items = st.chat.steer_items.clone();
         *queue_items = st.queue_items;
@@ -183,21 +186,20 @@ pub(crate) async fn switch_session(
     } else {
         *scroll = 0;
         *follow = true;
+        *queue_scroll = 0;
         *sys_tokens = sys_tokens_for(&agent_name_for_tokens, &workdir_for_tokens, None);
-        chat.steer_items = store
-            .pending_inputs(&new_session_id, Delivery::Steer)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|si| (si.seq.unwrap_or(0), si.prompt))
-            .collect();
-        *queue_items = store
-            .pending_inputs(&new_session_id, Delivery::Queue)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|si| (si.seq.unwrap_or(0), si.prompt))
-            .collect();
+        chat.steer_items = crate::queue_panel::pending_mirror(
+            store
+                .pending_inputs(&new_session_id, Delivery::Steer)
+                .await
+                .unwrap_or_default(),
+        );
+        *queue_items = crate::queue_panel::pending_mirror(
+            store
+                .pending_inputs(&new_session_id, Delivery::Queue)
+                .await
+                .unwrap_or_default(),
+        );
         *active_skill = None;
         *active_skill_body = None;
     }

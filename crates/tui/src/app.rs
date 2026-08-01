@@ -100,6 +100,10 @@ pub(super) async fn run_app(
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
+    // Queue/steer panel scroll offset (0 = pinned to newest). Lives next to
+    // `scroll`/`follow` because it is session UI state, snapshot/restored
+    // per-session via `SessionUiState` on `/task` switches.
+    let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
     let mut sys_tokens: u64 =
@@ -107,7 +111,7 @@ pub(super) async fn run_app(
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
-    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut queue_items = crate::queue_panel::restore_pending_mirrors(&store, &session_id, &mut chat.steer_items).await;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
@@ -237,6 +241,7 @@ pub(super) async fn run_app(
                     display_queue,
                     &mut scroll,
                     follow,
+                    &mut queue_scroll,
                     anim_tick,
                     &mode_flash,
                     skill_menu.as_ref(),
@@ -309,6 +314,7 @@ pub(super) async fn run_app(
                                         &mut history,
                                         &mut scroll,
                                         &mut follow,
+                                        &mut queue_scroll,
                                         &mut sys_tokens,
                                         &mut queue_items,
                                         &mut active_skill,
@@ -436,6 +442,7 @@ pub(super) async fn run_app(
                             input_disabled,
                             &mut undo_state,
                             &mut help_scroll,
+                            &mut queue_scroll,
                         ) {
                             KeyAction::Submit(text) => {
                                 let (clean, _unresolved) = resolve_persist(
@@ -477,7 +484,7 @@ pub(super) async fn run_app(
                                             let trigger = skill_trigger(skill_name);
                                             let image_uris = snapshot_image_uris(&pending_images);
                                             if let Ok(seq) = store
-                                                .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &image_uris))
+                                                .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(skill_token_display(skill_name)), &image_uris))
                                                 .await
                                             {
                                                 pending_images.clear();
@@ -488,11 +495,11 @@ pub(super) async fn run_app(
                                 } else if running {
                                     let image_uris = snapshot_image_uris(&pending_images);
                                     if let Ok(seq) = store
-                                        .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, &image_uris))
+                                        .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(queued_item_display(&text, &clean)), &image_uris))
                                         .await
                                     {
                                         pending_images.clear();
-                                        queue_items.push((seq, clean.clone()));
+                                        queue_items.push((seq, queued_item_display(&text, &clean)));
                                     }
                                 } else {
                                     // Control commands (/act, /plan, /act_clear_context) apply
@@ -541,9 +548,9 @@ pub(super) async fn run_app(
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, Some(queued_item_display(&text, clean)), &image_uris)).await {
                                         pending_images.clear();
-                                        chat.steer_items.push((seq, clean.to_string()));
+                                        chat.steer_items.push((seq, queued_item_display(&text, clean)));
                                     }
                                     // Steer input isn't echoed in the transcript; it's surfaced only
                                     // in the side queue panel + status bar badge (like queued inputs).
@@ -552,7 +559,7 @@ pub(super) async fn run_app(
                                     // as a steer so the injected skill body is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, Some(skill_token_display(skill_name)), &image_uris)).await {
                                         pending_images.clear();
                                         chat.steer_items.push((seq, skill_token_display(skill_name)));
                                     }
@@ -568,16 +575,16 @@ pub(super) async fn run_app(
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(queued_item_display(&text, clean)), &image_uris)).await {
                                         pending_images.clear();
-                                        queue_items.push((seq, clean.to_string()));
+                                        queue_items.push((seq, queued_item_display(&text, clean)));
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `{$name}` token): admit the trigger
                                     // to the queue so the active skill is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(skill_token_display(skill_name)), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, skill_token_display(skill_name)));
                                     }
@@ -693,6 +700,7 @@ pub(super) async fn run_app(
                             &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
                             &mut subagent_sys, &workdir, &mut queue_items, &session_id,
                             store.as_ref(), &mut copy_msg, &mut last_click, &mut dbl_click,
+                            &mut queue_scroll,
                         )
                         .await;
                         if let Some(msg) = copy_msg {
@@ -793,7 +801,7 @@ pub(crate) use crate::app_helpers::{
     mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_user,
     snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
-pub(crate) use crate::skill_display::{skill_token_display, skill_trigger};
+pub(crate) use crate::skill_display::{queued_item_display, skill_token_display, skill_trigger};
 
 #[cfg(test)]
 #[path = "app_tests/mod.rs"]

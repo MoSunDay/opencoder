@@ -5,8 +5,8 @@ use tracing::warn;
 use crate::types::{Delivery, SessionInput};
 
 const INSERT_INPUT: &str = "\
-INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq)
-VALUES (?, ?, ?, ?, ?, ?, NULL)";
+INSERT INTO session_inputs (id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text)
+VALUES (?, ?, ?, ?, ?, ?, NULL, ?)";
 
 pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
     super::tx::run_tx(conn, "BEGIN", || async move {
@@ -21,6 +21,7 @@ pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
                 input.prompt.as_str(),
                 images_json.as_str(),
                 admitted_seq,
+                input.display_text.as_deref(),
             ],
         )
         .await
@@ -36,7 +37,7 @@ pub async fn pending(
     delivery: Delivery,
 ) -> Result<Vec<SessionInput>> {
     let stmt = conn
-        .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL ORDER BY admitted_seq ASC")
+        .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = ? AND promoted_seq IS NULL ORDER BY admitted_seq ASC")
         .await?;
     let mut rows = stmt.query(params![session_id, delivery.as_str()]).await?;
     let mut out = Vec::new();
@@ -122,7 +123,7 @@ pub async fn claim_next_queue(
 ) -> Result<Option<(i64, SessionInput)>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
-            .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
+            .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
             .await?;
         let mut rows = stmt.query(params![session_id]).await?;
         let claimed = match rows.next().await? {
@@ -241,10 +242,11 @@ fn row_to_input(r: &libsql::Row) -> Result<SessionInput> {
         images,
         admitted_seq: r.get(6)?,
         promoted_seq: r.get::<Option<i64>>(7)?,
+        display_text: r.get(8)?,
     })
 }
 
-/// Row layout for the claim query: seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq.
+/// Row layout for the claim query: seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text.
 fn row_to_input_full(r: &libsql::Row, seq: i64) -> Result<SessionInput> {
     let delivery_s: String = r.get(3)?;
     let images: Vec<String> = serde_json::from_str(&r.get::<String>(5)?).unwrap_or_default();
@@ -257,5 +259,6 @@ fn row_to_input_full(r: &libsql::Row, seq: i64) -> Result<SessionInput> {
         images,
         admitted_seq: r.get(6)?,
         promoted_seq: r.get::<Option<i64>>(7)?,
+        display_text: r.get(8)?,
     })
 }

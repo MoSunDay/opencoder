@@ -128,6 +128,7 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
             delivery: Delivery::Steer,
             prompt: "STEER-MARKER".into(),
             images: Vec::new(),
+            display_text: None,
             admitted_seq: 0,
             promoted_seq: None,
         })
@@ -244,6 +245,7 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
             delivery: Delivery::Queue,
             prompt: "follow-up".into(),
             images: Vec::new(),
+            display_text: None,
             admitted_seq: 0,
             promoted_seq: None,
         })

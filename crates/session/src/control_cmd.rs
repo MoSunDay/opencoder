@@ -113,10 +113,11 @@ pub fn fresh_start_message() -> Message {
     msg
 }
 
-/// Persist an agent switch to the store. This also closes the latent
-/// resume-persistence gap where a mode switch via `UiCmd::SwitchAgent` was not
-/// always durably recorded.
-async fn persist_agent(session: &SessionState, agent: &str) {
+/// Persist an agent switch to the store. Closes the latent
+/// resume-persistence gap where a mode switch via `UiCmd::SwitchAgent` (TUI
+/// key handler) was not durably recorded: the worker now calls this so
+/// `resume()` and the `/task` picker read the switched mode.
+pub async fn persist_agent(session: &SessionState, agent: &str) {
     if let Some(store) = &session.store {
         let _ = store
             .update_session(

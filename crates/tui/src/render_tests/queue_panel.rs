@@ -14,7 +14,7 @@ fn queue_panel_renders_steer_and_queue_rows() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_queue_panel(f, area, &steers, &queues, &mut btns);
+            render_queue_panel(f, area, &steers, &queues, 0, &mut btns);
         })
         .unwrap();
 
@@ -44,7 +44,7 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_queue_panel(f, area, &steers, &queues, &mut btns);
+            render_queue_panel(f, area, &steers, &queues, 0, &mut btns);
         })
         .unwrap();
 
@@ -95,4 +95,105 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
             .any(|b| b.action == QueueBtnAction::Submit),
         "queue row must not have a Submit button"
     );
+}
+
+/// Overflowing panels (more entries than the 3-row viewport) draw a scrollbar
+/// in the rightmost column (track `│` / thumb `█`) and window by `scroll`:
+/// `scroll == 0` pins to the newest entries, `scroll == max_scroll` shows the
+/// oldest. The old static "↑N more" marker is gone — the scrollbar carries the
+/// overflow signal.
+#[test]
+fn queue_panel_overflow_windows_and_scrollbar() {
+    use crate::queue_panel::{QueueBtn, QueueBtnAction};
+    let backend = TestBackend::new(80, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let queues: Vec<(i64, String)> = vec![
+        (1, "oldest".into()),
+        (2, "older".into()),
+        (3, "middle".into()),
+        (4, "newer".into()),
+        (5, "newest".into()),
+    ];
+
+    // scroll = 0 → pinned to newest: rows are middle / newer / newest.
+    let mut btns: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, &[], &queues, 0, &mut btns);
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row0 = row_text(buf, 0, 80);
+    let row2 = row_text(buf, 2, 80);
+    assert!(row0.contains("middle"), "newest-anchored window: {row0}");
+    assert!(row2.contains("newest"), "newest-anchored window: {row2}");
+    assert!(
+        !row0.contains("oldest") && !row0.contains("older"),
+        "older entries must be hidden at scroll=0: {row0}"
+    );
+    // Scrollbar: thumb sits at the top when pinned to newest.
+    assert_eq!(row0.chars().last(), Some('\u{2588}'), "thumb at top");
+    assert_eq!(row2.chars().last(), Some('\u{250a}'), "track below thumb");
+    // Hit rects stay aligned with the (shifted-left) control strip.
+    let del = btns
+        .iter()
+        .filter(|b| b.seq == 5 && b.action == QueueBtnAction::Delete)
+        .collect::<Vec<_>>();
+    assert_eq!(del.len(), 1, "one delete button for the newest row");
+    assert_eq!(del[0].rect.x, 78, "delete glyph 1 col left of scrollbar");
+    assert_eq!(del[0].rect.y, 2);
+
+    // scroll = max_scroll (2) → oldest entries visible, thumb at the bottom.
+    let mut btns2: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, &[], &queues, 2, &mut btns2);
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row0 = row_text(buf, 0, 80);
+    let row2 = row_text(buf, 2, 80);
+    assert!(row0.contains("oldest"), "scrolled window: {row0}");
+    assert!(row2.contains("middle"), "scrolled window: {row2}");
+    assert_eq!(row0.chars().last(), Some('\u{250a}'), "track above thumb");
+    assert_eq!(row2.chars().last(), Some('\u{2588}'), "thumb at bottom");
+}
+
+/// With the scrollbar taking the rightmost column, every queue-row control
+/// glyph shifts one column left — and its hit rect follows exactly, so clicks
+/// on ▲/▼/✕ land on the visible glyphs.
+#[test]
+fn queue_panel_overflow_hit_rects_track_shifted_glyphs() {
+    use crate::queue_panel::{btn_x_offsets, QueueBtn, QueueBtnAction};
+    let backend = TestBackend::new(80, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let queues: Vec<(i64, String)> = vec![
+        (1, "a".into()),
+        (2, "b".into()),
+        (3, "c".into()),
+        (4, "d".into()),
+    ];
+    let mut btns: Vec<QueueBtn> = Vec::new();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_queue_panel(f, area, &[], &queues, 0, &mut btns);
+        })
+        .unwrap();
+
+    // Overflow: content width = 80 - 1 (scrollbar column) → offsets shift
+    // left by exactly one relative to the non-overflow geometry.
+    let expected = btn_x_offsets(79);
+    assert!(!btns.is_empty(), "overflow rows must stay clickable");
+    for b in &btns {
+        let x = b.rect.x; // area.x == 0 in this terminal
+        match b.action {
+            QueueBtnAction::Up => assert_eq!(x, expected[0], "up glyph col"),
+            QueueBtnAction::Down => assert_eq!(x, expected[1], "down glyph col"),
+            QueueBtnAction::Delete => assert_eq!(x, expected[2], "delete glyph col"),
+            QueueBtnAction::Submit => panic!("queue rows never carry a submit button"),
+        }
+    }
 }

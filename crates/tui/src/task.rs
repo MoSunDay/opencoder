@@ -39,15 +39,55 @@ pub struct TaskPicker {
     /// Two-step confirmation guard for the destructive "Clear all" row.
     /// `true` while we're waiting for the second Enter (or an Esc to cancel).
     confirm_clear: bool,
+    /// Discovered skills, used to resolve a stored skill **body** (what
+    /// `sessions.skill` persists) back to a display name for the row tag.
+    skills: Vec<opencoder_core::Skill>,
 }
 
 impl TaskPicker {
     pub fn new(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
+        Self::with_skills(sessions, current_session_id, opencoder_core::discover_skills())
+    }
+
+    /// Construct with an explicit skill slice so tests can inject a fake
+    /// skill without touching `~/.opencoder/skills`.
+    fn with_skills(
+        sessions: Vec<SessionListItem>,
+        current_session_id: String,
+        skills: Vec<opencoder_core::Skill>,
+    ) -> Self {
         TaskPicker {
             sessions,
             selected: 0,
             current_session_id,
             confirm_clear: false,
+            skills,
+        }
+    }
+
+    /// Resolve a stored skill body to a display tag (`[name]`), matching
+    /// against the discovered skills (the store persists the body, not the
+    /// name). Falls back to the body's first line so an active skill that is
+    /// no longer discoverable still renders something.
+    fn skill_tag(&self, body: &str) -> Option<String> {
+        let name = self
+            .skills
+            .iter()
+            .find(|sk| sk.body == body)
+            .map(|sk| sk.name.clone())
+            .or_else(|| {
+                body.lines()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| l.trim().trim_start_matches('#').trim().to_string())
+            })
+            .unwrap_or_default();
+        let name = composer::truncate_to_width(&name, 18);
+        if name.is_empty() {
+            None
+        } else {
+            // `agent_txt` already carries a trailing space, so the tag renders
+            // as `[act] [do-and-done]`.
+            Some(format!("[{name}]"))
         }
     }
 
@@ -221,12 +261,22 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         let cancelled_badge = (s.subagent_cancelled > 0)
             .then(|| format!("  \u{2297} {} replay pending", s.subagent_cancelled));
         let agent_txt = format!("[{agent}] ");
+        // The store keeps the active skill body, not its name; resolve a
+        // display tag (` [name]`) by matching against the discovered skills so
+        // a `[plan]`-mode row can also show e.g. `[do-and-done]`.
+        let skill_tag = s
+            .skill
+            .as_deref()
+            .filter(|b| !b.trim().is_empty())
+            .and_then(|b| picker.skill_tag(b));
 
         // Budget the row inside the fixed-width popup so the status badges
-        // stay visible: the agent chip, separators, badges and suffix tags are
-        // fixed overhead; title and preview split whatever width remains.
+        // stay visible: the agent chip, skill tag, separators, badges and
+        // suffix tags are fixed overhead; title and preview split whatever
+        // width remains.
         let mut fixed = composer::str_width(&agent_txt)
             + 2 // "  " separator before the preview
+            + skill_tag.as_deref().map_or(0, composer::str_width)
             + running_badge.as_deref().map_or(0, composer::str_width)
             + cancelled_badge.as_deref().map_or(0, composer::str_width);
         if is_current {
@@ -236,17 +286,21 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         let title_budget = (free * 2 / 3).clamp(10, 28);
         let preview_budget = free.saturating_sub(title_budget).max(8);
 
-        let mut spans = vec![
-            Span::styled(
-                agent_txt,
-                Style::default().fg(crate::render::agent_chip_fg(agent)),
-            ),
-            Span::styled(composer::truncate_to_width(title, title_budget), style),
-            Span::styled(
-                format!("  {}", short_preview(&s.preview, preview_budget)),
-                Style::default().fg(theme::muted()),
-            ),
-        ];
+        let mut spans = vec![Span::styled(
+            agent_txt,
+            Style::default().fg(crate::render::agent_chip_fg(agent)),
+        )];
+        if let Some(tag) = skill_tag {
+            spans.push(Span::styled(tag, Style::default().fg(theme::accent())));
+        }
+        spans.push(Span::styled(
+            composer::truncate_to_width(title, title_budget),
+            style,
+        ));
+        spans.push(Span::styled(
+            format!("  {}", short_preview(&s.preview, preview_budget)),
+            Style::default().fg(theme::muted()),
+        ));
         if let Some(badge) = running_badge {
             spans.push(Span::styled(badge, Style::default().fg(theme::warn_color())));
         }
@@ -322,6 +376,7 @@ mod tests {
             preview: String::new(),
             subagent_running: 0,
             subagent_cancelled: 0,
+            skill: None,
         }
     }
 
@@ -461,15 +516,27 @@ mod tests {
         s
     }
 
-    fn render_to_text(sessions: Vec<SessionListItem>) -> String {
+    fn render_picker_to_text(picker: &TaskPicker) -> String {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
-        let picker = TaskPicker::new(sessions, "cur".into());
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
-            .draw(|f| render_task_picker(f, f.area(), &picker))
+            .draw(|f| render_task_picker(f, f.area(), picker))
             .unwrap();
         buffer_text(terminal.backend().buffer())
+    }
+
+    fn render_to_text(sessions: Vec<SessionListItem>) -> String {
+        render_picker_to_text(&TaskPicker::new(sessions, "cur".into()))
+    }
+
+    fn fake_skill(name: &str, body: &str) -> opencoder_core::Skill {
+        opencoder_core::Skill {
+            name: name.into(),
+            description: String::new(),
+            body: body.into(),
+            source: std::path::PathBuf::from("fake"),
+        }
     }
 
     #[test]
@@ -512,6 +579,76 @@ mod tests {
         assert!(
             text.contains("\u{2297} 2 replay pending"),
             "replay-pending badge clipped by long title:\n{text}"
+        );
+    }
+
+    #[test]
+    fn skill_tag_renders_matching_name_next_to_mode_chip() {
+        // The store persists the skill body; the picker must resolve it back
+        // to the skill name via `discover_skills()`-style matching.
+        let mut item = item("s1");
+        item.skill = Some("## do-and-done\nfull body".into());
+        let picker = TaskPicker::with_skills(
+            vec![item],
+            "cur".into(),
+            vec![fake_skill("do-and-done", "## do-and-done\nfull body")],
+        );
+        let text = render_picker_to_text(&picker);
+        assert!(
+            text.contains("[do-and-done]"),
+            "skill tag must render next to the mode chip:\n{text}"
+        );
+        assert!(
+            text.contains("[act] [do-and-done]"),
+            "skill tag must follow the agent chip:\n{text}"
+        );
+    }
+
+    #[test]
+    fn skill_tag_falls_back_to_first_body_line_when_not_discovered() {
+        // A skill that is no longer on disk (body unmatched) still renders a
+        // derived tag instead of vanishing silently.
+        let mut item = item("s1");
+        item.skill = Some("## retired-skill\ninstructions here".into());
+        let picker = TaskPicker::with_skills(vec![item], "cur".into(), vec![]);
+        let text = render_picker_to_text(&picker);
+        assert!(
+            text.contains("[retired-skill]"),
+            "fallback skill tag must derive from the body's first line:\n{text}"
+        );
+    }
+
+    #[test]
+    fn no_skill_tag_when_session_has_none() {
+        let text = render_to_text(vec![item("s1")]);
+        assert!(
+            !text.contains("[act] ["),
+            "rows without a skill must not render a skill tag:\n{text}"
+        );
+    }
+
+    #[test]
+    fn skill_tag_survives_badges_and_suffix_tags() {
+        // Long skill name + running badge + (current): the skill tag is fixed
+        // overhead, so it must stay visible when the row overflows.
+        let mut item = busy_item("s1", 1, 2);
+        item.skill = Some("very-long-skill-name-that-gets-truncated".into());
+        let picker = TaskPicker::with_skills(
+            vec![item],
+            "s1".into(),
+            vec![fake_skill(
+                "very-long-skill-name-that-gets-truncated",
+                "very-long-skill-name-that-gets-truncated",
+            )],
+        );
+        let text = render_picker_to_text(&picker);
+        assert!(
+            text.contains("[very-long-skill-n"),
+            "skill tag must be visible even with badges + (current):\n{text}"
+        );
+        assert!(
+            text.contains("\u{25cf} 1 running"),
+            "running badge must survive a skill tag:\n{text}"
         );
     }
 

@@ -1,6 +1,7 @@
-//! DuckDuckGo HTML search, gated behind the `browser` cargo feature. Loads the
-//! DDG HTML results page through obscura (so it survives DDG's anti-bot), then
-//! parses `{title, url, snippet}` rows via [`super::web_read::parse_ddg_results`].
+//! Multi-engine web search, gated behind the `browser` cargo feature. Loads
+//! the SERP page (Bing / Baidu / Sogou / DuckDuckGo) through obscura (so it
+//! survives anti-bot walls), then parses `{title, url, snippet}` rows via
+//! [`super::web_read::parse_search_results`], which dispatches by URL host.
 //!
 //! Like [`super::web_fetch`], the obscura interaction runs on a dedicated
 //! blocking thread (`current_thread` runtime + `LocalSet`) because obscura
@@ -11,11 +12,20 @@ use async_trait::async_trait;
 use opencoder_core::{effective_proxy, json, tool::truncate_output, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use std::time::Duration;
-use url::Url;
 
+use super::research;
 use super::web_read::{self, SearchResult};
 
-const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
+/// CSS selector that marks a loaded result container, per engine — used to
+/// wait for the SERP to render before reading the DOM.
+fn wait_selector(engine: &str) -> &'static str {
+    match engine {
+        "bing" => "li.b_algo",
+        "baidu" => "div.c-container",
+        "sogou" => "div.vrwrap",
+        _ => ".result", // ddg
+    }
+}
 
 pub struct WebSearchTool;
 
@@ -25,11 +35,21 @@ impl Tool for WebSearchTool {
         "web_search"
     }
     fn description(&self) -> &str {
-        "Search the web via DuckDuckGo (rendered through a headless browser for anti-bot resilience) and return a JSON list of {title, url, snippet} results."
+        "Search the web (engine: bing | baidu | sogou | ddg, rendered through a \
+         headless browser for anti-bot resilience) and return a JSON list of \
+         {title, url, snippet} results."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
         props.insert("query".into(), json::prop_str("The search query."));
+        props.insert(
+            "engine".into(),
+            serde_json::json!({
+                "type": "string",
+                "enum": ["bing", "baidu", "sogou", "ddg"],
+                "description": "Search engine to use (default \"ddg\")."
+            }),
+        );
         props.insert(
             "limit".into(),
             serde_json::json!({ "type": "integer", "description": "Max results to return (1-20, default 8)." }),
@@ -46,17 +66,20 @@ impl Tool for WebSearchTool {
         if query.is_empty() {
             return Ok(ToolOutput::err("query is required"));
         }
+        let engine = input
+            .get("engine")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ddg")
+            .to_string();
         let limit = input
             .get("limit")
             .and_then(|v| v.as_u64())
             .unwrap_or(8)
             .clamp(1, 20) as usize;
 
-        let search_url = match Url::parse_with_params(DDG_HTML_URL, &[("q", query)]) {
-            Ok(u) => u,
-            Err(e) => return Ok(ToolOutput::err(format!("bad query: {e}"))),
-        };
+        let search_url = research::serp_url(&engine, query);
         let search_url_str = search_url.to_string();
+        let wait_sel = wait_selector(&engine).to_string();
         let proxy = effective_proxy(ctx.proxy.as_deref());
 
         let joined = tokio::task::spawn_blocking(move || -> std::result::Result<String, String> {
@@ -81,7 +104,7 @@ impl Tool for WebSearchTool {
                     return Err(format!("search failed: {e}"));
                 }
                 let _ = page
-                    .wait_for_selector(".result", Duration::from_secs(10))
+                    .wait_for_selector(&wait_sel, Duration::from_secs(10))
                     .await;
                 let html = page.content();
                 drop(page);
@@ -97,15 +120,71 @@ impl Tool for WebSearchTool {
             Err(e) => return Ok(ToolOutput::err(format!("worker join failed: {e}"))),
         };
 
-        let results: Vec<SearchResult> = web_read::parse_ddg_results(&html, limit);
+        let results: Vec<SearchResult> = web_read::parse_search_results(&search_url, &html, limit);
         if results.is_empty() {
-            return Ok(ToolOutput::err(
-                "no results parsed (DDG layout may have changed)",
-            ));
+            return Ok(ToolOutput::err(format!(
+                "no results parsed (engine '{engine}' layout may have changed or is blocked)"
+            )));
         }
         Ok(truncate_output(
             serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".into()),
             ctx.max_output,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wait_selector_maps_all_four_engines() {
+        assert_eq!(wait_selector("bing"), "li.b_algo");
+        assert_eq!(wait_selector("baidu"), "div.c-container");
+        assert_eq!(wait_selector("sogou"), "div.vrwrap");
+        assert_eq!(wait_selector("ddg"), ".result");
+    }
+
+    #[test]
+    fn wait_selector_unknown_engine_falls_back_to_ddg() {
+        assert_eq!(wait_selector("google"), ".result");
+        assert_eq!(wait_selector(""), ".result");
+    }
+
+    #[test]
+    fn engine_dispatch_uses_research_serp_url() {
+        // execute() renders `research::serp_url(engine, query)` and waits on
+        // `wait_selector(engine)`; pin that dispatch contract here since the
+        // obscura-backed execute path itself needs a real browser.
+        assert_eq!(
+            research::serp_url("bing", "rust").as_str(),
+            "https://cn.bing.com/search?q=rust"
+        );
+        assert_eq!(
+            research::serp_url("baidu", "rust").as_str(),
+            "https://www.baidu.com/s?wd=rust"
+        );
+        assert_eq!(
+            research::serp_url("sogou", "rust").as_str(),
+            "https://www.sogou.com/web?query=rust"
+        );
+        assert_eq!(
+            research::serp_url("ddg", "rust").as_str(),
+            "https://html.duckduckgo.com/html/?q=rust"
+        );
+        // unknown engine: bing URL (serp_url fallback) + ddg selector
+        assert_eq!(
+            research::serp_url("google", "rust").as_str(),
+            "https://cn.bing.com/search?q=rust"
+        );
+        assert_eq!(wait_selector("google"), ".result");
+    }
+
+    #[test]
+    fn parameters_enum_advertises_four_engines() {
+        let schema = WebSearchTool.parameters();
+        let enum_ = schema["properties"]["engine"]["enum"].as_array().unwrap();
+        let engines: Vec<&str> = enum_.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(engines, ["bing", "baidu", "sogou", "ddg"]);
     }
 }

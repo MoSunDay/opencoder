@@ -179,6 +179,41 @@ def _run_e11_delivery(c: Counter, base: str, port: int, webdir: str) -> None:
             c.soft("steer turn A created app.py", False, "file missing")
 
 
+def _assert_tool_pairs(c: Counter, doc: dict, label: str, *, exclude_task: bool) -> None:
+    """HARD contract: every ``tool_use`` id must be answered by a later
+    ``tool_result`` with matching ``tool_use_id`` — the exact condition a
+    provider rejects with HTTP 400 (``tool_calls`` without ``tool_call_id``
+    response). ``exclude_task`` skips ``task`` tool_uses (their results are
+    legitimately backfilled on the *next* turn by replay/abandon), for the
+    immediate post-interrupt snapshot. Also reports 400/stream-failure
+    symptoms in tool error text as a SOFT diagnostic."""
+    use_ids = [
+        b.get("id")
+        for m in doc.get("messages", [])
+        for b in m.get("blocks", [])
+        if b.get("kind") == "tool_use"
+        and not (exclude_task and b.get("name") == "task")
+    ]
+    result_ids = {
+        b.get("tool_use_id")
+        for m in doc.get("messages", [])
+        for b in m.get("blocks", [])
+        if b.get("kind") == "tool_result"
+    }
+    dangling = [i for i in use_ids if i not in result_ids]
+    c.check(f"{label}: no dangling tool_use (every id answered)", not dangling,
+            f"dangling tool_use ids: {dangling}")
+    err_text = " ".join(
+        b.get("content", "")
+        for m in doc.get("messages", [])
+        for b in m.get("blocks", [])
+        if b.get("kind") == "tool_result" and b.get("is_error")
+    )
+    c.soft(f"{label}: no 400/stream-failure symptoms in tool errors",
+           "400 Bad Request" not in err_text and "stream failed" not in err_text,
+           "saw provider error text in tool results")
+
+
 def _run_e15_interrupt(c: Counter, base: str, port: int) -> None:
     """E15: cancel a running turn mid-flight, then prove the session survives.
 
@@ -202,8 +237,30 @@ def _run_e15_interrupt(c: Counter, base: str, port: int) -> None:
     seq = r.get("admitted_seq")
     c.check("interrupt-test prompt admitted", seq is not None)
 
-    # Let the drain start producing output before interrupting.
-    time.sleep(3)
+    # Interrupt as soon as the first assistant tool_use lands: that is the
+    # mid-tool-batch window where a hard cancel used to drop the whole tool
+    # message, leaving dangling ids that the next LLM request rejects with
+    # HTTP 400. Whether the model cooperates with landing exactly in the
+    # window is SOFT; the well-formedness contract below is HARD and catches
+    # any dangling pair regardless of timing.
+    saw_tool_use = False
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        try:
+            doc = _request("GET", f"{base}/api/sessions/{sid}/messages", timeout=20)
+            saw_tool_use = any(
+                b.get("kind") == "tool_use"
+                for m in doc.get("messages", [])
+                for b in m.get("blocks", [])
+            )
+        except Exception:
+            pass
+        if saw_tool_use:
+            break
+        time.sleep(0.5)
+    c.soft("interrupt landed mid-tool-batch (model emitted tool_use before interrupt)",
+           saw_tool_use, "model finished the turn before any tool call; contract still enforced")
+    time.sleep(0.3)
 
     # Fire the interrupt.
     try:
@@ -216,11 +273,15 @@ def _run_e15_interrupt(c: Counter, base: str, port: int) -> None:
     # Wait for the drain to settle after interrupt.
     time.sleep(3)
 
-    # The interrupted session must have persisted the user prompt at minimum.
+    # The interrupted session must have persisted the user prompt at minimum,
+    # and (Fix A) non-task tool results of an interrupted batch must already
+    # be recorded — task ids may still be dangling until the next turn
+    # backfills them via replay/abandon.
     try:
         doc = _request("GET", f"{base}/api/sessions/{sid}/messages", timeout=20)
         users = [m for m in doc.get("messages", []) if m.get("role") == "user"]
         c.check("interrupted session persisted the user prompt", len(users) >= 1)
+        _assert_tool_pairs(c, doc, "post-interrupt transcript", exclude_task=True)
     except Exception as e:
         c.check("interrupted session persisted the user prompt", False, str(e))
 
@@ -261,3 +322,16 @@ def _run_e15_interrupt(c: Counter, base: str, port: int) -> None:
 
     c.check("session survives interrupt (re-admit completes)", survived,
             "follow-up prompt never produced an assistant response")
+
+    # FINAL WELL-FORMEDNESS CONTRACT (HARD): after any number of turns, every
+    # tool_use id — task included, since replay/abandon/reconcile must have
+    # answered them by now — has a matching tool_result. This is the precise
+    # HTTP-400 condition: an assistant tool_calls entry without a subsequent
+    # tool_call_id response. Catches every path that can produce dangling
+    # pairs: mid-batch interrupt, compaction, steer, queue.
+    try:
+        doc = _request("GET", f"{base}/api/sessions/{sid}/messages", timeout=20)
+        _assert_tool_pairs(c, doc, "final transcript", exclude_task=False)
+    except Exception as e:
+        c.check("final transcript: no dangling tool_use (every id answered)",
+                False, str(e))

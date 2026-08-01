@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
@@ -87,6 +87,13 @@ pub async fn run_with_registry(
     // should be abandoned rather than silently replayed.
     let has_new_input = !user_text.is_empty() || !images.is_empty();
     crate::resume::replay_cancelled_tasks(session, has_new_input).await;
+    // In-process safety net for well-formed history: any `tool_use` id left
+    // dangling by a prior interrupted batch (and not replayable via
+    // replay_cancelled_tasks / resume_and_replay) is answered with a synthetic
+    // error tool_result, so the next LLM request cannot hit the provider's
+    // "unanswered tool_call" HTTP 400. Idempotent; runs before the new user
+    // input is recorded so the synthesized message lands at the transcript end.
+    crate::dangling_tools::reconcile_dangling_tool_uses(session).await;
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
     // claimed at turn boundaries to supply the actual user input, and the web
@@ -421,16 +428,55 @@ pub(crate) async fn run_loop(
         if turn_was_interrupted {
             reset_turn_cancel(session);
         }
-        // If interrupted mid-tool-batch, drop the tool message entirely so a
-        // cancelled subagent's `task` tool_use stays dangling (replayed on the
-        // next user turn by run_with_registry). Other interrupted tool_uses are
-        // reconciled to error results by resume()'s dangling-tool_use path.
+        // Hard cancel mid-tool-batch: record every non-replayable tool result
+        // so the transcript stays well-formed — dropping the whole tool message
+        // (the old behavior) left its `tool_use` ids dangling and provoked a
+        // provider HTTP 400 on the next turn. `task` tool_use ids whose
+        // subagent is still replayable (Running/Cancelled in the store) stay
+        // dangling on purpose: their results are backfilled by
+        // replay_cancelled_tasks / resume_and_replay on the next user turn.
+        // In-process continuation additionally hits the
+        // reconcile_dangling_tool_uses safety net in run_with_registry.
         if session
             .cancel
             .as_ref()
             .map(|c| c.is_cancelled())
             .unwrap_or(false)
         {
+            let replayable: HashSet<String> = match session.store.clone() {
+                Some(store) => {
+                    let records = store
+                        .list_subagent_tasks(&session.id)
+                        .await
+                        .unwrap_or_default();
+                    crate::dangling_tools::replayable_task_ids_from_records(&records)
+                }
+                // Store-less session: nothing can be replayed, so the batch's
+                // results (task included) are all recorded.
+                None => HashSet::new(),
+            };
+            let non_replayable: Vec<ContentBlock> = tool_blocks
+                .into_iter()
+                .filter(|b| match b {
+                    ContentBlock::ToolResult { tool_use_id, .. } => {
+                        !replayable.contains(tool_use_id)
+                    }
+                    _ => true,
+                })
+                .collect();
+            if !non_replayable.is_empty() {
+                let tool_msg = Message {
+                    id: new_id(),
+                    role: Role::Tool,
+                    blocks: non_replayable,
+                    model: None,
+                    agent: None,
+                    usage: MessageUsage::default(),
+                    created_at: now_ms(),
+                    synthetic: false,
+                };
+                session.record(tool_msg).await;
+            }
             on_event(SessionEvent::Status("interrupted".into()));
             break;
         }

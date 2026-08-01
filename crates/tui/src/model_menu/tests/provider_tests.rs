@@ -1,11 +1,12 @@
 //! Tests for ProviderPatch, ProviderList CRUD, ProviderForm, and headers.
 
-use super::common::{enter, esc, key, provider_cfg};
+use super::common::{ctrl, enter, esc, key, provider_cfg};
 use crate::model_menu::list::ProviderList;
 use crate::model_menu::provider_form::{ProviderField, ProviderForm};
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 
 // ── ProviderPatch ─────────────────────────────────────────────────────────
@@ -543,4 +544,245 @@ fn save_default_confirm_renders_visible_dialog() {
         "session-only hint missing:\n{all}"
     );
     assert!(all.contains("deepseek-chat"), "model name missing:\n{all}");
+}
+
+// ── Ctrl+L / Ctrl+U clear focused field ───────────────────────────────────
+
+#[test]
+fn ctrl_clear_empties_model_id_and_base_url() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
+        &provider_cfg(),
+    )));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Form(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ProviderField::ModelId;
+        f.model_id = "glm-5.2".into();
+    }
+    handle_model_key(&mut slot, ctrl('u'));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Form(f) => f,
+            _ => unreachable!(),
+        };
+        assert!(f.model_id.is_empty(), "Ctrl+U must clear model_id");
+        f.focus = ProviderField::BaseUrl;
+        f.base_url = "https://open.bigmodel.cn/v4".into();
+    }
+    handle_model_key(&mut slot, ctrl('l'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Form(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(f.base_url.is_empty(), "Ctrl+L must clear base_url");
+    assert_eq!(f.focus, ProviderField::BaseUrl, "focus must stay");
+}
+
+#[test]
+fn ctrl_clear_editable_name_but_readonly_name_is_noop() {
+    // New provider: editable name clears.
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
+        &provider_cfg(),
+    )));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Form(f) => f,
+            _ => unreachable!(),
+        };
+        f.name = "acme".into();
+    }
+    handle_model_key(&mut slot, ctrl('u'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Form(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(f.name.is_empty(), "Ctrl+U must clear editable name");
+
+    // Editing an existing provider: name is read-only → no-op.
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
+        "acme", "u", "m", "k", vec![],
+    )));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Form(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ProviderField::Name;
+    }
+    handle_model_key(&mut slot, ctrl('l'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Form(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.name, "acme", "read-only name must survive Ctrl+L");
+}
+
+#[test]
+fn ctrl_clear_api_key_marks_edited() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
+        "svc", "u", "m", "orig-key-12345", vec![],
+    )));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Form(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ProviderField::ApiKey;
+    }
+    assert!(!slot_edited(&slot));
+    handle_model_key(&mut slot, ctrl('u'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Form(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(
+        f.api_key_edited,
+        "Ctrl+U on api_key must mark it edited (persist the clear)"
+    );
+    assert!(
+        f.api_key_input.is_empty(),
+        "api_key raw buffer must be empty after clear"
+    );
+}
+
+fn slot_edited(slot: &Option<ModelMenu>) -> bool {
+    match slot {
+        Some(ModelMenu::Form(f)) => f.api_key_edited,
+        _ => false,
+    }
+}
+
+#[test]
+fn ctrl_d_still_quits_in_provider_form() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
+        &provider_cfg(),
+    )));
+    let out = handle_model_key(&mut slot, ctrl('d'));
+    assert!(matches!(out, ModelOutcome::Quit), "Ctrl+D must quit modal");
+    assert!(slot.is_none());
+}
+
+// ── provider form cursor placement ────────────────────────────────────────
+
+#[test]
+fn provider_form_cursor_on_model_id() {
+    let mut form = ProviderForm::new_blank(&provider_cfg());
+    form.focus = ProviderField::ModelId;
+    form.model_id = "glm-5.2".into();
+    let menu = ModelMenu::Form(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // popup: x=4, y=11 (want_h = 11 + max(1 header row) = 12); model_id is
+    // row 1; "glm-5.2" has 7 chars → cx = 4+1+15+7 = 27, cy = 11+1+1 = 13
+    terminal.backend_mut().assert_cursor_position((27, 13));
+}
+
+#[test]
+fn provider_form_cursor_on_api_key_uses_raw_buffer() {
+    let mut form = ProviderForm::from_existing("svc", "u", "m", "orig-key-12345", vec![]);
+    form.focus = ProviderField::ApiKey;
+    form.api_key_edited = true;
+    form.api_key_input = "n".into();
+    let menu = ModelMenu::Form(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // api_key is row 3; raw buffer "n" (1 char) → cx = 4+1+15+1 = 21,
+    // cy = 11+1+3 = 15
+    terminal.backend_mut().assert_cursor_position((21, 15));
+}
+
+#[test]
+fn provider_form_cursor_hidden_on_save_and_readonly_name() {
+    // Save button: no text field → no cursor.
+    let mut form = ProviderForm::new_blank(&provider_cfg());
+    form.focus = ProviderField::Save;
+    let menu = ModelMenu::Form(form);
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+    terminal.backend_mut().assert_cursor_position((0, 0));
+
+    // Read-only name in edit mode: no cursor either.
+    let mut form = ProviderForm::from_existing("svc", "u", "m", "k", vec![]);
+    form.focus = ProviderField::Name;
+    let menu = ModelMenu::Form(form);
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+    terminal.backend_mut().assert_cursor_position((0, 0));
+}
+
+#[test]
+fn provider_form_cursor_inside_headers_cell() {
+    let mut form = ProviderForm::new_blank(&provider_cfg());
+    form.focus = ProviderField::Headers;
+    form.headers_active = true;
+    form.headers = crate::model_menu::headers::HeadersEditor::new(vec![
+        ("X-Region".into(), "eu".into()),
+        ("X-Env".into(), "prod".into()),
+    ]);
+    form.headers.selected = 1;
+    form.headers.editing_value = false; // editing name of pair 1
+    let menu = ModelMenu::Form(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // 2 headers → want_h = 13 → popup y = 23-13 = 10; pair rows start at
+    // popup line 5; pair 1 (index 1) → cy = 10+1+5+1 = 17.
+    // name column starts at popup col 5; "X-Env" has 5 chars → cx = 4+1+5+5 = 15
+    terminal.backend_mut().assert_cursor_position((15, 17));
+}
+
+#[test]
+fn provider_form_cursor_inside_headers_value() {
+    let mut form = ProviderForm::new_blank(&provider_cfg());
+    form.focus = ProviderField::Headers;
+    form.headers_active = true;
+    form.headers = crate::model_menu::headers::HeadersEditor::new(vec![
+        ("X-Region".into(), "eu-west".into()),
+    ]);
+    form.headers.editing_value = true; // editing value of pair 0
+    let menu = ModelMenu::Form(form);
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_model_popup(f, Rect::new(0, 0, 80, 24), 23, &menu);
+        })
+        .unwrap();
+
+    // pair 0 → cy = 11+1+5+0 = 17. value column starts at popup col 28
+    // (5 spaces + 20-char name + " = "); "eu-west" has 7 chars → cx = 4+1+28+7 = 40
+    terminal.backend_mut().assert_cursor_position((40, 17));
 }

@@ -220,15 +220,15 @@ fn ctrl_shift_tab_in_plan_mode_switches_without_clear() {
 }
 
 #[test]
-fn ctrl_u_switches_mode_without_clear() {
-    // Ctrl+U is the preferred chord for the pure act<->plan mode toggle on
+fn ctrl_t_switches_mode_without_clear() {
+    // Ctrl+T is the preferred chord for the pure act<->plan mode toggle on
     // terminals where Ctrl+Shift+Tab is captured by the OS/shell. It must
     // behave exactly like Ctrl+Shift+Tab: switch mode, keep the transcript,
     // and leave the input box untouched.
     let mut input = String::from("draft text");
     let mut idx = 5;
     let action = run_handle(
-        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        key(KeyCode::Char('t'), KeyModifiers::CONTROL),
         &mut input,
         &mut idx,
         false,
@@ -236,7 +236,7 @@ fn ctrl_u_switches_mode_without_clear() {
     );
     assert!(
         matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "plan"),
-        "Ctrl+U in act mode should switch to plan without clear"
+        "Ctrl+T in act mode should switch to plan without clear"
     );
     assert_eq!(input, "draft text");
     assert_eq!(idx, 5);
@@ -245,7 +245,7 @@ fn ctrl_u_switches_mode_without_clear() {
     let mut input = String::from("keep me");
     let mut idx = 3;
     let action = run_handle(
-        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        key(KeyCode::Char('t'), KeyModifiers::CONTROL),
         &mut input,
         &mut idx,
         false,
@@ -253,21 +253,21 @@ fn ctrl_u_switches_mode_without_clear() {
     );
     assert!(
         matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "act"),
-        "Ctrl+U in plan mode should switch to act without clear"
+        "Ctrl+T in plan mode should switch to act without clear"
     );
     assert_eq!(input, "keep me");
     assert_eq!(idx, 3);
 }
 
 #[test]
-fn ctrl_u_blocked_when_input_disabled() {
-    // In subagent-focus view (input_disabled) Ctrl+U must be a no-op, matching
+fn ctrl_t_blocked_when_input_disabled() {
+    // In subagent-focus view (input_disabled) Ctrl+T must be a no-op, matching
     // Ctrl+Shift+Tab's behaviour, so the parent agent is not switched while
     // browsing a subagent.
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle_disabled(
-        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        key(KeyCode::Char('t'), KeyModifiers::CONTROL),
         &mut input,
         &mut idx,
         "plan",

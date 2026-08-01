@@ -1,7 +1,7 @@
 //! Slim `/config` form: generation parameters only (no model/base_url/api_key
 //! — those moved to `/model`).
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
 
 use super::patch::ConfigPatch;
@@ -265,6 +265,27 @@ impl ConfigForm {
 /// Handle a key in `/config` mode. Takes ownership, returns outcome + next menu.
 pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<ModelMenu>) {
     form.error = None;
+    // Ctrl+L / Ctrl+U: clear the focused numeric field (max_tokens /
+    // context_size / threshold / fps / ap_max_iter). No-op on toggle and
+    // button fields. Both the 'l'/'u' char form and the raw control-char
+    // forms (\u{c} FF, \u{15} NAK, per kitty keyboard protocol) match.
+    if k.modifiers.contains(KeyModifiers::CONTROL) {
+        match k.code {
+            KeyCode::Char('l')
+            | KeyCode::Char('\u{c}')
+            | KeyCode::Char('u')
+            | KeyCode::Char('\u{15}') => match form.focus {
+                ConfigField::MaxTokens => form.max_tokens_input.clear(),
+                ConfigField::ContextSize => form.context_size_input.clear(),
+                ConfigField::Threshold => form.threshold_input.clear(),
+                ConfigField::Fps => form.fps_input.clear(),
+                ConfigField::ApMaxIter => form.ap_max_iter_input.clear(),
+                _ => {}
+            },
+            _ => {}
+        }
+        return (ModelOutcome::Idle, Some(ModelMenu::Config(form)));
+    }
     match k.code {
         KeyCode::Esc => return (ModelOutcome::Cancel, None),
         KeyCode::Tab => form.focus = form.focus.next(),

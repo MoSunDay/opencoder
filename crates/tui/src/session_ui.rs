@@ -790,3 +790,5 @@ mod tests {
         );
     }
 }
+#[cfg(test)]
+mod subagent_block_tests;

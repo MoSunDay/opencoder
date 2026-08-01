@@ -376,6 +376,8 @@ pub(crate) async fn dispatch_command(
     }
     match outcome {
         CommandOutcome::Dispatch(SlashAction::Task) => {
+            // Parent sessions only: `/task` switches back to a parent
+            // conversation, subagent children are not listed here.
             let sessions = store
                 .list_sessions(&opencoder_store::SessionFilter::default())
                 .await

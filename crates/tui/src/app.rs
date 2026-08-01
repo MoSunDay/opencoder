@@ -84,7 +84,6 @@ pub(super) async fn run_app(
     let child_turn_cancels = session.child_turn_cancels.clone();
     let child_cancels = session.child_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
-
     let mut chat = initial_chat_view(&session, &store).await;
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
@@ -295,6 +294,7 @@ pub(super) async fn run_app(
                             match handle_task_key(&mut task_picker, k) {
                                 TaskOutcome::Pick(pick) => {
                                     app_task::switch_session(
+                                        terminal,
                                         pick,
                                         &mut cmd_tx,
                                         &mut evt_rx,

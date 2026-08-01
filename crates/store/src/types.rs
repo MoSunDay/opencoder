@@ -91,6 +91,15 @@ pub struct SessionListItem {
     pub created_at: i64,
     pub updated_at: i64,
     pub preview: String,
+    /// Number of subagent tasks still in-flight (`Running`) for this session,
+    /// derived from `subagent_tasks` at list time. `0` when none.
+    #[serde(default)]
+    pub subagent_running: usize,
+    /// Number of subagent tasks interrupted (`Cancelled`, pending replay on the
+    /// next user turn), derived from `subagent_tasks` at list time. `0` when
+    /// none.
+    #[serde(default)]
+    pub subagent_cancelled: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

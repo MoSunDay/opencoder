@@ -168,6 +168,10 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
     TaskOutcome::Idle
 }
 
+/// Fixed popup width (in display columns). Session rows budget their
+/// agent/title/preview/badge spans against this so status badges stay visible.
+const POPUP_W: u16 = 60;
+
 /// Render the task picker as a centered popup.
 pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     let visible = picker.row_count();
@@ -175,7 +179,7 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         .min(area.height.saturating_sub(2))
         .max(7);
     let h = want_h.min(area.height.saturating_sub(2));
-    let w = 60u16.min(area.width.saturating_sub(4));
+    let w = POPUP_W.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let popup = Rect::new(x, y, w, h);
@@ -209,17 +213,46 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         } else {
             Style::default()
         };
+        // Subagent-task status badges, derived from the persisted
+        // `subagent_tasks` table: in-flight children (`Running`) and
+        // interrupted ones pending replay on the next user turn (`Cancelled`).
+        let running_badge = (s.subagent_running > 0)
+            .then(|| format!("  \u{25cf} {} running", s.subagent_running));
+        let cancelled_badge = (s.subagent_cancelled > 0)
+            .then(|| format!("  \u{2297} {} replay pending", s.subagent_cancelled));
+        let agent_txt = format!("[{agent}] ");
+
+        // Budget the row inside the fixed-width popup so the status badges
+        // stay visible: the agent chip, separators, badges and suffix tags are
+        // fixed overhead; title and preview split whatever width remains.
+        let mut fixed = composer::str_width(&agent_txt)
+            + 2 // "  " separator before the preview
+            + running_badge.as_deref().map_or(0, composer::str_width)
+            + cancelled_badge.as_deref().map_or(0, composer::str_width);
+        if is_current {
+            fixed += composer::str_width("  (current)");
+        }
+        let free = (POPUP_W as usize).saturating_sub(fixed);
+        let title_budget = (free * 2 / 3).clamp(10, 28);
+        let preview_budget = free.saturating_sub(title_budget).max(8);
+
         let mut spans = vec![
             Span::styled(
-                format!("[{agent}] "),
+                agent_txt,
                 Style::default().fg(crate::render::agent_chip_fg(agent)),
             ),
-            Span::styled(title.to_string(), style),
+            Span::styled(composer::truncate_to_width(title, title_budget), style),
             Span::styled(
-                format!("  {}", short_preview(&s.preview)),
+                format!("  {}", short_preview(&s.preview, preview_budget)),
                 Style::default().fg(theme::muted()),
             ),
         ];
+        if let Some(badge) = running_badge {
+            spans.push(Span::styled(badge, Style::default().fg(theme::warn_color())));
+        }
+        if let Some(badge) = cancelled_badge {
+            spans.push(Span::styled(badge, Style::default().fg(theme::muted())));
+        }
         if is_current {
             spans.push(Span::styled(
                 "  (current)".to_string(),
@@ -268,9 +301,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     f.render_stateful_widget(list, popup, &mut state);
 }
 
-/// Truncate a session-list preview to 40 *display columns*.
-fn short_preview(s: &str) -> String {
-    composer::truncate_to_width(s.trim(), 40)
+/// Truncate a session-list preview to `max_w` *display columns*.
+fn short_preview(s: &str, max_w: usize) -> String {
+    composer::truncate_to_width(s.trim(), max_w)
 }
 
 #[cfg(test)]
@@ -287,6 +320,16 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             preview: String::new(),
+            subagent_running: 0,
+            subagent_cancelled: 0,
+        }
+    }
+
+    fn busy_item(id: &str, running: usize, cancelled: usize) -> SessionListItem {
+        SessionListItem {
+            subagent_running: running,
+            subagent_cancelled: cancelled,
+            ..item(id)
         }
     }
 
@@ -401,5 +444,82 @@ mod tests {
             !matches!(out, TaskOutcome::Quit),
             "Ctrl+C must not quit the task picker"
         );
+    }
+
+    // ── Status-badge rendering ────────────────────────────────────────────
+
+    /// Concatenate every cell's symbol row-by-row into one searchable string.
+    fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area;
+        let mut s = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                s.push_str(buf[(x, y)].symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    fn render_to_text(sessions: Vec<SessionListItem>) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let picker = TaskPicker::new(sessions, "cur".into());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|f| render_task_picker(f, f.area(), &picker))
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn status_badges_render_running_and_replay_pending() {
+        let text = render_to_text(vec![
+            busy_item("s1", 2, 1),
+            busy_item("s2", 0, 0),
+        ]);
+        assert!(
+            text.contains("\u{25cf} 2 running"),
+            "running badge missing from picker:\n{text}"
+        );
+        assert!(
+            text.contains("\u{2297} 1 replay pending"),
+            "replay-pending badge missing from picker:\n{text}"
+        );
+        // The idle session must render no status badge at all.
+        assert_eq!(
+            text.matches("running").count(),
+            1,
+            "only the busy row should carry a running badge:\n{text}"
+        );
+        assert_eq!(
+            text.matches("replay pending").count(),
+            1,
+            "only the busy row should carry a replay-pending badge:\n{text}"
+        );
+    }
+
+    #[test]
+    fn status_badges_survive_long_titles_and_suffix_tags() {
+        // Worst case: both badges + (current) + a title long enough to need
+        // truncation. The badges are placed before the suffix tags, so they
+        // must stay on screen even when the row overflows.
+        let text = render_to_text(vec![busy_item("s1", 1, 2)]);
+        assert!(
+            text.contains("\u{25cf} 1 running"),
+            "running badge clipped by long title:\n{text}"
+        );
+        assert!(
+            text.contains("\u{2297} 2 replay pending"),
+            "replay-pending badge clipped by long title:\n{text}"
+        );
+    }
+
+    #[test]
+    fn short_preview_respects_custom_budget() {
+        let preview = "x".repeat(80);
+        assert_eq!(short_preview(&preview, 40).chars().count(), 40, "39 cols + ellipsis fits 40");
+        assert_eq!(short_preview(&preview, 8).chars().count(), 8, "7 cols + ellipsis fits 8");
+        assert_eq!(short_preview("short", 40), "short", "fits unchanged");
     }
 }

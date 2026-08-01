@@ -32,6 +32,15 @@ use crate::SessionState;
 /// never collides with real plan text (no LLM/user output starts with this).
 pub(crate) const CLEAR_CONTEXT_SENTINEL: &str = "<<OPENCODER_CLEAR_CONTEXT_MARKER>>";
 
+/// True when a persisted `handoff_plan` is the clear-context sentinel — i.e.
+/// the boundary was written by [`ControlCmd::ClearContext`], not a plan->act
+/// handoff. Public so display layers (TUI plan card, CLI JSON dump) can skip
+/// the raw sentinel instead of ever outputting it; the LLM must never see it
+/// (resume converts it to [`fresh_start_message`] before rebuilding context).
+pub fn is_clear_context_handoff(handoff_plan: &str) -> bool {
+    handoff_plan == CLEAR_CONTEXT_SENTINEL
+}
+
 /// Body of the fresh-start marker message left after a context clear.
 const CLEAR_CONTEXT_BODY: &str = "[Context cleared - starting fresh in act mode.]";
 
@@ -172,6 +181,13 @@ mod tests {
             s = s.with_store(st).mark_session_created();
         }
         s
+    }
+
+    #[test]
+    fn clear_context_sentinel_predicate() {
+        assert!(is_clear_context_handoff(CLEAR_CONTEXT_SENTINEL));
+        assert!(!is_clear_context_handoff("## Plan\n1. do X"));
+        assert!(!is_clear_context_handoff(""));
     }
 
     #[test]

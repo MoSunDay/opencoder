@@ -8,9 +8,9 @@ use opencoder_core::{json, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
+use super::bg::{handoff, output_path, register, unregister, BgState};
 #[cfg(test)]
 use super::bg::{kill_all, list, test_registry_mutex};
-use super::bg::{handoff, output_path, register, unregister, BgState};
 
 /// Foreground timeout for a bash command (seconds). When exceeded the command
 /// is moved to the background (see [`super::bg::handoff`]) instead of being

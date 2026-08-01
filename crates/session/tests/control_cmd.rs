@@ -334,3 +334,59 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
     );
     assert_eq!(session.agent.name, "plan", "steered /plan switched agent");
 }
+
+/// After /act_clear_context the internal sentinel must never reach the model:
+/// the fresh-start marker is what travels, and no LLM request body contains
+/// the raw `<<OPENCODER_CLEAR_CONTEXT_MARKER>>` string (model context is
+/// rebuilt from messages only, never from handoff_plan metadata).
+#[tokio::test]
+async fn clear_context_sentinel_never_reaches_model_context() {
+    let store = mem_store().await;
+    seed(&store, "sentinel-sess", "plan").await;
+    store
+        .append_messages("sentinel-sess", &[Message::user("u1", "old question")])
+        .await
+        .unwrap();
+
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("post-clear reply")]));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "sentinel-sess",
+        resolve_agent("plan").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = vec![Message::user("u1", "old question")];
+
+    // Clear the context (idle short-circuit: no LLM call).
+    run(&mut session, "/act_clear_context".into(), |_| {})
+        .await
+        .unwrap();
+    assert_eq!(session.messages.len(), 1, "transcript collapsed to marker");
+
+    // A real prompt after the clear triggers exactly one LLM call.
+    run(&mut session, "continue".into(), |_| {}).await.unwrap();
+
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1, "one LLM call after clear");
+    let body = requests[0].to_body().to_string();
+    assert!(
+        !body.contains("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+        "sentinel must never be stored into model context, got: {body}"
+    );
+    // The fresh-start marker is present in the model context (the first
+    // message is the system prompt, so scan the user messages).
+    let has_marker = requests[0]
+        .messages
+        .iter()
+        .any(|m| m.to_string().contains("Context cleared"));
+    assert!(
+        has_marker,
+        "fresh-start marker must lead the model context: {body}"
+    );
+}

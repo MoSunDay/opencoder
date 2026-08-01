@@ -79,12 +79,11 @@ pub async fn resume(
             }
             // Distinguish a ClearContext fresh-start marker from a plan->act
             // handoff: the sentinel stored by control_cmd::ClearContext.
-            let mut head_msg =
-                if plan_display.as_str() == crate::control_cmd::CLEAR_CONTEXT_SENTINEL {
-                    crate::control_cmd::fresh_start_message()
-                } else {
-                    crate::plan_handoff::handoff_message(plan_display)
-                };
+            let mut head_msg = if crate::control_cmd::is_clear_context_handoff(plan_display) {
+                crate::control_cmd::fresh_start_message()
+            } else {
+                crate::plan_handoff::handoff_message(plan_display)
+            };
             for url in &preserved_images {
                 head_msg.blocks.push(ContentBlock::Image {
                     url: url.clone(),
@@ -154,7 +153,7 @@ pub async fn resume(
     let n = messages.len();
     let model = config.model_id().to_string();
 
-    let mut s = SessionState {
+    let s = SessionState {
         id: id.to_string(),
         messages,
         agent,
@@ -169,9 +168,7 @@ pub async fn resume(
         persisted_count: n,
         session_created: true,
         cancel: None,
-        turn_cancel: Some(Arc::new(Mutex::new(
-            CancellationToken::new(),
-        ))),
+        turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
         child_cancels: Arc::new(Mutex::new(HashMap::new())),
         summary: meta.summary,
@@ -179,7 +176,6 @@ pub async fn resume(
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
     };
-    let _ = &mut s;
     Ok(s)
 }
 

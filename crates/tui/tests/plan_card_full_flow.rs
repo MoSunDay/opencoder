@@ -192,3 +192,43 @@ async fn reverse_order_handoff_then_reset_replay_yields_one_plan_block() {
         plan_block_count(&chat)
     );
 }
+
+/// The clear-context boundary (`/act_clear_context`) must NEVER render a plan
+/// card: `handoff_plan` only holds the internal sentinel so resume can rebuild
+/// the fresh-start transcript. `replay_into_chat` skips it — the raw
+/// `<<OPENCODER_CLEAR_CONTEXT_MARKER>>` string never reaches the UI.
+#[tokio::test]
+async fn clear_context_sentinel_renders_no_plan_card() {
+    let session_id = "clear-context-no-card";
+    let store = setup_session(session_id).await;
+
+    // Overwrite the plan->act handoff with the clear-context boundary: this is
+    // exactly what `control_cmd::ClearContext` persists in handoff_plan.
+    store
+        .update_session(
+            session_id,
+            &SessionPatch {
+                handoff_seq: Some(2),
+                handoff_plan: Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>".into()),
+                updated_at: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let fresh = opencoder_session::control_cmd::fresh_start_message();
+    let chat = replay_into_chat("act", &[fresh], &store, session_id).await;
+
+    assert_eq!(
+        plan_block_count(&chat),
+        0,
+        "clear-context sentinel must not render a Plan card, got {}",
+        plan_block_count(&chat)
+    );
+    let raw = format!("{:?}", chat.blocks);
+    assert!(
+        !raw.contains("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+        "sentinel must never be output, got: {raw}"
+    );
+}

@@ -6,10 +6,12 @@ use crate::autopilot::state::{ApOutcome, VerifyVerdict};
 
 /// Parse the VERIFY model's raw answer into a boolean verdict.
 ///
-/// Semantics: `true` = more work needed; `false` = task complete. The VERIFY
-/// prompt asks for a single "yes"/"no" token, but we tolerate a handful of
-/// aliases and surrounding punctuation/case so a slightly chatty model still
-/// parses. Anything else returns `None` (malformed → retry).
+/// The bool is the model's *affirmative* answer to the question asked. VERIFY
+/// asks "is the goal fully achieved?", so `true` = the goal IS achieved
+/// (task complete) and `false` = more work is still needed. The prompt asks
+/// for a single "yes"/"no" token, but we tolerate a handful of aliases and
+/// surrounding punctuation/case so a slightly chatty model still parses.
+/// Anything else returns `None` (malformed → retry).
 pub fn parse_verdict(text: &str) -> Option<bool> {
     let raw = text.trim().to_lowercase();
     if raw.is_empty() {

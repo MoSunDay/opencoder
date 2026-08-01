@@ -9,7 +9,8 @@ use anyhow::{anyhow, Context, Result};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter, Store,
+    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter,
+    SessionMeta, Store,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -173,6 +174,16 @@ pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<
         .get_session(id)
         .await?
         .ok_or_else(|| anyhow!("session not found: {id}"))?;
+    // A clear-context boundary (`/act_clear_context`) persists an internal
+    // sentinel in handoff_plan so resume can rebuild the fresh-start marker.
+    // That raw marker must never be output — redact it from the JSON surface
+    // (handoff_seq still records that a boundary exists).
+    let meta = SessionMeta {
+        handoff_plan: meta
+            .handoff_plan
+            .filter(|p| !opencoder_session::is_clear_context_handoff(p)),
+        ..meta
+    };
     let messages = store.load_messages(id).await?;
     let subagent_tasks = store.list_subagent_tasks(id).await?;
     Ok(serde_json::json!({
@@ -375,6 +386,41 @@ mod tests {
             body["subagent_tasks"].as_array().unwrap().len(),
             0,
             "no subagent tasks"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_session_json_redacts_clear_context_sentinel() {
+        use super::build_session_json;
+        use opencoder_store::{LibsqlStore, SessionMeta, Store};
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+        store
+            .create_session(&SessionMeta {
+                id: "redact-s1".into(),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                handoff_seq: Some(1),
+                // Exactly what control_cmd::ClearContext persists as the
+                // resume-reconstruction boundary marker.
+                handoff_plan: Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>".into()),
+                created_at: 0,
+                updated_at: 0,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let body = build_session_json(&store, "redact-s1").await.unwrap();
+        let raw = serde_json::to_string(&body).unwrap();
+        assert!(
+            !raw.contains("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+            "sentinel must never be output, got: {raw}"
+        );
+        assert_eq!(body["meta"]["handoff_seq"], 1, "boundary still visible");
+        assert!(
+            body["meta"].get("handoff_plan").is_none(),
+            "sentinel redacted to None so the marker is never printed"
         );
     }
 

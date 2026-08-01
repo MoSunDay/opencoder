@@ -26,11 +26,16 @@ pub fn execute_prompt() -> String {
 
 /// System prompt for the isolated shadow VERIFY one-shot. This message is part
 /// of the ephemeral snapshot and is NEVER persisted into the main transcript.
+///
+/// The question is phrased positively ("is the goal fully achieved?") so the
+/// judge's instinctive "yes, done" maps to `Complete`. Asking "is more work
+/// needed?" instead biased a chatty judge toward perpetual `MoreWork`.
 pub fn verify_system_prompt() -> String {
     "You are a strict verification judge. You are given the full transcript of \
      an autonomous coding session working toward a goal. Decide whether the \
-     goal is fully achieved. Reply with a SINGLE token: 'yes' if MORE work is \
-     still needed, 'no' if the task is COMPLETE. Output nothing else."
+     goal is fully achieved. Reply with a SINGLE token: 'yes' if the goal is \
+     ACHIEVED (task complete), 'no' if more work is still needed. Output \
+     nothing else."
         .to_string()
 }
 
@@ -39,8 +44,8 @@ pub fn verify_system_prompt() -> String {
 pub fn verify_user_prompt(goal: &str) -> String {
     format!(
         "Goal: {goal}\n\n\
-         Based on the transcript above, is MORE work needed to fully achieve \
-         this goal? Reply with a single token: 'yes' (more work) or 'no' \
-         (complete).",
+         Based on the transcript above, is the goal fully achieved? Reply with \
+         a single token: 'yes' (achieved / complete) or 'no' (more work \
+         needed).",
     )
 }

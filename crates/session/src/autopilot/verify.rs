@@ -19,6 +19,13 @@ use crate::autopilot::state::{ApState, VerifyVerdict};
 use crate::runner::new_id;
 use crate::SessionState;
 
+/// Headroom reserved out of the context window for the judge system prompt, the
+/// goal question and the model's output tokens. The remaining budget is what
+/// the cloned transcript may occupy.
+const VERIFY_RESERVED_TOKENS: u64 = 2_000;
+/// Per-message structural overhead, matching `opencoder_llm::estimate_messages`.
+const MSG_OVERHEAD: usize = 4;
+
 /// Run up to `retries` isolated one-shot VERIFY calls against a throwaway
 /// snapshot of the current transcript. Returns the first parseable verdict, or
 /// [`VerifyVerdict::Malformed`] if none parse.
@@ -27,12 +34,7 @@ use crate::SessionState;
 /// recorded or persisted. A transient LLM error counts as a malformed attempt
 /// and is retried within the budget.
 pub async fn verify(session: &SessionState, state: &ApState, retries: u32) -> VerifyVerdict {
-    // Build the ephemeral snapshot: system + cloned transcript + goal question.
-    let mut snapshot = Vec::with_capacity(session.messages.len() + 2);
-    snapshot.push(Message::system(new_id(), verify_system_prompt()));
-    snapshot.extend(session.messages.iter().cloned());
-    snapshot.push(Message::user(new_id(), verify_user_prompt(&state.goal)));
-    let msgs = lower_messages(&snapshot);
+    let msgs = lower_messages(&build_snapshot(session, state));
 
     for _ in 0..retries {
         let req = ChatRequest {
@@ -47,14 +49,53 @@ pub async fn verify(session: &SessionState, state: &ApState, retries: u32) -> Ve
         };
         match drain_one_shot(&session.client, req).await {
             Ok(text) => match parse_verdict(&text) {
-                Some(true) => return VerifyVerdict::MoreWork,
-                Some(false) => return VerifyVerdict::Complete,
+                // Affirmative ("yes") → the goal is fully achieved.
+                Some(true) => return VerifyVerdict::Complete,
+                // Negative ("no") → more work is still needed.
+                Some(false) => return VerifyVerdict::MoreWork,
                 None => continue, // malformed → retry within budget
             },
             Err(_) => continue, // transient error → retry within budget
         }
     }
     VerifyVerdict::Malformed
+}
+
+/// Build the ephemeral snapshot: judge system prompt + a truncated clone of the
+/// transcript + the goal question.
+///
+/// The transcript is capped to the most recent messages that fit
+/// `context_limit - VERIFY_RESERVED_TOKENS` (estimated tokens), so a long
+/// autopilot run never overflows the small model's window. The goal is
+/// re-stated verbatim in the question, so dropping old turns never loses the
+/// anchor the judge is measured against.
+fn build_snapshot(session: &SessionState, state: &ApState) -> Vec<Message> {
+    let budget = session
+        .config
+        .context_limit()
+        .saturating_sub(VERIFY_RESERVED_TOKENS) as usize;
+    let mut snapshot = Vec::with_capacity(session.messages.len() + 2);
+    snapshot.push(Message::system(new_id(), verify_system_prompt()));
+    if opencoder_llm::estimate_messages(&session.messages) <= budget {
+        snapshot.extend(session.messages.iter().cloned());
+    } else {
+        // Sliding window: walk from the most recent message backward, keeping
+        // as many as fit the budget, then restore original order.
+        let mut kept: Vec<Message> = Vec::new();
+        let mut cost = 0usize;
+        for m in session.messages.iter().rev() {
+            let msg_cost = opencoder_llm::estimate(&m.estimate_chars()) + MSG_OVERHEAD;
+            if cost + msg_cost > budget {
+                break;
+            }
+            cost += msg_cost;
+            kept.push(m.clone());
+        }
+        kept.reverse();
+        snapshot.extend(kept);
+    }
+    snapshot.push(Message::user(new_id(), verify_user_prompt(&state.goal)));
+    snapshot
 }
 
 /// Collect a single completion into a String. Mirrors the sink loop in

@@ -17,9 +17,9 @@ pub enum ApPhase {
 /// The verdict produced by the shadow VERIFY one-shot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyVerdict {
-    /// The model said "yes" — more work is needed, keep looping.
+    /// The model said "no" — more work is needed, keep looping.
     MoreWork,
-    /// The model said "no" — the task is complete.
+    /// The model said "yes" — the goal is fully achieved.
     Complete,
     /// Every retry produced an unparseable answer.
     Malformed,
@@ -28,13 +28,15 @@ pub enum VerifyVerdict {
 /// Terminal outcome of [`crate::autopilot::drive`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApOutcome {
-    /// VERIFY returned "no" — the goal is satisfied.
+    /// VERIFY said "yes" — the goal is fully achieved.
     Complete,
-    /// VERIFY never produced a parseable verdict (`verify_retries` exhausted),
-    /// or a phase run errored.
+    /// VERIFY never produced a parseable verdict (`verify_retries` exhausted).
+    /// Phase-run errors are NOT folded here: `drive` propagates them via `?`.
     Aborted(String),
-    /// `max_iterations` reached without VERIFY saying "no".
+    /// `max_iterations` reached without VERIFY saying "yes".
     MaxIterations,
+    /// The session's cancellation token was tripped mid-loop.
+    Cancelled,
 }
 
 /// Mutable loop state, threaded through each iteration. `goal` is extracted

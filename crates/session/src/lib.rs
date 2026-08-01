@@ -1,8 +1,8 @@
 pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
-pub mod dangling_tools;
 pub mod control_cmd;
+pub mod dangling_tools;
 pub mod event_sink;
 pub mod plan_handoff;
 pub mod prompt;
@@ -12,7 +12,9 @@ pub mod streamline;
 pub mod tool_guard;
 pub mod tools;
 
-pub use control_cmd::{apply as apply_control_cmd, parse as parse_control_cmd, ControlCmd};
+pub use control_cmd::{
+    apply as apply_control_cmd, is_clear_context_handoff, parse as parse_control_cmd, ControlCmd,
+};
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
@@ -326,9 +328,18 @@ impl SessionState {
     /// summary message is NOT in the store, so the store count is
     /// summary_seq + (messages.len() - 1).
     pub fn store_message_count(&self) -> usize {
-        let prior_skip = self.summary_seq.unwrap_or(0) as usize;
-        let has_prior_summary = self.summary_seq.is_some();
-        prior_skip + self.messages.len() - if has_prior_summary { 1 } else { 0 }
+        // The head of the in-memory transcript may be a synthetic message that
+        // is NOT in the store: a compaction summary (summary_seq) or a
+        // plan->act handoff / clear-context marker (handoff_seq). In both
+        // cases the true store count is `skip + len - 1`; with no synthetic
+        // head every in-memory message is already persisted.
+        if let Some(skip) = self.summary_seq {
+            skip as usize + self.messages.len() - 1
+        } else if let Some(skip) = self.handoff_seq {
+            skip as usize + self.messages.len() - 1
+        } else {
+            self.messages.len()
+        }
     }
 
     /// Update bookkeeping after compaction. Sets the summary metadata and

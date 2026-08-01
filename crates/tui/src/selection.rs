@@ -53,21 +53,17 @@ impl CopyReport {
     /// (green), or neither (red, honest failure with a contextual hint).
     pub fn status_message(&self) -> String {
         match self.local_tool {
-            Some(tool) => format!(
-                "\u{1f4cb} Copied {} line(s) ({}) \u{2014} Shift+drag = terminal selection",
-                self.lines, tool
-            ),
-            None if self.osc52_reliable => format!(
-                "\u{1f4cb} Copied {} line(s) via OSC52 \u{2014} Shift+drag = terminal selection",
-                self.lines
-            ),
+            Some(tool) => format!("\u{1f4cb} Copied {} line(s) ({})", self.lines, tool),
+            None if self.osc52_reliable => {
+                format!("\u{1f4cb} Copied {} line(s) via OSC52", self.lines)
+            }
             None => {
                 let hint = if self.tmux {
                     "tmux: set -g set-clipboard on, or install xclip"
                 } else if self.ssh {
-                    "use Shift+drag for native selection"
+                    "SSH terminal intercepted OSC52 — enable OSC52 in terminal/tmux"
                 } else {
-                    "install xclip/xsel or use Shift+drag"
+                    "install xclip/xsel"
                 };
                 format!("\u{26a0} Copy unreliable \u{2014} {}", hint)
             }
@@ -345,9 +341,11 @@ mod tests {
             tmux: false,
             ssh: false,
         };
-        assert!(report.status_message().contains("3 line"));
-        assert!(report.status_message().contains("xclip"));
-        assert!(!report.status_message().contains("Copy unreliable"));
+        let msg = report.status_message();
+        assert!(msg.contains("3 line"));
+        assert!(msg.contains("xclip"));
+        assert!(!msg.contains("Copy unreliable"));
+        assert!(!msg.contains("Shift+drag"));
     }
 
     #[test]
@@ -364,6 +362,7 @@ mod tests {
         assert!(msg.contains("OSC52"));
         assert!(msg.contains("1 line(s)"));
         assert!(!msg.contains("\u{26a0}"));
+        assert!(!msg.contains("Shift+drag"));
     }
 
     #[test]
@@ -393,7 +392,8 @@ mod tests {
         };
         let msg = report.status_message();
         assert!(msg.contains("\u{26a0}"));
-        assert!(msg.contains("Shift+drag"));
+        assert!(msg.contains("OSC52"));
+        assert!(!msg.contains("Shift+drag"));
     }
 
     #[test]

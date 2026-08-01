@@ -1,7 +1,8 @@
 //! Tests for ConfigPatch serialization and ConfigForm key handling.
 
-use super::common::{backspace, cfg, enter, key, left, right};
-use crate::model_menu::config_form::{ConfigField, ConfigForm};
+use crossterm::event::{KeyCode, KeyModifiers};
+use super::common::{backspace, cfg, ctrl, enter, key, left, right};
+use crate::model_menu::config_form::{ConfigField, ConfigForm, Reasoning};
 use crate::model_menu::patch::ConfigPatch;
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
@@ -537,4 +538,135 @@ fn config_form_cursor_hidden_on_save_button() {
         .unwrap();
 
     terminal.backend_mut().assert_cursor_position((0, 0));
+}
+
+// ── Ctrl+L / Ctrl+U clear focused field ───────────────────────────────────
+
+#[test]
+fn ctrl_u_clears_focused_numeric_field() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::MaxTokens;
+        f.max_tokens_input = "8192".into();
+    }
+    handle_model_key(&mut slot, ctrl('u'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(f.max_tokens_input.is_empty(), "Ctrl+U must clear max_tokens");
+    assert_eq!(f.focus, ConfigField::MaxTokens, "focus must stay");
+}
+
+#[test]
+fn ctrl_l_clears_focused_field_and_raw_control_char_forms_match() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::ContextSize;
+        f.context_size_input = "128000".into();
+    }
+    // Raw control-char form (kitty keyboard protocol reports \u{c} for Ctrl+L).
+    handle_model_key(
+        &mut slot,
+        crossterm::event::KeyEvent::new(KeyCode::Char('\u{c}'), KeyModifiers::CONTROL),
+    );
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(
+        f.context_size_input.is_empty(),
+        "raw Ctrl+L must clear context_size"
+    );
+
+    // Ctrl+L char form clears fps; raw \u{15} clears ap_max_iter.
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::Fps;
+        f.fps_input = "24".into();
+    }
+    handle_model_key(&mut slot, ctrl('l'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(f.fps_input.is_empty(), "Ctrl+L must clear fps");
+
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::ApMaxIter;
+        f.ap_max_iter_input = "9".into();
+    }
+    handle_model_key(
+        &mut slot,
+        crossterm::event::KeyEvent::new(KeyCode::Char('\u{15}'), KeyModifiers::CONTROL),
+    );
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert!(
+        f.ap_max_iter_input.is_empty(),
+        "raw \u{15} (Ctrl+U) must clear ap_max_iter"
+    );
+}
+
+#[test]
+fn ctrl_clear_is_noop_on_toggle_and_button_fields() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::Reasoning;
+        f.reasoning = Reasoning::High;
+    }
+    handle_model_key(&mut slot, ctrl('u'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        f.reasoning,
+        Reasoning::High,
+        "Ctrl+U must not touch toggle fields"
+    );
+
+    {
+        let f = match slot.as_mut().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        f.focus = ConfigField::Save;
+    }
+    handle_model_key(&mut slot, ctrl('l'));
+    let f = match slot.as_ref().unwrap() {
+        ModelMenu::Config(f) => f,
+        _ => unreachable!(),
+    };
+    assert_eq!(f.focus, ConfigField::Save, "Ctrl+L must not move focus");
+    assert!(slot.is_some(), "menu must stay open after Ctrl+L");
+}
+
+#[test]
+fn ctrl_d_still_quits_in_config() {
+    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+    let out = handle_model_key(&mut slot, ctrl('d'));
+    assert!(matches!(out, ModelOutcome::Quit), "Ctrl+D must quit modal");
+    assert!(slot.is_none());
 }

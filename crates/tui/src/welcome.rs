@@ -18,7 +18,7 @@ const TUTORIAL: &str = "\
   🎮 常用操作：
     • Alt+Enter / Shift+Enter  换行（多行输入）
     • Shift+Tab  切换 plan / act（plan→act 时清空上下文）
-    • Ctrl+U  仅切换模式，保留完整上下文
+    • Ctrl+T  仅切换模式，保留完整上下文
     • /  命令菜单（会话切换、设置等）
     • $  选择并插入技能
     • Ctrl+H  查看完整快捷键列表

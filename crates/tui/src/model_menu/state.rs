@@ -51,7 +51,19 @@ pub fn handle_model_key(slot: &mut Option<ModelMenu>, k: KeyEvent) -> ModelOutco
             *slot = None;
             return ModelOutcome::Quit;
         }
-        return ModelOutcome::Idle;
+        // Ctrl+L / Ctrl+U: "clear the focused text field" — forwarded to the
+        // active form handler (config_form / provider_form / headers). Every
+        // other Ctrl chord stays swallowed so forms never see it.
+        let clear = matches!(
+            k.code,
+            KeyCode::Char('l')
+                | KeyCode::Char('\u{c}')
+                | KeyCode::Char('u')
+                | KeyCode::Char('\u{15}')
+        );
+        if !clear {
+            return ModelOutcome::Idle;
+        }
     }
     let menu = match slot.take() {
         Some(m) => m,

@@ -2,9 +2,9 @@
 //! line must surface an honest "Nothing to copy" message, plus the pure
 //! `is_within_dbl_click_window` timing boundary.
 
+use super::mouse_helpers::*;
 use crate::app_helpers::*;
 use ratatui::layout::Rect;
-use super::mouse_helpers::*;
 
 // ── Double-click on blank line ─────────────────────────────────────
 
@@ -23,8 +23,6 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
     let mut follow = true;
     let mut selection: Option<SelRange> = None;
     let mut subagent_focus = None;
-    let mut parent_scroll = 0u32;
-    let mut parent_follow = true;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let mut copy_msg: Option<String> = None;
@@ -41,10 +39,21 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
             modifiers: KeyModifiers::NONE,
         };
         handle_mouse(
-            down, &hits, &mut scroll, &mut follow, &mut selection, &mut chat,
-            &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
-            &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
-            &mut copy_msg, &mut last_click, &mut dbl_click,
+            down,
+            &hits,
+            &mut scroll,
+            &mut follow,
+            &mut selection,
+            &mut chat,
+            &mut subagent_focus,
+            &mut subagent_sys,
+            Path::new("."),
+            &mut queue_items,
+            "s",
+            &store,
+            &mut copy_msg,
+            &mut last_click,
+            &mut dbl_click,
             &mut queue_scroll,
         )
         .await;
@@ -59,11 +68,22 @@ async fn double_click_blank_line_shows_nothing_to_copy() {
         modifiers: KeyModifiers::NONE,
     };
     handle_mouse(
-        up, &hits, &mut scroll, &mut follow, &mut selection, &mut chat,
-        &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
-        &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
-        &mut copy_msg, &mut last_click, &mut dbl_click,
-            &mut queue_scroll,
+        up,
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
     )
     .await;
 

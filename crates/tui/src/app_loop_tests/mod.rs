@@ -277,7 +277,67 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
     }
 }
 
+
+/// Queued requirements count as requirement submissions: a plan-mode Tab-queue
+/// arms `plan_submitted` (via `note_requirement_submitted`, called by the app
+/// loop's Queue branch), so the subsequent idle Shift+Tab plan→act switch must
+/// trigger the handoff (SwitchAndStart → context cleared) rather than a pure
+/// agent swap. Pins the wiring contract between the queue admit path and the
+/// `handle_switch_agent` gate.
+#[tokio::test]
+async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
+    let mut chat = ChatView {
+        agent: "plan".into(),
+        plan_submitted: false,
+        ..Default::default()
+    };
+    // What the Queue branch does on a successful Tab-queue admit in plan mode.
+    chat.note_requirement_submitted();
+    assert!(
+        chat.plan_submitted,
+        "queue admit must arm the plan→act handoff"
+    );
+
+    let mut running = false;
+    let mut follow = false;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let outcome = handle_switch_agent(
+        "act".into(),
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+    )
+    .await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    assert!(running);
+    // ResetCancel precedes the handoff command (same as the Enter-armed path).
+    assert!(matches!(cmd_rx.try_recv().unwrap(), UiCmd::ResetCancel(_)));
+    match cmd_rx.try_recv().unwrap() {
+        UiCmd::SwitchAndStart(ref n, _) => assert_eq!(n, "act"),
+        _ => panic!("expected SwitchAndStart after queued-armed plan→act switch"),
+    }
+}
+
 // ----- fold_ui_events P0/P1 tests -----
+
 
 use opencoder_core::Message;
 use opencoder_session::SessionEvent;

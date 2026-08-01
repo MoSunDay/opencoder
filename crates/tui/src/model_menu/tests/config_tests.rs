@@ -1,11 +1,11 @@
 //! Tests for ConfigPatch serialization and ConfigForm key handling.
 
-use crossterm::event::{KeyCode, KeyModifiers};
 use super::common::{backspace, cfg, ctrl, enter, key, left, right};
 use crate::model_menu::config_form::{ConfigField, ConfigForm, Reasoning};
 use crate::model_menu::patch::ConfigPatch;
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
@@ -468,6 +468,7 @@ fn config_form_cursor_on_max_tokens() {
     let mut form = ConfigForm::new(&cfg());
     form.focus = ConfigField::MaxTokens;
     form.max_tokens_input = "8192".into();
+    form.max_tokens_cursor = form.max_tokens_input.chars().count(); // end
     let menu = ModelMenu::Config(form);
 
     let backend = TestBackend::new(80, 24);
@@ -488,6 +489,7 @@ fn config_form_cursor_on_context_size() {
     let mut form = ConfigForm::new(&cfg());
     form.focus = ConfigField::ContextSize;
     form.context_size_input = "128000".into();
+    form.context_size_cursor = form.context_size_input.chars().count(); // end
     let menu = ModelMenu::Config(form);
 
     let backend = TestBackend::new(80, 24);
@@ -540,6 +542,8 @@ fn config_form_cursor_hidden_on_save_button() {
     terminal.backend_mut().assert_cursor_position((0, 0));
 }
 
+// ── numeric cursor editing (Left/Right, insert/delete at cursor) ─────────
+
 // ── Ctrl+L / Ctrl+U clear focused field ───────────────────────────────────
 
 #[test]
@@ -558,7 +562,10 @@ fn ctrl_u_clears_focused_numeric_field() {
         ModelMenu::Config(f) => f,
         _ => unreachable!(),
     };
-    assert!(f.max_tokens_input.is_empty(), "Ctrl+U must clear max_tokens");
+    assert!(
+        f.max_tokens_input.is_empty(),
+        "Ctrl+U must clear max_tokens"
+    );
     assert_eq!(f.focus, ConfigField::MaxTokens, "focus must stay");
 }
 

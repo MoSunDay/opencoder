@@ -5,6 +5,7 @@
 use crate::app_helpers::*;
 use async_trait::async_trait;
 use opencoder_core::Message;
+use opencoder_session::SessionEvent;
 use opencoder_store::{
     Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
     SessionPatch, SubagentTaskRecord,
@@ -56,21 +57,13 @@ impl opencoder_store::Store for StubStore {
     async fn pending_inputs(&self, _: &str, _: Delivery) -> anyhow::Result<Vec<SessionInput>> {
         unimplemented!()
     }
-    async fn promote_inputs(
-        &self,
-        _: &str,
-        _: i64,
-        _: Delivery,
-    ) -> anyhow::Result<Vec<i64>> {
+    async fn promote_inputs(&self, _: &str, _: i64, _: Delivery) -> anyhow::Result<Vec<i64>> {
         unimplemented!()
     }
     async fn promote_next_queued(&self, _: &str) -> anyhow::Result<Option<i64>> {
         unimplemented!()
     }
-    async fn claim_next_queue(
-        &self,
-        _: &str,
-    ) -> anyhow::Result<Option<(i64, SessionInput)>> {
+    async fn claim_next_queue(&self, _: &str) -> anyhow::Result<Option<(i64, SessionInput)>> {
         unimplemented!()
     }
     async fn delete_input(&self, _: i64) -> anyhow::Result<()> {
@@ -94,10 +87,7 @@ impl opencoder_store::Store for StubStore {
     async fn complete_subagent_task(&self, _: &str, _: &str, _: bool) -> anyhow::Result<()> {
         unimplemented!()
     }
-    async fn list_subagent_tasks(
-        &self,
-        _: &str,
-    ) -> anyhow::Result<Vec<SubagentTaskRecord>> {
+    async fn list_subagent_tasks(&self, _: &str) -> anyhow::Result<Vec<SubagentTaskRecord>> {
         unimplemented!()
     }
     async fn get_subagent_task(&self, _: &str) -> anyhow::Result<Option<SubagentTaskRecord>> {
@@ -132,4 +122,28 @@ pub fn view_from_lines(lines: &[&str]) -> ChatView {
         v.push_marker(ratatui::text::Line::from(l.to_string()));
     }
     v
+}
+
+/// Parent whose own content is short but wraps a long, unfinalized subagent
+/// child. The child view owns rows that do not exist in the parent, so
+/// selecting those rows proves which view the interaction reads from.
+pub fn parent_with_long_subagent() -> ChatView {
+    let mut chat = ChatView::default();
+    chat.apply(&SessionEvent::TextDelta("parent preamble".into()));
+    chat.apply(&SessionEvent::Done);
+    chat.apply(&SessionEvent::SubagentStart {
+        id: "s1".into(),
+        kind: "explore".into(),
+        prompt: "find it".into(),
+        child_session_id: "c1".into(),
+    });
+    let child_text = (0..40)
+        .map(|i| format!("child output line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    chat.apply(&SessionEvent::SubagentChild {
+        id: "s1".into(),
+        ev: Box::new(SessionEvent::TextDelta(child_text)),
+    });
+    chat
 }

@@ -70,7 +70,7 @@ Commit: (working-tree, pre-initial-commit)
 | 透传：mk_input_with_images 带 display_text | `mk_input_with_images_passes_display_text` | crates/tui/src/app_helpers_tests/mod.rs |
 | e2e：resume 恢复原文 + drain 保持 clean | `resume_restores_display_originals_and_drain_stays_clean` | crates/tui/tests/resume_queue_display.rs |
 
-- 全量回归：`cargo test --workspace` → 102 binaries，**1543 passed / 0 failed / 1 ignored**（当次实跑；ignored 为既有 `research_smoke_bing_wikipedia`，需真实 Chrome/网络）
+- 全量回归：`cargo test --workspace` → 102 binaries，**1587 passed / 0 failed / 1 ignored**（当次实跑；ignored 为既有 `research_smoke_bing_wikipedia`，需真实 Chrome/网络；同 commit 的 queue 面板滚动 12 个测试一并计入，见 [tui-queue-panel-scroll](./tui-queue-panel-scroll.md)）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
 - 行数：`display_text.rs` 304、`store_concurrency.rs` 391、`store_migrations.rs` 371、`resume_queue_display.rs` 140（新文件 ≤400）；`store_integration.rs` 780、`app.rs` 800、`app_helpers.rs` 785、`queue_panel.rs` 372（迭代 ≤800）

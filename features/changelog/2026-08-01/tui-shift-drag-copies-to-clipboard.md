@@ -56,6 +56,9 @@ Commit: (working-tree, pre-initial-commit)
 | Shift+Drag 扩展选区、松开复制 | `shift_drag_copies_on_release` | mouse_clip_tests.rs |
 | Shift+单击复制整行（force 路径） | `shift_click_copies_single_line` | mouse_clip_tests.rs |
 | 普通拖拽复制 | `multi_line_drag_copies_on_release` | mouse_clip_tests.rs |
+| 子代理视图拖拽复制子代理内容（非父视图） | `subagent_view_drag_copies_child_text` | mouse_clip_tests.rs |
+| 主视图跨 Thinking/Tool 块拖拽复制（flatten 行映射） | `main_view_drag_copies_across_thinking_tool_blocks` | mouse_clip_tests.rs |
+| 子代理视图 Shift+单击复制该行（force 路径） | `subagent_view_shift_click_copies_line` | mouse_clip_tests.rs |
 | 双击空行诚实提示 | `double_click_blank_line_shows_nothing_to_copy` | mouse_dbl_click_tests.rs |
 | 双击窗口边界 | `dbl_click_window_within_threshold` / `dbl_click_window_beyond_500ms` | mouse_dbl_click_tests.rs |
 | CopyReport 文案（本地工具/OSC52/SSH/通用） | `copy_report_status_*`（5 例） | selection.rs |
@@ -67,3 +70,16 @@ Commit: (working-tree, pre-initial-commit)
 - `cargo clippy --workspace --lib -- -D warnings`：零警告。
 - `cargo clippy -p opencoder-tui --lib --tests -- -D warnings`：零警告。
 - `cargo clippy --workspace --all-targets -- -D warnings` / `cargo test --workspace`：当次被范围外 `crates/session/tests/resume_replay.rs:674` 未闭合定界符阻断（外部并发会话编辑中），非本功能引入。
+
+### 本轮加固（子代理视图 + 跨块复制回归测试，2026-08-01）
+
+- **`cargo test -p opencoder-tui --lib`：762 passed，0 failed**（含 3 个新测试：
+  `subagent_view_drag_copies_child_text` / `main_view_drag_copies_across_thinking_tool_blocks` /
+  `subagent_view_shift_click_copies_line`；基线 749 + 本功能 3 + 同期其它 WIP 新增 10）。
+  子代理用例的判定不依赖环境：选中子代理视图**仅子代理才拥有的行**（父视图该区间为空），
+  若复制管线错误地读取父视图会得到 "Nothing to copy"——测试在无剪贴板工具/SSH 环境下
+  仍确定性通过。
+- **`cargo test --workspace`：102 个 test binary 全部 ok，0 failed**。
+- **`cargo clippy -p opencoder-tui --lib --tests -- -D warnings`：零警告**。
+- 注：本轮 lib 全量回归中曾短暂出现 `model_menu/list.rs` 编译失败（并发会话为
+  `ProviderForm` 增加光标字段中、尚未同步更新构造点），由外部会话随后修复，非本功能引入。

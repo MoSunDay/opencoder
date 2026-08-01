@@ -125,14 +125,24 @@ pub struct ConfigForm {
     pub reasoning: Reasoning,
     pub interleaved_thinking: bool,
     pub max_tokens_input: String,
+    /// Char-index edit cursor within `max_tokens_input`.
+    pub max_tokens_cursor: usize,
     pub threshold_input: String,
+    /// Char-index edit cursor within `threshold_input`.
+    pub threshold_cursor: usize,
     pub context_size_input: String,
+    /// Char-index edit cursor within `context_size_input`.
+    pub context_size_cursor: usize,
     pub fps_input: String,
+    /// Char-index edit cursor within `fps_input`.
+    pub fps_cursor: usize,
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
     pub ap_enabled: bool,
     pub ap_max_iter_input: String,
+    /// Char-index edit cursor within `ap_max_iter_input`.
+    pub ap_max_iter_cursor: usize,
     pub theme: crate::theme::ThemeKind,
     pub focus: ConfigField,
     pub error: Option<String>,
@@ -140,42 +150,53 @@ pub struct ConfigForm {
 
 impl ConfigForm {
     pub fn new(config: &Config) -> Self {
+        // Cursors start at the end of each buffer so plain typing appends,
+        // preserving the pre-cursor editing model.
+        let max_tokens_input = config.max_tokens.map(|v| v.to_string()).unwrap_or_default();
+        let threshold_input = config.compaction.context_threshold.to_string();
+        let context_size_input = config.context_limit().to_string();
+        let fps_input = config.tui_fps().to_string();
+        let ap_max_iter_input = config.autopilot.max_iterations.to_string();
         ConfigForm {
             reasoning: Reasoning::from_config(config.reasoning_effort.as_deref()),
             interleaved_thinking: config.interleaved_thinking.unwrap_or(true),
-            max_tokens_input: config.max_tokens.map(|v| v.to_string()).unwrap_or_default(),
-            threshold_input: config.compaction.context_threshold.to_string(),
-            context_size_input: config.context_limit().to_string(),
-            fps_input: config.tui_fps().to_string(),
+            max_tokens_input: max_tokens_input.clone(),
+            max_tokens_cursor: max_tokens_input.chars().count(),
+            threshold_input: threshold_input.clone(),
+            threshold_cursor: threshold_input.chars().count(),
+            context_size_input: context_size_input.clone(),
+            context_size_cursor: context_size_input.chars().count(),
+            fps_input: fps_input.clone(),
+            fps_cursor: fps_input.chars().count(),
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
             capabilities_tools_subagent: config.capabilities.tools_subagent,
             ap_enabled: config.autopilot.enabled,
-            ap_max_iter_input: config.autopilot.max_iterations.to_string(),
+            ap_max_iter_input: ap_max_iter_input.clone(),
+            ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             theme: crate::theme::ThemeKind::from_label(&config.theme),
             focus: ConfigField::Reasoning,
             error: None,
         }
     }
 
-    fn adjust_threshold(&mut self, delta: i64) {
-        let cur = self.threshold_input.parse::<i64>().unwrap_or(0);
-        self.threshold_input = (cur + delta).max(0).to_string();
-    }
-
-    fn adjust_context_size(&mut self, delta: i64) {
-        let cur = self.context_size_input.parse::<i64>().unwrap_or(0);
-        self.context_size_input = (cur + delta).max(0).to_string();
-    }
-
-    fn adjust_fps(&mut self, delta: i32) {
-        let cur = self.fps_input.parse::<i32>().unwrap_or(0);
-        self.fps_input = (cur + delta).max(0).to_string();
-    }
-
-    fn adjust_ap_max_iter(&mut self, delta: i32) {
-        let cur = self.ap_max_iter_input.parse::<i32>().unwrap_or(0);
-        self.ap_max_iter_input = (cur + delta).max(0).to_string();
+    /// Apply `op` to the focused numeric field's (text, cursor). Toggle and
+    /// button fields are no-ops. Pure editing: only the text buffer and its
+    /// cursor move — no value interpretation happens here.
+    fn edit_numeric<F>(&mut self, op: F)
+    where
+        F: FnOnce(&mut String, &mut usize),
+    {
+        match self.focus {
+            ConfigField::MaxTokens => op(&mut self.max_tokens_input, &mut self.max_tokens_cursor),
+            ConfigField::ContextSize => {
+                op(&mut self.context_size_input, &mut self.context_size_cursor)
+            }
+            ConfigField::Threshold => op(&mut self.threshold_input, &mut self.threshold_cursor),
+            ConfigField::Fps => op(&mut self.fps_input, &mut self.fps_cursor),
+            ConfigField::ApMaxIter => op(&mut self.ap_max_iter_input, &mut self.ap_max_iter_cursor),
+            _ => {}
+        }
     }
 
     pub fn build_patch(&self) -> ConfigPatch {
@@ -244,21 +265,19 @@ impl ConfigForm {
         Ok(())
     }
 
-    /// Paste text into the focused numeric field (mirrors the `Char` digit filter).
+    /// Paste digits into the focused numeric field at the cursor (mirrors the
+    /// `Char` digit filter; non-digits are dropped).
     pub fn paste_into(&mut self, text: &str) {
-        for c in text.chars() {
-            if !c.is_ascii_digit() {
-                continue;
-            }
-            match self.focus {
-                ConfigField::MaxTokens => self.max_tokens_input.push(c),
-                ConfigField::ContextSize => self.context_size_input.push(c),
-                ConfigField::Threshold => self.threshold_input.push(c),
-                ConfigField::Fps => self.fps_input.push(c),
-                ConfigField::ApMaxIter => self.ap_max_iter_input.push(c),
-                _ => {}
-            }
+        let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            return;
         }
+        self.edit_numeric(|input, cur| {
+            let idx = (*cur).min(input.chars().count());
+            let (s, i) = crate::composer::insert_str(input, idx, &digits);
+            *input = s;
+            *cur = i;
+        });
     }
 }
 
@@ -274,14 +293,10 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             KeyCode::Char('l')
             | KeyCode::Char('\u{c}')
             | KeyCode::Char('u')
-            | KeyCode::Char('\u{15}') => match form.focus {
-                ConfigField::MaxTokens => form.max_tokens_input.clear(),
-                ConfigField::ContextSize => form.context_size_input.clear(),
-                ConfigField::Threshold => form.threshold_input.clear(),
-                ConfigField::Fps => form.fps_input.clear(),
-                ConfigField::ApMaxIter => form.ap_max_iter_input.clear(),
-                _ => {}
-            },
+            | KeyCode::Char('\u{15}') => form.edit_numeric(|text, cur| {
+                text.clear();
+                *cur = 0;
+            }),
             _ => {}
         }
         return (ModelOutcome::Idle, Some(ModelMenu::Config(form)));
@@ -297,9 +312,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::ContextSize => form.adjust_context_size(-1000),
-            ConfigField::Threshold => form.adjust_threshold(-1000),
-            ConfigField::Fps => form.adjust_fps(-1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
             ConfigField::ComputerUse => {
                 form.capabilities_computer_use = !form.capabilities_computer_use
@@ -308,8 +320,12 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
-            ConfigField::ApMaxIter => form.adjust_ap_max_iter(-1),
             ConfigField::Theme => form.theme = form.theme.next(),
+            ConfigField::MaxTokens
+            | ConfigField::ContextSize
+            | ConfigField::Threshold
+            | ConfigField::Fps
+            | ConfigField::ApMaxIter => form.edit_numeric(|_, cur| *cur = cur.saturating_sub(1)),
             _ => {}
         },
         KeyCode::Right => match form.focus {
@@ -317,9 +333,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::ContextSize => form.adjust_context_size(1000),
-            ConfigField::Threshold => form.adjust_threshold(1000),
-            ConfigField::Fps => form.adjust_fps(1),
             ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
             ConfigField::ComputerUse => {
                 form.capabilities_computer_use = !form.capabilities_computer_use
@@ -328,8 +341,14 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
-            ConfigField::ApMaxIter => form.adjust_ap_max_iter(1),
             ConfigField::Theme => form.theme = form.theme.next(),
+            ConfigField::MaxTokens
+            | ConfigField::ContextSize
+            | ConfigField::Threshold
+            | ConfigField::Fps
+            | ConfigField::ApMaxIter => {
+                form.edit_numeric(|text, cur| *cur = (*cur + 1).min(text.chars().count()));
+            }
             _ => {}
         },
         KeyCode::Enter => match form.focus {
@@ -344,37 +363,14 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::Cancel => return (ModelOutcome::Cancel, None),
             _ => form.focus = form.focus.next(),
         },
-        KeyCode::Backspace => match form.focus {
-            ConfigField::MaxTokens => {
-                form.max_tokens_input.pop();
+        KeyCode::Backspace => form.edit_numeric(|text, cur| {
+            let idx = (*cur).min(text.chars().count());
+            if let Some((s, i)) = crate::composer::backspace(text, idx) {
+                *text = s;
+                *cur = i;
             }
-            ConfigField::ContextSize => {
-                form.context_size_input.pop();
-            }
-            ConfigField::Threshold => {
-                form.threshold_input.pop();
-            }
-            ConfigField::Fps => {
-                form.fps_input.pop();
-            }
-            ConfigField::ApMaxIter => {
-                form.ap_max_iter_input.pop();
-            }
-            _ => {}
-        },
+        }),
         KeyCode::Char(c) => match form.focus {
-            ConfigField::MaxTokens if c.is_ascii_digit() => {
-                form.max_tokens_input.push(c);
-            }
-            ConfigField::ContextSize if c.is_ascii_digit() => {
-                form.context_size_input.push(c);
-            }
-            ConfigField::Threshold if c.is_ascii_digit() => {
-                form.threshold_input.push(c);
-            }
-            ConfigField::Fps if c.is_ascii_digit() => {
-                form.fps_input.push(c);
-            }
             ConfigField::Reasoning if c == ' ' => form.reasoning = form.reasoning.next(),
             ConfigField::InterleavedThinking if c == ' ' => {
                 form.interleaved_thinking = !form.interleaved_thinking
@@ -390,8 +386,19 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             }
             ConfigField::ApEnabled if c == ' ' => form.ap_enabled = !form.ap_enabled,
             ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
-            ConfigField::ApMaxIter if c.is_ascii_digit() => {
-                form.ap_max_iter_input.push(c);
+            ConfigField::MaxTokens
+            | ConfigField::ContextSize
+            | ConfigField::Threshold
+            | ConfigField::Fps
+            | ConfigField::ApMaxIter
+                if c.is_ascii_digit() =>
+            {
+                form.edit_numeric(|text, cur| {
+                    let idx = (*cur).min(text.chars().count());
+                    let (s, i) = crate::composer::insert_char(text, idx, c);
+                    *text = s;
+                    *cur = i;
+                });
             }
             _ => {}
         },

@@ -5,10 +5,13 @@
 use super::*;
 use opencoder_store::SessionMeta;
 
-mod mouse_helpers;
-mod mouse_tests;
+mod ctrl_l_tests;
 mod mouse_clip_tests;
 mod mouse_dbl_click_tests;
+mod mouse_helpers;
+mod mouse_scroll_tests;
+mod mouse_tests;
+mod mouse_wheel_tests;
 
 #[test]
 fn paste_existing_absolute_file_echoes_full_path() {
@@ -103,11 +106,23 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
         .await
         .unwrap();
     let s_seq = store
-        .admit_input(&mk_input_with_images(sid, Delivery::Steer, "steer-1", None, &[]))
+        .admit_input(&mk_input_with_images(
+            sid,
+            Delivery::Steer,
+            "steer-1",
+            None,
+            &[],
+        ))
         .await
         .unwrap();
     let q_seq = store
-        .admit_input(&mk_input_with_images(sid, Delivery::Queue, "queue-1", None, &[]))
+        .admit_input(&mk_input_with_images(
+            sid,
+            Delivery::Queue,
+            "queue-1",
+            None,
+            &[],
+        ))
         .await
         .unwrap();
     let mut steer_items = vec![(s_seq, String::from("steer-1"))];
@@ -138,14 +153,14 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
 /// Ctrl+T is now a pure act<->plan mode toggle and must NOT be consumed by
 /// `pre_key_intercept` (so it falls through to `handle_key`, which switches
 /// mode without collapsing thinking or clearing the input). Ctrl+L owns the
-/// collapse/clear behaviour (without the forced redraw — that moved to Ctrl+F).
+/// collapse/clear/follow behaviour (without the forced redraw — that moved to
+/// Ctrl+F).
 #[test]
 fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
-    fn run(key: KeyEvent) -> (bool, String, usize, bool) {
+    fn run(key: KeyEvent) -> (bool, String, usize, bool, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
-        let mut scroll = 5u32;
-        let mut follow = true;
+        let mut follow = false;
         let mut selection = None;
         let mut last_esc = None;
         let mut input = "hello world".to_string();
@@ -154,18 +169,15 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
         let consumed = pre_key_intercept(
             key,
             &mut subagent_focus,
-            &mut scroll,
             &mut follow,
             &mut selection,
             &mut last_esc,
             &mut chat,
             &mut input,
             &mut cursor,
-            0,
-            true,
             &mut needs_clear,
         );
-        (consumed, input, cursor, needs_clear)
+        (consumed, input, cursor, needs_clear, follow)
     }
 
     let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
@@ -173,7 +185,7 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     let ctrl_f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
 
     // Ctrl+T must pass through untouched (handled downstream as a mode toggle).
-    let (t_consumed, t_input, t_cursor, t_clear) = run(ctrl_t);
+    let (t_consumed, t_input, t_cursor, t_clear, t_follow) = run(ctrl_t);
     assert!(
         !t_consumed,
         "Ctrl+T must NOT be consumed by pre_key_intercept"
@@ -184,10 +196,11 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     );
     assert_eq!(t_cursor, 5, "Ctrl+T must not move the cursor");
     assert!(!t_clear, "Ctrl+T must not request a forced clear/redraw");
+    assert!(!t_follow, "Ctrl+T must not touch follow mode");
 
     // Ctrl+L still collapses thinking / clears the input, but no longer
     // forces the full-screen redraw (that is Ctrl+F's job now).
-    let (l_consumed, l_input, l_cursor, l_clear) = run(ctrl_l);
+    let (l_consumed, l_input, l_cursor, l_clear, l_follow) = run(ctrl_l);
     assert!(l_consumed, "Ctrl+L must be consumed by pre_key_intercept");
     assert!(l_input.is_empty(), "Ctrl+L must clear the input");
     assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
@@ -195,10 +208,14 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
         !l_clear,
         "Ctrl+L must NOT request a forced full-screen redraw anymore"
     );
+    assert!(
+        l_follow,
+        "Ctrl+L must return to follow mode (bottom of the view)"
+    );
 
     // Ctrl+F: force redraw only — consumes the key, sets needs_clear, and
     // leaves the input / cursor untouched.
-    let (f_consumed, f_input, f_cursor, f_clear) = run(ctrl_f);
+    let (f_consumed, f_input, f_cursor, f_clear, f_follow) = run(ctrl_f);
     assert!(f_consumed, "Ctrl+F must be consumed by pre_key_intercept");
     assert_eq!(
         f_input, "hello world",
@@ -209,6 +226,7 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
         f_clear,
         "Ctrl+F must request a forced full-screen redraw (needs_clear == true)"
     );
+    assert!(!f_follow, "Ctrl+F must not touch follow mode");
 }
 
 #[test]
@@ -290,7 +308,10 @@ fn mk_input_with_images_passes_display_text() {
         Some("{$repo-memory} clean prompt"),
         "the display form must be preserved verbatim while prompt stays clean"
     );
-    assert_eq!(input.prompt, "clean prompt", "prompt (LLM contract) unchanged");
+    assert_eq!(
+        input.prompt, "clean prompt",
+        "prompt (LLM contract) unchanged"
+    );
 }
 
 fn pending_row(
@@ -352,7 +373,12 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
         .unwrap();
     // Queued input with a distinct display form (raw `{$skill}` original).
     let row = pending_row(
-        0, sid, 1, Delivery::Queue, "fix the bug", Some("{$repo-memory} fix the bug"),
+        0,
+        sid,
+        1,
+        Delivery::Queue,
+        "fix the bug",
+        Some("{$repo-memory} fix the bug"),
     );
     let q_seq = store.admit_input(&row).await.unwrap();
     // Steered input admitted without a display form (pre-display_text rows).
@@ -363,12 +389,8 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
 
     let mut steer_items: Vec<(i64, String)> = Vec::new();
     let store: Arc<dyn Store> = Arc::new(store);
-    let queue_items = crate::queue_panel::restore_pending_mirrors(
-        &store,
-        sid,
-        &mut steer_items,
-    )
-    .await;
+    let queue_items =
+        crate::queue_panel::restore_pending_mirrors(&store, sid, &mut steer_items).await;
 
     assert_eq!(
         queue_items,
@@ -597,13 +619,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
         !trimmed.is_empty(),
         "combined content must not collapse to a pure-skill trigger"
     );
-    let input = crate::app_helpers::mk_input_with_images(
-        sid,
-        Delivery::Queue,
-        trimmed,
-        None,
-        &[],
-    );
+    let input = crate::app_helpers::mk_input_with_images(sid, Delivery::Queue, trimmed, None, &[]);
     store.admit_input(&input).await.unwrap();
 
     // Verify: the queued prompt is the user's task text, NOT a skill trigger.

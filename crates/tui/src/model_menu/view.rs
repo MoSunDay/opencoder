@@ -64,7 +64,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
 
     let title = match &form.error {
         Some(e) => format!(" /config \u{2014} ERROR: {e} "),
-        None => " /config \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} change, Enter=next, [Save] commits, Esc cancel ".to_string(),
+        None => " /config \u{2014} \u{2191}/\u{2193} option, \u{2190}/\u{2192} cursor, Enter=next, [Save] commits, Esc cancel ".to_string(),
     };
     let block = crate::theme::rounded_block_plain().title(title);
 
@@ -108,19 +108,19 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "max_tokens:",
             &max_tokens_val,
             form.focus == ConfigField::MaxTokens,
-            "digits, Backspace, empty=unset, Enter=next",
+            "\u{2190}/\u{2192} cursor, digits, Backspace, empty=unset, Enter=next",
         ),
         field_line(
             "ctx size:",
             &context_size_hint,
             form.focus == ConfigField::ContextSize,
-            "digits/\u{2190}\u{2192} \u{00b1}1k, Backspace, Enter=next",
+            "\u{2190}/\u{2192} cursor, digits, Backspace, Enter=next",
         ),
         field_line(
             "ctx threshold:",
             &threshold_hint,
             form.focus == ConfigField::Threshold,
-            "digits/\u{2190}\u{2192} \u{00b1}1k, Backspace, Enter=next",
+            "\u{2190}/\u{2192} cursor, digits, Backspace, Enter=next",
         ),
         field_line(
             "fps:",
@@ -130,7 +130,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
                 format!("{} FPS", form.fps_input)
             },
             form.focus == ConfigField::Fps,
-            "1-30, digits/\u{2190}\u{2192} \u{00b1}1, Backspace",
+            "1-30, \u{2190}/\u{2192} cursor, digits, Backspace",
         ),
         field_line(
             "browser:",
@@ -185,7 +185,7 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
                 form.ap_max_iter_input.clone()
             },
             form.focus == ConfigField::ApMaxIter,
-            "1+, digits/\u{2190}/\u{2192} \u{00b1}1, Backspace",
+            "1+, \u{2190}/\u{2192} cursor, digits, Backspace",
         ),
         field_line(
             "theme:",
@@ -203,13 +203,15 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             .alignment(Alignment::Left),
         popup,
     );
-    // Place terminal cursor at end of raw input for text fields.
-    if let Some(row) = text_field_row(form.focus) {
-        if let Some(raw) = focused_raw_input(form) {
-            let cx = popup.x + 1 + 15 + raw.chars().count() as u16;
-            let cy = popup.y + 1 + row as u16;
-            f.set_cursor_position((cx, cy));
-        }
+    // Place terminal cursor at the edit position inside the focused raw input.
+    if let (Some(raw), Some(idx), Some(row)) = (
+        focused_raw_input(form),
+        focused_cursor(form),
+        text_field_row(form.focus),
+    ) {
+        let cx = popup.x + 1 + 15 + crate::composer::cursor_column(raw, idx);
+        let cy = popup.y + 1 + row as u16;
+        f.set_cursor_position((cx, cy));
     }
 }
 
@@ -233,6 +235,18 @@ fn focused_raw_input(form: &ConfigForm) -> Option<&str> {
         ConfigField::Threshold => Some(&form.threshold_input),
         ConfigField::Fps => Some(&form.fps_input),
         ConfigField::ApMaxIter => Some(&form.ap_max_iter_input),
+        _ => None,
+    }
+}
+
+/// Char-index edit cursor for the currently-focused text field, if any.
+fn focused_cursor(form: &ConfigForm) -> Option<usize> {
+    match form.focus {
+        ConfigField::MaxTokens => Some(form.max_tokens_cursor),
+        ConfigField::ContextSize => Some(form.context_size_cursor),
+        ConfigField::Threshold => Some(form.threshold_cursor),
+        ConfigField::Fps => Some(form.fps_cursor),
+        ConfigField::ApMaxIter => Some(form.ap_max_iter_cursor),
         _ => None,
     }
 }
@@ -415,7 +429,7 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
     let title = match &form.error {
         Some(e) => format!(" /model {mode} \u{2014} ERROR: {e} "),
         None => {
-            format!(" /model {mode} \u{2014} type values, Enter=next, [Save] commits, Esc cancel ")
+            format!(" /model {mode} \u{2014} type, \u{2190}/\u{2192} cursor, Enter=next, [Save] commits, Esc cancel ")
         }
     };
     let block = crate::theme::rounded_block_plain().title(title);
@@ -445,25 +459,25 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
             "name:",
             &name_display,
             form.focus == ProviderField::Name && !form.name_readonly,
-            "type provider name, Enter=next",
+            "type, \u{2190}/\u{2192} cursor, Enter=next",
         ),
         field_line(
             "model_id:",
             &model_display,
             form.focus == ProviderField::ModelId,
-            "type model id, Enter=next",
+            "type, \u{2190}/\u{2192} cursor, Enter=next",
         ),
         field_line(
             "base_url:",
             &base_display,
             form.focus == ProviderField::BaseUrl,
-            "type URL, Enter=next",
+            "type, \u{2190}/\u{2192} cursor, Enter=next",
         ),
         field_line(
             "api_key:",
             &form.api_key_display(),
             form.focus == ProviderField::ApiKey,
-            "type new value, Enter=next",
+            "type, \u{2190}/\u{2192} cursor, Enter=next",
         ),
     ];
 
@@ -555,7 +569,7 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
         popup,
     );
 
-    // Place terminal cursor at the end of the focused raw input field.
+    // Place terminal cursor at the edit position inside the focused raw input.
     // ApiKey positions by its raw edit buffer (empty when the masked original
     // is still showing — typing replaces it); read-only name shows no cursor.
     let text_field = match form.focus {
@@ -569,8 +583,12 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
         }),
         _ => None,
     };
-    if let (Some(raw), Some(row)) = (text_field, provider_text_field_row(form.focus)) {
-        let cx = popup.x + 1 + 15 + raw.chars().count() as u16;
+    if let (Some(raw), Some(idx), Some(row)) = (
+        text_field,
+        provider_focused_cursor(form),
+        provider_text_field_row(form.focus),
+    ) {
+        let cx = popup.x + 1 + 15 + crate::composer::cursor_column(raw, idx);
         let cy = popup.y + 1 + row;
         f.set_cursor_position((cx, cy));
     }
@@ -598,6 +616,17 @@ fn provider_text_field_row(field: ProviderField) -> Option<u16> {
         ProviderField::ModelId => Some(1),
         ProviderField::BaseUrl => Some(2),
         ProviderField::ApiKey => Some(3),
+        _ => None,
+    }
+}
+
+/// Char-index edit cursor for the focused editable text field, if any.
+fn provider_focused_cursor(form: &ProviderForm) -> Option<usize> {
+    match form.focus {
+        ProviderField::Name if !form.name_readonly => Some(form.name_cursor),
+        ProviderField::ModelId => Some(form.model_id_cursor),
+        ProviderField::BaseUrl => Some(form.base_url_cursor),
+        ProviderField::ApiKey => Some(form.api_key_cursor),
         _ => None,
     }
 }

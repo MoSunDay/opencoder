@@ -67,7 +67,7 @@ fn handle_key_disabled_blocks_char() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -107,7 +107,7 @@ fn handle_key_disabled_blocks_enter() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -146,7 +146,7 @@ fn handle_key_disabled_allows_scroll() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30);
@@ -187,7 +187,7 @@ fn handle_key_disabled_allows_quit() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Quit));
 }
@@ -226,7 +226,7 @@ fn ctrl_v_returns_clip() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Clip));
 }
@@ -267,7 +267,7 @@ fn handle_key_disabled_blocks_alt_tab() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
 
@@ -291,7 +291,7 @@ fn handle_key_disabled_blocks_alt_tab() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -332,7 +332,7 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
 
@@ -356,7 +356,7 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         true,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -426,7 +426,7 @@ fn undo_restores_previous_text() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert_eq!(input, "");
 
@@ -450,7 +450,7 @@ fn undo_restores_previous_text() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert_eq!(input, "hi");
 }
@@ -490,7 +490,7 @@ fn undo_after_backspace() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert_eq!(input, "hell");
 
@@ -514,7 +514,7 @@ fn undo_after_backspace() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert_eq!(input, "hello");
 }
@@ -557,7 +557,7 @@ fn help_open_down_arrow_increments_scroll() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(help_scroll, 1);
@@ -597,7 +597,7 @@ fn help_open_page_down_jumps_scroll() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(help_scroll, 0); // 5 - 10 saturated to 0
@@ -642,7 +642,7 @@ fn up_arrow_browses_history_when_single_row() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
@@ -686,178 +686,10 @@ fn up_arrow_moves_cursor_when_multi_row() {
         false,
         &mut undo_state,
         &mut help_scroll,
-            &mut queue_scroll,
+        &mut queue_scroll,
     );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");
     assert_eq!(input, input_text);
     assert_eq!(hist_idx, None);
-}
-
-#[test]
-fn shift_page_up_scrolls_queue_panel_not_body() {
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
-    let mut scroll = 50u32;
-    let mut follow = false;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 1, "Shift+PageUp looks at older entries");
-    assert_eq!(scroll, 50, "body scroll untouched");
-    assert!(!follow, "body follow untouched");
-}
-
-#[test]
-fn shift_page_down_returns_to_newest() {
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
-    let mut scroll = 50u32;
-    let mut follow = true;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 3;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::PageDown, KeyModifiers::SHIFT),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 2, "Shift+PageDown moves toward newest");
-    assert_eq!(scroll, 50, "body scroll untouched");
-    assert!(follow, "body follow untouched");
-}
-
-#[test]
-fn shift_page_down_floors_at_zero() {
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
-    let mut scroll = 0u32;
-    let mut follow = true;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::PageDown, KeyModifiers::SHIFT),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 0, "already at newest — stays pinned");
-}
-
-#[test]
-fn plain_page_up_still_scrolls_body() {
-    // Regression guard: without SHIFT, PageUp must keep body semantics even
-    // though queue_scroll exists in the signature.
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
-    let mut scroll = 50u32;
-    let mut follow = true;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(scroll, 30, "plain PageUp scrolls the body");
-    assert!(!follow);
-    assert_eq!(queue_scroll, 0, "queue panel untouched");
 }

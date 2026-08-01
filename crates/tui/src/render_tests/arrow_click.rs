@@ -81,8 +81,6 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut follow = false;
         let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
-        let mut parent_scroll = 0u32;
-        let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
         let mut copy_msg: Option<String> = None;
@@ -102,8 +100,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut sel,
             &mut chat,
             &mut subagent_focus,
-            &mut parent_scroll,
-            &mut parent_follow,
             &mut subagent_sys,
             std::path::Path::new("."),
             &mut queue_items,
@@ -173,8 +169,6 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut follow = true;
         let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
-        let mut parent_scroll = 0u32;
-        let mut parent_follow = false;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
         let mut copy_msg: Option<String> = None;
@@ -194,8 +188,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut sel,
             &mut chat,
             &mut subagent_focus,
-            &mut parent_scroll,
-            &mut parent_follow,
             &mut subagent_sys,
             std::path::Path::new("."),
             &mut queue_items,

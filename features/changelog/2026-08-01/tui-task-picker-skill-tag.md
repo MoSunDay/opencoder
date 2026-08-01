@@ -33,7 +33,7 @@ store 的 `list_sessions` 此前不返回 `sessions.skill` 列，TUI 无法渲�
 | 标签：badge/后缀共存稳定 | `skill_tag_survives_badges_and_suffix_tags` | crates/tui/src/task.rs |
 | store：list_sessions 携带 skill body | `list_sessions_carries_skill_body_for_picker_tag` | crates/store/tests/store_integration.rs |
 
-- 全量回归：`cargo test --workspace` → 102 binaries，**1543 passed / 0 failed / 1 ignored**（当次实跑）
+- 全量回归：`cargo test --workspace` → 102 binaries，**1587 passed / 0 failed / 1 ignored**（当次实跑；同 commit 的 queue 面板滚动 12 个测试一并计入，见 [tui-queue-panel-scroll](./tui-queue-panel-scroll.md)）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
 - 行数：`task.rs` 662 ≤ 800（迭代）；`sessions.rs` 225、`types.rs` 272（迭代 ≤800）

@@ -125,44 +125,10 @@ pub async fn resume(
     // `tool_use` ids -- which most OpenAI-compatible providers reject with
     // HTTP 400 on the next call. Synthesize error results for every dangling
     // call, persist them, and append them so history stays well-formed.
-    let answered: HashSet<&str> = messages
-        .iter()
-        .flat_map(|m| m.blocks.iter())
-        .filter_map(|b| match b {
-            ContentBlock::ToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
-            _ => None,
-        })
-        .collect();
-    // `task` tool_use ids whose subagent is still in-flight (Running) or was
-    // interrupted (Cancelled): these are replayed/backfilled on the next user
-    // turn, so leave them dangling rather than synthesizing error results.
-    let replayable: HashSet<&str> = tasks
-        .iter()
-        .filter(|t| {
-            matches!(
-                t.status,
-                SubagentStatus::Running | SubagentStatus::Cancelled
-            )
-        })
-        .map(|t| t.task_id.as_str())
-        .collect();
-    let dangling: Vec<ContentBlock> = messages
-        .iter()
-        .flat_map(|m| m.blocks.iter())
-        .filter_map(|b| match b {
-            ContentBlock::ToolUse { id, .. }
-                if !answered.contains(id.as_str()) && !replayable.contains(id.as_str()) =>
-            {
-                Some(ContentBlock::ToolResult {
-                    tool_use_id: id.clone(),
-                    content: "session interrupted: tool result missing".to_string(),
-                    is_error: true,
-                    images: Vec::new(),
-                })
-            }
-            _ => None,
-        })
-        .collect();
+    // Pure logic lives in `dangling_tools` (shared with the in-process
+    // safety net in `run_with_registry`); only the persistence differs.
+    let replayable = crate::dangling_tools::replayable_task_ids_from_records(&tasks);
+    let dangling = crate::dangling_tools::dangling_tool_use_results(&messages, &replayable);
     if !dangling.is_empty() {
         let n_dangling = dangling.len();
         let synthetic = Message {

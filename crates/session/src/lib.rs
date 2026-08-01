@@ -1,6 +1,7 @@
 pub mod autopilot;
 pub mod bash_guard;
 pub mod compaction;
+pub mod dangling_tools;
 pub mod control_cmd;
 pub mod event_sink;
 pub mod plan_handoff;

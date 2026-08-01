@@ -37,9 +37,9 @@ pub fn should_compact(session: &SessionState) -> bool {
 
 /// Estimated tokens of the conversation about to be sent (system + messages).
 ///
-/// The ambient global `~/.opencoder/AGENTS.md` is excluded: it still ships in
-/// the system prompt but is treated as free baseline context that does not
-/// count against the session's compaction budget.
+/// The global `~/.opencoder/AGENTS.md` ships in the system prompt (see
+/// `build_system`), so its tokens count toward the compaction budget exactly
+/// like any other context the model actually consumes.
 fn estimated_tokens(session: &SessionState) -> u64 {
     let system = build_system(
         &session.agent,
@@ -47,11 +47,7 @@ fn estimated_tokens(session: &SessionState) -> u64 {
         session.skill_prompt_cloned().as_deref(),
         &session.config.capabilities,
     );
-    let mut est = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
-    if let Some(global) = crate::prompt::global_instructions_text(&session.working_dir) {
-        est = est.saturating_sub(estimate(&global));
-    }
-    est as u64
+    estimate_messages(&session.messages).saturating_add(estimate(&system.text())) as u64
 }
 
 fn estimate(s: &str) -> usize {
@@ -60,20 +56,11 @@ fn estimate(s: &str) -> usize {
 
 /// Provider-reported input tokens from the last call. Uses `input_tokens`
 /// (not `total_tokens`) so output-heavy turns don't prematurely trip the
-/// input budget.
-///
-/// The global `~/.opencoder/AGENTS.md` footprint is subtracted so this
-/// authoritative signal stays consistent with the estimate path (which also
-/// excludes the global file) — otherwise a large global file would re-enter
-/// the budget here and trip compaction early. The default config leaves a
-/// `context_limit − budget` margin (128k − 80k = 48k tokens) that absorbs any
-/// realistic global instructions file against overflow.
+/// input budget. The value already includes the global instructions file
+/// (it ships in the system prompt), so no adjustment is needed — it stays
+/// consistent with the estimate path, which also counts it.
 fn reported_tokens(session: &SessionState) -> u64 {
-    let raw = session.last_usage.input_tokens;
-    match crate::prompt::global_instructions_text(&session.working_dir) {
-        Some(global) => raw.saturating_sub(estimate(&global) as u64),
-        None => raw,
-    }
+    session.last_usage.input_tokens
 }
 
 pub async fn compact(

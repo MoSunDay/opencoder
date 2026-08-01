@@ -76,7 +76,8 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         "SELECT s.id, s.title, s.agent, s.model, s.created_at, s.updated_at, \
          (SELECT m.blocks_json FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1) AS preview, \
          (SELECT COUNT(*) FROM subagent_tasks st WHERE st.parent_session_id = s.id AND st.status = 'running') AS subagent_running, \
-         (SELECT COUNT(*) FROM subagent_tasks st WHERE st.parent_session_id = s.id AND st.status = 'cancelled') AS subagent_cancelled \
+         (SELECT COUNT(*) FROM subagent_tasks st WHERE st.parent_session_id = s.id AND st.status = 'cancelled') AS subagent_cancelled, \
+         s.skill \
          FROM sessions s",
     );
     if !where_clauses.is_empty() {
@@ -100,6 +101,7 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
             preview: extract_preview(&r.get::<Option<String>>(6)?),
             subagent_running: r.get::<i64>(7)?.max(0) as usize,
             subagent_cancelled: r.get::<i64>(8)?.max(0) as usize,
+            skill: r.get::<Option<String>>(9)?,
         });
     }
     Ok(out)

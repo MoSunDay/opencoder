@@ -26,6 +26,7 @@ async fn shift_drag_starts_selection() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<std::time::Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     // Shift+Down must anchor a selection exactly like a normal drag.
     // Screen rows 1..3 map to content rows 0..2 (inner_y = 1) — the three
@@ -41,6 +42,7 @@ async fn shift_drag_starts_selection() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert_eq!(selection, Some((0, 0)), "Shift+Down must anchor a selection");
@@ -57,6 +59,7 @@ async fn shift_drag_starts_selection() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert_eq!(selection, Some((0, 2)), "Shift+Drag must extend the selection");
@@ -80,6 +83,7 @@ async fn shift_drag_copies_on_release() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<std::time::Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     // Shift+Down + Shift+Drag + Shift+Up: same copy pipeline as a normal drag.
     // Screen rows 1..3 select content rows 0..2 ("alpha".."gamma").
@@ -98,6 +102,7 @@ async fn shift_drag_copies_on_release() {
             &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
             &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
             &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
         )
         .await;
     }
@@ -114,6 +119,7 @@ async fn shift_drag_copies_on_release() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(copy_msg.is_some(), "Shift+drag release must copy");
@@ -142,6 +148,7 @@ async fn shift_click_copies_single_line() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<std::time::Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     // Shift+Down then Shift+Up with no drag: single-line copy (force path).
     // Screen row 2 = content row 1 ("beta").
@@ -156,6 +163,7 @@ async fn shift_click_copies_single_line() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -170,6 +178,7 @@ async fn shift_click_copies_single_line() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(copy_msg.is_some(), "Shift+click must copy the line");
@@ -201,6 +210,7 @@ async fn multi_line_drag_copies_on_release() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<std::time::Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     // Down at row 5, drag to row 7, then release.
     let down = MouseEvent {
@@ -214,6 +224,7 @@ async fn multi_line_drag_copies_on_release() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -228,6 +239,7 @@ async fn multi_line_drag_copies_on_release() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -242,6 +254,7 @@ async fn multi_line_drag_copies_on_release() {
         &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
         &mut subagent_sys, Path::new("."), &mut queue_items, "s", &store,
         &mut copy_msg, &mut last_click, &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 

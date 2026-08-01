@@ -339,6 +339,7 @@ pub async fn post_subagent_steer(
         delivery: Delivery::Steer,
         prompt: body.prompt,
         images: body.images,
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     };

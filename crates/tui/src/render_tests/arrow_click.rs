@@ -33,6 +33,7 @@ async fn render_then_click_arrow_targets_jump_view() {
     {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         let mut scroll = 0u32;
+        let mut queue_scroll: u32 = 0;
         let mut hits = MouseHits::default();
         render(
             &mut terminal,
@@ -53,6 +54,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             &[],
             &mut scroll,
             false, // not following -> arrow visible
+            &mut queue_scroll,
             0,
             None,
             None,
@@ -86,6 +88,7 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<std::time::Instant> = None;
         let mut dbl_click = false;
+        let mut queue_scroll: u32 = 0;
         let outcome = handle_mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
@@ -109,6 +112,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut copy_msg,
             &mut last_click,
             &mut dbl_click,
+            &mut queue_scroll,
         )
         .await;
         assert_eq!(outcome, MouseOutcome::None);
@@ -120,6 +124,7 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         // follow=false keeps the supplied scroll (clamped to max_rows).
         let mut scroll = 30u32;
+        let mut queue_scroll: u32 = 0;
         let mut hits = MouseHits::default();
         render(
             &mut terminal,
@@ -140,6 +145,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             &[],
             &mut scroll,
             false,
+            &mut queue_scroll,
             0,
             None,
             None,
@@ -174,6 +180,7 @@ async fn render_then_click_arrow_targets_jump_view() {
         let mut copy_msg: Option<String> = None;
         let mut last_click: Option<std::time::Instant> = None;
         let mut dbl_click = false;
+        let mut queue_scroll: u32 = 0;
         let outcome = handle_mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
@@ -197,6 +204,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut copy_msg,
             &mut last_click,
             &mut dbl_click,
+            &mut queue_scroll,
         )
         .await;
         assert_eq!(outcome, MouseOutcome::None);

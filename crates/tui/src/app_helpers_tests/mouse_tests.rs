@@ -124,6 +124,8 @@ fn empty_hits(body: Rect) -> MouseHits {
         jump_btn: None,
         top_btn: None,
         body: Some(body),
+        queue_panel: None,
+        queue_total: 0,
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
@@ -187,6 +189,7 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     handle_mouse(
         scroll_down(),
@@ -206,6 +209,7 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -242,6 +246,7 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     handle_mouse(
         scroll_down(),
@@ -261,6 +266,7 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -299,6 +305,7 @@ async fn dbl_click_selects_line_and_copies_on_release() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
     let mk_down = |row| MouseEvent {
@@ -327,6 +334,7 @@ async fn dbl_click_selects_line_and_copies_on_release() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(!dbl_click, "first click should not be a double-click");
@@ -350,6 +358,7 @@ async fn dbl_click_selects_line_and_copies_on_release() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(dbl_click, "second click should be detected as double-click");
@@ -380,6 +389,7 @@ async fn dbl_click_selects_line_and_copies_on_release() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(copy_msg.is_some(), "double-click should copy on release");
@@ -413,6 +423,7 @@ async fn submit_btn_returns_steer_submit() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     let down = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
@@ -438,6 +449,7 @@ async fn submit_btn_returns_steer_submit() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -481,6 +493,7 @@ async fn single_click_does_not_copy_on_release() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
     let down = MouseEvent {
@@ -507,6 +520,7 @@ async fn single_click_does_not_copy_on_release() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(!dbl_click);
@@ -535,6 +549,7 @@ async fn single_click_does_not_copy_on_release() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(copy_msg.is_none(), "single click should not copy");
@@ -557,6 +572,8 @@ async fn jump_btn_click_works_after_recent_body_click() {
         jump_btn: Some(jump_btn_rect),
         top_btn: None,
         body: Some(body),
+        queue_panel: None,
+        queue_total: 0,
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
@@ -575,6 +592,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
     // First click: hits the body interior (row 5, well inside body).
@@ -602,6 +620,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(last_click.is_some(), "body click should set last_click");
@@ -633,6 +652,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert!(
@@ -677,6 +697,7 @@ async fn scrollup_advances_faster_than_default() {
     let mut copy_msg: Option<String> = None;
     let mut last_click: Option<Instant> = None;
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
     handle_mouse(
@@ -697,6 +718,7 @@ async fn scrollup_advances_faster_than_default() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
 
@@ -735,6 +757,8 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         jump_btn: None,
         top_btn: None,
         body: Some(body),
+        queue_panel: None,
+        queue_total: 0,
         queue_btns: Vec::new(),
         thinking_btns: vec![crate::render::ThinkingBtn {
             block_idx: 0,
@@ -759,6 +783,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
     // On the buggy code this trips `is_dbl` and the toggle is skipped.
     let mut last_click: Option<Instant> = Some(Instant::now());
     let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
 
     let outcome = handle_mouse(
         MouseEvent {
@@ -783,6 +808,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         &mut copy_msg,
         &mut last_click,
         &mut dbl_click,
+            &mut queue_scroll,
     )
     .await;
     assert_eq!(outcome, MouseOutcome::None);
@@ -797,4 +823,235 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         !dbl_click,
         "a header toggle must not be flagged as a double-click"
     );
+}
+
+fn wheel_event(kind: MouseEventKind, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: 40,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+/// Wheel-up over the queue/steer panel scrolls the panel toward older entries
+/// and must NOT touch the body scroll/follow state.
+#[tokio::test]
+async fn wheel_up_in_queue_panel_scrolls_panel_only() {
+    let mut chat = ChatView::default();
+    let body = Rect::new(0, 4, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.queue_panel = Some(Rect::new(0, 0, 80, 3));
+    hits.queue_total = 6;
+    let mut scroll = 10u32;
+    let mut follow = false;
+    let mut queue_scroll = 0u32;
+    let mut selection: Option<SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut parent_scroll = 0u32;
+    let mut parent_follow = false;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let store = StubStore;
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click = false;
+
+    handle_mouse(
+        wheel_event(MouseEventKind::ScrollUp, 1),
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut parent_scroll,
+        &mut parent_follow,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+
+    assert_eq!(queue_scroll, 1, "wheel-up over panel looks at older entries");
+    assert_eq!(scroll, 10, "body scroll untouched");
+    assert!(!follow, "body follow untouched");
+}
+
+/// Wheel-down over the queue/steer panel moves back toward the newest entries
+/// and floors at 0 (pinned to newest).
+#[tokio::test]
+async fn wheel_down_in_queue_panel_returns_toward_newest() {
+    let mut chat = ChatView::default();
+    let body = Rect::new(0, 4, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.queue_panel = Some(Rect::new(0, 0, 80, 3));
+    hits.queue_total = 6;
+    let mut scroll = 10u32;
+    let mut follow = true;
+    let mut queue_scroll = 2u32;
+    let mut selection: Option<SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut parent_scroll = 0u32;
+    let mut parent_follow = false;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let store = StubStore;
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click = false;
+
+    handle_mouse(
+        wheel_event(MouseEventKind::ScrollDown, 1),
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut parent_scroll,
+        &mut parent_follow,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+    assert_eq!(queue_scroll, 1, "one notch toward newest");
+
+    // A second wheel-down floors at 0 — never negative.
+    queue_scroll = 0;
+    handle_mouse(
+        wheel_event(MouseEventKind::ScrollDown, 1),
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut parent_scroll,
+        &mut parent_follow,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+    assert_eq!(queue_scroll, 0, "pinned to newest floors at zero");
+}
+
+/// A wheel over the body (outside the queue-panel rect) keeps the existing
+/// body semantics and leaves the panel offset untouched — no regression.
+#[tokio::test]
+async fn wheel_outside_queue_panel_scrolls_body() {
+    let mut chat = ChatView::default();
+    let body = Rect::new(0, 4, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.queue_panel = Some(Rect::new(0, 0, 80, 3));
+    hits.queue_total = 6;
+    hits.total_rows = 100;
+    let mut scroll = 10u32;
+    let mut follow = false;
+    let mut queue_scroll = 1u32;
+    let mut selection: Option<SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut parent_scroll = 0u32;
+    let mut parent_follow = false;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let store = StubStore;
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click = false;
+
+    // row 6 is inside the body rect (rows 4..16), below the panel (rows 0..3).
+    handle_mouse(
+        wheel_event(MouseEventKind::ScrollDown, 6),
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut parent_scroll,
+        &mut parent_follow,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+
+    assert_eq!(scroll, 13, "body scroll advanced by one notch");
+    assert_eq!(queue_scroll, 1, "panel offset untouched");
+}
+
+/// Without a queue-panel hit rect (panel hidden, e.g. plan mode), the wheel
+/// keeps scrolling the body — stale `queue_scroll` stays put and is clamped
+/// by the renderer.
+#[tokio::test]
+async fn wheel_with_no_queue_panel_keeps_body_behavior() {
+    let mut chat = ChatView::default();
+    let body = Rect::new(0, 0, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.total_rows = 100;
+    let mut scroll = 10u32;
+    let mut follow = false;
+    let mut queue_scroll = 0u32;
+    let mut selection: Option<SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut parent_scroll = 0u32;
+    let mut parent_follow = false;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let store = StubStore;
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click = false;
+
+    handle_mouse(
+        wheel_event(MouseEventKind::ScrollUp, 6),
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut parent_scroll,
+        &mut parent_follow,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+
+    assert_eq!(scroll, 2, "wheel-up over body still scrolls the body");
+    assert_eq!(queue_scroll, 0, "no panel → no queue scroll");
 }

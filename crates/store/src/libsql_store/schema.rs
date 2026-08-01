@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS session_inputs (
   delivery     TEXT NOT NULL,
   prompt       TEXT NOT NULL,
   images_json  TEXT NOT NULL DEFAULT '[]',
+  display_text TEXT,
   admitted_seq INTEGER NOT NULL,
   promoted_seq INTEGER
 )";
@@ -212,6 +213,15 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         .await
         .context("backfill task_type")?;
         conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
+    }
+    if from < 6 {
+        // v6: display-only text on session inputs, preserving the verbatim
+        // original (which may contain the `{$skill}` token) so the TUI queue/
+        // steer panel can restore it after resume/reload. `prompt` keeps the
+        // clean token-stripped text that the LLM consumes; this column is
+        // never fed to the LLM. Nullable so pre-existing rows stay valid —
+        // old rows keep NULL and display layers fall back to `prompt`.
+        add_column_if_absent(conn, "session_inputs", "display_text", "TEXT").await?;
     }
     Ok(())
 }

@@ -113,6 +113,8 @@ pub fn empty_hits(body: Rect) -> MouseHits {
         jump_btn: None,
         top_btn: None,
         body: Some(body),
+        queue_panel: None,
+        queue_total: 0,
         queue_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),

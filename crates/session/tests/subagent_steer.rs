@@ -124,6 +124,7 @@ async fn turn_cancel_allows_loop_to_continue() {
         delivery: Delivery::Steer,
         prompt: "change direction".to_string(),
         images: vec![],
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     };

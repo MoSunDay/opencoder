@@ -140,6 +140,7 @@ pub async fn admit_and_drain(
         delivery,
         prompt,
         images,
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     };

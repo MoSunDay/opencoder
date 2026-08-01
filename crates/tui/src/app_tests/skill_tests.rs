@@ -297,6 +297,7 @@ fn double_esc_while_running_cancels() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     let esc = key(KeyCode::Esc, KeyModifiers::NONE);
 
     let first = handle_key(
@@ -318,6 +319,7 @@ fn double_esc_while_running_cancels() {
         false,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -344,6 +346,7 @@ fn double_esc_while_running_cancels() {
         false,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

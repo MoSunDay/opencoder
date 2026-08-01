@@ -31,6 +31,7 @@ fn draw_frame(
     terminal: &mut Terminal<TestBackend>,
     chat: &ChatView,
     scroll: &mut u32,
+    queue_scroll: &mut u32,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
 ) {
@@ -57,6 +58,7 @@ fn draw_frame(
         &[],
         scroll,
         true,
+        queue_scroll,
         0,
         None,
         None,
@@ -88,6 +90,7 @@ fn draw_frame(
 fn per_frame_clear_wipes_stale_glyphs_across_frames() {
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
     let mut scroll = 0u32;
+    let mut queue_scroll: u32 = 0;
     let mut hits = MouseHits::default();
     let mut viewport: Option<ViewportCache> = None;
 
@@ -99,6 +102,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &mut terminal,
         &chat_a,
         &mut scroll,
+        &mut queue_scroll,
         &mut hits,
         &mut viewport,
     );
@@ -116,6 +120,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &mut terminal,
         &chat_b,
         &mut scroll,
+        &mut queue_scroll,
         &mut hits,
         &mut viewport,
     );
@@ -123,6 +128,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &mut terminal,
         &chat_b,
         &mut scroll,
+        &mut queue_scroll,
         &mut hits,
         &mut viewport,
     );

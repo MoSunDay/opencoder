@@ -47,6 +47,7 @@ pub(crate) async fn admit_subagent_steer(
         delivery: Delivery::Steer,
         prompt: clean.to_string(),
         images: image_uris.to_vec(),
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     };

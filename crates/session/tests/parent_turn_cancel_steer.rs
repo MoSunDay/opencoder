@@ -138,6 +138,7 @@ async fn turn_cancel_interrupts_llm_without_hard_abort() {
         delivery: opencoder_store::Delivery::Steer,
         prompt: "new direction from steer".into(),
         images: Vec::new(),
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     };

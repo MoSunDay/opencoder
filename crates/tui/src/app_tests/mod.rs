@@ -28,6 +28,7 @@ pub(super) fn run_handle(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     handle_key(
         k,
         input,
@@ -47,6 +48,7 @@ pub(super) fn run_handle(
         false,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     )
 }
 
@@ -68,6 +70,7 @@ pub(super) fn run_handle_disabled(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     handle_key(
         k,
         input,
@@ -87,6 +90,7 @@ pub(super) fn run_handle_disabled(
         true,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     )
 }
 
@@ -107,6 +111,7 @@ pub(super) fn run_handle_subagent(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     handle_key(
         k,
         input,
@@ -126,6 +131,7 @@ pub(super) fn run_handle_subagent(
         false,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     )
 }
 
@@ -145,6 +151,7 @@ pub(super) fn run_handle_menu(
     let mut last_esc: Option<Instant> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     handle_key(
         k,
         input,
@@ -164,6 +171,7 @@ pub(super) fn run_handle_menu(
         false,
         &mut undo_state,
         &mut help_scroll,
+        &mut queue_scroll,
     )
 }
 

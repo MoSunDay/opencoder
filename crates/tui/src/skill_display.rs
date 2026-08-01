@@ -23,3 +23,53 @@ pub(crate) fn skill_trigger(skill_name: &str) -> String {
 pub(crate) fn skill_token_display(skill_name: &str) -> String {
     format!("{{${skill_name}}}")
 }
+
+/// Display string for a queued/steered combined submission (`{$skill} text`) in
+/// the side panels and the `queued:`/`steer:` consumed markers.
+///
+/// The store row admits only the token-stripped `clean` text (the LLM and the
+/// web drain must never see the token), so the queue panel — the only place a
+/// queued item is surfaced, it is not echoed in the transcript — would show
+/// just `text`, making the inserted `{$skill}` silently vanish. Mirroring the
+/// Submit transcript (which records the raw input), the UI shows exactly what
+/// the user typed whenever the token stripping changed anything; plain text
+/// has no tokens, so `text` and `clean` coincide and this is a pass-through.
+pub(crate) fn queued_item_display(text: &str, clean: &str) -> String {
+    let raw = text.trim();
+    if raw == clean {
+        clean.to_string()
+    } else {
+        raw.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_text_passes_through_clean() {
+        assert_eq!(queued_item_display("fix the bug", "fix the bug"), "fix the bug");
+    }
+
+    #[test]
+    fn combined_skill_keeps_token_visible() {
+        assert_eq!(
+            queued_item_display("{$repo-memory} fix the bug", "fix the bug"),
+            "{$repo-memory} fix the bug"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_difference_uses_clean() {
+        assert_eq!(queued_item_display("  fix  ", "fix"), "fix");
+    }
+
+    #[test]
+    fn mid_text_token_preserved() {
+        assert_eq!(
+            queued_item_display("do {$a} then {$b}", "do  then "),
+            "do {$a} then {$b}"
+        );
+    }
+}

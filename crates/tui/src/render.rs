@@ -57,6 +57,13 @@ pub(crate) struct MouseHits {
     pub jump_btn: Option<Rect>,
     pub top_btn: Option<Rect>,
     pub body: Option<Rect>,
+    /// Queue/steer panel area (Some while the panel is visible), used by the
+    /// scroll-wheel handler to scroll the panel instead of the body.
+    pub queue_panel: Option<Rect>,
+    /// Cached total pending entries (steer + queue) from the last render.
+    /// Mirrors `total_rows` for the body: lets the wheel handler clamp the
+    /// queue scroll without re-deriving the panel contents.
+    pub queue_total: usize,
     pub queue_btns: Vec<QueueBtn>,
     /// Clickable Thinking-block header rows; clicking toggles collapse.
     /// One entry per Thinking block currently visible in the body viewport.
@@ -119,6 +126,7 @@ pub(crate) fn render<B: Backend>(
     queue_items: &[(i64, String)],
     scroll: &mut u32,
     follow: bool,
+    queue_scroll: &mut u32,
     anim_tick: u32,
     mode_flash: Option<&str>,
     skill_menu: Option<&SkillMenu>,
@@ -222,12 +230,21 @@ pub(crate) fn render<B: Backend>(
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
         }
         ci += 1;
+        // Clamp a stale queue scroll every frame (entries deleted/consumed
+        // since the last interaction shrink the panel) — same pattern as the
+        // body `total_rows` clamp in `render_body`.
+        hits.queue_panel = None;
         if queue_h > 0 {
+            hits.queue_panel = Some(chunks[ci]);
+            hits.queue_total = pending;
+            let max_scroll = pending.saturating_sub(queue_h as usize);
+            *queue_scroll = (*queue_scroll as usize).min(max_scroll) as u32;
             crate::queue_panel::render_queue_panel(
                 f,
                 chunks[ci],
                 steer_items,
                 queue_items,
+                *queue_scroll,
                 &mut hits.queue_btns,
             );
         }

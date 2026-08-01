@@ -1,17 +1,23 @@
 //! P0 functional tests for the libsql-backed Store.
 //!
 //! Each test asserts a *behavior contract*, not "the function runs":
-//! - concurrent_readers_while_writer: WAL allows N readers + 1 writer
-//! - wal_crash_recovery: drop & reopen the db file, committed data survives
-//! - jsonl_import_roundtrip: import preserves message history byte-equal
-//! - schema_migration_versioning: bootstrap records schema version
+//! - create_get_update_delete_session_contract: full CRUD lifecycle
+//! - clear_other_sessions_keeps_current_and_cascades: keep-one cleanup + FK cascade
+//! - append_and_load_preserves_all_roles_and_blocks: roles/blocks/usage round-trip
+//! - jsonl_import_roundtrip: import preserves message history + idempotent re-run
 //! - transaction_rollback_on_partial_failure: failed batch leaves no partial rows
 //! - list_pagination_with_metadata: cursor pagination + search filter
+//! - bundle_export_import_roundtrip: binary bundle export/import incl. subagents
+//! - session_handoff_and_skill_fields_round_trip: v3 session fields via patch
+//! - cancelled_transaction_*: future-cancellation must not panic and the store
+//!   stays usable/consistent afterwards
 //!
-//! These run against a real on-disk libsql file (tempdir) so WAL behaviour
-//! is exercised truthfully, not mocked.
+//! These run against a real on-disk libsql file (tempdir) so WAL behaviour is
+//! exercised truthfully, not mocked. Concurrent-writer stress tests live in
+//! `store_concurrency.rs`, schema-migration tests in `store_migrations.rs`, and
+//! subagent-task tests in `subagent_status_counts.rs`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message, Role};
 use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, SessionPatch, Store};
@@ -229,80 +235,6 @@ async fn append_and_load_preserves_all_roles_and_blocks() {
 }
 
 #[tokio::test]
-async fn concurrent_readers_while_writer() {
-    let dir = tempfile::tempdir().unwrap();
-    let store_raw = LibsqlStore::open(dir.path().join("cw.db")).await.unwrap();
-    make_session(&store_raw, "s", 1).await;
-    store_raw
-        .append_messages("s", &conv("seed", 10))
-        .await
-        .unwrap();
-    let store = Arc::new(store_raw);
-    let _dir = dir; // keep alive
-
-    let store_w = store.clone();
-    let writer = tokio::spawn(async move {
-        for b in 0..20u32 {
-            let msgs = conv(&format!("w{b}"), 5);
-            store_w
-                .append_messages("s", &msgs)
-                .await
-                .expect("append ok");
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-        }
-    });
-
-    let mut readers = Vec::new();
-    for r in 0..8u32 {
-        let store_r = store.clone();
-        readers.push(tokio::spawn(async move {
-            for _ in 0..10usize {
-                let loaded = store_r.load_messages("s").await.expect("read ok");
-                // WAL: readers always see a consistent snapshot — count must be
-                // monotonically non-decreasing and never observe a half-written batch.
-                assert!(!loaded.is_empty(), "reader {r} saw empty");
-                tokio::time::sleep(std::time::Duration::from_millis(3)).await;
-            }
-        }));
-    }
-
-    writer.await.unwrap();
-    for h in readers {
-        h.await.unwrap();
-    }
-    let final_count = store.load_messages("s").await.unwrap().len();
-    assert_eq!(final_count, 10 + 20 * 5, "all writes landed");
-}
-
-#[tokio::test]
-async fn wal_crash_recovery() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("crash.db");
-
-    {
-        let store = LibsqlStore::open(&db_path).await.unwrap();
-        make_session(&store, "persist", 5).await;
-        store
-            .append_messages("persist", &conv("c", 7))
-            .await
-            .unwrap();
-        // drop store WITHOUT graceful shutdown — simulates process crash
-        drop(store);
-    }
-    // Reopen from the same file; committed data must survive.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
-    let got = store
-        .get_session("persist")
-        .await
-        .unwrap()
-        .expect("survived");
-    assert_eq!(got.id, "persist");
-    let loaded = store.load_messages("persist").await.unwrap();
-    assert_eq!(loaded.len(), 7);
-    assert_eq!(loaded[0].text(), "c msg 0");
-}
-
-#[tokio::test]
 async fn jsonl_import_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let jsonl_dir = dir.path().join("sessions");
@@ -338,20 +270,6 @@ async fn jsonl_import_roundtrip() {
         .await
         .unwrap();
     assert_eq!(report2.sessions, 0, "second run skips existing");
-}
-
-#[tokio::test]
-async fn schema_migration_versioning() {
-    let (_dir, store) = fresh().await;
-    let conn = store.conn().await.unwrap();
-    let stmt = conn
-        .prepare("SELECT version FROM schema_version LIMIT 1")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let r = rows.next().await.unwrap().expect("version row exists");
-    let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 5, "schema_version must be 5 after bootstrap");
 }
 
 #[tokio::test]
@@ -514,108 +432,6 @@ async fn delivery_parse_and_as_str_roundtrip() {
 }
 
 #[tokio::test]
-async fn subagent_task_crud_roundtrip() {
-    use opencoder_store::{SubagentStatus, SubagentTaskRecord};
-
-    let (_dir, store) = fresh().await;
-    // Seed session rows so the FK constraints on parent/child resolve.
-    make_session(&store, "parent-sess", 0).await;
-    make_session(&store, "sub-sess-001", 0).await;
-
-    let rec = SubagentTaskRecord {
-        task_id: "task-001".into(),
-        parent_session_id: "parent-sess".into(),
-        child_session_id: "sub-sess-001".into(),
-        parent_message_id: Some("msg-42".into()),
-        agent: "explore".into(),
-        prompt: "find all TODO comments".into(),
-        result: None,
-        status: SubagentStatus::Running,
-        ok: None,
-        started_at: 1000,
-        completed_at: None,
-    };
-    store.create_subagent_task(&rec).await.unwrap();
-
-    // List as Running.
-    let rows = store.list_subagent_tasks("parent-sess").await.unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].task_id, "task-001");
-    assert_eq!(rows[0].child_session_id, "sub-sess-001");
-    assert_eq!(rows[0].agent, "explore");
-    assert!(matches!(rows[0].status, SubagentStatus::Running));
-    assert!(rows[0].result.is_none());
-    assert!(rows[0].ok.is_none());
-
-    // Complete it.
-    store
-        .complete_subagent_task("task-001", "found 5 TODOs", true)
-        .await
-        .unwrap();
-
-    // List again — must reflect completion.
-    let rows = store.list_subagent_tasks("parent-sess").await.unwrap();
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(rows[0].status, SubagentStatus::Completed));
-    assert_eq!(rows[0].result.as_deref(), Some("found 5 TODOs"));
-    assert_eq!(rows[0].ok, Some(true));
-    assert!(rows[0].completed_at.is_some(), "completed_at must be set");
-}
-
-#[tokio::test]
-async fn subagent_task_list_filters_by_parent() {
-    use opencoder_store::{SubagentStatus, SubagentTaskRecord};
-
-    let (_dir, store) = fresh().await;
-
-    for (tid, parent) in [("t-a", "sess-a"), ("t-b", "sess-b"), ("t-c", "sess-a")] {
-        make_session(&store, parent, 0).await;
-        make_session(&store, &format!("child-{tid}"), 0).await;
-        let rec = SubagentTaskRecord {
-            task_id: tid.into(),
-            parent_session_id: parent.into(),
-            child_session_id: format!("child-{tid}"),
-            parent_message_id: None,
-            agent: "build".into(),
-            prompt: format!("prompt-{tid}"),
-            result: None,
-            status: SubagentStatus::Running,
-            ok: None,
-            started_at: 2000,
-            completed_at: None,
-        };
-        store.create_subagent_task(&rec).await.unwrap();
-    }
-
-    let a_rows = store.list_subagent_tasks("sess-a").await.unwrap();
-    assert_eq!(a_rows.len(), 2, "sess-a should have 2 tasks");
-    let b_rows = store.list_subagent_tasks("sess-b").await.unwrap();
-    assert_eq!(b_rows.len(), 1, "sess-b should have 1 task");
-    let none_rows = store.list_subagent_tasks("sess-c").await.unwrap();
-    assert!(none_rows.is_empty(), "sess-c should have 0 tasks");
-}
-
-#[tokio::test]
-async fn subagent_status_parse_and_as_str() {
-    use opencoder_store::SubagentStatus;
-    assert_eq!(SubagentStatus::parse("running"), SubagentStatus::Running);
-    assert_eq!(
-        SubagentStatus::parse("completed"),
-        SubagentStatus::Completed
-    );
-    assert_eq!(SubagentStatus::parse("failed"), SubagentStatus::Failed);
-    assert_eq!(
-        SubagentStatus::parse("cancelled"),
-        SubagentStatus::Cancelled
-    );
-    assert_eq!(SubagentStatus::parse("bogus"), SubagentStatus::Running);
-    assert_eq!(SubagentStatus::Running.as_str(), "running");
-    assert_eq!(SubagentStatus::Completed.as_str(), "completed");
-    assert_eq!(SubagentStatus::Failed.as_str(), "failed");
-    assert_eq!(SubagentStatus::Cancelled.as_str(), "cancelled");
-}
-
-#[tokio::test]
 async fn bundle_export_import_roundtrip() {
     use opencoder_store::{
         export_bundle, import_bundle, read_bundle, write_bundle, SubagentStatus, SubagentTaskRecord,
@@ -774,366 +590,40 @@ async fn list_sessions_excludes_subagents_by_default() {
     );
 }
 
-// =============================================================================
-// Diagnostic reproduction tests for concurrent-write failures.
-//
-// The existing `concurrent_readers_while_writer` test only covers 1 writer +
-// N readers, so it can never surface write-lock contention. These two tests
-// hammer a FILE-BACKED libsql DB with many CONCURRENT WRITERS (mimicking
-// parallel subagent sessions, which all share one `Arc<dyn Store>`), to
-// surface SQLITE_BUSY / other write-lock errors and capture the real error
-// text. They REPORT rather than hard-assert, because the contention itself is
-// the phenomenon under investigation. Run with: --nocapture --test-threads=1.
-// =============================================================================
-
-/// Test A — pure concurrent writers: 8 sessions x 50 single-row append_message
-/// (the exact path `SessionState::record` -> `append_message` takes), no sleep,
-/// to maximize write-lock contention.
 #[tokio::test]
-async fn concurrent_writers_reproduce_busy() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(LibsqlStore::open(dir.path().join("busy.db")).await.unwrap());
-    const W: u32 = 8;
-    const N: u32 = 50;
-    for w in 0..W {
-        make_session(&store, &format!("child{w}"), w as i64).await;
-    }
-    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut handles = Vec::new();
-    for w in 0..W {
-        let s = store.clone();
-        let errs = errs.clone();
-        handles.push(tokio::spawn(async move {
-            let sid = format!("child{w}");
-            for k in 0..N {
-                let m = Message::user(format!("u-{w}-{k}"), format!("body-{w}-{k}"));
-                if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k} append_message] {e:#}"));
-                }
-            }
-        }));
-    }
-    for h in handles {
-        h.await.unwrap();
-    }
-    let total = W * N;
-    {
-        let errs = errs.lock().unwrap();
-        eprintln!(
-            "== concurrent_writers_reproduce_busy: {}/{} writes failed ==",
-            errs.len(),
-            total
-        );
-        for e in errs.iter() {
-            eprintln!("WRITE_ERR {e}");
-        }
-    }
-    let landed = store.load_messages("child0").await.unwrap().len();
-    eprintln!("child0 landed messages: {landed}/{N}");
-}
-
-/// Test B — mixed concurrent writes: each writer interleaves
-/// append_message + append_event + claim_next_queue (BEGIN IMMEDIATE tx),
-/// which holds the write lock for the whole transaction and may starve
-/// concurrent message appends — closer to the real runner mix.
-#[tokio::test]
-async fn mixed_concurrent_writes_with_immediate_tx() {
-    use opencoder_store::{Delivery, EventKind, SessionEventRecord, SessionInput};
-    let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(
-        LibsqlStore::open(dir.path().join("mixed.db"))
-            .await
-            .unwrap(),
-    );
-    const W: u32 = 8;
-    const ITERS: u32 = 20;
-    for w in 0..W {
-        let sid = format!("child{w}");
-        make_session(&store, &sid, w as i64).await;
-        for k in 0..ITERS {
-            let inp = SessionInput {
-                seq: None,
-                id: format!("in-{w}-{k}"),
-                session_id: sid.clone(),
-                delivery: Delivery::Queue,
-                prompt: format!("q-{w}-{k}"),
-                images: Vec::new(),
-                admitted_seq: k as i64 + 1,
-                promoted_seq: None,
-            };
-            store.admit_input(&inp).await.unwrap();
-        }
-    }
-    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut handles = Vec::new();
-    for w in 0..W {
-        let s = store.clone();
-        let errs = errs.clone();
-        handles.push(tokio::spawn(async move {
-            let sid = format!("child{w}");
-            for k in 0..ITERS {
-                let m = Message::user(format!("u-{w}-{k}"), format!("body-{w}-{k}"));
-                if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k} append_message] {e:#}"));
-                }
-                let rec = SessionEventRecord {
-                    session_id: sid.clone(),
-                    kind: EventKind::TextDelta,
-                    payload: serde_json::Value::String(format!("ev-{w}-{k}")),
-                    ts: k as i64,
-                    seq: None,
-                    sse_kind: None,
-                };
-                if let Err(e) = s.append_event(&rec).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k} append_event] {e:#}"));
-                }
-                if let Err(e) = s.claim_next_queue(&sid).await {
-                    errs.lock()
-                        .unwrap()
-                        .push(format!("[w{w} k{k} claim_next_queue] {e:#}"));
-                }
-            }
-        }));
-    }
-    for h in handles {
-        h.await.unwrap();
-    }
-    let errs = errs.lock().unwrap();
-    eprintln!(
-        "== mixed_concurrent_writes_with_immediate_tx: {} ops failed ==",
-        errs.len()
-    );
-    for e in errs.iter() {
-        eprintln!("WRITE_ERR {e}");
-    }
-}
-
-/// Test C — extreme pressure: 32 sessions x 200 single-row appends, to test
-/// whether `busy_timeout=5000` ever breaks under heavy intra-process load.
-#[tokio::test]
-async fn extreme_concurrent_writers() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(
-        LibsqlStore::open(dir.path().join("extreme.db"))
-            .await
-            .unwrap(),
-    );
-    const W: u32 = 32;
-    const N: u32 = 200;
-    for w in 0..W {
-        make_session(&store, &format!("c{w}"), w as i64).await;
-    }
-    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut handles = Vec::new();
-    for w in 0..W {
-        let s = store.clone();
-        let errs = errs.clone();
-        handles.push(tokio::spawn(async move {
-            let sid = format!("c{w}");
-            for k in 0..N {
-                let payload = "x".repeat(512);
-                let m = Message::user(format!("u{w}-{k}"), payload);
-                if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock().unwrap().push(format!("[w{w} k{k}] {e:#}"));
-                }
-            }
-        }));
-    }
-    for h in handles {
-        h.await.unwrap();
-    }
-    let errs = errs.lock().unwrap();
-    eprintln!(
-        "== extreme_concurrent_writers: {}/{} writes failed ==",
-        errs.len(),
-        W * N
-    );
-    for e in errs.iter().take(20) {
-        eprintln!("WRITE_ERR {e}");
-    }
-}
-
-/// Test D — TWO separate `LibsqlStore` handles opened on the SAME db file
-/// (mimicking two processes — e.g. TUI + web server — or two independent
-/// connection pools hitting one opencoder.db). Each store spawns concurrent
-/// writers. This is the configuration most likely to surface cross-connection
-/// write-lock contention.
-#[tokio::test]
-async fn two_stores_same_file_concurrent_writers() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("shared.db");
-    let store_a = Arc::new(LibsqlStore::open(&path).await.unwrap());
-    let store_b = Arc::new(LibsqlStore::open(&path).await.unwrap());
-    const W: u32 = 6;
-    const N: u32 = 50;
-    for w in 0..W {
-        let sid = format!("c{w}");
-        store_a.create_session(&meta_for(&sid)).await.unwrap();
-    }
-    let _ = (store_a, store_b); // moved into closures below
-    let store_a = Arc::new(LibsqlStore::open(&path).await.unwrap());
-    let store_b = Arc::new(LibsqlStore::open(&path).await.unwrap());
-    let errs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let mut handles = Vec::new();
-    for w in 0..W {
-        let s = if w % 2 == 0 {
-            store_a.clone()
-        } else {
-            store_b.clone()
-        };
-        let errs = errs.clone();
-        handles.push(tokio::spawn(async move {
-            let sid = format!("c{w}");
-            for k in 0..N {
-                let m = Message::user(format!("u{w}-{k}"), format!("b{w}-{k}"));
-                if let Err(e) = s.append_message(&sid, &m).await {
-                    errs.lock().unwrap().push(format!("[w{w} k{k}] {e:#}"));
-                }
-            }
-        }));
-    }
-    for h in handles {
-        h.await.unwrap();
-    }
-    let errs = errs.lock().unwrap();
-    eprintln!(
-        "== two_stores_same_file_concurrent_writers: {}/{} writes failed ==",
-        errs.len(),
-        W * N
-    );
-    for e in errs.iter().take(20) {
-        eprintln!("WRITE_ERR {e}");
-    }
-}
-
-fn meta_for(id: &str) -> SessionMeta {
-    SessionMeta {
-        id: id.to_string(),
-        title: Some(format!("t-{id}")),
-        agent: Some("act".into()),
-        model: Some("glm-5.2".into()),
-        workdir_hash: Some("h".into()),
-        created_at: 1,
-        updated_at: 1,
-        summary: None,
-        summary_seq: None,
-        handoff_seq: None,
-        handoff_plan: None,
-        skill: None,
-        task_type: None,
-    }
-}
-
-#[tokio::test]
-async fn schema_migration_v1_to_v2_adds_sse_kind() {
-    use libsql::Builder;
-
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("migrate.db");
-
-    // Phase 1: manually create a v1-style database (no sse_kind column).
-    {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
-            .await
-            .unwrap();
-        conn.execute(
-            "CREATE TABLE sessions (\
-               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
-               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, summary TEXT, summary_seq INTEGER)",
-            (),
-        )
-        .await
-        .unwrap();
-        conn.execute(
-            "CREATE TABLE session_events (\
-               seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-               session_id TEXT NOT NULL,\
-               type TEXT NOT NULL, payload_json TEXT NOT NULL,\
-               ts INTEGER NOT NULL)",
-            (),
-        )
-        .await
-        .unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", ())
-            .await
-            .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s1', 1, 1)",
-            (),
-        )
-        .await
-        .unwrap();
-        conn.execute(
-            "INSERT INTO session_events (session_id, type, payload_json, ts) \
-             VALUES ('s1', 'text_delta', '{}', 100)",
-            (),
-        )
-        .await
-        .unwrap();
-    }
-
-    // Phase 2: reopen — triggers bootstrap → migrate from v1 to v2.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
-
-    // Old event record: sse_kind is None (column added by migration, was NULL).
-    let events = store.events_after("s1", 0).await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0].sse_kind, None,
-        "old v1 events should have sse_kind=None"
-    );
-
-    // Schema version bumped to 2.
-    {
-        let conn = store.conn().await.unwrap();
-        let stmt = conn
-            .prepare("SELECT version FROM schema_version LIMIT 1")
-            .await
-            .unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        let r = rows.next().await.unwrap().unwrap();
-        let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 5, "schema version must be 5 after migration");
-    }
-
-    // New events can be stored with sse_kind and read back.
-    use opencoder_store::EventKind;
+async fn list_sessions_carries_skill_body_for_picker_tag() {
+    let (_dir, store) = fresh().await;
+    // Session with an active skill: the store persists the body, not the name.
     store
-        .append_event(&opencoder_store::SessionEventRecord {
-            session_id: "s1".into(),
-            kind: EventKind::Step,
-            payload: serde_json::json!({"status": "ok"}),
-            ts: 200,
-            seq: None,
-            sse_kind: Some("status".into()),
+        .create_session(&SessionMeta {
+            id: "skilled".into(),
+            agent: Some("plan".into()),
+            skill: Some("## do-and-done\nfull body".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    store
+        .create_session(&SessionMeta {
+            id: "plain".into(),
+            agent: Some("act".into()),
+            ..Default::default()
         })
         .await
         .unwrap();
 
-    let events2 = store.events_after("s1", 0).await.unwrap();
-    assert_eq!(events2.len(), 2);
-    assert_eq!(events2[1].sse_kind.as_deref(), Some("status"));
-
-    // Idempotent: reopening again does not re-run migration or error.
-    drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
-    let conn = store2.conn().await.unwrap();
-    let stmt = conn
-        .prepare("SELECT version FROM schema_version LIMIT 1")
+    let items = store
+        .list_sessions(&SessionFilter::default())
         .await
         .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let r = rows.next().await.unwrap().unwrap();
-    let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 5, "schema version stays 5 after idempotent re-open");
+    let skilled = items.iter().find(|s| s.id == "skilled").expect("skilled row");
+    assert_eq!(
+        skilled.skill.as_deref(),
+        Some("## do-and-done\nfull body"),
+        "list() must surface the stored skill body so the /task picker can tag it"
+    );
+    let plain = items.iter().find(|s| s.id == "plain").expect("plain row");
+    assert_eq!(plain.skill, None, "sessions without a skill must list None");
 }
 
 #[tokio::test]
@@ -1187,117 +677,6 @@ async fn session_handoff_and_skill_fields_round_trip() {
     // Untouched fields preserved.
     assert_eq!(m1.agent.as_deref(), Some("act"));
     assert!(m1.summary_seq.is_none());
-}
-
-#[tokio::test]
-async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
-    use libsql::Builder;
-
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("migrate-v3.db");
-
-    // Phase 1: hand-write a faithful v2 database. The sessions table omits the
-    // v3 columns (handoff_seq / handoff_plan / skill), and session_events ALREADY
-    // has sse_kind — so on reopen migrate(conn, 2) skips the `if from < 2` block
-    // and only runs the `if from < 3` block, isolating the v3 migration branch.
-    {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
-            .await
-            .unwrap();
-        // sessions at v2: no handoff_seq / handoff_plan / skill columns yet.
-        conn.execute(
-            "CREATE TABLE sessions (\
-               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
-               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, summary TEXT, summary_seq INTEGER)",
-            (),
-        )
-        .await
-        .unwrap();
-        // session_events at v2: already carries sse_kind.
-        conn.execute(
-            "CREATE TABLE session_events (\
-               seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-               session_id TEXT NOT NULL,\
-               type TEXT NOT NULL, payload_json TEXT NOT NULL,\
-               sse_kind TEXT,\
-               ts INTEGER NOT NULL)",
-            (),
-        )
-        .await
-        .unwrap();
-        conn.execute("INSERT INTO schema_version (version) VALUES (2)", ())
-            .await
-            .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s2', 1, 1)",
-            (),
-        )
-        .await
-        .unwrap();
-    }
-
-    // Phase 2: reopen — triggers bootstrap → migrate(conn, 2), which runs only
-    // the `if from < 3` branch (adds handoff_seq / handoff_plan / skill).
-    let store = LibsqlStore::open(&db_path).await.unwrap();
-
-    // (1) The pre-existing row survives; the new columns are nullable, so the
-    //     three v3 fields read back as None without data loss.
-    let m0 = store.get_session("s2").await.unwrap().unwrap();
-    assert_eq!(m0.id, "s2");
-    assert!(m0.handoff_seq.is_none(), "v2 row: handoff_seq must be None");
-    assert!(
-        m0.handoff_plan.is_none(),
-        "v2 row: handoff_plan must be None"
-    );
-    assert!(m0.skill.is_none(), "v2 row: skill must be None");
-
-    // (2) The migrated columns round-trip through SessionPatch (write + read).
-    store
-        .update_session(
-            "s2",
-            &SessionPatch {
-                handoff_seq: Some(42),
-                handoff_plan: Some("## Plan\n1. a\n2. b".into()),
-                skill: Some("review".into()),
-                updated_at: Some(2),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    let m1 = store.get_session("s2").await.unwrap().unwrap();
-    assert_eq!(m1.handoff_seq, Some(42));
-    assert_eq!(m1.handoff_plan.as_deref(), Some("## Plan\n1. a\n2. b"));
-    assert_eq!(m1.skill.as_deref(), Some("review"));
-
-    // (3) Schema version bumped to 3.
-    {
-        let conn = store.conn().await.unwrap();
-        let stmt = conn
-            .prepare("SELECT version FROM schema_version LIMIT 1")
-            .await
-            .unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        let r = rows.next().await.unwrap().unwrap();
-        let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 5, "schema version must be 5 after v2→v3 migration");
-    }
-
-    // (4) Idempotent: reopening again does not re-run migration or error, and
-    //     the version stays at 4.
-    drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
-    let conn = store2.conn().await.unwrap();
-    let stmt = conn
-        .prepare("SELECT version FROM schema_version LIMIT 1")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let r = rows.next().await.unwrap().unwrap();
-    let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 5, "schema version stays 5 after idempotent re-open");
 }
 
 // ---------------------------------------------------------------------------
@@ -1398,122 +777,4 @@ async fn cancelled_then_concurrent_ops_stay_consistent() {
             "ok message {id} from round {round} must survive"
         );
     }
-}
-
-#[tokio::test]
-async fn schema_migration_is_idempotent_when_column_already_exists() {
-    use libsql::Builder;
-    use opencoder_store::{EventKind, SessionEventRecord};
-
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("idempotent-migrate.db");
-
-    // Reproduce the exact failure mode: the on-disk tables already carry the
-    // *full latest* shape (CREATE TABLE statements embed the full schema, so
-    // they include e.g. sse_kind on session_events and handoff_seq/handoff_plan/
-    // skill on sessions), but schema_version is stale at 1. A bare ADD COLUMN
-    // in migrate() would fail with `duplicate column name: sse_kind`.
-    {
-        let db = Builder::new_local(&db_path).build().await.unwrap();
-        let conn = db.connect().unwrap();
-        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
-            .await
-            .unwrap();
-        // sessions with the full current shape, including the v3 handoff/skill
-        // columns — identical to the CREATE_SESSIONS the store ships.
-        conn.execute(
-            "CREATE TABLE sessions (\
-               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
-               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, summary TEXT,\
-               summary_seq INTEGER, handoff_seq INTEGER, handoff_plan TEXT, skill TEXT)",
-            (),
-        )
-        .await
-        .unwrap();
-        // session_events with the full current shape, including the v2 sse_kind
-        // column — identical to CREATE_EVENTS the store ships.
-        conn.execute(
-            "CREATE TABLE session_events (\
-               seq INTEGER PRIMARY KEY AUTOINCREMENT,\
-               session_id TEXT NOT NULL,\
-               type TEXT NOT NULL, payload_json TEXT NOT NULL,\
-               sse_kind TEXT, ts INTEGER NOT NULL)",
-            (),
-        )
-        .await
-        .unwrap();
-        // Stale version: schema_version = 1, but tables are already at v3 shape.
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", ())
-            .await
-            .unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s1', 1, 1)",
-            (),
-        )
-        .await
-        .unwrap();
-        // Pre-existing event carrying a real sse_kind value that must survive.
-        conn.execute(
-            "INSERT INTO session_events (session_id, type, payload_json, sse_kind, ts) \
-             VALUES ('s1', 'step', '{\"status\":\"ok\"}', 'status', 100)",
-            (),
-        )
-        .await
-        .unwrap();
-    }
-
-    // Reopen — triggers bootstrap → migrate(1). Before the fix this errored:
-    //   `migrate v2: add sse_kind column` / `duplicate column name: sse_kind`.
-    let store = LibsqlStore::open(&db_path).await.unwrap();
-
-    // The pre-existing sse_kind data is intact and reads back through the store.
-    let events = store.events_after("s1", 0).await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(
-        events[0].sse_kind.as_deref(),
-        Some("status"),
-        "pre-existing sse_kind data must survive migration"
-    );
-
-    // schema_version bumped all the way to 3.
-    {
-        let conn = store.conn().await.unwrap();
-        let stmt = conn
-            .prepare("SELECT version FROM schema_version LIMIT 1")
-            .await
-            .unwrap();
-        let mut rows = stmt.query(()).await.unwrap();
-        let r = rows.next().await.unwrap().unwrap();
-        let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 5, "schema version must be 5 after migration");
-    }
-
-    // A freshly appended event still round-trips its sse_kind.
-    store
-        .append_event(&SessionEventRecord {
-            session_id: "s1".into(),
-            kind: EventKind::Step,
-            payload: serde_json::json!({"status": "more"}),
-            ts: 200,
-            seq: None,
-            sse_kind: Some("status".into()),
-        })
-        .await
-        .unwrap();
-    let events2 = store.events_after("s1", 0).await.unwrap();
-    assert_eq!(events2.len(), 2);
-    assert_eq!(events2[1].sse_kind.as_deref(), Some("status"));
-
-    // Idempotent: reopening again does not re-run migration or error.
-    drop(store);
-    let store2 = LibsqlStore::open(&db_path).await.unwrap();
-    let conn = store2.conn().await.unwrap();
-    let stmt = conn
-        .prepare("SELECT version FROM schema_version LIMIT 1")
-        .await
-        .unwrap();
-    let mut rows = stmt.query(()).await.unwrap();
-    let r = rows.next().await.unwrap().unwrap();
-    let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 5, "schema version stays 5 after idempotent re-open");
 }

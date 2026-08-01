@@ -61,6 +61,7 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Shift+I (uppercase I) on empty input while idle in plan mode enters
     // the plan-text editor.
@@ -83,6 +84,7 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::EnterPlanEdit));
     assert!(
@@ -104,6 +106,7 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Shift+I in act mode is a plain char insertion, not plan-edit entry.
     let action = handle_key(
@@ -125,6 +128,7 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "I", "should insert the character 'I'");
@@ -143,6 +147,7 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Even in plan mode, Shift+I while running just inserts the char.
     let action = handle_key(
@@ -164,6 +169,7 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "I", "should insert the character 'I'");
@@ -182,6 +188,7 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Once the user has started typing, Shift+I resumes normal insertion.
     let action = handle_key(
@@ -203,6 +210,7 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(!matches!(action, KeyAction::EnterPlanEdit));
     assert_eq!(input, "helloI", "should append the character 'I'");
@@ -221,6 +229,7 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
     let action = handle_key(
@@ -242,6 +251,7 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "i", "lowercase i should be inserted into input");
@@ -264,6 +274,7 @@ fn up_down_navigate_soft_wrapped_rows() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
     // narrow width (inner_w=10) forces wrapping into multiple rows
     let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
     let res = handle_key(
@@ -285,6 +296,7 @@ fn up_down_navigate_soft_wrapped_rows() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
     assert!(matches!(res, KeyAction::None));
     // History was NOT cycled (input unchanged, hist_idx still None)
@@ -307,6 +319,7 @@ fn enter_produces_subagent_steer_when_focused() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     // Enter with a running subagent focused produces SubagentSteer (not
     // Steer/Submit), and the input line is cleared.
@@ -329,6 +342,7 @@ fn enter_produces_subagent_steer_when_focused() {
         false, // input_disabled
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
 
     assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer the subagent"));
@@ -351,6 +365,7 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -371,6 +386,7 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
         false,
         &mut undo_state,
         &mut help_scroll,
+            &mut queue_scroll,
     );
 
     assert!(matches!(action, KeyAction::Steer(ref t) if t == "steer the parent"));

@@ -244,6 +244,7 @@ pub(crate) fn mk_input_with_images(
     session_id: &str,
     delivery: Delivery,
     prompt: &str,
+    display_text: Option<String>,
     images: &[String],
 ) -> SessionInput {
     SessionInput {
@@ -253,6 +254,7 @@ pub(crate) fn mk_input_with_images(
         delivery,
         prompt: prompt.to_string(),
         images: images.to_vec(),
+        display_text,
         admitted_seq: 0,
         promoted_seq: None,
     }
@@ -546,6 +548,7 @@ pub(crate) async fn handle_mouse(
     copy_msg: &mut Option<String>,
     last_click: &mut Option<Instant>,
     dbl_click: &mut bool,
+    queue_scroll: &mut u32,
 ) -> MouseOutcome {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
@@ -722,6 +725,18 @@ pub(crate) async fn handle_mouse(
             *dbl_click = false;
         }
         MouseEventKind::ScrollUp => {
+            // Queue/steer panel: wheel-up looks at older (earlier) entries.
+            // The panel sits above the body, so the rects never overlap.
+            if let Some(r) = hits.queue_panel {
+                if in_rect(r, m.column, m.row) {
+                    // Clamp against the cached panel total (mirrors the body
+                    // `total_rows` clamp) so burst wheel events can't run the
+                    // offset past the oldest entry before the next render.
+                    let max_scroll = hits.queue_total.saturating_sub(r.height as usize);
+                    *queue_scroll = queue_scroll.saturating_add(1).min(max_scroll as u32);
+                    return MouseOutcome::None;
+                }
+            }
             if let Some(r) = hits.body {
                 if in_rect(r, m.column, m.row) {
                     *scroll = scroll.saturating_sub(8);
@@ -730,6 +745,14 @@ pub(crate) async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
+            // Queue/steer panel: wheel-down returns toward the newest
+            // entries (offset 0 = pinned to newest).
+            if let Some(r) = hits.queue_panel {
+                if in_rect(r, m.column, m.row) {
+                    *queue_scroll = queue_scroll.saturating_sub(1);
+                    return MouseOutcome::None;
+                }
+            }
             if let Some(r) = hits.body {
                 if in_rect(r, m.column, m.row) {
                     let visible_h = r.height.saturating_sub(2) as usize;

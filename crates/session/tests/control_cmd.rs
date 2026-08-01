@@ -56,6 +56,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
         delivery,
         prompt: prompt.into(),
         images: vec![],
+        display_text: None,
         admitted_seq: 0,
         promoted_seq: None,
     }

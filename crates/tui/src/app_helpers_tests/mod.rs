@@ -103,11 +103,11 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
         .await
         .unwrap();
     let s_seq = store
-        .admit_input(&mk_input_with_images(sid, Delivery::Steer, "steer-1", &[]))
+        .admit_input(&mk_input_with_images(sid, Delivery::Steer, "steer-1", None, &[]))
         .await
         .unwrap();
     let q_seq = store
-        .admit_input(&mk_input_with_images(sid, Delivery::Queue, "queue-1", &[]))
+        .admit_input(&mk_input_with_images(sid, Delivery::Queue, "queue-1", None, &[]))
         .await
         .unwrap();
     let mut steer_items = vec![(s_seq, String::from("steer-1"))];
@@ -218,12 +218,18 @@ fn mk_input_with_images_passes_images_through() {
         "s1",
         opencoder_store::Delivery::Steer,
         "hello",
+        Some("{$skill} hello".to_string()),
         &images,
     );
     assert_eq!(input.session_id, "s1");
     assert_eq!(input.prompt, "hello");
     assert_eq!(input.images, images);
     assert_eq!(input.delivery, opencoder_store::Delivery::Steer);
+    assert_eq!(
+        input.display_text.as_deref(),
+        Some("{$skill} hello"),
+        "display_text must be passed through verbatim"
+    );
 }
 
 #[test]
@@ -260,9 +266,120 @@ fn mk_input_with_images_defaults_empty_when_none() {
         "s2",
         opencoder_store::Delivery::Queue,
         "plain",
+        None,
         &[],
     );
     assert!(input.images.is_empty());
+    assert!(
+        input.display_text.is_none(),
+        "None display_text must stay None (consumers fall back to prompt)"
+    );
+}
+
+#[test]
+fn mk_input_with_images_passes_display_text() {
+    let input = crate::app_helpers::mk_input_with_images(
+        "s3",
+        opencoder_store::Delivery::Queue,
+        "clean prompt",
+        Some("{$repo-memory} clean prompt".to_string()),
+        &[],
+    );
+    assert_eq!(
+        input.display_text.as_deref(),
+        Some("{$repo-memory} clean prompt"),
+        "the display form must be preserved verbatim while prompt stays clean"
+    );
+    assert_eq!(input.prompt, "clean prompt", "prompt (LLM contract) unchanged");
+}
+
+fn pending_row(
+    seq: i64,
+    session_id: &str,
+    admitted_seq: i64,
+    delivery: Delivery,
+    prompt: &str,
+    display_text: Option<&str>,
+) -> SessionInput {
+    SessionInput {
+        seq: Some(seq),
+        id: format!("in-{seq}"),
+        session_id: session_id.into(),
+        delivery,
+        prompt: prompt.into(),
+        images: Vec::new(),
+        display_text: display_text.map(|d| d.to_string()),
+        admitted_seq,
+        promoted_seq: None,
+    }
+}
+
+#[test]
+fn pending_mirror_uses_display_text_with_prompt_fallback() {
+    let rows = vec![
+        pending_row(
+            10,
+            "s",
+            1,
+            Delivery::Queue,
+            "fix the bug",
+            Some("{$repo-memory} fix the bug"),
+        ),
+        pending_row(11, "s", 2, Delivery::Steer, "steer me", None),
+    ];
+    let mirror = crate::queue_panel::pending_mirror(rows);
+    assert_eq!(
+        mirror,
+        vec![
+            (10, "{$repo-memory} fix the bug".to_string()),
+            (11, "steer me".to_string()),
+        ],
+        "display_text verbatim when present; prompt fallback when None"
+    );
+}
+
+#[tokio::test]
+async fn restore_pending_mirrors_restores_display_text_at_reload() {
+    use opencoder_store::LibsqlStore;
+    let store = LibsqlStore::open_memory().await.unwrap();
+    let sid = "resume-sess";
+    store
+        .create_session(&SessionMeta {
+            id: sid.into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Queued input with a distinct display form (raw `{$skill}` original).
+    let row = pending_row(
+        0, sid, 1, Delivery::Queue, "fix the bug", Some("{$repo-memory} fix the bug"),
+    );
+    let q_seq = store.admit_input(&row).await.unwrap();
+    // Steered input admitted without a display form (pre-display_text rows).
+    let s_seq = store
+        .admit_input(&pending_row(0, sid, 2, Delivery::Steer, "steer me", None))
+        .await
+        .unwrap();
+
+    let mut steer_items: Vec<(i64, String)> = Vec::new();
+    let store: Arc<dyn Store> = Arc::new(store);
+    let queue_items = crate::queue_panel::restore_pending_mirrors(
+        &store,
+        sid,
+        &mut steer_items,
+    )
+    .await;
+
+    assert_eq!(
+        queue_items,
+        vec![(q_seq, "{$repo-memory} fix the bug".to_string())],
+        "queue mirror restores the display original"
+    );
+    assert_eq!(
+        steer_items,
+        vec![(s_seq, "steer me".to_string())],
+        "steer mirror falls back to prompt when display_text is None"
+    );
 }
 
 #[test]
@@ -404,7 +521,7 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
 
     // Step 2: admit as a queued input (mirrors the else branch).
     let input =
-        crate::app_helpers::mk_input_with_images(sid, Delivery::Queue, &trigger, &image_uris);
+        crate::app_helpers::mk_input_with_images(sid, Delivery::Queue, &trigger, None, &image_uris);
     let result = store.admit_input(&input).await;
 
     // Step 3: on success, clear pending images.
@@ -484,6 +601,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
         sid,
         Delivery::Queue,
         trimmed,
+        None,
         &[],
     );
     store.admit_input(&input).await.unwrap();

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
-    run as run_session, run_with_images, spawn_event_flusher, SessionEvent, SessionState,
-    SharedCancel,
+    control_cmd::persist_agent as persist_session_agent, run as run_session, run_with_images,
+    spawn_event_flusher, SessionEvent, SessionState, SharedCancel,
 };
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
@@ -203,18 +203,20 @@ pub async fn process_cmd(
         UiCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
-                let ev = SessionEvent::AgentSwitch(name);
+                let ev = SessionEvent::AgentSwitch(name.clone());
                 persist_event(&sess.store, &sess.id, &ev).await;
                 forward_event(evt_tx, ev);
+                persist_session_agent(sess, &name).await;
             }
         }
         UiCmd::SwitchAndStart(name, extra) => {
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
-                let ev = SessionEvent::AgentSwitch(name);
+                let ev = SessionEvent::AgentSwitch(name.clone());
                 let _ = sink.push(&ev);
                 forward_event(evt_tx, ev);
+                persist_session_agent(sess, &name).await;
             }
             // Plan→act handoff: clear the transcript so the act agent starts
             // from only the final plan, not the full read-only planning noise.

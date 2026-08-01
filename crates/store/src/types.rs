@@ -87,6 +87,11 @@ pub struct SessionListItem {
     pub id: String,
     pub title: Option<String>,
     pub agent: Option<String>,
+    /// The session's active skill **body** (full instruction text), when one
+    /// is set. The store persists the body, not the name; display layers
+    /// derive a name by matching it against `discover_skills()`.
+    #[serde(default)]
+    pub skill: Option<String>,
     pub model: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -140,6 +145,12 @@ pub struct SessionInput {
     /// their images across turn boundaries and restarts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
+    /// Display-only text for the TUI queue/steer panel, preserved verbatim
+    /// (may contain the `{$skill}` token). NULL for rows admitted without a
+    /// distinct display form — consumers fall back to `prompt`. Never fed to
+    /// the LLM (drain always reads `prompt`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_text: Option<String>,
     pub admitted_seq: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promoted_seq: Option<i64>,

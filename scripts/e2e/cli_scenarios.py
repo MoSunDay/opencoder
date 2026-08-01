@@ -14,6 +14,7 @@ SOFT = model-cooperation-dependent, recorded as skip not failure):
   E12     session list + delete lifecycle                     HARD (store CRUD via CLI)
   E13     interleaved thinking reasoning_content persisted    SOFT (model-dependent)
   E14     config show emits valid merged JSON                 HARD (deterministic)
+  E18     autopilot self-drive loop (phase markers + injected prompt persisted)  HARD
 """
 
 from __future__ import annotations
@@ -38,6 +39,11 @@ FORK_PROMPT = "给贪吃蛇加暂停功能，按 P 键暂停/继续。"
 THUNDER_PROMPT = (
     "用 python3 写一个雷霆战机(飞机射击)游戏，保存为 thunder.py。方向键移动、空格射击、"
     "敌机下落、击中得分、被撞结束。写完运行 'python3 -m py_compile thunder.py' 验证语法（不要运行游戏循环）。"
+)
+
+AP_PROMPT = (
+    "用 python3 在当前目录创建 hello_ap.txt，内容写入一行 'hello autopilot'，"
+    "然后用 cat 命令读取该文件验证内容。"
 )
 
 
@@ -410,6 +416,77 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     else:
         c.soft("crashed session history well-formed", False,
                "resume failed")
+
+
+    # ---- E18: autopilot self-driving loop (PLAN -> ACT -> VERIFY) ----
+    # Real-model full-chain: the initial turn runs, then drive() hands control
+    # to the autopilot loop (max_iterations=1 clamps to exactly one iteration,
+    # verify_retries=1). Phase markers are display.rs:66's exact stderr lines;
+    # injected phase prompts are code strings persisted into the transcript.
+    print("== E18: autopilot self-driving loop (PLAN -> ACT -> VERIFY) ==")
+    ap_cfg = lib.make_config(api_key=api_key)
+    ap_cfg["autopilot"] = {"enabled": True, "max_iterations": 1, "verify_retries": 1}
+    ap_wd = lib.seed_workdir(ap_cfg)
+    rc, ap_log = lib.run_prompt(bin_path, ap_wd, AP_PROMPT)
+    sid_ap = lib.extract_session_id(ap_log)
+
+    # Config contract (deterministic — no model call): the merged config JSON
+    # must carry the autopilot knobs from opencoder.json (config show reads
+    # defaults < env < project-file merge, so enabled/max_iterations survive).
+    ap_cfg_out = lib.config_show(bin_path, ap_wd)
+    ap_cfg_json = None
+    try:
+        ap_cfg_json = json.loads(ap_cfg_out)
+    except Exception:
+        pass
+    apj_ok = isinstance(ap_cfg_json, dict) and "autopilot" in ap_cfg_json
+    c.check("config show includes autopilot object", apj_ok)
+    if apj_ok:
+        apj_cfg = ap_cfg_json["autopilot"]
+        c.check("autopilot.enabled merged true", apj_cfg.get("enabled") is True)
+        c.check("autopilot.max_iterations merged 1", apj_cfg.get("max_iterations") == 1)
+
+    # Reverse guard: autopilot is OFF by default, so the E1 run (default
+    # config) must never have driven the loop — no display.rs phase markers.
+    c.check("autopilot stays off for default config (E1 log clean)",
+            "autopilot: " not in e1_log)
+
+    # Phase markers: drive() emits exactly one Plan/Act/Verify triplet per
+    # iteration (max_iterations=1 => iteration 0 only). Marker text is the
+    # precise display.rs output: "autopilot: {phase:?} (iteration {i})".
+    c.check("log has autopilot Plan marker (iteration 0)",
+            "autopilot: Plan (iteration 0)" in ap_log)
+    c.check("log has autopilot Act marker (iteration 0)",
+            "autopilot: Act (iteration 0)" in ap_log)
+    c.check("log has autopilot Verify marker (iteration 0)",
+            "autopilot: Verify (iteration 0)" in ap_log)
+
+    if sid_ap is None:
+        c.soft("E18 run completed", False,
+               "no [session] marker (run errored — transient)")
+    else:
+        # Injected-prompt contract: at least one code-injected autopilot string
+        # must be persisted in the transcript. The PLAN continuation prompt is
+        # ALWAYS recorded (drive -> run_plan_phase, before any handoff reset);
+        # the ACT execute prompt is recorded on the no-plan fallback path. The
+        # handoff message itself ("Planning phase complete.") is in-memory only
+        # (after_handoff store accounting — see session/src/lib.rs), so it only
+        # shows up if ACT echoes it; include it in the union for robustness.
+        apj_show = lib.show_json(bin_path, ap_wd, sid_ap)
+        ap_text = lib.all_text(apj_show)
+        injected = (
+            "Autopilot PLAN phase" in ap_text
+            or "Autopilot ACT phase" in ap_text
+            or "Planning phase complete." in ap_text
+        )
+        c.check("transcript carries an injected autopilot phase prompt", injected)
+        # Business outcome + handoff-boundary (model-cooperation soft checks).
+        hello_ap = os.path.join(ap_wd, "hello_ap.txt")
+        c.soft("autopilot created hello_ap.txt artifact", os.path.isfile(hello_ap),
+               "file missing (model did not finish the write)")
+        c.soft("handoff_plan persisted in session meta",
+               bool((apj_show.get("meta") or {}).get("handoff_plan")),
+               "PLAN produced no plan text -> fallback ACT path (no handoff)")
 
     c.summary("CLI scenarios")
     return c

@@ -6,12 +6,12 @@ use crate::chat::ChatView;
 
 // ----- Shared test infrastructure (used by submodules) -----
 
-/// Single process-global lock serializing every test that either mutates the
-/// `HOME` env var or reads it indirectly via `sys_tokens_for` (->
-/// `global_instructions_text` -> `home_dir()`). `std::env::set_var` is not
-/// thread-safe at the libc level: without this lock a concurrent reader can
-/// observe a transiently-wrong/empty HOME and compute a different token
-/// estimate -- the classic `sys_tokens_counts_system_prompt` flake (0 vs 406).
+/// Single process-global lock serializing every test that mutates the `HOME`
+/// env var (the system prompt's global-instructions read goes through
+/// `home_dir()`). `std::env::set_var` is not thread-safe at the libc level:
+/// without this lock a concurrent reader can observe a transiently-wrong/empty
+/// HOME and compute a different token estimate -- the classic
+/// `sys_tokens_counts_system_prompt` flake (0 vs 406).
 pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// RAII guard that restores an env var to its prior value on drop,

@@ -329,14 +329,11 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 }
 
 /// Estimated tokens of the system prompt that will accompany every request:
-/// `agent.prompt + environment block + active skill`. Tracked separately from
-/// `ChatView::context_used` (which sums the streamed transcript and resets on
-/// compaction) so the context meter reflects the real request size.
-///
-/// The ambient global `~/.opencoder/AGENTS.md` is excluded from this count so
-/// the context meter at startup (and throughout the session) is not inflated
-/// by an always-on global instructions file. The global content still ships
-/// in the system prompt; only the accounting omits it.
+/// `agent.prompt + project instructions + environment block + active skill`.
+/// Tracked separately from `ChatView::context_used` (which sums the streamed
+/// transcript and resets on compaction) so the context meter reflects the
+/// real request size — including the global `~/.opencoder/AGENTS.md` content,
+/// which ships in the system prompt and consumes context like any other part.
 pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {
     let agent = match resolve_agent(agent_name) {
         Some(a) => a,
@@ -349,11 +346,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         &opencoder_core::CapabilitiesConfig::default(),
     )
     .text();
-    let mut tokens = estimate(&text) as u64;
-    if let Some(global) = opencoder_session::prompt::global_instructions_text(workdir) {
-        tokens = tokens.saturating_sub(estimate(&global) as u64);
-    }
-    tokens
+    estimate(&text) as u64
 }
 
 /// Resolve inline `{$name}` skill tokens in `text`: strip them from the

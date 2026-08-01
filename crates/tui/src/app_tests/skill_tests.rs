@@ -2,10 +2,9 @@ use super::*;
 
 #[test]
 fn sys_tokens_counts_system_prompt() {
-    // `sys_tokens_for` reads `home_dir()` (via `global_instructions_text`);
-    // take the shared HOME lock so a concurrent test that mutates HOME
-    // can't race the read and flake the determinism assertion below
-    // (0 vs 406).
+    // take the shared HOME lock so a concurrent test that mutates HOME can't
+    // race a system-prompt build in this test and flake the determinism
+    // assertion below (system prompt reads workdir + global instructions).
     let _home = crate::app::app_loop::tests::HOME_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -36,10 +35,9 @@ fn sys_tokens_counts_system_prompt() {
 /// passing the body is observably correct.
 #[test]
 fn sys_tokens_skill_body_dominates_skill_name() {
-    // `sys_tokens_for` reads `home_dir()` (via `global_instructions_text`);
-    // take the shared HOME lock so a concurrent test that mutates HOME
-    // can't race the read and flake the determinism assertion below
-    // (0 vs 406).
+    // take the shared HOME lock so a concurrent test that mutates HOME can't
+    // race a system-prompt build in this test and flake the determinism
+    // assertion below (system prompt reads workdir + global instructions).
     let _home = crate::app::app_loop::tests::HOME_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());

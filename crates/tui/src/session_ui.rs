@@ -85,17 +85,15 @@ impl SessionUiState {
     }
 }
 
-/// Replay a single persisted message into `chat`, reconstructing `Assistant`
-/// text blocks and `Tool` blocks (header from `ToolUse`, output appended from
-/// the matching `ToolResult`). Mirrors the live `ChatView::apply` path so a
-/// resumed or compacted session renders tool invocations identically.
+/// Replay a single persisted message into `chat`: reconstruct `Assistant` text and
+/// `Tool` blocks (header from `ToolUse`, output from matching `ToolResult`),
+/// mirroring the live `ChatView::apply` path for resumed/compacted sessions.
 fn replay_one(chat: &mut ChatView, msg: &Message) {
     match msg.role {
         Role::User => {
-            // Synthetic user messages (steer/queue promotions, plan->act
-            // handoff, compaction summaries) are internal — don't render them
-            // as visible `user:` blocks during resume/replay, matching how the
-            // live event stream and compaction layer treat them.
+            // Synthetic user messages (steer/queue promotions, plan->act handoff,
+            // compaction summaries) are internal — skip `user:` blocks on replay, as
+            // the live event stream and compaction layer treat them.
             if msg.synthetic {
                 return;
             }
@@ -239,9 +237,7 @@ fn replay_one(chat: &mut ChatView, msg: &Message) {
 }
 
 /// Build a fresh `ChatView` for a resumed session by replaying stored messages
-/// as styled markers (user: / say: headers) and reconstructing subagent blocks
-/// from persisted `subagent_tasks` records. Used when restoring a session
-/// that has no prior UI snapshot.
+/// and reconstructing subagent blocks from persisted `subagent_tasks` records.
 pub async fn replay_into_chat(
     agent_name: &str,
     messages: &[Message],
@@ -253,24 +249,25 @@ pub async fn replay_into_chat(
         ..Default::default()
     };
 
-    // If a plan→act handoff was persisted, render the plan card at the top so
-    // the resumed/switched-back view shows the same focused plan context the
-    // user had before exit (the synthetic handoff message itself is skipped by
-    // replay_one, so the card is the only representation).
+    // Plan→act handoff card. The clear-context boundary (/act_clear_context)
+    // also persists an internal sentinel here — skip it so the raw marker
+    // never reaches the UI.
     if let Ok(Some(meta)) = store.get_session(session_id).await {
-        if let Some(plan) = &meta.handoff_plan {
+        if let Some(plan) = meta
+            .handoff_plan
+            .as_deref()
+            .filter(|p| !opencoder_session::is_clear_context_handoff(p))
+        {
             let rendered = crate::markdown::render(plan);
             if !rendered.is_empty() {
                 chat.blocks.push(ChatBlock::Plan {
                     rendered,
-                    raw: plan.clone(),
+                    raw: plan.to_string(),
                 });
             }
         }
     }
 
-    // Load subagent tasks and group by parent_message_id so they can be
-    // interleaved after the corresponding assistant message block.
     let tasks = store
         .list_subagent_tasks(session_id)
         .await
@@ -294,8 +291,7 @@ pub async fn replay_into_chat(
 
     for msg in messages {
         replay_one(&mut chat, msg);
-        // Interleave subagent blocks whose parent_message_id matches this
-        // assistant message (only relevant for assistant turns).
+        // Interleave child blocks under their parent assistant message.
         if msg.role == Role::Assistant {
             if let Some(task_list) = tasks_by_parent.remove(&msg.id) {
                 for task in task_list {
@@ -306,7 +302,6 @@ pub async fn replay_into_chat(
         }
     }
 
-    // Append orphan tasks (no parent_message_id) at the end.
     for task in orphan_tasks {
         let block = build_subagent_block(&task, store).await;
         chat.blocks.push(block);
@@ -494,9 +489,8 @@ mod tests {
 
     #[test]
     fn replay_skips_synthetic_user_messages() {
-        // Synthetic user messages (steer/queue promotion, plan->act handoff,
-        // compaction summary) must NOT appear as visible `user:` blocks on
-        // resume/replay — only real typed prompts should.
+        // Synthetic user messages (steer/queue promotion, plan->act handoff, compaction
+        // summary) must NOT appear as visible `user:` blocks on resume/replay.
         let msgs = vec![
             make_user("u1", "real prompt", false),
             make_user("u2", "[synthetic steer body]", true),

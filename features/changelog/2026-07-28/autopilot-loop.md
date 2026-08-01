@@ -19,13 +19,15 @@ autopilot 引入一个**可选的**自驱动循环：在初始任务完成后，
   主 transcript 中（合法工作记录）。
 - **ACT** — 切到 act agent（上下文沿用，不重置），注入 execute prompt，跑一个 turn。
 - **VERIFY** — **隔离的 shadow 一次性调用**：克隆当前 transcript 到一次性快照，让
-  small_model 判断「是否还需要更多工作」，解析单个 yes/no，随后丢弃快照。判定交换
-  **不写入、不持久化**——主 transcript 绝不被污染。
+  small_model 判断「目标是否已完全达成」（正向设问，`yes`=完成，避免 judge 顺着
+  「是，还需要工作吗？」的直觉答 yes 导致永不完成），解析单个 yes/no，随后丢弃快照。
+  判定交换**不写入、不持久化**——主 transcript 绝不被污染。
 
 终止条件（`state.rs::ApOutcome`）：
-- VERIFY 回答「no」→ `Complete`。
+- VERIFY 回答「yes」→ `Complete`。
 - 连续 malformed 达 `verify_retries` 次 → `Aborted`。
 - 已完成迭代数达 `max_iterations` → `MaxIterations`。
+- 会话 cancel token 被触发 → `Cancelled`（独立于 MaxIterations）。
 
 既有 doom-loop（`DOOM_THRESHOLD`）、tool-failure guard、cancel token 仍然约束每个阶段的
 单次 run，不会被绕过。
@@ -100,11 +102,11 @@ autopilot 引入一个**可选的**自驱动循环：在初始任务完成后，
 
 | 功能 | 测试名 |
 |------|--------|
-| VERIFY=yes → MoreWork 且不污染 transcript | `verify_yes_means_more_work_and_does_not_pollute_transcript` |
-| VERIFY=no → Complete | `verify_no_means_complete` |
+| VERIFY=yes → Complete 且不污染 transcript | `verify_yes_means_complete_and_does_not_pollute_transcript` |
+| VERIFY=no → MoreWork | `verify_no_means_more_work` |
 | 垃圾裁决重试后 malformed | `verify_garbage_retries_then_malformed` |
 | 重试直到得到可解析答案 | `verify_retries_until_a_parseable_answer` |
-| drive 在 VERIFY=no 时完成完整循环 | `drive_completes_when_verify_says_no` |
+| drive 在 VERIFY=yes 时完成完整循环 | `drive_completes_when_verify_says_yes` |
 | drive 发出阶段进度事件 | `drive_emits_autopilot_phase_events` |
 | drive 在持续 malformed 时中止 | `drive_aborts_when_verify_keeps_malformed` |
 | max_iterations=1 → MaxIterations | `drive_max_iterations_one_yields_max_iterations` |

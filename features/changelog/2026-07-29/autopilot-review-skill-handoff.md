@@ -32,13 +32,13 @@ review skill 的职责是评估当前状态并输出 gaps，即为 ACT 阶段的
 
 ```
 启动任务 → run_loop 停止
-  → VERIFY: 结束?
-     → 是 → Complete
-     → 否 → PLAN (plan agent + review skill): 评估输出 gaps
-           → handoff: transcript = [HANDOFF_PREFIX + review输出]
-           → set_skill(None), 切 act agent
-           → ACT: 执行 gaps plan
-           → VERIFY → 循环
+  → PLAN (plan agent + review skill): 评估输出 gaps
+    → handoff: transcript = [HANDOFF_PREFIX + review输出]
+    → set_skill(None), 切 act agent
+    → ACT: 执行 gaps plan
+    → VERIFY: 目标是否达成?
+       → 是 → Complete
+       → 否 → PLAN → 循环
 ```
 
 ## 变更

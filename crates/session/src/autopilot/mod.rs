@@ -8,15 +8,15 @@
 //! - **ACT** — switch to the act agent (context carried over, no reset), inject
 //!   an execute prompt, run one loop.
 //! - **VERIFY** — an isolated *shadow* one-shot: it clones the current
-//!   transcript into a throwaway snapshot, asks a small model "is more work
-//!   needed?", parses a single yes/no, then discards the snapshot. Nothing is
-//!   recorded or persisted — the main transcript is never polluted by the
-//!   judgement exchange.
+//!   transcript into a throwaway snapshot, asks a small model "is the goal
+//!   fully achieved?", parses a single yes/no, then discards the snapshot.
+//!   Nothing is recorded or persisted — the main transcript is never polluted
+//!   by the judgement exchange.
 //!
-//! The loop stops when VERIFY says "no" (complete), retries exhaust on
-//! malformed verdicts (aborted), or `max_iterations` is hit. The existing
-//! doom-loop / tool-failure / cancel guards inside `run_loop` still terminate
-//! individual phase runs.
+//! The loop stops when VERIFY says "yes" (complete), retries exhaust on
+//! malformed verdicts (aborted), the session is cancelled, or `max_iterations`
+//! is hit. The existing doom-loop / tool-failure / cancel guards inside
+//! `run_loop` still terminate individual phase runs.
 
 mod decision;
 mod phases;
@@ -71,44 +71,82 @@ pub async fn drive(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<ApOutcome> {
     // Copy the Copy-type config knobs out so we don't hold an immutable borrow
-    // of `session.config` across the mutable phase calls.
-    let max_iterations = session.config.autopilot.max_iterations;
-    let verify_retries = session.config.autopilot.verify_retries;
+    // of `session.config` across the mutable phase calls. Degenerate values are
+    // clamped: 0 iterations would silently spin, 0 verify retries would never
+    // judge at all.
+    let max_iterations = session.config.autopilot.max_iterations.max(1);
+    let verify_retries = session.config.autopilot.verify_retries.max(1);
     let mut state = ApState::new(extract_goal(session));
 
-    while state.iteration < max_iterations {
+    loop {
         if is_cancelled(session) {
-            break;
+            return finish(session, on_event, ApOutcome::Cancelled);
+        }
+        if state.iteration >= max_iterations {
+            return finish(session, on_event, ApOutcome::MaxIterations);
         }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Plan,
             iteration: state.iteration,
         });
-        run_plan_phase(session, registry, on_event, &state).await?;
+        // A phase error still runs the terminal bookkeeping (skill cleared +
+        // Done) so the next user turn doesn't inherit the review skill, then
+        // the error propagates to the caller unchanged.
+        if let Err(e) = run_plan_phase(session, registry, on_event, &state).await {
+            finish(
+                session,
+                on_event,
+                ApOutcome::Aborted(format!("plan phase failed: {e:#}")),
+            )?;
+            return Err(e);
+        }
 
         if is_cancelled(session) {
-            break;
+            return finish(session, on_event, ApOutcome::Cancelled);
         }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Act,
             iteration: state.iteration,
         });
-        run_act_phase(session, registry, on_event).await?;
+        if let Err(e) = run_act_phase(session, registry, on_event).await {
+            finish(
+                session,
+                on_event,
+                ApOutcome::Aborted(format!("act phase failed: {e:#}")),
+            )?;
+            return Err(e);
+        }
 
+        // A cancel during ACT (run_loop broke with Status("interrupted")) must
+        // not burn a VERIFY call.
+        if is_cancelled(session) {
+            return finish(session, on_event, ApOutcome::Cancelled);
+        }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Verify,
             iteration: state.iteration,
         });
+        // VERIFY is deliberately NOT cancel-checked: it is a short one-shot
+        // (max_tokens=8). A cancel tripped mid-judge surfaces at the next
+        // loop-top check; the runner-level cancel still stops the outer run.
         let verdict = verify(session, &state, verify_retries).await;
         match should_stop(verdict, state.iteration, max_iterations) {
-            Some(ApOutcome::Complete) => {
-                session.set_skill(None);
-                on_event(SessionEvent::Done);
-                return Ok(ApOutcome::Complete);
-            }
-            Some(other) => return Ok(other),
+            Some(outcome) => return finish(session, on_event, outcome),
             None => state.iteration += 1, // MoreWork, under cap → loop again
         }
     }
-    Ok(ApOutcome::MaxIterations)
+}
+
+/// Terminal bookkeeping for every outcome: clear the active skill, emit a
+/// final `Done` so surfaces get a uniform end-of-autopilot marker, and return
+/// the outcome. `should_stop` never yields `Cancelled` — that path is handled
+/// by the explicit checks above.
+fn finish(
+    session: &mut SessionState,
+    on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    outcome: ApOutcome,
+) -> Result<ApOutcome> {
+    session.set_skill(None);
+    on_event(SessionEvent::Done);
+    Ok(outcome)
 }

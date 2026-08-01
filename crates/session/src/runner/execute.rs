@@ -146,10 +146,8 @@ pub(super) async fn execute_call_with_timeout(
             // so it is never stuck Running, prune the stale entries, and emit a
             // terminal SubagentEnd so the UI clears the subagent panel.
             Err(_elapsed) => {
-                force_cancel_subagent(
-                    store, child_cancels, child_turn_cancels, sink, &call_id,
-                )
-                .await;
+                force_cancel_subagent(store, child_cancels, child_turn_cancels, sink, &call_id)
+                    .await;
                 match signal {
                     TaskSignal::Timeout => ToolOutput::err(format!(
                         "subagent timed out after {} without completing",
@@ -423,8 +421,7 @@ mod tests {
     async fn force_cancel_marks_task_and_prunes_registries() {
         use opencoder_store::{LibsqlStore, Store, SubagentStatus, SubagentTaskRecord};
 
-        let store: Arc<dyn Store> =
-            Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "force-cancel-parent".into(),

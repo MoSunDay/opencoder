@@ -9,9 +9,13 @@ use anyhow::{Context, Result};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::ChatStream;
 use opencoder_session::{SessionState, SharedCancel};
-use opencoder_store::{Delivery, Store};
-use ratatui::style::Style;
+use opencoder_store::{Delivery, Store, SubagentStatus};
+use ratatui::backend::Backend;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Clear, Paragraph};
+use ratatui::{Frame, Terminal};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -32,6 +36,7 @@ use crate::worker::{gate_clear_all, process_cmd, rebind_session, ClearAllGate, U
 /// The outer match's post-arm `continue` stays inline in `run_app`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn switch_session(
+    terminal: &mut crate::render::Term,
     pick: crate::task::TaskPick,
     cmd_tx: &mut mpsc::Sender<UiCmd>,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
@@ -81,6 +86,10 @@ pub(crate) async fn switch_session(
         }
         crate::task::TaskPick::Resume(id) => {
             let new_config = Config::load(workdir).unwrap_or_else(|_| config.clone());
+            // In-flight subagents are replayed to completion during resume;
+            // paint a progress banner so the (potentially slow) replay has
+            // visible feedback instead of a frozen pre-switch frame.
+            draw_resume_replay_banner(terminal, store, id).await?;
             let replay_cancel = CancellationToken::new();
             opencoder_session::resume::resume_and_replay(
                 store.clone(),
@@ -276,5 +285,307 @@ pub(crate) async fn handle_clear_all(
                 }
             }
         }
+    }
+}
+
+/// Build the resume-replay banner text for `n` in-flight subagents. Returns
+/// `None` (callers skip the banner entirely) when there is nothing to replay.
+fn resume_banner_message(n: usize) -> Option<String> {
+    if n == 0 {
+        return None;
+    }
+    Some(format!(
+        "Resuming session \u{2014} replaying {n} subagent(s)\u{2026}"
+    ))
+}
+
+/// Paint the banner paragraph centered over the whole frame. Kept generic
+/// over the backend so it can be unit-tested with a `TestBackend`; the
+/// concrete `Term` only enters at the production call site.
+fn render_resume_replay_banner(frame: &mut Frame, msg: &str) {
+    let area = frame.area();
+    frame.render_widget(Clear, area);
+    let para = Paragraph::new(Line::from(Span::styled(
+        msg.to_string(),
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::BOLD),
+    )))
+    .alignment(Alignment::Center);
+    let h = 3u16.min(area.height);
+    let w = (msg.chars().count() as u16 + 4).min(area.width);
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    frame.render_widget(para, Rect::new(x, y, w, h));
+}
+
+/// Paint a full-screen progress banner before `resume_and_replay` when the
+/// target session has in-flight (`Running`) subagents. Replay runs each stuck
+/// child to completion, which can take a while; without this banner the screen
+/// would sit frozen on the pre-switch frame with no feedback. No-op when the
+/// session has no in-flight children (or the store query fails).
+pub(crate) async fn draw_resume_replay_banner<B: Backend>(
+    terminal: &mut Terminal<B>,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) -> Result<()> {
+    let n = store
+        .list_subagent_tasks(session_id)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|t| t.status == SubagentStatus::Running)
+        .count();
+    let Some(msg) = resume_banner_message(n) else {
+        return Ok(());
+    };
+    terminal.draw(|f| render_resume_replay_banner(f, &msg))?;
+    Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_core::Message;
+    use opencoder_store::{
+        Delivery, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
+        SessionPatch, SubagentTaskRecord,
+    };
+    use ratatui::backend::TestBackend;
+
+    /// Store stub for the banner path: only `list_subagent_tasks` is read by
+    /// `draw_resume_replay_banner`; every other method is unreachable and
+    /// panics if called (mirrors the other TUI store stubs).
+    struct BannerStore {
+        running: usize,
+        cancelled: usize,
+        fail_list: bool,
+    }
+
+    fn task_record(status: SubagentStatus, id: &str) -> SubagentTaskRecord {
+        SubagentTaskRecord {
+            task_id: id.to_string(),
+            parent_session_id: "parent".into(),
+            child_session_id: format!("child-{id}"),
+            parent_message_id: Some("a1".into()),
+            agent: "explore".into(),
+            prompt: "explore the codebase".into(),
+            result: None,
+            status,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Store for BannerStore {
+        fn backend_name(&self) -> &'static str {
+            "banner-stub"
+        }
+        async fn list_subagent_tasks(&self, _: &str) -> Result<Vec<SubagentTaskRecord>> {
+            if self.fail_list {
+                anyhow::bail!("boom");
+            }
+            let mut tasks = Vec::new();
+            for i in 0..self.running {
+                tasks.push(task_record(SubagentStatus::Running, &format!("run-{i}")));
+            }
+            for i in 0..self.cancelled {
+                tasks.push(task_record(SubagentStatus::Cancelled, &format!("cancelled-{i}")));
+            }
+            Ok(tasks)
+        }
+        async fn create_session(&self, _: &SessionMeta) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_session(&self, _: &str) -> Result<Option<SessionMeta>> {
+            unimplemented!()
+        }
+        async fn list_sessions(&self, _: &SessionFilter) -> Result<Vec<SessionListItem>> {
+            unimplemented!()
+        }
+        async fn update_session(&self, _: &str, _: &SessionPatch) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_session(&self, _: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn clear_other_sessions(&self, _: &str) -> Result<u64> {
+            unimplemented!()
+        }
+        async fn append_message(&self, _: &str, _: &Message) -> Result<i64> {
+            unimplemented!()
+        }
+        async fn append_messages(&self, _: &str, _: &[Message]) -> Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn load_messages(&self, _: &str) -> Result<Vec<Message>> {
+            unimplemented!()
+        }
+        async fn last_message_seq(&self, _: &str) -> Result<i64> {
+            unimplemented!()
+        }
+        async fn admit_input(&self, _: &SessionInput) -> Result<i64> {
+            unimplemented!()
+        }
+        async fn pending_inputs(&self, _: &str, _: Delivery) -> Result<Vec<SessionInput>> {
+            unimplemented!()
+        }
+        async fn promote_inputs(&self, _: &str, _: i64, _: Delivery) -> Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn promote_next_queued(&self, _: &str) -> Result<Option<i64>> {
+            unimplemented!()
+        }
+        async fn claim_next_queue(&self, _: &str) -> Result<Option<(i64, SessionInput)>> {
+            unimplemented!()
+        }
+        async fn delete_input(&self, _: i64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn swap_input_order(&self, _: &str, _: i64, _: i64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn append_events(&self, _: &[SessionEventRecord]) -> Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn events_after(&self, _: &str, _: i64) -> Result<Vec<SessionEventRecord>> {
+            unimplemented!()
+        }
+        async fn last_event_seq(&self, _: &str) -> Result<i64> {
+            unimplemented!()
+        }
+        async fn create_subagent_task(&self, _: &SubagentTaskRecord) -> Result<()> {
+            unimplemented!()
+        }
+        async fn complete_subagent_task(&self, _: &str, _: &str, _: bool) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_subagent_task(&self, _: &str) -> Result<Option<SubagentTaskRecord>> {
+            unimplemented!()
+        }
+        async fn cancel_subagent_task(&self, _: &str) -> Result<()> {
+            unimplemented!()
+        }
+    }
+
+    /// Concatenate every cell's symbol row-by-row into a searchable string.
+    fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        let area = buf.area;
+        let mut s = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                s.push_str(buf[(x, y)].symbol());
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    /// True when the frame buffer is untouched (all-blank cells).
+    fn blank_buffer(terminal: &Terminal<TestBackend>) -> bool {
+        let buf = terminal.backend().buffer();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if buf[(x, y)].symbol() != " " {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    // ── resume_banner_message (pure) ────────────────────────────────────
+
+    #[test]
+    fn resume_banner_message_none_for_zero() {
+        assert_eq!(resume_banner_message(0), None, "0 in-flight -> no banner");
+    }
+
+    #[test]
+    fn resume_banner_message_counts_subagents() {
+        let one = resume_banner_message(1).expect("n>0 yields a message");
+        assert!(one.contains("replaying 1 subagent"), "got: {one}");
+        assert!(one.contains("Resuming session"), "got: {one}");
+        let three = resume_banner_message(3).expect("n>0 yields a message");
+        assert!(three.contains("replaying 3 subagent"), "got: {three}");
+    }
+
+    // ── draw_resume_replay_banner (store stub + TestBackend) ────────────
+
+    #[tokio::test]
+    async fn resume_banner_drawn_when_running_subagents() {
+        let store: Arc<dyn Store> = Arc::new(BannerStore {
+            running: 2,
+            cancelled: 1,
+            fail_list: false,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        draw_resume_replay_banner(&mut terminal, &store, "parent")
+            .await
+            .unwrap();
+        let text = buffer_text(terminal.backend().buffer());
+        assert!(text.contains("Resuming session"), "banner missing; got: {text:?}");
+        assert!(
+            text.contains("replaying 2 subagent(s)"),
+            "running count must appear; got: {text:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_banner_noop_without_running_subagents() {
+        // Cancelled children are replayed on the next user turn, not eagerly
+        // during resume — so they must NOT trigger the replay banner.
+        let store: Arc<dyn Store> = Arc::new(BannerStore {
+            running: 0,
+            cancelled: 2,
+            fail_list: false,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        draw_resume_replay_banner(&mut terminal, &store, "parent")
+            .await
+            .unwrap();
+        assert!(
+            blank_buffer(&terminal),
+            "no banner expected when only cancelled tasks exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_banner_noop_when_store_query_fails() {
+        // A store error must degrade to a silent no-op, not an error frame
+        // mid-switch (mirrors `unwrap_or_default` in the production path).
+        let store: Arc<dyn Store> = Arc::new(BannerStore {
+            running: 1,
+            cancelled: 0,
+            fail_list: true,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        draw_resume_replay_banner(&mut terminal, &store, "parent")
+            .await
+            .unwrap();
+        assert!(
+            blank_buffer(&terminal),
+            "store failure must degrade to no banner"
+        );
+    }
+
+    #[test]
+    fn banner_renders_within_narrow_area() {
+        // Width/height clamping must keep the paragraph inside a tiny frame
+        // without panicking or spilling past the buffer edge.
+        let mut terminal = Terminal::new(TestBackend::new(10, 2)).unwrap();
+        terminal
+            .draw(|f| {
+                render_resume_replay_banner(f, "Resuming session \u{2014} replaying 9 subagent(s)\u{2026}");
+            })
+            .unwrap();
+        let text = buffer_text(terminal.backend().buffer());
+        assert!(
+            text.contains("Resuming"),
+            "prefix must survive width clamping; got: {text:?}"
+        );
     }
 }

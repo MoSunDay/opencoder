@@ -162,6 +162,7 @@ async fn handoff_steer_consumed_once() {
             delivery: Delivery::Steer,
             prompt: "look at module X".into(),
             images: Vec::new(),
+            display_text: None,
             admitted_seq: 1,
             promoted_seq: None,
         })

@@ -61,6 +61,7 @@ async fn concurrent_store_ops_serialized() {
                 delivery: Delivery::Queue,
                 prompt: format!("q-{w}-{k}"),
                 images: Vec::new(),
+                display_text: None,
                 admitted_seq: k as i64 + 1,
                 promoted_seq: None,
             };

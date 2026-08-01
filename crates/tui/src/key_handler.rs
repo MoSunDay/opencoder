@@ -63,6 +63,7 @@ pub(crate) fn handle_key(
     input_disabled: bool,
     undo_state: &mut crate::undo::UndoState,
     help_scroll: &mut u16,
+    queue_scroll: &mut u32,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -100,6 +101,23 @@ pub(crate) fn handle_key(
             }
             KeyCode::PageDown => {
                 *help_scroll = help_scroll.saturating_add(10);
+                return KeyAction::None;
+            }
+            _ => {}
+        }
+    }
+    // Queue/steer panel scroll keys: Shift+PageUp looks at older pending
+    // entries, Shift+PageDown returns to the newest. Plain PageUp/PageDown
+    // keep scrolling the body (below). A stale offset is clamped on the next
+    // render, so these are safe even while the panel is hidden (plan mode).
+    if k.modifiers.contains(KeyModifiers::SHIFT) {
+        match k.code {
+            KeyCode::PageUp => {
+                *queue_scroll = queue_scroll.saturating_add(1);
+                return KeyAction::None;
+            }
+            KeyCode::PageDown => {
+                *queue_scroll = queue_scroll.saturating_sub(1);
                 return KeyAction::None;
             }
             _ => {}

@@ -46,6 +46,7 @@ async fn images_roundtrip_through_pending_inputs() {
             "data:image/png;base64,iVBORw0KGgo=".into(),
             "https://x.test/b.jpg".into(),
         ],
+        display_text: None,
         admitted_seq: 1,
         promoted_seq: None,
     };
@@ -73,6 +74,7 @@ async fn images_roundtrip_through_claim_next_queue() {
         delivery: Delivery::Queue,
         prompt: "follow up".into(),
         images: vec!["data:image/png;base64,YQ==".into()],
+        display_text: None,
         admitted_seq: 1,
         promoted_seq: None,
     };
@@ -99,6 +101,7 @@ async fn plain_text_input_has_empty_images() {
         delivery: Delivery::Steer,
         prompt: "plain".into(),
         images: Vec::new(),
+        display_text: None,
         admitted_seq: 1,
         promoted_seq: None,
     };

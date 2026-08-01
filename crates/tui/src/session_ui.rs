@@ -24,6 +24,8 @@ pub struct SessionUiState {
     pub history: Vec<String>,
     pub scroll: u32,
     pub follow: bool,
+    /// Queue/steer panel scroll offset (0 = pinned to newest).
+    pub queue_scroll: u32,
     pub sys_tokens: u64,
     pub queue_items: Vec<(i64, String)>,
     pub active_skill: Option<String>,
@@ -43,6 +45,7 @@ impl SessionUiState {
             history: Vec::new(),
             scroll: 0,
             follow: true,
+            queue_scroll: 0,
             sys_tokens,
             queue_items: Vec::new(),
             active_skill: None,
@@ -60,6 +63,7 @@ impl SessionUiState {
         history: &[String],
         scroll: u32,
         follow: bool,
+        queue_scroll: u32,
         sys_tokens: u64,
         queue_items: &[(i64, String)],
         active_skill: &Option<String>,
@@ -71,6 +75,7 @@ impl SessionUiState {
             history: history.to_vec(),
             scroll,
             follow,
+            queue_scroll,
             sys_tokens,
             queue_items: queue_items.to_vec(),
             active_skill: active_skill.clone(),
@@ -460,6 +465,7 @@ mod tests {
             &history,
             42,
             false,
+            7,
             12000,
             &queues,
             &skill,
@@ -471,6 +477,7 @@ mod tests {
         assert_eq!(snap.history, history);
         assert_eq!(snap.scroll, 42);
         assert!(!snap.follow);
+        assert_eq!(snap.queue_scroll, 7);
         assert_eq!(snap.sys_tokens, 12000);
         assert_eq!(snap.chat.steer_items, steers);
         assert_eq!(snap.queue_items, queues);
@@ -514,7 +521,7 @@ mod tests {
     fn snapshot_is_independent_of_source() {
         // Mutating the source chat after snapshot must not affect the snapshot.
         let mut chat = sample_chat();
-        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, &[], &None, &None);
+        let snap = SessionUiState::snapshot(false, &chat, &[], 0, true, 0, 0, &[], &None, &None);
         chat.push_marker(ratatui::text::Line::from("new line"));
         assert_ne!(snap.chat, chat, "snapshot must be a deep copy");
     }
@@ -532,6 +539,7 @@ mod tests {
             &["h1".into()],
             10,
             false,
+            4,
             200,
             &queues,
             &Some("s".into()),
@@ -543,6 +551,7 @@ mod tests {
         assert_eq!(snap.history, vec!["h1".to_string()]);
         assert_eq!(snap.scroll, 10);
         assert!(!snap.follow);
+        assert_eq!(snap.queue_scroll, 4);
         assert_eq!(snap.sys_tokens, 200);
         assert_eq!(snap.chat.steer_items, steers);
         assert_eq!(snap.queue_items, queues);

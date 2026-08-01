@@ -1,7 +1,9 @@
 //! Headless Chrome rendering via CLI. Spawns short-lived `chrome --headless`
-//! processes for `fetch` (dump DOM + extract readable text) and `screenshot`
-//! (capture a full-page PNG). No persistent browser session — each call is
-//! independent. Chrome binary is auto-detected from PATH or `$CHROME_PATH`.
+//! processes for `fetch` (dump DOM + extract readable text / structured SERP),
+//! `resolve` (unwind search-engine redirect URLs to the real target), `html`
+//! (raw rendered DOM for downstream `web_extract`) and `screenshot` (full-page
+//! PNG). No persistent browser session — each call is independent. Chrome
+//! binary is auto-detected from PATH or `$CHROME_PATH`.
 
 use std::path::PathBuf;
 
@@ -11,9 +13,15 @@ use opencoder_core::{json, tool::truncate_output, Tool, ToolContext, ToolOutput}
 use serde_json::Value;
 use url::Url;
 
-use super::web_read;
+use super::{web_extract, web_read};
 
 pub struct ChromeHeadlessTool;
+
+/// Real Chrome desktop UA — search engines and bot walls are far more likely to
+/// serve real content to this than to a `HeadlessChrome` UA. Overridable per
+/// call via the `ua` input.
+const REAL_CHROME_UA: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 /// Locate a Chrome/Chromium binary. Checks `$CHROME_PATH` first, then common
 /// binary names on `$PATH`.
@@ -87,6 +95,118 @@ fn normalise_url(raw: &str) -> Result<String, String> {
     Ok(format!("https://{trimmed}"))
 }
 
+/// Shared Chrome flags: container-safe sandbox/gpu flags plus anti-detection
+/// (real UA, `AutomationControlled` off) and a zh-CN locale so Chinese sites
+/// and search engines behave like a normal browser.
+fn chrome_base_args(user_agent: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "--headless=new".to_string(),
+        "--no-sandbox".to_string(),
+        "--disable-gpu".to_string(),
+        "--disable-blink-features=AutomationControlled".to_string(),
+        "--lang=zh-CN".to_string(),
+    ];
+    let ua = user_agent.unwrap_or(REAL_CHROME_UA);
+    if !ua.is_empty() {
+        args.push(format!("--user-agent={ua}"));
+    }
+    args
+}
+
+/// A fresh per-call profile dir. Required by snap-packaged Chromium in
+/// containers and avoids "profile in use" races when calls overlap.
+fn temp_profile_dir() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "oc-chrome-profile-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ))
+}
+
+/// Render `url` with headless Chrome and return the final DOM. Shared by
+/// `fetch`, `resolve` and `html`; `wait_ms` maps to `--virtual-time-budget`
+/// and `ua` overrides the default Chrome UA.
+pub(crate) async fn dump_dom(
+    url: &str,
+    wait_ms: Option<u64>,
+    ua: Option<&str>,
+) -> Result<String, String> {
+    let chrome = find_chrome().ok_or_else(not_found_msg)?;
+    let profile = temp_profile_dir();
+    let _ = std::fs::create_dir_all(&profile);
+
+    let mut cmd = tokio::process::Command::new(&chrome);
+    cmd.args(chrome_base_args(ua));
+    cmd.arg("--dump-dom");
+    cmd.arg(format!("--user-data-dir={}", profile.display()));
+    if let Some(wait) = wait_ms.filter(|&w| w > 0) {
+        cmd.arg(format!("--virtual-time-budget={wait}"));
+    }
+    cmd.arg(url);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let output = cmd.output().await;
+    let _ = std::fs::remove_dir_all(&profile);
+    match output {
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
+        Ok(o) => Err(format!(
+            "Chrome exited with {}: {}",
+            o.status,
+            String::from_utf8_lossy(&o.stderr)
+        )),
+        Err(e) => Err(format!("Failed to launch Chrome: {e}")),
+    }
+}
+
+/// Recognise search-engine redirect URLs (Baidu/Sogou `/link?url=...`) whose
+/// real target is not decodable client-side and must be rendered to unwind.
+fn is_redirect_url(raw: &str) -> bool {
+    let Ok(u) = Url::parse(raw) else {
+        return false;
+    };
+    let host = u.host_str().unwrap_or("");
+    (host.contains("baidu.com") || host.contains("sogou.com"))
+        && u.path().contains("/link")
+        && u.query().map(|q| q.contains("url=")).unwrap_or(false)
+}
+
+/// Extract the real target URL from a rendered redirect page: prefer
+/// `<link rel="canonical">`, then `<meta property="og:url">`, else the URL
+/// that was actually rendered. Relative canonical hrefs are resolved against
+/// `fallback`.
+pub(crate) fn extract_final_url(html: &str, fallback: &str) -> String {
+    use scraper::{Html, Selector};
+    let doc = Html::parse_document(html);
+    for sel_str in ["link[rel='canonical']", "meta[property='og:url']"] {
+        let Ok(sel) = Selector::parse(sel_str) else {
+            continue;
+        };
+        let Some(el) = doc.select(&sel).next() else {
+            continue;
+        };
+        let href = el
+            .attr("href")
+            .or_else(|| el.attr("content"))
+            .unwrap_or("")
+            .trim();
+        if href.is_empty() {
+            continue;
+        }
+        if let Ok(u) = base_join(fallback, href) {
+            return u.to_string();
+        }
+        return href.to_string();
+    }
+    fallback.to_string()
+}
+
+fn base_join(base: &str, href: &str) -> Result<Url, url::ParseError> {
+    Url::parse(base).and_then(|b| b.join(href))
+}
+
 /// Render structured SERP results as a clean numbered markdown list. The header
 /// echoes the source URL so callers can tell which query produced the rows; the
 /// snippet and url lines are omitted when empty.
@@ -114,58 +234,98 @@ async fn do_fetch(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
         Ok(u) => u,
         Err(msg) => return Ok(ToolOutput::err(msg)),
     };
-    let chrome = match find_chrome() {
-        Some(c) => c,
-        None => return Ok(ToolOutput::err(not_found_msg())),
+    let wait = input.get("wait").and_then(|v| v.as_u64());
+    let ua = input
+        .get("ua")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let html = match dump_dom(&url, wait, ua).await {
+        Ok(h) => h,
+        Err(e) => return Ok(ToolOutput::err(e)),
     };
+    // Auto-detect SERP pages and emit structured results; otherwise fall back
+    // to readable-text extraction. Keeps non-search pages unchanged.
+    let parsed_url = Url::parse(&url).ok();
+    let serp = parsed_url
+        .as_ref()
+        .map(|u| web_read::parse_search_results(u, &html, 12))
+        .filter(|v| !v.is_empty());
+    let body = match serp {
+        Some(results) => format_serp_output(&url, &results),
+        None => {
+            let text = web_read::extract_readable_text(&html);
+            format!("# {url}\n\n{text}")
+        }
+    };
+    Ok(truncate_output(body, ctx.max_output))
+}
 
-    let mut cmd = tokio::process::Command::new(&chrome);
-    cmd.args([
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--dump-dom",
-    ]);
-    if let Some(wait) = input
+/// Render a (possibly search-engine redirect) URL and report the real target
+/// from the rendered page's canonical/og:url plus a title and short excerpt —
+/// the key step that makes Baidu/Sogou SERP links actually usable.
+async fn do_resolve(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    let raw_url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    if raw_url.is_empty() {
+        return Ok(ToolOutput::err("Missing required parameter: url."));
+    }
+    let url = match normalise_url(raw_url) {
+        Ok(u) => u,
+        Err(msg) => return Ok(ToolOutput::err(msg)),
+    };
+    let ua = input
+        .get("ua")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    // Redirect links need a moment to bounce to the real target.
+    let wait = input
         .get("wait")
         .and_then(|v| v.as_u64())
-        .filter(|&w| w > 0)
-    {
-        cmd.arg(format!("--virtual-time-budget={wait}"));
+        .or_else(|| is_redirect_url(&url).then_some(2000));
+    let html = match dump_dom(&url, wait, ua).await {
+        Ok(h) => h,
+        Err(e) => return Ok(ToolOutput::err(e)),
+    };
+    let final_url = extract_final_url(&html, &url);
+    let final_parsed = Url::parse(&final_url).unwrap_or_else(|_| Url::parse(&url).unwrap());
+    let article = web_extract::extract_article(&html, &final_parsed);
+    let mut body = format!("# Resolved URL: {final_url}\n");
+    if !article.title.is_empty() {
+        body.push_str(&format!("**{}**\n", article.title));
     }
-    cmd.arg(&url);
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
+    let excerpt: String = article.content.chars().take(600).collect();
+    if !excerpt.is_empty() {
+        body.push_str(&excerpt);
+        if article.content.chars().count() > 600 {
+            body.push_str("\n…");
+        }
+    }
+    Ok(truncate_output(body, ctx.max_output))
+}
 
-    let output = cmd.output().await;
-    match output {
-        Ok(o) if o.status.success() => {
-            let html = String::from_utf8_lossy(&o.stdout);
-            // Auto-detect SERP pages and emit structured results; otherwise fall
-            // back to readable-text extraction. Keeps non-search pages unchanged.
-            let parsed_url = Url::parse(&url).ok();
-            let serp = parsed_url
-                .as_ref()
-                .map(|u| web_read::parse_search_results(u, &html, 12))
-                .filter(|v| !v.is_empty());
-            let body = match serp {
-                Some(results) => format_serp_output(&url, &results),
-                None => {
-                    let text = web_read::extract_readable_text(&html);
-                    format!("# {url}\n\n{text}")
-                }
-            };
-            Ok(truncate_output(body, ctx.max_output))
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            Ok(ToolOutput::err(format!(
-                "Chrome exited with {}: {stderr}",
-                o.status
-            )))
-        }
-        Err(e) => Ok(ToolOutput::err(format!("Failed to launch Chrome: {e}"))),
+/// Return the raw rendered DOM (truncated) so callers can run `web_extract`
+/// or any other parser over it.
+async fn do_html(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    let raw_url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    if raw_url.is_empty() {
+        return Ok(ToolOutput::err("Missing required parameter: url."));
     }
+    let url = match normalise_url(raw_url) {
+        Ok(u) => u,
+        Err(msg) => return Ok(ToolOutput::err(msg)),
+    };
+    let wait = input.get("wait").and_then(|v| v.as_u64());
+    let ua = input
+        .get("ua")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let html = match dump_dom(&url, wait, ua).await {
+        Ok(h) => h,
+        Err(e) => return Ok(ToolOutput::err(e)),
+    };
+    Ok(truncate_output(
+        format!("<!-- raw DOM of {url} -->\n{html}"),
+        ctx.max_output,
+    ))
 }
 
 async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> {
@@ -181,6 +341,10 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
         Some(c) => c,
         None => return Ok(ToolOutput::err(not_found_msg())),
     };
+    let ua = input
+        .get("ua")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
 
     let tmp = std::env::temp_dir().join(format!(
         "oc-chrome-{}.png",
@@ -189,16 +353,14 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
             .unwrap_or_default()
             .as_millis()
     ));
+    let profile = temp_profile_dir();
+    let _ = std::fs::create_dir_all(&profile);
     let screenshot_arg = format!("--screenshot={}", tmp.display());
 
     let mut cmd = tokio::process::Command::new(&chrome);
-    cmd.args([
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        &screenshot_arg,
-        "--window-size=1920,1080",
-    ]);
+    cmd.args(chrome_base_args(ua));
+    cmd.args([&screenshot_arg, "--window-size=1920,1080"]);
+    cmd.arg(format!("--user-data-dir={}", profile.display()));
     if let Some(wait) = input
         .get("wait")
         .and_then(|v| v.as_u64())
@@ -211,6 +373,7 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
     cmd.stderr(std::process::Stdio::piped());
 
     let output = cmd.output().await;
+    let _ = std::fs::remove_dir_all(&profile);
     match output {
         Ok(o) if o.status.success() && tmp.exists() => {
             let images = match super::image_data::file_to_data_uri(&tmp) {
@@ -243,9 +406,11 @@ impl Tool for ChromeHeadlessTool {
         "chrome_headless"
     }
     fn description(&self) -> &str {
-        "Headless Chrome via CLI. Actions: fetch (render URL with JS, extract readable \
-         text) and screenshot (capture full-page PNG to a temp file). Requires Chrome \
-         or Chromium installed. Prefer web_fetch if available."
+        "Headless Chrome via CLI. Actions: fetch (render URL with JS, extract \
+         readable text / structured SERP), resolve (unwind Baidu/Sogou redirect \
+         links to the real URL + title + excerpt), html (dump raw rendered DOM \
+         for web_extract), screenshot (full-page PNG). Requires Chrome or \
+         Chromium installed."
     }
     fn parameters(&self) -> Value {
         let mut props = serde_json::Map::new();
@@ -253,7 +418,7 @@ impl Tool for ChromeHeadlessTool {
             "action".into(),
             serde_json::json!({
                 "type": "string",
-                "enum": ["fetch", "screenshot"],
+                "enum": ["fetch", "resolve", "html", "screenshot"],
                 "description": "The operation to perform."
             }),
         );
@@ -262,8 +427,12 @@ impl Tool for ChromeHeadlessTool {
             "wait".into(),
             serde_json::json!({
                 "type": "integer",
-                "description": "Virtual time budget in ms to wait for JS rendering (fetch/screenshot)."
+                "description": "Virtual time budget in ms to wait for JS rendering (fetch/resolve/html/screenshot)."
             }),
+        );
+        props.insert(
+            "ua".into(),
+            json::prop_str("Optional override for the default Chrome user-agent string."),
         );
         json::object_schema(Value::Object(props), &["action", "url"])
     }
@@ -275,9 +444,11 @@ impl Tool for ChromeHeadlessTool {
             .unwrap_or("fetch");
         match action {
             "fetch" => do_fetch(&input, ctx).await,
+            "resolve" => do_resolve(&input, ctx).await,
+            "html" => do_html(&input, ctx).await,
             "screenshot" => do_screenshot(&input, ctx).await,
             other => Ok(ToolOutput::err(format!(
-                "Unknown action '{other}'. Use 'fetch' or 'screenshot'."
+                "Unknown action '{other}'. Use 'fetch', 'resolve', 'html' or 'screenshot'."
             ))),
         }
     }
@@ -351,5 +522,82 @@ mod tests {
         assert!(out.contains("   http://www.baidu.com/link?url=a\n"));
         // empty fields are omitted (no url line for second row)
         assert!(!out.contains("**Second**\n   \n"));
+    }
+
+    #[test]
+    fn base_args_use_real_ua_and_anti_detection() {
+        let args = chrome_base_args(None);
+        let joined = args.join(" ");
+        assert!(joined.contains("--headless=new"));
+        assert!(joined.contains("--no-sandbox"));
+        assert!(joined.contains("--disable-blink-features=AutomationControlled"));
+        assert!(joined.contains("--lang=zh-CN"));
+        assert!(joined.contains("--user-agent=Mozilla/5.0"));
+        assert!(!joined.contains("HeadlessChrome"));
+        // ua override replaces the default
+        let custom = chrome_base_args(Some("CustomUA/1.0"));
+        assert!(custom.iter().any(|a| a == "--user-agent=CustomUA/1.0"));
+        assert!(!custom.iter().any(|a| a.contains("Mozilla/5.0")));
+    }
+
+    #[test]
+    fn redirect_urls_are_recognised() {
+        assert!(is_redirect_url(
+            "https://www.baidu.com/link?url=https%3A%2F%2Freal.example%2Fx&wd=&eqid=1"
+        ));
+        assert!(is_redirect_url("https://www.sogou.com/link?url=abc"));
+        assert!(!is_redirect_url("https://www.baidu.com/s?wd=rust"));
+        assert!(!is_redirect_url("https://example.com/article/1"));
+        assert!(!is_redirect_url("not a url"));
+    }
+
+    #[test]
+    fn extract_final_url_prefers_canonical() {
+        let html = "<html><head><link rel=\"canonical\" href=\"https://real.example/post\">\
+                    <meta property=\"og:url\" content=\"https://og.example/post\"></head></html>";
+        assert_eq!(
+            extract_final_url(html, "https://www.baidu.com/link?url=x"),
+            "https://real.example/post"
+        );
+    }
+
+    #[test]
+    fn extract_final_url_falls_back_to_og_url() {
+        let html = "<html><head><meta property=\"og:url\" content=\"https://og.example/post\"></head></html>";
+        assert_eq!(
+            extract_final_url(html, "https://www.baidu.com/link?url=x"),
+            "https://og.example/post"
+        );
+    }
+
+    #[test]
+    fn extract_final_url_resolves_relative_canonical() {
+        let html = "<html><head><link rel=\"canonical\" href=\"/posts/42\"></head></html>";
+        assert_eq!(
+            extract_final_url(html, "https://real.example/a/b"),
+            "https://real.example/posts/42"
+        );
+    }
+
+    #[test]
+    fn extract_final_url_returns_fallback_when_absent() {
+        let html = "<html><head><title>no canonical</title></head><body>hi</body></html>";
+        assert_eq!(
+            extract_final_url(html, "https://example.com/x"),
+            "https://example.com/x"
+        );
+    }
+
+    #[test]
+    fn parameters_schema_advertises_all_actions() {
+        // resolve/html (and screenshot) dispatch live in execute(); the
+        // parameter schema is the pure, unit-testable half of that contract.
+        let schema = ChromeHeadlessTool.parameters();
+        let enum_ = schema["properties"]["action"]["enum"].as_array().unwrap();
+        let actions: Vec<&str> = enum_.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(actions, ["fetch", "resolve", "html", "screenshot"]);
+        let required = schema["required"].as_array().unwrap();
+        let required: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(required, ["action", "url"]);
     }
 }

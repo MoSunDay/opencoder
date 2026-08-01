@@ -13,10 +13,12 @@ pub mod image_data;
 pub mod latent;
 pub mod ls;
 pub mod read;
+pub mod research;
 pub mod search;
 pub mod ssh_pty;
 pub mod task;
 pub mod view_image;
+pub mod web_extract;
 pub mod web_read;
 
 #[cfg(feature = "browser")]
@@ -39,6 +41,8 @@ pub fn registry() -> HashMap<String, ToolArc> {
             Arc::new(computer_use::ComputerUseTool) as ToolArc,
             Arc::new(ssh_pty::SshPtyTool) as ToolArc,
             Arc::new(chrome_headless::ChromeHeadlessTool) as ToolArc,
+            Arc::new(web_extract::WebExtractTool) as ToolArc,
+            Arc::new(research::ResearchTool) as ToolArc,
         ];
         // Browser tools are heavy (obscura + V8): only compiled with the
         // `browser` feature. Runtime visibility is additionally gated by

@@ -43,9 +43,17 @@ pub struct ProviderForm {
     pub name: String,
     /// `true` when editing an existing provider (Name field is read-only).
     pub name_readonly: bool,
+    /// Char-index edit cursor within `name`.
+    pub name_cursor: usize,
     pub model_id: String,
+    /// Char-index edit cursor within `model_id`.
+    pub model_id_cursor: usize,
     pub base_url: String,
+    /// Char-index edit cursor within `base_url`.
+    pub base_url_cursor: usize,
     pub(crate) api_key_input: String,
+    /// Char-index edit cursor within `api_key_input`.
+    pub(crate) api_key_cursor: usize,
     pub(crate) api_key_original: String,
     pub(crate) api_key_edited: bool,
     pub headers: HeadersEditor,
@@ -67,9 +75,13 @@ impl ProviderForm {
         ProviderForm {
             name: name.to_string(),
             name_readonly: true,
+            name_cursor: name.chars().count(),
             model_id: model_id.to_string(),
+            model_id_cursor: model_id.chars().count(),
             base_url: base_url.to_string(),
+            base_url_cursor: base_url.chars().count(),
             api_key_input: String::new(),
+            api_key_cursor: 0,
             api_key_original: api_key.to_string(),
             api_key_edited: false,
             headers: HeadersEditor::new(headers),
@@ -81,12 +93,17 @@ impl ProviderForm {
 
     /// Create a blank form for adding a new provider.
     pub fn new_blank(config: &Config) -> Self {
+        let base_url = config.base_url_for(config.provider_id());
         ProviderForm {
             name: String::new(),
             name_readonly: false,
+            name_cursor: 0,
             model_id: String::new(),
-            base_url: config.base_url_for(config.provider_id()),
+            model_id_cursor: 0,
+            base_url: base_url.clone(),
+            base_url_cursor: base_url.chars().count(),
             api_key_input: String::new(),
+            api_key_cursor: 0,
             api_key_original: String::new(),
             api_key_edited: false,
             headers: HeadersEditor::new(Vec::new()),
@@ -96,23 +113,58 @@ impl ProviderForm {
         }
     }
 
-    /// Paste text into the focused field (mirrors the `Char` arm of `handle_key`).
+    /// Paste text into the focused field at the cursor (mirrors the `Char`
+    /// arm of `handle_key`).
     pub fn paste_into(&mut self, text: &str) {
         if self.headers_active && self.focus == ProviderField::Headers {
             self.headers.paste_into(text);
             return;
         }
         match self.focus {
-            ProviderField::Name if !self.name_readonly => self.name.push_str(text),
-            ProviderField::ModelId => self.model_id.push_str(text),
-            ProviderField::BaseUrl => self.base_url.push_str(text),
+            ProviderField::Name if !self.name_readonly => {
+                let idx = self.name_cursor.min(self.name.chars().count());
+                let (s, i) = crate::composer::insert_str(&self.name, idx, text);
+                self.name = s;
+                self.name_cursor = i;
+            }
+            ProviderField::ModelId => {
+                let idx = self.model_id_cursor.min(self.model_id.chars().count());
+                let (s, i) = crate::composer::insert_str(&self.model_id, idx, text);
+                self.model_id = s;
+                self.model_id_cursor = i;
+            }
+            ProviderField::BaseUrl => {
+                let idx = self.base_url_cursor.min(self.base_url.chars().count());
+                let (s, i) = crate::composer::insert_str(&self.base_url, idx, text);
+                self.base_url = s;
+                self.base_url_cursor = i;
+            }
             ProviderField::ApiKey => {
                 if !self.api_key_edited {
                     self.api_key_input.clear();
                     self.api_key_edited = true;
+                    self.api_key_cursor = 0;
                 }
-                self.api_key_input.push_str(text);
+                let idx = self.api_key_cursor.min(self.api_key_input.chars().count());
+                let (s, i) = crate::composer::insert_str(&self.api_key_input, idx, text);
+                self.api_key_input = s;
+                self.api_key_cursor = i;
             }
+            _ => {}
+        }
+    }
+
+    /// Apply `op` to the focused editable text field's (text, cursor).
+    /// Read-only name, ApiKey (own edited-flag logic), and non-text fields
+    /// are handled by their dedicated arms in `handle_key`.
+    fn edit_text<F>(&mut self, op: F)
+    where
+        F: FnOnce(&mut String, &mut usize),
+    {
+        match self.focus {
+            ProviderField::Name if !self.name_readonly => op(&mut self.name, &mut self.name_cursor),
+            ProviderField::ModelId => op(&mut self.model_id, &mut self.model_id_cursor),
+            ProviderField::BaseUrl => op(&mut self.base_url, &mut self.base_url_cursor),
             _ => {}
         }
     }
@@ -187,14 +239,15 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
             | KeyCode::Char('\u{c}')
             | KeyCode::Char('u')
             | KeyCode::Char('\u{15}') => match form.focus {
-                ProviderField::Name if !form.name_readonly => form.name.clear(),
-                ProviderField::ModelId => form.model_id.clear(),
-                ProviderField::BaseUrl => form.base_url.clear(),
                 ProviderField::ApiKey => {
                     form.api_key_input.clear();
+                    form.api_key_cursor = 0;
                     form.api_key_edited = true;
                 }
-                _ => {}
+                _ => form.edit_text(|text, cur| {
+                    text.clear();
+                    *cur = 0;
+                }),
             },
             _ => {}
         }
@@ -206,6 +259,8 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
         KeyCode::BackTab => form.focus = form.focus.prev(),
         KeyCode::Up => form.focus = form.focus.prev(),
         KeyCode::Down => form.focus = form.focus.next(),
+        KeyCode::Left => form.edit_text(|_, cur| *cur = cur.saturating_sub(1)),
+        KeyCode::Right => form.edit_text(|text, cur| *cur = (*cur + 1).min(text.chars().count())),
         KeyCode::Enter => match form.focus {
             ProviderField::Headers => {
                 form.headers_active = true;
@@ -222,36 +277,50 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
             _ => form.focus = form.focus.next(),
         },
         KeyCode::Backspace => match form.focus {
-            ProviderField::Name if !form.name_readonly => {
-                form.name.pop();
-            }
-            ProviderField::ModelId => {
-                form.model_id.pop();
-            }
-            ProviderField::BaseUrl => {
-                form.base_url.pop();
+            ProviderField::Name | ProviderField::ModelId | ProviderField::BaseUrl => {
+                form.edit_text(|text, cur| {
+                    let idx = (*cur).min(text.chars().count());
+                    if let Some((s, i)) = crate::composer::backspace(text, idx) {
+                        *text = s;
+                        *cur = i;
+                    }
+                });
             }
             ProviderField::ApiKey => {
                 if !form.api_key_edited {
                     form.api_key_input.clear();
                     form.api_key_edited = true;
+                    form.api_key_cursor = 0;
                 }
-                form.api_key_input.pop();
+                let idx = form.api_key_cursor.min(form.api_key_input.chars().count());
+                if let Some((s, i)) = crate::composer::backspace(&form.api_key_input, idx) {
+                    form.api_key_input = s;
+                    form.api_key_cursor = i;
+                }
             }
             _ => {}
         },
         KeyCode::Char(c) => {
             // Ignore chars meant for headers when not in headers mode.
             match form.focus {
-                ProviderField::Name if !form.name_readonly => form.name.push(c),
-                ProviderField::ModelId => form.model_id.push(c),
-                ProviderField::BaseUrl => form.base_url.push(c),
+                ProviderField::Name | ProviderField::ModelId | ProviderField::BaseUrl => {
+                    form.edit_text(|text, cur| {
+                        let idx = (*cur).min(text.chars().count());
+                        let (s, i) = crate::composer::insert_char(text, idx, c);
+                        *text = s;
+                        *cur = i;
+                    });
+                }
                 ProviderField::ApiKey => {
                     if !form.api_key_edited {
                         form.api_key_input.clear();
                         form.api_key_edited = true;
+                        form.api_key_cursor = 0;
                     }
-                    form.api_key_input.push(c);
+                    let idx = form.api_key_cursor.min(form.api_key_input.chars().count());
+                    let (s, i) = crate::composer::insert_char(&form.api_key_input, idx, c);
+                    form.api_key_input = s;
+                    form.api_key_cursor = i;
                 }
                 _ => {}
             }

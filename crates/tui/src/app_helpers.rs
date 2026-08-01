@@ -109,9 +109,10 @@ pub(crate) async fn initial_chat_view(
     }
 }
 
-/// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
-/// subagent view, Ctrl+L collapses all thinking + tool-output blocks / exits a
-/// subagent view / clears the input, and Ctrl+F forces a full-screen redraw.
+/// Pre-`handle_key` intercepts that run while no modal is open: Esc or Ctrl+L
+/// exits a subagent view back to the parent at FOLLOW MODE (bottom of view);
+/// Ctrl+L additionally collapses all thinking + tool-output blocks and clears
+/// the input; Ctrl+F forces a full-screen redraw.
 /// Returns `true` when the key was consumed (caller should `continue` to the
 /// next event).
 ///
@@ -122,42 +123,36 @@ pub(crate) async fn initial_chat_view(
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,
     subagent_focus: &mut Option<usize>,
-    scroll: &mut u32,
     follow: &mut bool,
     selection: &mut Option<SelRange>,
     last_esc: &mut Option<Instant>,
     chat: &mut ChatView,
     input: &mut String,
     cursor_idx: &mut usize,
-    parent_scroll: u32,
-    parent_follow: bool,
     needs_clear: &mut bool,
 ) -> bool {
     *needs_clear = false;
     // Subagent ctx-switch: Esc exits to parent view.
     if subagent_focus.is_some() && k.code == KeyCode::Esc {
         *subagent_focus = None;
-        *scroll = parent_scroll;
-        *follow = parent_follow;
+        *follow = true; // follow mode: render clamps scroll to bottom (render.rs)
         *selection = None;
         *last_esc = None;
         return true;
     }
     // Ctrl+L: collapse all thinking + tool-output blocks, exit subagent view
-    // if in one, and clear the input box. The forced full-screen redraw lives
-    // on Ctrl+F (see below).
+    // if in one, return to follow mode, and clear the input (Ctrl+F = redraw).
     if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
                 view.collapse_all_collapsible();
             }
             *subagent_focus = None;
-            *scroll = parent_scroll;
-            *follow = parent_follow;
             *selection = None;
             *last_esc = None;
         }
         chat.collapse_all_collapsible();
+        *follow = true; // follow mode: render clamps scroll to bottom (render.rs)
         input.clear();
         *cursor_idx = 0;
         return true;
@@ -171,8 +166,6 @@ pub(crate) fn pre_key_intercept(
     false
 }
 
-/// Decide what text to insert into the composer for a bracketed-paste event.
-///
 /// Decide what text to insert into the composer for a bracketed-paste event.
 ///
 /// Dragging a file into the terminal delivers its path atomically — sometimes
@@ -538,8 +531,6 @@ pub(crate) async fn handle_mouse(
     selection: &mut Option<SelRange>,
     chat: &mut ChatView,
     subagent_focus: &mut Option<usize>,
-    parent_scroll: &mut u32,
-    parent_follow: &mut bool,
     subagent_sys: &mut u64,
     workdir: &Path,
     queue_items: &mut Vec<(i64, String)>,
@@ -644,8 +635,6 @@ pub(crate) async fn handle_mouse(
             // its context stats are shown full-body.
             for btn in &hits.subagent_btns {
                 if in_rect(btn.rect, m.column, m.row) {
-                    *parent_scroll = *scroll;
-                    *parent_follow = *follow;
                     *scroll = 0;
                     *follow = true;
                     *subagent_focus = Some(btn.block_idx);
@@ -725,13 +714,10 @@ pub(crate) async fn handle_mouse(
             *dbl_click = false;
         }
         MouseEventKind::ScrollUp => {
-            // Queue/steer panel: wheel-up looks at older (earlier) entries.
-            // The panel sits above the body, so the rects never overlap.
+            // Wheel-up over the queue/steer panel looks at older entries (rects never overlap the body).
             if let Some(r) = hits.queue_panel {
                 if in_rect(r, m.column, m.row) {
-                    // Clamp against the cached panel total (mirrors the body
-                    // `total_rows` clamp) so burst wheel events can't run the
-                    // offset past the oldest entry before the next render.
+                    // Clamp to the cached panel total (mirrors the body clamp) so burst wheels can't overshoot.
                     let max_scroll = hits.queue_total.saturating_sub(r.height as usize);
                     *queue_scroll = queue_scroll.saturating_add(1).min(max_scroll as u32);
                     return MouseOutcome::None;
@@ -745,8 +731,7 @@ pub(crate) async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
-            // Queue/steer panel: wheel-down returns toward the newest
-            // entries (offset 0 = pinned to newest).
+            // Wheel-down over the queue/steer panel returns toward newest (0 = pinned).
             if let Some(r) = hits.queue_panel {
                 if in_rect(r, m.column, m.row) {
                     *queue_scroll = queue_scroll.saturating_sub(1);

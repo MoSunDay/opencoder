@@ -23,7 +23,7 @@ pub const HELP: &str = "\
   PageUp/Down      滚动对话记录  （PageDown = 跳到底部）
   Shift+PageUp/Down 滚动转向面板（查看更早的排队条目 / 回到最新）
   Ctrl+F           强制重新渲染屏幕
-  Ctrl+L           退出子代理视图 / 折叠所有输出 / 清空输入
+  Ctrl+L           退出子代理视图 / 折叠所有输出 / 回到底部跟随 / 清空输入
   Ctrl+L / Ctrl+U  /config、/model 弹窗内: 清空当前聚焦字段
 
 鼠标:            滚轮滚动对话记录；点击箭头跟随最新

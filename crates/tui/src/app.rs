@@ -73,14 +73,13 @@ pub(super) async fn run_app(
     // Reassigned by `rebind_session` on every `/task` session switch.
     let mut cancel = CancellationToken::new();
     let session = session.with_cancel(cancel.clone());
-    // Parent turn-level interrupt handle. The TUI `>` steer button fires
-    // this (instead of a hard `cancel`) to interrupt the parent's current
-    // LLM/tool turn so a pending steer is absorbed at the next boundary --
-    // the run loop continues rather than aborting like double-Esc.
-    // Reassigned by `rebind_session` on every `/task` switch.
-    let mut turn_cancel = session.turn_cancel.clone().unwrap_or_else(|| {
-        Arc::new(std::sync::Mutex::new(CancellationToken::new()))
-    });
+    // Parent turn-level interrupt: TUI `>` steer fires this (not a hard `cancel`) so a
+    // pending steer is absorbed at the next boundary; the run loop continues, unlike
+    // double-Esc. Reassigned by `rebind_session` on every `/task` switch.
+    let mut turn_cancel = session
+        .turn_cancel
+        .clone()
+        .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
     let child_turn_cancels = session.child_turn_cancels.clone();
     let child_cancels = session.child_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
@@ -100,18 +99,21 @@ pub(super) async fn run_app(
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
-    // Queue/steer panel scroll offset (0 = pinned to newest). Lives next to
-    // `scroll`/`follow` because it is session UI state, snapshot/restored
-    // per-session via `SessionUiState` on `/task` switches.
+    // Queue/steer panel scroll offset (0 = pinned to newest); snapshot/restored per-session.
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
-    let mut sys_tokens: u64 =
-        sys_tokens_for(session.agent.name.as_str(), &workdir, initial_skill_body.as_deref());
+    let mut sys_tokens: u64 = sys_tokens_for(
+        session.agent.name.as_str(),
+        &workdir,
+        initial_skill_body.as_deref(),
+    );
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
-    let mut queue_items = crate::queue_panel::restore_pending_mirrors(&store, &session_id, &mut chat.steer_items).await;
+    let mut queue_items =
+        crate::queue_panel::restore_pending_mirrors(&store, &session_id, &mut chat.steer_items)
+            .await;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
@@ -123,8 +125,6 @@ pub(super) async fn run_app(
     let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
-    let mut parent_scroll: u32 = 0;
-    let mut parent_follow: bool = true;
     // Active mouse text-selection in the body (absolute content-row range), or
     // None. Kept in absolute rows so it tracks the text while the viewport
     // scrolls. Cleared on copy (mouse-up) and on subagent ctx-switch.
@@ -186,8 +186,7 @@ pub(super) async fn run_app(
     // `hits` persists outside `loop {}` — resetting inside drops idle clicks.
     let mut hits = MouseHits::default();
 
-    // Idle-resize safety net: `frame_ticker` polls the kernel size each frame;
-    // on mismatch (a lost Resize event — tmux, fast drag) we force autoresize + redraw.
+    // Idle-resize safety net: on kernel-size mismatch (lost Resize — tmux/fast drag) force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
 
     loop {
@@ -270,8 +269,7 @@ pub(super) async fn run_app(
 
         tokio::select! {
             maybe_ev = input_rx.recv() => {
-                // `None` ⇒ the input collector thread exited (stdin closed or a
-                // read error). Quit instead of busy-looping on a dead source.
+                // `None` ⇒ the input collector thread exited (stdin closed/read error); quit instead of busy-looping.
                 let ev = match maybe_ev {
                     Some(ev) => ev,
                     None => {
@@ -398,15 +396,12 @@ pub(super) async fn run_app(
                         if pre_key_intercept(
                             k,
                             &mut subagent_focus,
-                            &mut scroll,
                             &mut follow,
                             &mut selection,
                             &mut last_esc,
                             &mut chat,
                             &mut input,
                             &mut cursor_idx,
-                            parent_scroll,
-                            parent_follow,
                             &mut needs_clear,
                         ) {
                             apply_force_redraw(
@@ -430,8 +425,7 @@ pub(super) async fn run_app(
                             &mut follow,
                             &mut last_esc,
                             &mut skill_menu,
-                            // Composer wrap geometry: matches the values used by `render`
-                            // (inner_w = term width - 2 borders, prompt_w = 2 for the `❯ ` prefix)
+                            // Composer wrap geometry matches `render` (inner_w = width-2, prompt_w = 2 for `❯ `),
                             // so Up/Down cursor movement tracks the rendered wrapped rows.
                             terminal
                                 .size()
@@ -458,9 +452,8 @@ pub(super) async fn run_app(
                                             push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                         }
                                         if !running {
-                                            // Skill-only submit: send a trigger prompt naming the active
-                                            // skill so the model records a user turn and begins acting on
-                                            // the skill body injected into the system prompt.
+                                            // Skill-only submit: send a trigger prompt naming the active skill so
+                                            // the model records a user turn and acts on the injected skill body.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
                                             let image_uris = snapshot_image_uris(&pending_images);
@@ -472,14 +465,11 @@ pub(super) async fn run_app(
                                             pending_images.clear();
                                             running = true;
                                             follow = true;
-                                            if chat.agent == "plan" {
-                                                chat.plan_submitted = true;
-                                            }
+                                            chat.note_requirement_submitted();
                                             chat.begin_turn();
                                         } else {
-                                            // Skill-only submit while running: admit the skill trigger
-                                            // as a queued input and drain pending images so they don't
-                                            // leak into a later unrelated submit.
+                                            // Skill-only submit while running: admit the trigger as a queued input and
+                                            // drain pending images so they don't leak into a later unrelated submit.
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
                                             let image_uris = snapshot_image_uris(&pending_images);
@@ -520,9 +510,7 @@ pub(super) async fn run_app(
                                     cancelled = false; // B3: clear stale flag from a prior cancel
                                     running = true;
                                     follow = true;
-                                    if chat.agent == "plan" {
-                                        chat.plan_submitted = true;
-                                    }
+                                    chat.note_requirement_submitted();
                                     chat.begin_turn();
                                 }
                             }
@@ -578,6 +566,7 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(queued_item_display(&text, clean)), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, queued_item_display(&text, clean)));
+                                        chat.note_requirement_submitted();
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `{$name}` token): admit the trigger
@@ -587,6 +576,7 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(skill_token_display(skill_name)), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, skill_token_display(skill_name)));
+                                        chat.note_requirement_submitted();
                                     }
                                 }
                                 follow = true;
@@ -697,7 +687,7 @@ pub(super) async fn run_app(
                         let mut copy_msg: Option<String> = None;
                         let outcome = handle_mouse(
                             m, &hits, &mut scroll, &mut follow, &mut selection, &mut chat,
-                            &mut subagent_focus, &mut parent_scroll, &mut parent_follow,
+                            &mut subagent_focus,
                             &mut subagent_sys, &workdir, &mut queue_items, &session_id,
                             store.as_ref(), &mut copy_msg, &mut last_click, &mut dbl_click,
                             &mut queue_scroll,

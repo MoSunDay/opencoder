@@ -466,3 +466,7 @@ mod tests;
 #[cfg(test)]
 #[path = "key_handler_plan_edit_tests.rs"]
 mod plan_edit_tests;
+
+#[cfg(test)]
+#[path = "key_handler_queue_scroll_tests.rs"]
+mod queue_scroll_tests;

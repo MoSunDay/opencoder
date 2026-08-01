@@ -550,9 +550,8 @@ fn save_default_confirm_renders_visible_dialog() {
 
 #[test]
 fn ctrl_clear_empties_model_id_and_base_url() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
-        &provider_cfg(),
-    )));
+    let mut slot: Option<ModelMenu> =
+        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
     {
         let f = match slot.as_mut().unwrap() {
             ModelMenu::Form(f) => f,
@@ -583,9 +582,8 @@ fn ctrl_clear_empties_model_id_and_base_url() {
 #[test]
 fn ctrl_clear_editable_name_but_readonly_name_is_noop() {
     // New provider: editable name clears.
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
-        &provider_cfg(),
-    )));
+    let mut slot: Option<ModelMenu> =
+        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
     {
         let f = match slot.as_mut().unwrap() {
             ModelMenu::Form(f) => f,
@@ -602,7 +600,11 @@ fn ctrl_clear_editable_name_but_readonly_name_is_noop() {
 
     // Editing an existing provider: name is read-only → no-op.
     let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
-        "acme", "u", "m", "k", vec![],
+        "acme",
+        "u",
+        "m",
+        "k",
+        vec![],
     )));
     {
         let f = match slot.as_mut().unwrap() {
@@ -622,7 +624,11 @@ fn ctrl_clear_editable_name_but_readonly_name_is_noop() {
 #[test]
 fn ctrl_clear_api_key_marks_edited() {
     let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::from_existing(
-        "svc", "u", "m", "orig-key-12345", vec![],
+        "svc",
+        "u",
+        "m",
+        "orig-key-12345",
+        vec![],
     )));
     {
         let f = match slot.as_mut().unwrap() {
@@ -656,9 +662,8 @@ fn slot_edited(slot: &Option<ModelMenu>) -> bool {
 
 #[test]
 fn ctrl_d_still_quits_in_provider_form() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Form(ProviderForm::new_blank(
-        &provider_cfg(),
-    )));
+    let mut slot: Option<ModelMenu> =
+        Some(ModelMenu::Form(ProviderForm::new_blank(&provider_cfg())));
     let out = handle_model_key(&mut slot, ctrl('d'));
     assert!(matches!(out, ModelOutcome::Quit), "Ctrl+D must quit modal");
     assert!(slot.is_none());
@@ -671,6 +676,7 @@ fn provider_form_cursor_on_model_id() {
     let mut form = ProviderForm::new_blank(&provider_cfg());
     form.focus = ProviderField::ModelId;
     form.model_id = "glm-5.2".into();
+    form.model_id_cursor = form.model_id.chars().count(); // end
     let menu = ModelMenu::Form(form);
 
     let backend = TestBackend::new(80, 24);
@@ -692,6 +698,7 @@ fn provider_form_cursor_on_api_key_uses_raw_buffer() {
     form.focus = ProviderField::ApiKey;
     form.api_key_edited = true;
     form.api_key_input = "n".into();
+    form.api_key_cursor = form.api_key_input.chars().count(); // end
     let menu = ModelMenu::Form(form);
 
     let backend = TestBackend::new(80, 24);
@@ -768,9 +775,8 @@ fn provider_form_cursor_inside_headers_value() {
     let mut form = ProviderForm::new_blank(&provider_cfg());
     form.focus = ProviderField::Headers;
     form.headers_active = true;
-    form.headers = crate::model_menu::headers::HeadersEditor::new(vec![
-        ("X-Region".into(), "eu-west".into()),
-    ]);
+    form.headers =
+        crate::model_menu::headers::HeadersEditor::new(vec![("X-Region".into(), "eu-west".into())]);
     form.headers.editing_value = true; // editing value of pair 0
     let menu = ModelMenu::Form(form);
 
@@ -786,3 +792,5 @@ fn provider_form_cursor_inside_headers_value() {
     // (5 spaces + 20-char name + " = "); "eu-west" has 7 chars → cx = 4+1+28+7 = 40
     terminal.backend_mut().assert_cursor_position((40, 17));
 }
+
+// ── provider form cursor editing (Left/Right, insert/delete at cursor) ───

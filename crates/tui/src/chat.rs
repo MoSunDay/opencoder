@@ -255,6 +255,17 @@ impl ChatView {
         }
     }
 
+    /// Record that a user requirement was delivered to the current agent.
+    /// In plan mode this arms the plan→act handoff, so Shift+Tab collapses the
+    /// planning transcript (only the final plan carries over). Every delivery
+    /// path — Enter-submit, Tab-queue while running — must call this; a
+    /// requirement given via the queue panel is still a requirement.
+    pub fn note_requirement_submitted(&mut self) {
+        if self.agent == "plan" {
+            self.plan_submitted = true;
+        }
+    }
+
     /// Begin a new turn. The single owner of the turn-start invariant: any
     /// transient presentation status (e.g. an `[interrupted] ...` marker set on
     /// the previous turn) must be cleared so it does not leak into the status

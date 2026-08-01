@@ -534,15 +534,16 @@ impl Drop for ScopedHome {
 }
 
 #[test]
-fn global_agents_md_excluded_from_compaction_budget() {
-    // A large global ~/.opencoder/AGENTS.md must NOT affect the compaction
-    // decision. We prove this differentially: `should_compact` must return
-    // the same value whether or not the global file is present. The transcript
-    // is sized so that, IF the global file were counted, the estimate would
-    // jump far over the 1800-token budget and trip compaction.
+fn global_agents_md_counts_toward_compaction_budget() {
+    // A large global ~/.opencoder/AGENTS.md must be COUNTED: it ships in the
+    // system prompt (see `build_system`) and consumes the real context window,
+    // so it must trip compaction once it pushes the estimate over the budget.
+    // Proven differentially: with the global file the session trips, without
+    // it the same session stays under budget. The transcript is sized so that
+    // ONLY the global file decides the outcome.
     let home = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
-    // 100k chars ≈ 25k tokens — far above the 1800 budget if it were counted.
+    // 100k chars ≈ 25k tokens — far above the 1800 budget when counted.
     std::fs::write(
         home.path().join(".opencoder").join("AGENTS.md"),
         "g".repeat(100_000),
@@ -562,23 +563,24 @@ fn global_agents_md_excluded_from_compaction_budget() {
         let client: Arc<dyn ChatStream> = client_with_default_done("ok");
         let mut s = SessionState::new("g", agent, config.clone(), client, dir.path().to_path_buf());
         // ~1125 estimated transcript tokens — comfortably under the 1800 budget
-        // with headroom for the (act) system prompt. The 100k-char global file
-        // (~25k tokens) would still blow the budget if it were ever counted.
+        // together with the (act) system prompt, so the session does NOT trip
+        // without the global file. The 100k-char global (~25k tokens) pushes
+        // the estimate far over the budget.
         s.messages.push(big_user_message("u1", 4_500));
 
-        // With the global file present: excluded → must NOT trip.
+        // With the global file present: counted → must trip.
         let with_global = should_compact(&s);
         // Remove the global file and re-evaluate on the same session.
         std::fs::remove_file(&global_path).unwrap();
         let without_global = should_compact(&s);
 
         assert!(
-            !with_global,
-            "global agents.md must be excluded so the budget is not blown"
+            with_global,
+            "global agents.md must count toward the compaction budget"
         );
-        assert_eq!(
-            with_global, without_global,
-            "global agents.md must not change the compaction decision"
+        assert!(
+            !without_global,
+            "without the global file the session stays under budget"
         );
     });
 }

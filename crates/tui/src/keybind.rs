@@ -5,7 +5,7 @@ pub const HELP: &str = "\
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
   Ctrl+Shift+Tab  切换模式（保留上下文，不重置）
-  Ctrl+U          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
+  Ctrl+T          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
   Ctrl+V          粘贴剪贴板图片（截图）
   Shift+Enter / Ctrl+J   插入换行（多行输入）
   $                选择并插入技能 -> {$name}；提交时加载
@@ -21,10 +21,12 @@ pub const HELP: &str = "\
   Ctrl+Z / Ctrl+Y  撤销 / 重做输入编辑
   ↑ / ↓            多行时移动光标；单行时浏览历史记录
   PageUp/Down      滚动对话记录  （PageDown = 跳到底部）
-  Ctrl+L           强制重新渲染屏幕 / 退出子代理视图 / 折叠所有输出 / 清空输入
+  Ctrl+F           强制重新渲染屏幕
+  Ctrl+L           退出子代理视图 / 折叠所有输出 / 清空输入
+  Ctrl+L / Ctrl+U  /config、/model 弹窗内: 清空当前聚焦字段
 
 鼠标:            滚轮滚动对话记录；点击箭头跟随最新
                   拖拽选择文本并复制到剪贴板（OSC52）
-                  SHIFT+拖拽 = 终端原生选择（OSC52 被拦截时的备用方案）
+                  SHIFT+拖拽 = 选中并复制到剪贴板
                   转向面板: ✕ 删除, > 立即提交（中断并提升）
 ";

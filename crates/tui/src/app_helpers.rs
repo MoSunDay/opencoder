@@ -110,11 +110,12 @@ pub(crate) async fn initial_chat_view(
 }
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc exits a
-/// subagent view, and Ctrl+L collapses all thinking + tool-output blocks / exits a
-/// subagent view / clears the input. Returns `true` when the key was
-/// consumed (caller should `continue` to the next event).
+/// subagent view, Ctrl+L collapses all thinking + tool-output blocks / exits a
+/// subagent view / clears the input, and Ctrl+F forces a full-screen redraw.
+/// Returns `true` when the key was consumed (caller should `continue` to the
+/// next event).
 ///
-/// Note: Ctrl+U is intentionally NOT handled here — it is a pure act<->plan
+/// Note: Ctrl+T is intentionally NOT handled here — it is a pure act<->plan
 /// mode toggle (see `handle_key`). Keeping it out of this intercept lets it
 /// switch mode without collapsing thinking or clearing the input box.
 #[allow(clippy::too_many_arguments)]
@@ -143,8 +144,8 @@ pub(crate) fn pre_key_intercept(
         return true;
     }
     // Ctrl+L: collapse all thinking + tool-output blocks, exit subagent view
-    // if in one, and clear the input box. (Ctrl+U used to alias this but is
-    // now a pure act<->plan mode toggle handled in `handle_key`.)
+    // if in one, and clear the input box. The forced full-screen redraw lives
+    // on Ctrl+F (see below).
     if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
@@ -159,8 +160,11 @@ pub(crate) fn pre_key_intercept(
         chat.collapse_all_collapsible();
         input.clear();
         *cursor_idx = 0;
-        // Force a full-screen redraw: the caller resets the terminal's diff
-        // buffer via `terminal.clear()` so the next draw repaints every cell.
+        return true;
+    }
+    // Ctrl+F: force a full-screen redraw. The caller resets the terminal's
+    // diff buffer via `terminal.clear()` so the next draw repaints every cell.
+    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('f')) {
         *needs_clear = true;
         return true;
     }
@@ -543,21 +547,6 @@ pub(crate) async fn handle_mouse(
     last_click: &mut Option<Instant>,
     dbl_click: &mut bool,
 ) -> MouseOutcome {
-    // Shift+drag bypass: when Shift is held during a left-button Down or Drag,
-    // return immediately so the terminal can perform its own native selection
-    // (which works even when OSC52 is blocked by tmux/screen or the terminal).
-    // Also clear any in-progress app-layer selection so the overlay doesn't
-    // linger. Up events are NOT bypassed so a non-Shift drag that started
-    // normally still completes its copy.
-    if m.modifiers.contains(KeyModifiers::SHIFT)
-        && matches!(
-            m.kind,
-            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
-        )
-    {
-        *selection = None;
-        return MouseOutcome::None;
-    }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             // Follow button: highest-priority check — MUST precede double-click
@@ -719,12 +708,13 @@ pub(crate) async fn handle_mouse(
                     Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
                     _ => &*chat,
                 };
+                let shift = m.modifiers.contains(KeyModifiers::SHIFT);
                 if let Some(report) =
-                    crate::selection::finish_copy(viewed, hits.body, sel, *dbl_click)
+                    crate::selection::finish_copy(viewed, hits.body, sel, *dbl_click || shift)
                 {
                     *copy_msg = Some(report.status_message());
-                // Real drag/dbl-click that found nothing; bare click stays silent.
-                } else if sel.0 != sel.1 || *dbl_click {
+                // Real drag/dbl-click/shift-click that found nothing; bare click stays silent.
+                } else if sel.0 != sel.1 || *dbl_click || shift {
                     *copy_msg = Some("Nothing to copy at this position".to_string());
                 }
                 *selection = None;
@@ -773,7 +763,7 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<Arc<dyn Store>> {
 
 /// Force a full-screen redraw when `needs_clear` is set: clears the terminal
 /// diff buffer so the next frame repaints every cell, then authorises the
-/// render. Called after `pre_key_intercept` reports Ctrl+L. Extracted from
+/// render. Called after `pre_key_intercept` reports Ctrl+F. Extracted from
 /// `app::run_app` to keep that file under the 800-line iteration cap.
 pub(crate) fn apply_force_redraw<B: ratatui::backend::Backend>(
     needs_clear: bool,

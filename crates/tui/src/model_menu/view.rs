@@ -554,4 +554,50 @@ fn render_provider_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Pro
             .alignment(Alignment::Left),
         popup,
     );
+
+    // Place terminal cursor at the end of the focused raw input field.
+    // ApiKey positions by its raw edit buffer (empty when the masked original
+    // is still showing — typing replaces it); read-only name shows no cursor.
+    let text_field = match form.focus {
+        ProviderField::Name if !form.name_readonly => Some(form.name.as_str()),
+        ProviderField::ModelId => Some(form.model_id.as_str()),
+        ProviderField::BaseUrl => Some(form.base_url.as_str()),
+        ProviderField::ApiKey => Some(if form.api_key_edited {
+            form.api_key_input.as_str()
+        } else {
+            ""
+        }),
+        _ => None,
+    };
+    if let (Some(raw), Some(row)) = (text_field, provider_text_field_row(form.focus)) {
+        let cx = popup.x + 1 + 15 + raw.chars().count() as u16;
+        let cy = popup.y + 1 + row;
+        f.set_cursor_position((cx, cy));
+    }
+    // Headers sub-mode: cursor inside the active name/value cell of the
+    // selected pair (pair rows start at line 5 of the popup).
+    if form.headers_active && form.focus == ProviderField::Headers {
+        let idx = form.headers.selected;
+        if let Some((hn, hv)) = form.headers.pairs.get(idx) {
+            let (raw, col) = if form.headers.editing_value {
+                (hv.as_str(), 28)
+            } else {
+                (hn.as_str(), 5)
+            };
+            let cx = popup.x + 1 + col + raw.chars().count() as u16;
+            let cy = popup.y + 1 + 5 + idx as u16;
+            f.set_cursor_position((cx, cy));
+        }
+    }
+}
+
+/// Row index in the provider-form `lines` vec for text-edit fields (0-based).
+fn provider_text_field_row(field: ProviderField) -> Option<u16> {
+    match field {
+        ProviderField::Name => Some(0),
+        ProviderField::ModelId => Some(1),
+        ProviderField::BaseUrl => Some(2),
+        ProviderField::ApiKey => Some(3),
+        _ => None,
+    }
 }

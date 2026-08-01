@@ -60,6 +60,10 @@ pub(crate) fn esc() -> crossterm::event::KeyEvent {
 pub(crate) fn backspace() -> crossterm::event::KeyEvent {
     crossterm::event::KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty())
 }
+/// Ctrl+<c> chord (the char form terminals report for Ctrl+L / Ctrl+U).
+pub(crate) fn ctrl(c: char) -> crossterm::event::KeyEvent {
+    crossterm::event::KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+}
 
 // ── HOME isolation ─────────────────────────────────────────────────────────
 //

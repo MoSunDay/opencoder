@@ -47,6 +47,19 @@ impl HeadersEditor {
     pub fn handle_key(&mut self, k: crossterm::event::KeyEvent) -> HeaderAction {
         use crossterm::event::{KeyCode, KeyModifiers};
         if k.modifiers.contains(KeyModifiers::CONTROL) {
+            // Ctrl+L / Ctrl+U: clear the active name/value cell. All other
+            // Ctrl chords stay swallowed.
+            match k.code {
+                KeyCode::Char('l')
+                | KeyCode::Char('\u{c}')
+                | KeyCode::Char('u')
+                | KeyCode::Char('\u{15}') => {
+                    if let Some(s) = self.active_string() {
+                        s.clear();
+                    }
+                }
+                _ => {}
+            }
             return HeaderAction::Active;
         }
         match k.code {
@@ -149,6 +162,41 @@ mod tests {
     }
     fn right() -> KeyEvent {
         KeyEvent::new(KeyCode::Right, KeyModifiers::empty())
+    }
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+    fn ctrl_raw(c: char) -> KeyEvent {
+        // Raw control-char form (kitty keyboard protocol).
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_u_clears_active_name() {
+        let mut ed = HeadersEditor::new(vec![("X-Foo".into(), "bar".into())]);
+        ed.handle_key(ctrl('u'));
+        assert_eq!(ed.pairs[0].0, "", "Ctrl+U clears the active name");
+        assert_eq!(ed.pairs[0].1, "bar", "value untouched");
+    }
+
+    #[test]
+    fn ctrl_l_clears_active_value() {
+        let mut ed = HeadersEditor::new(vec![("X-Foo".into(), "bar".into())]);
+        ed.editing_value = true;
+        ed.handle_key(ctrl('l'));
+        assert_eq!(ed.pairs[0].1, "", "Ctrl+L clears the active value");
+        assert_eq!(ed.pairs[0].0, "X-Foo", "name untouched");
+    }
+
+    #[test]
+    fn ctrl_clear_raw_control_char_forms_match() {
+        let mut ed = HeadersEditor::new(vec![("X-Foo".into(), "bar".into())]);
+        ed.handle_key(ctrl_raw('\u{c}')); // raw Ctrl+L
+        assert_eq!(ed.pairs[0].0, "", "raw control-char Ctrl+L must clear the name");
+        ed.pairs[0].0 = "X-Foo".into();
+        ed.editing_value = true;
+        ed.handle_key(ctrl_raw('\u{15}')); // raw Ctrl+U
+        assert_eq!(ed.pairs[0].1, "", "raw control-char Ctrl+U must clear the value");
     }
 
     #[test]

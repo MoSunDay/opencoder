@@ -5,8 +5,10 @@
 use super::*;
 use opencoder_store::SessionMeta;
 
+mod mouse_helpers;
 mod mouse_tests;
 mod mouse_clip_tests;
+mod mouse_dbl_click_tests;
 
 #[test]
 fn paste_existing_absolute_file_echoes_full_path() {
@@ -133,12 +135,12 @@ async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
     );
 }
 
-/// Ctrl+U is now a pure act<->plan mode toggle and must NOT be consumed by
+/// Ctrl+T is now a pure act<->plan mode toggle and must NOT be consumed by
 /// `pre_key_intercept` (so it falls through to `handle_key`, which switches
-/// mode without collapsing thinking or clearing the input). Ctrl+L still owns
-/// the collapse/clear behaviour.
+/// mode without collapsing thinking or clearing the input). Ctrl+L owns the
+/// collapse/clear behaviour (without the forced redraw — that moved to Ctrl+F).
 #[test]
-fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
+fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     fn run(key: KeyEvent) -> (bool, String, usize, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
@@ -166,30 +168,46 @@ fn ctrl_u_not_intercepted_ctrl_l_clears_input() {
         (consumed, input, cursor, needs_clear)
     }
 
-    let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+    let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
     let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+    let ctrl_f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
 
-    // Ctrl+U must pass through untouched (handled downstream as a mode toggle).
-    let (u_consumed, u_input, u_cursor, u_clear) = run(ctrl_u);
+    // Ctrl+T must pass through untouched (handled downstream as a mode toggle).
+    let (t_consumed, t_input, t_cursor, t_clear) = run(ctrl_t);
     assert!(
-        !u_consumed,
-        "Ctrl+U must NOT be consumed by pre_key_intercept"
+        !t_consumed,
+        "Ctrl+T must NOT be consumed by pre_key_intercept"
     );
     assert_eq!(
-        u_input, "hello world",
-        "Ctrl+U must leave the input untouched"
+        t_input, "hello world",
+        "Ctrl+T must leave the input untouched"
     );
-    assert_eq!(u_cursor, 5, "Ctrl+U must not move the cursor");
-    assert!(!u_clear, "Ctrl+U must not request a forced clear/redraw");
+    assert_eq!(t_cursor, 5, "Ctrl+T must not move the cursor");
+    assert!(!t_clear, "Ctrl+T must not request a forced clear/redraw");
 
-    // Ctrl+L still collapses thinking / clears the input.
+    // Ctrl+L still collapses thinking / clears the input, but no longer
+    // forces the full-screen redraw (that is Ctrl+F's job now).
     let (l_consumed, l_input, l_cursor, l_clear) = run(ctrl_l);
     assert!(l_consumed, "Ctrl+L must be consumed by pre_key_intercept");
     assert!(l_input.is_empty(), "Ctrl+L must clear the input");
     assert_eq!(l_cursor, 0, "Ctrl+L must reset the cursor");
     assert!(
-        l_clear,
-        "Ctrl+L must request a forced full-screen redraw (needs_clear == true)"
+        !l_clear,
+        "Ctrl+L must NOT request a forced full-screen redraw anymore"
+    );
+
+    // Ctrl+F: force redraw only — consumes the key, sets needs_clear, and
+    // leaves the input / cursor untouched.
+    let (f_consumed, f_input, f_cursor, f_clear) = run(ctrl_f);
+    assert!(f_consumed, "Ctrl+F must be consumed by pre_key_intercept");
+    assert_eq!(
+        f_input, "hello world",
+        "Ctrl+F must leave the input untouched"
+    );
+    assert_eq!(f_cursor, 5, "Ctrl+F must not move the cursor");
+    assert!(
+        f_clear,
+        "Ctrl+F must request a forced full-screen redraw (needs_clear == true)"
     );
 }
 
@@ -489,7 +507,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
 }
 
 // ---------------------------------------------------------------------------
-// apply_force_redraw — Ctrl+L force-redraw helper
+// apply_force_redraw — Ctrl+F force-redraw helper
 // ---------------------------------------------------------------------------
 
 /// Concatenate every cell symbol of a ratatui buffer into one searchable

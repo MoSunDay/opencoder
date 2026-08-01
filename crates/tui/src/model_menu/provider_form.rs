@@ -1,7 +1,7 @@
 //! `/model` provider add/edit form: name / model_id / base_url / api_key /
 //! headers. Save produces a `ProviderPatch`.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
 
 use super::headers::{HeaderAction, HeadersEditor};
@@ -165,7 +165,8 @@ impl ProviderForm {
 
 /// Handle a key in provider-form mode.
 pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<ModelMenu>) {
-    // When headers sub-mode is active, route there first.
+    // When headers sub-mode is active, route there first (Ctrl+L/U clear the
+    // active header name/value inside HeadersEditor).
     if form.headers_active && form.focus == ProviderField::Headers {
         match form.headers.handle_key(k) {
             HeaderAction::Exit => {
@@ -177,6 +178,28 @@ pub fn handle_key(mut form: ProviderForm, k: KeyEvent) -> (ModelOutcome, Option<
     }
 
     form.error = None;
+    // Ctrl+L / Ctrl+U: clear the focused text field. ApiKey also flips
+    // api_key_edited so the cleared buffer is persisted as an edit (same
+    // semantics as the Backspace branch). Read-only name is a no-op.
+    if k.modifiers.contains(KeyModifiers::CONTROL) {
+        match k.code {
+            KeyCode::Char('l')
+            | KeyCode::Char('\u{c}')
+            | KeyCode::Char('u')
+            | KeyCode::Char('\u{15}') => match form.focus {
+                ProviderField::Name if !form.name_readonly => form.name.clear(),
+                ProviderField::ModelId => form.model_id.clear(),
+                ProviderField::BaseUrl => form.base_url.clear(),
+                ProviderField::ApiKey => {
+                    form.api_key_input.clear();
+                    form.api_key_edited = true;
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        return (ModelOutcome::Idle, Some(ModelMenu::Form(form)));
+    }
     match k.code {
         KeyCode::Esc => return (ModelOutcome::Cancel, None),
         KeyCode::Tab => form.focus = form.focus.next(),

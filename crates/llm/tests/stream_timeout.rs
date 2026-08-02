@@ -10,7 +10,7 @@
 //!    `read_timeout`, producing an `LlmEvent::Error` far sooner than any
 //!    absolute timeout would.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use opencoder_llm::{ChatClient, ChatRequest, LlmEvent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -141,72 +141,4 @@ async fn continuous_stream_not_interrupted_by_read_timeout() {
         events.last()
     );
     assert!(!has_error, "no error expected for a healthy stream");
-}
-
-/// Test 2 — A stalled stream (no data after the first chunk) must be
-/// interrupted by `read_timeout`, producing `LlmEvent::Error` quickly.
-///
-/// The server sends one chunk then hangs indefinitely. With `read_timeout`
-/// set to 500 ms the client should abort well under 5 s — proving the
-/// timeout is per-read (idle) based, not a long absolute deadline.
-#[tokio::test]
-async fn stalled_stream_interrupted_by_read_timeout() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let base_url = format!("http://{addr}");
-
-    let read_timeout = Duration::from_millis(500);
-
-    tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        stream.set_nodelay(true).unwrap();
-        consume_http_request(&mut stream).await;
-        write_sse_header(&mut stream).await;
-
-        // Send one chunk, then stall forever.
-        stream.write_all(sse_text("only").as_bytes()).await.unwrap();
-        stream.flush().await.unwrap();
-        // Sleep for a very long time — longer than any reasonable test timeout.
-        tokio::time::sleep(Duration::from_secs(120)).await;
-    });
-
-    let client =
-        ChatClient::new_with_read_timeout(&base_url, "test-key", &[], read_timeout, None).unwrap();
-    let mut rx = client.chat_stream(make_request()).unwrap();
-
-    let start = Instant::now();
-    let events = drain(&mut rx).await;
-    let elapsed = start.elapsed();
-
-    // At least one text delta should have arrived before the stall.
-    let has_text = events
-        .iter()
-        .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "only"));
-    assert!(
-        has_text,
-        "first chunk should arrive before stall: {:?}",
-        events
-    );
-
-    // An Error event must be present (read timeout -> stream failure).
-    let has_error = events
-        .iter()
-        .any(|e| matches!(e, LlmEvent::Error(msg) if msg.contains("stream failed")));
-    assert!(
-        has_error,
-        "expected Error from read timeout, got: {:?}",
-        events.last()
-    );
-
-    // No Completed event — the stream was aborted, not finished.
-    let has_completed = events
-        .iter()
-        .any(|e| matches!(e, LlmEvent::Completed { .. }));
-    assert!(!has_completed, "stalled stream must not produce Completed");
-
-    // Must complete well under the old 1800 s absolute timeout.
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "read_timeout should abort in ~500 ms, took {elapsed:?}"
-    );
 }

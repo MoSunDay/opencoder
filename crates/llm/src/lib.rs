@@ -1,4 +1,5 @@
 pub mod client;
+pub mod retry;
 pub mod event;
 pub mod message;
 pub mod mock;

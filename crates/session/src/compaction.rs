@@ -256,42 +256,38 @@ async fn summarize(
     };
     let mut rx = session.client.chat_stream(req)?;
     let mut text = String::new();
-    // Cancel + idle guard, mirroring `run_one_llm_call`: a double-Esc / web
-    // interrupt during the compaction-summary stream must break out promptly
-    // instead of blocking the runner until the summary finishes (issue #3).
-    // On cancel we abandon the summary -- `compact` only rewrites
-    // `session.messages` AFTER this returns Ok, so abandoning leaves the
-    // transcript untouched.
+    // Cancel guard only: the event-level idle watchdog now lives inside the
+    // streaming client, which retries stalls transparently. A double-Esc / web
+    // interrupt during the compaction-summary stream must still break out
+    // promptly instead of blocking the runner. On cancel we abandon the
+    // summary -- `compact` only rewrites `session.messages` AFTER this returns
+    // Ok, so abandoning leaves the transcript untouched.
     let mut cancel_fut = std::pin::pin!(await_cancel(session));
-    let idle_dur = session.config.stream_idle_timeout();
     loop {
-        // Recreated each iteration so every received event resets the idle
-        // window (matches the LLM-call guard).
-        let mut idle = std::pin::pin!(tokio::time::sleep(idle_dur));
         tokio::select! {
             biased;
             _ = &mut cancel_fut => {
                 on_event(SessionEvent::Status("interrupted".into()));
                 return Err(anyhow!("cancelled"));
             }
-            _ = &mut idle => {
-                on_event(SessionEvent::Status("stream idle".into()));
-                return Err(anyhow!(
-                    "compaction summary stream idle timeout: no events in {:?}",
-                    idle_dur
-                ));
-            }
             ev = rx.recv() => {
                 let ev = match ev { Some(ev) => ev, None => break };
                 match ev {
                     LlmEvent::TextDelta(t) => {
                         text.push_str(&t);
-                        on_event(SessionEvent::TextDelta(t));
+                        on_event(SessionEvent::CompactionDelta(t));
                     }
                     LlmEvent::Completed { text: t, .. } => {
                         if !t.is_empty() {
                             text = t;
                         }
+                    }
+                    LlmEvent::Retrying { .. } => {
+                        // Mid-stream retry: the client discarded its partial
+                        // summary and regenerates from scratch. Drop deltas
+                        // accumulated so far so the two attempts aren't
+                        // concatenated; the final `Completed` overwrites `text`.
+                        text.clear();
                     }
                     LlmEvent::Error(e) => return Err(anyhow!(e)),
                     _ => {}

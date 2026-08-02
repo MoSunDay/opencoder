@@ -31,10 +31,11 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         config.model = m.clone();
     }
     let ep = startup_endpoint(&config)?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new(
+    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new_with_read_timeout(
         &ep.base_url,
         &ep.api_key,
         &ep.headers,
+        config.stream_idle_timeout(),
         config.network.proxy.as_deref(),
     )?);
 

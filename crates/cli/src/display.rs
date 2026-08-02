@@ -11,6 +11,7 @@ pub(crate) fn print_event(ev: &SessionEvent) {
             let _ = std::io::stdout().flush();
         }
         SessionEvent::ReasoningDelta(_) => {}
+        SessionEvent::CompactionDelta(_) => {}
         SessionEvent::ToolStart { name, input, .. } => {
             if name == "task" {
                 return;

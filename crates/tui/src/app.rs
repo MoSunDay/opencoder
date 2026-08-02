@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
 use anyhow::Result;
 use crossterm::event::Event;
 use opencoder_core::Config;
@@ -27,19 +26,15 @@ use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::theme;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
-
 #[path = "app_loop.rs"]
 pub(crate) mod app_loop;
 
 #[path = "app_task.rs"]
 mod app_task;
-
 #[path = "app_bootstrap.rs"]
 mod app_bootstrap;
-
 #[path = "subagent_input.rs"]
 mod subagent_input;
-
 #[path = "app_display.rs"]
 mod app_display;
 
@@ -378,6 +373,7 @@ pub(super) async fn run_app(
                                 &mut cache_salt_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
+                                &mut mode_flash, anim_tick, &mut sys_tokens,
                             )
                             .await
                             {
@@ -563,20 +559,23 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
+                                    let display = queued_item_display(&text, clean);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(queued_item_display(&text, clean)), &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
-                                        queue_items.push((seq, queued_item_display(&text, clean)));
+                                        queue_items.push((seq, display.clone()));
+                                        app_loop::push_queued_marker(&mut chat, &display);
                                         chat.note_requirement_submitted();
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit (only a `{$name}` token): admit the trigger
-                                    // to the queue so the active skill is acted on, not dropped.
+                                    // Pure-skill submit: admit the trigger so the active skill is acted on.
                                     let trigger = skill_trigger(skill_name);
+                                    let display = skill_token_display(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(skill_token_display(skill_name)), &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
-                                        queue_items.push((seq, skill_token_display(skill_name)));
+                                        queue_items.push((seq, display.clone()));
+                                        app_loop::push_queued_marker(&mut chat, &display);
                                         chat.note_requirement_submitted();
                                     }
                                 }

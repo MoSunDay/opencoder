@@ -97,6 +97,38 @@ fn ctrl_j_inserts_newline() {
 }
 
 #[test]
+fn ctrl_u_clears_entire_input_line() {
+    let mut input = String::from("hello world");
+    let mut idx = 11;
+    let action = run_handle(
+        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(input.is_empty(), "Ctrl+U must clear the entire input line");
+    assert_eq!(idx, 0, "Ctrl+U must reset the cursor to 0");
+}
+
+#[test]
+fn ctrl_u_on_empty_input_is_noop() {
+    let mut input = String::new();
+    let mut idx = 0;
+    let action = run_handle(
+        key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        &mut input,
+        &mut idx,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(input.is_empty(), "Ctrl+U on empty input must be a no-op");
+    assert_eq!(idx, 0, "Ctrl+U on empty input must not move the cursor");
+}
+
+#[test]
 fn tab_while_running_admits_queue() {
     let mut input = String::from("next task");
     let mut idx = 9;

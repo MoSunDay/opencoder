@@ -123,11 +123,11 @@ const DELTA_MIN_CAPACITY: usize = 64;
 /// safely dropped when the UI channel is near capacity without data loss.
 fn is_droppable_delta(sev: &SessionEvent) -> bool {
     match sev {
-        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) => true,
+        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) | SessionEvent::CompactionDelta(_) => true,
         SessionEvent::SubagentChild { ev, .. } => {
             matches!(
                 ev.as_ref(),
-                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_)
+                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) | SessionEvent::CompactionDelta(_)
             )
         }
         _ => false,
@@ -303,10 +303,11 @@ pub async fn process_cmd(
             let applied_model;
             let prev_model = sess.config.model.clone();
             match new_cfg.resolve_endpoint() {
-                Ok(ep) => match ChatClient::new(
+                Ok(ep) => match ChatClient::new_with_read_timeout(
                     &ep.base_url,
                     &ep.api_key,
                     &ep.headers,
+                    new_cfg.stream_idle_timeout(),
                     new_cfg.network.proxy.as_deref(),
                 ) {
                     Ok(new_client) => {

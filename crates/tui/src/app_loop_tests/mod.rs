@@ -529,12 +529,12 @@ async fn fold_done_clears_queue_items() {
     );
 }
 
-/// When a queued follow-up is consumed at the idle boundary, the view must
-/// embed a `queued: {prompt}` marker into the transcript (so the user sees
-/// WHEN it fired) and drop the pending entry by seq — mirroring the
-/// `SteerConsumed` marker behavior.
+/// When a queued follow-up is consumed at the idle boundary, the handler
+/// drops the pending entry by seq. The marker is no longer pushed at consume
+/// time — it was already echoed at submission time (see `push_queued_marker`
+/// in app.rs's Queue arm).
 #[tokio::test]
-async fn fold_queue_consumed_pushes_marker_and_drops_entry() {
+async fn fold_queue_consumed_drops_entry_without_marker() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![
@@ -568,8 +568,8 @@ async fn fold_queue_consumed_pushes_marker_and_drops_entry() {
     .await;
 
     assert!(
-        crate::chat::block_text(&chat).contains("queued: queued prompt X"),
-        "QueueConsumed must embed a queued marker with the prompt text"
+        !crate::chat::block_text(&chat).contains("queued:"),
+        "QueueConsumed must NOT push a marker — it was already echoed at submit time"
     );
     assert_eq!(
         queue_items.len(),
@@ -728,3 +728,7 @@ mod plan_edit_tests;
 mod session_only_tests;
 
 mod image_paste_tests;
+
+#[cfg(test)]
+#[path = "../app_loop_dispatch_cmd_tests.rs"]
+mod dispatch_cmd_tests;

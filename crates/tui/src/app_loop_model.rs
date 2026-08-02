@@ -48,10 +48,11 @@ pub(crate) async fn handle_model_outcome(
                             // `/task` new sessions pick up the new endpoint
                             // (the worker only swaps its own sess.client).
                             match reloaded.resolve_endpoint() {
-                                Ok(ep) => match opencoder_llm::ChatClient::new(
+                                Ok(ep) => match opencoder_llm::ChatClient::new_with_read_timeout(
                                     &ep.base_url,
                                     &ep.api_key,
                                     &ep.headers,
+                                    reloaded.stream_idle_timeout(),
                                     reloaded.network.proxy.as_deref(),
                                 ) {
                                     Ok(new_client) => {

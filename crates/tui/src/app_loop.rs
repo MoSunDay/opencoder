@@ -553,6 +553,8 @@ pub(crate) fn route_paste(
     input: &mut String,
     cursor_idx: &mut usize,
     pending_images: &mut Vec<(String, String)>,
+    asm: &mut crate::image_chunk::Assembly,
+    chat: &mut ChatView,
     workdir: &Path,
 ) -> LoopFlow {
     if task_picker_open || cache_salt_menu_open {
@@ -570,6 +572,56 @@ pub(crate) fn route_paste(
         menu.paste(trimmed);
         return LoopFlow::Redraw;
     }
+
+    // Chunked image frames (ocimg protocol): tmux/SSH may truncate huge
+    // single pastes, so scripts emit small self-delimiting frames the TUI
+    // reassembles. Non-frame lines in the same paste fall through to the
+    // composer as text.
+    if trimmed.lines().any(|l| l.starts_with("ocimg ")) {
+        let now = crate::image_chunk::now_ms();
+        let mut leftover = String::new();
+        for line in trimmed.lines() {
+            use crate::image_chunk::FeedOutcome;
+            match asm.feed_line(line, now) {
+                FeedOutcome::NotFrame => {
+                    if !leftover.is_empty() {
+                        leftover.push('\n');
+                    }
+                    leftover.push_str(line);
+                }
+                FeedOutcome::Pending => {}
+                FeedOutcome::Complete { uri, filename, chunks } => {
+                    pending_images
+                        .push((uri, format!("{filename} ({chunks} chunks)")));
+                }
+                FeedOutcome::Warn { message } => {
+                    chat.push_marker(Line::from(Span::styled(
+                        message,
+                        Style::default().fg(theme::warn_color()),
+                    )));
+                }
+            }
+        }
+        if !leftover.is_empty() {
+            let (new_input, new_idx) = composer::insert_str(input, *cursor_idx, &leftover);
+            *input = new_input;
+            *cursor_idx = new_idx;
+        }
+        return LoopFlow::Proceed;
+    }
+
+    // Inline data:image URI — attach verbatim (trailing newline already stripped).
+    if let Some(filename) = crate::image_chunk::image_data_uri_filename(trimmed) {
+        pending_images.push((trimmed.to_string(), filename));
+        return LoopFlow::Proceed;
+    }
+
+    // HTTP(S) URL pointing at an image — attach the URL with its filename.
+    if let Some(filename) = crate::image_chunk::image_url_filename(trimmed) {
+        pending_images.push((trimmed.to_string(), filename));
+        return LoopFlow::Proceed;
+    }
+
     // Main composer: check if pasted content is an image file path.
     if let Some((data_uri, filename)) = crate::image_util::try_load_image(trimmed, workdir) {
         pending_images.push((data_uri, filename));

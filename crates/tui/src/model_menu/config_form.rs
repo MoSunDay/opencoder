@@ -82,7 +82,6 @@ pub enum ConfigField {
     Browser,
     ComputerUse,
     ToolsSubagent,
-    ApEnabled,
     ApMaxIter,
     Theme,
     Save,
@@ -90,7 +89,7 @@ pub enum ConfigField {
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 14] = [
+    const ORDER: [ConfigField; 13] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -100,7 +99,6 @@ impl ConfigField {
         ConfigField::Browser,
         ConfigField::ComputerUse,
         ConfigField::ToolsSubagent,
-        ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
         ConfigField::Theme,
         ConfigField::Save,
@@ -139,7 +137,6 @@ pub struct ConfigForm {
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
-    pub ap_enabled: bool,
     pub ap_max_iter_input: String,
     /// Char-index edit cursor within `ap_max_iter_input`.
     pub ap_max_iter_cursor: usize,
@@ -171,7 +168,6 @@ impl ConfigForm {
             capabilities_browser: config.capabilities.browser,
             capabilities_computer_use: config.capabilities.computer_use,
             capabilities_tools_subagent: config.capabilities.tools_subagent,
-            ap_enabled: config.autopilot.enabled,
             ap_max_iter_input: ap_max_iter_input.clone(),
             ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             theme: crate::theme::ThemeKind::from_label(&config.theme),
@@ -233,7 +229,6 @@ impl ConfigForm {
             capabilities_browser: self.capabilities_browser,
             capabilities_computer_use: self.capabilities_computer_use,
             capabilities_tools_subagent: self.capabilities_tools_subagent,
-            ap_enabled: self.ap_enabled,
             ap_max_iter,
             theme: self.theme.label().to_string(),
         }
@@ -319,7 +314,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
-            ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
             ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::MaxTokens
             | ConfigField::ContextSize
@@ -340,7 +334,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
-            ConfigField::ApEnabled => form.ap_enabled = !form.ap_enabled,
             ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::MaxTokens
             | ConfigField::ContextSize
@@ -384,7 +377,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::ToolsSubagent if c == ' ' => {
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
-            ConfigField::ApEnabled if c == ' ' => form.ap_enabled = !form.ap_enabled,
             ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
             ConfigField::MaxTokens
             | ConfigField::ContextSize

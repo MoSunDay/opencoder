@@ -24,7 +24,6 @@ fn config_patch_serializes_all_fields() {
         capabilities_browser: true,
         capabilities_computer_use: false,
         capabilities_tools_subagent: false,
-        ap_enabled: true,
         ap_max_iter: 15,
         theme: "dark".into(),
     };
@@ -39,7 +38,6 @@ fn config_patch_serializes_all_fields() {
     );
     assert_eq!(v["context_limit"], serde_json::json!(128_000));
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
-    assert_eq!(v["autopilot"]["enabled"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
     assert_eq!(v["theme"], serde_json::json!("dark"));
 }
@@ -56,7 +54,6 @@ fn config_patch_omits_max_tokens_when_none() {
         capabilities_browser: false,
         capabilities_computer_use: false,
         capabilities_tools_subagent: false,
-        ap_enabled: false,
         ap_max_iter: 10,
         theme: "dark".into(),
     };
@@ -101,7 +98,6 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::Browser,
         ConfigField::ComputerUse,
         ConfigField::ToolsSubagent,
-        ConfigField::ApEnabled,
         ConfigField::ApMaxIter,
         ConfigField::Theme,
         ConfigField::Save,
@@ -272,33 +268,9 @@ fn config_form_inits_autopilot_from_config() {
     c.autopilot.enabled = true;
     c.autopilot.max_iterations = 7;
     let f = ConfigForm::new(&c);
-    assert!(f.ap_enabled);
     assert_eq!(f.ap_max_iter_input, "7");
     let p = f.build_patch();
-    assert!(p.ap_enabled);
     assert_eq!(p.ap_max_iter, 7);
-}
-
-#[test]
-fn config_form_toggle_ap_enabled() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Config(f) => f,
-            _ => unreachable!(),
-        };
-        f.focus = ConfigField::ApEnabled;
-    }
-    let before = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.ap_enabled,
-        _ => unreachable!(),
-    };
-    handle_model_key(&mut slot, right());
-    let after = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f.ap_enabled,
-        _ => unreachable!(),
-    };
-    assert_eq!(after, !before, "Right toggles ap_enabled");
 }
 
 #[test]

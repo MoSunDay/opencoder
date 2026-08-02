@@ -11,7 +11,6 @@ pub struct ConfigPatch {
     pub capabilities_browser: bool,
     pub capabilities_computer_use: bool,
     pub capabilities_tools_subagent: bool,
-    pub ap_enabled: bool,
     pub ap_max_iter: u32,
     pub theme: String,
 }
@@ -31,7 +30,6 @@ impl ConfigPatch {
                 "tools_subagent": self.capabilities_tools_subagent,
             },
             "autopilot": {
-                "enabled": self.ap_enabled,
                 "max_iterations": self.ap_max_iter,
             },
         });

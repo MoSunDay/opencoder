@@ -278,13 +278,23 @@ pub(crate) async fn fold_ui_events(
                     } else if !*drain_pending {
                         *running = false;
                         chat.steer_items.clear();
-                        // Only clear queue_items on Done — the store queue is provably
-                        // empty (claim_one_queued returned None before Done). On Error,
-                        // queued items may still be pending in the store; they are
-                        // maintained per-item by QueueConsumed events and will be
-                        // consumed on the next drain.
                         if matches!(sev, SessionEvent::Done) {
-                            queue_items.clear();
+                            // Re-sync the queue mirror from the store: with
+                            // one-queued-real-prompt-per-run semantics, Done no
+                            // longer proves the store queue is empty — rows
+                            // behind the consumed prompt stay pending for the
+                            // next explicit submission and must remain visible
+                            // in the side panel. On Error, rows are maintained
+                            // per-item by QueueConsumed events as before.
+                            *queue_items = crate::queue_panel::pending_mirror(
+                                store
+                                    .pending_inputs(
+                                        session_id,
+                                        opencoder_store::Delivery::Queue,
+                                    )
+                                    .await
+                                    .unwrap_or_default(),
+                            );
                         }
                     }
                 }
@@ -363,11 +373,12 @@ pub(crate) async fn dispatch_command(
     session_id: &str,
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
-    config: &Config,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
     input: &mut String,
     cursor_idx: &mut usize,
+    config: &mut Config,
+    workdir: &Path,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -453,14 +464,18 @@ pub(crate) async fn dispatch_command(
             *follow = true;
             chat.begin_turn();
         }
-        // Display-only commands: inspect / kill background bash. Never start a
-        // turn and never reach session.messages — the result is pushed as a
-        // purple marker. Work in any state (idle + mid-turn).
+        // Display-only commands: inspect / kill background bash, toggle
+        // autopilot. Never start a turn and never reach session.messages —
+        // the result is pushed as a purple marker. Work in any state
+        // (idle + mid-turn).
         CommandOutcome::Dispatch(SlashAction::Ps) => {
-            local_cmd::run("/ps", chat);
+            local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
         }
         CommandOutcome::Dispatch(SlashAction::Stop) => {
-            local_cmd::run("/stop", chat);
+            local_cmd::run("/stop", chat, config, cmd_tx, workdir).await;
+        }
+        CommandOutcome::Dispatch(SlashAction::Ap) => {
+            local_cmd::run("/ap", chat, config, cmd_tx, workdir).await;
         }
         // `/install_tools`: handled one frame up in `run_app` (needs the
         // terminal handle to suspend/resume the screen). Decision only.

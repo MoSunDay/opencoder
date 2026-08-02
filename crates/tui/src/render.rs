@@ -144,6 +144,7 @@ pub(crate) fn render<B: Backend>(
     run_ms: u64,
     help_scroll: u16,
     is_top_level: bool,
+    ap_enabled: bool,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -300,6 +301,9 @@ pub(crate) fn render<B: Backend>(
         }
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
+        }
+        if ap_enabled {
+            render_status_chip(f, composer_area, "AP", theme::local_color());
         }
         if let Some(text) = mode_flash {
             let is_plan = text.contains("plan");

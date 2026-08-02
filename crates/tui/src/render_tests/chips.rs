@@ -112,3 +112,140 @@ fn header_line_indices_aligned_with_flatten_while_withheld() {
         );
     }
 }
+
+/// The `AP` autopilot chip is drawn at the composer top-right in the local
+/// (magenta) color when autopilot is enabled, and absent when disabled.
+#[test]
+fn ap_chip_visible_only_when_autopilot_enabled() {
+    use crate::render::render;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
+    let chat = ChatView::default();
+    let local = crate::theme::local_color();
+
+    let find_ap = |terminal: &mut Terminal<TestBackend>| -> bool {
+        let buf = terminal.backend().buffer();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    let symbol = cell.symbol();
+                    let is_ap = symbol == "A" || symbol == "P";
+                    let on_local_bg = cell.bg == local;
+                    if is_ap && on_local_bg {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    };
+
+    let mut scroll = 0u32;
+    let mut queue_scroll: u32 = 0;
+    let mut hits = MouseHits::default();
+
+    // Disabled: no AP chip anywhere on the frame.
+    {
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        render(
+            &mut terminal,
+            &chat,
+            "",
+            0,
+            "title",
+            "agent",
+            false,
+            false,
+            0,
+            0,
+            200_000,
+            200_000,
+            "model",
+            "idle",
+            &[],
+            &[],
+            &mut scroll,
+            true,
+            &mut queue_scroll,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &mut hits,
+            &mut None,
+            None,
+            None,
+            &[],
+            false,
+            None,
+            0,
+            0u16,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(!find_ap(&mut terminal), "no AP chip when autopilot is off");
+    }
+
+    // Enabled: the AP chip sits on a local-color (magenta) background cell.
+    {
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        render(
+            &mut terminal,
+            &chat,
+            "",
+            0,
+            "title",
+            "agent",
+            false,
+            false,
+            0,
+            0,
+            200_000,
+            200_000,
+            "model",
+            "idle",
+            &[],
+            &[],
+            &mut scroll,
+            true,
+            &mut queue_scroll,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &mut hits,
+            &mut None,
+            None,
+            None,
+            &[],
+            false,
+            None,
+            0,
+            0u16,
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(find_ap(&mut terminal), "AP chip must render when enabled");
+        // The chip text " AP " is visible somewhere on the frame (drawn at the
+        // composer's top-right row).
+        let buf = terminal.backend().buffer();
+        let area = buf.area;
+        let chip_rows: Vec<u16> = (0..area.height)
+            .filter(|&y| row_text(buf, y, area.width).contains(" AP "))
+            .collect();
+        assert!(
+            !chip_rows.is_empty(),
+            "AP chip text must be visible; rows with it: {chip_rows:?}"
+        );
+    }
+}

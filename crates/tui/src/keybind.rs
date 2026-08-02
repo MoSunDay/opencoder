@@ -17,6 +17,7 @@ pub const HELP: &str = "\
   Ctrl+D           退出
   Ctrl+H           打开/关闭此帮助
   Ctrl+W           删除光标前的单词
+  Ctrl+U           清空整个输入行（可被 Ctrl+Z 撤销）
   Ctrl+A / Ctrl+E  光标移到行首/行尾
   Ctrl+Z / Ctrl+Y  撤销 / 重做输入编辑
   ↑ / ↓            多行时移动光标；单行时浏览历史记录

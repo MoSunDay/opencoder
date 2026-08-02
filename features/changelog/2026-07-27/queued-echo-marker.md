@@ -42,7 +42,7 @@ Commit: (working-tree, pre-initial-commit)
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
-| queued echo 标记推送 + 条目删除 | `fold_queue_consumed_pushes_marker_and_drops_entry` | `app_loop_tests/mod.rs` |
+| QueueConsumed 仅删除条目（不再推送标记） | `fold_queue_consumed_drops_entry_without_marker` | `app_loop_tests/mod.rs` |
 | 未知 seq 的 QueueConsumed 为 no-op | `fold_queue_consumed_unknown_seq_is_noop` | `app_loop_tests/mod.rs` |
 
 - 全量回归：`cargo test --workspace` → **1213 passed / 0 failed / 0 ignored**

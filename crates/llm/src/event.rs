@@ -48,9 +48,16 @@ pub enum LlmEvent {
         tool_calls: Vec<CompletedToolCall>,
         usage: Option<Usage>,
     },
-    /// Emitted before each retry backoff during the pre-stream retry loop
-    /// (`attempt` is 1-based, `max` is the total attempt budget). Lets the UI
-    /// surface "↻ retry attempt/max" so a transient failure isn't silent.
+    /// Emitted before each retry backoff (`attempt` is 1-based, `max` is the
+    /// total attempt budget). Lets the UI surface "↻ retry attempt/max" so a
+    /// transient failure isn't silent.
+    ///
+    /// Used by BOTH retry loops — the pre-stream connection loop and the
+    /// mid-stream interruption loop. When emitted mid-stream, the consumer MUST
+    /// discard any deltas accumulated so far (text/reasoning/tool-call
+    /// buffers): the retry restarts the response from scratch, so the final
+    /// `Completed.text` is a fresh frame, never stitched across attempts.
+    /// Persisted text is therefore always internally consistent.
     Retrying {
         attempt: u8,
         max: u8,

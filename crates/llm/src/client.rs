@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -8,9 +8,13 @@ use tracing::{debug, warn};
 
 use crate::event::{LlmEvent, Usage};
 use crate::request::ChatRequest;
+use crate::retry::{
+    backoff_delay, retry_decision, should_retry_stream_interruption, AttemptOutcome,
+    RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
+};
 use crate::sse::SseDecoder;
 use crate::stream::ChatStream;
-use crate::tool_call::ToolAccumulator;
+use crate::tool_call::{CompletedToolCall, ToolAccumulator};
 
 #[derive(Debug, Clone)]
 pub struct ChatParams {
@@ -24,6 +28,12 @@ pub struct ChatClient {
     base_url: String,
     api_key: String,
     headers: Vec<(String, String)>,
+    /// Event-level idle watchdog: if no decoded SSE event arrives within this
+    /// window, the stream is treated as interrupted (and retried). Independent
+    /// of the HTTP client's byte-level `read_timeout`, which catches total
+    /// stalls; this catches a connection dribbling keep-alive heartbeats with
+    /// no content.
+    idle_timeout: Duration,
 }
 
 /// Default per-read idle timeout (10 minutes). A read that stalls for this
@@ -45,9 +55,10 @@ impl ChatClient {
         Self::new_with_read_timeout(base_url, api_key, headers, DEFAULT_READ_TIMEOUT, proxy)
     }
 
-    /// Construct a client with a custom per-read idle timeout. Useful for
-    /// tests that need a short stall window. See [`Self::new`] for proxy
-    /// semantics.
+    /// Construct a client with a custom per-read timeout. The same value
+    /// governs both the HTTP client's byte-level `read_timeout` and the
+    /// event-level idle watchdog, so a configured `stream_idle_timeout` flows
+    /// through both layers consistently. See [`Self::new`] for proxy semantics.
     pub fn new_with_read_timeout(
         base_url: &str,
         api_key: &str,
@@ -61,6 +72,7 @@ impl ChatClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             headers: headers.to_vec(),
+            idle_timeout: read_timeout,
         })
     }
 
@@ -71,9 +83,12 @@ impl ChatClient {
         let client = self.http.clone();
         let key = self.api_key.clone();
         let headers = self.headers.clone();
+        let idle_timeout = self.idle_timeout;
 
         tokio::spawn(async move {
-            if let Err(e) = run_stream(client, url, key, headers, body, tx.clone()).await {
+            if let Err(e) = run_stream(client, url, key, headers, body, tx.clone(), idle_timeout)
+                .await
+            {
                 let _ = tx
                     .send(LlmEvent::Error(format!("stream failed: {e:#}")))
                     .await;
@@ -87,11 +102,45 @@ impl ChatStream for ChatClient {
     fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
         ChatClient::chat_stream(self, req)
     }
-    fn backend(&self) -> &'static str {
-        "openai"
+}
+
+/// Accumulated output from one stream attempt, returned to the retry wrapper so
+/// it can degrade sensibly when the retry budget is exhausted.
+struct StreamOutcome {
+    text: String,
+    tool_calls: Vec<CompletedToolCall>,
+    usage: Option<Usage>,
+}
+
+/// Snapshot whatever a single attempt accumulated, for degradation on
+/// exhaustion. `tools.finish_all()` finalizes in-progress tool calls.
+fn snapshot(text: String, tools: &mut ToolAccumulator, usage: Option<Usage>) -> StreamOutcome {
+    StreamOutcome {
+        text,
+        tool_calls: tools.finish_all().unwrap_or_default(),
+        usage,
     }
 }
 
+/// Outcome of a single stream attempt.
+enum OnceError {
+    /// Pre-stream connect failed (`connect_with_retry` exhausted its budget).
+    Connect(anyhow::Error),
+    /// The stream was interrupted mid-flight; `partial` holds whatever was
+    /// accumulated so far so the wrapper can decide to retry or degrade.
+    Interrupted {
+        reason: StreamInterruption,
+        partial: StreamOutcome,
+    },
+}
+
+/// Drive a chat completion to completion, retrying mid-stream interruptions
+/// (chunk read errors, truncated streams, idle stalls) up to
+/// [`MAX_STREAM_ATTEMPTS`] times. The pre-stream connection loop
+/// (`connect_with_retry`) runs on every attempt; mid-stream retries reset all
+/// per-attempt state (text/tool/usage buffers) so a retried response is
+/// regenerated cleanly — the persisted text always comes from a single frame's
+/// `Completed`, never stitched across attempts.
 async fn run_stream(
     client: reqwest::Client,
     url: String,
@@ -99,132 +148,161 @@ async fn run_stream(
     headers: Vec<(String, String)>,
     body: Value,
     tx: mpsc::Sender<LlmEvent>,
+    idle_timeout: Duration,
 ) -> Result<()> {
-    // Pre-stream retry loop: retries ONLY connection + initial HTTP status,
-    // never mid-stream. This guarantees partial streamed output can never be
-    // duplicated by a retry (a retry only happens when NO bytes have been
-    // emitted to the consumer yet).
-    let resp = connect_with_retry(&client, &url, &key, &headers, &body, &tx).await?;
+    let mut attempt: u8 = 0;
+    loop {
+        attempt = attempt.saturating_add(1);
+        match run_stream_once(&client, &url, &key, &headers, &body, &tx, idle_timeout).await {
+            // `Completed` already emitted to `tx`.
+            Ok(()) => return Ok(()),
+            Err(OnceError::Connect(e)) => {
+                // Connection-level retries already exhausted inside
+                // `connect_with_retry`; surface as a terminal error.
+                let _ = tx
+                    .send(LlmEvent::Error(format!("stream failed: {e:#}")))
+                    .await;
+                return Err(e);
+            }
+            Err(OnceError::Interrupted { reason, partial }) => {
+                let can_retry =
+                    should_retry_stream_interruption(reason) && attempt < MAX_STREAM_ATTEMPTS;
+                if !can_retry {
+                    // Budget exhausted — degrade by reason so no data is lost
+                    // unnecessarily. A truncated stream has usable partial text,
+                    // so deliver it as a best-effort `Completed`; chunk errors and
+                    // idle stalls produce no coherent text, so they surface as an
+                    // `Error`.
+                    match reason {
+                        StreamInterruption::Truncated => {
+                            warn!(
+                                attempts = attempt,
+                                "stream truncated; delivering partial output after retries"
+                            );
+                            let _ = tx
+                                .send(LlmEvent::Completed {
+                                    text: partial.text,
+                                    tool_calls: partial.tool_calls,
+                                    usage: partial.usage,
+                                })
+                                .await;
+                            return Ok(());
+                        }
+                        StreamInterruption::ChunkError | StreamInterruption::IdleTimeout => {
+                            let kind = match reason {
+                                StreamInterruption::ChunkError => "chunk read error",
+                                StreamInterruption::IdleTimeout => "idle timeout",
+                                StreamInterruption::Truncated => unreachable!(),
+                            };
+                            let msg = format!("stream failed: {kind} after {attempt} attempts");
+                            let _ = tx.send(LlmEvent::Error(msg.clone())).await;
+                            return Err(anyhow!("{msg}"));
+                        }
+                    }
+                }
+                // Retry: tell consumers to discard accumulated deltas, back off,
+                // then reconnect for a fresh attempt.
+                warn!(attempt, reason = ?reason, "mid-stream interruption, retrying");
+                let _ = tx
+                    .send(LlmEvent::Retrying {
+                        attempt,
+                        max: MAX_STREAM_ATTEMPTS,
+                    })
+                    .await;
+                backoff_delay(attempt).await;
+            }
+        }
+    }
+}
 
+/// Run a single stream attempt end to end. On success emits exactly one
+/// `Completed`; on interruption returns the partial output for the wrapper.
+async fn run_stream_once(
+    client: &reqwest::Client,
+    url: &str,
+    key: &str,
+    headers: &[(String, String)],
+    body: &Value,
+    tx: &mpsc::Sender<LlmEvent>,
+    idle_timeout: Duration,
+) -> Result<(), OnceError> {
+    let resp = connect_with_retry(client, url, key, headers, body, tx)
+        .await
+        .map_err(OnceError::Connect)?;
     let mut stream = resp.bytes_stream();
     let mut decoder = SseDecoder::new();
     let mut tools = ToolAccumulator::default();
     let mut usage: Option<Usage> = None;
     let mut finished = false;
     let mut text_buf = String::new();
+    // Event-level idle watchdog: reset whenever at least one SSE data frame is
+    // decoded. A keep-alive-only connection delivers bytes (so the HTTP
+    // read_timeout never trips) but no data frames, so this elapsed check —
+    // not the byte-level timeout — is what catches it.
+    let mut last_event_at = Instant::now();
 
     use futures::StreamExt;
     while let Some(chunk) = stream.next().await {
-        let bytes = chunk.context("read stream chunk")?;
+        let bytes = match chunk {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(error = %e, "stream chunk read error");
+                return Err(OnceError::Interrupted {
+                    reason: StreamInterruption::ChunkError,
+                    partial: snapshot(text_buf, &mut tools, usage),
+                });
+            }
+        };
         decoder.push(&bytes);
-        for data in decoder.drain() {
+        let frames = decoder.drain();
+        if !frames.is_empty() {
+            last_event_at = Instant::now();
+        }
+        for data in frames {
             if tx.is_closed() {
                 return Ok(());
             }
-            let parsed = match crate::sse::parse_chunk(&data) {
-                Some(v) => v,
-                None => continue,
-            };
-            handle_event(
-                &parsed,
-                &mut tools,
-                &mut usage,
-                &mut finished,
-                &mut text_buf,
-                &tx,
-            )
-            .await?;
-        }
-    }
-    for data in decoder.flush_remaining() {
-        if let Some(parsed) = crate::sse::parse_chunk(&data) {
-            handle_event(
-                &parsed,
-                &mut tools,
-                &mut usage,
-                &mut finished,
-                &mut text_buf,
-                &tx,
-            )
-            .await?;
-        }
-    }
-
-    let tool_calls = tools.finish_all().unwrap_or_default();
-    let _ = tx
-        .send(LlmEvent::Completed {
-            text: text_buf,
-            tool_calls,
-            usage,
-        })
-        .await;
-    Ok(())
-}
-
-/// Total request attempts (1 initial + 4 retries).
-const MAX_ATTEMPTS: u8 = 5;
-/// Base backoff in ms; actual delay is `BASE_BACKOFF_MS * 2^(attempt-1)` plus
-/// up to 250 ms jitter, giving roughly 0.5/1/2/4/8 s between attempts.
-const BASE_BACKOFF_MS: u64 = 500;
-
-/// Whether an HTTP status is transient enough to warrant a retry. Network/send
-/// errors (no status) are always retried; only these status codes qualify.
-fn is_retryable_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 425 | 429 | 500 | 502 | 503 | 504)
-}
-
-/// Classification of a single send attempt's outcome, abstracted away from
-/// `reqwest` so the retry decision can be unit-tested without HTTP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AttemptOutcome {
-    /// 2xx — the request succeeded; stop and consume the response.
-    Success,
-    /// A transient failure worth retrying (whitelisted status, or a network/
-    /// transport error with no status at all).
-    RetryableError,
-    /// A permanent failure (4xx other than the whitelist) — fail immediately.
-    NonRetryableError,
-}
-
-impl AttemptOutcome {
-    /// Classify an HTTP response status into an attempt outcome.
-    fn from_status(status: reqwest::StatusCode) -> Self {
-        if status.is_success() {
-            Self::Success
-        } else if is_retryable_status(status) {
-            Self::RetryableError
-        } else {
-            Self::NonRetryableError
-        }
-    }
-}
-
-/// What the retry loop should do after observing an attempt's outcome, given
-/// the current 1-based `attempt` number and the `max` attempts allowed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RetryDecision {
-    /// Request succeeded — stop and return the response.
-    Done,
-    /// Transient failure, attempts remaining — emit `Retrying` and back off.
-    Retry,
-    /// Permanent failure OR retries exhausted — stop with an error.
-    Fail,
-}
-
-/// Pure retry policy with no I/O, so the loop's boundary logic (the part prone
-/// to off-by-one errors) is exhaustively unit-testable. `connect_with_retry`
-/// delegates every retry-vs-fail-vs-done decision here.
-fn retry_decision(outcome: AttemptOutcome, attempt: u8, max: u8) -> RetryDecision {
-    match outcome {
-        AttemptOutcome::Success => RetryDecision::Done,
-        AttemptOutcome::NonRetryableError => RetryDecision::Fail,
-        AttemptOutcome::RetryableError => {
-            if attempt >= max {
-                RetryDecision::Fail
-            } else {
-                RetryDecision::Retry
+            if let Some(parsed) = crate::sse::parse_chunk(&data) {
+                handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, tx)
+                    .await
+                    .map_err(OnceError::Connect)?;
             }
         }
+        if last_event_at.elapsed() >= idle_timeout {
+            return Err(OnceError::Interrupted {
+                reason: StreamInterruption::IdleTimeout,
+                partial: snapshot(text_buf, &mut tools, usage),
+            });
+        }
+    }
+    // Stream ended — flush any buffered partial frame the decoder still holds.
+    let mut flushed_any = false;
+    for data in decoder.flush_remaining() {
+        if let Some(parsed) = crate::sse::parse_chunk(&data) {
+            handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, tx)
+                .await
+                .map_err(OnceError::Connect)?;
+            flushed_any = true;
+        }
+    }
+    let _ = flushed_any;
+
+    if finished {
+        let tool_calls = tools.finish_all().unwrap_or_default();
+        let _ = tx
+            .send(LlmEvent::Completed {
+                text: text_buf,
+                tool_calls,
+                usage,
+            })
+            .await;
+        Ok(())
+    } else {
+        // No `finish_reason` seen — the stream was truncated.
+        Err(OnceError::Interrupted {
+            reason: StreamInterruption::Truncated,
+            partial: snapshot(text_buf, &mut tools, usage),
+        })
     }
 }
 
@@ -245,49 +323,6 @@ async fn send_request(
         .send()
         .await
         .context("send chat request")
-}
-
-/// Build the HTTP header map for a chat request. Built-in headers
-/// (`authorization`, `content-type`, `accept`) are applied first; entries in
-/// `custom` then override any built-in with the same (case-insensitive) name.
-/// Malformed custom entries (invalid header name or value bytes) are silently
-/// skipped so one bad entry can't break the whole stream. Pure and
-/// side-effect-free so the override/merge behavior is unit-testable.
-pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
-    let mut map = HeaderMap::new();
-    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {key}")) {
-        map.insert(AUTHORIZATION, v);
-    }
-    map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    map.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
-    for (name, value) in custom {
-        if let (Ok(n), Ok(v)) = (
-            HeaderName::from_bytes(name.as_bytes()),
-            HeaderValue::from_str(value),
-        ) {
-            map.insert(n, v);
-        }
-    }
-    map
-}
-
-/// Exponential backoff delay (ms) for the given 1-based `attempt`, BEFORE
-/// jitter: `BASE_BACKOFF_MS * 2^(attempt-1)` → 500/1000/2000/4000/8000 ms.
-/// Extracted as a pure function so the growth curve is unit-testable.
-fn backoff_millis(attempt: u8) -> u64 {
-    BASE_BACKOFF_MS.saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1) as u32))
-}
-
-/// Exponential backoff for the given 1-based `attempt`, with up to 250 ms of
-/// jitter derived from the wall clock (no `rand` dependency). Jitter avoids
-/// synchronized retry bursts when many clients share a flaky endpoint.
-async fn backoff_delay(attempt: u8) {
-    let exp = backoff_millis(attempt);
-    let jitter = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| (d.subsec_nanos() as u64) % 250)
-        .unwrap_or(0);
-    tokio::time::sleep(Duration::from_millis(exp + jitter)).await;
 }
 
 /// Retry the request up to `MAX_ATTEMPTS` times, but only before any streamed
@@ -484,146 +519,38 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
+/// Build the HTTP header map for a chat request. Built-in headers
+/// (`authorization`, `content-type`, `accept`) are applied first; entries in
+/// `custom` then override any built-in with the same (case-insensitive) name.
+/// Malformed custom entries (invalid header name or value bytes) are silently
+/// skipped so one bad entry can't break the whole stream. Pure and
+/// side-effect-free so the override/merge behavior is unit-testable.
+pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {key}")) {
+        map.insert(AUTHORIZATION, v);
+    }
+    map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    map.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+    for (name, value) in custom {
+        if let (Ok(n), Ok(v)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            map.insert(n, v);
+        }
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Regression guard: the default read timeout must stay at 600 s (10 min).
-    /// Accidentally changing it (e.g. to 30 s) would break long-running
-    /// streaming turns from models that pause between chunks.
     #[test]
     fn default_read_timeout_is_600s() {
         assert_eq!(DEFAULT_READ_TIMEOUT, Duration::from_secs(600));
-    }
-
-    #[test]
-    fn retryable_status_whitelist() {
-        // Transient — retried.
-        for code in [408, 425, 429, 500, 502, 503, 504] {
-            assert!(
-                is_retryable_status(reqwest::StatusCode::from_u16(code).unwrap()),
-                "{code} should be retryable"
-            );
-        }
-    }
-
-    #[test]
-    fn non_retryable_status_fails_fast() {
-        // Auth / bad-request / not-found / redirect are NOT retried.
-        for code in [400, 401, 403, 404, 422] {
-            assert!(
-                !is_retryable_status(reqwest::StatusCode::from_u16(code).unwrap()),
-                "{code} should fail fast"
-            );
-        }
-        // 200 is success, not "retryable" (handled separately).
-        assert!(!is_retryable_status(reqwest::StatusCode::OK));
-    }
-
-    /// The backoff curve doubles each attempt: 0.5/1/2/4/8 s for attempts
-    /// 1–5. This exercises the actual `backoff_millis` production function
-    /// (the `saturating_mul`/`saturating_pow` math), not just constants.
-    #[test]
-    fn backoff_millis_doubles_each_attempt() {
-        assert_eq!(backoff_millis(1), 500);
-        assert_eq!(backoff_millis(2), 1000);
-        assert_eq!(backoff_millis(3), 2000);
-        assert_eq!(backoff_millis(4), 4000);
-        assert_eq!(backoff_millis(5), 8000);
-        assert_eq!(MAX_ATTEMPTS, 5);
-    }
-
-    /// `AttemptOutcome::from_status` must classify success/retryable/fail the
-    /// same way the production loop does (it is the loop's classifier).
-    #[test]
-    fn attempt_outcome_classifies_status() {
-        use reqwest::StatusCode;
-        assert_eq!(
-            AttemptOutcome::from_status(StatusCode::OK),
-            AttemptOutcome::Success
-        );
-        for code in [408, 425, 429, 500, 502, 503, 504] {
-            assert_eq!(
-                AttemptOutcome::from_status(StatusCode::from_u16(code).unwrap()),
-                AttemptOutcome::RetryableError,
-                "{code} should classify as retryable"
-            );
-        }
-        for code in [400, 401, 403, 404, 422] {
-            assert_eq!(
-                AttemptOutcome::from_status(StatusCode::from_u16(code).unwrap()),
-                AttemptOutcome::NonRetryableError,
-                "{code} should classify as non-retryable"
-            );
-        }
-    }
-
-    /// Success always stops immediately, regardless of attempt number.
-    #[test]
-    fn retry_decision_success_stops() {
-        assert_eq!(
-            retry_decision(AttemptOutcome::Success, 1, 5),
-            RetryDecision::Done
-        );
-        assert_eq!(
-            retry_decision(AttemptOutcome::Success, 5, 5),
-            RetryDecision::Done
-        );
-    }
-
-    /// A non-retryable error fails FAST on every attempt — never retries.
-    #[test]
-    fn retry_decision_non_retryable_fails_fast() {
-        for attempt in 1..=5u8 {
-            assert_eq!(
-                retry_decision(AttemptOutcome::NonRetryableError, attempt, 5),
-                RetryDecision::Fail,
-                "non-retryable must fail fast at attempt {attempt}"
-            );
-        }
-    }
-
-    /// A retryable error retries while attempts remain and FAILS exactly when
-    /// attempt == max (no sixth attempt). This is the off-by-one canary.
-    #[test]
-    fn retry_decision_retryable_retries_then_fails_at_max() {
-        for attempt in 1..=4u8 {
-            assert_eq!(
-                retry_decision(AttemptOutcome::RetryableError, attempt, 5),
-                RetryDecision::Retry,
-                "attempt {attempt} (< max=5) should retry"
-            );
-        }
-        // attempt == max: the last allowed attempt already happened — fail.
-        assert_eq!(
-            retry_decision(AttemptOutcome::RetryableError, 5, 5),
-            RetryDecision::Fail,
-            "attempt == max must fail (no attempt beyond max)"
-        );
-    }
-
-    /// Replay a full retry-then-recover sequence through the policy: 2
-    /// retryable failures then success. Verifies the loop's decision stream
-    /// without needing HTTP — exactly what `connect_with_retry` produces when
-    /// the endpoint recovers on attempt 3.
-    #[test]
-    fn retry_decision_sequence_recover_on_third_attempt() {
-        let max = 5u8;
-        // Attempt 1: retryable → retry.
-        assert_eq!(
-            retry_decision(AttemptOutcome::RetryableError, 1, max),
-            RetryDecision::Retry
-        );
-        // Attempt 2: retryable → retry.
-        assert_eq!(
-            retry_decision(AttemptOutcome::RetryableError, 2, max),
-            RetryDecision::Retry
-        );
-        // Attempt 3: success → done.
-        assert_eq!(
-            retry_decision(AttemptOutcome::Success, 3, max),
-            RetryDecision::Done
-        );
     }
 
     // ---- parse_usage: base fields + cache-token normalization ----
@@ -632,8 +559,6 @@ mod tests {
         serde_json::from_str(s).expect("valid usage json")
     }
 
-    /// Base OpenAI shape: the three legacy keys map through unchanged and no
-    /// cache info yields zero cache tokens.
     #[test]
     fn parse_usage_reads_openai_base_fields() {
         let u = parse_usage(&usage_json(
@@ -646,34 +571,28 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 0);
     }
 
-    /// Anthropic / OpenAI-compatible proxies fronting Claude & GLM spell the
-    /// cache fields `cache_read_input_tokens` / `cache_creation_input_tokens`.
-    /// (A single turn with ~105M cache reads is realistic for big contexts.)
     #[test]
     fn parse_usage_reads_anthropic_cache_fields() {
         let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":2000,"completion_tokens":10,"total_tokens":2010,
-               "cache_read_input_tokens":104857600,
-               "cache_creation_input_tokens":1500}"#,
+            r#"{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,
+               "cache_read_input_tokens":42,"cache_creation_input_tokens":7}"#,
         ));
-        assert_eq!(u.cache_read_tokens, 104_857_600);
-        assert_eq!(u.cache_creation_tokens, 1500);
+        assert_eq!(u.cache_read_tokens, 42);
+        assert_eq!(u.cache_creation_tokens, 7);
     }
 
-    /// Some gateways use the shorter `cache_read` / `cache_write` aliases.
     #[test]
-    fn parse_usage_reads_gateway_cache_aliases() {
+    fn parse_usage_reads_short_aliases() {
         let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":50,"completion_tokens":5,"total_tokens":55,
-               "cache_read":8000,"cache_write":2000}"#,
+            r#"{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,
+               "cache_read":8,"cache_write":3}"#,
         ));
-        assert_eq!(u.cache_read_tokens, 8000);
-        assert_eq!(u.cache_creation_tokens, 2000);
+        assert_eq!(u.cache_read_tokens, 8);
+        assert_eq!(u.cache_creation_tokens, 3);
     }
 
-    /// OpenAI native nests cached tokens under `prompt_tokens_details`.
     #[test]
-    fn parse_usage_reads_openai_nested_cached_tokens() {
+    fn parse_usage_reads_openai_cached_tokens() {
         let u = parse_usage(&usage_json(
             r#"{"prompt_tokens":300,"completion_tokens":20,"total_tokens":320,
                "prompt_tokens_details":{"cached_tokens":9000}}"#,
@@ -682,8 +601,6 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 0);
     }
 
-    /// When both the explicit Anthropic key and the short alias are present,
-    /// the explicit one wins (it is checked first) -- deterministic precedence.
     #[test]
     fn parse_usage_prefers_explicit_anthropic_key_over_alias() {
         let u = parse_usage(&usage_json(
@@ -693,8 +610,6 @@ mod tests {
         assert_eq!(u.cache_read_tokens, 7);
     }
 
-    /// A usage object with only base fields (legacy / plain OpenAI) yields
-    /// zero cache tokens -- the backward-compat path old rows rely on.
     #[test]
     fn parse_usage_missing_cache_fields_default_to_zero() {
         let u = parse_usage(&usage_json(
@@ -704,7 +619,6 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 0);
     }
 
-    /// Boundary: a totally empty usage object -> all zeros, no panic.
     #[test]
     fn parse_usage_empty_object_is_all_zeros() {
         let u = parse_usage(&usage_json("{}"));
@@ -715,8 +629,6 @@ mod tests {
         assert_eq!(u.cache_creation_tokens, 0);
     }
 
-    /// `first_u64` returns the FIRST present key (precedence) and ignores
-    /// missing keys / non-u64 values.
     #[test]
     fn first_u64_returns_first_present_key() {
         let obj = usage_json(r#"{"a":10,"b":20}"#);

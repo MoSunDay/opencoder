@@ -195,6 +195,40 @@ pub(crate) async fn handle_switch_agent(
     SwitchOutcome::Proceed
 }
 
+/// Push a `queued: {display}` marker (bold, warn-colored) into the transcript
+/// followed by a blank separator line. Called at queue-submission time (Tab
+/// while running) so the user sees the queued prompt immediately — not only
+/// when it is consumed at the idle boundary.
+pub(crate) fn push_queued_marker(chat: &mut ChatView, display: &str) {
+    chat.push_marker(Line::from(Span::styled(
+        format!("queued: {display}"),
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::BOLD),
+    )));
+    chat.push_marker(Line::from(""));
+}
+
+/// Shared plan→act handoff prep for the `/act` and `/act_clear_context` slash
+/// commands (and mirrors the Shift+Tab path in [`handle_switch_agent`]):
+/// drain the input box, refresh the context-meter baseline, set the mode-flash
+/// banner. Returns the captured input text to forward as `SwitchAndStart`'s
+/// extra payload.
+fn prep_plan_to_act(
+    input: &mut String,
+    cursor_idx: &mut usize,
+    sys_tokens: &mut u64,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    workdir: &Path,
+) -> String {
+    let extra = std::mem::take(input);
+    *cursor_idx = 0;
+    *sys_tokens = sys_tokens_for("act", workdir, None);
+    *mode_flash = Some(("\u{2192} act mode".into(), anim_tick));
+    extra
+}
+
 /// Body of the `maybe_ev = evt_rx.recv()` select arm: drain all queued
 /// `UiEvent`s and fold them into the chat / queue state. Returns
 /// [`LoopFlow::Quit`] when the worker channel closed (`recv()` gave `None`),
@@ -251,22 +285,10 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
                 if let SessionEvent::QueueConsumed { seq } = &sev {
-                    // Mirror the SteerConsumed marker: resolve seq->prompt,
-                    // embed a `queued: {prompt}` marker so the user sees WHEN
-                    // the queued follow-up fired, then drop the row.
-                    if let Some(prompt) = queue_items
-                        .iter()
-                        .find(|(s, _)| s == seq)
-                        .map(|(_, p)| p.clone())
-                    {
-                        chat.push_marker(Line::from(Span::styled(
-                            format!("queued: {prompt}"),
-                            Style::default()
-                                .fg(theme::warn_color())
-                                .add_modifier(Modifier::BOLD),
-                        )));
-                        chat.push_marker(Line::from(""));
-                    }
+                    // The queued prompt was already echoed into the transcript
+                    // at submission time (see [`push_queued_marker`]), so only
+                    // the bookkeeping — drop the consumed entry by seq — happens
+                    // here.
                     queue_items.retain(|(s, _)| s != seq);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
@@ -379,6 +401,9 @@ pub(crate) async fn dispatch_command(
     cursor_idx: &mut usize,
     config: &mut Config,
     workdir: &Path,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    sys_tokens: &mut u64,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -430,9 +455,20 @@ pub(crate) async fn dispatch_command(
         // Control commands (/act, /plan, /act_clear_context): dispatch as a
         // prompt via the worker. run_with_registry short-circuits them (no LLM
         // call) and emits AgentSwitch / TranscriptReset + Done. No user echo —
-        // the popup path never calls push_user.
+        // the popup path never calls push_user.  EXCEPTION: /act and
+        // /act_clear_context from plan mode with a submitted plan route through
+        // SwitchAndStart (plan→act handoff) — same as Shift+Tab — preserving
+        // the plan and starting execution instead of wiping the transcript.
         CommandOutcome::Dispatch(SlashAction::Act) => {
-            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new())).await {
+            if chat.agent == "plan" && chat.plan_submitted && !*running {
+                let extra = prep_plan_to_act(
+                    input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+                );
+                if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
+                }
+            } else if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new())).await {
                 worker_dead(chat);
                 return LoopFlow::Quit;
             }
@@ -450,7 +486,15 @@ pub(crate) async fn dispatch_command(
             chat.begin_turn();
         }
         CommandOutcome::Dispatch(SlashAction::ClearContext) => {
-            if !start_turn(
+            if chat.agent == "plan" && chat.plan_submitted && !*running {
+                let extra = prep_plan_to_act(
+                    input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+                );
+                if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
+                }
+            } else if !start_turn(
                 cmd_tx,
                 cancel,
                 UiCmd::Prompt("/act_clear_context".into(), Vec::new()),

@@ -35,6 +35,7 @@ pub enum SessionEvent {
     /// sync with the on-disk config.
     ModelSwitch(String),
     Compaction(String),
+    CompactionDelta(String),
     Status(String),
     /// A subagent (task tool) started. `child_session_id` is the child's
     /// session for loading its transcript from the store.
@@ -103,6 +104,7 @@ impl SessionEvent {
             SessionEvent::AgentSwitch(_) => "agent_switched",
             SessionEvent::ModelSwitch(_) => "model_switched",
             SessionEvent::Compaction(_) => "compaction",
+            SessionEvent::CompactionDelta(_) => "compaction_delta",
             SessionEvent::Status(_) => "status",
             SessionEvent::Done => "done",
             SessionEvent::Error(_) => "error",
@@ -139,6 +141,7 @@ impl SessionEvent {
             SessionEvent::AgentSwitch(a) => serde_json::json!({ "agent": a }),
             SessionEvent::ModelSwitch(m) => serde_json::json!({ "model": m }),
             SessionEvent::Compaction(s) => serde_json::json!({ "summary": s }),
+            SessionEvent::CompactionDelta(t) => serde_json::json!({ "text": t }),
             SessionEvent::Status(s) => serde_json::json!({ "status": s }),
             SessionEvent::Done => serde_json::json!({}),
             SessionEvent::Error(e) => serde_json::json!({ "error": e }),
@@ -205,6 +208,9 @@ impl SessionEvent {
             "agent_switched" => SessionEvent::AgentSwitch(data.get("agent")?.as_str()?.to_string()),
             "model_switched" => SessionEvent::ModelSwitch(data.get("model")?.as_str()?.to_string()),
             "compaction" => SessionEvent::Compaction(data.get("summary")?.as_str()?.to_string()),
+            "compaction_delta" => {
+                SessionEvent::CompactionDelta(data.get("text")?.as_str()?.to_string())
+            }
             "status" => SessionEvent::Status(data.get("status")?.as_str()?.to_string()),
             "subagent_start" => SessionEvent::SubagentStart {
                 id: data.get("id")?.as_str()?.to_string(),
@@ -258,6 +264,7 @@ impl SessionEvent {
             SessionEvent::AgentSwitch(_) => EventKind::AgentSwitched,
             SessionEvent::ModelSwitch(_) => EventKind::ModelSwitched,
             SessionEvent::Compaction(_) => EventKind::Compaction,
+            SessionEvent::CompactionDelta(_) => EventKind::Compaction,
             SessionEvent::Status(_) => EventKind::Step,
             SessionEvent::Done => EventKind::Done,
             SessionEvent::Error(_) => EventKind::Error,
@@ -318,6 +325,7 @@ mod from_sse_tests {
             SessionEvent::AgentSwitch("plan".into()),
             SessionEvent::ModelSwitch("openai/gpt-4o".into()),
             SessionEvent::Compaction("summary".into()),
+            SessionEvent::CompactionDelta("cdelta".into()),
             SessionEvent::Status("running".into()),
             SessionEvent::SubagentStart {
                 id: "s1".into(),
@@ -351,8 +359,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            18,
-            "expected all 18 unique kinds, got {kinds:?}"
+            19,
+            "expected all 19 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {

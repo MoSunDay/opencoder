@@ -210,6 +210,18 @@ pub(crate) fn handle_key(
                 }
                 return KeyAction::None;
             }
+            // Ctrl+U: clear the entire input line (readline unix-line-discard).
+            // Undoable via snapshot so Ctrl+Z can restore, consistent with Ctrl+W.
+            // Under kitty keyboard protocol crossterm may report the raw control
+            // char `\u{15}` (NAK) with the CONTROL modifier set.
+            KeyCode::Char('u') | KeyCode::Char('\u{15}') => {
+                if !input.is_empty() {
+                    input.clear();
+                    *cursor_idx = 0;
+                    crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+                }
+                return KeyAction::None;
+            }
             // Ctrl+T: switch act <-> plan mode WITHOUT clearing context
             // or auto-executing (pure mode toggle, same as Ctrl+Shift+Tab).
             // Preferred on terminals where Ctrl+Shift+Tab is captured by the

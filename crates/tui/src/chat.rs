@@ -15,6 +15,10 @@ mod helpers;
 pub use helpers::block_text;
 pub(crate) use helpers::{short, summarize};
 
+#[path = "compaction_block.rs"]
+mod compaction_block;
+pub(crate) use compaction_block::render_collapsible;
+
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
         self.track_context(ev);
@@ -28,6 +32,12 @@ impl ChatView {
             SessionEvent::ReasoningDelta(t) => {
                 self.ensure_thinking_open();
                 if let Some(ChatBlock::Thinking { text, .. }) = self.blocks.last_mut() {
+                    text.push_str(t);
+                }
+            }
+            SessionEvent::CompactionDelta(t) => {
+                self.ensure_compaction_open();
+                if let Some(ChatBlock::Compaction { text, .. }) = self.blocks.last_mut() {
                     text.push_str(t);
                 }
             }
@@ -120,11 +130,10 @@ impl ChatView {
             }
             SessionEvent::Compaction(c) => {
                 self.finalize_assistant();
-                self.blocks
-                    .push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                        format!("[context compacted] {}", short(c, 100)),
-                        Style::default().fg(theme::warn_color()),
-                    ))]));
+                self.blocks.push(ChatBlock::Compaction {
+                    text: c.clone(),
+                    collapsed: true,
+                });
             }
             SessionEvent::Status(s) => self.status = s.clone(),
             SessionEvent::SubagentStart {
@@ -339,7 +348,9 @@ impl ChatView {
     pub fn collapse_all_collapsible(&mut self) {
         for block in &mut self.blocks {
             match block {
-                ChatBlock::Thinking { collapsed, .. } | ChatBlock::Tool { collapsed, .. } => {
+                ChatBlock::Thinking { collapsed, .. }
+                | ChatBlock::Tool { collapsed, .. }
+                | ChatBlock::Compaction { collapsed, .. } => {
                     *collapsed = true;
                 }
                 _ => {}
@@ -403,10 +414,18 @@ impl ChatView {
     /// Thinking / Subagent / Tool block, using the identical per-block line
     /// accounting that `flatten_with()` emits. Keeping the accounting in one
     /// place guarantees hit-rect indices stay aligned with the live render.
-    fn collect_headers(&self) -> (Vec<ThinkingHeader>, Vec<SubagentHeader>, Vec<ToolHeader>) {
+    fn collect_headers(
+        &self,
+    ) -> (
+        Vec<ThinkingHeader>,
+        Vec<SubagentHeader>,
+        Vec<ToolHeader>,
+        Vec<CompactionHeader>,
+    ) {
         let mut think = Vec::new();
         let mut sub = Vec::new();
         let mut tool = Vec::new();
+        let mut compaction = Vec::new();
         let mut line_idx = 0usize;
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -452,6 +471,16 @@ impl ChatView {
                     // Header always rendered; output + trailing blank only when expanded.
                     line_idx += 1 + if *collapsed { 0 } else { output.len() + 1 };
                 }
+                ChatBlock::Compaction { text, collapsed, .. } => {
+                    compaction.push(CompactionHeader {
+                        block_idx,
+                        header_line_idx: line_idx,
+                    });
+                    line_idx += 1;
+                    if !collapsed {
+                        line_idx += text.lines().count();
+                    }
+                }
                 ChatBlock::Image { rendered, .. } => {
                     line_idx += 1 + rendered.len() + 1;
                 }
@@ -467,7 +496,7 @@ impl ChatView {
                 }
             }
         }
-        (think, sub, tool)
+        (think, sub, tool, compaction)
     }
 
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
@@ -521,31 +550,21 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Thinking {
-                    text, collapsed, ..
-                } => {
-                    let count = text.lines().count().max(1);
-                    if *collapsed {
-                        out.push(Line::from(Span::styled(
-                            format!("\u{1f4ad} Thinking ({count} lines) [\u{2193} expand]"),
-                            Style::default().fg(theme::muted()),
-                        )));
-                    } else {
-                        out.push(Line::from(Span::styled(
-                            "\u{1f4ad} Thinking [\u{2191} collapse]",
-                            Style::default()
-                                .fg(theme::muted())
-                                .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-                        )));
-                        for l in text.lines() {
-                            out.push(Line::from(Span::styled(
-                                format!("  {l}"),
-                                Style::default()
-                                    .fg(theme::muted())
-                                    .add_modifier(Modifier::ITALIC),
-                            )));
-                        }
-                    }
+                ChatBlock::Thinking { text, collapsed, .. } => {
+                    out.extend(render_collapsible(
+                        "\u{1f4ad}",
+                        "Thinking",
+                        text,
+                        *collapsed,
+                    ));
+                }
+                ChatBlock::Compaction { text, collapsed } => {
+                    out.extend(render_collapsible(
+                        "\u{1f5dc}",
+                        "Compaction",
+                        text,
+                        *collapsed,
+                    ));
                 }
                 ChatBlock::Tool {
                     header,

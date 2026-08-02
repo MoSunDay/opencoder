@@ -114,6 +114,11 @@ async fn drain_one_shot(client: &Arc<dyn ChatStream>, req: ChatRequest) -> Resul
                 }
                 break;
             }
+            LlmEvent::Retrying { .. } => {
+                // Mid-stream retry: drop deltas so the two attempts aren't
+                // concatenated; the final `Completed` overwrites `text`.
+                text.clear();
+            }
             LlmEvent::Error(e) => return Err(anyhow::anyhow!(e)),
             _ => {}
         }

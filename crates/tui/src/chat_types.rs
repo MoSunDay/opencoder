@@ -34,6 +34,14 @@ pub enum ChatBlock {
         collapsed: bool,
         sealed: bool,
     },
+    /// Collapsible compaction-summary block with muted italic styling.
+    /// Mirrors Thinking: streams via `CompactionDelta`, defaults collapsed,
+    /// click-to-expand. The final `Compaction(summary)` event replaces the
+    /// streamed block with the complete summary.
+    Compaction {
+        text: String,
+        collapsed: bool,
+    },
     /// Tool invocation: a header line plus its (full) output lines. `collapsed`
     /// hides the output behind a click-to-expand header, mirroring Thinking.
     Tool {
@@ -130,6 +138,14 @@ pub struct SubagentHeader {
 /// Locates a `Tool` block's header line for mouse hit-testing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ToolHeader {
+    pub block_idx: usize,
+    pub header_line_idx: usize,
+}
+
+/// Locates a `Compaction` block's header line for mouse hit-testing.
+/// Mirrors `ThinkingHeader`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CompactionHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
 }

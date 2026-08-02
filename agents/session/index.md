@@ -34,6 +34,23 @@ CLI/HTTP 入口 → 建/恢复 SessionState（store 可选）→ `run(session, p
 
 empty prompt = drain / continuation 模式：不 push 合成 user msg，直接进 run_loop（web drain 依赖 store 中已 admit 的 steer/queue 提供输入；TUI plan→act 手动切换经 `SwitchAndStart` 也走此路径——但**先经 `plan_handoff::handoff` 把 transcript 清为只含最终计划**，系统提示变 act，act 以干净 ctx 执行计划）。
 
+## 两段式 delivery：steer / queue drain 契约
+
+steer 与 queue 都是「先以 pending 落库（`admitted_seq` 列、`promoted_seq=NULL`），run_loop 在合适边界才 promote 进历史」的延迟提交机制，但消费规则截然相反。权威实现：`claim_steers` / `claim_one_queued`（`runner/steer.rs`），drain 在 `run_loop`（`runner/mod.rs`）。
+
+- **steer =「一把全吸收」**：每个 turn 边界顶部（cancel 检查之后、LLM 调用之前）调 `claim_steers` → `promote_inputs(sid, max_seq, Steer)`，SQL `... WHERE delivery='steer' AND promoted_seq IS NULL AND admitted_seq <= max ORDER BY admitted_seq ASC` 一次把**全部 pending steer** 提升进历史，逐条 emit `SteerConsumed{seq}`（seq 为 `session_inputs` 主键，让前端按身份收缩 pending 镜像）。steered 控制命令（`/plan` 等）防御性 apply、**不记为 user text**。无每 run 配额——多少条都在同一个边界吃掉。
+- **queue =「一条真实 prompt / run，跑完即 Done」**：仅在 **idle 边界**（本轮 `tool_calls.is_empty()`）才进 drain；`claim_one_queued` → `claim_next_queue`（SQL `... WHERE delivery='queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1`，`BEGIN IMMEDIATE` 原子 SELECT+UPDATE）每次取一条。控制命令（`/act`、`/plan`、`/act_clear_context`）apply 后 `continue` 连排、**不消耗 LLM turn**；碰到**真实 prompt** 则 record 一条（`synthetic=true`）、置 `queue_real_consumed=true`、break 出内层让 LLM 跑这一个 turn；该 turn 跑完回到 idle 边界时 `if queue_real_consumed { Done; break }`——**run 在此终止**，剩余 queue 行保持 pending 等下次显式提交。
+
+| 维度 | steer | queue |
+|---|---|---|
+| 触发边界 | 每个 turn 边界顶部 | 仅 idle 边界 |
+| 单次消费 | 全部 pending（`admitted_seq <= max`） | 恰好一条（`LIMIT 1`） |
+| 每 run 配额 | 无限制 | 至多 1 条真实 prompt |
+| 控制命令 | apply 不入历史（防御性） | apply 不耗 turn，可连排 |
+| 打断进行中 turn | 能——`turn_cancel`（子 agent `>` submit-now）经 LLM 调用与工具批的 `select!`（`await_turn_cancel`）短路，下一边界 `claim_steers` 吸收 | 否——必须等 idle |
+
+测试锚点：`steer_followup.rs`（`steer_promotes_at_turn_boundary`、`multiple_steers_at_one_boundary_promoted_once`——3 条 steer 同边界全部提交、`queue_promotes_exactly_one_real_prompt_per_run_then_stops`、`steer_consumed_carries_pk_seq_not_admitted_seq`、`durable_pending_input_survives_until_drain`）；`control_cmd.rs::queue_drains_control_cmds_between_real_prompts`（队列 `[/plan,prompt,/act]`：前导控制命令不耗 turn、真实 prompt 跑一 turn 后 run 停止、尾部 `/act` 保持 pending）。
+
 ## 依赖与接口
 - 依赖：opencoder-core、opencoder-llm（ChatStream）、opencoder-store（Store）、tokio-util（CancellationToken）。
 - 被依赖：web（drain_to_completion）、cli（run_headless / resume）、tui。

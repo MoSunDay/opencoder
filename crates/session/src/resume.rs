@@ -610,6 +610,11 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
                 }
                 break;
             }
+            LlmEvent::Retrying { .. } => {
+                // Mid-stream retry: drop deltas so the two attempts aren't
+                // concatenated; the final `Completed` overwrites `text`.
+                text.clear();
+            }
             LlmEvent::Error(e) => return Err(anyhow!(e)),
             _ => {}
         }

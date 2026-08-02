@@ -72,6 +72,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             0,
             0u16,
             true,
+            false,
         )
         .unwrap();
         let btn = hits
@@ -159,6 +160,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             0,
             0u16,
             true,
+            false,
         )
         .unwrap();
         assert!(scroll > 0, "precondition: body must be scrolled");

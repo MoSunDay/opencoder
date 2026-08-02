@@ -170,6 +170,11 @@ pub(crate) async fn run_loop(
     // Tracks the first bash-timeout output in a consecutive run so that
     // subsequent timeouts can be deduplicated (same PID / output file).
     let mut bash_timeout_first: Option<String> = None;
+    // One queued real prompt per run: after its turn completes at the next
+    // idle boundary the run stops (Done) and remaining queue rows stay
+    // pending for the next explicit submission. Steer is the clear-all path
+    // (claim_steers absorbs every pending steer at the turn boundary).
+    let mut queue_real_consumed = false;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -266,7 +271,17 @@ pub(crate) async fn run_loop(
             // Idle boundary: drain queued follow-ups. Control commands
             // (/act, /plan, /act_clear_context) are applied immediately
             // without an LLM turn, so multiple can be drained in sequence. A
-            // real prompt breaks the inner loop so the outer loop processes it.
+            // real prompt breaks the inner loop so the outer loop processes
+            // it — and at most ONE queued real prompt is submitted per run.
+            // Once its turn completes, the next idle boundary stops the run
+            // (Done) with any remaining queue rows still pending for the next
+            // explicit submission; steer (Delivery::Steer) is the "submit
+            // everything now" path (claim_steers absorbs all pending steers
+            // at the turn boundary above).
+            if queue_real_consumed {
+                on_event(SessionEvent::Done);
+                break;
+            }
             let mut got_real_prompt = false;
             loop {
                 if let Some((seq, q, imgs)) = claim_one_queued(session).await {
@@ -280,6 +295,7 @@ pub(crate) async fn run_loop(
                     m.synthetic = true;
                     session.record(m).await;
                     got_real_prompt = true;
+                    queue_real_consumed = true;
                     break;
                 }
                 // Queue empty: go idle.

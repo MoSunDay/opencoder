@@ -86,6 +86,7 @@ pub(super) async fn run_app(
     let mut chat = initial_chat_view(&session, &store).await;
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut img_asm = crate::image_chunk::Assembly::new();
     let mut cursor_idx: usize = 0;
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
@@ -140,7 +141,6 @@ pub(super) async fn run_app(
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
-
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(512);
 
@@ -188,7 +188,6 @@ pub(super) async fn run_app(
 
     // Idle-resize safety net: on kernel-size mismatch (lost Resize — tmux/fast drag) force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
-
     loop {
         app_loop::tick_clock(running, &mut last_clock, &mut run_elapsed_ms);
         let app_loop::DisplayState {
@@ -738,7 +737,8 @@ pub(super) async fn run_app(
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(),
                             &mut model_menu, &mut command_menu, &mut input,
-                            &mut cursor_idx, &mut pending_images, &workdir,
+                            &mut cursor_idx, &mut pending_images, &mut img_asm,
+                            &mut chat, &workdir,
                         ) {
                             continue;
                         }

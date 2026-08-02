@@ -56,6 +56,8 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
     let mut input = String::new();
     let mut idx = 0usize;
     let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
         false,
@@ -65,6 +67,8 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
         &mut input,
         &mut idx,
         &mut pending_images,
+        &mut asm,
+        &mut chat,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Proceed));
@@ -81,6 +85,8 @@ fn route_paste_swallowed_when_task_picker_open() {
     let mut input = String::new();
     let mut idx = 0usize;
     let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
         true,
@@ -90,6 +96,8 @@ fn route_paste_swallowed_when_task_picker_open() {
         &mut input,
         &mut idx,
         &mut pending_images,
+        &mut asm,
+        &mut chat,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Redraw));
@@ -109,6 +117,8 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
     let mut input = String::from("kept");
     let mut idx = 2usize;
     let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
     let flow = route_paste(
         "plain text",
         false,
@@ -118,6 +128,8 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
         &mut input,
         &mut idx,
         &mut pending_images,
+        &mut asm,
+        &mut chat,
         Path::new("."),
     );
     assert!(matches!(flow, LoopFlow::Redraw));
@@ -714,3 +726,5 @@ mod plan_edit_tests;
 #[cfg(test)]
 #[path = "../app_loop_session_only_tests.rs"]
 mod session_only_tests;
+
+mod image_paste_tests;

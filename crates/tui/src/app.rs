@@ -257,6 +257,7 @@ pub(super) async fn run_app(
                     run_elapsed_ms,
                     help_scroll,
                     subagent_focus.is_none(),
+                    config.autopilot.enabled,
                 )?;
             }
             dirty = false;
@@ -374,9 +375,10 @@ pub(super) async fn run_app(
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
-                                &session_id, &mut task_picker, &mut model_menu, &config,
+                                &session_id, &mut task_picker, &mut model_menu,
                                 &mut cache_salt_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
+                                &mut config, &workdir,
                             )
                             .await
                             {
@@ -445,7 +447,7 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim().to_string();
-                                if crate::local_cmd::run(&clean, &mut chat) { // /ps /stop: display-only
+                                if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap: display-only
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {

@@ -16,11 +16,12 @@ const TUTORIAL: &str = "\
   🤖 Rust 原生的 AI 编码助手。在下方输入框中开始提问吧！
 
   🎮 常用操作：
-    • Alt+Enter / Shift+Enter  换行（多行输入）
+    • Alt+回车  换行（多行输入）
     • Shift+Tab  切换 plan / act（plan→act 时清空上下文）
     • Ctrl+T  仅切换模式，保留完整上下文
     • /  命令菜单（会话切换、设置等）
     • $  选择并插入技能
+    • Ctrl+F  强制重绘屏幕（花屏/乱码时按一下）
     • Ctrl+H  查看完整快捷键列表
 
   💡 开始对话后本教程自动消失，开启你的编码之旅吧！

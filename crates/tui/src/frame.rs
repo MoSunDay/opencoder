@@ -73,6 +73,7 @@ pub(crate) fn render_frame(
     run_ms: u64,
     help_scroll: u16,
     is_top_level: bool,
+    ap_enabled: bool,
 ) -> anyhow::Result<()> {
     let plan_label = plan_edit.as_ref().map(|pe| pe.mode_label());
     let (render_input, render_cursor) = match plan_edit {
@@ -117,5 +118,6 @@ pub(crate) fn render_frame(
         run_ms,
         help_scroll,
         is_top_level,
+        ap_enabled,
     )
 }

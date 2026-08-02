@@ -172,12 +172,6 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "\u{2190}/\u{2192}/Space toggle",
         ),
         field_line(
-            "autopilot:",
-            if form.ap_enabled { "[ on ]" } else { "[ off ]" },
-            form.focus == ConfigField::ApEnabled,
-            "\u{2190}/\u{2192}/Space toggle",
-        ),
-        field_line(
             "ap max_iter:",
             &if form.ap_max_iter_input.is_empty() {
                 "(empty)".to_string()

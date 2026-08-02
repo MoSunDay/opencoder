@@ -232,14 +232,19 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
 }
 
 #[tokio::test]
-async fn queue_only_promotes_at_idle_exactly_one_per_cycle() {
+async fn queue_promotes_exactly_one_real_prompt_per_run_then_stops() {
     let store = mem_store().await;
-    // turn 1 (done) → idle → consume queue-1 → turn 2 (done) → idle → consume queue-2 → turn 3 (done) → idle, none → Done
+    // run 1: "start" (done) → idle → consume queue-1 → turn (done) → idle →
+    // Done with queue-2 STILL PENDING (exactly one queued real prompt per
+    // run). run 2 ("again") → idle → consume queue-2 → turn (done) → idle →
+    // Done, queue now empty. Steer is the clear-all path; queue is one at a
+    // time with an explicit re-submit between.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_turn("t1")])
             .push_script(vec![done_turn("t2")])
-            .push_script(vec![done_turn("t3")]),
+            .push_script(vec![done_turn("t3")])
+            .push_script(vec![done_turn("t4")]),
     ) as Arc<dyn ChatStream>;
     let (_dir, mut s) = session(store.clone(), mock);
     for i in 1..=2u32 {
@@ -268,17 +273,37 @@ async fn queue_only_promotes_at_idle_exactly_one_per_cycle() {
         .collect();
     assert_eq!(
         queued_promoted.len(),
-        2,
-        "both queued follow-ups eventually consumed"
+        1,
+        "run 1 submits exactly one queued real prompt, not both"
     );
-    // ordering: QUEUE-1 before QUEUE-2
+    assert_eq!(queued_promoted[0], "QUEUE-1");
+    let still_pending = store
+        .pending_inputs("drain-sess", Delivery::Queue)
+        .await
+        .unwrap();
+    assert_eq!(
+        still_pending.len(),
+        1,
+        "QUEUE-2 must stay pending after run 1 stops"
+    );
+    assert_eq!(still_pending[0].prompt, "QUEUE-2");
+
+    // A second explicit run consumes the next queued prompt.
+    run(&mut s, "again".into(), |_| {}).await.unwrap();
+    let msgs = store.load_messages("drain-sess").await.unwrap();
+    let queued_promoted: Vec<String> = msgs
+        .iter()
+        .filter(|m| m.synthetic && m.text().starts_with("QUEUE-"))
+        .map(|m| m.text())
+        .collect();
+    assert_eq!(queued_promoted.len(), 2, "second run consumes QUEUE-2");
     assert_eq!(queued_promoted[0], "QUEUE-1");
     assert_eq!(queued_promoted[1], "QUEUE-2");
     let still_pending = store
         .pending_inputs("drain-sess", Delivery::Queue)
         .await
         .unwrap();
-    assert!(still_pending.is_empty(), "queue drained");
+    assert!(still_pending.is_empty(), "queue drained after run 2");
 }
 
 #[tokio::test]

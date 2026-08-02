@@ -7,7 +7,7 @@ pub const HELP: &str = "\
   Ctrl+Shift+Tab  切换模式（保留上下文，不重置）
   Ctrl+T          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
   Ctrl+V          粘贴剪贴板图片（截图）
-  Shift+Enter / Ctrl+J   插入换行（多行输入）
+  Alt+回车            插入换行（多行输入）
   $                选择并插入技能 -> {$name}；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃

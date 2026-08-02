@@ -39,6 +39,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
+    ("/ap", "切换 autopilot 自动模式（不计入模型上下文）"),
     ("/install_tools", "检测并安装所有 tools 依赖（tmux + chromium）"),
 ];
 
@@ -57,6 +58,8 @@ pub enum SlashAction {
     Ps,
     /// Display-only: kill all background bash (never enters model context).
     Stop,
+    /// Display-only: toggle autopilot (never enters model context).
+    Ap,
     /// `/install_tools`: detect + install optional tool deps (tmux + chromium).
     InstallTools,
 }
@@ -177,6 +180,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "act_clear_context" => Some(SlashAction::ClearContext),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
+        "ap" => Some(SlashAction::Ap),
         "install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
@@ -193,6 +197,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
+        "/ap" => Some(SlashAction::Ap),
         "/install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
@@ -517,7 +522,9 @@ mod tests {
     fn parse_local_commands() {
         assert_eq!(parse("/ps"), Some(SlashAction::Ps));
         assert_eq!(parse("/stop"), Some(SlashAction::Stop));
+        assert_eq!(parse("/ap"), Some(SlashAction::Ap));
         assert_eq!(parse(" /ps "), Some(SlashAction::Ps));
+        assert_eq!(parse(" /ap "), Some(SlashAction::Ap));
     }
 
     #[test]
@@ -551,6 +558,28 @@ mod tests {
             CommandOutcome::Dispatch(SlashAction::Stop) => {}
             other => panic!("expected Dispatch(Stop), got {:?}", other),
         }
+    }
+
+    #[test]
+    fn enter_on_ap_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "ap".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        // Query "ap" also matches "/config" (its description contains
+        // "api_key"), which sorts before "/ap" — move down once to it.
+        menu.as_mut()
+            .expect("menu open")
+            .move_down();
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Ap) => {}
+            other => panic!("expected Dispatch(Ap), got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Enter-dispatch");
     }
 
     #[test]

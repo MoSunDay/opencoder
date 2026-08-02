@@ -9,6 +9,7 @@ opencoder-core.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 anyhow.workspace = true

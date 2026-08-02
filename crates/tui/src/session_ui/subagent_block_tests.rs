@@ -2,7 +2,11 @@
 //! Kept in a child module file so `session_ui.rs` stays within the 800-line
 //! budget while retaining access to the module-private builder.
 
-use super::*;
+use super::replay::build_subagent_block;
+use opencoder_core::Message;
+use std::sync::Arc;
+use opencoder_store::{SubagentStatus, SubagentTaskRecord};
+use crate::chat::ChatBlock;
 
 // ── build_subagent_block status mapping ───────────────────────────────
 

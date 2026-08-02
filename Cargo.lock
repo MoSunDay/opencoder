@@ -2577,6 +2577,7 @@ dependencies = [
  "opencoder-store",
  "pulldown-cmark",
  "ratatui",
+ "reqwest",
  "serde_json",
  "signal-hook",
  "tempfile",

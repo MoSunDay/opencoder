@@ -1,0 +1,325 @@
+//! route_paste image-classification + chunked-upload tests.
+
+use super::*;
+
+/// Drive one paste through `route_paste` with no modal open, mirroring the
+/// main-composer path in `app.rs`.
+fn paste(
+    pasted: &str,
+    pending: &mut Vec<(String, String)>,
+    asm: &mut crate::image_chunk::Assembly,
+    chat: &mut ChatView,
+    input: &mut String,
+    idx: &mut usize,
+) -> LoopFlow {
+    let mut mm: Option<ModelMenu> = None;
+    let mut cm: Option<CommandMenu> = None;
+    route_paste(
+        pasted,
+        false,
+        false,
+        &mut mm,
+        &mut cm,
+        input,
+        idx,
+        pending,
+        asm,
+        chat,
+        Path::new("."),
+    )
+}
+
+/// A data-URI paste attaches verbatim (trailing terminal newline stripped)
+/// and never touches the composer text.
+#[test]
+fn paste_data_uri_attaches_verbatim() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(
+        pending,
+        vec![(
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==".to_string(),
+            "pasted.png".to_string()
+        )]
+    );
+    assert!(input.is_empty());
+}
+
+/// An image URL paste attaches the URL verbatim with the last path segment
+/// as its label.
+#[test]
+fn paste_image_url_attaches() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "https://example.com/pics/cat.jpeg",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, "https://example.com/pics/cat.jpeg");
+    assert_eq!(pending[0].1, "cat.jpeg");
+    assert!(input.is_empty());
+}
+
+/// A non-image URL is plain text: inserted into the composer, nothing
+/// attached.
+#[test]
+fn paste_non_image_url_inserts_text() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "https://example.com/docs\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(pending.is_empty());
+    assert!(input.contains("https://example.com/docs"));
+}
+
+/// A `data:text/plain` URI is not an image: inserted verbatim.
+#[test]
+fn paste_data_text_plain_inserts_text() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "data:text/plain;base64,aGVsbG8=",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(pending.is_empty());
+    assert_eq!(input, "data:text/plain;base64,aGVsbG8=");
+}
+
+/// Pasting an existing image file's path reads + encodes it as a data URI.
+#[test]
+fn paste_local_path_attaches() {
+    let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
+    std::fs::write(tmp.path(), png_bytes).unwrap();
+    let path_str = tmp.path().to_str().unwrap().to_string();
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        &path_str,
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(pending.len(), 1);
+    assert!(pending[0].0.starts_with("data:image/png;base64,"));
+    assert!(input.is_empty());
+}
+
+/// A whole chunked upload in one atomic paste: all frames consumed, one
+/// reassembled attachment, composer untouched, accumulator drained.
+#[test]
+fn paste_chunk_block_single_shot() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "ocimg begin t1 png 3\nocimg chunk t1 0 AAA\nocimg chunk t1 1 BBB\nocimg chunk t1 2 CCC\nocimg end t1\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(
+        pending,
+        vec![(
+            "data:image/png;base64,AAABBBCCC".to_string(),
+            "pasted.png (3 chunks)".to_string()
+        )]
+    );
+    assert!(input.is_empty());
+    assert!(asm.is_empty(), "completed assembly is removed from state");
+}
+
+/// Frames arriving across separate pastes accumulate until `end` completes
+/// the assembly.
+#[test]
+fn paste_chunk_frames_incremental() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    paste(
+        "ocimg begin t2 jpeg 2\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(pending.is_empty());
+    paste(
+        "ocimg chunk t2 0 AAA\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(pending.is_empty());
+    paste(
+        "ocimg chunk t2 1 BBB\nocimg end t2\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert_eq!(
+        pending,
+        vec![(
+            "data:image/jpeg;base64,AAABBB".to_string(),
+            "pasted.jpeg (2 chunks)".to_string()
+        )]
+    );
+    assert!(input.is_empty());
+}
+
+/// Out-of-order chunks reassemble in sequence order, not arrival order.
+#[test]
+fn paste_chunk_out_of_order() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    for frame in [
+        "ocimg begin t3 png 2\n",
+        "ocimg chunk t3 1 BBB\n",
+        "ocimg chunk t3 0 AAA\n",
+        "ocimg end t3\n",
+    ] {
+        paste(
+            frame,
+            &mut pending,
+            &mut asm,
+            &mut chat,
+            &mut input,
+            &mut idx,
+        );
+    }
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0, "data:image/png;base64,AAABBB");
+    assert!(input.is_empty());
+}
+
+/// An `end` with a missing chunk warns and drops the assembly: nothing
+/// attached and no frame line leaks into the composer.
+#[test]
+fn paste_chunk_missing_piece_warns() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    for frame in [
+        "ocimg begin t5 png 2\n",
+        "ocimg chunk t5 0 AAA\n",
+        "ocimg end t5\n",
+    ] {
+        paste(
+            frame,
+            &mut pending,
+            &mut asm,
+            &mut chat,
+            &mut input,
+            &mut idx,
+        );
+    }
+    assert!(pending.is_empty());
+    assert!(input.is_empty(), "frame lines never reach the composer");
+}
+
+/// A huge single-line text paste takes the plain-text path with no decode
+/// work: inserted verbatim, nothing attached.
+#[test]
+fn paste_random_long_text_not_blocked() {
+    let blob = "x".repeat(200_000);
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        &blob,
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(pending.is_empty());
+    assert_eq!(input, blob);
+}
+
+/// Frames and text mixed in one paste: frames attach an image, the leftover
+/// line lands in the composer.
+#[test]
+fn paste_mixed_frames_and_text() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let flow = paste(
+        "ocimg begin t4 png 1\nocimg chunk t4 0 AAA\nocimg end t4\nhello",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(pending.len(), 1);
+    assert_eq!(input, "hello");
+}

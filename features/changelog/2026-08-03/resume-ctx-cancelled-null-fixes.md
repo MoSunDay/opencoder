@@ -68,7 +68,7 @@ Commit: (working-tree, pre-initial-commit)
 
 ## 全量回归（当次实跑）
 
-- `cargo test --workspace` → **1667 passed / 0 failed / 1 ignored**
+- `cargo test --workspace` → **1672 passed / 0 failed / 1 ignored**
   （ignored = 预存 `research_smoke_bing_wikipedia` e2e，需 Chrome/网络）
 - `cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - `cargo build --workspace` → 零错误

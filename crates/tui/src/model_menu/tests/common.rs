@@ -73,50 +73,16 @@ pub(crate) fn ctrl(c: char) -> crossterm::event::KeyEvent {
 // as `working_dir` but leaves the real `HOME`/`XDG_CONFIG_HOME` in place causes
 // `save_target` to fall through the (non-existent) project-local candidates to
 // the *real* global config and overwrite the user's `~/.opencoder/config.json`
-// (observed: `model` clobbered to a test value). `lock_home` repoints both env
-// vars at the tempdir for the lifetime of the returned guard, so every global
-// candidate resolves *inside* the tempdir and the real user config is untouched.
+// (observed: `model` clobbered to a test value).
 //
-// The guard holds the process-wide `HOME_TEST_LOCK` — the very same mutex the
-// `app_loop` / `sys_tokens_*` tests use — so HOME mutators and HOME readers are
-// serialized across the whole `opencoder-tui` test binary. Two independent
-// mutexes would NOT interlock: a concurrent `sys_tokens_counts_system_prompt`
-// reader (which indirectly reads `home_dir()`) could observe an empty tempdir
-// HOME and flake its `base > 0` assertion (the classic 0-vs-406 race).
-pub(crate) struct HomeGuard {
-    prev_home: Option<std::ffi::OsString>,
-    prev_xdg: Option<std::ffi::OsString>,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-/// Point `HOME` + `XDG_CONFIG_HOME` at `home` for the lifetime of the returned
-/// guard, restoring the prior values (and releasing the shared lock) on drop.
-pub(crate) fn lock_home(home: &std::path::Path) -> HomeGuard {
-    let _lock = crate::app::app_loop::tests::HOME_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    let prev_home = std::env::var_os("HOME");
-    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
-    std::env::set_var("HOME", home);
-    std::env::set_var("XDG_CONFIG_HOME", home);
-    HomeGuard {
-        prev_home,
-        prev_xdg,
-        _lock,
-    }
-}
-
-impl Drop for HomeGuard {
-    fn drop(&mut self) {
-        match self.prev_home.take() {
-            Some(h) => std::env::set_var("HOME", h),
-            None => std::env::remove_var("HOME"),
-        }
-        match self.prev_xdg.take() {
-            Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
-    }
+// `lock_home` installs a *thread-local* config-home override (no process-env
+// mutation) so every global candidate resolves inside the tempdir and the real
+// user config is untouched. Thread-local isolation also disables env overlays
+// (OPENCODER_MODEL etc.) on this thread, and — being per-thread — needs no
+// process-wide mutex: there is no `std::env::set_var` for a concurrent reader
+// to race, so the classic 0-vs-406 sys_tokens flake cannot occur.
+pub(crate) fn lock_home(home: &std::path::Path) -> opencoder_core::ScopedConfigHome {
+    opencoder_core::scoped_config_home(home.to_path_buf())
 }
 
 // ── mask_key ──────────────────────────────────────────────────────────────

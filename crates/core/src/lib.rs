@@ -20,9 +20,9 @@ pub use computer_use::{
     ProviderBackend, RecordingExecutor,
 };
 pub use config::{
-    looks_like_env_var, AgentDefaults, AutoPilotConfig, CapabilitiesConfig, CompactionConfig,
-    Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig, ProviderConfig,
-    DEFAULT_CONTEXT_LIMIT,
+    looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig, CapabilitiesConfig,
+    CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
+    ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
 };
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;

@@ -45,13 +45,19 @@ impl SseDecoder {
         while let Some(rel) = normalized[start..].find("\n\n") {
             let frame_end = start + rel + 2;
             let frame = &normalized[start..frame_end];
+            // Per the SSE spec, consecutive `data:` fields within one event
+            // frame are concatenated with `\n` and dispatched as a single
+            // event — NOT emitted as separate strings.
+            let mut data_parts: Vec<&str> = Vec::new();
             for line in frame.lines() {
                 if let Some(rest) = line.strip_prefix("data:") {
-                    let data = rest.trim();
-                    if data.is_empty() || data == "[DONE]" {
-                        continue;
-                    }
-                    out.push(data.to_string());
+                    data_parts.push(rest.trim());
+                }
+            }
+            if !data_parts.is_empty() {
+                let joined = data_parts.join("\n");
+                if !joined.is_empty() && joined != "[DONE]" {
+                    out.push(joined);
                 }
             }
             start = frame_end;
@@ -73,12 +79,19 @@ impl SseDecoder {
         let normalized: String = s.replace("\r\n", "\n").replace('\r', "\n");
         self.buf.clear();
         let mut out = Vec::new();
+        // The flushed buffer is a single (terminator-less) frame, so per the
+        // SSE spec multiple `data:` fields are concatenated with `\n` into one
+        // event.
+        let mut data_parts: Vec<&str> = Vec::new();
         for line in normalized.lines() {
             if let Some(rest) = line.strip_prefix("data:") {
-                let data = rest.trim();
-                if !data.is_empty() && data != "[DONE]" {
-                    out.push(data.to_string());
-                }
+                data_parts.push(rest.trim());
+            }
+        }
+        if !data_parts.is_empty() {
+            let joined = data_parts.join("\n");
+            if !joined.is_empty() && joined != "[DONE]" {
+                out.push(joined);
             }
         }
         out
@@ -119,6 +132,37 @@ mod tests {
     }
 
     #[test]
+    fn drain_concatenates_multi_line_data_per_spec() {
+        // Per the SSE spec, multiple `data:` fields within ONE event frame are
+        // joined with `\n` and dispatched as a single event (not separate
+        // outputs).
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:line1\ndata:line2\ndata:line3\n\n");
+        let out = dec.drain();
+        assert_eq!(out, vec!["line1\nline2\nline3"]);
+    }
+
+    #[test]
+    fn drain_concatenates_multi_line_data_across_frames() {
+        // Each frame is independent: a frame with multiple data lines yields
+        // one joined event; a frame with one data line yields one event.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:a\ndata:b\n\ndata:c\n\n");
+        let out = dec.drain();
+        assert_eq!(out, vec!["a\nb", "c"]);
+    }
+
+    #[test]
+    fn drain_concatenation_with_space_after_colon() {
+        // The single leading space after `data:` is stripped per spec; the
+        // join uses `\n`.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data: hello\ndata: world\n\n");
+        let out = dec.drain();
+        assert_eq!(out, vec!["hello\nworld"]);
+    }
+
+    #[test]
     fn drain_holds_partial_until_complete() {
         let mut dec = SseDecoder::new();
         dec.push(b"data:{\"a\":1}");
@@ -134,6 +178,14 @@ mod tests {
         assert!(dec.drain().is_empty());
         let out = dec.flush_remaining();
         assert_eq!(out, vec!["{\"a\":99}"]);
+    }
+
+    #[test]
+    fn flush_remaining_concatenates_multi_line_data() {
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:a\ndata:b\ndata:c");
+        let out = dec.flush_remaining();
+        assert_eq!(out, vec!["a\nb\nc"]);
     }
 
     #[test]

@@ -238,10 +238,10 @@ impl SessionEvent {
                 SessionEvent::TranscriptReset(Vec::new())
             }
             "queue_consumed" => SessionEvent::QueueConsumed {
-                seq: data.get("seq")?.as_i64().unwrap_or(0),
+                seq: data.get("seq")?.as_i64()?,
             },
             "steer_consumed" => SessionEvent::SteerConsumed {
-                seq: data.get("seq")?.as_i64().unwrap_or(0),
+                seq: data.get("seq")?.as_i64()?,
             },
             "autopilot" => {
                 let iteration = data.get("iteration")?.as_u64()? as u32;

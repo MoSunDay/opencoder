@@ -251,7 +251,7 @@ pub(super) async fn run_subagent(
     // is dropped, closing the channel so the flusher drains remaining events
     // and exits. Await it so this function returns only after every event is
     // durably persisted.
-    let _ = flusher.await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), flusher).await;
 
     // Remove the turn-cancel and cancel tokens from the parent's registries
     // now that the child has finished.

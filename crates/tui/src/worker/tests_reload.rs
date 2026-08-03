@@ -1,18 +1,9 @@
 use super::*;
 
-static API_KEY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static PROXY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn reload_config_success_swaps_model() {
         use opencoder_core::{resolve_agent, Config, ProviderConfig};
         use opencoder_llm::MockChatClient;
-
-        let _guard = PROXY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-            std::env::remove_var(v);
-        }
 
         let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
         let agent = resolve_agent("act").expect("act agent");
@@ -43,15 +34,9 @@ static PROXY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     /// `/ap` toggles and pure max_iterations saves land here with an unchanged
     /// model: no `[model]` marker and no store rewrite may fire for them.
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn reload_config_same_model_emits_no_model_switch() {
         use opencoder_core::{resolve_agent, Config, ProviderConfig};
         use opencoder_llm::MockChatClient;
-
-        let _guard = PROXY_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-            std::env::remove_var(v);
-        }
 
         let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(8);
         let agent = resolve_agent("act").expect("act agent");
@@ -147,13 +132,14 @@ static PROXY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn reload_config_missing_api_key_keeps_client_and_emits_error() {
-        use opencoder_core::{resolve_agent, Config, ProviderConfig};
+        use opencoder_core::{resolve_agent, scoped_config_home, Config, ProviderConfig};
         use opencoder_llm::MockChatClient;
 
-        let _guard = API_KEY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("OPENAI_API_KEY");
+        // Isolate env on this thread only: `resolve_endpoint`'s `OPENAI_API_KEY`
+        // fallback must see no host key, so the missing-api_key config fails
+        // deterministically. No `std::env::remove_var` (thread-unsafe → UB).
+        let _iso = scoped_config_home(std::env::temp_dir());
 
         let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(16);
         let agent = resolve_agent("act").expect("act agent");

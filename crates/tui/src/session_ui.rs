@@ -6,6 +6,7 @@ use crate::chat::ChatView;
 
 mod replay;
 pub use replay::replay_into_chat;
+pub use replay::replay_messages;
 
 /// Snapshot of all session-specific TUI state. The `input`, `cursor_idx`,
 /// `hist_idx`, and `last_esc` are intentionally NOT included — they are

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, Agent, Config, Message, Role};
+use opencoder_core::{message::now_ms, Agent, AgentKind, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
@@ -168,6 +168,11 @@ pub struct SessionState {
     /// reconstruct the synthetic plan instruction on resume and to render the
     /// plan card.
     pub handoff_plan: Option<String>,
+    /// Number of user requirements submitted in the current plan-mode phase.
+    /// Reset to 0 when switching *to* plan mode (via `/plan` or agent switch)
+    /// or after a plan→act handoff. When > 0, subsequent plan prompts get a
+    /// read-only reminder appended so the model stays focused on planning.
+    pub plan_input_count: usize,
 }
 
 impl SessionState {
@@ -201,6 +206,7 @@ impl SessionState {
             summary_seq: None,
             handoff_seq: None,
             handoff_plan: None,
+            plan_input_count: 0,
         }
     }
 
@@ -361,6 +367,20 @@ impl SessionState {
         self.summary = None;
         self.summary_seq = None;
         self.persisted_count = self.messages.len();
+        self.plan_input_count = 0;
+    }
+
+    /// When in plan mode and this is not the first requirement in the current
+    /// plan phase, append a read-only reminder so the model stays focused on
+    /// planning across multi-turn plan conversations. Also increments the
+    /// counter so the next call knows this requirement already occurred.
+    pub fn maybe_tag_plan_prompt(&mut self, text: &mut String) {
+        if self.agent.kind == AgentKind::Plan {
+            if self.plan_input_count > 0 {
+                text.push_str("\n（当前处于只读的 plan 模式，聚焦计划生成）");
+            }
+            self.plan_input_count += 1;
+        }
     }
 }
 
@@ -492,5 +512,75 @@ mod cache_salt_tests {
         assert!(!token.lock().unwrap().is_cancelled());
         fire_turn_cancel(&token);
         assert!(token.lock().unwrap().is_cancelled());
+    }
+}
+
+#[cfg(test)]
+mod plan_tag_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    fn make_plan_session() -> SessionState {
+        let config = Config::default();
+        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+        SessionState::new(
+            "test",
+            resolve_agent("plan").unwrap(),
+            config,
+            client,
+            PathBuf::from("."),
+        )
+    }
+
+    fn make_act_session() -> SessionState {
+        let config = Config::default();
+        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+        SessionState::new(
+            "test",
+            resolve_agent("act").unwrap(),
+            config,
+            client,
+            PathBuf::from("."),
+        )
+    }
+
+    #[test]
+    fn plan_first_prompt_not_tagged() {
+        let mut s = make_plan_session();
+        let mut text = String::from("build a web app");
+        s.maybe_tag_plan_prompt(&mut text);
+        assert_eq!(text, "build a web app", "first prompt should not be tagged");
+        assert_eq!(s.plan_input_count, 1);
+    }
+
+    #[test]
+    fn plan_second_prompt_tagged() {
+        let mut s = make_plan_session();
+        s.plan_input_count = 1;
+        let mut text = String::from("also add tests");
+        s.maybe_tag_plan_prompt(&mut text);
+        assert!(text.contains("（当前处于只读的 plan 模式，聚焦计划生成）"));
+        assert_eq!(s.plan_input_count, 2);
+    }
+
+    #[test]
+    fn act_mode_never_tagged() {
+        let mut s = make_act_session();
+        s.plan_input_count = 5; // even with prior count, act mode should not tag
+        let mut text = String::from("do something");
+        s.maybe_tag_plan_prompt(&mut text);
+        assert_eq!(text, "do something", "act mode should never tag");
+    }
+
+    #[test]
+    fn switch_to_plan_resets_count() {
+        let mut s = make_plan_session();
+        s.plan_input_count = 3;
+        // simulate ClearContext handoff reset
+        s.after_handoff(0, String::new());
+        assert_eq!(s.plan_input_count, 0, "after_handoff resets count");
     }
 }

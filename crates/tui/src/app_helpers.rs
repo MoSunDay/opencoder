@@ -629,6 +629,15 @@ pub(crate) async fn handle_mouse(
                     break;
                 }
             }
+            for btn in &hits.compaction_btns {
+                if in_rect(btn.rect, m.column, m.row) {
+                    if let Some(v) = collapse_view(chat, *subagent_focus) {
+                        ChatView::toggle_compaction_at(v, btn.block_idx);
+                    }
+                    consumed = true;
+                    break;
+                }
+            }
             // Click on a Subagent-block header: enter
             // the subagent's perspective (ctx-switch).
             // No inline expansion — the child view and

@@ -104,3 +104,45 @@ pub(super) fn record_tool_hits(
         }
     }
 }
+
+/// A clickable Compaction-block header. Mirrors `ThinkingBtn`; clicking
+/// toggles the block's collapse state.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CompactionBtn {
+    pub block_idx: usize,
+    pub rect: Rect,
+}
+
+/// Populate `out` with one `CompactionBtn` per Compaction-block header line
+/// that is currently visible inside the body viewport. Mirrors
+/// `record_thinking_hits`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn record_compaction_hits(
+    chat: &ChatView,
+    cache: &ViewportCache,
+    text_w: u16,
+    scroll_y: usize,
+    visible_h: usize,
+    x: u16,
+    y0: u16,
+    out: &mut Vec<CompactionBtn>,
+) {
+    let headers = chat.compaction_headers();
+    if headers.is_empty() || visible_h == 0 || text_w == 0 || cache.total_rows() == 0 {
+        return;
+    }
+    let viewport_bottom = scroll_y + visible_h;
+    for h in headers {
+        let header_row = cache.row_of_line(h.header_line_idx);
+        if header_row >= viewport_bottom {
+            break;
+        }
+        if header_row >= scroll_y {
+            let screen_y = y0.saturating_add((header_row - scroll_y) as u16);
+            out.push(CompactionBtn {
+                block_idx: h.block_idx,
+                rect: Rect::new(x, screen_y, text_w, 1),
+            });
+        }
+    }
+}

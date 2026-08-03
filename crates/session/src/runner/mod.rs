@@ -62,7 +62,7 @@ pub async fn run_with_images(
 
 pub async fn run_with_registry(
     session: &mut SessionState,
-    user_text: String,
+    mut user_text: String,
     images: Vec<String>,
     registry: &HashMap<String, ToolArc>,
     on_event: impl FnMut(SessionEvent) + Send,
@@ -106,6 +106,7 @@ pub async fn run_with_registry(
     let has_text = !user_text.trim().is_empty();
     let has_images = !images.is_empty();
     if has_text || has_images {
+        session.maybe_tag_plan_prompt(&mut user_text);
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
     }
@@ -170,11 +171,6 @@ pub(crate) async fn run_loop(
     // Tracks the first bash-timeout output in a consecutive run so that
     // subsequent timeouts can be deduplicated (same PID / output file).
     let mut bash_timeout_first: Option<String> = None;
-    // One queued real prompt per run: after its turn completes at the next
-    // idle boundary the run stops (Done) and remaining queue rows stay
-    // pending for the next explicit submission. Steer is the clear-all path
-    // (claim_steers absorbs every pending steer at the turn boundary).
-    let mut queue_real_consumed = false;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -198,7 +194,9 @@ pub(crate) async fn run_loop(
                     crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
                     continue;
                 }
-                let mut m = Message::user_with_images(new_id(), p.clone(), imgs);
+                let mut text = p.clone();
+                session.maybe_tag_plan_prompt(&mut text);
+                let mut m = Message::user_with_images(new_id(), text, imgs);
                 m.synthetic = true;
                 session.record(m).await;
             }
@@ -268,34 +266,26 @@ pub(crate) async fn run_loop(
         session.record(assistant).await;
 
         if tool_calls.is_empty() {
-            // Idle boundary: drain queued follow-ups. Control commands
-            // (/act, /plan, /act_clear_context) are applied immediately
-            // without an LLM turn, so multiple can be drained in sequence. A
-            // real prompt breaks the inner loop so the outer loop processes
-            // it — and at most ONE queued real prompt is submitted per run.
-            // Once its turn completes, the next idle boundary stops the run
-            // (Done) with any remaining queue rows still pending for the next
-            // explicit submission; steer (Delivery::Steer) is the "submit
-            // everything now" path (claim_steers absorbs all pending steers
-            // at the turn boundary above).
-            if queue_real_consumed {
-                on_event(SessionEvent::Done);
-                break;
-            }
+            // Idle boundary: drain FIFO queued follow-ups until empty.
+            // Control commands (/act, /plan, /act_clear_context) are applied
+            // immediately without an LLM turn, so multiple can be drained in
+            // sequence. A real prompt breaks the inner loop so the outer loop
+            // processes it; once its turn completes the next idle boundary
+            // claims the next queued item until the queue is empty (Done).
             let mut got_real_prompt = false;
             loop {
-                if let Some((seq, q, imgs)) = claim_one_queued(session).await {
+                if let Some((seq, mut q, imgs)) = claim_one_queued(session).await {
                     on_event(SessionEvent::QueueConsumed { seq });
                     if let Some(cmd) = crate::control_cmd::parse(&q) {
                         crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
                         continue; // drain next queued item, no LLM turn
                     }
                     // Real prompt: record it and let the outer loop process it.
+                    session.maybe_tag_plan_prompt(&mut q);
                     let mut m = Message::user_with_images(new_id(), q, &imgs);
                     m.synthetic = true;
                     session.record(m).await;
                     got_real_prompt = true;
-                    queue_real_consumed = true;
                     break;
                 }
                 // Queue empty: go idle.

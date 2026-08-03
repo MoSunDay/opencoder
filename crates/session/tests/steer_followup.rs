@@ -5,8 +5,8 @@
 //!   appended to history at the next turn boundary
 //! - multiple_steers_one_boundary_promoted_once: N steers at one boundary are
 //!   all promoted at that boundary
-//! - queue_only_promotes_at_idle_exactly_one: queued inputs never interrupt a
-//!   running turn; at idle exactly one is consumed per cycle
+//! - queue_drains_all_fifo_at_idle: queued inputs never interrupt a running
+//!   turn; at idle all are drained FIFO until the queue is empty
 //! - durable_pending_survives_to_next_drain: an admitted-but-unpromoted steer
 //!   persists in the store until a drain claims it
 //! - no_store_no_steering: without a store the runner behaves classically
@@ -232,19 +232,17 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
 }
 
 #[tokio::test]
-async fn queue_promotes_exactly_one_real_prompt_per_run_then_stops() {
+async fn queue_drains_all_fifo_in_single_run_then_done() {
     let store = mem_store().await;
-    // run 1: "start" (done) → idle → consume queue-1 → turn (done) → idle →
-    // Done with queue-2 STILL PENDING (exactly one queued real prompt per
-    // run). run 2 ("again") → idle → consume queue-2 → turn (done) → idle →
-    // Done, queue now empty. Steer is the clear-all path; queue is one at a
-    // time with an explicit re-submit between.
+    // A single run drains the entire queue FIFO: "start" turn -> idle ->
+    // consume QUEUE-1 -> turn -> idle -> consume QUEUE-2 -> turn -> idle ->
+    // Done (queue empty). Steer is the clear-all path; queue is drained one
+    // item per turn boundary until empty within a single run.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_turn("t1")])
             .push_script(vec![done_turn("t2")])
-            .push_script(vec![done_turn("t3")])
-            .push_script(vec![done_turn("t4")]),
+            .push_script(vec![done_turn("t3")]),
     ) as Arc<dyn ChatStream>;
     let (_dir, mut s) = session(store.clone(), mock);
     for i in 1..=2u32 {
@@ -273,37 +271,16 @@ async fn queue_promotes_exactly_one_real_prompt_per_run_then_stops() {
         .collect();
     assert_eq!(
         queued_promoted.len(),
-        1,
-        "run 1 submits exactly one queued real prompt, not both"
+        2,
+        "single run drains both queued items in FIFO order"
     );
-    assert_eq!(queued_promoted[0], "QUEUE-1");
-    let still_pending = store
-        .pending_inputs("drain-sess", Delivery::Queue)
-        .await
-        .unwrap();
-    assert_eq!(
-        still_pending.len(),
-        1,
-        "QUEUE-2 must stay pending after run 1 stops"
-    );
-    assert_eq!(still_pending[0].prompt, "QUEUE-2");
-
-    // A second explicit run consumes the next queued prompt.
-    run(&mut s, "again".into(), |_| {}).await.unwrap();
-    let msgs = store.load_messages("drain-sess").await.unwrap();
-    let queued_promoted: Vec<String> = msgs
-        .iter()
-        .filter(|m| m.synthetic && m.text().starts_with("QUEUE-"))
-        .map(|m| m.text())
-        .collect();
-    assert_eq!(queued_promoted.len(), 2, "second run consumes QUEUE-2");
     assert_eq!(queued_promoted[0], "QUEUE-1");
     assert_eq!(queued_promoted[1], "QUEUE-2");
     let still_pending = store
         .pending_inputs("drain-sess", Delivery::Queue)
         .await
         .unwrap();
-    assert!(still_pending.is_empty(), "queue drained after run 2");
+    assert!(still_pending.is_empty(), "queue fully drained after single run");
 }
 
 #[tokio::test]

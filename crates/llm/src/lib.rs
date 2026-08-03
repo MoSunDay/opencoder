@@ -16,5 +16,5 @@ pub use message::{lower_messages, OpenAIMessage};
 pub use mock::MockChatClient;
 pub use request::ChatRequest;
 pub use stream::ChatStream;
-pub use tokens::{estimate, estimate_messages, estimate_transcript};
+pub use tokens::{estimate, estimate_messages, estimate_messages_for_display, estimate_transcript};
 pub use tool_call::CompletedToolCall;

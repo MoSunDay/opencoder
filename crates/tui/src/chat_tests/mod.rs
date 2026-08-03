@@ -1,6 +1,7 @@
 use super::*;
 use crate::composer;
 
+mod compaction_state;
 mod agent_switch;
 mod image_render;
 mod plan_card;

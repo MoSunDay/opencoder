@@ -3,7 +3,7 @@ use super::*;
 /// Build a ChatView with a Compaction block followed by an assistant block.
 fn compaction_view() -> ChatView {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::CompactionDelta("summary-a\nsummary-b".into()));
+    v.apply(&SessionEvent::Compaction("summary-a\nsummary-b".into()));
     v.apply(&SessionEvent::TextDelta("answer".into()));
     v.apply(&SessionEvent::Done);
     v

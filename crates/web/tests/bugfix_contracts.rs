@@ -267,12 +267,12 @@ async fn post_interrupt_no_handle_returns_ok_false() {
         "missing handle must include an error message"
     );
 
-    // Positive: a live handle flips the answer to ok:true.
-    state
-        .handles
-        .lock()
-        .await
-        .insert("live".to_string(), opencoder_web::handle::SessionHandle::new());
+    // Positive: a live (actively draining) handle flips the answer to ok:true.
+    // A bare SessionHandle::new() has draining=false; an idle handle must NOT
+    // report ok:true (Bug #2), so simulate a running drain here.
+    let live = opencoder_web::handle::SessionHandle::new();
+    live.draining.store(true, Ordering::SeqCst);
+    state.handles.lock().await.insert("live".to_string(), live);
     let resp = opencoder_web::api::post_interrupt(
         State(state.clone()),
         Path("live".to_string()),
@@ -283,7 +283,7 @@ async fn post_interrupt_no_handle_returns_ok_false() {
         .await
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["ok"], true, "existing handle must signal ok:true");
+    assert_eq!(v["ok"], true, "actively draining handle must signal ok:true");
 }
 
 /// Bug #4: a Store failure on POST /sessions must surface as a structured 500.

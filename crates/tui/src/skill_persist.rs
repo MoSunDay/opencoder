@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use opencoder_core::message::now_ms;
 use opencoder_store::{SessionPatch, Store};
 
-use crate::app_helpers::resolve_and_warn;
+use crate::app_helpers::resolve_and_warn_with;
 use crate::chat::ChatView;
 
 /// Persist the active skill to the store when it differs from `prev`.
@@ -55,12 +55,46 @@ pub(crate) async fn persist_skill(
 }
 
 
-#[allow(clippy::too_many_arguments)]
 /// Resolve `{$skill}` tokens in `text` (activating the skill in-memory) **and**
 /// persist the result to the store when it changed — the single composition
 /// `run_app` relies on for every Submit / Steer / Queue. Extracted so the
 /// three call sites stay byte-identical and the wiring itself is testable.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_persist(
+    text: &str,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+    skill_handle: &Arc<Mutex<Option<String>>>,
+    chat: &mut ChatView,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) -> (String, Vec<String>) {
+    let skills = opencoder_core::discover_skills();
+    resolve_persist_with(
+        &skills,
+        text,
+        active_skill,
+        active_skill_body,
+        sys_tokens,
+        agent_name,
+        workdir,
+        skill_handle,
+        chat,
+        store,
+        session_id,
+    )
+    .await
+}
+
+/// [`resolve_persist`] resolved against an *explicit* skill slice (typically
+/// `discover_in(tempdir)`), so tests avoid mutating the process-global `HOME`
+/// that `discover_skills()` reads. See [`resolve_and_warn_with`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resolve_persist_with(
+    skills: &[opencoder_core::Skill],
     text: &str,
     active_skill: &mut Option<String>,
     active_skill_body: &mut Option<String>,
@@ -76,7 +110,8 @@ pub(crate) async fn resolve_persist(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let (clean, unresolved) = resolve_and_warn(
+    let (clean, unresolved) = resolve_and_warn_with(
+        skills,
         text,
         active_skill,
         active_skill_body,
@@ -209,37 +244,22 @@ mod tests {
         assert_eq!(persisted.skill.as_deref(), Some("body-b"));
     }
 
-    /// RAII: restore `HOME` on drop (even if the test panics mid-await).
-    struct HomeRestore(Option<std::ffi::OsString>);
-    impl Drop for HomeRestore {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(h) => std::env::set_var("HOME", h),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-    }
-
     /// End-to-end composition: `{$alpha} fix the bug` through `resolve_persist`
     /// activates the skill in-memory AND persists it to the store — the exact
     /// wiring `run_app`'s Submit/Steer/Queue branches rely on. Pins that the
     /// three call sites' "snapshot -> resolve -> persist" sequence is correct,
     /// not just the two halves in isolation.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
     async fn resolve_persist_activates_and_stores_combined_skill_token() {
-        // A temp HOME holding a discoverable skill file.
+        // A tempdir holding a discoverable skill file. We pass it explicitly via
+        // `discover_in` + `resolve_persist_with`, so no `HOME` mutation is
+        // needed (the former `set_var("HOME", …)` is thread-unsafe → UB under
+        // parallel test execution and would flake unrelated pure tests).
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join(".opencoder").join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
         std::fs::write(skills_dir.join("alpha.md"), "the alpha body").unwrap();
-
-        // resolve_and_warn -> sys_tokens_for reads home_dir(); serialize + guard.
-        let _lock = crate::app::app_loop::tests::HOME_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let _home = HomeRestore(std::env::var_os("HOME"));
-        std::env::set_var("HOME", dir.path());
+        let skills = opencoder_core::discover_in(&skills_dir);
 
         let store = fresh_store().await;
         let skill_handle = handle(None);
@@ -252,7 +272,8 @@ mod tests {
         };
         let workdir = std::path::PathBuf::from("/tmp");
 
-        let (clean, unresolved) = resolve_persist(
+        let (clean, unresolved) = resolve_persist_with(
+            &skills,
             "{$alpha} fix the bug",
             &mut active_skill,
             &mut active_skill_body,

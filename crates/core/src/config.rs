@@ -85,7 +85,7 @@ pub struct Config {
     #[serde(default)]
     pub capabilities: CapabilitiesConfig,
     /// Tool-failure guard: consecutive-failure threshold and exponential
-    /// backoff. Defaults: 5 consecutive failures → abort; 200 ms → 2000 ms
+    /// backoff. Defaults: 20 consecutive failures → abort; 200 ms → 2000 ms
     /// exponential backoff.
     #[serde(default)]
     pub tool_guard: ToolGuardConfig,
@@ -494,12 +494,13 @@ impl Config {
     }
 
     /// Resolve the api_key for a provider name: `providers[name].api_key` →
-    /// legacy `provider.api_key` → `OPENAI_API_KEY` env var.
+    /// legacy `provider.api_key` → `OPENAI_API_KEY` env var (skipped when a
+    /// test isolation override is active on this thread).
     pub fn api_key_for(&self, name: &str) -> Result<String> {
         self.provider_for(name)
             .and_then(|p| p.api_key.clone())
             .or_else(|| self.provider.api_key.clone())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .or_else(|| env_get("OPENAI_API_KEY"))
             .filter(|s| !s.is_empty())
             .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
     }
@@ -623,45 +624,108 @@ pub fn looks_like_env_var(s: &str) -> bool {
         && t.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
+/// Thread-local override that redirects config discovery + env overlays away
+/// from the process-global environment.
+///
+/// `std::env::set_var`/`remove_var` are thread-unsafe at the libc level: under
+/// parallel test execution a concurrent `getenv` can observe a transiently
+/// corrupt environ and crash the whole test binary (taking unrelated tests
+/// with it). This thread-local lets a test isolate config discovery to a
+/// tempdir on the *current thread only* — no process-env mutation, so no UB —
+/// while production code (which never sets it) keeps reading the real env.
+///
+/// When set, [`config_candidates`] resolves every global candidate inside the
+/// override dir, and [`env_get`] returns `None` for every name (so env overlays
+/// like `OPENCODER_MODEL` / `OPENAI_API_KEY` never leak in from the host).
+pub fn scoped_config_home(home: PathBuf) -> ScopedConfigHome {
+    let prev = ISOLATION.with(|c| c.borrow_mut().replace(home));
+    ScopedConfigHome { prev }
+}
+
+/// RAII guard restoring the prior isolation state on drop. Created by
+/// [`scoped_config_home`]; drop unwinds the override even if a test panics.
+pub struct ScopedConfigHome {
+    prev: Option<PathBuf>,
+}
+
+impl Drop for ScopedConfigHome {
+    fn drop(&mut self) {
+        ISOLATION.with(|c| *c.borrow_mut() = self.prev.take());
+    }
+}
+
+thread_local! {
+    static ISOLATION: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The override dir when a test has installed [`scoped_config_home`].
+fn isolated_home() -> Option<PathBuf> {
+    ISOLATION.with(|c| c.borrow().clone())
+}
+
+/// Resolve the home dir for config discovery: the thread-local override when a
+/// test set it, otherwise the real `dirs::home_dir()`.
+fn config_home_dir() -> Option<PathBuf> {
+    isolated_home().or_else(dirs::home_dir)
+}
+
+/// Resolve the XDG config dir: the thread-local override when a test set it
+/// (mirrors the tests that pointed both `HOME` and `XDG_CONFIG_HOME` at one
+/// tempdir), otherwise the real `dirs::config_dir()`.
+fn config_xdg_dir() -> Option<PathBuf> {
+    isolated_home().or_else(dirs::config_dir)
+}
+
+/// Read an env var, *unless* a test isolation override is active on this
+/// thread — in which case return `None` so host env never contaminates the
+/// isolated config under test.
+fn env_get(name: &str) -> Option<String> {
+    if isolated_home().is_some() {
+        None
+    } else {
+        std::env::var(name).ok()
+    }
+}
+
 fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
     let mut v = vec![
         working_dir.join(".opencoder").join("config.json"),
         working_dir.join("opencoder.json"),
     ];
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = config_home_dir() {
         // ~/.opencoder/ (this binary's own config home) — highest-priority global,
         // so `opencoder` runs directly from any directory with no project config.
         v.push(home.join(".opencoder").join("config.json"));
         v.push(home.join(".opencoder").join("opencoder.json"));
     }
-    if let Some(cfg) = dirs::config_dir() {
+    if let Some(cfg) = config_xdg_dir() {
         v.push(cfg.join("opencoder").join("config.json"));
     }
     v
 }
 
 fn apply_env(cfg: &mut Config) {
-    if let Ok(b) = std::env::var("OPENAI_BASE_URL") {
+    if let Some(b) = env_get("OPENAI_BASE_URL") {
         if !b.is_empty() {
             cfg.provider.base_url = b.trim_end_matches('/').to_string();
         }
     }
-    if let Ok(m) = std::env::var("OPENCODER_MODEL") {
+    if let Some(m) = env_get("OPENCODER_MODEL") {
         if !m.is_empty() {
             cfg.model = m;
         }
     }
-    if let Ok(m) = std::env::var("OPENCODER_SMALL_MODEL") {
+    if let Some(m) = env_get("OPENCODER_SMALL_MODEL") {
         if !m.is_empty() {
             cfg.small_model = Some(m);
         }
     }
-    if let Ok(v) = std::env::var("OPENCODER_CONTEXT_LIMIT") {
+    if let Some(v) = env_get("OPENCODER_CONTEXT_LIMIT") {
         if let Ok(n) = v.parse::<u64>() {
             cfg.context_limit = Some(n);
         }
     }
-    if let Ok(raw) = std::env::var("OPENCODER_CACHE_SALT") {
+    if let Some(raw) = env_get("OPENCODER_CACHE_SALT") {
         match raw.trim().to_ascii_lowercase().as_str() {
             "true" | "1" | "yes" => cfg.cache_salt = Some(true),
             "false" | "0" | "no" => cfg.cache_salt = Some(false),
@@ -672,7 +736,7 @@ fn apply_env(cfg: &mut Config) {
     // when the user has not already configured `network.proxy` directly.
     if cfg.network.proxy.is_none() {
         for var in ["OPENCODER_PROXY", "ALL_PROXY"] {
-            if let Ok(v) = std::env::var(var) {
+            if let Some(v) = env_get(var) {
                 let t = v.trim();
                 if !t.is_empty() {
                     cfg.network.proxy = Some(t.to_string());

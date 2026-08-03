@@ -128,6 +128,11 @@ pub async fn session_dispatch(sub: &SessionSub, cli: &Cli) -> Result<()> {
             if *json {
                 return show_session_json(&store, id).await;
             }
+            // Match the JSON path: a missing session is an error, not an
+            // empty (silent) listing.
+            if store.get_session(id).await?.is_none() {
+                anyhow::bail!("session not found: {id}");
+            }
             for m in store.load_messages(id).await? {
                 println!("[{:?}] {}", m.role, m.text());
             }

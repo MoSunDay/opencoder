@@ -3,6 +3,7 @@
 //! interrupt mutate the live session handle.
 
 use std::collections::HashSet;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -343,13 +344,15 @@ pub async fn post_interrupt(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let handle = state.handles.lock().await.get(&id).cloned();
-    if let Some(h) = &handle {
-        h.cancel.lock().await.cancel();
-    }
-    if handle.is_some() {
-        Json(json!({ "ok": true }))
-    } else {
-        Json(json!({ "ok": false, "error": "no active session handle" }))
+    match &handle {
+        // Only an actively draining session can be interrupted; a stale/idle
+        // handle has no live drain task to cancel.
+        Some(h) if h.draining.load(Ordering::SeqCst) => {
+            h.cancel.lock().await.cancel();
+            Json(json!({ "ok": true }))
+        }
+        Some(_) => Json(json!({ "ok": false, "error": "no active drain running" })),
+        None => Json(json!({ "ok": false, "error": "no active session handle" })),
     }
 }
 
@@ -375,6 +378,12 @@ pub async fn post_subagent_steer(
         }
         Err(e) => return error_500(format!("get_subagent_task: {e:#}")),
     };
+    // The URL path `:id` is the parent session; ensure the fetched task
+    // actually belongs to it so a task_id from another session can't be
+    // steered through this route.
+    if task.parent_session_id != id {
+        return error_404("task not found in this session");
+    }
     if task.status != SubagentStatus::Running {
         return (
             axum::http::StatusCode::CONFLICT,
@@ -428,8 +437,14 @@ pub async fn get_events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(q): Query<EventsQuery>,
-) -> impl IntoResponse {
+) -> Response {
     let after = q.after.unwrap_or(0);
+
+    // Reject non-existent sessions: otherwise a get-or-created handle would
+    // subscribe to a broadcast that never fires, hanging the SSE stream forever.
+    if state.store.get_session(&id).await.ok().flatten().is_none() {
+        return error_404("session not found");
+    }
 
     // Subscribe FIRST, then query persisted events. This closes the race where
     // an event broadcast between query and subscribe is lost (not yet
@@ -521,7 +536,9 @@ pub async fn get_events(
         Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
     });
 
-    Sse::new(merged).keep_alive(KeepAlive::default())
+    Sse::new(merged)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 pub async fn health() -> impl IntoResponse {
@@ -537,6 +554,14 @@ pub async fn get_event_seq(
 ) -> impl IntoResponse {
     let seq = state.store.last_event_seq(&id).await.unwrap_or(0);
     Json(json!({ "id": id, "seq": seq }))
+}
+
+fn error_404(msg: &str) -> Response {
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
 }
 
 fn error_500(msg: String) -> Response {

@@ -8,7 +8,11 @@ pub struct ChatRequest {
     pub messages: Vec<OpenAIMessage>,
     pub tools: Vec<Value>,
     pub tool_choice: Option<String>,
-    pub temperature: Option<f32>,
+    /// Sampling temperature. Stored as `f64` (not `f32`) so that `json!(t)`
+    /// serializes the shortest round-trippable decimal (e.g. `0.3`) rather than
+    /// the widened `f32` artifact `0.6999999880790710` that `0.7_f32 as f64`
+    /// produces.
+    pub temperature: Option<f64>,
     pub max_tokens: Option<u64>,
     /// OpenAI-style reasoning effort (`low|medium|high|xhigh|max`). Forwarded verbatim
     /// as a top-level `reasoning_effort` field on the request body. `None`
@@ -55,5 +59,52 @@ impl ChatRequest {
             }
         }
         body
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_req() -> ChatRequest {
+        ChatRequest {
+            model: "m".into(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            tool_choice: None,
+            temperature: None,
+            max_tokens: None,
+            reasoning_effort: None,
+            cache_salt: None,
+        }
+    }
+
+    #[test]
+    fn temperature_omitted_when_none() {
+        let body = minimal_req().to_body();
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn temperature_serializes_as_clean_f64() {
+        // Regression: when the field was `f32`, `0.7_f32` widened to f64 on
+        // serialization produced the artifact `0.6999999880790710`. As `f64`,
+        // serde_json emits the shortest round-trippable decimal `0.7`.
+        let mut req = minimal_req();
+        req.temperature = Some(0.7);
+        let body = req.to_body();
+        // The serialized number must read back exactly as 0.7, not the f32
+        // widening artifact.
+        assert_eq!(body["temperature"], json!(0.7));
+        assert_eq!(body["temperature"].to_string(), "0.7");
+    }
+
+    #[test]
+    fn temperature_zero_serializes_cleanly() {
+        let mut req = minimal_req();
+        req.temperature = Some(0.0);
+        let body = req.to_body();
+        assert_eq!(body["temperature"], json!(0.0));
+        assert_eq!(body["temperature"].to_string(), "0.0");
     }
 }

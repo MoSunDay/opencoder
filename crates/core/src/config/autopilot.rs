@@ -32,9 +32,9 @@ pub(super) fn merge(cfg: &mut AutoPilotConfig, obj: &serde_json::Map<String, ser
         cfg.enabled = v;
     }
     if let Some(v) = obj.get("max_iterations").and_then(|v| v.as_u64()) {
-        cfg.max_iterations = v as u32;
+        cfg.max_iterations = v.min(u32::MAX as u64) as u32;
     }
     if let Some(v) = obj.get("verify_retries").and_then(|v| v.as_u64()) {
-        cfg.verify_retries = v as u32;
+        cfg.verify_retries = v.min(u32::MAX as u64) as u32;
     }
 }

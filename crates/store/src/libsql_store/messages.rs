@@ -9,26 +9,11 @@ INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_jso
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
 
 pub async fn append(conn: &Connection, session_id: &str, msg: &Message) -> Result<i64> {
-    let blocks_json = serde_json::to_string(&msg.blocks).context("serialize blocks")?;
-    let usage_json = serde_json::to_string(&msg.usage).context("serialize usage")?;
-    let role = role_str(msg.role);
-    conn.execute(
-        INSERT_MESSAGE,
-        params![
-            msg.id.as_str(),
-            session_id,
-            role,
-            msg.agent.as_deref(),
-            msg.model.as_deref(),
-            blocks_json,
-            usage_json,
-            msg.created_at,
-            msg.synthetic as i64,
-        ],
-    )
-    .await
-    .context("insert message")?;
-    last_seq(conn, session_id).await
+    // Delegate to `append_many` so the INSERT + seq read happen inside a single
+    // transaction (same `run_tx` + `last_seq_in_tx` pattern). The autocommit +
+    // separate `SELECT MAX(seq)` used previously could race across processes.
+    let mut seqs = append_many(conn, session_id, std::slice::from_ref(msg)).await?;
+    Ok(seqs.remove(0))
 }
 
 pub async fn append_many(

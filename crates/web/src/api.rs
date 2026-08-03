@@ -2,6 +2,7 @@
 //! streaming happens via the SSE `/events` endpoint. Agent/model switches and
 //! interrupt mutate the live session handle.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -49,7 +50,9 @@ pub async fn create_session(
         skill: None,
         task_type: None,
     };
-    let _ = state.store.create_session(&meta).await;
+    if let Err(e) = state.store.create_session(&meta).await {
+        return error_500(format!("create_session: {e:#}"));
+    }
     Json(json!({ "id": id })).into_response()
 }
 
@@ -180,7 +183,9 @@ pub async fn post_prompt(
         .as_deref()
         .and_then(Delivery::parse)
         .unwrap_or(Delivery::Steer);
-    ensure_session_row(&state, &id, &body.prompt, &config).await;
+    if let Err(e) = ensure_session_row(&state, &id, &body.prompt, &config).await {
+        return error_500(e);
+    }
     match admit_and_drain(
         state.handles.clone(),
         state.store.clone(),
@@ -199,12 +204,17 @@ pub async fn post_prompt(
     }
 }
 
-async fn ensure_session_row(state: &AppState, id: &str, prompt: &str, config: &Config) {
+async fn ensure_session_row(
+    state: &AppState,
+    id: &str,
+    prompt: &str,
+    config: &Config,
+) -> Result<(), String> {
     if state.store.get_session(id).await.ok().flatten().is_some() {
-        return;
+        return Ok(());
     }
     let now = opencoder_core::message::now_ms();
-    let _ = state
+    state
         .store
         .create_session(&SessionMeta {
             id: id.to_string(),
@@ -221,7 +231,8 @@ async fn ensure_session_row(state: &AppState, id: &str, prompt: &str, config: &C
             skill: None,
             task_type: None,
         })
-        .await;
+        .await
+        .map_err(|e| format!("create_session: {e:#}"))
 }
 
 #[derive(Deserialize)]
@@ -295,10 +306,15 @@ pub async fn post_interrupt(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    if let Some(h) = state.handles.lock().await.get(&id).cloned() {
+    let handle = state.handles.lock().await.get(&id).cloned();
+    if let Some(h) = &handle {
         h.cancel.lock().await.cancel();
     }
-    Json(json!({ "ok": true }))
+    if handle.is_some() {
+        Json(json!({ "ok": true }))
+    } else {
+        Json(json!({ "ok": false, "error": "no active session handle" }))
+    }
 }
 
 /// Steer a running subagent: admit a steer input to the child session and fire
@@ -378,6 +394,18 @@ pub async fn get_events(
     Query(q): Query<EventsQuery>,
 ) -> impl IntoResponse {
     let after = q.after.unwrap_or(0);
+
+    // Subscribe FIRST, then query persisted events. This closes the race where
+    // an event broadcast between query and subscribe is lost (not yet
+    // persisted at query time, not received via broadcast). With subscribe-first
+    // every post-subscribe broadcast is captured by the live stream; any overlap
+    // with the replay window is deduplicated below.
+    let rx = {
+        let mut map = state.handles.lock().await;
+        let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
+        handle.tx.subscribe()
+    };
+
     let persisted: Vec<SseEvt> = state
         .store
         .events_after(&id, after)
@@ -398,15 +426,44 @@ pub async fn get_events(
         })
         .unwrap_or_default();
 
-    let rx = {
-        let mut map = state.handles.lock().await;
-        let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
-        handle.tx.subscribe()
-    };
+    // Dedup: events broadcast between subscribe and query may appear in BOTH
+    // the replay (persisted before query) and the live stream (received via
+    // broadcast). Track fingerprints of replayed events and skip matching live
+    // events. The set is bounded by the replay size and shrinks as matches are
+    // consumed, so it self-clears once the overlap window passes.
+    let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(
+        std::sync::Mutex::new(
+            persisted
+                .iter()
+                .map(|e| (e.kind.clone(), e.data.to_string()))
+                .collect(),
+        ),
+    );
 
     let replay = futures::stream::iter(persisted);
-    let live =
-        tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|r| async move { r.ok() });
+    let live = tokio_stream::wrappers::BroadcastStream::new(rx)
+        .filter_map(|r| async move { r.ok() })
+        .filter_map({
+            let seen = Arc::clone(&seen);
+            move |evt| {
+                let seen = Arc::clone(&seen);
+                async move {
+                    let key = (evt.kind.clone(), evt.data.to_string());
+                    let mut is_dup = false;
+                    if let Ok(mut guard) = seen.lock() {
+                        if guard.contains(&key) {
+                            guard.remove(&key);
+                            is_dup = true;
+                        }
+                    }
+                    if is_dup {
+                        None
+                    } else {
+                        Some(evt)
+                    }
+                }
+            }
+        });
     let merged = replay.chain(live).map(|evt| {
         let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
         Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))

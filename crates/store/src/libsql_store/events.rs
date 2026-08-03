@@ -85,8 +85,10 @@ pub async fn after(
         let payload_json: String = r.get(2)?;
         let sse_kind: Option<String> = r.get(3)?;
         let ts: i64 = r.get(4)?;
-        let payload: serde_json::Value =
-            serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap_or_else(|e| {
+            tracing::warn!(session_id, seq, error = %e, "failed to deserialize event payload, using null");
+            serde_json::Value::Null
+        });
         out.push(SessionEventRecord {
             session_id: session_id.to_string(),
             kind: parse_kind(&kind_s),

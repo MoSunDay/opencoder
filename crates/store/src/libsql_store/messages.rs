@@ -147,8 +147,14 @@ fn row_to_message(r: &libsql::Row) -> Result<Message> {
     let usage_json: String = r.get(5)?;
     let created_at: i64 = r.get(6)?;
     let synthetic_i: i64 = r.get(7)?;
-    let blocks: Vec<ContentBlock> = serde_json::from_str(&blocks_json).unwrap_or_default();
-    let usage: MessageUsage = serde_json::from_str(&usage_json).unwrap_or_default();
+    let blocks: Vec<ContentBlock> = serde_json::from_str(&blocks_json).unwrap_or_else(|e| {
+        tracing::warn!(message_id = %id, error = %e, "failed to deserialize message blocks, using empty");
+        Vec::new()
+    });
+    let usage: MessageUsage = serde_json::from_str(&usage_json).unwrap_or_else(|e| {
+        tracing::warn!(message_id = %id, error = %e, "failed to deserialize message usage, using default");
+        MessageUsage::default()
+    });
     Ok(Message {
         id,
         role: parse_role(&role_s),

@@ -28,6 +28,7 @@ pub(super) async fn run_subagent(
     parent: &SessionState,
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
+    activity: tokio::sync::mpsc::Sender<()>,
 ) -> ToolOutput {
     let prompt = input
         .get("prompt")
@@ -191,6 +192,13 @@ pub(super) async fn run_subagent(
         Vec::new(),
         registry,
         move |cev| {
+            // Signal forward progress so the parent's idle-timeout watchdog
+            // (Phase-1 reset loop in execute.rs) resets its deadline. Every
+            // SessionEvent counts as activity: a stalled child is one that
+            // produces *no* events at all. `try_send` is non-blocking and the
+            // signal is idempotent, so a full/closed channel is silently
+            // dropped (only the most recent real activity matters).
+            let _ = activity.try_send(());
             // Incremental persist: push to the ordered flusher channel. The
             // callback is sync (cannot await); `try_send` is non-blocking, so
             // it can only fail if the channel is full (slow-DB backpressure)

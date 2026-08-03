@@ -96,8 +96,12 @@ pub struct Config {
     /// actual content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_idle_timeout_secs: Option<u64>,
-    /// Max wall-clock duration for a `task` subagent before it is aborted
-    /// (seconds). Defaults to 1800 (30 min). Prevents indefinite subagent hangs.
+    /// Per-step idle timeout for a `task` subagent (seconds). Defaults to 1800
+    /// (30 min). The deadline resets on every forward-progress signal the child
+    /// produces (tool call start/end, LLM text/reasoning deltas), so a
+    /// long-running but active subagent is never killed — the timeout fires only
+    /// when a single step stalls with no activity for this long. Formerly a
+    /// single wall-clock cap; behaviour changed to idle-timeout semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_timeout_secs: Option<u64>,
     /// Max wall-clock duration for replaying a single interrupted subagent
@@ -411,7 +415,9 @@ impl Config {
     pub fn stream_idle_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.stream_idle_timeout_secs.unwrap_or(600))
     }
-    /// Effective max wall-clock duration for a single `task` subagent.
+    /// Effective per-step idle timeout for a single `task` subagent. The
+    /// deadline resets on every child activity signal, so this bounds how long a
+    /// single stalled step (no events) may run — not total subagent runtime.
     pub fn task_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.task_timeout_secs.unwrap_or(1800))
     }

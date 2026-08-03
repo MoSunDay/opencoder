@@ -353,3 +353,80 @@ fn user_embedded_tool_result_image_rehomes_to_user_message() {
         |p| p["type"] == "image_url" && p["image_url"]["url"] == "data:image/png;base64,iVBOR="
     ));
 }
+
+// --- assistant message lowering (Fix 3: content null → empty string) ---
+
+fn assistant_with_tool_calls(tool_id: &str) -> Message {
+    Message {
+        id: "m1".into(),
+        role: Role::Assistant,
+        blocks: vec![ContentBlock::ToolUse {
+            id: tool_id.into(),
+            name: "bash".into(),
+            input: serde_json::json!({"cmd": "ls"}),
+        }],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    }
+}
+
+#[test]
+fn assistant_tool_only_content_is_empty_string_not_null() {
+    let out = lower_messages(&[assistant_with_tool_calls("c1")]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0]["role"], "assistant");
+    // content must be a string (empty), NOT null — some providers reject null.
+    assert!(
+        out[0]["content"].is_string(),
+        "assistant content must be a string, got: {:?}",
+        out[0]["content"]
+    );
+    assert_eq!(out[0]["content"].as_str().unwrap(), "");
+}
+
+#[test]
+fn assistant_text_content_is_preserved() {
+    let msg = Message {
+        id: "m1".into(),
+        role: Role::Assistant,
+        blocks: vec![ContentBlock::Text {
+            text: "hello world".into(),
+        }],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let out = lower_messages(&[msg]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0]["content"].as_str().unwrap(), "hello world");
+}
+
+#[test]
+fn multi_turn_tool_only_messages_all_have_string_content() {
+    // Regression: multiple consecutive tool-call-only assistant turns must
+    // all emit content as a string, never null.
+    let msgs = vec![
+        assistant_with_tool_calls("c1"),
+        tool_msg("c1", "output1", false),
+        assistant_with_tool_calls("c2"),
+        tool_msg("c2", "output2", false),
+        assistant_with_tool_calls("c3"),
+        tool_msg("c3", "output3", false),
+    ];
+    let out = lower_messages(&msgs);
+    let assistant_msgs: Vec<_> = out.iter().filter(|m| m["role"] == "assistant").collect();
+    assert_eq!(assistant_msgs.len(), 3);
+    for (i, m) in assistant_msgs.iter().enumerate() {
+        assert!(
+            m["content"].is_string(),
+            "assistant #{} content must be string, got: {:?}",
+            i,
+            m["content"]
+        );
+    }
+}

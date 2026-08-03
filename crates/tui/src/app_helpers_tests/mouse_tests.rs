@@ -287,6 +287,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
+        compaction_btns: Vec::new(),
         total_rows: 0,
     };
 
@@ -405,6 +406,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         }],
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
+        compaction_btns: Vec::new(),
         total_rows: 0,
     };
 
@@ -457,5 +459,89 @@ async fn thinking_header_toggles_even_right_after_another_click() {
     assert!(
         !dbl_click,
         "a header toggle must not be flagged as a double-click"
+    );
+}
+
+/// Clicking a Compaction-block header must toggle its collapse on the first
+/// click. Mirrors `thinking_header_toggles_even_right_after_another_click`.
+#[tokio::test]
+async fn compaction_header_click_toggles_collapse() {
+    use std::time::Instant;
+
+    let mut chat = crate::chat::ChatView::default();
+    chat.apply(&SessionEvent::TextDelta("answer".into()));
+    chat.apply(&SessionEvent::Done);
+    chat.apply(&SessionEvent::CompactionDelta("hidden summary".into()));
+    // Collapsed by default.
+    assert!(
+        !chat.flatten().iter().any(|l| l
+            .spans
+            .iter()
+            .any(|s| s.content.contains("hidden summary"))),
+        "precondition: compaction must start collapsed"
+    );
+
+    let body = Rect::new(0, 0, 80, 12);
+    let header_rect = Rect::new(1, 2, 78, 1);
+    let hits = MouseHits {
+        jump_btn: None,
+        top_btn: None,
+        body: Some(body),
+        queue_panel: None,
+        queue_total: 0,
+        queue_btns: Vec::new(),
+        thinking_btns: Vec::new(),
+        subagent_btns: Vec::new(),
+        tool_btns: Vec::new(),
+        compaction_btns: vec![crate::render::CompactionBtn {
+            block_idx: crate::chat::ChatView::compaction_headers(&chat)[0].block_idx,
+            rect: header_rect,
+        }],
+        total_rows: 0,
+    };
+
+    let mut scroll = 0u32;
+    let mut follow = false;
+    let mut selection: Option<crate::selection::SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let store = StubStore;
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = Some(Instant::now());
+    let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
+
+    let outcome = handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: header_rect.x,
+            row: header_rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut subagent_sys,
+        std::path::Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+    assert_eq!(outcome, MouseOutcome::None);
+    assert!(
+        chat.flatten().iter().any(|l| l
+            .spans
+            .iter()
+            .any(|s| s.content.contains("hidden summary"))),
+        "compaction must be expanded after the header click"
     );
 }

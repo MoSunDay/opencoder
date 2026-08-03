@@ -4,9 +4,9 @@
 //! Contracts:
 //! - idle_short_circuit: a bare "/plan" prompt switches mode with NO LLM call
 //! - queue_drains_control_cmds: a queue of ["/plan", "real prompt", "/act"]
-//!   applies the leading control commands without LLM turns and runs the real
-//!   prompt; the trailing "/act" stays pending (at most ONE queued real
-//!   prompt is submitted per run — the run stops at the next idle boundary)
+//!   is fully drained FIFO in a single run — leading/trailing control
+//!   commands are applied without LLM turns and the real prompt gets a
+//!   turn; the run finishes (Done) with an empty queue
 //! - clear_context_survives_resume: after /act_clear_context, resume
 //!   reconstructs the fresh-start marker transcript
 
@@ -117,10 +117,10 @@ async fn idle_short_circuit_switches_with_no_llm_call() {
     assert_eq!(meta.agent.as_deref(), Some("plan"));
 }
 
-/// Queue drain: ["/plan", "do work", "/act"] applies the leading control
-/// command without an LLM turn and processes the real prompt — then the run
-/// STOPS (Done) with "/act" still pending: exactly one queued real prompt per
-/// run. The trailing control command is consumed by the next run's drain.
+/// Queue drain: ["/plan", "do work", "/act"] is fully drained FIFO in a
+/// single run — leading/trailing control commands are applied without LLM
+/// turns, the real prompt gets a turn, and the run finishes (Done) with an
+/// empty queue.
 #[tokio::test]
 async fn queue_drains_control_cmds_between_real_prompts() {
     let store = mem_store().await;
@@ -169,7 +169,7 @@ async fn queue_drains_control_cmds_between_real_prompts() {
     .unwrap();
 
     // Query the store BEFORE taking the events lock (avoids holding a
-    // MutexGuard across an .await): "/act" must still be pending.
+    // MutexGuard across an .await): the queue should be fully drained.
     let still_pending = store
         .pending_inputs("drain-sess", Delivery::Queue)
         .await
@@ -177,9 +177,9 @@ async fn queue_drains_control_cmds_between_real_prompts() {
 
     let evs = events.lock().unwrap();
 
-    // After "kickoff" turn (bash -> tool exec -> idle), the queue drains:
-    // /plan (no LLM), "do work" (LLM turn), then the run STOPS at the next
-    // idle boundary — "/act" stays pending for the next explicit submission.
+    // After "kickoff" turn -> idle, the queue drains FIFO in a single run:
+    // /plan (no LLM), "do work" (LLM turn), then at the next idle boundary
+    // /act (no LLM) is applied and the queue empties -> Done.
     let agent_switches: Vec<&str> = evs
         .iter()
         .filter_map(|e| match e {
@@ -192,22 +192,20 @@ async fn queue_drains_control_cmds_between_real_prompts() {
         "/plan applied -> AgentSwitch(plan)"
     );
     assert!(
-        !agent_switches.contains(&"act"),
-        "/act must NOT be applied in the same run (one queued real prompt per run)"
+        agent_switches.contains(&"act"),
+        "/act applied in the same run -> AgentSwitch(act)"
     );
 
-    // The final agent should be plan (the trailing /act is still pending).
-    assert_eq!(session.agent.name, "plan", "final agent is plan, not act");
+    // The final agent should be act (trailing /act was drained).
+    assert_eq!(session.agent.name, "act", "final agent is act");
 
-    // QueueConsumed should fire for the leading control command + the real
-    // prompt; "/act" must still be pending in the store.
+    // QueueConsumed fires for all three items; the queue is now empty.
     let consumed_count = evs
         .iter()
         .filter(|e| matches!(e, SessionEvent::QueueConsumed { .. }))
         .count();
-    assert_eq!(consumed_count, 2, "exactly /plan + \"do work\" consumed");
-    assert_eq!(still_pending.len(), 1, "trailing /act stays pending");
-    assert_eq!(still_pending[0].prompt, "/act");
+    assert_eq!(consumed_count, 3, "all three queue items consumed");
+    assert!(still_pending.is_empty(), "queue fully drained");
 
     // Done should be emitted exactly once (at the very end of the run).
     let done_count = evs

@@ -564,7 +564,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
-                                        app_loop::push_queued_marker(&mut chat, &display);
                                         chat.note_requirement_submitted();
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
@@ -575,7 +574,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
-                                        app_loop::push_queued_marker(&mut chat, &display);
                                         chat.note_requirement_submitted();
                                     }
                                 }

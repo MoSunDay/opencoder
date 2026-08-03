@@ -175,6 +175,7 @@ pub async fn resume(
         summary_seq: meta.summary_seq,
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
+        plan_input_count: 0,
     };
     Ok(s)
 }
@@ -200,20 +201,20 @@ pub async fn resume_and_replay(
     working_dir: PathBuf,
     replay_cancel: Option<CancellationToken>,
 ) -> Result<SessionState> {
-    let running: Vec<SubagentTaskRecord> = store
+    let pending: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(id)
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter(|t| t.status == SubagentStatus::Running)
+        .filter(|t| matches!(t.status, SubagentStatus::Running | SubagentStatus::Cancelled))
         .collect();
 
-    // Replay each Running child, collecting results to backfill in ONE Tool
+    // Replay each non-terminal child (Running or Cancelled), collecting results to backfill in ONE Tool
     // message -- mirrors run_loop, which batches a turn's tool results into a
     // single tool message. `list_subagent_tasks` returns rows in `seq` order,
     // so results land deterministically in dispatch order.
-    let mut backfill: Vec<ContentBlock> = Vec::with_capacity(running.len());
-    for task in &running {
+    let mut backfill: Vec<ContentBlock> = Vec::with_capacity(pending.len());
+    for task in &pending {
         if let Some(c) = &replay_cancel {
             if c.is_cancelled() {
                 break;

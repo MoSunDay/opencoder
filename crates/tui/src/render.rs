@@ -73,6 +73,8 @@ pub(crate) struct MouseHits {
     /// Clickable Tool-block header rows; clicking toggles collapse.
     /// One entry per Tool block currently visible in the body viewport.
     pub tool_btns: Vec<ToolBtn>,
+    /// Clickable Compaction-block header rows; clicking toggles collapse.
+    pub compaction_btns: Vec<CompactionBtn>,
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
     pub total_rows: usize,
@@ -208,6 +210,7 @@ pub(crate) fn render<B: Backend>(
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
         hits.tool_btns.clear();
+        hits.compaction_btns.clear();
         if !plan_active {
             render_body(
                 f,
@@ -223,6 +226,7 @@ pub(crate) fn render<B: Backend>(
                 &mut hits.thinking_btns,
                 &mut hits.subagent_btns,
                 &mut hits.tool_btns,
+                &mut hits.compaction_btns,
                 selection,
                 viewport,
                 is_top_level,
@@ -342,6 +346,7 @@ fn render_body(
     thinking_btns: &mut Vec<ThinkingBtn>,
     subagent_btns: &mut Vec<SubagentBtn>,
     tool_btns: &mut Vec<ToolBtn>,
+    compaction_btns: &mut Vec<CompactionBtn>,
     selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
@@ -409,6 +414,10 @@ fn render_body(
     );
     hit_records::record_tool_hits(
         chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y, tool_btns,
+    );
+    hit_records::record_compaction_hits(
+        chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y,
+        compaction_btns,
     );
 
     f.render_widget(block, area);
@@ -780,6 +789,7 @@ fn place_cursor(
 
 #[path = "render_hits.rs"]
 mod hit_records;
+pub(crate) use hit_records::CompactionBtn;
 
 #[cfg(test)]
 #[path = "render_tests/mod.rs"]

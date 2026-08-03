@@ -31,5 +31,6 @@ mod cursor;
 mod queue_panel;
 mod status_bar;
 mod status_ctx;
+mod compaction;
 mod thinking;
 mod timer;

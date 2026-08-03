@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_llm::estimate_messages;
+use opencoder_llm::estimate_messages_for_display;
 use opencoder_session::SessionEvent;
 use opencoder_store::{Store, SubagentStatus, SubagentTaskRecord};
 use ratatui::style::{Modifier, Style};
@@ -246,7 +246,7 @@ pub async fn replay_into_chat(
     }
 
     // Full transcript token count for ctx% (system prompt added at render).
-    chat.context_used = estimate_messages(messages) as u64;
+    chat.context_used = estimate_messages_for_display(messages) as u64;
     chat
 }
 
@@ -305,6 +305,13 @@ pub(super) async fn reconstruct_child_view(
                 view.apply(&ev);
             }
         }
+        // Events may be incomplete; compute context_used from the full
+        // message list for an accurate token estimate.
+        let child_msgs = store
+            .load_messages(child_session_id)
+            .await
+            .unwrap_or_default();
+        view.context_used = estimate_messages_for_display(&child_msgs) as u64;
         return view;
     }
 
@@ -375,7 +382,7 @@ pub(super) async fn prefetch_image_bytes(messages: &[Message]) -> HashMap<String
 
 /// Text-only message replay (no subagent reconstruction). Used as a fallback
 /// for child views without persisted events, and by tests.
-pub(super) fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
+pub fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
     let empty = HashMap::new();
     let mut chat = ChatView {
         agent: agent_name.into(),
@@ -384,5 +391,6 @@ pub(super) fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatVie
     for msg in messages {
         replay_one(&mut chat, msg, &empty);
     }
+    chat.context_used = estimate_messages_for_display(messages) as u64;
     chat
 }

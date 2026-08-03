@@ -4,9 +4,9 @@ use super::super::*;
 fn thinking_block_collapses() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ReasoningDelta("line1\nline2\nline3".into()));
-    // Collapsed by default: summary line only, content hidden
+    // Collapsed by default: header only, content hidden
     let text = block_text(&v);
-    assert!(text.contains("3 lines"));
+    assert!(text.contains("Thinking"));
     assert!(!text.contains("line1"));
     // Expand: should contain all 3 lines
     v.toggle_thinking_at(0);

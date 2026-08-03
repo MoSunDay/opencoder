@@ -261,21 +261,118 @@ async fn clear_context_survives_resume() {
         assert_eq!(
             session.messages.len(),
             1,
-            "transcript collapsed to 1 marker"
+            "transcript collapsed to 1 handoff marker"
         );
         assert_eq!(session.agent.name, "act", "switched to act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
+        // The finalized plan ("old answer") was preserved, not blanked.
+        assert_eq!(session.handoff_plan.as_deref(), Some("old answer"));
         assert!(
             evs.iter()
                 .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
             "TranscriptReset emitted"
         );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::PlanHandoff(p) if p == "old answer")),
+            "PlanHandoff emitted carrying the preserved plan"
+        );
     }
 
-    // Now resume from the store and verify the marker survives.
+    // Now resume from the store and verify the handoff marker survives.
     let resumed = resume(
         store.clone(),
         "clear-sess",
+        config(),
+        Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resumed.messages.len(),
+        1,
+        "resume reconstructs single plan-handoff marker"
+    );
+    assert_eq!(resumed.agent.name, "act");
+    let marker_text = resumed.messages[0].text();
+    assert!(
+        marker_text.contains("old answer"),
+        "marker text carries the preserved plan: {marker_text}"
+    );
+}
+
+/// ClearContext with no finalized plan falls back to a blank fresh-start that
+/// survives resume: resume reconstructs the sentinel fresh-start marker.
+#[tokio::test]
+async fn clear_context_no_plan_survives_resume() {
+    let store = mem_store().await;
+    seed(&store, "clear-noplan", "plan").await;
+
+    // Only user messages: no assistant plan text to hand off.
+    let msgs = vec![
+        Message::user("u1", "old question"),
+        Message::user("u2", "another question"),
+    ];
+    store.append_messages("clear-noplan", &msgs).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "clear-noplan",
+        resolve_agent("plan").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, "/act_clear_context".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    {
+        let evs = events.lock().unwrap();
+        assert_eq!(
+            session.messages.len(),
+            1,
+            "transcript collapsed to 1 fresh-start marker"
+        );
+        assert_eq!(session.agent.name, "act", "switched to act");
+        assert!(session.handoff_seq.is_some(), "handoff_seq set");
+        // No plan -> blank sentinel stored so resume reconstructs fresh-start.
+        // (CLEAR_CONTEXT_SENTINEL is pub(crate); assert the literal value.)
+        assert_eq!(
+            session.handoff_plan.as_deref(),
+            Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+        );
+        assert!(
+            session.messages[0].text().contains("Context cleared"),
+            "marker is the blank fresh-start"
+        );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
+            "TranscriptReset emitted"
+        );
+        assert!(
+            !evs
+                .iter()
+                .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
+            "no PlanHandoff when there is no plan"
+        );
+    }
+
+    // Resume reconstructs the blank fresh-start marker.
+    let resumed = resume(
+        store.clone(),
+        "clear-noplan",
         config(),
         Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -291,7 +388,7 @@ async fn clear_context_survives_resume() {
     let marker_text = resumed.messages[0].text();
     assert!(
         marker_text.contains("Context cleared"),
-        "marker text preserved: {marker_text}"
+        "marker text is the blank fresh-start: {marker_text}"
     );
 }
 

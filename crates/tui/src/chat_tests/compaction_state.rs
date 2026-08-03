@@ -1,11 +1,38 @@
 use super::super::*;
 
-/// A CompactionDelta creates a Compaction block that starts collapsed and
+/// CompactionDelta events are ignored: they must not create any block or render
+/// any text. Only the final `Compaction(summary)` event renders the block,
+/// avoiding a flicker where `TranscriptReset` destroys the streamed block and
+/// `Compaction` recreates it. Mirrors the headless CLI (display.rs).
+#[test]
+fn compaction_delta_is_ignored() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::CompactionDelta("streamed-chunk".into()));
+
+    // No block is created by the delta.
+    assert!(v.blocks.is_empty(), "CompactionDelta must not create a block");
+
+    // The delta text is not rendered anywhere.
+    assert!(!block_text(&v).contains("streamed-chunk"));
+
+    // Multiple deltas still accumulate nothing.
+    v.apply(&SessionEvent::CompactionDelta("more-text".into()));
+    assert!(v.blocks.is_empty());
+    assert!(!block_text(&v).contains("more-text"));
+
+    // The final Compaction event still renders exactly one block, proving the
+    // deltas left no half-built block behind.
+    v.apply(&SessionEvent::Compaction("final-summary".into()));
+    assert_eq!(v.blocks.len(), 1, "Compaction must create exactly one block");
+    assert!(v.last_compaction_collapsed());
+}
+
+/// A Compaction event creates a Compaction block that starts collapsed and
 /// hides its content.
 #[test]
-fn compaction_delta_creates_collapsed_block() {
+fn compaction_creates_collapsed_block() {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::CompactionDelta("line1\nline2\nline3".into()));
+    v.apply(&SessionEvent::Compaction("line1\nline2\nline3".into()));
     // Collapsed by default: header only, content hidden.
     let text = block_text(&v);
     assert!(text.contains("Compaction"));
@@ -17,7 +44,7 @@ fn compaction_delta_creates_collapsed_block() {
 #[test]
 fn toggle_expands_and_collapses() {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::CompactionDelta("summary-a\nsummary-b".into()));
+    v.apply(&SessionEvent::Compaction("summary-a\nsummary-b".into()));
     assert!(!block_text(&v).contains("summary-a"));
 
     v.toggle_compaction_at(0);
@@ -38,7 +65,7 @@ fn collapse_all_covers_compaction() {
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
     v.apply(&SessionEvent::TextDelta("answer".into()));
     v.apply(&SessionEvent::Done);
-    v.apply(&SessionEvent::CompactionDelta("compact".into()));
+    v.apply(&SessionEvent::Compaction("compact".into()));
 
     // Expand everything so they are observably NOT collapsed beforehand.
     v.toggle_thinking_at(0);
@@ -61,33 +88,11 @@ fn collapse_all_covers_compaction() {
     assert!(v.last_compaction_collapsed());
 }
 
-/// CompactionDelta appends to the current trailing Compaction block instead
-/// of creating a new one.
-#[test]
-fn multiple_deltas_accumulate_in_one_block() {
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::CompactionDelta("part1\n".into()));
-    v.apply(&SessionEvent::CompactionDelta("part2".into()));
-
-    // Exactly one Compaction block with accumulated text.
-    let compaction_count = v
-        .blocks
-        .iter()
-        .filter(|b| matches!(b, ChatBlock::Compaction { .. }))
-        .count();
-    assert_eq!(compaction_count, 1);
-
-    v.toggle_compaction_at(0);
-    let text = block_text(&v);
-    assert!(text.contains("part1"));
-    assert!(text.contains("part2"));
-}
-
 /// Collapsed header shows icon + label + line count; expanded header does not.
 #[test]
 fn header_text_shows_line_count() {
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::CompactionDelta("a\nb\nc".into()));
+    v.apply(&SessionEvent::Compaction("a\nb\nc".into()));
 
     // Collapsed: body "a\nb\nc" -> 3 lines, shown in the header.
     let flat = v.flatten();

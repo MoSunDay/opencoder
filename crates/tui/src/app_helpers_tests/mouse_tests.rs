@@ -471,7 +471,7 @@ async fn compaction_header_click_toggles_collapse() {
     let mut chat = crate::chat::ChatView::default();
     chat.apply(&SessionEvent::TextDelta("answer".into()));
     chat.apply(&SessionEvent::Done);
-    chat.apply(&SessionEvent::CompactionDelta("hidden summary".into()));
+    chat.apply(&SessionEvent::Compaction("hidden summary".into()));
     // Collapsed by default.
     assert!(
         !chat.flatten().iter().any(|l| l

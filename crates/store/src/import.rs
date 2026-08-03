@@ -111,7 +111,15 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         task_type: None,
     };
     store.create_session(&meta).await?;
-    store.append_messages(session_id, &msgs).await?;
+    // If message import fails mid-way, the just-created session row would be
+    // left behind as an empty stub. The idempotency guard in
+    // `import_jsonl_dir` (`get_session(...).is_some()`) would then skip it on
+    // every retry, permanently blocking re-import. Roll the stub back so a
+    // retry can start from a clean slate.
+    if let Err(e) = store.append_messages(session_id, &msgs).await {
+        let _ = store.delete_session(session_id).await;
+        return Err(e);
+    }
     Ok(ImportReport {
         sessions: 1,
         messages: msgs.len() as u32,

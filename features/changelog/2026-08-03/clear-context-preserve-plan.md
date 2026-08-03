@@ -54,7 +54,7 @@ Commit: (working-tree, pre-initial-commit)
 
 - `cargo test -p opencoder-session --lib control_cmd` -> **8 passed** / 0 failed（含 1 新增）
 - `cargo test -p opencoder-session --test control_cmd` -> **6 passed** / 0 failed（含 1 新增）
-- 全量回归 `cargo test --workspace` -> **1669 passed / 0 failed / 1 ignored**（预先存在）
+- 全量回归 `cargo test --workspace` -> **1672 passed / 0 failed / 1 ignored**（预先存在）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` -> 零警告
 
 ## Impact Surface

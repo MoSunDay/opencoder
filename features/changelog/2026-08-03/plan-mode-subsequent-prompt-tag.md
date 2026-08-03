@@ -55,7 +55,19 @@ requirement 都原样进入对话，模型在多轮 plan 对话中容易漂移�
 > 三处均位于"真实 prompt 被记录为 user message"之前；控制命令（`/plan`、`/act` 等）
 > 不经过打标签，保持原样 apply。
 
+### 集成测试（`crates/session/tests/plan_tag.rs`）
+
+新增端到端集成测试，驱动真实的 `run` 入口，覆盖 `runner/mod.rs` 三个注入点。使用
+`LibsqlStore::open_memory()` + `MockChatClient`（不触达真实 LLM），通过
+`MockChatClient::requests()` 校验模型请求体是否携带标签：
+
+1. 直连 prompt 路径 —— `run_with_registry()` 注入点。
+2. steer 消费分支 —— turn 边界 steer 提升注入点。
+3. queue 消费循环 —— idle 时 `claim_one_queued` 排空注入点。
+
 ## 测试覆盖
+
+共 7 条测试（4 单元 + 3 集成）。
 
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
@@ -63,6 +75,9 @@ requirement 都原样进入对话，模型在多轮 plan 对话中容易漂移�
 | 第二个 plan prompt 打标签（计数 > 0，调用后变 2） | `plan_second_prompt_tagged` | `crates/session/src/lib.rs`（plan_tag_tests） |
 | act 模式无论计数多少都不打标签 | `act_mode_never_tagged` | `crates/session/src/lib.rs`（plan_tag_tests） |
 | plan→act 交接后计数归零 | `switch_to_plan_resets_count` | `crates/session/src/lib.rs`（plan_tag_tests） |
+| 直连 prompt 路径：turn-1 不打标签、turn-2 打标签，模型请求体同步 | `direct_prompt_tags_only_after_first` | `crates/session/tests/plan_tag.rs` |
+| steer 提升：kickoff 已推进计数后，turn 边界 steer 文本被加标签 | `steer_prompt_tagged_after_first` | `crates/session/tests/plan_tag.rs` |
+| queue 排空：idle 时排出的后续 requirement 回放时被加标签 | `queued_prompt_tagged_after_first` | `crates/session/tests/plan_tag.rs` |
 
 - `cargo test --workspace` → 全部通过。
 - `cargo clippy --workspace --all-targets -- -D warnings` → 0 warnings。

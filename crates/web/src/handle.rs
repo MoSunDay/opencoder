@@ -182,6 +182,56 @@ pub async fn admit_and_drain(
             )
             .await;
         });
+    } else {
+        // Lost the CAS: a drain appears to be running. But it may have
+        // already passed its final queue check and be exiting (draining
+        // still true until DrainGuard drops). Spawn a lightweight watchdog
+        // that waits for the drain to clear, then re-checks for our
+        // admitted input and spawns a fresh drain if needed.
+        let handles_w = handles.clone();
+        let store_w = store.clone();
+        let sid_w = session_id.to_string();
+        let cfg_w = config.clone();
+        let client_w = client.clone();
+        let wd_w = workdir.clone();
+        let handle_w = handle.clone();
+        tokio::spawn(async move {
+            // Wait for the current drain to finish (max ~5s).
+            for _ in 0..100 {
+                if !handle_w.draining.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            // If draining is still true after timeout, assume it's stuck;
+            // don't spawn a duplicate. If it cleared, check for pending work.
+            if handle_w.draining.load(Ordering::SeqCst) {
+                return;
+            }
+            // Check if our admitted input (or any queue input) is still pending.
+            let pending = store_w
+                .pending_inputs(&sid_w, opencoder_store::Delivery::Queue)
+                .await
+                .unwrap_or_default();
+            if pending.is_empty() {
+                return;
+            }
+            // Race to spawn: try to flip draining false→true.
+            if !handle_w.draining.swap(true, Ordering::SeqCst) {
+                let token = CancellationToken::new();
+                *handle_w.cancel.lock().await = token.clone();
+                drain_to_completion(
+                    handles_w,
+                    store_w,
+                    &sid_w,
+                    client_w,
+                    wd_w,
+                    cfg_w,
+                    handle_w,
+                )
+                .await;
+            }
+        });
     }
     // If a drain is already running with child subagents in flight, cancel
     // them so the parent's run_loop returns from run_subagent and absorbs

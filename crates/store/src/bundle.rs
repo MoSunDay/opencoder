@@ -103,6 +103,10 @@ pub fn read_bundle(reader: &mut impl Read) -> Result<SessionBundle> {
     let mut lbuf = [0u8; 8];
     reader.read_exact(&mut lbuf).context("read length")?;
     let len = u64::from_le_bytes(lbuf) as usize;
+    const MAX_BUNDLE: usize = 256 * 1024 * 1024; // 256 MiB
+    if len > MAX_BUNDLE {
+        anyhow::bail!("bundle payload too large: {len} bytes (max {MAX_BUNDLE})");
+    }
     let mut payload = vec![0u8; len];
     reader.read_exact(&mut payload).context("read payload")?;
     serde_json::from_slice(&payload).context("deserialize bundle")
@@ -241,5 +245,27 @@ mod tests {
         buf.extend_from_slice(&0u64.to_le_bytes());
         let mut cursor = std::io::Cursor::new(&buf);
         assert!(read_bundle(&mut cursor).is_err());
+    }
+
+    /// A crafted bundle advertising a huge payload length must be rejected
+    /// with an error (capped by MAX_BUNDLE) rather than triggering an
+    /// unbounded allocation that would OOM/crash the process.
+    #[test]
+    fn rejects_oversized_payload() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        // Claim a 1 GiB payload — well above the 256 MiB cap.
+        let huge = 1024 * 1024 * 1024u64;
+        buf.extend_from_slice(&huge.to_le_bytes());
+        // No actual payload bytes follow; the length check must fire first.
+        let mut cursor = std::io::Cursor::new(&buf);
+        let res = read_bundle(&mut cursor);
+        assert!(res.is_err(), "oversized payload should error");
+        let msg = format!("{}", res.unwrap_err());
+        assert!(
+            msg.contains("too large"),
+            "error should mention 'too large', got: {msg}"
+        );
     }
 }

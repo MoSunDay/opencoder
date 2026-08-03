@@ -226,5 +226,36 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(a) = obj.get("autopilot").and_then(|v| v.as_object()) {
             super::autopilot::merge(&mut cfg.autopilot, a);
         }
+        if let Some(o) = obj.get("output_streamline").and_then(|v| v.as_object()) {
+            if let Some(b) = o.get("enabled").and_then(|v| v.as_bool()) {
+                cfg.output_streamline.enabled = b;
+            }
+            if let Some(b) = o.get("trim_trailing").and_then(|v| v.as_bool()) {
+                cfg.output_streamline.trim_trailing = b;
+            }
+            if let Some(b) = o.get("collapse_blank_lines").and_then(|v| v.as_bool()) {
+                cfg.output_streamline.collapse_blank_lines = b;
+            }
+            if let Some(b) = o.get("trim_outer").and_then(|v| v.as_bool()) {
+                cfg.output_streamline.trim_outer = b;
+            }
+            if let Some(b) = o.get("collapse_inline_ws").and_then(|v| v.as_bool()) {
+                cfg.output_streamline.collapse_inline_ws = b;
+            }
+        }
+        if let Some(t) = obj.get("tool_guard").and_then(|v| v.as_object()) {
+            if let Some(v) = t.get("max_consecutive_failures").and_then(|v| v.as_u64()) {
+                cfg.tool_guard.max_consecutive_failures = v as u32;
+            }
+            if let Some(v) = t.get("backoff_base_ms").and_then(|v| v.as_u64()) {
+                cfg.tool_guard.backoff_base_ms = v;
+            }
+            if let Some(v) = t.get("backoff_max_ms").and_then(|v| v.as_u64()) {
+                cfg.tool_guard.backoff_max_ms = v;
+            }
+        }
+        if let Some(v) = obj.get("subagent_drain_secs").and_then(|v| v.as_u64()) {
+            cfg.subagent_drain_secs = Some(v);
+        }
     }
 }

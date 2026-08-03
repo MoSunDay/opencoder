@@ -354,6 +354,11 @@ impl SessionState {
     pub fn after_compaction(&mut self, summary: String, summary_seq: i64) {
         self.summary = Some(summary);
         self.summary_seq = Some(summary_seq);
+        // Compaction subsumes any prior handoff boundary: clear the stale
+        // handoff state so resume takes the compaction path, not the handoff
+        // path (resume checks handoff_seq first).
+        self.handoff_seq = None;
+        self.handoff_plan = None;
         self.persisted_count = self.messages.len();
     }
 
@@ -582,5 +587,77 @@ mod plan_tag_tests {
         // simulate ClearContext handoff reset
         s.after_handoff(0, String::new());
         assert_eq!(s.plan_input_count, 0, "after_handoff resets count");
+    }
+}
+
+#[cfg(test)]
+mod compaction_after_handoff_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    fn make_session() -> SessionState {
+        let config = Config::default();
+        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+        SessionState::new(
+            "test",
+            resolve_agent("act").unwrap(),
+            config,
+            client,
+            PathBuf::from("."),
+        )
+    }
+
+    /// After a plan→act handoff, compaction must clear the stale handoff
+    /// boundary and install a compaction summary instead — otherwise resume
+    /// would take the handoff path (it checks `handoff_seq` first) and ignore
+    /// the freshly written summary.
+    #[test]
+    fn compaction_after_handoff_clears_handoff_state() {
+        let mut s = make_session();
+        // Simulate post-handoff state: handoff_seq set, no compaction yet.
+        s.after_handoff(10, "the plan".into());
+        assert_eq!(s.handoff_seq, Some(10));
+        assert!(s.summary_seq.is_none());
+
+        // prev_skip must fall back to handoff_seq when summary_seq is None.
+        let prev_skip = s.summary_seq.or(s.handoff_seq).unwrap_or(0);
+        assert_eq!(prev_skip, 10, "prev_skip must use handoff_seq");
+
+        // Simulate compaction producing a summary covering the handoff head.
+        s.after_compaction("compacted summary".into(), prev_skip);
+
+        assert_eq!(
+            s.summary_seq,
+            Some(10),
+            "summary_seq should hold the (handoff-derived) skip"
+        );
+        assert!(s.handoff_seq.is_none(), "handoff_seq must be cleared");
+        assert!(s.handoff_plan.is_none(), "handoff_plan must be cleared");
+        assert_eq!(s.summary.as_deref(), Some("compacted summary"));
+    }
+
+    /// With no prior handoff and no prior compaction, prev_skip is 0.
+    #[test]
+    fn prev_skip_zero_when_no_compaction_or_handoff() {
+        let s = make_session();
+        let prev_skip = s.summary_seq.or(s.handoff_seq).unwrap_or(0);
+        assert_eq!(prev_skip, 0);
+    }
+
+    /// When a compaction summary already exists it takes priority over a
+    /// (hypothetical leftover) handoff_seq.
+    #[test]
+    fn summary_seq_takes_priority_over_handoff_seq() {
+        let mut s = make_session();
+        s.handoff_seq = Some(5);
+        s.summary_seq = Some(20);
+        let prev_skip = s.summary_seq.or(s.handoff_seq).unwrap_or(0);
+        assert_eq!(prev_skip, 20);
+        s.after_compaction("s".into(), 20);
+        assert!(s.handoff_seq.is_none());
     }
 }

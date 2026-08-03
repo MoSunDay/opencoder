@@ -662,6 +662,55 @@ fn resolve_endpoint_includes_custom_headers_with_env_resolution() {
     std::env::remove_var("MY_TENANT");
 }
 
+#[test]
+fn merge_handles_output_streamline_tool_guard_subagent_drain() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "output_streamline": {
+                "enabled": false,
+                "trim_trailing": false,
+                "collapse_blank_lines": false,
+                "trim_outer": false,
+                "collapse_inline_ws": true
+            },
+            "tool_guard": {
+                "max_consecutive_failures": 7,
+                "backoff_base_ms": 500,
+                "backoff_max_ms": 4000
+            },
+            "subagent_drain_secs": 42
+        }"#,
+    )
+    .unwrap();
+
+    let cfg = Config::load(dir.path()).unwrap();
+
+    // output_streamline section is no longer silently ignored.
+    assert!(!cfg.output_streamline.enabled);
+    assert!(!cfg.output_streamline.trim_trailing);
+    assert!(!cfg.output_streamline.collapse_blank_lines);
+    assert!(!cfg.output_streamline.trim_outer);
+    assert!(cfg.output_streamline.collapse_inline_ws);
+
+    // tool_guard section is no longer silently ignored.
+    assert_eq!(cfg.tool_guard.max_consecutive_failures, 7);
+    assert_eq!(cfg.tool_guard.backoff_base_ms, 500);
+    assert_eq!(cfg.tool_guard.backoff_max_ms, 4000);
+
+    // subagent_drain_secs is no longer silently ignored.
+    assert_eq!(cfg.subagent_drain_secs, Some(42));
+}
+
+#[test]
+fn default_provider_base_url_is_openai() {
+    // Config::default() must agree with the serde default for base_url.
+    let cfg = Config::default();
+    assert_eq!(cfg.provider.base_url, "https://api.openai.com/v1");
+}
+
 /// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`
 /// does not pick up the developer's real global config. Returns the home guard
 /// (keep it alive for the test body) and a clean working-dir tempdir.

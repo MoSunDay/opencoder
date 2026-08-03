@@ -426,11 +426,25 @@ pub async fn get_events(
         })
         .unwrap_or_default();
 
-    // Dedup: events broadcast between subscribe and query may appear in BOTH
-    // the replay (persisted before query) and the live stream (received via
-    // broadcast). Track fingerprints of replayed events and skip matching live
-    // events. The set is bounded by the replay size and shrinks as matches are
-    // consumed, so it self-clears once the overlap window passes.
+    // Dedup live broadcast events against the replayed (persisted) window.
+    //
+    // In this codebase every live event is broadcast with `seq: None`
+    // (persistence runs async via the event flusher; see `sse_from_session_event`),
+    // while persisted/replayed events carry `seq: Some(n)`. We therefore dedup
+    // in two tiers:
+    //  (1) If the live event DOES carry a persisted `seq`: drop it iff
+    //      `seq <= max_replay_seq`. This is exact and never collapses two
+    //      distinct events that merely share kind+payload (the H7 content-key
+    //      collision bug).
+    //  (2) The normal case — `seq: None`: an event broadcast after we
+    //      subscribed may also have been persisted before we queried (the
+    //      subscribe/query overlap window). Fall back to a content fingerprint
+    //      match against replayed events. The set is bounded by the replay size
+    //      and each fingerprint is consumed on first match, so it self-clears
+    //      once the overlap window passes. Pure content dedup is unavoidable
+    //      here because the live copy has no seq to compare; tier (1) removes
+    //      the collision risk whenever a seq is available.
+    let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
     let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(
         std::sync::Mutex::new(
             persisted
@@ -448,19 +462,21 @@ pub async fn get_events(
             move |evt| {
                 let seen = Arc::clone(&seen);
                 async move {
+                    // (1) Exact seq-based dedup when the live event carries a seq.
+                    if let Some(seq) = evt.seq {
+                        if seq <= max_replay_seq {
+                            return None;
+                        }
+                        return Some(evt);
+                    }
+                    // (2) Content overlap dedup for seq-less broadcasts.
                     let key = (evt.kind.clone(), evt.data.to_string());
-                    let mut is_dup = false;
                     if let Ok(mut guard) = seen.lock() {
-                        if guard.contains(&key) {
-                            guard.remove(&key);
-                            is_dup = true;
+                        if guard.remove(&key) {
+                            return None;
                         }
                     }
-                    if is_dup {
-                        None
-                    } else {
-                        Some(evt)
-                    }
+                    Some(evt)
                 }
             }
         });

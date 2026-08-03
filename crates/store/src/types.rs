@@ -55,10 +55,16 @@ pub struct SessionPatch {
     pub handoff_seq: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_plan: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_handoff: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 #[derive(Debug, Clone)]

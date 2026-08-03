@@ -347,7 +347,10 @@ impl CapabilitiesConfig {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            provider: ProviderConfig::default(),
+            provider: ProviderConfig {
+                base_url: default_base_url(),
+                ..Default::default()
+            },
             providers: HashMap::new(),
             model: default_model(),
             small_model: None,

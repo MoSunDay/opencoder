@@ -83,7 +83,10 @@ async fn threshold_stops_after_max_consecutive_failures() {
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
 
-    run(&mut s, "test".into(), |_| {}).await.unwrap();
+    let result = run(&mut s, "test".into(), |_| {}).await;
+    // Tool-failure now returns Err so autopilot cannot continue on an aborted
+    // task. The guard still stops after 20 failures.
+    assert!(result.is_err(), "tool-failure should cause run to return Err");
 
     // Loop stopped after 20 failures — 21st script never consumed.
     assert_eq!(mock.call_count(), 20);
@@ -101,13 +104,14 @@ async fn emits_error_event_on_threshold() {
     let mut s = make_session(fast_config(), client).await;
 
     let mut errors = Vec::new();
-    run(&mut s, "test".into(), |ev| {
+    let result = run(&mut s, "test".into(), |ev| {
         if let SessionEvent::Error(msg) = ev {
             errors.push(msg);
         }
     })
-    .await
-    .unwrap();
+    .await;
+    // Tool-failure returns Err; the Error event was emitted via on_event first.
+    assert!(result.is_err(), "tool-failure should cause run to return Err");
 
     assert!(
         errors.iter().any(|e| e.contains("tool-failure")),
@@ -133,7 +137,8 @@ async fn success_between_failures_resets_counter() {
     let client: Arc<dyn ChatStream> = mock.clone();
     let mut s = make_session(fast_config(), client).await;
 
-    run(&mut s, "test".into(), |_| {}).await.unwrap();
+    let result = run(&mut s, "test".into(), |_| {}).await;
+    assert!(result.is_err(), "tool-failure should cause run to return Err");
 
     // 3 + 20 = 23 tool-call turns consumed; 24th (done) not reached.
     assert_eq!(mock.call_count(), 23);

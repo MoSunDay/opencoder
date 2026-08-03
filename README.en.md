@@ -131,7 +131,7 @@ OpenCoder is a Cargo workspace composed of 8 crates with strictly layered depend
 
 - **`Store` trait** (`crates/store/src/store.rs`) — unified CRUD for sessions / messages / inputs / events / subagent_tasks; the only seam for swapping SQLite implementations.
 - **`ChatStream` trait** (`crates/llm/src/stream.rs`) — implemented by both `ChatClient` (real) and `MockChatClient`, enabling zero-token deterministic testing of the session runtime.
-- **drain semantics** (`crates/session/src/runner.rs::run_loop`) — promotes steer at every turn boundary; when idle it consumes exactly one queued item; a doom-loop guard (`DOOM_THRESHOLD=3`) breaks consecutive empty turns.
+- **drain semantics** (`crates/session/src/runner.rs::run_loop`) — promotes steer at every turn boundary; when idle it consumes exactly one queued item; a doom-loop guard (`DOOM_THRESHOLD=20`) breaks consecutive empty turns.
 
 ## 📖 Command Reference
 

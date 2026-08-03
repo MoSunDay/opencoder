@@ -233,7 +233,11 @@ async fn clear_context_survives_resume() {
     ];
     store.append_messages("clear-sess", &msgs).await.unwrap();
 
-    let mock = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+    // ClearContext with a preserved result now EXECUTES it — push a mock
+    // response for the execution turn.
+    let mock = Arc::new(
+        MockChatClient::new().push_script(vec![done_turn("done")]),
+    ) as Arc<dyn ChatStream>;
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-sess",
@@ -258,10 +262,11 @@ async fn clear_context_survives_resume() {
     // (clippy::await_holding_lock).
     {
         let evs = events.lock().unwrap();
+        // After ClearContext + execution: [handoff_message, assistant_response]
         assert_eq!(
             session.messages.len(),
-            1,
-            "transcript collapsed to 1 handoff marker"
+            2,
+            "transcript = handoff marker + assistant execution response"
         );
         assert_eq!(session.agent.name, "act", "switched to act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
@@ -289,16 +294,71 @@ async fn clear_context_survives_resume() {
     )
     .await
     .unwrap();
+    // [reconstructed handoff marker, assistant execution response]
     assert_eq!(
         resumed.messages.len(),
-        1,
-        "resume reconstructs single plan-handoff marker"
+        2,
+        "resume reconstructs handoff marker + assistant response"
     );
     assert_eq!(resumed.agent.name, "act");
     let marker_text = resumed.messages[0].text();
     assert!(
         marker_text.contains("old answer"),
         "marker text carries the preserved plan: {marker_text}"
+    );
+}
+
+/// `/act_clear_context` with a prior assistant result must EXECUTE the
+/// preserved result — the LLM is called exactly once and the handoff
+/// message carrying the result appears in the request context.
+#[tokio::test]
+async fn clear_context_executes_preserved_result() {
+    let store = mem_store().await;
+    seed(&store, "exec-sess", "act").await;
+
+    let msgs = vec![
+        Message::user("u1", "implement feature X"),
+        {
+            let mut m = Message::assistant("a1");
+            m.blocks.push(ContentBlock::text("I will implement X by..."));
+            m
+        },
+    ];
+    store.append_messages("exec-sess", &msgs).await.unwrap();
+
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("done")]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "exec-sess",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+
+    run(&mut session, "/act_clear_context".into(), |_| {})
+        .await
+        .unwrap();
+
+    // The LLM was called exactly once (the execution turn).
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 1, "one LLM call to execute the preserved result");
+
+    // The preserved result text appears in the model context.
+    let body = requests[0].to_body().to_string();
+    assert!(
+        body.contains("I will implement X by..."),
+        "preserved result must appear in the model context: {body}"
+    );
+
+    // The raw command string must NOT leak to the model.
+    assert!(
+        !body.contains("/act_clear_context"),
+        "raw command string must not reach the model: {body}"
     );
 }
 

@@ -72,14 +72,21 @@ pub(crate) fn reapply_resume_agent(
     if session.agent.name == *name {
         return Ok(None);
     }
-    let resolved = resolve_agent(name)
-        .or_else(|| resolve_agent("act"))
-        .ok_or_else(|| anyhow!("agent not found: {name}"))?;
+    // `name` here is always an explicit --agent value (we returned early on
+    // None), so an unknown name must error rather than silently resolve to
+    // "act".
+    let resolved = resolve_agent(name).ok_or_else(|| anyhow!("agent not found: {name}"))?;
     session.agent = resolved;
     Ok(Some(name.clone()))
 }
 
 pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
+    // --fork copies a resumed session, so it is meaningless without a resume
+    // target. Without this guard, `--fork` on its own silently creates a fresh
+    // session (pick_resume_id returns Ok(None) and cli.fork is never read).
+    if cli.fork && cli.session.is_none() && !cli.continue_ {
+        anyhow::bail!("--fork requires --session <id> or --continue");
+    }
     let workdir = resolve_workdir(cli)?;
     let mut config = Config::load(&workdir)?;
     apply_model_override(&mut config, &cli.model);
@@ -121,9 +128,15 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         .await?
     } else {
         let agent_name = config.agent.default.as_str();
-        let agent = resolve_agent(agent_name)
-            .or_else(|| resolve_agent("act"))
-            .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
+        // Only fall back to "act" when no agent name was configured at all.
+        // An explicit but unknown name (e.g. a typo via --agent or config) must
+        // error rather than silently resolve to "act".
+        let agent = if agent_name.is_empty() {
+            resolve_agent("act").ok_or_else(|| anyhow!("agent not found: act"))?
+        } else {
+            resolve_agent(agent_name)
+                .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?
+        };
         let mut s = SessionState::new(
             opencoder_session::runner::new_id(),
             agent,
@@ -283,6 +296,12 @@ async fn pick_resume_id(cli: &Cli, store: Option<&dyn Store>) -> Result<Option<S
                 ..Default::default()
             })
             .await?;
+        if list.is_empty() {
+            // Without this, an empty list returns Ok(None) and run_headless
+            // silently falls through to the fresh-session path, masking the
+            // user's intent to resume.
+            anyhow::bail!("no sessions to --continue in this workdir");
+        }
         return Ok(list.into_iter().next().map(|i| i.id));
     }
     Ok(None)
@@ -727,5 +746,62 @@ mod tests {
         );
         // no override -> no change, returns None
         assert_eq!(reapply_resume_agent(&mut s, &None).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn fork_without_session_or_continue_errors() {
+        use clap::Parser;
+        // --fork with no --session/--continue must error rather than silently
+        // creating a fresh session (the guard runs before any I/O).
+        let cli = Cli::parse_from(["opencoder", "--fork"]);
+        let err = run_headless(&cli, "hi".into()).await.unwrap_err();
+        assert!(
+            err.to_string().contains("--fork requires --session"),
+            "expected --fork guard error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn continue_with_no_sessions_errors() {
+        use clap::Parser;
+        use opencoder_store::{LibsqlStore, Store};
+
+        let store = LibsqlStore::open_memory().await.unwrap();
+        // No sessions exist: --continue must error, not fall through to a
+        // fresh-session creation.
+        let cli = Cli::parse_from(["opencoder", "--continue"]);
+        let err = pick_resume_id(&cli, Some(&store as &dyn Store))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("no sessions to --continue"),
+            "expected empty-continue error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn reapply_resume_agent_rejects_unknown_name() {
+        use opencoder_llm::{ChatStream, MockChatClient};
+        use opencoder_session::SessionState;
+        use std::sync::Arc;
+        // A typo'd/explicit-but-unknown agent name must error rather than
+        // silently resolving to "act".
+        let cfg = Config::default();
+        let agent = resolve_agent("act").unwrap();
+        let mut s = SessionState::new(
+            "s1",
+            agent,
+            cfg,
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            std::path::PathBuf::from("/tmp"),
+        );
+        let err = reapply_resume_agent(&mut s, &Some("nonexistent-agent".into()))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("agent not found: nonexistent-agent"),
+            "expected unknown-agent error, got: {err}"
+        );
+        // session agent unchanged by the failed reapply
+        assert_eq!(s.agent.name, "act");
     }
 }

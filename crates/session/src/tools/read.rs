@@ -89,6 +89,17 @@ impl Tool for ReadTool {
             actual_end = start + i + 1;
         }
 
+        // Edge case: the very first line at the requested offset exceeded the
+        // token budget on its own, so the loop broke at i==0 before `actual_end`
+        // was advanced. Left as-is, `lines_read` would be 0 and the truncation
+        // notice would tell the model to re-read at the SAME offset
+        // (`actual_end + 1 == start + 1 == offset`) — an infinite retry loop.
+        // Skip the oversized line so the next read makes progress.
+        let first_line_oversized = actual_end == start && start < requested_end;
+        if first_line_oversized {
+            actual_end = start + 1;
+        }
+
         let lines_read = actual_end - start;
         let token_capped = actual_end < requested_end;
 
@@ -98,10 +109,18 @@ impl Tool for ReadTool {
 
         out.push('\n');
         if token_capped {
-            out.push_str(&format!(
-                "[INCOMPLETE READ] output truncated at token limit; re-read with offset={} to continue.\n",
-                actual_end + 1
-            ));
+            let next = actual_end + 1;
+            if first_line_oversized {
+                out.push_str(&format!(
+                    "[INCOMPLETE READ] line {} exceeded the token limit and was skipped; re-read with offset={} to continue.\n",
+                    start + 1, next
+                ));
+            } else {
+                out.push_str(&format!(
+                    "[INCOMPLETE READ] output truncated at token limit; re-read with offset={} to continue.\n",
+                    next
+                ));
+            }
         }
         out.push_str("--- metadata ---\n");
         out.push_str(&format!("total_lines: {}\n", total_lines));
@@ -246,6 +265,75 @@ mod tests {
         assert!(opencoder_llm::estimate(&out[..content_end]) <= 5000);
         assert!(out.contains("[INCOMPLETE READ]"));
         assert!(out.contains("offset="));
+    }
+
+    #[tokio::test]
+    async fn test_oversized_first_line_skipped_no_loop() {
+        // Regression (Bug 1): when the FIRST line at the requested offset
+        // alone exceeds the token budget, the read must still ADVANCE past it
+        // (lines_read=1, re-read offset = offset + 1) instead of telling the
+        // model to re-read the SAME offset, which caused an infinite loop.
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("f.txt")).unwrap();
+        // Line 1 is a single oversized word (>5000 tokens => >20000 chars).
+        writeln!(f, "{}", "x".repeat(25_000)).unwrap();
+        for i in 0..5 {
+            writeln!(f, "small {}", i).unwrap();
+        }
+        let ctx = ctx_for(&dir);
+        let tool = super::ReadTool;
+        let out = run_read(&tool, &ctx, json!({ "path": "f.txt", "offset": 1 })).await;
+        let meta = parse_metadata(&out);
+        // The oversized line is skipped but counted as read so progress is made.
+        assert_eq!(meta.get("offset"), Some(&"1"));
+        assert_eq!(meta.get("lines_read"), Some(&"1"), "{}", out);
+        // The notice must point PAST the oversized line (offset=2), never back
+        // at the same offset=1 — that was the infinite-loop bug.
+        let notice = out
+            .lines()
+            .find(|l| l.starts_with("[INCOMPLETE READ]"))
+            .expect("truncation notice present");
+        assert!(
+            notice.contains("exceeded the token limit and was skipped"),
+            "{}",
+            notice
+        );
+        assert!(notice.contains("offset=2"), "{}", notice);
+        assert!(
+            !notice.contains("offset=1"),
+            "must not repeat the same offset (infinite loop): {}",
+            notice
+        );
+    }
+
+    #[tokio::test]
+    async fn test_oversized_line_mid_read_keeps_wording() {
+        // When truncation happens AFTER at least one line was emitted (i.e. not
+        // the first-line-oversized case), the original "output truncated"
+        // wording must be preserved and the read still advances.
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("f.txt")).unwrap();
+        // Line 1 is small (emitted), line 2 alone blows the budget.
+        writeln!(f, "small first line").unwrap();
+        writeln!(f, "{}", "y".repeat(25_000)).unwrap();
+        for i in 0..3 {
+            writeln!(f, "tail {}", i).unwrap();
+        }
+        let ctx = ctx_for(&dir);
+        let tool = super::ReadTool;
+        let out = run_read(&tool, &ctx, json!({ "path": "f.txt", "offset": 1 })).await;
+        let meta = parse_metadata(&out);
+        assert_eq!(meta.get("lines_read"), Some(&"1"), "{}", out);
+        let notice = out
+            .lines()
+            .find(|l| l.starts_with("[INCOMPLETE READ]"))
+            .expect("truncation notice present");
+        assert!(
+            notice.contains("output truncated at token limit"),
+            "non-first-line truncation keeps original wording: {}",
+            notice
+        );
+        assert!(notice.contains("offset=2"), "{}", notice);
     }
 
     #[tokio::test]

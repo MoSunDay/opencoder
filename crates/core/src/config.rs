@@ -169,6 +169,13 @@ fn default_model() -> String {
 /// constraint by default, but lets `reserved` take effect once set.
 pub const DEFAULT_CONTEXT_LIMIT: u64 = 128_000;
 
+/// Serde default for [`AgentDefaults::default`], kept in sync with the
+/// `Default` impl so deserializing `{}` yields `"act"` rather than `""`.
+/// (Returns `String` to match the field type for `#[serde(default = ...)]`.)
+fn default_agent_name() -> String {
+    "act".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfig {
     #[serde(default = "default_base_url")]
@@ -209,7 +216,7 @@ fn default_base_url() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefaults {
-    #[serde(default)]
+    #[serde(default = "default_agent_name")]
     pub default: String,
 }
 impl Default for AgentDefaults {
@@ -389,6 +396,25 @@ impl Config {
             if p.exists() {
                 let raw = std::fs::read_to_string(&p)?;
                 let parsed: serde_json::Value = serde_json::from_str(&raw)?;
+                if !parsed.is_object() {
+                    // A valid-JSON-but-not-object file (e.g. `[1,2]` or
+                    // `"foo"`) falls through `merge_into` silently. Warn so the
+                    // misconfiguration is visible instead of dropped.
+                    let kind = match &parsed {
+                        serde_json::Value::Null => "null",
+                        serde_json::Value::Bool(_) => "bool",
+                        serde_json::Value::Number(_) => "number",
+                        serde_json::Value::String(_) => "string",
+                        serde_json::Value::Array(_) => "array",
+                        serde_json::Value::Object(_) => "object",
+                    };
+                    tracing::warn!(
+                        "config file {} is valid JSON but not an object (got \
+                         {}); ignoring",
+                        p.display(),
+                        kind
+                    );
+                }
                 merge::merge_into(&mut cfg, parsed);
             }
         }
@@ -542,10 +568,25 @@ impl Config {
             std::fs::create_dir_all(parent).ok();
         }
         let mut root: serde_json::Value = if target.exists() {
-            std::fs::read_to_string(&target)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_else(|| serde_json::json!({}))
+            let raw = std::fs::read_to_string(&target).map_err(|e| {
+                CoreError::Config(format!("read config {}: {e}", target.display()))
+            })?;
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) => v,
+                Err(e) => {
+                    // Don't silently destroy a corrupt file — surface the
+                    // error. An empty/whitespace-only file is treated as an
+                    // empty object (matches a freshly-created config).
+                    if raw.trim().is_empty() {
+                        serde_json::json!({})
+                    } else {
+                        return Err(CoreError::Config(format!(
+                            "config file {} is corrupt: {e}; refusing to overwrite",
+                            target.display()
+                        )));
+                    }
+                }
+            }
         } else {
             serde_json::json!({})
         };
@@ -780,5 +821,98 @@ mod tests {
             serde_json::json!({ "theme": "light", "model": "openai/gpt-4o" }),
         );
         assert_eq!(c.theme, "light");
+    }
+
+    // --- Bug 3: AgentDefaults serde default must agree with Default impl ---
+    #[test]
+    fn agent_defaults_empty_object_deserializes_to_act() {
+        // Deserializing {} must match the Default impl ("act"), not "".
+        let ad: super::AgentDefaults = serde_json::from_str("{}").unwrap();
+        assert_eq!(ad.default, "act");
+        assert_eq!(ad.default, super::AgentDefaults::default().default);
+    }
+
+    // --- Bug 1: Config::save must not silently wipe a corrupt config file ---
+    // HOME is isolated to the temp dir so `save_target` resolves entirely
+    // within it — otherwise a real ~/.opencoder/config.json carrying editable
+    // keys would shadow the temp file. Both cases share one test so there is a
+    // single HOME override, and HOME is restored before any assertion can panic.
+    #[test]
+    fn save_handles_corrupt_and_empty_config_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("opencoder.json");
+        let prev_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", dir.path());
+
+        // Corrupt file: save must refuse and leave it untouched.
+        let corrupt = "{ this is :: not valid json";
+        std::fs::write(&target, corrupt).unwrap();
+        let corrupt_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
+        let corrupt_contents = std::fs::read_to_string(&target).unwrap();
+
+        // Empty/whitespace file: treated as an empty object, patch applied.
+        std::fs::write(&target, "   \n  ").unwrap();
+        let empty_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
+        let empty_written: Option<serde_json::Value> = empty_res
+            .ok()
+            .and_then(|p| serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok());
+
+        // Restore HOME before asserting so a failing assert can't leak the
+        // override into the rest of the process.
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert!(
+            corrupt_res.is_err(),
+            "save should refuse a corrupt file, got {corrupt_res:?}"
+        );
+        assert_eq!(
+            corrupt_contents, corrupt,
+            "corrupt file must be left untouched"
+        );
+        let written = empty_written.expect("save of an empty/whitespace file should succeed");
+        assert_eq!(written["theme"], "light");
+    }
+
+    // --- Bug 2: non-object config files are tolerated (warned, not errored) ---
+    #[test]
+    fn load_tolerates_non_object_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A valid-JSON-but-not-object candidate must not break load.
+        std::fs::write(dir.path().join("opencoder.json"), "[1, 2, 3]").unwrap();
+        let cfg = Config::load(dir.path());
+        assert!(cfg.is_ok(), "load should not error on a non-object file");
+    }
+
+    // --- Bug 4: provider headers must be merged (appended), not replaced ---
+    #[test]
+    fn merge_into_appends_provider_headers() {
+        let mut c = Config::default();
+        c.providers.insert(
+            "foo".into(),
+            super::ProviderConfig {
+                headers: vec![super::HttpHeader {
+                    name: "X-Global".into(),
+                    value: "1".into(),
+                }],
+                ..Default::default()
+            },
+        );
+        super::merge::merge_into(
+            &mut c,
+            serde_json::json!({
+                "providers": {
+                    "foo": {
+                        "headers": [{ "name": "X-Project", "value": "2" }]
+                    }
+                }
+            }),
+        );
+        let headers = &c.providers["foo"].headers;
+        assert_eq!(headers.len(), 2, "project headers should append to global");
+        assert_eq!(headers[0].name, "X-Global");
+        assert_eq!(headers[1].name, "X-Project");
     }
 }

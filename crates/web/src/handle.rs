@@ -321,7 +321,9 @@ async fn drain_to_completion(
     // Release the drain guard BEFORE awaiting the flusher so a new prompt
     // can spawn a fresh drain while the old flusher persists events.
     drop(guard);
-    let _ = flusher.await;
+    if let Err(e) = flusher.await {
+        warn!(session_id, error = %e, "final event flush failed");
+    }
 
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");

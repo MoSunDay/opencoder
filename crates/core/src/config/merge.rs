@@ -159,14 +159,15 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                         entry.model = Some(m.to_string());
                     }
                     if let Some(hs) = pcfg.get("headers").and_then(|v| v.as_array()) {
-                        entry.headers = hs
-                            .iter()
-                            .filter_map(|h| {
-                                let name = h.get("name")?.as_str()?.to_string();
-                                let value = h.get("value")?.as_str()?.to_string();
-                                Some(HttpHeader { name, value })
-                            })
-                            .collect();
+                        // Append rather than replace: a project file's headers
+                        // extend the global set instead of clobbering it (other
+                        // sub-fields above are merged field-by-field for the
+                        // same reason).
+                        entry.headers.extend(hs.iter().filter_map(|h| {
+                            let name = h.get("name")?.as_str()?.to_string();
+                            let value = h.get("value")?.as_str()?.to_string();
+                            Some(HttpHeader { name, value })
+                        }));
                     }
                 }
             }

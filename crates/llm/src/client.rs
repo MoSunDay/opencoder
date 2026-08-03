@@ -9,8 +9,8 @@ use tracing::{debug, warn};
 use crate::event::{LlmEvent, Usage};
 use crate::request::ChatRequest;
 use crate::retry::{
-    backoff_delay, retry_decision, should_retry_stream_interruption, AttemptOutcome,
-    RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
+    backoff_delay, backoff_duration, retry_decision, should_retry_stream_interruption,
+    AttemptOutcome, RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
 };
 use crate::sse::SseDecoder;
 use crate::stream::ChatStream;
@@ -226,9 +226,15 @@ async fn run_stream_once(
     tx: &mpsc::Sender<LlmEvent>,
     idle_timeout: Duration,
 ) -> Result<(), OnceError> {
-    let resp = connect_with_retry(client, url, key, headers, body, tx)
+    let resp = match connect_with_retry(client, url, key, headers, body, tx)
         .await
-        .map_err(OnceError::Connect)?;
+        .map_err(OnceError::Connect)?
+    {
+        Some(resp) => resp,
+        // Consumer dropped during pre-stream retries — stop cleanly; there is
+        // no one left to deliver events to.
+        None => return Ok(()),
+    };
     let mut stream = resp.bytes_stream();
     let mut decoder = SseDecoder::new();
     let mut tools = ToolAccumulator::default();
@@ -266,9 +272,7 @@ async fn run_stream_once(
         };
         decoder.push(&bytes);
         let frames = decoder.drain();
-        if !frames.is_empty() {
-            last_event_at = Instant::now();
-        }
+        let had_frames = !frames.is_empty();
         for data in frames {
             if tx.is_closed() {
                 return Ok(());
@@ -278,6 +282,14 @@ async fn run_stream_once(
                     .await
                     .map_err(OnceError::Connect)?;
             }
+        }
+        // Stamp the watchdog AFTER delivering frames to the consumer. Stamping
+        // before the `tx.send` loop would make the elapsed check include time
+        // blocked on a full channel (slow-consumer back-pressure), producing
+        // spurious idle-timeout retries that measure consumer lag rather than
+        // upstream silence.
+        if had_frames {
+            last_event_at = Instant::now();
         }
         if last_event_at.elapsed() >= idle_timeout {
             if finished {
@@ -359,15 +371,21 @@ async fn connect_with_retry(
     headers: &[(String, String)],
     body: &Value,
     tx: &mpsc::Sender<LlmEvent>,
-) -> Result<reqwest::Response> {
+) -> Result<Option<reqwest::Response>> {
     let mut attempt: u8 = 0;
     loop {
+        // The consumer (the `rx` half of the channel) may have been dropped
+        // while we slept between retries. There is no point issuing another
+        // request — bail out cleanly instead of looping until exhaustion.
+        if tx.is_closed() {
+            return Ok(None);
+        }
         attempt = attempt.saturating_add(1);
         match send_request(client, url, key, headers, body).await {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
-                    return Ok(resp);
+                    return Ok(Some(resp));
                 }
                 let outcome = AttemptOutcome::from_status(status);
                 if retry_decision(outcome, attempt, MAX_ATTEMPTS) == RetryDecision::Fail {
@@ -384,13 +402,27 @@ async fn connect_with_retry(
                     });
                 }
                 warn!(attempt, status = status.as_u16(), "retryable HTTP status");
+                // Read `Retry-After` and drain the body BEFORE sleeping: an
+                // unread body keeps the connection tied up (preventing pool
+                // reuse), and the header may demand a longer wait than backoff.
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+                let _ = resp.text().await;
                 let _ = tx
                     .send(LlmEvent::Retrying {
                         attempt,
                         max: MAX_ATTEMPTS,
                     })
                     .await;
-                backoff_delay(attempt).await;
+                let computed = backoff_duration(attempt);
+                let delay = match retry_after {
+                    Some(secs) => computed.max(Duration::from_secs(secs.max(1))),
+                    None => computed,
+                };
+                tokio::time::sleep(delay).await;
             }
             Err(e) => {
                 // Network/transport error — treat as transient.

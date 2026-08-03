@@ -66,7 +66,7 @@ pub struct ListQuery {
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ListQuery>,
-) -> impl IntoResponse {
+) -> Result<Response, Response> {
     let filter = SessionFilter {
         limit: q.limit.unwrap_or(50).clamp(1, 500),
         cursor: q.cursor,
@@ -74,8 +74,12 @@ pub async fn list_sessions(
         search: q.search,
         include_subagents: false,
     };
-    let items = state.store.list_sessions(&filter).await.unwrap_or_default();
-    Json(json!({ "sessions": items })).into_response()
+    let items = state
+        .store
+        .list_sessions(&filter)
+        .await
+        .map_err(|e| error_500(format!("list_sessions: {e:#}")))?;
+    Ok(Json(json!({ "sessions": items })).into_response())
 }
 
 pub async fn get_session(
@@ -102,7 +106,15 @@ pub async fn delete_session(
             .into_response();
     }
     match state.store.delete_session(&id).await {
-        Ok(()) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(()) => {
+            // Evict the live handle and cancel any running drain so a deleted
+            // session stops calling the LLM (otherwise the drain outlives the
+            // DELETE and keeps making LLM requests on a gone session).
+            if let Some(h) = state.handles.lock().await.remove(&id) {
+                h.cancel.lock().await.cancel();
+            }
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
         Err(e) => error_500(format!("delete_session: {e:#}")),
     }
 }
@@ -114,10 +126,14 @@ pub async fn get_messages(
     messages_response(&state, &id).await
 }
 
-async fn messages_response(state: &AppState, id: &str) -> Response {
+async fn messages_response(state: &AppState, id: &str) -> Result<Response, Response> {
     let meta = state.store.get_session(id).await.ok().flatten();
-    let messages = state.store.load_messages(id).await.unwrap_or_default();
-    Json(json!({ "id": id, "meta": meta, "messages": messages })).into_response()
+    let messages = state
+        .store
+        .load_messages(id)
+        .await
+        .map_err(|e| error_500(format!("load_messages: {e:#}")))?;
+    Ok(Json(json!({ "id": id, "meta": meta, "messages": messages })).into_response())
 }
 
 #[derive(Deserialize)]
@@ -244,8 +260,8 @@ pub async fn post_agent(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<SwitchBody>,
-) -> impl IntoResponse {
-    let _ = state
+) -> Response {
+    if let Err(e) = state
         .store
         .update_session(
             &id,
@@ -255,11 +271,20 @@ pub async fn post_agent(
                 ..Default::default()
             },
         )
-        .await;
-    if let Some(h) = state.handles.lock().await.get(&id).cloned() {
-        h.overrides.lock().await.agent = Some(body.value.clone());
+        .await
+    {
+        return error_500(format!("update_session: {e:#}"));
     }
-    Json(json!({ "ok": true, "agent": body.value }))
+    // get-or-create the handle so the override is never dropped, even right
+    // after create_session when no drain has started yet.
+    let handle = {
+        let mut map = state.handles.lock().await;
+        map.entry(id.clone())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+    handle.overrides.lock().await.agent = Some(body.value.clone());
+    Json(json!({ "ok": true, "agent": body.value })).into_response()
 }
 
 /// Request body for `POST /sessions/:id/model`.
@@ -279,7 +304,15 @@ pub async fn post_model(
     Path(id): Path<String>,
     Json(body): Json<ModelBody>,
 ) -> Response {
-    let _ = state
+    // Persist to global config FIRST, before mutating session meta or runtime
+    // overrides, so a save failure leaves session state untouched.
+    if body.persist_default {
+        let patch = serde_json::json!({ "model": &body.value });
+        if let Err(e) = Config::save(&state.workdir, &patch) {
+            return error_500(format!("persist_default failed: {e:#}"));
+        }
+    }
+    if let Err(e) = state
         .store
         .update_session(
             &id,
@@ -289,16 +322,19 @@ pub async fn post_model(
                 ..Default::default()
             },
         )
-        .await;
-    if let Some(h) = state.handles.lock().await.get(&id).cloned() {
-        h.overrides.lock().await.model = Some(body.value.clone());
+        .await
+    {
+        return error_500(format!("update_session: {e:#}"));
     }
-    if body.persist_default {
-        let patch = serde_json::json!({ "model": &body.value });
-        if let Err(e) = Config::save(&state.workdir, &patch) {
-            return error_500(format!("persist_default failed: {e:#}"));
-        }
-    }
+    // get-or-create the handle so the override is never dropped, even right
+    // after create_session when no drain has started yet.
+    let handle = {
+        let mut map = state.handles.lock().await;
+        map.entry(id.clone())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+    handle.overrides.lock().await.model = Some(body.value.clone());
     Json(json!({ "ok": true, "model": body.value })).into_response()
 }
 

@@ -22,6 +22,23 @@ pub fn resolve_token(token: Option<String>) -> Result<String> {
         .ok_or_else(|| anyhow!("no token: pass --token <T> or set OPENCODER_SERVER_TOKEN"))
 }
 
+/// Resolve which session id / continue flag the `client` subcommand should use,
+/// falling back to the global CLI flags when the subcommand's own flags were
+/// not given. Pure extraction of the resolution done in `main.rs`'s Client arm
+/// so the shadowing/fallback is unit-testable without a server.
+///
+/// The `Client` subcommand re-declares its own `--session`/`--continue`, which
+/// shadow the globals; without this fallback, `opencode --continue client ...`
+/// would silently ignore the global and create a fresh remote session.
+pub fn resolve_client_session_flags(
+    client_session: Option<String>,
+    client_continue: bool,
+    global_session: Option<String>,
+    global_continue: bool,
+) -> (Option<String>, bool) {
+    (client_session.or(global_session), client_continue || global_continue)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn client_run(
     remote: String,
@@ -84,6 +101,7 @@ pub async fn client_run(
         .await?;
 
     let mut rx = client.events(&session_id, after)?;
+    let mut saw_done = false;
     while let Some(evt) = rx.recv().await {
         // TranscriptReset carries no messages on the wire: pull a fresh
         // transcript snapshot from the server (rebuild path for compaction).
@@ -98,10 +116,20 @@ pub async fn client_run(
         };
         print_event(&ev);
         match &ev {
-            SessionEvent::Done => break,
+            SessionEvent::Done => {
+                saw_done = true;
+                break;
+            }
             SessionEvent::Error(e) => return Err(anyhow!("{e}")),
             _ => {}
         }
+    }
+
+    // If the HTTP stream ended without a terminal `done` event, the run was
+    // truncated (network drop, server crash, partial proxy buffer flush).
+    // Reporting Ok(()) here would hide the failure from the caller.
+    if !saw_done {
+        anyhow::bail!("stream ended without a done event (possible truncation)");
     }
 
     eprintln!("\n\x1b[2m[remote session {}]\x1b[0m", session_id);
@@ -110,10 +138,43 @@ pub async fn client_run(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_token;
+    use super::{resolve_client_session_flags, resolve_token};
 
     #[test]
     fn resolve_token_param_returns_ok() {
         assert_eq!(resolve_token(Some("explicit".into())).unwrap(), "explicit");
+    }
+
+    #[test]
+    fn client_session_flags_fall_back_to_globals() {
+        // Client's own --session wins over the global.
+        let (s, _) = resolve_client_session_flags(
+            Some("c-sess".into()),
+            false,
+            Some("g-sess".into()),
+            false,
+        );
+        assert_eq!(s.as_deref(), Some("c-sess"));
+
+        // No client --session -> global is used (otherwise it would be lost).
+        let (s, _) = resolve_client_session_flags(None, false, Some("g-sess".into()), false);
+        assert_eq!(s.as_deref(), Some("g-sess"));
+
+        // Neither set -> None.
+        let (s, _) = resolve_client_session_flags(None, false, None, false);
+        assert!(s.is_none());
+    }
+
+    #[test]
+    fn client_continue_flags_or_with_globals() {
+        // client flag alone
+        let (_, c) = resolve_client_session_flags(None, true, None, false);
+        assert!(c);
+        // global alone (this is the bug: previously shadowed & dropped)
+        let (_, c) = resolve_client_session_flags(None, false, None, true);
+        assert!(c);
+        // neither
+        let (_, c) = resolve_client_session_flags(None, false, None, false);
+        assert!(!c);
     }
 }

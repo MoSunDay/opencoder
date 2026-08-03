@@ -98,12 +98,19 @@ pub fn backoff_millis(attempt: u8) -> u64 {
 /// jitter derived from the wall clock (no `rand` dependency). Jitter avoids
 /// synchronized retry bursts when many clients share a flaky endpoint.
 pub async fn backoff_delay(attempt: u8) {
+    tokio::time::sleep(backoff_duration(attempt)).await;
+}
+
+/// The (jittered) backoff [`Duration`] that [`backoff_delay`] would sleep for,
+/// without sleeping. Exposed so callers can combine it with server-provided
+/// hints (e.g. an HTTP `Retry-After` header) before deciding how long to wait.
+pub fn backoff_duration(attempt: u8) -> Duration {
     let exp = backoff_millis(attempt);
     let jitter = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| (d.subsec_nanos() as u64) % 250)
         .unwrap_or(0);
-    tokio::time::sleep(Duration::from_millis(exp + jitter)).await;
+    Duration::from_millis(exp + jitter)
 }
 
 /// Classification of a mid-stream interruption. All three indicate a transient
@@ -172,6 +179,22 @@ mod tests {
         assert_eq!(backoff_millis(5), 8000);
         assert_eq!(MAX_ATTEMPTS, 5);
         assert_eq!(MAX_STREAM_ATTEMPTS, 3);
+    }
+
+    #[test]
+    fn backoff_duration_within_millis_plus_jitter() {
+        // backoff_duration must be the pure backoff plus at most 250 ms of
+        // jitter, so a caller can safely combine it with a Retry-After hint via
+        // `Duration::max` without surprising bounds.
+        for attempt in 1..=5u8 {
+            let lo = backoff_millis(attempt);
+            let hi = lo + 250;
+            let d = backoff_duration(attempt);
+            assert!(
+                d >= Duration::from_millis(lo) && d <= Duration::from_millis(hi),
+                "attempt {attempt}: backoff_duration {d:?} not within [{lo}, {hi}] ms"
+            );
+        }
     }
 
     #[test]

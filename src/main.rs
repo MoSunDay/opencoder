@@ -61,11 +61,21 @@ async fn main() -> Result<()> {
             if !*interrupt {
                 require(&p)?;
             }
+            // The Client subcommand re-declares its own --session/--continue,
+            // which shadow the global flags. Fall back to the globals so
+            // `opencode --continue client -r http://...` works as expected
+            // instead of silently creating a fresh remote session.
+            let (session, continue_) = opencoder_cli::client::resolve_client_session_flags(
+                session.clone(),
+                *continue_,
+                cli.session.clone(),
+                cli.continue_,
+            );
             opencoder_cli::client::client_run(
                 remote.clone(),
                 token.clone(),
-                session.clone(),
-                *continue_,
+                session,
+                continue_,
                 cli.agent.clone(),
                 cli.model.clone(),
                 *interrupt,

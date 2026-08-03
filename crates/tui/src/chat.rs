@@ -35,12 +35,11 @@ impl ChatView {
                     text.push_str(t);
                 }
             }
-            SessionEvent::CompactionDelta(t) => {
-                self.ensure_compaction_open();
-                if let Some(ChatBlock::Compaction { text, .. }) = self.blocks.last_mut() {
-                    text.push_str(t);
-                }
-            }
+            // Ignore the streamed delta: the final `Compaction(summary)` event
+            // (handled below) renders the block once. Reacting to deltas causes
+            // a flicker because `TranscriptReset` destroys the streamed block and
+            // `Compaction` recreates it. The CLI does the same (display.rs).
+            SessionEvent::CompactionDelta(_) => {}
             SessionEvent::ToolStart { id, name, input } => {
                 if name == "task" {
                     return;

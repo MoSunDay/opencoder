@@ -48,19 +48,6 @@ pub(crate) fn render_collapsible(
 }
 
 impl ChatView {
-    /// Ensure a trailing Compaction block exists, opening a new one if the
-    /// last block isn't already a Compaction block. Called on each
-    /// `CompactionDelta` during streaming summarization.
-    pub(crate) fn ensure_compaction_open(&mut self) {
-        if !matches!(self.blocks.last(), Some(ChatBlock::Compaction { .. })) {
-            self.finalize_assistant();
-            self.blocks.push(ChatBlock::Compaction {
-                text: String::new(),
-                collapsed: true,
-            });
-        }
-    }
-
     /// Toggle collapse on the Compaction block at `block_idx` (mouse click).
     /// No-op if the index is out of range or not a Compaction block.
     pub fn toggle_compaction_at(&mut self, block_idx: usize) {

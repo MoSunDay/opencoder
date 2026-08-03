@@ -35,9 +35,9 @@ pub enum ChatBlock {
         sealed: bool,
     },
     /// Collapsible compaction-summary block with muted italic styling.
-    /// Mirrors Thinking: streams via `CompactionDelta`, defaults collapsed,
-    /// click-to-expand. The final `Compaction(summary)` event replaces the
-    /// streamed block with the complete summary.
+    /// Mirrors Thinking: defaults collapsed, click-to-expand. Created once by
+    /// the final `Compaction(summary)` event; the streamed `CompactionDelta`s
+    /// are ignored by the TUI (the summary is rendered only once).
     Compaction {
         text: String,
         collapsed: bool,

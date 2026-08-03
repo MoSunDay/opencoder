@@ -14,16 +14,6 @@ use std::sync::Arc;
 
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
 
-/// Serialize tests that scrub process-wide proxy env vars (mirrors the
-/// convention in `worker::tests` / `agent_switch_persist.rs`).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn clear_proxy_env() {
-    for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-        std::env::remove_var(v);
-    }
-}
-
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
 }
@@ -59,11 +49,7 @@ fn steered_input(session_id: &str, prompt: &str) -> SessionInput {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)]
 async fn resume_restores_display_originals_and_drain_stays_clean() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    clear_proxy_env();
-
     let store = mem_store().await;
     let sid = "resume-demo";
     store

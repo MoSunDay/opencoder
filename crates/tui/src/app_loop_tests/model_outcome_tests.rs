@@ -1,7 +1,7 @@
 //! Model-outcome Err-branch tests extracted from the unified app_loop_tests
 //! module to keep each file under the 800-line cap.
 
-use super::{EnvGuard, HOME_TEST_LOCK};
+use super::HOME_TEST_LOCK;
 use crate::app::app_loop::*;
 
 // ----- handle_model_outcome Err-branch tests -----
@@ -117,8 +117,8 @@ async fn handle_model_outcome_client_build_failure_pushes_red_marker() {
 
 /// `resolve_endpoint` fails when no api_key is available (neither the merged
 /// config nor `OPENAI_API_KEY` provides one) → the "endpoint resolve failed"
-/// red marker is pushed. HOME is redirected to a temp dir so the global config
-/// candidates can't smuggle in an api_key.
+/// red marker is pushed. Config discovery is isolated to a temp dir on this
+/// thread so global candidates can't smuggle in an api_key.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
@@ -129,12 +129,13 @@ async fn handle_model_outcome_endpoint_resolve_failure_pushes_red_marker() {
 
     let _guard = HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Redirect HOME to a temp dir so no global config can supply an api_key,
-    // and clear any inherited `OPENAI_API_KEY`. RAII guards guarantee
-    // restoration even if an assertion panics mid-`await`.
+    // Isolate config discovery + env overlays to this tempdir on this thread
+    // only (no process-env mutation → no `set_var`/`remove_var` UB). The
+    // thread-local override makes `config_candidates` resolve inside the
+    // tempdir (so no global config can supply an api_key) and disables env
+    // reads (so `OPENAI_API_KEY` can't leak in from the host).
     let tmp = tempfile::tempdir().unwrap();
-    let _home_guard = EnvGuard::set("HOME", tmp.path());
-    let _key_guard = EnvGuard::remove("OPENAI_API_KEY");
+    let _iso = opencoder_core::scoped_config_home(tmp.path().to_path_buf());
 
     let workdir = tmp.path();
 

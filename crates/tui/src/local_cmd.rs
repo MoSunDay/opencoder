@@ -202,46 +202,13 @@ mod tests {
     /// round-trip in a tempdir: on → off → on, asserting the on-disk JSON and
     /// the in-memory config agree after each flip, and that a reload command
     /// was dispatched every time.
-    /// Restores `HOME` / `XDG_CONFIG_HOME` on drop so a fake home never
-    /// leaks into tests that run later in the same binary.
-    struct EnvRestore {
-        home: Option<std::ffi::OsString>,
-        xdg: Option<std::ffi::OsString>,
-    }
-    impl EnvRestore {
-        fn capture() -> Self {
-            Self {
-                home: std::env::var_os("HOME"),
-                xdg: std::env::var_os("XDG_CONFIG_HOME"),
-            }
-        }
-    }
-    impl Drop for EnvRestore {
-        fn drop(&mut self) {
-            match &self.home {
-                Some(h) => std::env::set_var("HOME", h),
-                None => std::env::remove_var("HOME"),
-            }
-            match &self.xdg {
-                Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
-            }
-        }
-    }
-
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
     async fn toggle_ap_round_trips_persisted_state() {
-        // Hold the process-wide HOME lock + fake HOME so save_target/load
-        // resolve against an empty global config (never the real one) and
-        // never race the sys_tokens_* readers in the same test binary.
-        let _lock = crate::app::app_loop::tests::HOME_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let fake_home = tempfile::tempdir().expect("tempdir for fake HOME");
-        let _env = EnvRestore::capture();
-        std::env::set_var("HOME", fake_home.path());
-        std::env::set_var("XDG_CONFIG_HOME", fake_home.path());
+        // Isolate config discovery to a tempdir on this thread only — no
+        // process-env mutation, so no `set_var` UB and no race with the
+        // sys_tokens_* readers elsewhere in the test binary.
+        let fake_home = tempfile::tempdir().expect("tempdir for fake config home");
+        let _iso = opencoder_core::scoped_config_home(fake_home.path().to_path_buf());
         let dir = tempfile::tempdir().expect("tempdir");
         let workdir = dir.path();
         let mut config = Config::default();

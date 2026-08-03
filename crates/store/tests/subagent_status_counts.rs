@@ -272,6 +272,13 @@ async fn subagent_status_parse_and_as_str() {
         SubagentStatus::Cancelled
     );
     assert_eq!(SubagentStatus::parse("bogus"), SubagentStatus::Running);
+    // Regression: "unknown" must round-trip, not fall through to Running.
+    assert_eq!(SubagentStatus::parse("unknown"), SubagentStatus::Unknown);
+    assert_eq!(SubagentStatus::Unknown.as_str(), "unknown");
+    assert_eq!(
+        SubagentStatus::parse(SubagentStatus::Unknown.as_str()),
+        SubagentStatus::Unknown
+    );
     assert_eq!(SubagentStatus::Running.as_str(), "running");
     assert_eq!(SubagentStatus::Completed.as_str(), "completed");
     assert_eq!(SubagentStatus::Failed.as_str(), "failed");

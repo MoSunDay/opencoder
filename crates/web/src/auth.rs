@@ -57,6 +57,20 @@ fn hex(b: u8) -> Option<u8> {
     }
 }
 
+/// Constant-time string equality to avoid timing side-channels on token
+/// comparison. Leaks only the length (and only as an early `false` when
+/// lengths differ, which is unavoidable without padding).
+fn ct_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Reject unmatched requests with a JSON 401.
 fn unauthorized() -> Response {
     (
@@ -74,11 +88,11 @@ pub async fn require_token(
     // 1. Authorization: Bearer <T>
     if let Some(h) = req.headers().get(axum::http::header::AUTHORIZATION) {
         if let Ok(v) = h.to_str() {
-            if v.trim() == format!("Bearer {token}") {
+            if ct_eq(v.trim(), &format!("Bearer {token}")) {
                 return next.run(req).await;
             }
             // also accept a bare token (lenient)
-            if v.trim() == token {
+            if ct_eq(v.trim(), &token) {
                 return next.run(req).await;
             }
         }
@@ -86,7 +100,7 @@ pub async fn require_token(
     // 2. ?token=<T> (EventSource cannot set headers)
     if let Some(q) = req.uri().query() {
         if let Some(t) = query_token(q) {
-            if t == token {
+            if ct_eq(&t, &token) {
                 return next.run(req).await;
             }
         }

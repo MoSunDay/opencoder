@@ -52,18 +52,24 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         args.push(h.clone().into());
     }
     if let Some(s) = &filter.search {
-        where_clauses.push("(s.id LIKE ? OR COALESCE(s.title,'') LIKE ?)".into());
-        let like = format!("%{s}%");
+        // Escape LIKE metacharacters (`\`, `%`, `_`) in the user-supplied term
+        // so they match literally. `ESCAPE '\'` declares the escape character.
+        where_clauses.push(
+            "(s.id LIKE ? ESCAPE '\\' OR COALESCE(s.title,'') LIKE ? ESCAPE '\\')".into(),
+        );
+        let escaped = s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let like = format!("%{escaped}%");
         args.push(like.clone().into());
         args.push(like.into());
     }
     if let Some(cursor) = &filter.cursor {
-        if let Some((ts, id)) = decode_cursor(cursor) {
-            where_clauses.push("(s.created_at < ? OR (s.created_at = ? AND s.id < ?))".into());
-            args.push(ts.into());
-            args.push(ts.into());
-            args.push(id.into());
-        }
+        // A malformed cursor is a real error, not a silent fallback to page 1.
+        let (ts, id) = decode_cursor(cursor)
+            .ok_or_else(|| anyhow::anyhow!("invalid list cursor: {cursor}"))?;
+        where_clauses.push("(s.created_at < ? OR (s.created_at = ? AND s.id < ?))".into());
+        args.push(ts.into());
+        args.push(ts.into());
+        args.push(id.into());
     }
     if !filter.include_subagents {
         where_clauses.push("s.task_type = 'parent'".into());

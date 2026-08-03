@@ -17,16 +17,6 @@ use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, SessionP
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
-/// Serialize tests that scrub process-wide proxy env vars (mirrors the
-/// convention in `worker::tests`).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn clear_proxy_env() {
-    for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-        std::env::remove_var(v);
-    }
-}
-
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
 }
@@ -50,11 +40,7 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)]
 async fn queued_combined_submission_drains_with_skill() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    clear_proxy_env();
-
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {

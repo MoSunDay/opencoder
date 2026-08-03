@@ -301,7 +301,7 @@ async fn interrupt_cancels_running_drain_token() {
         tx,
         cancel: tokio::sync::Mutex::new(cancel.clone()),
         overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
-        draining: AtomicBool::new(false),
+        draining: AtomicBool::new(true),
         child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),

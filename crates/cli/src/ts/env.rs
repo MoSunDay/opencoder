@@ -1,5 +1,6 @@
 //! Environment detection: is tmux installed / are we inside a tmux client?
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 /// True when a `tmux` executable is on PATH.
@@ -11,7 +12,14 @@ pub(crate) fn which_tmux() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join("tmux");
-        if candidate.is_file() {
+        // A non-executable file named `tmux` (e.g. a data file or doc stub)
+        // must not be reported as a usable binary: require the execute bit.
+        let is_exec = candidate.is_file()
+            && candidate
+                .metadata()
+                .map(|m| m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false);
+        if is_exec {
             return Some(candidate);
         }
     }

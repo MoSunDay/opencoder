@@ -180,7 +180,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 cfg.compaction.context_threshold = v;
             }
             if let Some(v) = c.get("tail_turns").and_then(|v| v.as_u64()) {
-                cfg.compaction.tail_turns = v as u32;
+                cfg.compaction.tail_turns = v.min(u32::MAX as u64) as u32;
             }
             if let Some(v) = c.get("reserved").and_then(|v| v.as_u64()) {
                 cfg.compaction.reserved = v;

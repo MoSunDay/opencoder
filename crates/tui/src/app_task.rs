@@ -225,7 +225,7 @@ pub(crate) async fn switch_session(
     // applies to its turns.
     *skill_handle = new_skill_handle;
     if let Some(body) = &*active_skill_body {
-        *skill_handle.lock().unwrap() = Some(body.clone());
+        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body.clone());
     }
     Ok(())
 }

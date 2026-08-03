@@ -18,7 +18,7 @@ use crate::tool_call::{CompletedToolCall, ToolAccumulator};
 
 #[derive(Debug, Clone)]
 pub struct ChatParams {
-    pub temperature: Option<f32>,
+    pub temperature: Option<f64>,
     pub max_tokens: Option<u64>,
 }
 
@@ -278,9 +278,21 @@ async fn run_stream_once(
                 return Ok(());
             }
             if let Some(parsed) = crate::sse::parse_chunk(&data) {
-                handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, tx)
-                    .await
-                    .map_err(OnceError::Connect)?;
+                // `handle_event` is infallible in practice: `emit_delta`
+                // swallows channel-send errors with `let _ =` and always
+                // returns `Ok(())`. The former `.map_err(OnceError::Connect)?`
+                // was dead code (and would have misclassified an event-handling
+                // error as a connect failure), so the result is simply
+                // discarded here.
+                let _ = handle_event(
+                    &parsed,
+                    &mut tools,
+                    &mut usage,
+                    &mut finished,
+                    &mut text_buf,
+                    tx,
+                )
+                .await;
             }
         }
         // Stamp the watchdog AFTER delivering frames to the consumer. Stamping
@@ -313,9 +325,16 @@ async fn run_stream_once(
     let mut flushed_any = false;
     for data in decoder.flush_remaining() {
         if let Some(parsed) = crate::sse::parse_chunk(&data) {
-            handle_event(&parsed, &mut tools, &mut usage, &mut finished, &mut text_buf, tx)
-                .await
-                .map_err(OnceError::Connect)?;
+            // See note above: `handle_event` is infallible; discard its result.
+            let _ = handle_event(
+                &parsed,
+                &mut tools,
+                &mut usage,
+                &mut finished,
+                &mut text_buf,
+                tx,
+            )
+            .await;
             flushed_any = true;
         }
     }

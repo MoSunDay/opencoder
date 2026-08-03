@@ -16,7 +16,9 @@ impl JsonlStore {
 
     pub async fn append(&self, msg: &Message) -> Result<()> {
         if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent).await.ok();
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("create jsonl dir")?;
         }
         let line = serde_json::to_string(msg).context("serialize message")?;
         let mut file = tokio::fs::OpenOptions::new()

@@ -44,6 +44,12 @@ async fn start_new(cli: &Cli) -> Result<()> {
     ensure_session(&workdir, &id).await?;
 
     let name = session_name(&id);
+    // Bail early with a helpful hint if a tmux session with this name is
+    // already live; otherwise `tmux new-session` fails with a confusing
+    // "duplicate session" error.
+    if session_exists(&name)? {
+        bail!("tmux session '{name}' already exists; use `opencode ts -r <id>` to resume");
+    }
     let exe = std::env::current_exe().context("resolve opencoder executable")?;
     let mut cmd = Command::new(tmux_bin()?);
     cmd.arg("new-session")

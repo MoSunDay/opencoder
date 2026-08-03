@@ -214,7 +214,8 @@ pub enum SubagentStatus {
     Cancelled,
     /// Forward-compat fallback produced only by `#[serde(other)]` when an
     /// unknown status string is deserialized from JSON. The DB TEXT path uses
-    /// `parse()`, which maps unknown strings to `Running` (still-in-flight).
+    /// `as_str()`/`parse()`; `"unknown"` round-trips to `Unknown`, while any
+    /// other unrecognized string still falls back to `Running` (still-in-flight).
     #[serde(other)]
     Unknown,
 }
@@ -232,9 +233,11 @@ impl SubagentStatus {
 
     pub fn parse(s: &str) -> Self {
         match s {
+            "running" => SubagentStatus::Running,
             "completed" => SubagentStatus::Completed,
             "failed" => SubagentStatus::Failed,
             "cancelled" => SubagentStatus::Cancelled,
+            "unknown" => SubagentStatus::Unknown,
             _ => SubagentStatus::Running,
         }
     }

@@ -105,14 +105,11 @@ fn delete_and_switch_patches() {
 fn provider_patch_model_survives_save_load_cycle() {
     use opencoder_core::Config;
 
-    // Scrub env vars that Config::load → apply_env would inject.
-    let _model = std::env::var("OPENCODER_MODEL").ok();
-    std::env::remove_var("OPENCODER_MODEL");
-
     let dir = tempfile::tempdir().unwrap();
-    // Isolate HOME/XDG_CONFIG_HOME so Config::save_target's global candidates
-    // (~~/.opencoder/config.json, XDG) resolve inside this tempdir instead of
-    // falling through to the real ~/.opencoder and clobbering the user config.
+    // Isolate config discovery to this tempdir on this thread only (no
+    // process-env mutation → no `set_var` UB). The thread-local override also
+    // disables env overlays (`OPENCODER_MODEL` etc.) so `Config::load`'s
+    // `apply_env` can't clobber the saved model with a host env var.
     let _home = super::common::lock_home(dir.path());
     // Simulate adding a provider while a *different* model is active.
     let patch = crate::model_menu::patch::ProviderPatch {
@@ -148,11 +145,6 @@ fn provider_patch_model_survives_save_load_cycle() {
         entry.model_id, "qwen-max",
         "ProviderList must read the persisted per-provider model, not the active model"
     );
-
-    // Restore env
-    if let Some(v) = _model {
-        std::env::set_var("OPENCODER_MODEL", v);
-    }
 }
 
 #[test]

@@ -275,10 +275,13 @@ async fn run_stream(
         .await
         .context("events request")?;
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
         return Err(anyhow!(
-            "events: HTTP {} {}",
-            resp.status().as_u16(),
-            resp.status().canonical_reason().unwrap_or("")
+            "events: HTTP {} {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            body
         ));
     }
     let mut stream = resp.bytes_stream();

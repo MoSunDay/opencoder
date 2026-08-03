@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use opencoder_core::{discover_skills, resolve_agent, Config, Endpoint};
+use opencoder_core::{resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionPatch, Store};
@@ -360,35 +360,13 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
 /// and every name is reported as unresolved. The shared skill handle is updated
 /// directly before the caller issues `Prompt`, so the worker — which holds the
 /// same `Arc` — observes the new skill on its next turn without a channel hop.
-pub(crate) fn apply_skill_tokens(
-    text: &str,
-    active_skill: &mut Option<String>,
-    active_skill_body: &mut Option<String>,
-    sys_tokens: &mut u64,
-    agent_name: &str,
-    workdir: &Path,
-    skill_handle: &Arc<Mutex<Option<String>>>,
-) -> (String, Vec<String>) {
-    let skills = discover_skills();
-    apply_skill_tokens_with(
-        &skills,
-        text,
-        active_skill,
-        active_skill_body,
-        sys_tokens,
-        agent_name,
-        workdir,
-        skill_handle,
-    )
-}
-
-/// Core of [`apply_skill_tokens`] that resolves `{$name}` tokens against an
-/// *explicit* skill slice instead of scanning `~/.opencoder/skills`. Factored
-/// out so tests can pass `discover_in(tempdir)` and avoid mutating the
-/// process-global `HOME` env var — `std::env::set_var` is not thread-safe at
-/// the libc level, so under parallel test execution a concurrent `getenv`
-/// could observe a transiently-wrong HOME and spuriously mark a known skill
-/// unresolved. Taking the skills as a parameter removes the global entirely.
+/// Core skill-token resolver: maps `{$name}` tokens against an *explicit*
+/// skill slice instead of scanning `~/.opencoder/skills`. Taking skills as a
+/// parameter removes the process-global `HOME` read entirely —
+/// `std::env::set_var` is not thread-safe at the libc level, so under parallel
+/// test execution a concurrent `getenv` could observe a transiently-wrong HOME
+/// and spuriously mark a known skill unresolved. Production callers discover
+/// skills via `opencoder_core::discover_skills()` and pass them in explicitly.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_skill_tokens_with(
     skills: &[opencoder_core::Skill],
@@ -429,16 +407,19 @@ pub(crate) fn apply_skill_tokens_with(
         *active_skill = Some(display);
         *active_skill_body = Some(body.clone());
         *sys_tokens = sys_tokens_for(agent_name, workdir, Some(&body));
-        *skill_handle.lock().unwrap() = Some(body);
+        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body);
     }
     (clean, unresolved)
 }
 
-/// Wraps `apply_skill_tokens` with a `chat` sink for unresolved-skill warnings.
-/// The 8th arg (`chat`) is load-bearing: it lets the caller avoid a separate
-/// `push_marker` round-trip after every submit/steer/queue.
+/// Resolves `{$name}` tokens against an *explicit* skill slice (typically
+/// `discover_in(tempdir)`) and pushes a warning marker for unresolved skills.
+/// The 9th arg (`chat`) is load-bearing: it lets the caller avoid a separate
+/// `push_marker` round-trip after every submit/steer/queue. Production callers
+/// discover skills via `opencoder_core::discover_skills()` and pass them in.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_and_warn(
+pub(crate) fn resolve_and_warn_with(
+    skills: &[opencoder_core::Skill],
     text: &str,
     active_skill: &mut Option<String>,
     active_skill_body: &mut Option<String>,
@@ -448,7 +429,8 @@ pub(crate) fn resolve_and_warn(
     skill_handle: &Arc<Mutex<Option<String>>>,
     chat: &mut ChatView,
 ) -> (String, Vec<String>) {
-    let (clean, unresolved) = apply_skill_tokens(
+    let (clean, unresolved) = apply_skill_tokens_with(
+        skills,
         text,
         active_skill,
         active_skill_body,

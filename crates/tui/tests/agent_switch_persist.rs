@@ -21,16 +21,6 @@ use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
 
-/// Serialize tests that scrub process-wide proxy env vars (mirrors the
-/// convention in `worker::tests`).
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn clear_proxy_env() {
-    for v in &["OPENCODER_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"] {
-        std::env::remove_var(v);
-    }
-}
-
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
 }
@@ -50,11 +40,7 @@ fn text_done(text: &str) -> LlmEvent {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)]
 async fn switch_agent_persists_mode_and_survives_resume() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    clear_proxy_env();
-
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {
@@ -109,11 +95,7 @@ async fn switch_agent_persists_mode_and_survives_resume() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)]
 async fn switch_and_start_handoff_persists_act_mode() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    clear_proxy_env();
-
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {
@@ -179,11 +161,7 @@ async fn switch_and_start_handoff_persists_act_mode() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)]
 async fn switch_agent_to_plan_resets_plan_input_count() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    clear_proxy_env();
-
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {

@@ -159,7 +159,12 @@ fn head_tail_lines(content: &str, budget: usize) -> String {
     let keep = budget.saturating_sub(1).max(2);
     let head = keep / 2;
     let tail = keep - head;
-    let mid = lines.len() - head - tail;
+    // Guard against underflow when the budget is so small that head+tail would
+    // exceed the available line count — just return the full content.
+    if lines.len() < head + tail {
+        return content.to_string();
+    }
+    let mid = lines.len().saturating_sub(head + tail);
     let mut out = lines[..head].join("\n");
     out.push_str("\n... [");
     out.push_str(&mid.to_string());

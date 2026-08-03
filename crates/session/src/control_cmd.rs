@@ -77,6 +77,9 @@ pub async fn apply(
         ControlCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(name) {
                 session.agent = a;
+                if name == "plan" {
+                    session.plan_input_count = 0;
+                }
                 persist_agent(session, name).await;
                 on_event(SessionEvent::AgentSwitch(name.clone()));
             }

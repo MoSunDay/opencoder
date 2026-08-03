@@ -530,11 +530,10 @@ async fn fold_done_clears_queue_items() {
 }
 
 /// When a queued follow-up is consumed at the idle boundary, the handler
-/// drops the pending entry by seq. The marker is no longer pushed at consume
-/// time — it was already echoed at submission time (see `push_queued_marker`
-/// in app.rs's Queue arm).
+/// echoes a `queued:` marker into the transcript (bold, warn-colored) and
+/// drops the consumed entry by seq from the pending mirror.
 #[tokio::test]
-async fn fold_queue_consumed_drops_entry_without_marker() {
+async fn fold_queue_consumed_pushes_marker_and_drops_entry() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![
@@ -568,8 +567,8 @@ async fn fold_queue_consumed_drops_entry_without_marker() {
     .await;
 
     assert!(
-        !crate::chat::block_text(&chat).contains("queued:"),
-        "QueueConsumed must NOT push a marker — it was already echoed at submit time"
+        crate::chat::block_text(&chat).contains("queued: queued prompt X"),
+        "QueueConsumed must push a marker at consume time"
     );
     assert_eq!(
         queue_items.len(),

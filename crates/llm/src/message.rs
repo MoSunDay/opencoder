@@ -131,7 +131,7 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
     m.insert(
         "content".to_string(),
         if text.is_empty() {
-            Value::Null
+            Value::String(String::new())
         } else {
             Value::String(text)
         },

@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message, Role};
-use opencoder_llm::estimate_messages;
+use opencoder_llm::estimate_messages_for_display;
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use opencoder_tui::session_ui::replay_into_chat;
 use tempfile::TempDir;
@@ -73,7 +73,7 @@ async fn resume_context_used_matches_transcript_estimate() {
     );
     assert_eq!(
         chat.context_used,
-        estimate_messages(&messages) as u64,
+        estimate_messages_for_display(&messages) as u64,
         "context_used must equal the transcript token estimate"
     );
 }
@@ -117,5 +117,110 @@ async fn resume_context_used_grows_with_more_messages() {
         "longer transcript must have larger context_used ({} > {})",
         chat_long.context_used,
         chat_short.context_used
+    );
+}
+
+// --- child view context_used (Fix 1: reconstruct_child_view / replay_messages) ---
+
+use opencoder_store::{SubagentStatus, SubagentTaskRecord};
+use opencoder_tui::chat::ChatBlock;
+
+fn assistant_with_task(id: &str, task_id: &str) -> Message {
+    Message {
+        id: id.into(),
+        role: Role::Assistant,
+        blocks: vec![
+            ContentBlock::Text { text: "delegating".into() },
+            ContentBlock::ToolUse {
+                id: task_id.into(),
+                name: "task".into(),
+                input: serde_json::json!({"prompt": "explore"}),
+            },
+        ],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    }
+}
+
+#[tokio::test]
+async fn child_view_context_used_is_nonzero() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "parent").await;
+    make_session(&store, "child-1").await;
+    let store_arc: Arc<dyn Store> = store.clone();
+
+    let child_msgs = vec![
+        Message::user("cu1", "explore the codebase thoroughly"),
+        assistant("ca1", "found 3 files implementing the drain loop"),
+    ];
+    for msg in &child_msgs {
+        store.append_message("child-1", msg).await.unwrap();
+    }
+
+    let parent_msgs = vec![
+        Message::user("u1", "please explore"),
+        assistant_with_task("a1", "task-1"),
+    ];
+
+    store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-1".into(),
+            parent_session_id: "parent".into(),
+            child_session_id: "child-1".into(),
+            parent_message_id: Some("a1".into()),
+            agent: "explore".into(),
+            prompt: "explore".into(),
+            result: Some("done".into()),
+            status: SubagentStatus::Completed,
+            ok: Some(true),
+            started_at: 0,
+            completed_at: Some(1),
+        })
+        .await
+        .unwrap();
+
+    let chat = replay_into_chat("act", &parent_msgs, &store_arc, "parent").await;
+
+    let sub = chat
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            ChatBlock::Subagent { view, .. } => Some(view),
+            _ => None,
+        })
+        .expect("expected a Subagent block");
+
+    assert!(
+        sub.context_used > 0,
+        "child view context_used must be non-zero, got {}",
+        sub.context_used
+    );
+    assert_eq!(
+        sub.context_used,
+        estimate_messages_for_display(&child_msgs) as u64,
+        "child view context_used must match display estimate of child messages"
+    );
+}
+
+#[tokio::test]
+async fn replay_messages_context_used_is_nonzero() {
+    use opencoder_tui::session_ui::replay_messages;
+
+    let msgs = vec![
+        Message::user("u1", "hello world from the test suite"),
+        assistant("a1", "hi there, this is a response"),
+    ];
+    let view = replay_messages("act", &msgs);
+    assert!(
+        view.context_used > 0,
+        "replay_messages must set context_used, got {}",
+        view.context_used
+    );
+    assert_eq!(
+        view.context_used,
+        estimate_messages_for_display(&msgs) as u64
     );
 }

@@ -195,20 +195,6 @@ pub(crate) async fn handle_switch_agent(
     SwitchOutcome::Proceed
 }
 
-/// Push a `queued: {display}` marker (bold, warn-colored) into the transcript
-/// followed by a blank separator line. Called at queue-submission time (Tab
-/// while running) so the user sees the queued prompt immediately — not only
-/// when it is consumed at the idle boundary.
-pub(crate) fn push_queued_marker(chat: &mut ChatView, display: &str) {
-    chat.push_marker(Line::from(Span::styled(
-        format!("queued: {display}"),
-        Style::default()
-            .fg(theme::warn_color())
-            .add_modifier(Modifier::BOLD),
-    )));
-    chat.push_marker(Line::from(""));
-}
-
 /// Shared plan→act handoff prep for the `/act` and `/act_clear_context` slash
 /// commands (and mirrors the Shift+Tab path in [`handle_switch_agent`]):
 /// drain the input box, refresh the context-meter baseline, set the mode-flash
@@ -285,10 +271,20 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
                 if let SessionEvent::QueueConsumed { seq } = &sev {
-                    // The queued prompt was already echoed into the transcript
-                    // at submission time (see [`push_queued_marker`]), so only
-                    // the bookkeeping — drop the consumed entry by seq — happens
-                    // here.
+                    // Echo the queued prompt into the transcript at
+                    // consume time (the idle boundary), then drop the
+                    // consumed entry by seq from the pending mirror.
+                    if let Some((_, display)) =
+                        queue_items.iter().find(|(s, _)| s == seq)
+                    {
+                        chat.push_marker(Line::from(Span::styled(
+                            format!("queued: {display}"),
+                            Style::default()
+                                .fg(theme::warn_color())
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                        chat.push_marker(Line::from(""));
+                    }
                     queue_items.retain(|(s, _)| s != seq);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
@@ -301,13 +297,15 @@ pub(crate) async fn fold_ui_events(
                         *running = false;
                         chat.steer_items.clear();
                         if matches!(sev, SessionEvent::Done) {
-                            // Re-sync the queue mirror from the store: with
-                            // one-queued-real-prompt-per-run semantics, Done no
-                            // longer proves the store queue is empty — rows
-                            // behind the consumed prompt stay pending for the
-                            // next explicit submission and must remain visible
-                            // in the side panel. On Error, rows are maintained
-                            // per-item by QueueConsumed events as before.
+                            // Re-sync the queue mirror from the store as a
+                            // safety net. Under FIFO drain-to-empty semantics
+                            // Done normally means the queue is fully drained,
+                            // so pending_inputs should be empty — but a
+                            // cancel/interrupt can break the run early with
+                            // queued rows still pending, and those must remain
+                            // visible in the side panel. On Error, rows are
+                            // maintained per-item by QueueConsumed events as
+                            // before.
                             *queue_items = crate::queue_panel::pending_mirror(
                                 store
                                     .pending_inputs(

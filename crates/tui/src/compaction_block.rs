@@ -10,9 +10,10 @@ use ratatui::text::{Line, Span};
 
 /// Render a collapsible text block (used by both Thinking and Compaction).
 ///
-/// When collapsed: a single muted header line showing the icon, label, line
-/// count, and an expand hint. When expanded: a muted italic-bold header with
-/// a collapse hint, followed by each line indented 2 spaces in muted italic.
+/// When collapsed: a single muted header line showing the icon + label.
+/// When expanded: a muted italic-bold header followed by each line indented
+/// 2 spaces in muted italic. Click-to-expand is wired separately via the
+/// hit-rect pipeline.
 pub(crate) fn render_collapsible(
     icon: &str,
     label: &str,
@@ -21,14 +22,13 @@ pub(crate) fn render_collapsible(
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     if collapsed {
-        let count = text.lines().count().max(1);
         out.push(Line::from(Span::styled(
-            format!("{icon} {label} ({count} lines) [\u{2193} expand]"),
+            format!("{icon} {label}"),
             Style::default().fg(theme::muted()),
         )));
     } else {
         out.push(Line::from(Span::styled(
-            format!("{icon} {label} [\u{2191} collapse]"),
+            format!("{icon} {label}"),
             Style::default()
                 .fg(theme::muted())
                 .add_modifier(Modifier::ITALIC | Modifier::BOLD),

@@ -177,3 +177,44 @@ async fn switch_and_start_handoff_persists_act_mode() {
         "a resumed post-execution task must show [act], not the stale [plan]"
     );
 }
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn switch_agent_to_plan_resets_plan_input_count() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    clear_proxy_env();
+
+    let store = mem_store().await;
+    store
+        .create_session(&SessionMeta {
+            id: "plan-reset".into(),
+            agent: Some("act".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let (tx, _rx) = mpsc::channel::<UiEvent>(8);
+    let mut sess = SessionState::new(
+        "plan-reset",
+        resolve_agent("act").expect("act agent"),
+        Config::default(),
+        Arc::new(MockChatClient::new()) as Arc<dyn opencoder_llm::ChatStream>,
+        std::env::temp_dir(),
+    )
+    .with_store(store.clone());
+
+    // Pre-seed a non-zero plan-input count, as if prior plan-mode turns
+    // occurred. Switching back to plan via the TUI path must reset it, so the
+    // "submit your plan" reminder logic starts from a fresh phase — matching
+    // the `/plan` slash-command path (control_cmd::apply).
+    sess.plan_input_count = 5;
+
+    let quit = process_cmd(UiCmd::SwitchAgent("plan".into()), &mut sess, &tx).await;
+    assert!(!quit, "SwitchAgent must not break the worker loop");
+    assert_eq!(sess.agent.name, "plan", "in-memory mode swapped");
+    assert_eq!(
+        sess.plan_input_count, 0,
+        "switching to plan must reset the plan-input counter, mirroring control_cmd::apply"
+    );
+}

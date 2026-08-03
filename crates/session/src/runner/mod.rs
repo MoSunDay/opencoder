@@ -63,7 +63,7 @@ pub async fn run_with_images(
 pub async fn run_with_registry(
     session: &mut SessionState,
     mut user_text: String,
-    images: Vec<String>,
+    mut images: Vec<String>,
     registry: &HashMap<String, ToolArc>,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
@@ -83,6 +83,7 @@ pub async fn run_with_registry(
             )
         {
             user_text.clear();
+            images.clear();
         } else {
             on_event(SessionEvent::Done);
             return Ok(());
@@ -148,24 +149,39 @@ pub async fn run_with_registry(
 /// result resets the consecutive count. Non-bash tool calls do NOT reset it
 /// (they run independently and don't affect the bash timeout streak).
 ///
+/// Deduplication only collapses timeouts for the SAME command: a different
+/// command has its own PID and output-file path, so reusing the first
+/// timeout's content would hide the real PID and point the model at the wrong
+/// background output file. A mismatched command starts a new streak.
+///
 /// `first` persists across turns (it lives in `run_loop`'s scope) so the
 /// dedup applies across turn boundaries, not just within a single batch.
 fn dedup_consecutive_bash_timeouts(
     tool_calls: &[opencoder_llm::CompletedToolCall],
     results: &mut [(usize, ToolOutput)],
-    first: &mut Option<String>,
+    first: &mut Option<(String, Value)>,
 ) {
     for (i, out) in results.iter_mut() {
-        let is_bash = tool_calls.get(*i).is_some_and(|tc| tc.name == "bash");
+        let tc = tool_calls.get(*i);
+        let is_bash = tc.is_some_and(|tc| tc.name == "bash");
         if is_bash
             && out
                 .content
                 .starts_with(crate::tools::bash::BASH_TIMEOUT_MARKER)
         {
-            if first.is_some() {
-                out.content = first.clone().unwrap();
+            // Capture the command input so timeouts for different commands
+            // are NOT collapsed onto each other.
+            let input = tc.map(|tc| tc.input.clone()).unwrap_or(Value::Null);
+            if let Some((first_content, first_input)) = first {
+                if *first_input == input {
+                    out.content = first_content.clone();
+                } else {
+                    // Different command — start a fresh streak so this
+                    // timeout's own PID / output file is preserved.
+                    *first = Some((out.content.clone(), input));
+                }
             } else {
-                *first = Some(out.content.clone());
+                *first = Some((out.content.clone(), input));
             }
         } else if is_bash {
             *first = None;
@@ -180,9 +196,11 @@ pub(crate) async fn run_loop(
 ) -> Result<()> {
     let mut doom: VecDeque<String> = VecDeque::new();
     let mut tool_failures: crate::tool_guard::FailureMap = HashMap::new();
-    // Tracks the first bash-timeout output in a consecutive run so that
-    // subsequent timeouts can be deduplicated (same PID / output file).
-    let mut bash_timeout_first: Option<String> = None;
+    // Tracks the first bash-timeout output in a consecutive run (paired with
+    // the command's input) so subsequent timeouts for the SAME command can be
+    // deduplicated (same PID / output file). Different commands start a new
+    // streak so their distinct PIDs are preserved.
+    let mut bash_timeout_first: Option<(String, Value)> = None;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -197,6 +215,9 @@ pub(crate) async fn run_loop(
         // last turn. A steer is absorbed into history HERE.
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
+            // Track whether the last steer was a sentinel ClearContext (no
+            // plan to execute) so we can go idle without an LM call.
+            let mut clear_sentinel = false;
             for (seq, p, imgs) in &steer_prompts {
                 on_event(SessionEvent::SteerConsumed { seq: *seq });
                 // Defensive: a steered control command is applied immediately
@@ -204,13 +225,25 @@ pub(crate) async fn run_loop(
                 // to the LLM as literal text.
                 if let Some(cmd) = crate::control_cmd::parse(p) {
                     crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+                    clear_sentinel = matches!(
+                        cmd,
+                        crate::control_cmd::ControlCmd::ClearContext
+                    ) && crate::control_cmd::is_clear_context_handoff(
+                        session.handoff_plan.as_deref().unwrap_or(""),
+                    );
                     continue;
                 }
+                clear_sentinel = false;
                 let mut text = p.clone();
                 session.maybe_tag_plan_prompt(&mut text);
                 let mut m = Message::user_with_images(new_id(), text, imgs);
                 m.synthetic = true;
                 session.record(m).await;
+            }
+            // Sentinel ClearContext: go idle without an LM call.
+            if clear_sentinel {
+                on_event(SessionEvent::Done);
+                break;
             }
         }
 
@@ -572,11 +605,11 @@ mod dedup_tests {
     use opencoder_llm::CompletedToolCall;
     use serde_json::json;
 
-    fn bash_tc(id: &str) -> CompletedToolCall {
+    fn bash_tc(id: &str, command: &str) -> CompletedToolCall {
         CompletedToolCall {
             id: id.into(),
             name: "bash".into(),
-            input: json!({}),
+            input: json!({ "command": command }),
         }
     }
 
@@ -605,7 +638,7 @@ mod dedup_tests {
 
     #[test]
     fn first_timeout_stored_subsequent_replaced() {
-        let tool_calls = vec![bash_tc("1"), bash_tc("2")];
+        let tool_calls = vec![bash_tc("1", "sleep 10"), bash_tc("2", "sleep 10")];
         let mut results = vec![(0, timeout_output(100)), (1, timeout_output(200))];
         let mut first = None;
         dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
@@ -622,7 +655,11 @@ mod dedup_tests {
 
     #[test]
     fn non_timeout_bash_resets_count() {
-        let tool_calls = vec![bash_tc("1"), bash_tc("2"), bash_tc("3")];
+        let tool_calls = vec![
+            bash_tc("1", "sleep 10"),
+            bash_tc("2", "ls"),
+            bash_tc("3", "sleep 10"),
+        ];
         let mut results = vec![
             (0, timeout_output(100)),
             (1, normal_output("done")),
@@ -640,7 +677,11 @@ mod dedup_tests {
 
     #[test]
     fn non_bash_tool_does_not_reset_count() {
-        let tool_calls = vec![bash_tc("1"), other_tc("edit", "2"), bash_tc("3")];
+        let tool_calls = vec![
+            bash_tc("1", "sleep 10"),
+            other_tc("edit", "2"),
+            bash_tc("3", "sleep 10"),
+        ];
         let mut results = vec![
             (0, timeout_output(100)),
             (1, normal_output("edited")),
@@ -658,18 +699,70 @@ mod dedup_tests {
 
     #[test]
     fn first_persists_across_batches() {
-        let tool_calls_a = vec![bash_tc("1")];
+        let tool_calls_a = vec![bash_tc("1", "sleep 10")];
         let mut results_a = vec![(0, timeout_output(100))];
         let mut first = None;
         dedup_consecutive_bash_timeouts(&tool_calls_a, &mut results_a, &mut first);
 
-        let tool_calls_b = vec![bash_tc("2")];
+        let tool_calls_b = vec![bash_tc("2", "sleep 10")];
         let mut results_b = vec![(0, timeout_output(200))];
         dedup_consecutive_bash_timeouts(&tool_calls_b, &mut results_b, &mut first);
 
         assert!(
             results_b[0].1.content.contains("pid: 100"),
             "second-batch timeout must reuse first-batch content"
+        );
+    }
+
+    #[test]
+    fn different_commands_not_deduped() {
+        // Two consecutive bash timeouts for DIFFERENT commands must NOT be
+        // collapsed onto each other: each has its own PID / output file, and
+        // reusing the first's content would hide the real PID and point the
+        // model at the wrong background output file.
+        let tool_calls = vec![bash_tc("1", "cargo build"), bash_tc("2", "npm test")];
+        let mut results = vec![(0, timeout_output(100)), (1, timeout_output(200))];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
+        assert!(
+            results[0].1.content.contains("pid: 100"),
+            "first timeout keeps its own pid"
+        );
+        assert!(
+            results[1].1.content.contains("pid: 200"),
+            "different-command timeout must keep its own pid (not deduped)"
+        );
+        assert!(
+            !results[1].1.content.contains("pid: 100"),
+            "different-command timeout must not inherit the first's pid"
+        );
+    }
+
+    #[test]
+    fn command_mismatch_starts_new_streak() {
+        // timeout(A) -> timeout(B) -> timeout(A): the third (A) should dedup
+        // against the SECOND (B), not the first (A), because B started a new
+        // streak. Verifies the streak state updates on a mismatch.
+        let tool_calls = vec![
+            bash_tc("1", "cargo build"),
+            bash_tc("2", "npm test"),
+            bash_tc("3", "npm test"),
+        ];
+        let mut results = vec![
+            (0, timeout_output(100)),
+            (1, timeout_output(200)),
+            (2, timeout_output(300)),
+        ];
+        let mut first = None;
+        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
+        assert!(results[0].1.content.contains("pid: 100"));
+        assert!(
+            results[1].1.content.contains("pid: 200"),
+            "mismatched command keeps its own pid (new streak)"
+        );
+        assert!(
+            results[2].1.content.contains("pid: 200"),
+            "third dedups against the second (same command, same streak)"
         );
     }
 }

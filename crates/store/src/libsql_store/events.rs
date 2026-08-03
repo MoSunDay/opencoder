@@ -17,6 +17,18 @@ pub async fn append_many(conn: &Connection, events: &[SessionEventRecord]) -> Re
         return Ok(Vec::new());
     }
     let session_id = events[0].session_id.as_str();
+    // Batch backfill assumes a single session: it captures `session_id` once
+    // and reads back the top-N seqs for THAT session. If callers mix session
+    // ids in one batch, the rows get inserted under their own ids but the
+    // returned seqs are computed for only `events[0]`'s session — silently
+    // misaligned with no error. Reject the mixed batch up front instead.
+    for ev in events {
+        if ev.session_id != session_id {
+            anyhow::bail!(
+                "append_events: all events in a batch must share the same session_id"
+            );
+        }
+    }
     super::tx::run_tx(conn, "BEGIN", || async move {
         for ev in events {
             let payload_json =

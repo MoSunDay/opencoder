@@ -150,3 +150,31 @@ fn last_thinking_collapsed_false_when_last_block_not_thinking() {
     view.apply(&SessionEvent::TextDelta("answer".into()));
     assert!(!view.last_thinking_collapsed());
 }
+
+/// Collapsed Thinking header shows the icon + label and the `(N lines)` count;
+/// expanded header drops the count. This guards the line-count summary that was
+/// accidentally removed from the shared `render_collapsible`.
+#[test]
+fn thinking_header_shows_line_count_when_collapsed() {
+    let mut v = ChatView::default();
+    // Body is 4 lines.
+    v.apply(&SessionEvent::ReasoningDelta("l1\nl2\nl3\nl4".into()));
+
+    // Collapsed: header carries the line count.
+    let flat = v.flatten();
+    let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
+    assert!(header.contains("Thinking"), "collapsed header has label");
+    assert!(header.contains("4 lines"), "collapsed header shows line count");
+    // Content is hidden while collapsed.
+    assert!(!header.contains("l1"));
+
+    // Expanded: header no longer carries the line count.
+    v.toggle_thinking_at(0);
+    let flat = v.flatten();
+    let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
+    assert!(header.contains("Thinking"), "expanded header has label");
+    assert!(
+        !header.contains("lines"),
+        "expanded header must not carry line count"
+    );
+}

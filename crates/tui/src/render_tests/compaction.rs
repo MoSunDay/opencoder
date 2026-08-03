@@ -83,14 +83,15 @@ fn hit_rect_matches_click_on_header_row() {
     assert!(!in_rect(rect, 5, 3));
 }
 
-/// Collapsed header shows only icon + label, no line count or expand hint.
+/// Collapsed header shows icon + label and the line count, no expand hint.
 #[test]
-fn collapsed_header_has_no_extra_text() {
+fn collapsed_header_shows_line_count() {
     let v = compaction_view();
     let flat = v.flatten();
     let header = &flat[0];
     let text: String = header.spans.iter().map(|s| &*s.content).collect();
     assert!(text.contains("Compaction"), "header must contain label");
-    assert!(!text.contains("lines)"), "no line count");
+    // compaction_view() body is "summary-a\nsummary-b" -> 2 lines.
+    assert!(text.contains("2 lines"), "collapsed header shows line count");
     assert!(!text.contains("expand"), "no expand hint");
 }

@@ -83,23 +83,24 @@ fn multiple_deltas_accumulate_in_one_block() {
     assert!(text.contains("part2"));
 }
 
-/// Header shows only icon + label — no line count, no expand/collapse hint.
+/// Collapsed header shows icon + label + line count; expanded header does not.
 #[test]
-fn header_text_is_clean() {
+fn header_text_shows_line_count() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::CompactionDelta("a\nb\nc".into()));
 
-    // Collapsed: clean header.
+    // Collapsed: body "a\nb\nc" -> 3 lines, shown in the header.
     let flat = v.flatten();
     let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
     assert!(header.contains("Compaction"));
-    assert!(!header.contains("3 lines"));
+    assert!(header.contains("3 lines"));
     assert!(!header.contains("expand"));
 
-    // Expanded: still clean header (no "collapse" hint).
+    // Expanded: header drops the line count and has no collapse hint.
     v.toggle_compaction_at(0);
     let flat = v.flatten();
     let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
     assert!(header.contains("Compaction"));
     assert!(!header.contains("collapse"));
+    assert!(!header.contains("lines"), "expanded header has no line count");
 }

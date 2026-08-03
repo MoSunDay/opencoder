@@ -68,13 +68,25 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // Control commands (/act, /plan, /act_clear_context) take effect
-    // immediately without consuming an LLM turn. Short-circuit when the idle
-    // prompt is one so CLI/Web/TUI free-text idle use skips run_loop entirely.
+    // Control commands (/act, /plan) take effect immediately without
+    // consuming an LLM turn — short-circuit when the idle prompt is one.
+    // EXCEPTION: /act_clear_context with a preserved result falls through
+    // to run_loop so the agent executes the preserved task.
     if let Some(cmd) = crate::control_cmd::parse(&user_text) {
         crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
-        on_event(SessionEvent::Done);
-        return Ok(());
+        // ClearContext with a preserved result must execute it — fall through
+        // to run_loop so the agent picks up the handoff message and starts
+        // working. When no result was found (sentinel path), stop as before.
+        if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
+            && !crate::control_cmd::is_clear_context_handoff(
+                session.handoff_plan.as_deref().unwrap_or(""),
+            )
+        {
+            user_text.clear();
+        } else {
+            on_event(SessionEvent::Done);
+            return Ok(());
+        }
     }
     // Replay any subagent tasks left cancelled from a prior interrupted run
     // BEFORE the user's new input enters the loop: resume each cancelled child,
@@ -278,6 +290,18 @@ pub(crate) async fn run_loop(
                     on_event(SessionEvent::QueueConsumed { seq });
                     if let Some(cmd) = crate::control_cmd::parse(&q) {
                         crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+                        // ClearContext with a preserved result must execute it:
+                        // break to the outer loop so the LLM picks up the
+                        // handoff message. Sentinel path (no result) continues
+                        // draining as before.
+                        if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
+                            && !crate::control_cmd::is_clear_context_handoff(
+                                session.handoff_plan.as_deref().unwrap_or(""),
+                            )
+                        {
+                            got_real_prompt = true;
+                            break;
+                        }
                         continue; // drain next queued item, no LLM turn
                     }
                     // Real prompt: record it and let the outer loop process it.

@@ -85,23 +85,30 @@ pub async fn apply(
             }
         }
         ControlCmd::ClearContext => {
-            // Total store messages that predate the clear (the history to trim
-            // on resume). Accounts for any in-memory-only compaction summary.
-            let store_msg_count = session.store_message_count();
+            // Preserve the finalized plan via plan->act handoff when one exists;
+            // fall back to a blank fresh-start only when no plan was produced.
+            let plan_display = crate::plan_handoff::handoff(session, "");
 
-            // Preserve recent images so they travel into the fresh transcript.
-            let preserved_images = crate::compaction::collect_head_images(&session.messages);
-            let mut marker = fresh_start_message();
-            for url in &preserved_images {
-                marker.blocks.push(ContentBlock::Image {
-                    url: url.clone(),
-                    detail: None,
-                });
+            if plan_display.is_none() {
+                // No plan to carry forward: blank fresh-start sentinel path.
+                // Total store messages that predate the clear (the history to
+                // trim on resume). Accounts for any in-memory-only summary.
+                let store_msg_count = session.store_message_count();
+                let preserved_images =
+                    crate::compaction::collect_head_images(&session.messages);
+                let mut marker = fresh_start_message();
+                for url in &preserved_images {
+                    marker.blocks.push(ContentBlock::Image {
+                        url: url.clone(),
+                        detail: None,
+                    });
+                }
+                session.messages = vec![marker];
+                // Record the boundary so resume reconstructs the fresh marker,
+                // not the full cleared history.
+                session
+                    .after_handoff(store_msg_count as i64, CLEAR_CONTEXT_SENTINEL.to_string());
             }
-            session.messages = vec![marker];
-            // Record the boundary so resume reconstructs the fresh marker, not
-            // the full cleared history.
-            session.after_handoff(store_msg_count as i64, CLEAR_CONTEXT_SENTINEL.to_string());
 
             // Clear context always switches to act.
             if let Some(a) = resolve_agent("act") {
@@ -112,6 +119,11 @@ pub async fn apply(
             persist_clear(session).await;
             on_event(SessionEvent::AgentSwitch("act".into()));
             on_event(SessionEvent::TranscriptReset(session.messages.clone()));
+            // When a plan was handed off, surface it so the display layer can
+            // render a read-only plan card (mirrors the TUI worker path).
+            if let Some(plan) = plan_display {
+                on_event(SessionEvent::PlanHandoff(plan));
+            }
         }
     }
     Ok(())
@@ -258,6 +270,8 @@ mod tests {
 
     #[tokio::test]
     async fn apply_clear_context_collapses_and_emits() {
+        // A finalized plan exists -> ClearContext preserves it via plan->act
+        // handoff rather than wiping to a blank fresh-start.
         let store =
             Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
         store
@@ -283,13 +297,15 @@ mod tests {
         assert_eq!(
             session.messages.len(),
             1,
-            "transcript collapses to 1 marker"
+            "transcript collapses to 1 handoff marker"
         );
         assert_eq!(session.agent.name, "act", "switches to act");
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
-        assert_eq!(
-            session.handoff_plan.as_deref(),
-            Some(CLEAR_CONTEXT_SENTINEL),
+        // The plan is preserved, not replaced by the blank sentinel.
+        assert_eq!(session.handoff_plan.as_deref(), Some("plan text"));
+        assert!(
+            session.messages[0].text().contains("plan text"),
+            "marker carries the preserved plan"
         );
 
         let has_switch = evs
@@ -298,8 +314,12 @@ mod tests {
         let has_reset = evs
             .iter()
             .any(|e| matches!(e, SessionEvent::TranscriptReset(_)));
+        let has_handoff = evs
+            .iter()
+            .any(|e| matches!(e, SessionEvent::PlanHandoff(p) if p == "plan text"));
         assert!(has_switch, "AgentSwitch(act) emitted");
         assert!(has_reset, "TranscriptReset emitted");
+        assert!(has_handoff, "PlanHandoff emitted carrying the plan");
         // AgentSwitch must come before TranscriptReset.
         let switch_idx = evs
             .iter()
@@ -308,6 +328,51 @@ mod tests {
             .iter()
             .position(|e| matches!(e, SessionEvent::TranscriptReset(_)));
         assert!(switch_idx < reset_idx, "AgentSwitch before TranscriptReset");
+    }
+
+    #[tokio::test]
+    async fn apply_clear_context_no_plan_falls_back_to_fresh_start() {
+        // No assistant plan text exists -> ClearContext falls back to the blank
+        // fresh-start sentinel path (no plan to hand off).
+        let mut session = make_session(None);
+        session.messages.push(Message::user("u1", "hello"));
+        session.messages.push(Message::user("u2", "still no plan"));
+
+        let evs = collect_events(&mut session, ControlCmd::ClearContext);
+
+        assert_eq!(
+            session.messages.len(),
+            1,
+            "transcript collapses to 1 fresh-start marker"
+        );
+        assert_eq!(session.agent.name, "act", "switches to act");
+        assert!(session.handoff_seq.is_some(), "handoff_seq set");
+        // No plan -> blank sentinel stored so resume reconstructs fresh-start.
+        assert_eq!(
+            session.handoff_plan.as_deref(),
+            Some(CLEAR_CONTEXT_SENTINEL),
+        );
+        assert!(
+            session.messages[0].text().contains("Context cleared"),
+            "marker is the blank fresh-start"
+        );
+
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act")),
+            "AgentSwitch(act) emitted"
+        );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
+            "TranscriptReset emitted"
+        );
+        assert!(
+            !evs
+                .iter()
+                .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
+            "no PlanHandoff when there is no plan"
+        );
     }
 
     #[test]

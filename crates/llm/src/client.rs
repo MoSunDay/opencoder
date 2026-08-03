@@ -246,6 +246,17 @@ async fn run_stream_once(
         let bytes = match chunk {
             Ok(b) => b,
             Err(e) => {
+                if finished {
+                    let tool_calls = tools.finish_all().unwrap_or_default();
+                    let _ = tx
+                        .send(LlmEvent::Completed {
+                            text: std::mem::take(&mut text_buf),
+                            tool_calls,
+                            usage,
+                        })
+                        .await;
+                    return Ok(());
+                }
                 warn!(error = %e, "stream chunk read error");
                 return Err(OnceError::Interrupted {
                     reason: StreamInterruption::ChunkError,
@@ -269,6 +280,17 @@ async fn run_stream_once(
             }
         }
         if last_event_at.elapsed() >= idle_timeout {
+            if finished {
+                let tool_calls = tools.finish_all().unwrap_or_default();
+                let _ = tx
+                    .send(LlmEvent::Completed {
+                        text: std::mem::take(&mut text_buf),
+                        tool_calls,
+                        usage,
+                    })
+                    .await;
+                return Ok(());
+            }
             return Err(OnceError::Interrupted {
                 reason: StreamInterruption::IdleTimeout,
                 partial: snapshot(text_buf, &mut tools, usage),

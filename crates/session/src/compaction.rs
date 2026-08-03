@@ -127,7 +127,7 @@ pub async fn compact(
     // Persist compaction summary to the store so resume can reconstruct
     // the compacted transcript instead of reloading the full history.
     if let Some(store) = &session.store {
-        let prev_skip = session.summary_seq.unwrap_or(0);
+        let prev_skip = session.summary_seq.or(session.handoff_seq).unwrap_or(0);
         // The head in the in-memory list is messages[0..split].
         // If the first message is synthetic (a previous compaction summary OR
         // a plan->act handoff / clear-context marker), it is not in the store,
@@ -146,6 +146,7 @@ pub async fn compact(
                     summary: Some(summary.clone()),
                     summary_seq: Some(new_skip),
                     updated_at: Some(now_ms()),
+                    clear_handoff: true,
                     ..Default::default()
                 },
             )

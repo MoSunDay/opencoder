@@ -138,6 +138,10 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("handoff_plan = ?");
         args.push(v.clone().into());
     }
+    if patch.clear_handoff {
+        sets.push("handoff_seq = NULL");
+        sets.push("handoff_plan = NULL");
+    }
     if let Some(v) = &patch.skill {
         sets.push("skill = ?");
         args.push(v.clone().into());

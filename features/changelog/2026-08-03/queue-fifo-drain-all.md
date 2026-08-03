@@ -38,4 +38,4 @@ FIFO 排空直到队列空。同时 TUI 的 `queued:` marker 回显时机从提�
 - `crates/tui/src/app_loop_tests/mod.rs`：
   `fold_queue_consumed_pushes_marker_and_drops_entry`（重写，消费时 marker
   出现 + 行删除）。
-- 全量回归 `cargo test --workspace`：1669 passed / 0 failed。
+- 全量回归 `cargo test --workspace`：1672 passed / 0 failed。

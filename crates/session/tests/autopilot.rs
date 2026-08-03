@@ -294,9 +294,9 @@ async fn autopilot_enabled_via_run_with_registry_completes() {
 
 #[tokio::test]
 async fn doom_loop_guard_terminates_act_phase() {
-    // The act phase's run_loop gets 20 identical bash calls -> doom-loop break
-    // (DOOM_THRESHOLD=20). plan (1, idle), act (20 bash -> doom),
-    // verify (yes -> Complete).
+    // The act phase's run_loop gets 20 identical bash calls -> doom-loop
+    // returns Err (DOOM_THRESHOLD=20). plan (1, idle), act (20 bash -> doom
+    // Err). The drive aborts: verify is NOT called.
     let mut builder = MockChatClient::new().push_script(vec![completed("plan-0", vec![])]);
     for i in 1..=20u32 {
         builder = builder.push_script(vec![bash_turn(i)]);
@@ -309,9 +309,10 @@ async fn doom_loop_guard_terminates_act_phase() {
 
     let reg = registry();
     let (_buf, mut on_event) = collector();
-    let outcome = drive(&mut session, &reg, &mut on_event).await.unwrap();
-    // The doom guard broke the act phase; verify then said Complete.
-    assert_eq!(outcome, ApOutcome::Complete);
+    let result = drive(&mut session, &reg, &mut on_event).await;
+    // Doom-loop during ACT returns Err, aborting the drive entirely.
+    // Verify must NOT have been called (the "yes" script remains unconsumed).
+    assert!(result.is_err(), "doom-loop should abort drive, got {:?}", result.ok());
 }
 
 #[tokio::test]
@@ -688,5 +689,42 @@ async fn drive_phase_error_clears_skill_and_emits_done() {
             .iter()
             .any(|ev| matches!(ev, SessionEvent::Done)),
         "terminal Done event must be emitted on a phase error"
+    );
+}
+
+#[tokio::test]
+async fn doom_loop_in_initial_run_aborts_autopilot() {
+    // The initial run_loop hits doom-loop (20 identical bash calls ->
+    // DOOM_THRESHOLD=20). With the fix, run_loop returns Err, so the `?` in
+    // run_with_registry short-circuits and autopilot::drive is NEVER called.
+    let mut builder = MockChatClient::new();
+    for i in 1..=20u32 {
+        builder = builder.push_script(vec![bash_turn(i)]);
+    }
+    // If autopilot WERE called, it would consume these scripts:
+    builder = builder.push_script(vec![completed("plan-0", vec![])]); // plan
+    builder = builder.push_script(vec![completed("act-0", vec![])]); // act
+    builder = builder.push_script(vec![completed("yes", vec![])]); // verify
+    let mock = Arc::new(builder) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(40, 3));
+    session
+        .record(Message::user("u1", "implement feature X"))
+        .await;
+
+    let reg = registry();
+    let (_buf, mut on_event) = collector();
+    let result = run_with_registry(
+        &mut session,
+        "do it".into(),
+        Vec::new(),
+        &reg,
+        &mut on_event,
+    )
+    .await;
+
+    // run_with_registry must return Err (doom-loop), NOT Ok.
+    assert!(
+        result.is_err(),
+        "doom-loop should cause run_with_registry to return Err, got Ok"
     );
 }

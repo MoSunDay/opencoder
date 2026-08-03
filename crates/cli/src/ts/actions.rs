@@ -10,7 +10,7 @@ use opencoder_store::{SessionFilter, SessionListItem, SessionMeta, Store};
 
 use crate::Cli;
 
-use super::display::{abbreviate_path, format_ts, now_secs, task_head};
+use super::display::{abbreviate_path, format_ts, task_head};
 use super::env::tmux_available;
 use super::naming::{fresh_id, resolve_target, session_name};
 use super::tmux::{attach, list_managed, session_exists, tmux_bin};
@@ -146,7 +146,7 @@ async fn ensure_session(workdir: &Path, id: &str) -> Result<()> {
     if store.get_session(id).await?.is_some() {
         return Ok(());
     }
-    let now = now_secs();
+    let now = opencoder_core::message::now_ms();
     store
         .create_session(&SessionMeta {
             id: id.to_string(),
@@ -178,4 +178,13 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
         return Ok(w.clone());
     }
     std::env::current_dir().context("get current dir")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn now_ms_is_milliseconds() {
+        let t = opencoder_core::message::now_ms();
+        assert!(t > 1_000_000_000_000, "now_ms should be in milliseconds, got {t}");
+    }
 }

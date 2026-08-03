@@ -348,7 +348,7 @@ pub(crate) async fn run_loop(
                         synthetic: false,
                     };
                     session.record(doom_msg).await;
-                    return Ok(());
+                    return Err(anyhow!("doom-loop: same tool repeated {}x", DOOM_THRESHOLD));
                 }
             }
             // Announce every tool start up front, in call order.
@@ -515,7 +515,7 @@ pub(crate) async fn run_loop(
             on_event(SessionEvent::Error(format!(
                 "tool-failure guard: {detail}, stopping"
             )));
-            break;
+            return Err(anyhow!("tool-failure guard: {detail}"));
         }
     }
     Ok(())

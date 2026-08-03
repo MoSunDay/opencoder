@@ -9,7 +9,7 @@ INSERT INTO subagent_tasks \
 VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, NULL)";
 
 const COMPLETE: &str = "\
-UPDATE subagent_tasks SET result = ?1, ok = ?2, status = ?3, completed_at = ?4 WHERE task_id = ?5";
+UPDATE subagent_tasks SET result = ?1, ok = ?2, status = ?3, completed_at = ?4 WHERE task_id = ?5 AND status IN ('running', 'cancelled')";
 
 const SELECT_BY_PARENT: &str = "\
 SELECT task_id, parent_session_id, child_session_id, parent_message_id, agent, prompt, result, status, ok, started_at, completed_at \
@@ -123,5 +123,136 @@ pub async fn get_by_task_id(
         }))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cancel, complete, create, get_by_task_id};
+    use crate::libsql_store::LibsqlStore;
+    use crate::store::Store;
+    use crate::types::{SessionMeta, SubagentStatus, SubagentTaskRecord};
+
+    fn session(id: &str) -> SessionMeta {
+        SessionMeta {
+            id: id.into(),
+            title: Some(id.into()),
+            agent: Some("build".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+            task_type: None,
+        }
+    }
+
+    fn task(task_id: &str) -> SubagentTaskRecord {
+        SubagentTaskRecord {
+            task_id: task_id.into(),
+            parent_session_id: "p1".into(),
+            child_session_id: "c1".into(),
+            parent_message_id: None,
+            agent: "build".into(),
+            prompt: "delegate".into(),
+            result: None,
+            status: SubagentStatus::Running,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_can_override_terminal_for_timeout_recovery() {
+        // The timeout handler in execute.rs intentionally calls cancel AFTER
+        // the child's cleanup may have called complete (Completed or Failed).
+        // This override (terminal -> Cancelled) is legitimate and must succeed:
+        // CANCEL has no status guard so the timeout recovery path works.
+        let store = LibsqlStore::open_memory().await.unwrap();
+        store.create_session(&session("p1")).await.unwrap();
+        store.create_session(&session("c1")).await.unwrap();
+        let conn = store.conn().await.unwrap();
+
+        create(&conn, &task("t1")).await.unwrap();
+        complete(&conn, "t1", "child-finished-ok", true)
+            .await
+            .unwrap();
+        // Timeout override: Completed -> Cancelled (must succeed).
+        cancel(&conn, "t1").await.unwrap();
+        let rec = get_by_task_id(&conn, "t1")
+            .await
+            .unwrap()
+            .expect("task must exist");
+        assert_eq!(
+            rec.status,
+            SubagentStatus::Cancelled,
+            "timeout override must set Cancelled even from Completed"
+        );
+    }
+
+    #[tokio::test]
+    async fn complete_allows_cancelled_to_completed_resume_path() {
+        // resume_and_replay replays a Cancelled task and calls complete to
+        // transition it Cancelled -> Completed. The COMPLETE guard allows
+        // transitions from both 'running' and 'cancelled' (but not from
+        // terminal states like 'completed' or 'failed').
+        let store = LibsqlStore::open_memory().await.unwrap();
+        store.create_session(&session("p1")).await.unwrap();
+        store.create_session(&session("c1")).await.unwrap();
+        let conn = store.conn().await.unwrap();
+
+        create(&conn, &task("t2")).await.unwrap();
+        // Running -> Cancelled (interrupt)
+        cancel(&conn, "t2").await.unwrap();
+        // Cancelled -> Completed (resume_and_replay path)
+        complete(&conn, "t2", "replayed-result", true)
+            .await
+            .unwrap();
+
+        let rec = get_by_task_id(&conn, "t2")
+            .await
+            .unwrap()
+            .expect("task must exist");
+        assert_eq!(
+            rec.status,
+            SubagentStatus::Completed,
+            "Cancelled -> Completed via resume must succeed"
+        );
+        assert_eq!(rec.result.as_deref(), Some("replayed-result"));
+    }
+
+    #[tokio::test]
+    async fn complete_does_not_overwrite_completed_terminal_state() {
+        // A late complete must not clobber an already-completed task.
+        let store = LibsqlStore::open_memory().await.unwrap();
+        store.create_session(&session("p1")).await.unwrap();
+        store.create_session(&session("c1")).await.unwrap();
+        let conn = store.conn().await.unwrap();
+
+        create(&conn, &task("t3")).await.unwrap();
+        complete(&conn, "t3", "first-result", true)
+            .await
+            .unwrap();
+        // Late complete with different result: must be rejected by the guard.
+        complete(&conn, "t3", "late-result", false)
+            .await
+            .unwrap();
+
+        let rec = get_by_task_id(&conn, "t3")
+            .await
+            .unwrap()
+            .expect("task must exist");
+        assert_eq!(
+            rec.status,
+            SubagentStatus::Completed,
+            "first completion must survive a late complete"
+        );
+        assert_eq!(rec.result.as_deref(), Some("first-result"));
+        assert!(rec.ok.unwrap_or(false));
     }
 }

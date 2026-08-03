@@ -69,7 +69,9 @@ SessionEvent::CompactionDelta(_) => {}
 
 ## 回归
 
-- `cargo test --workspace` → **1684 passed / 0 failed**
+- `cargo test --workspace` → **1673 passed / 0 failed**
+  > 勘误：原 act-mode 记录 1684（并行 cargo 实跑争用 build lock 导致漂移）；
+  > 后续在 frozen commit 3e43bb6 单跑复测，实数为 1673。
 - `cargo test -p opencoder-tui --lib` → **832 passed / 0 failed**
 - `cargo clippy --workspace --all-targets -- -D warnings` → **0 warnings**
 - `cargo build --workspace` → **PASS**

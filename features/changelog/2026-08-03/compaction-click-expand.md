@@ -37,7 +37,7 @@ Compaction 块与 Thinking 块行为对齐——同一 click-to-expand hit-rect 
 
 ## 测试覆盖
 
-新增 12 条测试（TUI lib 819 → **831**；`cargo test --workspace` 复跑 **1667** passed / 0 failed，已逐 binary 核对 failed 字段）：
+新增 12 条测试（TUI lib 819 → **831**；`cargo test --workspace` 复跑 **1672** passed / 0 failed，已逐 binary 核对 failed 字段）：
 
 | 层级 | 功能 | 测试名 | 文件 |
 |------|------|--------|------|

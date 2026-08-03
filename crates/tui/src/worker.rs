@@ -203,6 +203,14 @@ pub async fn process_cmd(
         UiCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
+                // Mirror control_cmd::apply: switching to plan resets the
+                // plan-input counter so the "submit your plan" reminder logic
+                // starts from a fresh phase. Without this the TUI key-handler
+                // path (Alt+Tab / Ctrl+T) inherited a stale nonzero count,
+                // unlike the `/plan` slash-command path.
+                if name == "plan" {
+                    sess.plan_input_count = 0;
+                }
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 persist_event(&sess.store, &sess.id, &ev).await;
                 forward_event(evt_tx, ev);

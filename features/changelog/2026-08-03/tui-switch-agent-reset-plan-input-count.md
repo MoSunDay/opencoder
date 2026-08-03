@@ -18,25 +18,18 @@ TUI 内经按键（Alt+Tab / Ctrl+T）切换 agent 模式走 `UiCmd::SwitchAgent
 "当前处于只读的 plan 模式" 提醒，或导致 plan 阶段的提醒计数错位。Web 侧无此问题
 （`resume` 每次从 0 重建会话，`resume.rs`），故该分歧只影响 TUI。
 
-另：三份状态文档（`agents.md`、`README.md`、`README.en.md`）中的
-`DOOM_THRESHOLD` 仍写作 `3`，而代码常量（`crates/session/src/runner/event.rs`）
-实为 `20`，属文档漂移，一并纠正。
+> 备注：`DOOM_THRESHOLD` 文档值（`agents.md`/`README.md`/`README.en.md`）经核对
+> 已与代码常量 `crates/session/src/runner/event.rs`（`=20`）一致，无需改动。
 
 ## 变更
 
-### A. TUI `SwitchAgent` 对齐 control_cmd（`crates/tui/src/worker.rs`）
+### TUI `SwitchAgent` 对齐 control_cmd（`crates/tui/src/worker.rs`）
 
 - **`crates/tui/src/worker.rs`**：`UiCmd::SwitchAgent(name)` 分支在
   `sess.agent = a;` 之后新增
   `if name == "plan" { sess.plan_input_count = 0; }`，与
   `control_cmd::apply` 完全一致。仅 `name == "plan"` 时触发，其余 agent 不受
   影响；现有的事件转发 / `persist_session_agent` 落库逻辑不变。
-
-### B. 文档纠错：`DOOM_THRESHOLD` 3 → 20
-
-- **`agents.md`** / **`README.md`** / **`README.en.md`**：将 doom-loop 守卫描述
-  中的 `DOOM_THRESHOLD=3` 改为 `DOOM_THRESHOLD=20`，与
-  `crates/session/src/runner/event.rs` 的常量一致。
 
 ## 测试覆盖
 

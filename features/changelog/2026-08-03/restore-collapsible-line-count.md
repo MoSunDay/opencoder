@@ -44,19 +44,20 @@
 ## 验证
 
 - `cargo test -p opencoder-tui` -> TUI 域 **863 passed / 0 failed**（含改动 2 + 新增 1）。
-- `cargo test --workspace` -> 本次变更的 TUI 域全绿；workspace 存在 **2 个与本变更无关**
-  的失败：`crates/session/tests/resume_cancelled_pending.rs` 中
-  `resume_and_replay_replays_cancelled_task` 与 `resume_and_replay_mixed_running_and_cancelled`，
-  源自工作树并发的 session/store/web/cli 脏改动（见下方"范围外改动"），非本次 TUI
-  渲染变更引入；本次变更不造成任何回归。
+- `cargo test --workspace` -> 本次变更的 TUI 域全绿；workspace 偶发 **与本变更无关的
+  session 失败**（flaky/drift：哪条用例失败随运行而变，时为 0 失败、时为 1-2 条，
+  如 `resume_and_replay_*` 或 `timeout_marks_subagent_cancelled`），均位于
+  `opencoder-session` crate。该 crate **不依赖** `opencoder-tui`（crate DAG 单向
+  tui->session），故 TUI 渲染变更不可能影响这些用例；失败源自工作树并发的
+  session/store/web/cli 脏改动（见下方"范围外改动"），非本次变更引入。
 - `cargo clippy --workspace --all-targets -D warnings` -> 零警告。
 - `cargo build --workspace` -> 编译干净。
 
 ## 范围外改动（不属本次提交）
 
 工作树存在并发的 session/store/web/cli 修改，已识别并排除出本次提交范围
-（`crates/{cli,session,store,web}/**`）。它们引入上述 2 个 session 失败测试，
-与本次 TUI 渲染微调无关。提交时仅 stage 本任务的 4 个 TUI 文件 + 本 changelog。
+（`crates/{cli,session,store,web}/**`）。它们偶发引入 session 失败测试（flaky，哪条
+失败随运行而变），与本次 TUI 渲染微调无关。提交时仅 stage 本任务的 4 个 TUI 文件 + 本 changelog。
 
 ## Impact Surface
 

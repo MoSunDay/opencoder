@@ -86,12 +86,21 @@ pub(super) async fn execute_call_with_timeout(
         let child_cancels = session.child_cancels.clone();
         let child_turn_cancels = session.child_turn_cancels.clone();
         let call_id = tc.id.clone();
+        // Activity channel: every event the child produces (tool calls, LLM
+        // text/reasoning deltas, tool results) is signalled here and *resets*
+        // the idle deadline. So the timeout means "no progress for `task_dur`"
+        // rather than a single wall-clock cap: a long-running but active
+        // subagent is never killed, only a truly stalled step trips it. A small
+        // bounded channel + non-blocking `try_send` keeps the signal lossy and
+        // cheap (it is idempotent — only the most recent real activity matters).
+        let (act_tx, mut act_rx) = tokio::sync::mpsc::channel::<()>(16);
         let mut sub = Box::pin(run_subagent(
             tc.input.clone(),
             call_id.clone(),
             session,
             registry,
             sink,
+            act_tx,
         ));
         let mut cancel_fut = std::pin::pin!(await_cancel(session));
         let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
@@ -101,12 +110,34 @@ pub(super) async fn execute_call_with_timeout(
         // signal fires, fall through to Phase 2. Using `&mut sub` (borrow)
         // instead of `sub` (move) ensures the future is NOT dropped when a
         // signal wins — it survives for Phase 2.
-        let signal: TaskSignal = tokio::select! {
-            biased;
-            _ = &mut cancel_fut => TaskSignal::HardCancel,
-            _ = &mut turn_cancel_fut => TaskSignal::TurnCancel,
-            _ = &mut deadline => TaskSignal::Timeout,
-            o = &mut sub => return o,
+        //
+        // This is a loop (not a single `select!`) so child activity can reset
+        // the idle deadline repeatedly: as long as the subagent keeps producing
+        // events it may run indefinitely; only a stalled step with no event for
+        // `task_dur` trips Timeout. Biased ordering — cancel > activity >
+        // timeout > sub — ensures a racing activity always wins the reset over
+        // a simultaneously-elapsed deadline, avoiding false timeouts at the edge.
+        //
+        // `activity_alive` disables the activity arm once the sender drops: a
+        // closed mpsc receiver resolves with `None` instantly forever, and
+        // under biased ordering that would starve `sub` (it would win every
+        // poll, preventing the subagent future from ever resolving). The child
+        // drops its sender when its run_loop returns (it then just flushes
+        // events + writes the DB result), so once the channel closes we let the
+        // deadline / sub / cancel arms settle the race.
+        let mut activity_alive = true;
+        let signal: TaskSignal = loop {
+            tokio::select! {
+                biased;
+                _ = &mut cancel_fut => break TaskSignal::HardCancel,
+                _ = &mut turn_cancel_fut => break TaskSignal::TurnCancel,
+                res = act_rx.recv(), if activity_alive => match res {
+                    Some(()) => deadline.as_mut().reset(tokio::time::Instant::now() + task_dur),
+                    None => activity_alive = false,
+                },
+                _ = &mut deadline => break TaskSignal::Timeout,
+                o = &mut sub => return o,
+            }
         };
 
         // Phase 2: the child's hard-cancel token is a child_token() of the

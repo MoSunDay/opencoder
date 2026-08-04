@@ -719,6 +719,7 @@ pub(super) async fn run_app(
                             }
                             follow = true;
                         }
+                        dirty = true;
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size),
                     Event::Paste(pasted) => {

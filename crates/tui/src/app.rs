@@ -728,6 +728,11 @@ pub(super) async fn run_app(
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size),
                     Event::Paste(pasted) => {
+                        if pasted.trim().is_empty() {
+                            app_loop::paste_clipboard_image_silent(&mut chat, &mut pending_images).await;
+                            dirty = true;
+                            continue;
+                        }
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(),

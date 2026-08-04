@@ -323,3 +323,124 @@ fn paste_mixed_frames_and_text() {
     assert_eq!(pending.len(), 1);
     assert_eq!(input, "hello");
 }
+
+// ----- Attachment marker (📎) consistency tests -----
+
+/// A helper that collects all marker block text from a ChatView.
+fn marker_texts(chat: &ChatView) -> Vec<String> {
+    use crate::chat::ChatBlock;
+    chat.blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Marker(lines) => {
+                let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.to_string()).collect();
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A data-URI image paste must produce a green `📎` marker in the chat stream.
+#[test]
+fn paste_data_uri_emits_attach_marker() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    paste(
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==\n",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    let markers = marker_texts(&chat);
+    assert!(
+        markers.iter().any(|m| m.contains('\u{1f4ce}')),
+        "expected a clip marker, got: {:?}",
+        markers
+    );
+}
+
+/// An image URL paste must produce a `📎` marker.
+#[test]
+fn paste_image_url_emits_attach_marker() {
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    paste(
+        "https://example.com/pics/cat.jpeg",
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    let markers = marker_texts(&chat);
+    assert!(
+        markers.iter().any(|m| m.contains('\u{1f4ce}')),
+        "expected a clip marker, got: {:?}",
+        markers
+    );
+}
+
+/// A file-path image paste must produce a `📎` marker with the filename.
+#[test]
+fn paste_file_path_emits_attach_marker() {
+    let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
+    std::fs::write(tmp.path(), png_bytes).unwrap();
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    paste(
+        tmp.path().to_str().unwrap(),
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    let markers = marker_texts(&chat);
+    assert!(
+        markers.iter().any(|m| m.contains('\u{1f4ce}') && m.contains(".png")),
+        "expected a clip marker with .png, got: {:?}",
+        markers
+    );
+}
+
+/// A quoted file path must still load as an image attachment with a marker.
+#[test]
+fn paste_quoted_file_path_emits_attach_marker() {
+    let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
+    std::fs::write(tmp.path(), png_bytes).unwrap();
+    let quoted = format!("\"{}\"", tmp.path().to_str().unwrap());
+    let mut pending: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let mut input = String::new();
+    let mut idx = 0usize;
+    paste(
+        &quoted,
+        &mut pending,
+        &mut asm,
+        &mut chat,
+        &mut input,
+        &mut idx,
+    );
+    assert!(!pending.is_empty(), "quoted path should attach as image");
+    let markers = marker_texts(&chat);
+    assert!(
+        markers.iter().any(|m| m.contains('\u{1f4ce}')),
+        "expected a clip marker, got: {:?}",
+        markers
+    );
+}

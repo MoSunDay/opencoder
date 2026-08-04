@@ -10,7 +10,7 @@ use axum::Router;
 use tower::ServiceExt;
 
 use opencoder_core::Message;
-use opencoder_llm::{ChatStream, MockChatClient};
+use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_store::{LibsqlStore, Store};
 
 fn app(state: Arc<opencoder_web::AppState>) -> Router {
@@ -41,6 +41,30 @@ async fn state() -> Arc<opencoder_web::AppState> {
     std::fs::create_dir_all(&workdir).ok();
     Arc::new(opencoder_web::AppState {
         client_override: Some(Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>),
+        store,
+        workdir,
+        handles: opencoder_web::handle::new_handle_map(),
+    })
+}
+
+/// AppState whose drain mock returns a deterministic completion — needed for
+/// endpoints whose drain task calls the LLM (e.g. manual compaction).
+async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
+    let mock: Arc<dyn ChatStream> = Arc::new(
+        MockChatClient::new().with_default(vec![
+            LlmEvent::TextDelta(text.into()),
+            LlmEvent::Completed {
+                text: text.into(),
+                tool_calls: vec![],
+                usage: None,
+            },
+        ]),
+    );
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&workdir).ok();
+    Arc::new(opencoder_web::AppState {
+        client_override: Some(mock),
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
@@ -208,14 +232,46 @@ async fn stop_bg_returns_ok() {
 }
 
 #[tokio::test]
-async fn compact_returns_ok_and_queued() {
-    let state = state().await;
+async fn compact_returns_ok_and_persists_summary() {
+    let state = state_with_reply("conversation summary text").await;
     let app = app(state.clone());
-    seed(&state, "c1").await;
+    let sid = "c1";
+    seed(&state, sid).await;
+    // Seed >=2 turns so compaction_split produces a non-empty head to summarize.
+    state.store.append_messages(sid, &[
+        Message::user("u1", "what is rust?"),
+        assistant_with_text("a1", "a systems programming language"),
+        Message::user("u2", "show me an example"),
+        assistant_with_text("a2", "fn main() { println!(\"hi\"); }"),
+    ]).await.unwrap();
     let resp = app.oneshot(Request::builder()
         .method("POST").uri("/api/sessions/c1/compact")
         .body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    // The Compact command is processed asynchronously by the drain task.
+    // Poll the durable store for the compaction boundary instead of a sleep.
+    let mut compacted = false;
+    for _ in 0..200 {
+        if let Some(meta) = state.store.get_session(sid).await.unwrap() {
+            if meta.summary_seq.is_some() {
+                assert!(
+                    meta.summary.is_some(),
+                    "summary text must be persisted alongside summary_seq"
+                );
+                assert!(
+                    meta.handoff_seq.is_none(),
+                    "compaction must clear prior handoff state"
+                );
+                compacted = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        compacted,
+        "manual compact must persist summary_seq to the store"
+    );
 }
 
 #[tokio::test]
@@ -229,11 +285,12 @@ async fn compact_nonexistent_returns_404() {
 }
 
 #[tokio::test]
-async fn handoff_returns_ok_when_plan_exists() {
+async fn handoff_persists_boundary_when_plan_exists() {
     let state = state().await;
     let app = app(state.clone());
-    seed(&state, "h1").await;
-    state.store.append_messages("h1", &[
+    let sid = "h1";
+    seed(&state, sid).await;
+    state.store.append_messages(sid, &[
         assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
     ]).await.unwrap();
     let resp = app.oneshot(Request::builder()
@@ -241,5 +298,29 @@ async fn handoff_returns_ok_when_plan_exists() {
         .header("content-type", "application/json")
         .body(Body::from(r#"{"extra":"begin"}"#)).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The Handoff command is processed asynchronously by the drain task.
+    // Poll the durable store for the handoff boundary (handoff_seq + plan).
+    let mut handed_off = false;
+    for _ in 0..200 {
+        if let Some(meta) = state.store.get_session(sid).await.unwrap() {
+            if meta.handoff_seq.is_some() {
+                assert!(
+                    meta.handoff_plan.is_some(),
+                    "handoff_plan must be persisted alongside handoff_seq"
+                );
+                assert_eq!(
+                    meta.agent.as_deref(),
+                    Some("act"),
+                    "handoff switches the agent to act"
+                );
+                handed_off = true;
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        handed_off,
+        "manual handoff must persist handoff_seq to the store"
+    );
 }

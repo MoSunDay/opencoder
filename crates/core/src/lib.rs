@@ -8,6 +8,7 @@ pub mod net;
 pub mod skill;
 pub mod sse;
 pub mod tool;
+pub mod version;
 pub mod tool_deps;
 pub mod tool_guard_config;
 

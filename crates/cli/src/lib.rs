@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "opencoder",
     version,
+    long_version = opencoder_core::version::VERSION_LONG,
     about = "High-performance minimal coding agent (Rust)"
 )]
 pub struct Cli {

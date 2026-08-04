@@ -312,3 +312,51 @@ async fn claim_next_queue_returns_seq_marks_promoted_and_idempotent_delete() {
         .unwrap()
         .is_empty());
 }
+
+/// Regression guard: `admitted_seq` is a per-session counter (resets to 1 in a
+/// new session) while the row PK `seq` is a table-wide AUTOINCREMENT (never
+/// resets). Interleaving admissions across two sessions proves the two
+/// counters are independent — a bug that scopes `seq` per session would make
+/// `seq_a2 == 2` instead of `3`.
+#[tokio::test]
+async fn admitted_seq_is_scoped_per_session_while_global_seq_is_monotonic() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "a", 1).await;
+    make_session(&store, "b", 1).await;
+
+    let mk_input = |sid: &str, id: &str| SessionInput {
+        seq: None,
+        id: id.to_string(),
+        session_id: sid.into(),
+        delivery: Delivery::Steer,
+        prompt: format!("p-{id}"),
+        images: Vec::new(),
+        display_text: None,
+        // Value is ignored: the store recomputes admitted_seq per session.
+        admitted_seq: 0,
+        promoted_seq: None,
+    };
+
+    // Interleave admissions: a, b, a — to prove isolation neither direction.
+    let seq_a1 = store.admit_input(&mk_input("a", "a1")).await.unwrap();
+    let seq_b1 = store.admit_input(&mk_input("b", "b1")).await.unwrap();
+    let seq_a2 = store.admit_input(&mk_input("a", "a2")).await.unwrap();
+
+    // Global PK seq is monotonic across the whole table (never resets).
+    assert_eq!((seq_a1, seq_b1, seq_a2), (1, 2, 3));
+
+    // Per-session admitted_seq: session "b" starts fresh at 1 even though
+    // session "a" already consumed admitted_seq=1.
+    let a = store.pending_inputs("a", Delivery::Steer).await.unwrap();
+    let b = store.pending_inputs("b", Delivery::Steer).await.unwrap();
+    assert_eq!(
+        a.iter().map(|i| i.admitted_seq).collect::<Vec<_>>(),
+        vec![1, 2],
+        "session a admitted_seq counts 1,2"
+    );
+    assert_eq!(
+        b.iter().map(|i| i.admitted_seq).collect::<Vec<_>>(),
+        vec![1],
+        "session b admitted_seq resets to 1, independent of session a"
+    );
+}

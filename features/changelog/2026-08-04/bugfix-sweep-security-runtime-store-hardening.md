@@ -6,7 +6,7 @@
 （4 批次：P0 安全 / P1 运行时 / P2 Web-Store / P3 清理）。所有修复均遵循
 纯函数式原则、附回归测试。测试拆分至独立文件以满足行数 gate。
 
-修复后：1799 tests / 0 failed / 1 ignored / 0 clippy warnings。
+修复后：1801 tests / 0 failed / 1 ignored / 0 clippy warnings。
 
 ## 变更
 
@@ -79,5 +79,9 @@ plan 模式依赖 bash_guard 拦截所有写操作，但以下类别可绕过分
 | 8 | store_message_count | `store_message_count_with_handoff_seq` | `crates/session/src/lib.rs` |
 | 8 | underflow guard | `store_message_count_empty_with_summary_seq_does_not_overflow` | `crates/session/src/lib.rs` |
 | 8 | underflow guard | `store_message_count_empty_with_handoff_seq_does_not_overflow` | `crates/session/src/lib.rs` |
+| 7 | compaction metadata Err propagation | `compact_returns_err_when_store_rejects_metadata_persistence` | `crates/session/tests/compaction_error_propagation.rs` |
+| — | admitted_seq per-session scoping | `admitted_seq_is_scoped_per_session_while_global_seq_is_monotonic` | `crates/store/tests/inputs_integration.rs` |
+| — | web compact persists summary | `compact_returns_ok_and_persists_summary` | `crates/web/tests/web_api_ops.rs` |
+| — | web handoff persists boundary | `handoff_persists_boundary_when_plan_exists` | `crates/web/tests/web_api_ops.rs` |
 
-**当次实跑**: `cargo test --workspace` → 1799 passed; 0 failed; 1 ignored。
+**当次实跑**: `cargo test --workspace` → 1801 passed; 0 failed; 1 ignored。

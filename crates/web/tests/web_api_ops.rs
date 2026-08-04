@@ -181,6 +181,9 @@ async fn skill_clear_with_null() {
 #[tokio::test]
 async fn get_config_returns_json() {
     let state = state().await;
+    // Isolate config discovery so this test never reads the real
+    // ~/.opencoder/config.json (host secrets/values must never leak in).
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
     let app = app(state.clone());
     let resp = app.oneshot(Request::builder()
         .method("GET").uri("/api/config")
@@ -195,14 +198,23 @@ async fn get_config_returns_json() {
 #[tokio::test]
 async fn patch_config_merges_and_persists() {
     let state = state().await;
+    // Isolate config discovery so save_target never escapes to the real
+    // ~/.opencoder/config.json on a host where HOME=/root.
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    // Derive the test model from the loaded config instead of hardcoding a
+    // magic string — the test stays deterministic without coupling to a
+    // specific provider value that could clash with a real config on disk.
+    let before = opencoder_core::Config::load(&state.workdir).unwrap();
+    let new_model = format!("test-{}", before.model);
+    let body = format!(r#"{{"model":"{}"}}"#, new_model);
     let app = app(state.clone());
     let resp = app.oneshot(Request::builder()
         .method("PATCH").uri("/api/config")
         .header("content-type", "application/json")
-        .body(Body::from(r#"{"model":"claude-test-model"}"#)).unwrap()).await.unwrap();
+        .body(Body::from(body)).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let cfg = opencoder_core::Config::load(&state.workdir).unwrap();
-    assert_eq!(cfg.model, "claude-test-model");
+    assert_eq!(cfg.model, new_model);
 }
 
 #[tokio::test]

@@ -146,17 +146,22 @@ fn begin_turn_preserves_transcript() {
 }
 
 #[test]
-fn steer_consumed_drops_entry_without_marker() {
-    // SteerConsumed only drops the consumed entry by seq. The `steer:` marker
-    // is now echoed at admit time (app.rs), so consuming must NOT push one.
+fn steer_consumed_echoes_marker_and_drops_entry() {
+    // SteerConsumed echoes the `steer:` marker at consume time (turn boundary)
+    // and drops the consumed entry by seq from steer_items. The marker is NOT
+    // pushed at admit time — it only appears when the steer executes.
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
     let before = block_text(&v);
     v.apply(&SessionEvent::SteerConsumed { seq: 7 });
-    assert_eq!(
+    assert!(
+        block_text(&v).contains("steer: use python"),
+        "SteerConsumed must echo the marker at consume time"
+    );
+    assert_ne!(
         block_text(&v),
         before,
-        "SteerConsumed must NOT push a marker — echoed at admit time"
+        "transcript must change after SteerConsumed echoes"
     );
     assert!(
         v.steer_items.is_empty(),

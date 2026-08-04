@@ -499,11 +499,11 @@ async fn fold_done_clears_queue_items() {
 }
 
 /// When a queued follow-up is consumed at the idle boundary, the handler
-/// only drops the consumed entry by seq from the pending mirror. The
-/// `queued:` marker is now echoed at admit time (app.rs), so consuming
-/// must NOT push a second marker into the transcript.
+/// echoes a `queued:` marker into the transcript and drops the consumed
+/// entry by seq from the pending mirror. The marker is NOT pushed at admit
+/// time — it only appears when the queued prompt actually starts executing.
 #[tokio::test]
-async fn fold_queue_consumed_drops_entry_without_marker() {
+async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut chat = ChatView::default();
     let mut queue_items: Vec<(i64, String)> = vec![
@@ -537,12 +537,15 @@ async fn fold_queue_consumed_drops_entry_without_marker() {
     )
     .await;
 
-    // No marker pushed at consume time (the marker lives in the transcript
-    // from admit time already).
-    assert_eq!(
+    // A `queued:` marker is pushed into the transcript at consume time.
+    assert!(
+        crate::chat::block_text(&chat).contains("queued: queued prompt X"),
+        "QueueConsumed must echo the marker at consume time"
+    );
+    assert_ne!(
         crate::chat::block_text(&chat),
         before,
-        "QueueConsumed must NOT push a marker — it is echoed at admit time"
+        "transcript must change after QueueConsumed echoes"
     );
     assert_eq!(
         queue_items.len(),

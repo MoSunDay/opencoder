@@ -1,11 +1,11 @@
 use super::super::*;
 
-/// SteerConsumed no longer echoes a `steer:` marker into the transcript.
-/// The marker is now pushed at admit time (app.rs), so consuming a steer at
-/// the turn boundary must only remove the row from the pending mirror and
-/// leave the transcript untouched.
+/// SteerConsumed echoes the `steer:` marker into the transcript at consume
+/// time (turn boundary) and drops the consumed row from the pending mirror.
+/// The marker is NOT pushed at admit time — it only appears when the steer
+/// actually starts executing.
 #[test]
-fn steer_consumed_drops_row_without_marker() {
+fn steer_consumed_echoes_marker_and_drops_row() {
     let mut v = ChatView::default();
     v.steer_items.push((7, "redirect here".into()));
     v.apply(&SessionEvent::SteerConsumed { seq: 7 });
@@ -15,14 +15,15 @@ fn steer_consumed_drops_row_without_marker() {
         v.steer_items.is_empty(),
         "SteerConsumed must drop the consumed row"
     );
-    // No `steer:` marker leaked into the transcript.
+    // The `steer:` marker is pushed into the transcript at consume time.
     assert!(
-        !block_text(&v).contains("steer:"),
-        "SteerConsumed must NOT push a marker — echoed at admit time"
+        block_text(&v).contains("steer: redirect here"),
+        "SteerConsumed must echo the marker at consume time"
     );
 }
 
-/// SteerConsumed for an unknown seq is a clean no-op (mirror untouched).
+/// SteerConsumed for an unknown seq is a clean no-op (mirror untouched,
+/// no spurious marker pushed).
 #[test]
 fn steer_consumed_unknown_seq_is_noop() {
     let mut v = ChatView::default();

@@ -70,7 +70,7 @@
 - TUI lib：**870 passed / 0 failed**；integration **32 passed**（当次实跑）
 - session crate：`cargo test -p opencoder-session` → **238 passed / 0 failed / 1 ignored**
 - TUI clippy：`cargo clippy -p opencoder-tui --all-targets -D warnings` → 零警告
-- workspace 级 build/clippy/test 被范围外 `src/main.rs`（`Command::Ts` 缺 `clean` 字段）阻断，非本次代码
+- workspace build：零警告；workspace test：1781 passed / 0 failed；workspace clippy 受范围外并发 `crates/web/src/api_ops.rs`（`result_large_err` lint）阻断，非本次代码
 
 ## Impact Surface
 - **tui/chat**: compaction 块在 summary 生成期间可见（展开 + 实时增长）；`queued:`/`steer:` 标记在 admit 时即时出现。

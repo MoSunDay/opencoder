@@ -152,7 +152,7 @@ pub struct SessionInput {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
     /// Display-only text for the TUI queue/steer panel, preserved verbatim
-    /// (may contain the `{$skill}` token). NULL for rows admitted without a
+    /// (may contain the `$skill` token). NULL for rows admitted without a
     /// distinct display form — consumers fall back to `prompt`. Never fed to
     /// the LLM (drain always reads `prompt`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

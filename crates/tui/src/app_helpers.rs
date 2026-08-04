@@ -348,7 +348,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
     estimate(&text) as u64
 }
 
-/// Resolve inline `{$name}` skill tokens in `text`: strip them from the
+/// Resolve inline `$name` skill tokens in `text`: strip them from the
 /// returned text and, when at least one named skill resolves, activate it
 /// (sticky) by updating the skill state and writing the resolved body into the
 /// shared `Arc<Mutex<Option<String>>>` skill handle. Returns
@@ -360,7 +360,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
 /// and every name is reported as unresolved. The shared skill handle is updated
 /// directly before the caller issues `Prompt`, so the worker — which holds the
 /// same `Arc` — observes the new skill on its next turn without a channel hop.
-/// Core skill-token resolver: maps `{$name}` tokens against an *explicit*
+/// Core skill-token resolver: maps `$name` tokens against an *explicit*
 /// skill slice instead of scanning `~/.opencoder/skills`. Taking skills as a
 /// parameter removes the process-global `HOME` read entirely —
 /// `std::env::set_var` is not thread-safe at the libc level, so under parallel
@@ -412,7 +412,7 @@ pub(crate) fn apply_skill_tokens_with(
     (clean, unresolved)
 }
 
-/// Resolves `{$name}` tokens against an *explicit* skill slice (typically
+/// Resolves `$name` tokens against an *explicit* skill slice (typically
 /// `discover_in(tempdir)`) and pushes a warning marker for unresolved skills.
 /// The 9th arg (`chat`) is load-bearing: it lets the caller avoid a separate
 /// `push_marker` round-trip after every submit/steer/queue. Production callers

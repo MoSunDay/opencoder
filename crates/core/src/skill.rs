@@ -372,30 +372,35 @@ fn file_stem(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Strip every `{$name}` token from `text`, returning the cleaned text and the
-/// list of skill names in the order they appeared (empty names from `{$}` are
-/// skipped; duplicates are preserved here and deduped by the caller).
+/// Strip every `$name` token from `text`, returning the cleaned text and the
+/// list of skill names in the order they appeared (duplicates are preserved
+/// here and deduped by the caller).
 ///
-/// An unclosed `{$abc` (no matching `}`) is treated as literal text. The scan
-/// is UTF-8 safe: `{$` are ASCII so byte-level detection never splits a
-/// multi-byte char.
+/// A token is `$` immediately followed by an ASCII lowercase letter, with the
+/// name extending over `[a-z0-9-]`. A `$` not followed by a lowercase letter
+/// (`$5`, `$HOME`, `$$`, trailing `$`) is literal text. The scan is UTF-8
+/// safe: `$` and all name bytes are ASCII, so byte-level detection never splits
+/// a multi-byte char.
 pub fn extract_skill_tokens(text: &str) -> (String, Vec<String>) {
     let mut clean = String::with_capacity(text.len());
     let mut names = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < text.len() {
-        if bytes[i] == b'{' && i + 1 < text.len() && bytes[i + 1] == b'$' {
-            let after = i + 2;
-            if let Some(rel) = text[after..].find('}') {
-                let close = after + rel;
-                let name = text[after..close].trim();
-                if !name.is_empty() {
-                    names.push(name.to_string());
+        if bytes[i] == b'$' && i + 1 < text.len() && bytes[i + 1].is_ascii_lowercase() {
+            let start = i + 1;
+            let mut end = start;
+            while end < text.len() {
+                let b = bytes[end];
+                if b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' {
+                    end += 1;
+                } else {
+                    break;
                 }
-                i = close + 1;
-                continue;
             }
+            names.push(text[start..end].to_string());
+            i = end;
+            continue;
         }
         let ch = text[i..].chars().next().unwrap();
         clean.push(ch);
@@ -507,51 +512,51 @@ mod tests {
 
     #[test]
     fn extract_tokens_basic_stripped() {
-        let (clean, names) = extract_skill_tokens("{$code}");
+        let (clean, names) = extract_skill_tokens("$code");
         assert_eq!(clean, "");
         assert_eq!(names, vec!["code"]);
     }
 
     #[test]
     fn extract_tokens_mid_text_preserves_surrounding_text() {
-        let (clean, names) = extract_skill_tokens("hello {$code} world");
+        let (clean, names) = extract_skill_tokens("hello $code world");
         assert_eq!(clean, "hello  world");
         assert_eq!(names, vec!["code"]);
     }
 
     #[test]
     fn extract_tokens_multiple_in_order() {
-        let (clean, names) = extract_skill_tokens("{$a} then {$b} then {$a}");
+        let (clean, names) = extract_skill_tokens("$a then $b then $a");
         assert_eq!(clean, " then  then ");
         assert_eq!(names, vec!["a", "b", "a"]);
     }
 
     #[test]
     fn extract_tokens_adjacent() {
-        let (clean, names) = extract_skill_tokens("x{$a}{$b}y");
-        assert_eq!(clean, "xy");
+        let (clean, names) = extract_skill_tokens("x$a$b");
+        assert_eq!(clean, "x");
         assert_eq!(names, vec!["a", "b"]);
     }
 
     #[test]
-    fn extract_tokens_name_with_spaces_trimmed() {
-        let (clean, names) = extract_skill_tokens("{$  spaced  }");
+    fn extract_tokens_hyphenated_name() {
+        let (clean, names) = extract_skill_tokens("$repo-memory");
         assert_eq!(clean, "");
-        assert_eq!(names, vec!["spaced"]);
+        assert_eq!(names, vec!["repo-memory"]);
     }
 
     #[test]
-    fn extract_tokens_empty_name_skipped() {
-        let (clean, names) = extract_skill_tokens("text {$} more");
-        assert_eq!(clean, "text  more");
+    fn extract_tokens_dollar_then_non_alpha_is_literal() {
+        let (clean, names) = extract_skill_tokens("text $ more");
+        assert_eq!(clean, "text $ more");
         assert!(names.is_empty());
     }
 
     #[test]
-    fn extract_tokens_unclosed_is_literal() {
-        let (clean, names) = extract_skill_tokens("{$unclosed followed by text");
-        assert_eq!(clean, "{$unclosed followed by text");
-        assert!(names.is_empty());
+    fn extract_tokens_name_terminates_at_non_name_char() {
+        let (clean, names) = extract_skill_tokens("$skill followed by text");
+        assert_eq!(clean, " followed by text");
+        assert_eq!(names, vec!["skill"]);
     }
 
     #[test]
@@ -562,10 +567,24 @@ mod tests {
     }
 
     #[test]
+    fn extract_tokens_dollar_uppercase_is_literal() {
+        let (clean, names) = extract_skill_tokens("env $HOME path");
+        assert_eq!(clean, "env $HOME path");
+        assert!(names.is_empty());
+    }
+
+    #[test]
+    fn extract_tokens_double_dollar_is_literal() {
+        let (clean, names) = extract_skill_tokens("cost is $$ total");
+        assert_eq!(clean, "cost is $$ total");
+        assert!(names.is_empty());
+    }
+
+    #[test]
     fn extract_tokens_utf8_text_preserved() {
-        let (clean, names) = extract_skill_tokens("héllo {$wörld} 日本語");
-        assert_eq!(clean, "héllo  日本語");
-        assert_eq!(names, vec!["wörld"]);
+        let (clean, names) = extract_skill_tokens("$review héllo 日本語");
+        assert_eq!(clean, " héllo 日本語");
+        assert_eq!(names, vec!["review"]);
     }
 
     // ----- write_install_script_in tests -----
@@ -596,14 +615,14 @@ mod tests {
 
     // ------------------------------------------------------------------
     // Combined-content cases: skill token mixed with other input text.
-    // These lock in the guarantee that `{$name}` is parsed correctly even
+    // These lock in the guarantee that `$name` is parsed correctly even
     // when surrounded by arbitrary user prose.
     // ------------------------------------------------------------------
 
     #[test]
     fn extract_tokens_token_at_end_after_text() {
         // Skill at the very end, after other content.
-        let (clean, names) = extract_skill_tokens("do stuff {$alpha}");
+        let (clean, names) = extract_skill_tokens("do stuff $alpha");
         assert_eq!(clean, "do stuff ");
         assert_eq!(names, vec!["alpha"]);
     }
@@ -612,7 +631,7 @@ mod tests {
     fn extract_tokens_realistic_combined_input() {
         // A realistic prompt: skill token + a natural-language task.
         let (clean, names) =
-            extract_skill_tokens("{$repo-memory} Summarize the recent changes.");
+            extract_skill_tokens("$repo-memory Summarize the recent changes.");
         assert_eq!(clean, " Summarize the recent changes.");
         assert_eq!(names, vec!["repo-memory"]);
     }
@@ -620,7 +639,7 @@ mod tests {
     #[test]
     fn extract_tokens_curly_brace_in_other_content_preserved() {
         // Other content with `{...}` that is NOT a skill token must survive.
-        let (clean, names) = extract_skill_tokens("use {x} then {$skill} now");
+        let (clean, names) = extract_skill_tokens("use {x} then $skill now");
         assert_eq!(clean, "use {x} then  now");
         assert_eq!(names, vec!["skill"]);
     }
@@ -628,7 +647,7 @@ mod tests {
     #[test]
     fn extract_tokens_dollar_in_other_content_preserved() {
         // A lone `$` in the surrounding text is not a token delimiter.
-        let (clean, names) = extract_skill_tokens("price is $5 {$skill} done");
+        let (clean, names) = extract_skill_tokens("price is $5 $skill done");
         assert_eq!(clean, "price is $5  done");
         assert_eq!(names, vec!["skill"]);
     }
@@ -637,7 +656,7 @@ mod tests {
     fn extract_tokens_multiple_skills_split_by_text() {
         // Two skill tokens separated by substantial prose.
         let (clean, names) =
-            extract_skill_tokens("{$a} first task then {$b} second task");
+            extract_skill_tokens("$a first task then $b second task");
         assert_eq!(clean, " first task then  second task");
         assert_eq!(names, vec!["a", "b"]);
     }

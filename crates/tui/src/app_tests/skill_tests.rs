@@ -121,14 +121,14 @@ fn skill_menu_enter_picks_selected_skill() {
         &mut idx,
         &mut menu,
     );
-    // Picking now inserts a `{$name}` token at the cursor instead of emitting
+    // Picking now inserts a `$name` token at the cursor instead of emitting
     // SetSkill; the skill body is resolved and loaded on submit.
     assert!(
         matches!(action, KeyAction::None),
         "pick must not emit SetSkill"
     );
     assert!(menu.is_none(), "menu must close after a pick");
-    assert_eq!(input, "{$alpha}");
+    assert_eq!(input, "$alpha");
     assert_eq!(
         idx,
         input.chars().count(),
@@ -157,7 +157,7 @@ fn pick_inserts_token_at_cursor_mid_text() {
     );
     assert!(matches!(action, KeyAction::None));
     assert!(menu.is_none());
-    assert_eq!(input, "hello {$alpha}");
+    assert_eq!(input, "hello $alpha");
     assert_eq!(idx, input.chars().count());
 }
 
@@ -242,7 +242,7 @@ fn skill_trigger_names_the_active_skill() {
 fn skill_token_display_shows_dollar_token() {
     assert_eq!(
         crate::skill_display::skill_token_display("repo-memory"),
-        "{$repo-memory}",
+        "$repo-memory",
     );
 }
 

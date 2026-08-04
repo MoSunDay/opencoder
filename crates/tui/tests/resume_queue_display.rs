@@ -1,10 +1,10 @@
 //! Regression: a quit→resume cycle restores the queue/steer panel mirrors
 //! from the store with the display original (`display_text`, may contain the
-//! `{$skill}` token) while the drained prompt stays the token-stripped clean
+//! `$skill` token) while the drained prompt stays the token-stripped clean
 //! text (LLM contract unchanged).
 //!
 //! The TUI admit paths now persist `display_text` (raw user text incl. any
-//! `{$skill}` token) alongside the clean `prompt`. On startup (`run_app`) and
+//! `$skill` token) alongside the clean `prompt`. On startup (`run_app`) and
 //! on `/task` reload (`app_task::switch_session`) the mirrors are rebuilt from
 //! `store.pending_inputs` via `restore_pending_mirrors`/`pending_mirror`, so a
 //! resumed session shows exactly what the user submitted — and rows admitted
@@ -19,7 +19,7 @@ async fn mem_store() -> Arc<dyn Store> {
 }
 
 /// Mirror of the app.rs admit shape: prompt is the clean (token-stripped)
-/// text, display_text is the raw user input (may carry `{$skill}`).
+/// text, display_text is the raw user input (may carry `$skill`).
 fn queued_input(session_id: &str, prompt: &str, display_text: Option<&str>) -> SessionInput {
     SessionInput {
         seq: None,
@@ -60,15 +60,15 @@ async fn resume_restores_display_originals_and_drain_stays_clean() {
         .await
         .unwrap();
 
-    // Phase 1 (pre-quit): user queues `{$repo-memory} fix the bug` while a
+    // Phase 1 (pre-quit): user queues `$repo-memory fix the bug` while a
     // skill is active — app.rs admits prompt="fix the bug" +
-    // display_text="{$repo-memory} fix the bug" — and steers a plain follow-up
+    // display_text="$repo-memory fix the bug" — and steers a plain follow-up
     // (no distinct display form).
     let q_seq = store
         .admit_input(&queued_input(
             sid,
             "fix the bug",
-            Some("{$repo-memory} fix the bug"),
+            Some("$repo-memory fix the bug"),
         ))
         .await
         .unwrap();
@@ -85,8 +85,8 @@ async fn resume_restores_display_originals_and_drain_stays_clean() {
 
     assert_eq!(
         queue_items,
-        vec![(q_seq, "{$repo-memory} fix the bug".to_string())],
-        "resumed queue panel must show the display original (raw {{$skill}} token)"
+        vec![(q_seq, "$repo-memory fix the bug".to_string())],
+        "resumed queue panel must show the display original (raw $skill token)"
     );
     assert_eq!(
         steer_items,
@@ -108,8 +108,8 @@ async fn resume_restores_display_originals_and_drain_stays_clean() {
         "drained prompt stays token-stripped (LLM contract)"
     );
     assert!(
-        !drained.prompt.contains("{$"),
-        "the {{$skill}} token must never reach the LLM"
+        !drained.prompt.contains("$"),
+        "the $skill token must never reach the LLM"
     );
 
     let mut panel = queue_items;

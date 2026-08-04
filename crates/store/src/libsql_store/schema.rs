@@ -216,7 +216,7 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
     }
     if from < 6 {
         // v6: display-only text on session inputs, preserving the verbatim
-        // original (which may contain the `{$skill}` token) so the TUI queue/
+        // original (which may contain the `$skill` token) so the TUI queue/
         // steer panel can restore it after resume/reload. `prompt` keeps the
         // clean token-stripped text that the LLM consumes; this column is
         // never fed to the LLM. Nullable so pre-existing rows stay valid —

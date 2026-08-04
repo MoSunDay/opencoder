@@ -18,35 +18,38 @@ mod tests {
 
     #[test]
     fn basic_token_stripped() {
-        let (clean, names) = extract_skill_tokens("{$ssh-pty} do stuff");
+        let (clean, names) = extract_skill_tokens("$ssh-pty do stuff");
         assert_eq!(clean, " do stuff");
         assert_eq!(names, vec!["ssh-pty"]);
     }
 
     #[test]
     fn multiple_tokens_in_order() {
-        let (clean, names) = extract_skill_tokens("{$a} x {$b} y");
+        let (clean, names) = extract_skill_tokens("$a x $b y");
         assert_eq!(clean, " x  y");
         assert_eq!(names, vec!["a", "b"]);
     }
 
     #[test]
-    fn unclosed_token_is_literal() {
-        let (clean, names) = extract_skill_tokens("{$abc");
-        assert_eq!(clean, "{$abc");
+    fn dollar_not_followed_by_lowercase_is_literal() {
+        // `$` followed by a digit (not a lowercase letter) is literal text,
+        // not a skill token.
+        let (clean, names) = extract_skill_tokens("$5");
+        assert_eq!(clean, "$5");
         assert!(names.is_empty());
     }
 
     #[test]
-    fn empty_token_is_skipped() {
-        let (clean, names) = extract_skill_tokens("a{$}b");
-        assert_eq!(clean, "ab");
+    fn trailing_dollar_is_literal() {
+        // A bare `$` at the end of the input is literal (no name follows).
+        let (clean, names) = extract_skill_tokens("a $");
+        assert_eq!(clean, "a $");
         assert!(names.is_empty());
     }
 
     #[test]
     fn token_with_dash_in_name() {
-        let (clean, names) = extract_skill_tokens("{$chrome-headless}");
+        let (clean, names) = extract_skill_tokens("$chrome-headless");
         assert_eq!(clean, "");
         assert_eq!(names, vec!["chrome-headless"]);
     }

@@ -1,7 +1,7 @@
 //! `session_inputs.display_text` integration tests.
 //!
 //! The `display_text` column preserves the verbatim display original of a
-//! submitted input (which may contain the `{$skill}` token) so the TUI queue/
+//! submitted input (which may contain the `$skill` token) so the TUI queue/
 //! steer panel can restore it after resume/reload, while `prompt` keeps the
 //! clean token-stripped text that is fed to the LLM. Covers round-trip, NULL
 //! fallback for old rows, the v5 -> v6 migration, the claim contract (LLM
@@ -77,7 +77,7 @@ async fn display_text_roundtrip() {
             "s",
             Delivery::Queue,
             "clean follow-up",
-            Some("display: run {$skill} then report"),
+            Some("display: run $skill then report"),
         ))
         .await
         .unwrap();
@@ -86,7 +86,7 @@ async fn display_text_roundtrip() {
     assert_eq!(pending.len(), 1);
     assert_eq!(
         pending[0].display_text.as_deref(),
-        Some("display: run {$skill} then report"),
+        Some("display: run $skill then report"),
         "display_text must round-trip verbatim (incl. the skill token)"
     );
     assert_eq!(
@@ -201,13 +201,13 @@ async fn v5_to_v6_migration_adds_display_text() {
             "s1",
             Delivery::Queue,
             "clean new",
-            Some("new {$skill} display"),
+            Some("new $skill display"),
         ))
         .await
         .unwrap();
     let pending = store.pending_inputs("s1", Delivery::Queue).await.unwrap();
     assert_eq!(pending.len(), 2);
-    assert_eq!(pending[1].display_text.as_deref(), Some("new {$skill} display"));
+    assert_eq!(pending[1].display_text.as_deref(), Some("new $skill display"));
     assert_eq!(pending[0].display_text, None, "old row keeps NULL via pending_inputs");
 
     // Version bumped to 6, and a second reopen is idempotent (no error).
@@ -239,7 +239,7 @@ async fn claim_next_queue_keeps_prompt_clean_with_display_text() {
             "s",
             Delivery::Queue,
             "clean text",
-            Some("clean text {$skill} token"),
+            Some("clean text $skill token"),
         ))
         .await
         .unwrap();
@@ -254,7 +254,7 @@ async fn claim_next_queue_keeps_prompt_clean_with_display_text() {
     assert_eq!(claimed.prompt, "clean text", "LLM must only ever see the clean prompt");
     assert_eq!(
         claimed.display_text.as_deref(),
-        Some("clean text {$skill} token"),
+        Some("clean text $skill token"),
         "display_text must preserve the verbatim original on claim"
     );
 }
@@ -266,7 +266,7 @@ async fn bundle_roundtrip_preserves_display_text() {
 
     // One input with a distinct display form, one old-style input with None.
     store
-        .admit_input(&input(1, "s", Delivery::Queue, "clean-1", Some("display-1 {$skill}")))
+        .admit_input(&input(1, "s", Delivery::Queue, "clean-1", Some("display-1 $skill")))
         .await
         .unwrap();
     store
@@ -291,7 +291,7 @@ async fn bundle_roundtrip_preserves_display_text() {
     assert_eq!(pending.len(), 2);
     assert_eq!(
         pending[0].display_text.as_deref(),
-        Some("display-1 {$skill}"),
+        Some("display-1 $skill"),
         "display_text must survive bundle export/import"
     );
     assert_eq!(pending[0].prompt, "clean-1");

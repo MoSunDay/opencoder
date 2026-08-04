@@ -69,22 +69,25 @@ pub enum Command {
     /// Start the interactive TUI.
     Tui,
     /// Run the TUI inside a tmux session that survives SSH disconnect.
-    /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists managed
-    /// sessions and `rs -r <id>`/`ts -r <id>` reattaches one. A bare `ts`/`rs`
-    /// always starts a fresh tmux-managed session.
+    /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists all sessions
+    /// (live + stopped), `rs -r <id>` reattaches or cold-starts a stopped one,
+    /// `rs -c` cleans up stopped sessions. A bare `ts`/`rs` reuses the latest
+    /// live session or creates a new one if none exist.
     #[command(alias = "rs")]
     Ts {
-        /// List managed tmux sessions (task-list with tmux id).
+        /// List all sessions (Store-first: shows live + stopped).
         #[arg(short, long)]
         list: bool,
-        /// Resume/attach a tmux session by id (tmux name `opencode-<id>`,
-        /// `$index`, or bare opencode session id).
+        /// Resume/attach a session by id (live: attach; stopped: cold-start
+        /// from Store history). Accepts `opencode-<id>`, bare id, or `$index`.
         #[arg(short, long)]
         resume: Option<String>,
-        /// No-op kept for backward compatibility: a bare `ts`/`rs` always
-        /// starts a fresh tmux-managed session now. Reattach with `-r <id>`.
+        /// Force-create a new session instead of reusing the latest live one.
         #[arg(long, default_value_t = false)]
         new: bool,
+        /// Clean up (delete) stopped sessions that are no longer running in tmux.
+        #[arg(short, long, default_value_t = false)]
+        clean: bool,
     },
     /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),
     /// protected by a bearer token. (`serve` is accepted as an alias.)

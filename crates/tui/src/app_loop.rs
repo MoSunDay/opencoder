@@ -17,7 +17,7 @@ use crossterm::event::KeyEvent;
 use opencoder_core::Config;
 use opencoder_session::SessionEvent;
 use opencoder_store::Store;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -271,20 +271,9 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
                 if let SessionEvent::QueueConsumed { seq } = &sev {
-                    // Echo the queued prompt into the transcript at
-                    // consume time (the idle boundary), then drop the
-                    // consumed entry by seq from the pending mirror.
-                    if let Some((_, display)) =
-                        queue_items.iter().find(|(s, _)| s == seq)
-                    {
-                        chat.push_marker(Line::from(Span::styled(
-                            format!("queued: {display}"),
-                            Style::default()
-                                .fg(theme::warn_color())
-                                .add_modifier(Modifier::BOLD),
-                        )));
-                        chat.push_marker(Line::from(""));
-                    }
+                    // The queued prompt was already echoed into the transcript at
+                    // admit time (app.rs). Here we only drop the consumed entry
+                    // by seq from the pending mirror.
                     queue_items.retain(|(s, _)| s != seq);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
@@ -568,6 +557,35 @@ pub(crate) async fn paste_clipboard_image(
     LoopFlow::Proceed
 }
 
+/// Like [`paste_clipboard_image`] but silent on failure. Used when an empty
+/// bracketed-paste arrives — the terminal swallowed Ctrl+V because the
+/// clipboard holds an image, not text. Success still shows the 📎 marker;
+/// "no image" or clipboard errors are quietly ignored so the user is never
+/// disturbed by an empty paste.
+pub(crate) async fn paste_clipboard_image_silent(
+    chat: &mut ChatView,
+    pending_images: &mut Vec<(String, String)>,
+) {
+    if let Ok(Some(data_uri)) =
+        tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await
+    {
+        let n = pending_images.len() + 1;
+        pending_images.push((data_uri, "clipboard.png".to_string()));
+        chat.push_marker(Line::from(Span::styled(
+            format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
+            Style::default().fg(theme::ok_color()),
+        )));
+    }
+}
+
+/// Push a green `📎 {label} ({n} attached)` marker into the chat stream.
+fn push_attach_marker(chat: &mut ChatView, n: usize, label: &str) {
+    chat.push_marker(Line::from(Span::styled(
+        format!("\u{1f4ce} {label} ({n} attached)"),
+        Style::default().fg(theme::ok_color()),
+    )));
+}
+
 /// Route a paste payload by the same modal priority as key events: an open
 /// popup owns the paste, so it never reaches the main input hidden behind it.
 ///
@@ -633,8 +651,9 @@ pub(crate) fn route_paste(
                 }
                 FeedOutcome::Pending => {}
                 FeedOutcome::Complete { uri, filename, chunks } => {
-                    pending_images
-                        .push((uri, format!("{filename} ({chunks} chunks)")));
+                    let label = format!("{filename} ({chunks} chunks)");
+                    pending_images.push((uri, label.clone()));
+                    push_attach_marker(chat, pending_images.len(), &label);
                 }
                 FeedOutcome::Warn { message } => {
                     chat.push_marker(Line::from(Span::styled(
@@ -654,19 +673,22 @@ pub(crate) fn route_paste(
 
     // Inline data:image URI — attach verbatim (trailing newline already stripped).
     if let Some(filename) = crate::image_chunk::image_data_uri_filename(trimmed) {
-        pending_images.push((trimmed.to_string(), filename));
+        pending_images.push((trimmed.to_string(), filename.clone()));
+        push_attach_marker(chat, pending_images.len(), &filename);
         return LoopFlow::Proceed;
     }
 
     // HTTP(S) URL pointing at an image — attach the URL with its filename.
     if let Some(filename) = crate::image_chunk::image_url_filename(trimmed) {
-        pending_images.push((trimmed.to_string(), filename));
+        pending_images.push((trimmed.to_string(), filename.clone()));
+        push_attach_marker(chat, pending_images.len(), &filename);
         return LoopFlow::Proceed;
     }
 
     // Main composer: check if pasted content is an image file path.
     if let Some((data_uri, filename)) = crate::image_util::try_load_image(trimmed, workdir) {
-        pending_images.push((data_uri, filename));
+        pending_images.push((data_uri, filename.clone()));
+        push_attach_marker(chat, pending_images.len(), &filename);
         return LoopFlow::Proceed;
     }
     // Otherwise: drag a file in (or clipboard paste) arrives as one

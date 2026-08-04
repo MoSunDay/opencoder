@@ -225,10 +225,11 @@ fn prompt_file_flag_parsed() {
 fn ts_subcommand_parses_list_flag() {
     let cli = parse(&["opencode", "ts", "-l"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             assert!(list);
             assert!(resume.is_none());
             assert!(!new);
+            assert!(!clean);
         }
         _ => panic!("expected Ts"),
     }
@@ -238,10 +239,11 @@ fn ts_subcommand_parses_list_flag() {
 fn ts_subcommand_parses_resume_target() {
     let cli = parse(&["opencode", "ts", "-r", "01HZ"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             assert!(!list);
             assert_eq!(resume.as_deref(), Some("01HZ"));
             assert!(!new);
+            assert!(!clean);
         }
         _ => panic!("expected Ts"),
     }
@@ -251,10 +253,11 @@ fn ts_subcommand_parses_resume_target() {
 fn ts_subcommand_parses_new_flag() {
     let cli = parse(&["opencode", "ts", "--new"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
             assert!(new);
+            assert!(!clean);
         }
         _ => panic!("expected Ts"),
     }
@@ -265,10 +268,11 @@ fn ts_subcommand_defaults_to_no_flags() {
     // Bare `opencode ts` -> Ts with every flag at its default.
     let cli = parse(&["opencode", "ts"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
             assert!(!new);
+            assert!(!clean);
         }
         _ => panic!("expected Ts"),
     }
@@ -338,10 +342,11 @@ fn rs_alias_resume_target() {
 fn rs_alias_defaults() {
     let cli = parse(&["opencode", "rs"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
             assert!(!new);
+            assert!(!clean);
         }
         _ => panic!("expected Ts via rs alias"),
     }
@@ -372,4 +377,18 @@ fn bare_prompt_accepts_global_agent_flag() {
 fn update_subcommand() {
     let cli = parse(&["opencoder", "update"]);
     assert!(matches!(cli.command, Some(Command::Update)));
+}
+
+#[test]
+fn ts_subcommand_parses_clean_flag() {
+    let cli = parse(&["opencode", "ts", "-c"]);
+    match cli.command {
+        Some(Command::Ts { list, resume, new, clean }) => {
+            assert!(!list);
+            assert!(resume.is_none());
+            assert!(!new);
+            assert!(clean);
+        }
+        _ => panic!("expected Ts"),
+    }
 }

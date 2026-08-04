@@ -146,16 +146,17 @@ fn begin_turn_preserves_transcript() {
 }
 
 #[test]
-fn steer_consumed_pushes_marker_and_drops_entry() {
-    // When a steer is promoted at the turn boundary, the view embeds a
-    // `steer: {prompt}` marker into the transcript (so the user sees WHEN it
-    // took effect) and drops the pending entry by seq.
+fn steer_consumed_drops_entry_without_marker() {
+    // SteerConsumed only drops the consumed entry by seq. The `steer:` marker
+    // is now echoed at admit time (app.rs), so consuming must NOT push one.
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
+    let before = block_text(&v);
     v.apply(&SessionEvent::SteerConsumed { seq: 7 });
-    assert!(
-        block_text(&v).contains("steer: use python"),
-        "SteerConsumed must embed a steer marker with the prompt text"
+    assert_eq!(
+        block_text(&v),
+        before,
+        "SteerConsumed must NOT push a marker — echoed at admit time"
     );
     assert!(
         v.steer_items.is_empty(),

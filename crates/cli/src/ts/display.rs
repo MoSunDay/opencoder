@@ -46,6 +46,29 @@ pub(crate) fn abbreviate_path(p: &str) -> String {
     p.to_string()
 }
 
+/// Truncate a ulid (or any id string) to its first 8 chars for a compact
+/// display column.
+pub(crate) fn id8(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
+/// Convert a millisecond epoch timestamp (as stored in the session store) to
+/// seconds for `format_ts`, which expects unix seconds.
+pub(crate) fn ms_to_secs(ms: i64) -> i64 {
+    ms / 1000
+}
+
+/// Prefer the `/task` preview; fall back to the stored title when the preview
+/// is empty/whitespace. Returns a reference into one of the inputs.
+pub(crate) fn preview_of<'a>(preview: &'a str, title: Option<&'a str>) -> &'a str {
+    let p = preview.trim();
+    if !p.is_empty() {
+        preview
+    } else {
+        title.unwrap_or("")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +98,29 @@ mod tests {
         assert_eq!(format_ts(now_secs() - 120), "2m ago");
         assert_eq!(format_ts(now_secs() - 7200), "2h ago");
         assert_eq!(format_ts(now_secs() - 2 * 86400), "2d ago");
+    }
+
+    #[test]
+    fn id8_truncates_to_eight_chars() {
+        assert_eq!(id8("01HZABCDEFGH1234"), "01HZABCD");
+        assert_eq!(id8("short"), "short");
+        assert_eq!(id8(""), "");
+    }
+
+    #[test]
+    fn ms_to_secs_divides_by_1000() {
+        assert_eq!(ms_to_secs(1_700_000_000_000), 1_700_000_000);
+        assert_eq!(ms_to_secs(0), 0);
+        assert_eq!(ms_to_secs(1500), 1);
+    }
+
+    #[test]
+    fn preview_of_prefers_preview() {
+        assert_eq!(preview_of("build the thing", Some("fallback")), "build the thing");
+        // Whitespace-only preview falls back to title.
+        assert_eq!(preview_of("   ", Some("title here")), "title here");
+        assert_eq!(preview_of("", Some("title here")), "title here");
+        // Both empty.
+        assert_eq!(preview_of("", None), "");
     }
 }

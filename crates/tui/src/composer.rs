@@ -213,6 +213,74 @@ fn is_word_whitespace(ch: char) -> bool {
     ch.is_whitespace() && ch != '\n'
 }
 
+/// Word classification for readline-style movement: `Word` = alphanumeric or
+/// underscore, `Punct` = other non-whitespace, `Space` = whitespace.
+#[derive(PartialEq, Eq)]
+enum WordKind {
+    Word,
+    Punct,
+    Space,
+}
+
+fn classify_word(ch: char) -> WordKind {
+    if ch.is_whitespace() {
+        WordKind::Space
+    } else if ch.is_alphanumeric() || ch == '_' {
+        WordKind::Word
+    } else {
+        WordKind::Punct
+    }
+}
+
+/// Readline `forward-word` (Alt+F): advance the cursor to the end of the
+/// current or next word.
+///
+/// If the cursor rests on whitespace it skips that first; then it consumes
+/// every character that shares the same [`WordKind`] as the character under
+/// the cursor. Lands one past the last character of the word (the boundary
+/// between the word and whatever follows).
+pub fn forward_word(input: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut i = cursor.min(len);
+    while i < len && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i >= len {
+        return len;
+    }
+    let kind = classify_word(chars[i]);
+    while i < len && classify_word(chars[i]) == kind {
+        i += 1;
+    }
+    i
+}
+
+/// Readline `backward-word` (Alt+B): move the cursor to the start of the
+/// word preceding the cursor.
+///
+/// Steps back one position, skips any trailing whitespace, then consumes
+/// every character sharing the same [`WordKind`]. Lands on the first
+/// character of the word.
+pub fn backward_word(input: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = input.chars().collect();
+    if chars.is_empty() || cursor == 0 {
+        return 0;
+    }
+    let mut i = (cursor.min(chars.len())) - 1;
+    while i > 0 && chars[i].is_whitespace() {
+        i -= 1;
+    }
+    if chars[i].is_whitespace() {
+        return 0;
+    }
+    let kind = classify_word(chars[i]);
+    while i > 0 && classify_word(chars[i - 1]) == kind {
+        i -= 1;
+    }
+    i
+}
+
 /// A single visual (wrapped) row of the composer input. `start`..`end` is a
 /// half-open char-index range; a row resulting from an explicit '\n' excludes
 /// the newline (it only triggers the break).

@@ -61,22 +61,39 @@ pub fn load_image_data_uri(path: &Path) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
+/// Normalize a pasted path string: trim whitespace, strip surrounding
+/// quotes, remove a `file://` scheme prefix, and expand a leading `~` to
+/// the home directory. Returns a clean path suitable for file operations.
+pub fn normalize_path(raw: &str) -> String {
+    let s = raw.trim();
+    let s = s.trim_matches(|c| c == '\'' || c == '"');
+    let s = s.strip_prefix("file://").unwrap_or(s);
+    let s = s.strip_prefix("localhost").unwrap_or(s);
+    if let Some(rest) = s.strip_prefix('~') {
+        if let Some(home) = dirs::home_dir() {
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            return home.join(rest).to_string_lossy().into_owned();
+        }
+    }
+    s.to_string()
+}
+
 /// Try to load a pasted string as an image file path. Returns `Some((data_uri, filename))`
 /// when the string is a readable image file, `None` otherwise.
 pub fn try_load_image(pasted: &str, workdir: &Path) -> Option<(String, String)> {
-    let trimmed = pasted.trim();
-    if !is_image_path(trimmed) {
+    let normalized = normalize_path(pasted);
+    if !is_image_path(&normalized) {
         return None;
     }
-    let path = if Path::new(trimmed).is_absolute() {
-        Path::new(trimmed).to_path_buf()
+    let path = if Path::new(&normalized).is_absolute() {
+        Path::new(&normalized).to_path_buf()
     } else {
-        workdir.join(trimmed)
+        workdir.join(&normalized)
     };
     match path.canonicalize() {
         Ok(full) => {
             let data_uri = load_image_data_uri(&full).ok()?;
-            let filename = extract_filename(trimmed);
+            let filename = extract_filename(&normalized);
             Some((data_uri, filename))
         }
         Err(_) => None,
@@ -154,5 +171,47 @@ mod tests {
         let (uri, name) = result.unwrap();
         assert!(uri.starts_with("data:image/png;base64,"));
         assert!(name.ends_with(".png"));
+    }
+
+    #[test]
+    fn normalize_path_strips_quotes() {
+        assert_eq!(normalize_path("\"/tmp/a.png\""), "/tmp/a.png");
+        assert_eq!(normalize_path("'/tmp/a.png'"), "/tmp/a.png");
+        assert_eq!(normalize_path("  /tmp/a.png  "), "/tmp/a.png");
+    }
+
+    #[test]
+    fn normalize_path_strips_file_scheme() {
+        assert_eq!(normalize_path("file:///tmp/a.png"), "/tmp/a.png");
+        assert_eq!(normalize_path("file://localhost/tmp/a.png"), "/tmp/a.png");
+    }
+
+    #[test]
+    fn normalize_path_expands_tilde() {
+        let home = dirs::home_dir().unwrap();
+        let expected = home.join("pics/a.png");
+        assert_eq!(normalize_path("~/pics/a.png"), expected.to_string_lossy());
+    }
+
+    #[test]
+    fn try_load_image_with_quoted_path() {
+        let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
+        std::fs::write(tmp.path(), png_bytes).unwrap();
+        let quoted = format!("\"{}\"", tmp.path().to_str().unwrap());
+        let result = try_load_image(&quoted, Path::new("."));
+        assert!(result.is_some());
+        let (_, name) = result.unwrap();
+        assert!(name.ends_with(".png"));
+    }
+
+    #[test]
+    fn try_load_image_with_file_scheme() {
+        let png_bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let tmp = tempfile::NamedTempFile::with_suffix(".png").unwrap();
+        std::fs::write(tmp.path(), png_bytes).unwrap();
+        let uri = format!("file://{}", tmp.path().to_str().unwrap());
+        let result = try_load_image(&uri, Path::new("."));
+        assert!(result.is_some());
     }
 }

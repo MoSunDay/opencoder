@@ -1,30 +1,51 @@
 use super::super::*;
 
-/// CompactionDelta events are ignored: they must not create any block or render
-/// any text. Only the final `Compaction(summary)` event renders the block,
-/// avoiding a flicker where `TranscriptReset` destroys the streamed block and
-/// `Compaction` recreates it. Mirrors the headless CLI (display.rs).
+/// CompactionDelta events stream into an EXPANDED block so the summary is
+/// visible while the summarizing LLM call runs. The first delta opens the
+/// block; subsequent deltas append to it; the final `Compaction(summary)`
+/// event finalizes (overwrites text + collapses) it.
 #[test]
-fn compaction_delta_is_ignored() {
+fn compaction_delta_streams_into_expanded_block() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::CompactionDelta("streamed-chunk".into()));
 
-    // No block is created by the delta.
-    assert!(v.blocks.is_empty(), "CompactionDelta must not create a block");
+    // The first delta creates exactly one streaming, expanded block.
+    assert_eq!(v.blocks.len(), 1, "CompactionDelta must create a block");
+    assert!(
+        !v.last_compaction_collapsed(),
+        "streaming block must be expanded"
+    );
+    assert!(block_text(&v).contains("streamed-chunk"));
 
-    // The delta text is not rendered anywhere.
-    assert!(!block_text(&v).contains("streamed-chunk"));
+    // A second delta appends to the SAME block (no new block).
+    v.apply(&SessionEvent::CompactionDelta(" more".into()));
+    assert_eq!(v.blocks.len(), 1);
+    assert!(block_text(&v).contains("streamed-chunk more"));
 
-    // Multiple deltas still accumulate nothing.
-    v.apply(&SessionEvent::CompactionDelta("more-text".into()));
-    assert!(v.blocks.is_empty());
-    assert!(!block_text(&v).contains("more-text"));
-
-    // The final Compaction event still renders exactly one block, proving the
-    // deltas left no half-built block behind.
+    // The final Compaction event finalizes the block: collapsed, full text.
     v.apply(&SessionEvent::Compaction("final-summary".into()));
-    assert_eq!(v.blocks.len(), 1, "Compaction must create exactly one block");
+    assert_eq!(v.blocks.len(), 1, "final Compaction must not add a second block");
     assert!(v.last_compaction_collapsed());
+    // Collapsed: the streamed chunks are gone (overwritten + hidden).
+    assert!(!block_text(&v).contains("streamed-chunk"));
+    // Expanding reveals the final summary text.
+    v.toggle_compaction_at(0);
+    assert!(block_text(&v).contains("final-summary"));
+}
+
+/// When the streaming block was destroyed between deltas and the final event
+/// (e.g. by a TranscriptReset replay that rebuilds the chat), the final
+/// `Compaction(summary)` creates a fresh collapsed block from scratch.
+#[test]
+fn compaction_finalizes_without_streaming_block() {
+    let mut v = ChatView::default();
+    // No prior CompactionDelta block exists.
+    v.apply(&SessionEvent::Compaction("final-summary".into()));
+    assert_eq!(v.blocks.len(), 1);
+    assert!(v.last_compaction_collapsed());
+    // Collapsed hides content; expand to verify the summary landed.
+    v.toggle_compaction_at(0);
+    assert!(block_text(&v).contains("final-summary"));
 }
 
 /// A Compaction event creates a Compaction block that starts collapsed and

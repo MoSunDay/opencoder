@@ -131,6 +131,9 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(v) = obj.get("cache_salt").and_then(|v| v.as_bool()) {
             cfg.cache_salt = Some(v);
         }
+        if let Some(v) = obj.get("enable_tmux_session").and_then(|v| v.as_bool()) {
+            cfg.enable_tmux_session = Some(v);
+        }
         if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
             cfg.fps = Some(fps.clamp(1, 30) as u32);
         }

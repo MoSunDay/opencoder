@@ -34,11 +34,14 @@ pub async fn ts_dispatch(
     list: bool,
     resume: Option<&str>,
     force_new: bool,
+    clean: bool,
 ) -> Result<()> {
     if list {
         actions::ts_list(cli).await
     } else if let Some(id) = resume {
-        actions::ts_resume(id)
+        actions::ts_resume(cli, id).await
+    } else if clean {
+        actions::ts_cleanup(cli).await
     } else {
         actions::ts_start(cli, force_new).await
     }

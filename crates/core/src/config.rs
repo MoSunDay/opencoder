@@ -117,6 +117,10 @@ pub struct Config {
     /// Autopilot loop (PLAN -> ACT -> VERIFY). Off by default.
     #[serde(default)]
     pub autopilot: AutoPilotConfig,
+    /// When true, bare `opencode` wraps the TUI in a tmux session (so it
+    /// survives SSH disconnect). Off by default; requires tmux installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_tmux_session: Option<bool>,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -379,6 +383,7 @@ impl Default for Config {
             replay_timeout_secs: None,
             subagent_drain_secs: None,
             autopilot: AutoPilotConfig::default(),
+            enable_tmux_session: None,
         }
     }
 }
@@ -978,5 +983,20 @@ mod tests {
         assert_eq!(headers.len(), 2, "project headers should append to global");
         assert_eq!(headers[0].name, "X-Global");
         assert_eq!(headers[1].name, "X-Project");
+    }
+
+    #[test]
+    fn enable_tmux_session_defaults_to_none() {
+        assert!(Config::default().enable_tmux_session.is_none());
+    }
+
+    #[test]
+    fn merge_into_applies_enable_tmux_session() {
+        let mut c = Config::default();
+        super::merge::merge_into(
+            &mut c,
+            serde_json::json!({ "enable_tmux_session": true }),
+        );
+        assert_eq!(c.enable_tmux_session, Some(true));
     }
 }

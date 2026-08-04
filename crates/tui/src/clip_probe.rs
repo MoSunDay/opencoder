@@ -28,9 +28,9 @@ pub struct ClipProbe {
     /// True when this looks like an SSH session (`$SSH_CONNECTION` /
     /// `$SSH_TTY`).
     pub is_ssh: bool,
-    /// Whether OSC 52 can be trusted to actually reach the clipboard. This is
-    /// `true` only for positively-identified reliable terminals; anything
-    /// unknown is conservatively treated as `false`.
+    /// Whether OSC 52 can be trusted to reach the clipboard. OSC 52 is widely
+    /// supported, so this is `true` by default and `false` only for known
+    /// stragglers (VTE-based terminals, GNU screen).
     pub osc52_reliable: bool,
     /// True when `$WAYLAND_DISPLAY` is set.
     pub wayland: bool,
@@ -47,20 +47,6 @@ const VTE_HINTS: &[&str] = &[
     "GNOME", "Terminator", "Xfce", "MATE", "VTE", "Guake", "Tilix",
 ];
 
-/// Substrings identifying terminals known to honour OSC 52 out-of-the-box.
-const RELIABLE_HINTS: &[&str] = &[
-    "iTerm.app",
-    "WezTerm",
-    "wezterm",
-    "alacritty",
-    "Alacritty",
-    "kitty",
-    "Kitty",
-    "ghostty",
-    "Ghostty",
-    "foot",
-];
-
 /// Check whether any of `VTE_HINTS` appears in the given env-var values.
 fn is_vte_terminal(term_program: &str, colorterm: &str, term: &str) -> bool {
     VTE_HINTS.iter().any(|hint| {
@@ -68,23 +54,12 @@ fn is_vte_terminal(term_program: &str, colorterm: &str, term: &str) -> bool {
     })
 }
 
-/// Check whether the terminal is positively identified as OSC-52-reliable.
-/// VTE and screen are excluded even if they also match a reliable hint
-/// (belt-and-suspenders).
-fn osc52_is_reliable(
-    term_program: &str,
-    term: &str,
-    is_vte: bool,
-    is_screen: bool,
-    wt_session: bool,
-) -> bool {
-    if is_vte || is_screen {
-        return false;
-    }
-    wt_session
-        || RELIABLE_HINTS
-            .iter()
-            .any(|h| term_program.contains(h) || term.contains(h))
+/// OSC 52 is widely supported (xterm, iTerm2, WezTerm, Alacritty, kitty,
+/// foot, Windows Terminal, ...). Only VTE-based terminals and GNU screen are
+/// known to silently drop the sequence, so we treat OSC52 as reliable by
+/// default and only exclude those.
+fn osc52_is_reliable(is_vte: bool, is_screen: bool) -> bool {
+    !(is_vte || is_screen)
 }
 
 /// Classify the terminal and display environment. Pure function: takes a
@@ -93,7 +68,6 @@ fn classify_terminal(get_var: impl Fn(&str) -> Option<String>) -> ClipProbe {
     let term_program = get_var("TERM_PROGRAM").unwrap_or_default();
     let colorterm = get_var("COLORTERM").unwrap_or_default();
     let term = get_var("TERM").unwrap_or_default();
-    let wt_session = get_var("WT_SESSION").is_some();
 
     let is_tmux = get_var("TMUX").is_some();
     let is_screen = get_var("STY").is_some();
@@ -102,7 +76,7 @@ fn classify_terminal(get_var: impl Fn(&str) -> Option<String>) -> ClipProbe {
     let x11 = get_var("DISPLAY").is_some();
 
     let is_vte = is_vte_terminal(&term_program, &colorterm, &term);
-    let osc52_reliable = osc52_is_reliable(&term_program, &term, is_vte, is_screen, wt_session);
+    let osc52_reliable = osc52_is_reliable(is_vte, is_screen);
 
     ClipProbe {
         is_vte,
@@ -316,13 +290,15 @@ mod tests {
     fn reliable_windows_terminal_via_wt_session() {
         let p = classify(&[("WT_SESSION", "1")]);
         assert!(p.osc52_reliable);
+        assert!(!p.is_vte);
     }
 
     #[test]
-    fn unknown_terminal_is_conservatively_unreliable() {
-        // Generic TERM with no identifiable terminal -> treat as unreliable.
+    fn unknown_terminal_is_reliable_by_default() {
+        // A generic TERM like xterm-256color is treated as reliable: OSC 52 is
+        // widely supported, so we only blacklist known stragglers.
         let p = classify(&[("TERM", "xterm-256color")]);
-        assert!(!p.osc52_reliable);
+        assert!(p.osc52_reliable);
         assert!(!p.is_vte);
     }
 
@@ -348,7 +324,8 @@ mod tests {
         let p = classify(&[]);
         assert!(!p.wayland);
         assert!(!p.x11);
-        assert!(!p.osc52_reliable);
+        // Headless still has OSC52 available if the terminal supports it.
+        assert!(p.osc52_reliable);
     }
 
     #[test]

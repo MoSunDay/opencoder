@@ -8,7 +8,7 @@ use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -40,6 +40,8 @@ mod app_display;
 
 #[path = "steer_dispatch.rs"]
 mod steer_dispatch;
+#[path = "steer_fire.rs"]
+mod steer_fire;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
@@ -263,6 +265,7 @@ pub(super) async fn run_app(
         }
 
         tokio::select! {
+            biased;
             maybe_ev = input_rx.recv() => {
                 // `None` ⇒ the input collector thread exited (stdin closed/read error); quit instead of busy-looping.
                 let ev = match maybe_ev {
@@ -532,23 +535,34 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
+                                    let display = queued_item_display(&text, clean);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, Some(queued_item_display(&text, clean)), &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
-                                        chat.steer_items.push((seq, queued_item_display(&text, clean)));
+                                        chat.steer_items.push((seq, display.clone()));
+                                        // Echo immediately (not deferred to SteerConsumed).
+                                        chat.push_marker(Line::from(Span::styled(format!("steer: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))));
                                     }
-                                    // Steer input isn't echoed in the transcript; it's surfaced only
-                                    // in the side queue panel + status bar badge (like queued inputs).
                                 } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit (only a `{$name}` token): admit the trigger
+                                    // Pure-skill submit (only a `$name` token): admit the trigger
                                     // as a steer so the injected skill body is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
+                                    let display = skill_token_display(skill_name);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, Some(skill_token_display(skill_name)), &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
-                                        chat.steer_items.push((seq, skill_token_display(skill_name)));
+                                        chat.steer_items.push((seq, display.clone()));
+                                        chat.push_marker(Line::from(Span::styled(format!("steer: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))));
                                     }
                                 }
+                                // Fire interrupt immediately so the steer is
+                                // absorbed at the next turn boundary — same as
+                                // clicking the `>` button.
+                                let _ = steer_fire::fire_steer_interrupt(
+                                    subagent_focus, running,
+                                    &child_cancels, &child_turn_cancels,
+                                    &turn_cancel, &chat,
+                                );
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
@@ -564,6 +578,8 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
+                                        // Echo immediately (not deferred to QueueConsumed).
+                                        chat.push_marker(Line::from(Span::styled(format!("queued: {display}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
                                         chat.note_requirement_submitted();
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
@@ -574,6 +590,7 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
+                                        chat.push_marker(Line::from(Span::styled(format!("queued: {display}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
                                         chat.note_requirement_submitted();
                                     }
                                 }
@@ -695,35 +712,16 @@ pub(super) async fn run_app(
                             copy_status = Some((msg, Instant::now()));
                         }
                         if outcome == MouseOutcome::SteerSubmit {
-                            let sub_focused = subagent_focus.is_some();
-                            // fire_child_cancels both checks AND cancels children — only call it
-                            // when the parent is running and no subagent row is focused.
-                            let has_children = !sub_focused && running
-                                && opencoder_session::fire_child_cancels(&child_cancels);
-                            match steer_dispatch::resolve(
-                                sub_focused, running, has_children, !chat.steer_items.is_empty(),
-                            ) {
-                                steer_dispatch::Action::Subagent => {
-                                    subagent_input::fire_subagent_turn_cancel(
-                                        &child_turn_cancels, &chat, subagent_focus,
-                                    );
-                                }
-                                steer_dispatch::Action::CancelChildren => {
-                                    // Children cancelled — run_loop absorbs the steer at the next
-                                    // turn boundary via err("cancelled") tool results.
-                                }
-                                steer_dispatch::Action::SteerParent => {
-                                    // G1: no running children but a steer is pending — interrupt the
-                                    // parent's current LLM/tool turn (soft cancel, not hard abort).
-                                    opencoder_session::fire_turn_cancel(&turn_cancel);
-                                }
-                                steer_dispatch::Action::StartTurn => {
-                                    start_turn(&cmd_tx, &mut cancel,
-                                        UiCmd::Prompt(String::new(), Vec::new())).await;
-                                    running = true;
-                                    chat.begin_turn();
-                                }
-                                steer_dispatch::Action::Noop => {}
+                            let action = steer_fire::fire_steer_interrupt(
+                                subagent_focus, running,
+                                &child_cancels, &child_turn_cancels,
+                                &turn_cancel, &chat,
+                            );
+                            if action == steer_dispatch::Action::StartTurn {
+                                start_turn(&cmd_tx, &mut cancel,
+                                    UiCmd::Prompt(String::new(), Vec::new())).await;
+                                running = true;
+                                chat.begin_turn();
                             }
                             follow = true;
                         }

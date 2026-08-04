@@ -123,11 +123,11 @@ const DELTA_MIN_CAPACITY: usize = 64;
 /// safely dropped when the UI channel is near capacity without data loss.
 fn is_droppable_delta(sev: &SessionEvent) -> bool {
     match sev {
-        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) | SessionEvent::CompactionDelta(_) => true,
+        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) => true,
         SessionEvent::SubagentChild { ev, .. } => {
             matches!(
                 ev.as_ref(),
-                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) | SessionEvent::CompactionDelta(_)
+                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_)
             )
         }
         _ => false,

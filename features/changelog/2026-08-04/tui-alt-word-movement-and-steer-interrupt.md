@@ -63,6 +63,6 @@ forward/backward 正例 + 边界：空串、纯空白、标点串、CJK、换行
 
 ### 全量验证
 
-- `cargo test -p opencoder-tui --lib` — **861 passed; 0 failed; 0 ignored**
+- `cargo test -p opencoder-tui --lib` — **870 passed; 0 failed; 0 ignored**
 - `cargo test -p opencoder-session --tests` — **18 passed; 0 failed**
 - `cargo clippy -p opencoder-tui --all-targets -- -D warnings` — clean

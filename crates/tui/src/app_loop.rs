@@ -569,12 +569,8 @@ pub(crate) async fn paste_clipboard_image_silent(
     if let Ok(Some(data_uri)) =
         tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await
     {
-        let n = pending_images.len() + 1;
         pending_images.push((data_uri, "clipboard.png".to_string()));
-        chat.push_marker(Line::from(Span::styled(
-            format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
-            Style::default().fg(theme::ok_color()),
-        )));
+        push_attach_marker(chat, pending_images.len(), "pasted image from clipboard");
     }
 }
 

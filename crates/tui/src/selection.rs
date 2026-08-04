@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(r.lines, 2);
         assert!(r.chars > 0);
         // osc52_reliable echoes the probe's environment-dependent verdict
-        // (conservatively false for unidentified terminals); we only confirm
+        // (reliable by default for unknown terminals); we only confirm
         // the field is populated, not a specific value.
         let _ = r.osc52_reliable;
     }

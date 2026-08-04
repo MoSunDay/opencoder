@@ -74,7 +74,7 @@ pub(crate) fn handle_key(
             // resolved and loaded on submit, not here, so picking is cheap and
             // reversible (backspace removes the token).
             MenuOutcome::Pick((name, _body)) => {
-                let token = format!("${}", name);
+                let token = format!("${} ", name);
                 let (s, i) = composer::insert_str(input, *cursor_idx, &token);
                 *input = s;
                 *cursor_idx = i;

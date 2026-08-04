@@ -35,11 +35,12 @@ impl ChatView {
                     text.push_str(t);
                 }
             }
-            // Ignore the streamed delta: the final `Compaction(summary)` event
-            // (handled below) renders the block once. Reacting to deltas causes
-            // a flicker because `TranscriptReset` destroys the streamed block and
-            // `Compaction` recreates it. The CLI does the same (display.rs).
-            SessionEvent::CompactionDelta(_) => {}
+            // Stream the summary into an expanded block so it is visible while
+            // the summarizing LLM call runs. The final `Compaction(summary)`
+            // event (below) finalizes + collapses it.
+            SessionEvent::CompactionDelta(t) => {
+                self.open_compaction_streaming(t);
+            }
             SessionEvent::ToolStart { id, name, input } => {
                 if name == "task" {
                     return;
@@ -128,11 +129,7 @@ impl ChatView {
                     ))]));
             }
             SessionEvent::Compaction(c) => {
-                self.finalize_assistant();
-                self.blocks.push(ChatBlock::Compaction {
-                    text: c.clone(),
-                    collapsed: true,
-                });
+                self.finalize_compaction(c);
             }
             SessionEvent::Status(s) => self.status = s.clone(),
             SessionEvent::SubagentStart {
@@ -186,30 +183,21 @@ impl ChatView {
             } => {
                 self.subagents_running = self.subagents_running.saturating_sub(1);
                 self.finalize_assistant();
-                if self.subagents_running > 0 {
-                    // Other siblings still running — buffer so all completion
-                    // summaries surface together when the last one finishes
-                    // (issue #5), instead of popping in one-by-one.
-                    self.pending_subagent_ends
-                        .push((id.clone(), *ok, *cancelled, summary.clone()));
-                } else {
-                    // Last (or only) sibling done — flush buffered ends in
-                    // arrival order, apply this one, then reveal the preamble.
-                    self.flush_pending_subagent_ends();
-                    self.mark_subagent_done(id, *ok, *cancelled, summary);
+                // Mark done immediately — each subagent's status/summary should
+                // surface as soon as it finishes, not be buffered behind siblings.
+                self.mark_subagent_done(id, *ok, *cancelled, summary);
+                if self.subagents_running == 0 {
                     self.hidden_assistant_idx = None;
                 }
             }
             SessionEvent::Done => {
                 self.subagents_running = 0;
-                self.flush_pending_subagent_ends();
                 self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
             SessionEvent::Error(e) => {
                 self.subagents_running = 0;
-                self.flush_pending_subagent_ends();
                 self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks
@@ -239,22 +227,9 @@ impl ChatView {
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq } => {
-                // Steer promoted at turn boundary: resolve seq->prompt, embed a
-                // `steer:` marker, drop the row. Clone text to free the borrow.
-                if let Some(prompt) = self
-                    .steer_items
-                    .iter()
-                    .find(|(s, _)| s == seq)
-                    .map(|(_, p)| p.clone())
-                {
-                    self.push_marker(Line::from(Span::styled(
-                        format!("steer: {prompt}"),
-                        Style::default()
-                            .fg(theme::accent())
-                            .add_modifier(Modifier::BOLD),
-                    )));
-                    self.push_marker(Line::from(""));
-                }
+                // Steer promoted at turn boundary. The `steer:` marker is echoed
+                // at admit time (app.rs), so here we only drop the consumed row
+                // from the pending mirror.
                 self.steer_items.retain(|(s, _)| s != seq);
             }
             SessionEvent::AutoPilot { phase, iteration } => {
@@ -557,7 +532,7 @@ impl ChatView {
                         *collapsed,
                     ));
                 }
-                ChatBlock::Compaction { text, collapsed } => {
+                ChatBlock::Compaction { text, collapsed, .. } => {
                     out.extend(render_collapsible(
                         "\u{1f5dc}",
                         "Compaction",
@@ -749,15 +724,6 @@ impl ChatView {
                 Span::styled(format!("  {mark} subagent "), Style::default().fg(color)),
                 Span::styled(short(summary, 110), Style::default().fg(theme::muted())),
             ])]));
-        }
-    }
-
-    /// Apply all buffered subagent completions in arrival order. Called when
-    /// the last sibling finishes, or on Done/Error as a safety flush.
-    fn flush_pending_subagent_ends(&mut self) {
-        let drained = std::mem::take(&mut self.pending_subagent_ends);
-        for (id, ok, cancelled, summary) in drained {
-            self.mark_subagent_done(&id, ok, cancelled, &summary);
         }
     }
 

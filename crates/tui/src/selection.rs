@@ -61,7 +61,7 @@ impl CopyReport {
                 let hint = if self.tmux {
                     "tmux: set -g set-clipboard on, or install xclip"
                 } else if self.ssh {
-                    "SSH terminal intercepted OSC52 — enable OSC52 in terminal/tmux"
+                    "terminal may not support OSC52 — install xclip/xsel locally"
                 } else {
                     "install xclip/xsel"
                 };

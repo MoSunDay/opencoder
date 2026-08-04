@@ -35,12 +35,14 @@ pub enum ChatBlock {
         sealed: bool,
     },
     /// Collapsible compaction-summary block with muted italic styling.
-    /// Mirrors Thinking: defaults collapsed, click-to-expand. Created once by
-    /// the final `Compaction(summary)` event; the streamed `CompactionDelta`s
-    /// are ignored by the TUI (the summary is rendered only once).
+    /// Mirrors Thinking: click-to-expand. While `streaming` is true the block
+    /// is expanded and its `text` grows with each `CompactionDelta` so the user
+    /// sees the summary as it is generated. The final `Compaction(summary)`
+    /// event finalizes it (full text + collapsed).
     Compaction {
         text: String,
         collapsed: bool,
+        streaming: bool,
     },
     /// Tool invocation: a header line plus its (full) output lines. `collapsed`
     /// hides the output behind a click-to-expand header, mirroring Thinking.
@@ -112,11 +114,6 @@ pub struct ChatView {
     /// hit-rects stay aligned. Cleared once all subagents finish (the content
     /// then appears in one shot).
     pub hidden_assistant_idx: Option<usize>,
-    /// Buffered `(id, ok, cancelled, summary)` for `SubagentEnd` events that
-    /// arrived while other subagents were still running. Applied in a single
-    /// batch when the last sibling finishes, so completion summaries never pop
-    /// in one-by-one.
-    pub pending_subagent_ends: Vec<(String, bool, bool, String)>,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.

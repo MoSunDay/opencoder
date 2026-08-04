@@ -161,6 +161,21 @@ pub(crate) fn handle_key(
         return KeyAction::SwitchAgent(next.into());
     }
 
+    // Alt+F / Alt+B: readline-style forward/backward word movement.
+    if k.modifiers.contains(KeyModifiers::ALT) {
+        match k.code {
+            KeyCode::Char('f') | KeyCode::Char('F') => {
+                *cursor_idx = composer::forward_word(input, *cursor_idx);
+                return KeyAction::None;
+            }
+            KeyCode::Char('b') | KeyCode::Char('B') => {
+                *cursor_idx = composer::backward_word(input, *cursor_idx);
+                return KeyAction::None;
+            }
+            _ => {}
+        }
+    }
+
     // Ctrl+Shift+Tab: switch act <-> plan mode WITHOUT clearing context or
     // auto-executing (pure mode toggle, keeps the full transcript). Must be
     // checked before the CONTROL branch which would otherwise swallow

@@ -1,10 +1,9 @@
 use super::*;
 
 /// Issue #5: with MULTIPLE concurrent subagents, the parent's preamble
-/// text is withheld (renders zero lines) and each sibling's completion
-/// summary is buffered until the LAST one finishes — so nothing pops in
-/// one-by-one. Once all are done, the preamble + every summary surface
-/// together.
+/// text is withheld (renders zero lines) until every sibling finishes.
+/// Each sibling's completion summary surfaces immediately on its own
+/// `SubagentEnd` — the preamble reappears once all are done.
 #[test]
 fn multiple_subagents_withhold_output_until_all_done() {
     let mut v = ChatView::default();
@@ -34,7 +33,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
         "preamble withheld while subagents run"
     );
 
-    // First sibling finishes — its summary is buffered, not yet shown.
+    // First sibling finishes — its summary surfaces immediately.
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: true,
@@ -42,13 +41,12 @@ fn multiple_subagents_withhold_output_until_all_done() {
         summary: "result-a".into(),
     });
     assert_eq!(v.subagents_running, 1);
-    assert_eq!(v.pending_subagent_ends.len(), 1);
     assert!(
-        !block_text(&v).contains("result-a"),
-        "first summary buffered, not shown while sibling runs"
+        block_text(&v).contains("result-a"),
+        "first summary shown immediately while sibling still runs"
     );
 
-    // Last sibling finishes — flush everything; preamble + both summaries.
+    // Last sibling finishes — preamble revealed; both summaries visible.
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
@@ -99,7 +97,6 @@ fn single_subagent_does_not_withhold() {
         summary: "done-single".into(),
     });
     assert!(block_text(&v).contains("done-single"));
-    assert!(v.pending_subagent_ends.is_empty());
 }
 
 /// Issue #4: a running subagent header renders the animated spinner glyph
@@ -131,12 +128,11 @@ fn block_text_for_tick(v: &ChatView, tick: u32) -> String {
 }
 
 /// Issue #5 failure path: when one sibling FAILS (`ok: false`) while
-/// another still runs, the failed summary must still buffer — not pop in
-/// early — and surface on the final flush with its "failed" status and
-/// red styling intact. Guards the `ok` flag's round-trip through
-/// `pending_subagent_ends` → `mark_subagent_done`.
+/// another still runs, the failed summary surfaces immediately with its
+/// "failed" status and red styling intact. Guards the `ok` flag's
+/// round-trip through `mark_subagent_done`.
 #[test]
-fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
+fn failed_subagent_summary_shows_immediately_with_sibling() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("preamble".into()));
     v.apply(&SessionEvent::SubagentStart {
@@ -153,7 +149,7 @@ fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
     });
     assert!(v.hidden_assistant_idx.is_some());
 
-    // First sibling FAILS — buffered, not shown.
+    // First sibling FAILS — shown immediately.
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: false,
@@ -161,13 +157,12 @@ fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
         summary: "crashed".into(),
     });
     assert_eq!(v.subagents_running, 1);
-    assert_eq!(v.pending_subagent_ends.len(), 1);
     assert!(
-        !block_text(&v).contains("crashed"),
-        "failed summary must buffer while sibling runs"
+        block_text(&v).contains("crashed"),
+        "failed summary shown immediately while sibling runs"
     );
 
-    // Last sibling succeeds — flush both; failed + ok summaries appear.
+    // Last sibling succeeds — preamble revealed; both summaries visible.
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
@@ -175,8 +170,8 @@ fn failed_subagent_summary_buffers_then_flushes_with_sibling() {
         summary: "ok-b".into(),
     });
     let text = block_text(&v);
-    assert!(text.contains("crashed"), "failed summary flushed");
-    assert!(text.contains("ok-b"), "ok summary flushed");
+    assert!(text.contains("crashed"), "failed summary still shown");
+    assert!(text.contains("ok-b"), "ok summary shown");
     assert!(text.contains("preamble"), "preamble revealed");
     // Status words reflect each subagent's outcome.
     assert!(text.contains("failed"), "failed subagent shows 'failed'");
@@ -213,10 +208,6 @@ fn done_while_subagents_running_reveals_preamble() {
     assert!(
         v.hidden_assistant_idx.is_none(),
         "Done must reveal preamble"
-    );
-    assert!(
-        v.pending_subagent_ends.is_empty(),
-        "Done must flush pending"
     );
     assert_eq!(v.subagents_running, 0, "Done must reset running count");
     assert!(

@@ -184,11 +184,19 @@ pub async fn admit_and_drain(
             if handle_w.draining.load(Ordering::SeqCst) {
                 return;
             }
-            let pending = store_w
+            // Defense-in-depth: a drain can exit with steers still pending
+            // (e.g. a steer stranded by a residual idle-boundary window, or a
+            // crashed drain). Restart the drain if EITHER a queued or a
+            // steered input is waiting so neither delivery channel strands.
+            let pending_q = store_w
                 .pending_inputs(&sid_w, opencoder_store::Delivery::Queue)
                 .await
                 .unwrap_or_default();
-            if pending.is_empty() {
+            let pending_s = store_w
+                .pending_inputs(&sid_w, opencoder_store::Delivery::Steer)
+                .await
+                .unwrap_or_default();
+            if pending_q.is_empty() && pending_s.is_empty() {
                 return;
             }
             if !handle_w.draining.swap(true, Ordering::SeqCst) {

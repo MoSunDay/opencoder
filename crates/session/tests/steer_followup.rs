@@ -441,3 +441,124 @@ async fn multiple_steers_consumed_each_carries_distinct_pk_seq() {
         "each SteerConsumed must carry the correct PK in admitted_seq order"
     );
 }
+
+// ---- Late-steer-at-idle-boundary regression ----
+//
+// A steer admitted during a text-only turn (after the top-of-loop
+// claim_steers, before the idle boundary) used to be stranded: the queue is
+// empty so the runner emitted Done and exited, leaving the steer row with
+// promoted_seq = NULL. The idle-boundary peek now catches it.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::Result;
+use opencoder_llm::ChatRequest;
+use tokio::sync::mpsc;
+
+/// Wraps a real ChatStream. On the FIRST text-only (no tool_calls) Completed
+/// event it forwards, it admits a Steer into the store BEFORE forwarding the
+/// event. Since the runner cannot reach the idle boundary until it receives
+/// that event (and the channel then closes), the admit is guaranteed complete
+/// by the time the idle boundary runs -- deterministically reproducing the race.
+struct SteerOnIdle {
+    inner: Arc<dyn ChatStream>,
+    store: Arc<dyn Store>,
+    session_id: String,
+    admitted: Arc<AtomicBool>,
+}
+
+impl ChatStream for SteerOnIdle {
+    fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
+        let mut rx = self.inner.chat_stream(req)?;
+        let (tx, out_rx) = mpsc::channel::<LlmEvent>(128);
+        let store = self.store.clone();
+        let sid = self.session_id.clone();
+        // Share self.admitted across ALL chat_stream calls so the steer is
+        // admitted exactly once (on the first text-only Completed), not on
+        // every text-only turn.
+        let flag = self.admitted.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = rx.recv().await {
+                if let LlmEvent::Completed { ref tool_calls, .. } = ev {
+                    if tool_calls.is_empty() && !flag.swap(true, Ordering::SeqCst) {
+                        let _ = store
+                            .admit_input(&SessionInput {
+                                seq: None,
+                                id: "late-steer".into(),
+                                session_id: sid.clone(),
+                                delivery: Delivery::Steer,
+                                prompt: "LATE-STEER".into(),
+                                images: Vec::new(),
+                                display_text: None,
+                                admitted_seq: 0,
+                                promoted_seq: None,
+                            })
+                            .await;
+                    }
+                }
+                if tx.send(ev).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Ok(out_rx)
+    }
+
+    fn backend(&self) -> &'static str {
+        self.inner.backend()
+    }
+}
+
+#[tokio::test]
+async fn late_steer_absorbed_at_idle_boundary() {
+    let store = mem_store().await;
+    // Turn 1 -> text-only "first-idle" (the wrapper admits LATE-STEER just
+    // before forwarding this). Turn 2 -> text-only "after-steer" (the
+    // follow-up turn the absorbed steer triggers).
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done_turn("first-idle")])
+            .push_script(vec![done_turn("after-steer")]),
+    ) as Arc<dyn ChatStream>;
+
+    let wrapper = Arc::new(SteerOnIdle {
+        inner: mock,
+        store: store.clone(),
+        session_id: "drain-sess".into(),
+        admitted: std::sync::Arc::new(AtomicBool::new(false)),
+    }) as Arc<dyn ChatStream>;
+
+    let (_dir, mut s) = session(store.clone(), wrapper);
+    seed_session(&store).await;
+
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut s, "kickoff".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    // The late steer must have been absorbed: SteerConsumed emitted...
+    let steer_consumed = events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|ev| matches!(ev, SessionEvent::SteerConsumed { .. }));
+    assert!(steer_consumed, "late steer must be consumed (SteerConsumed)");
+
+    // ...its text promoted into history...
+    let msgs = store.load_messages("drain-sess").await.unwrap();
+    let texts: Vec<String> = msgs.iter().map(|m| m.text()).collect();
+    assert!(
+        texts.iter().any(|t| t.contains("LATE-STEER")),
+        "late steer must be promoted into history: {texts:?}"
+    );
+
+    // ...and no longer pending (promoted_seq set, not stranded).
+    let pending = store
+        .pending_inputs("drain-sess", Delivery::Steer)
+        .await
+        .unwrap();
+    assert!(pending.is_empty(), "late steer must not be stranded");
+}

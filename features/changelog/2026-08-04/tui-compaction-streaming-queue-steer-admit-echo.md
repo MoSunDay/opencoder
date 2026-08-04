@@ -67,7 +67,7 @@
 | QueueConsumed 删行不推 marker | `fold_queue_consumed_drops_entry_without_marker` | `app_loop_tests/mod.rs` | integration |
 | QueueConsumed 未知 seq noop | `fold_queue_consumed_unknown_seq_is_noop` | 同上 | integration |
 
-- TUI lib：**861 passed / 0 failed**；integration **32 passed**（当次实跑）
+- TUI lib：**870 passed / 0 failed**；integration **32 passed**（当次实跑）
 - session crate：`cargo test -p opencoder-session` → **238 passed / 0 failed / 1 ignored**
 - TUI clippy：`cargo clippy -p opencoder-tui --all-targets -D warnings` → 零警告
 - workspace 级 build/clippy/test 被范围外 `src/main.rs`（`Command::Ts` 缺 `clean` 字段）阻断，非本次代码

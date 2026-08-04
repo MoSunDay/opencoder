@@ -48,8 +48,8 @@ Commit: (working-tree, pre-initial-commit)
 
 | 闸门 | 结果 |
 |------|------|
-| `cargo test -p opencoder-tui` | 893 passed; 0 failed |
-| `cargo test --workspace` | 1760 passed; 0 failed |
+| `cargo test -p opencoder-tui` | 902 passed; 0 failed |
+| `cargo test --workspace` | 1769 passed; 0 failed |
 | `cargo clippy --workspace --all-targets -D warnings` | 0 warnings |
 | `cargo check --workspace` | ok |
 

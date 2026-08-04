@@ -68,15 +68,13 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // Control commands (/act, /plan) take effect immediately without
-    // consuming an LLM turn — short-circuit when the idle prompt is one.
-    // EXCEPTION: /act_clear_context with a preserved result falls through
-    // to run_loop so the agent executes the preserved task.
-    if let Some(cmd) = crate::control_cmd::parse(&user_text) {
+    // Control commands (/act, /plan) short-circuit without an LLM turn. A
+    // compound input (/plan review) switches then runs the rest. EXCEPTION:
+    // /act_clear_context with a preserved result falls through to run_loop.
+    if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
-        // ClearContext with a preserved result must execute it — fall through
-        // to run_loop so the agent picks up the handoff message and starts
-        // working. When no result was found (sentinel path), stop as before.
+        // ClearContext with a preserved result falls through to run_loop to
+        // execute it; sentinel path (no result) stops as before.
         if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
             && !crate::control_cmd::is_clear_context_handoff(
                 session.handoff_plan.as_deref().unwrap_or(""),
@@ -84,37 +82,39 @@ pub async fn run_with_registry(
         {
             user_text.clear();
             images.clear();
+        } else if let Some(rest) = rest {
+            // Compound (/plan review): switch done; fall through to recording
+            // which resolves `$skill` tokens and records user_text as prompt.
+            user_text = rest;
         } else {
             on_event(SessionEvent::Done);
             return Ok(());
         }
     }
-    // Replay any subagent tasks left cancelled from a prior interrupted run
-    // BEFORE the user's new input enters the loop: resume each cancelled child,
-    // run it to completion, backfill the parent tool_result, and flip the task
-    // to Completed. The model then sees [user input + subagent result] together
-    // and the interrupted call is transparently resumed. No-op for children
-    // (they hold no `task` tool, so they have no subagent tasks).
-    // The TUI passes prompts directly as `user_text` (not via store Delivery),
-    // so we check that here: when the user typed new input, cancelled subagents
-    // should be abandoned rather than silently replayed.
+    // Replay cancelled subagent tasks from a prior interrupted run BEFORE the
+    // new input enters the loop: resume each child, backfill the parent
+    // tool_result, flip to Completed. No-op for children (no `task` tool).
+    // The TUI passes prompts directly (not via store Delivery), so when the
+    // user typed new input, cancelled subagents are abandoned, not replayed.
     let has_new_input = !user_text.is_empty() || !images.is_empty();
     crate::resume::replay_cancelled_tasks(session, has_new_input).await;
-    // In-process safety net for well-formed history: any `tool_use` id left
-    // dangling by a prior interrupted batch (and not replayable via
-    // replay_cancelled_tasks / resume_and_replay) is answered with a synthetic
-    // error tool_result, so the next LLM request cannot hit the provider's
-    // "unanswered tool_call" HTTP 400. Idempotent; runs before the new user
-    // input is recorded so the synthesized message lands at the transcript end.
+    // Safety net: any `tool_use` id left dangling by a prior interrupted batch
+    // is answered with a synthetic error tool_result, avoiding the provider's
+    // "unanswered tool_call" HTTP 400. Idempotent; runs before recording input.
     crate::dangling_tools::reconcile_dangling_tool_uses(session).await;
+    // Resolve inline `$skill` tokens from the raw user text (headless path —
+    // the TUI resolves before calling run). Covers both compound commands
+    // (`/plan $review do it`) and plain prompts (`$review do it`). After
+    // stripping, text may be empty if only `$skill` tokens were provided.
+    user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
-    // claimed at turn boundaries to supply the actual user input, and the web
-    // has no skill support (`skill_prompt` is `None`). When an active skill is
-    // set and the user submitted no text (pure-skill submit or image-only),
-    // inject a synthetic trigger so the model records a user turn and acts on
-    // the skill body in the system prompt instead of treating the input
-    // passively. For text-bearing turns the user's own words drive execution.
+    // claimed at turn boundaries to supply the actual user input. When an
+    // active skill is set and the user submitted no text (pure-skill submit
+    // after token stripping or image-only), inject a synthetic trigger so the
+    // model records a user turn and acts on the skill body in the system
+    // prompt instead of treating the input passively. For text-bearing turns
+    // the user's own words drive execution.
     let has_skill = session.skill_prompt_cloned().is_some();
     let has_text = !user_text.trim().is_empty();
     let has_images = !images.is_empty();
@@ -124,10 +124,7 @@ pub async fn run_with_registry(
         session.record(user).await;
     }
     if has_skill && !has_text {
-        let mut msg = Message::user(
-            new_id(),
-            "The active skill is now in effect. Begin executing it now.",
-        );
+        let mut msg = Message::user(new_id(), crate::skill_resolve::SKILL_TRIGGER);
         msg.synthetic = true;
         session.record(msg).await;
     }
@@ -215,15 +212,14 @@ pub(crate) async fn run_loop(
         // last turn. A steer is absorbed into history HERE.
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
-            // Track whether the last steer was a sentinel ClearContext (no
-            // plan to execute) so we can go idle without an LM call.
+            // Track whether the last steer was a sentinel ClearContext so we
+            // can go idle without an LM call.
             let mut clear_sentinel = false;
             for (seq, p, imgs) in &steer_prompts {
                 on_event(SessionEvent::SteerConsumed { seq: *seq });
-                // Defensive: a steered control command is applied immediately
-                // and NOT recorded as a user message, so "/plan" never leaks
-                // to the LLM as literal text.
-                if let Some(cmd) = crate::control_cmd::parse(p) {
+                // Defensive: a steered control command is applied immediately and
+                // NOT recorded as user text, so "/plan" never leaks to the LLM.
+                if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
                     crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
                     clear_sentinel = matches!(
                         cmd,
@@ -231,14 +227,17 @@ pub(crate) async fn run_loop(
                     ) && crate::control_cmd::is_clear_context_handoff(
                         session.handoff_plan.as_deref().unwrap_or(""),
                     );
+                    // Compound (/plan review): record the rest as a synthetic
+                    // user message in the new mode.
+                    if let Some(rest) = rest {
+                        clear_sentinel = false;
+                        crate::skill_resolve::record_compound(session, &rest, imgs).await;
+                    }
                     continue;
                 }
                 clear_sentinel = false;
-                let mut text = p.clone();
-                session.maybe_tag_plan_prompt(&mut text);
-                let mut m = Message::user_with_images(new_id(), text, imgs);
-                m.synthetic = true;
-                session.record(m).await;
+                // Resolve `$skill` tokens, apply plan tag, record as synthetic.
+                crate::skill_resolve::record_compound(session, p, imgs).await;
             }
             // Sentinel ClearContext: go idle without an LM call.
             if clear_sentinel {
@@ -336,22 +335,20 @@ pub(crate) async fn run_loop(
         session.record(assistant).await;
 
         if tool_calls.is_empty() {
-            // Idle boundary: drain FIFO queued follow-ups until empty.
-            // Control commands (/act, /plan, /act_clear_context) are applied
-            // immediately without an LLM turn, so multiple can be drained in
-            // sequence. A real prompt breaks the inner loop so the outer loop
-            // processes it; once its turn completes the next idle boundary
-            // claims the next queued item until the queue is empty (Done).
+            // Idle boundary: drain FIFO queued follow-ups until empty. Control
+            // commands (/act, /plan, /act_clear_context) are applied without an
+            // LLM turn, so multiple drain in sequence. A real prompt breaks the
+            // inner loop; the next idle boundary claims the next item (Done).
             let mut got_real_prompt = false;
             loop {
-                if let Some((seq, mut q, imgs)) = claim_one_queued(session).await {
+                if let Some((seq, q, imgs)) = claim_one_queued(session).await {
                     on_event(SessionEvent::QueueConsumed { seq });
-                    if let Some(cmd) = crate::control_cmd::parse(&q) {
+                    if let Some((cmd, rest)) =
+                        crate::control_cmd::split_control_prefix(&q)
+                    {
                         crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
-                        // ClearContext with a preserved result must execute it:
-                        // break to the outer loop so the LLM picks up the
-                        // handoff message. Sentinel path (no result) continues
-                        // draining as before.
+                        // ClearContext with a preserved result breaks to execute
+                        // it; sentinel path (no result) continues draining.
                         if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
                             && !crate::control_cmd::is_clear_context_handoff(
                                 session.handoff_plan.as_deref().unwrap_or(""),
@@ -360,13 +357,17 @@ pub(crate) async fn run_loop(
                             got_real_prompt = true;
                             break;
                         }
-                        continue; // drain next queued item, no LLM turn
+                        // Compound (/plan review): rest is a real prompt in
+                        // the new mode — record it and break.
+                        if let Some(rest) = rest {
+                            crate::skill_resolve::record_compound(session, &rest, &imgs).await;
+                            got_real_prompt = true;
+                            break;
+                        }
+                        continue; // bare command: drain next item, no LLM turn
                     }
-                    // Real prompt: record it and let the outer loop process it.
-                    session.maybe_tag_plan_prompt(&mut q);
-                    let mut m = Message::user_with_images(new_id(), q, &imgs);
-                    m.synthetic = true;
-                    session.record(m).await;
+                    // Real prompt: resolve `$skill` tokens, record, break.
+                    crate::skill_resolve::record_compound(session, &q, &imgs).await;
                     got_real_prompt = true;
                     break;
                 }

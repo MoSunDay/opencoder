@@ -53,16 +53,43 @@ pub enum ControlCmd {
     ClearContext,
 }
 
-/// Parse a user prompt into a control command. Returns `None` for anything that
-/// is not an exact (whitespace-trimmed) match for `/act`, `/plan`, or
-/// `/act_clear_context`.
-pub fn parse(prompt: &str) -> Option<ControlCmd> {
-    match prompt.trim() {
-        "/act" => Some(ControlCmd::SwitchAgent("act".into())),
-        "/plan" => Some(ControlCmd::SwitchAgent("plan".into())),
-        "/act_clear_context" => Some(ControlCmd::ClearContext),
-        _ => None,
+/// Split a compound prompt into its leading control command and any trailing
+/// argument text. Supports `/plan <args>` and `/act <args>` so a single
+/// submission like `/plan review` switches mode *and* runs the rest as a
+/// prompt in the new mode.
+///
+/// `/act_clear_context` is a sentinel that accepts NO arguments — it matches
+/// only on its own (trailing text must not be absorbed as a prompt).
+///
+/// Returns `None` for anything that is not a control command. The rest text is
+/// the trimmed remainder after the command token, or `None` when the input was
+/// a bare command with nothing following (e.g. `/plan`). Inline `$skill`
+/// tokens in the rest are preserved verbatim for downstream resolution.
+pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)> {
+    let trimmed = prompt.trim();
+    // Sentinel: exact match only — never takes an argument.
+    if trimmed == "/act_clear_context" {
+        return Some((ControlCmd::ClearContext, None));
     }
+    let mut parts = trimmed.split_whitespace();
+    let head = parts.next()?;
+    let cmd = match head {
+        "/act" => ControlCmd::SwitchAgent("act".into()),
+        "/plan" => ControlCmd::SwitchAgent("plan".into()),
+        _ => return None,
+    };
+    let rest: String = parts.collect::<Vec<_>>().join(" ");
+    let rest = (!rest.is_empty()).then_some(rest);
+    Some((cmd, rest))
+}
+
+/// Parse a user prompt into a control command. Returns `None` for anything that
+/// is not `/act`, `/plan`, or `/act_clear_context` (the first two accept an
+/// optional trailing argument). Compound inputs like `/plan review` are now
+/// recognized as a control command; use [`split_control_prefix`] to also
+/// recover the trailing argument.
+pub fn parse(prompt: &str) -> Option<ControlCmd> {
+    split_control_prefix(prompt).map(|(cmd, _)| cmd)
 }
 
 /// Apply a control command to `session`, mutating state, persisting via the
@@ -232,6 +259,74 @@ mod tests {
         assert_eq!(parse("hello"), None);
         assert_eq!(parse(""), None);
         assert_eq!(parse("/compact"), None);
+    }
+
+    #[test]
+    fn split_compound_plan_returns_rest() {
+        let (cmd, rest) = split_control_prefix("/plan review the code").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
+        assert_eq!(rest.as_deref(), Some("review the code"));
+    }
+
+    #[test]
+    fn split_compound_act_returns_rest() {
+        let (cmd, rest) = split_control_prefix("/act do thing").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("act".into()));
+        assert_eq!(rest.as_deref(), Some("do thing"));
+    }
+
+    #[test]
+    fn split_bare_command_returns_none_rest() {
+        let (cmd, rest) = split_control_prefix("/plan").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
+        assert!(rest.is_none(), "bare command has no rest");
+    }
+
+    #[test]
+    fn split_trims_whitespace_no_rest() {
+        let (cmd, rest) = split_control_prefix("  /act  ").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("act".into()));
+        assert!(rest.is_none());
+    }
+
+    #[test]
+    fn split_clear_context_takes_no_args() {
+        let (cmd, rest) = split_control_prefix("/act_clear_context").unwrap();
+        assert_eq!(cmd, ControlCmd::ClearContext);
+        assert!(rest.is_none());
+    }
+
+    #[test]
+    fn split_clear_context_with_args_not_recognized() {
+        // A compound "/act_clear_context review" is NOT a control command —
+        // the sentinel does not take arguments — so it is treated as text.
+        assert_eq!(split_control_prefix("/act_clear_context review"), None);
+    }
+
+    #[test]
+    fn split_rejects_non_commands() {
+        assert_eq!(split_control_prefix("/acting"), None);
+        assert_eq!(split_control_prefix("/act_clear"), None);
+        assert_eq!(split_control_prefix("hello world"), None);
+        assert_eq!(split_control_prefix(""), None);
+        assert_eq!(split_control_prefix("/compact"), None);
+    }
+
+    #[test]
+    fn split_preserves_dollar_tokens_in_rest() {
+        // `$skill` tokens survive in the rest for downstream skill resolution.
+        let (cmd, rest) = split_control_prefix("/plan $review do it").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
+        assert_eq!(rest.as_deref(), Some("$review do it"));
+    }
+
+    #[test]
+    fn parse_compound_recognized_as_command() {
+        // The fix: parse now returns the command for compound inputs.
+        assert_eq!(
+            parse("/plan review"),
+            Some(ControlCmd::SwitchAgent("plan".into()))
+        );
     }
 
     fn collect_events(session: &mut SessionState, cmd: ControlCmd) -> Vec<SessionEvent> {

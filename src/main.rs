@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
             .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
-        Some(Command::Ts { list, resume, new }) => {
+        Some(Command::Ts { list, resume, new, clean }) => {
             // If already inside tmux, run the TUI inline (never nest tmux).
             if opencoder_cli::ts::runs_inline(
                 *list,
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
                 opencoder_cli::exit_tips::print_exit_tips();
                 return r;
             }
-            opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *new).await
+            opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *new, *clean).await
         }
         Some(Command::Config { sub }) => {
             opencoder_cli::session_cmd::config_dispatch(&cli, sub).await
@@ -111,6 +111,8 @@ async fn main() -> Result<()> {
                 let p = join(cli.prompt.clone());
                 require(&p)?;
                 opencoder_cli::run::run_headless(&cli, p).await
+            } else if maybe_wrap_tui_in_tmux(&cli).await? {
+                return Ok(());
             } else {
                 opencoder_tui::run_tui(&opts_from_cli(&cli)).await
             }
@@ -142,4 +144,24 @@ fn require(p: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// When `enable_tmux_session` is set in config and tmux is available and we're
+/// not already inside tmux, wrap the TUI in a tmux session. Returns `true` if
+/// the TUI was launched inside tmux, `false` to fall through to the plain TUI.
+async fn maybe_wrap_tui_in_tmux(cli: &Cli) -> Result<bool> {
+    if opencoder_cli::ts::inside_tmux() || !opencoder_cli::ts::tmux_available() {
+        return Ok(false);
+    }
+    let workdir = match &cli.workdir {
+        Some(w) => w.clone(),
+        None => std::env::current_dir()?,
+    };
+    let config = opencoder_core::Config::load(&workdir)?;
+    if config.enable_tmux_session.unwrap_or(false) {
+        opencoder_cli::ts::ts_dispatch(cli, false, None, false, false).await?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }

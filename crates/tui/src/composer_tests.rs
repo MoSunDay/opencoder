@@ -295,6 +295,9 @@ fn display_rows_dual_width_prompt() {
 #[path = "composer_delete_tests.rs"]
 mod delete;
 
+#[path = "composer_word_tests.rs"]
+mod word;
+
 #[test]
 fn char_width_zero_width_combining_and_joiners() {
     assert_eq!(char_width('\u{0300}'), 0); // combining grave accent

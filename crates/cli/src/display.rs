@@ -11,7 +11,13 @@ pub(crate) fn print_event(ev: &SessionEvent) {
             let _ = std::io::stdout().flush();
         }
         SessionEvent::ReasoningDelta(_) => {}
-        SessionEvent::CompactionDelta(_) => {}
+        SessionEvent::CompactionDelta(t) => {
+            // Stream the summary live (muted/dim) so it appears while the
+            // summarizing LLM call runs, not only after the final Compaction.
+            eprint!("[2m{t}[0m");
+            use std::io::Write;
+            let _ = std::io::stderr().flush();
+        }
         SessionEvent::ToolStart { name, input, .. } => {
             if name == "task" {
                 return;

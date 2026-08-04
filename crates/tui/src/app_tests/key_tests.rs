@@ -749,3 +749,33 @@ fn ctrl_w_multibyte_chars() {
     assert_eq!(input, "你好 ");
     assert_eq!(idx, 3, "cursor must be at char boundary after 你好 ");
 }
+
+#[test]
+fn alt_f_moves_cursor_forward_word() {
+    let mut input = String::from("foo bar");
+    let mut cursor = 0usize;
+    let action = run_handle(
+        key(KeyCode::Char('f'), KeyModifiers::ALT),
+        &mut input,
+        &mut cursor,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(cursor, 3);
+}
+
+#[test]
+fn alt_b_moves_cursor_backward_word() {
+    let mut input = String::from("foo bar");
+    let mut cursor = 7usize;
+    let action = run_handle(
+        key(KeyCode::Char('b'), KeyModifiers::ALT),
+        &mut input,
+        &mut cursor,
+        false,
+        "act",
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(cursor, 4);
+}

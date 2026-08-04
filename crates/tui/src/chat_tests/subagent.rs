@@ -9,10 +9,9 @@ fn block_text_for_tick(v: &ChatView, tick: u32) -> String {
 }
 
 /// Issue #5: with MULTIPLE concurrent subagents, the parent's preamble
-/// text is withheld (renders zero lines) and each sibling's completion
-/// summary is buffered until the LAST one finishes — so nothing pops in
-/// one-by-one. Once all are done, the preamble + every summary surface
-/// together.
+/// text is withheld (renders zero lines) until every sibling finishes.
+/// Each sibling's completion summary surfaces immediately on its own
+/// `SubagentEnd` — the preamble reappears once all are done.
 #[test]
 fn multiple_subagents_withhold_output_until_all_done() {
     let mut v = ChatView::default();
@@ -42,7 +41,7 @@ fn multiple_subagents_withhold_output_until_all_done() {
         "preamble withheld while subagents run"
     );
 
-    // First sibling finishes — its summary is buffered, not yet shown.
+    // First sibling finishes — its summary surfaces immediately.
     v.apply(&SessionEvent::SubagentEnd {
         id: "a".into(),
         ok: true,
@@ -50,13 +49,12 @@ fn multiple_subagents_withhold_output_until_all_done() {
         summary: "result-a".into(),
     });
     assert_eq!(v.subagents_running, 1);
-    assert_eq!(v.pending_subagent_ends.len(), 1);
     assert!(
-        !block_text(&v).contains("result-a"),
-        "first summary buffered, not shown while sibling runs"
+        block_text(&v).contains("result-a"),
+        "first summary shown immediately while sibling still runs"
     );
 
-    // Last sibling finishes — flush everything; preamble + both summaries.
+    // Last sibling finishes — preamble revealed; both summaries visible.
     v.apply(&SessionEvent::SubagentEnd {
         id: "b".into(),
         ok: true,
@@ -107,7 +105,6 @@ fn single_subagent_does_not_withhold() {
         summary: "done-single".into(),
     });
     assert!(block_text(&v).contains("done-single"));
-    assert!(v.pending_subagent_ends.is_empty());
 }
 
 /// Issue #4: a running subagent header renders the animated spinner glyph

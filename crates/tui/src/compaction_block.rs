@@ -56,6 +56,55 @@ impl ChatView {
         }
     }
 
+    /// Append a streaming compaction delta. If the last block is a still-
+    /// streaming Compaction block, append to its text; otherwise finalize any
+    /// in-progress assistant block and open a fresh expanded streaming block.
+    /// This mirrors `ensure_assistant_open`/`TextDelta` so the summary is
+    /// visible while the summarizing LLM call runs, not only after it finishes.
+    pub(crate) fn open_compaction_streaming(&mut self, t: &str) {
+        self.finalize_assistant();
+        if let Some(ChatBlock::Compaction {
+            text,
+            streaming: true,
+            ..
+        }) = self.blocks.last_mut()
+        {
+            text.push_str(t);
+            return;
+        }
+        self.blocks.push(ChatBlock::Compaction {
+            text: t.to_string(),
+            collapsed: false,
+            streaming: true,
+        });
+    }
+
+    /// Finalize the compaction block with the complete summary. If the last
+    /// block is a streaming Compaction, overwrite its text with the final
+    /// summary and collapse it; otherwise create a fresh collapsed block (the
+    /// streamed block was destroyed, e.g. by a `TranscriptReset` replay).
+    pub(crate) fn finalize_compaction(&mut self, summary: &str) {
+        self.finalize_assistant();
+        if let Some(ChatBlock::Compaction {
+            text,
+            collapsed,
+            streaming,
+        }) = self.blocks.last_mut()
+        {
+            if *streaming {
+                *text = summary.to_string();
+                *collapsed = true;
+                *streaming = false;
+                return;
+            }
+        }
+        self.blocks.push(ChatBlock::Compaction {
+            text: summary.to_string(),
+            collapsed: true,
+            streaming: false,
+        });
+    }
+
     /// True if the last block is a collapsed Compaction block — per-delta
     /// re-renders can be skipped while the compaction summary streams hidden.
     pub fn last_compaction_collapsed(&self) -> bool {

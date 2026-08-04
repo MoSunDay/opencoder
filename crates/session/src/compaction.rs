@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use opencoder_core::{message::now_ms, ContentBlock, Message, Role, ToolArc};
 use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 use opencoder_store::SessionPatch;
@@ -126,20 +126,21 @@ pub async fn compact(
 
     // Persist compaction summary to the store so resume can reconstruct
     // the compacted transcript instead of reloading the full history.
+    //
+    // Compute the new skip BEFORE calling after_compaction (which clears
+    // handoff_seq). Bookkeeping is updated BEFORE the DB write so the in-memory
+    // state stays coherent even if persistence fails — the error is propagated
+    // so the caller (run_loop) can retry or surface it.
+    let prev_skip = session.summary_seq.or(session.handoff_seq).unwrap_or(0);
+    let head_store_msgs = if prev_skip > 0 || session.handoff_seq.is_some() {
+        split.saturating_sub(1)
+    } else {
+        split
+    };
+    let new_skip = prev_skip + head_store_msgs as i64;
+    session.after_compaction(summary.clone(), new_skip);
     if let Some(store) = &session.store {
-        let prev_skip = session.summary_seq.or(session.handoff_seq).unwrap_or(0);
-        // The head in the in-memory list is messages[0..split].
-        // If the first message is synthetic (a previous compaction summary OR
-        // a plan->act handoff / clear-context marker), it is not in the store,
-        // so the head holds split-1 STORE messages. Otherwise all split head
-        // messages are in the store.
-        let head_store_msgs = if prev_skip > 0 || session.handoff_seq.is_some() {
-            split - 1
-        } else {
-            split
-        };
-        let new_skip = prev_skip + head_store_msgs as i64;
-        let _ = store
+        store
             .update_session(
                 &session.id,
                 &SessionPatch {
@@ -150,8 +151,8 @@ pub async fn compact(
                     ..Default::default()
                 },
             )
-            .await;
-        session.after_compaction(summary.clone(), new_skip);
+            .await
+            .context("persist compaction metadata")?;
     }
 
     on_event(SessionEvent::Status(String::new()));

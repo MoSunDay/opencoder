@@ -11,7 +11,6 @@
 //!
 //! Drain spawn/cancel/live-lifecycle contracts live in `web_drain_contract.rs`.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -257,17 +256,7 @@ async fn switch_agent_updates_stored_meta_and_handle() {
     let sid = Uuid::new_v4().to_string();
     seed(&state, &sid, None, "act", "m").await;
     // install a live handle so the override path is exercised
-    let (tx, _rx) = tokio::sync::broadcast::channel(8);
-    let handle = Arc::new(opencoder_web::handle::SessionHandle {
-        tx,
-        cancel: tokio::sync::Mutex::new(tokio_util::sync::CancellationToken::new()),
-        overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
-        draining: AtomicBool::new(false),
-        child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
-        child_cancels: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-    });
+    let handle = opencoder_web::handle::SessionHandle::new();
     state.handles.lock().await.insert(sid.clone(), handle);
 
     let resp = app
@@ -295,18 +284,10 @@ async fn switch_agent_updates_stored_meta_and_handle() {
 async fn interrupt_cancels_running_drain_token() {
     let (_app, state) = app().await;
     let sid = "int-sess";
-    let (tx, _rx) = tokio::sync::broadcast::channel(8);
     let cancel = tokio_util::sync::CancellationToken::new();
-    let handle = Arc::new(opencoder_web::handle::SessionHandle {
-        tx,
-        cancel: tokio::sync::Mutex::new(cancel.clone()),
-        overrides: tokio::sync::Mutex::new(opencoder_web::handle::RuntimeOverrides::default()),
-        draining: AtomicBool::new(true),
-        child_turn_cancels: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
-        child_cancels: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-    });
+    let handle = opencoder_web::handle::SessionHandle::new();
+    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    *handle.cancel.lock().await = cancel.clone();
     state.handles.lock().await.insert(sid.into(), handle);
 
     let resp = opencoder_web::api::post_interrupt(

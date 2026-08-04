@@ -1,12 +1,14 @@
 pub mod api;
+pub mod api_ops;
 pub mod auth;
+pub mod cmd;
 pub mod handle;
 pub mod html;
 
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use opencoder_store::{LibsqlStore, Store};
 
@@ -16,10 +18,6 @@ pub struct AppState {
     pub store: Arc<dyn Store>,
     pub workdir: std::path::PathBuf,
     pub handles: HandleMap,
-    /// Optional injected client. When set (tests), the prompt path uses it
-    /// instead of building a real `ChatClient` from config — enabling
-    /// deterministic end-to-end tests against a `MockChatClient`. `None` in
-    /// production (the server always owns the LLM gateway).
     pub client_override: Option<Arc<dyn opencoder_llm::ChatStream>>,
 }
 
@@ -76,6 +74,14 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
             "/api/sessions/:id/subagents/:task_id/steer",
             post(api::post_subagent_steer),
         )
+        .route("/api/sessions/:id/fork", post(api_ops::fork_session))
+        .route("/api/sessions/:id/compact", post(api_ops::post_compact))
+        .route("/api/sessions/:id/handoff", post(api_ops::post_handoff))
+        .route("/api/sessions/:id/skill", post(api_ops::post_skill))
+        .route("/api/config", get(api_ops::get_config))
+        .route("/api/config", patch(api_ops::patch_config))
+        .route("/api/bg", get(api_ops::list_bg))
+        .route("/api/bg/stop", post(api_ops::stop_bg))
         .route("/api/health", get(api::health))
         .with_state(state);
     if let Some(t) = token {
@@ -91,12 +97,6 @@ pub fn data_dir_for(workdir: &std::path::Path) -> std::path::PathBuf {
         .join(hash_of(workdir))
 }
 
-/// Stable 64-bit fingerprint of a workdir path, used to key the local data
-/// directory. Uses FNV-1a (deterministic, no extra dependency) rather than
-/// `std::collections::hash_map::DefaultHasher`, which the std docs explicitly
-/// warn is NOT stable across Rust versions — basing DB-path identity on it
-/// would silently "lose" sessions after a toolchain bump. This is an identity
-/// key, not a security primitive, so a non-cryptographic hash is appropriate.
 fn hash_of(p: &std::path::Path) -> String {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -113,12 +113,8 @@ mod tests {
     use super::hash_of;
     use std::path::Path;
 
-    /// Pin the hash to a fixed value so any future change to the algorithm
-    /// (which would silently remap workdirs to new data dirs and "lose"
-    /// sessions) is caught at test time.
     #[test]
     fn hash_of_is_stable_and_pinned() {
-        // FNV-1a 64 of the bytes of "/tmp/opencoder-pin"
         assert_eq!(hash_of(Path::new("/tmp/opencoder-pin")), "ecd58ecfd9089443");
     }
 

@@ -213,5 +213,8 @@ mod tests {
         let uri = format!("file://{}", tmp.path().to_str().unwrap());
         let result = try_load_image(&uri, Path::new("."));
         assert!(result.is_some());
+        let (data_uri, name) = result.unwrap();
+        assert!(data_uri.starts_with("data:image/png;base64,"));
+        assert!(name.ends_with(".png"));
     }
 }

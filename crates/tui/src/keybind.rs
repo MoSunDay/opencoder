@@ -8,7 +8,7 @@ pub const HELP: &str = "\
   Ctrl+T          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
   Ctrl+V          粘贴剪贴板图片（截图）
   Alt+回车            插入换行（多行输入）
-  $                选择并插入技能 -> {$name}；提交时加载
+  $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Esc              关闭帮助/弹窗/清空输入
@@ -17,6 +17,7 @@ pub const HELP: &str = "\
   Ctrl+D           退出
   Ctrl+H           打开/关闭此帮助
   Ctrl+W           删除光标前的单词
+  Alt+F / Alt+B    光标向前/向后移动一个单词（readline 风格）
   Ctrl+U           清空整个输入行（可被 Ctrl+Z 撤销）
   Ctrl+A / Ctrl+E  光标移到行首/行尾
   Ctrl+Z / Ctrl+Y  撤销 / 重做输入编辑

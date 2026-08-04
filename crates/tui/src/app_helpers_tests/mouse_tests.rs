@@ -1,5 +1,6 @@
 use super::mouse_helpers::{empty_hits, StubStore};
 use crate::app_helpers::*;
+use crate::render::SubagentBtn;
 use opencoder_session::SessionEvent;
 use ratatui::layout::Rect;
 
@@ -543,5 +544,80 @@ async fn compaction_header_click_toggles_collapse() {
             .iter()
             .any(|s| s.content.contains("hidden summary"))),
         "compaction must be expanded after the header click"
+    );
+}
+
+/// Regression test for the idle-session `[→ view]` bug: when a subagent has
+/// finished, clicking its header (which maps to a `SubagentBtn`) must set
+/// `subagent_focus` so the child transcript becomes visible. Previously the
+/// `Event::Mouse` arm never set `dirty = true`, so the focused view never
+/// re-rendered and the click appeared to do nothing.
+#[tokio::test]
+async fn clicking_subagent_view_enters_subagent() {
+    // Build a ChatView with one completed Subagent block — the realistic
+    // idle-session scenario where the user clicks `[→ view]`.
+    let mut chat = ChatView::default();
+    chat.apply(&SessionEvent::SubagentStart {
+        id: "s1".into(),
+        kind: "explore".into(),
+        prompt: "test subagent".into(),
+        child_session_id: "c1".into(),
+    });
+    chat.apply(&SessionEvent::SubagentEnd {
+        id: "s1".into(),
+        ok: true,
+        cancelled: false,
+        summary: "done".into(),
+    });
+
+    // Body-only hit map with a single subagent header button at row 1.
+    let body = Rect::new(0, 0, 80, 12);
+    let mut hits = empty_hits(body);
+    hits.subagent_btns.push(SubagentBtn {
+        block_idx: 0,
+        rect: Rect::new(1, 1, 78, 1),
+    });
+
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut selection: Option<SelRange> = None;
+    let mut subagent_focus: Option<usize> = None;
+    let mut subagent_sys = 0u64;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut copy_msg: Option<String> = None;
+    let mut last_click: Option<Instant> = None;
+    let mut dbl_click = false;
+    let mut queue_scroll: u32 = 0;
+    let store = StubStore;
+
+    handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 10,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        &hits,
+        &mut scroll,
+        &mut follow,
+        &mut selection,
+        &mut chat,
+        &mut subagent_focus,
+        &mut subagent_sys,
+        Path::new("."),
+        &mut queue_items,
+        "s",
+        &store,
+        &mut copy_msg,
+        &mut last_click,
+        &mut dbl_click,
+        &mut queue_scroll,
+    )
+    .await;
+
+    assert_eq!(
+        subagent_focus,
+        Some(0),
+        "clicking a subagent header must enter the subagent view"
     );
 }

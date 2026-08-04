@@ -26,6 +26,7 @@
 //! When frontmatter is absent the name falls back to the file/dir stem and the
 //! description to the first non-empty, non-heading body line.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// A loadable skill instruction pack.
@@ -409,6 +410,58 @@ pub fn extract_skill_tokens(text: &str) -> (String, Vec<String>) {
     (clean, names)
 }
 
+
+/// Strip only the `$name` tokens whose name is in `resolved`, leaving every
+/// **unresolved** `$name` sequence intact as literal text.
+///
+/// `extract_skill_tokens` strips *all* tokens (it is used purely to discover
+/// and activate skills) — but the resolvers that own the actual `clean` text
+/// must not discard bytes for names that matched no skill. Otherwise a token
+/// like `$review1) task` (where `review1` is not a real skill, but the greedy
+/// `[a-z0-9-]` charset consumed the `1`) permanently deletes the user's
+/// content. This function rebuilds the text keeping unresolved `$name` bytes
+/// verbatim.
+///
+/// The scan mirrors [`extract_skill_tokens`]: a token is `$` followed by an
+/// ASCII lowercase letter, extending over `[a-z0-9-]`. UTF-8 safe via
+/// byte-level detection — `$` and all name bytes are ASCII, so the scan never
+/// splits a multi-byte char.
+pub fn strip_resolved_skill_tokens(text: &str, resolved: &HashSet<String>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < text.len() {
+        if bytes[i] == b'$' && i + 1 < text.len() && bytes[i + 1].is_ascii_lowercase() {
+            let start = i + 1;
+            let mut end = start;
+            while end < text.len() {
+                let b = bytes[end];
+                if b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            if resolved.contains(&text[start..end]) {
+                // Resolved token: drop it entirely.
+                i = end;
+                continue;
+            }
+            // Unresolved: emit the `$` and let the main loop copy the name
+            // bytes verbatim (they are all ASCII lowercase/digit/dash, never
+            // `$`, so no nested token can form).
+            out.push('$');
+            i += 1;
+            continue;
+        }
+        let ch = text[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,6 +638,61 @@ mod tests {
         let (clean, names) = extract_skill_tokens("$review héllo 日本語");
         assert_eq!(clean, " héllo 日本語");
         assert_eq!(names, vec!["review"]);
+    }
+
+    // ----- strip_resolved_skill_tokens tests -----
+
+    #[test]
+    fn strip_resolved_greedy_glued_name_preserved_verbatim() {
+        // The greedy `[a-z0-9-]` charset scans `review1` as the *whole* token
+        // name. Since `review1` != `review`, it is unresolved and the entire
+        // `$review1` is kept verbatim — no content is lost. (Contrast with the
+        // old `extract_skill_tokens`, which stripped `review1` unconditionally
+        // and lost the `$review1` bytes.)
+        let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(strip_resolved_skill_tokens("$review1) task", &resolved), "$review1) task");
+    }
+
+    #[test]
+    fn strip_resolved_space_separated_resolved_drops_token() {
+        // With a separating space, the scanner reads just `review` (resolving
+        // it) and leaves the rest intact — the picker inserts a trailing
+        // space precisely to enable this clean path.
+        let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(strip_resolved_skill_tokens("$review 1) task", &resolved), " 1) task");
+    }
+
+    #[test]
+    fn strip_resolved_keeps_unresolved_verbatim() {
+        let resolved: HashSet<String> = HashSet::new();
+        assert_eq!(strip_resolved_skill_tokens("$bogus text", &resolved), "$bogus text");
+    }
+
+    #[test]
+    fn strip_resolved_mixed_tokens() {
+        // Resolved `review` is dropped; unresolved `bogus` is preserved.
+        let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(strip_resolved_skill_tokens("$review $bogus mixed", &resolved), " $bogus mixed");
+    }
+
+    #[test]
+    fn strip_resolved_empty_input() {
+        let resolved: HashSet<String> = HashSet::new();
+        assert_eq!(strip_resolved_skill_tokens("", &resolved), "");
+    }
+
+    #[test]
+    fn strip_resolved_literal_dollar_untouched() {
+        // `$5` / `$HOME` / trailing `$` are never tokens, so they pass through
+        // regardless of `resolved`.
+        let resolved: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(strip_resolved_skill_tokens("price is $5 $HOME total $", &resolved), "price is $5 $HOME total $");
+    }
+
+    #[test]
+    fn strip_resolved_utf8_preserved() {
+        let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(strip_resolved_skill_tokens("$review héllo 日本語", &resolved), " héllo 日本語");
     }
 
     // ----- write_install_script_in tests -----

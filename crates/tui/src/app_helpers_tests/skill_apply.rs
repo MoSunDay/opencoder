@@ -81,7 +81,8 @@ async fn apply_skill_tokens_reports_unknown_skill() {
         &skill_handle,
     );
 
-    assert_eq!(clean, "go  now");
+    // Unresolved `$ghost` is preserved verbatim (no content loss).
+    assert_eq!(clean, "go $ghost now");
     assert_eq!(unresolved, vec!["ghost".to_string()]);
     // No skill resolved -> active skill untouched, sys_tokens unchanged.
     assert!(active_skill.is_none());
@@ -235,9 +236,9 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
         &skill_handle,
     );
 
-    // Both tokens are stripped from the clean text...
-    assert_eq!(clean, " do  stuff");
-    // ...but only the known skill resolves; the unknown is reported back.
+    // Resolved `alpha` is stripped; unresolved `$ghost` preserved verbatim.
+    assert_eq!(clean, " do $ghost stuff");
+    // Only the known skill resolves; the unknown is reported back.
     assert_eq!(unresolved, vec!["ghost"]);
     assert_eq!(active_skill.as_deref(), Some("alpha"));
     assert_eq!(

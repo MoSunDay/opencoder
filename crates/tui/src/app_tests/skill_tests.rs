@@ -128,7 +128,9 @@ fn skill_menu_enter_picks_selected_skill() {
         "pick must not emit SetSkill"
     );
     assert!(menu.is_none(), "menu must close after a pick");
-    assert_eq!(input, "$alpha");
+    // Trailing space separates the token from any text the user types
+    // next (prevents `$alpha1` glue that would corrupt the token name).
+    assert_eq!(input, "$alpha ");
     assert_eq!(
         idx,
         input.chars().count(),
@@ -157,7 +159,7 @@ fn pick_inserts_token_at_cursor_mid_text() {
     );
     assert!(matches!(action, KeyAction::None));
     assert!(menu.is_none());
-    assert_eq!(input, "hello $alpha");
+    assert_eq!(input, "hello $alpha ");
     assert_eq!(idx, input.chars().count());
 }
 

@@ -3,7 +3,7 @@
 //! The function was moved to core so both the TUI and CLI headless path can
 //! share the same token-stripping logic.
 
-pub use opencoder_core::extract_skill_tokens;
+pub use opencoder_core::{extract_skill_tokens, strip_resolved_skill_tokens};
 
 #[cfg(test)]
 mod tests {

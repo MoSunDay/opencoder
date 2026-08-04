@@ -409,6 +409,12 @@ pub(crate) fn apply_skill_tokens_with(
         *sys_tokens = sys_tokens_for(agent_name, workdir, Some(&body));
         *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body);
     }
+    // Rebuild `clean` so that ONLY resolved tokens are stripped — unresolved
+    // `$name` bytes are preserved verbatim as literal text, preventing content
+    // loss (e.g. a glued `$review1) task` keeps the `1)` instead of vanishing).
+    let resolved_set: std::collections::HashSet<String> =
+        resolved_names.iter().cloned().collect();
+    let clean = crate::skill_token::strip_resolved_skill_tokens(text, &resolved_set);
     (clean, unresolved)
 }
 

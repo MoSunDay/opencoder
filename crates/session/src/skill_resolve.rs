@@ -35,7 +35,9 @@ pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin execut
 ///
 /// When `text` has no tokens the active skill is left untouched (sticky).
 /// When tokens are present, the resolved bodies are joined (`\\n\\n`) and set
-/// as the session skill, matching the TUI multi-skill convention.
+/// as the session skill, matching the TUI multi-skill convention. Only
+/// resolved `$name` tokens are stripped from the returned text; unresolved
+/// `$name` sequences are preserved verbatim as literal text.
 pub fn resolve_inline_skills_with(
     session: &SessionState,
     text: &str,
@@ -48,19 +50,26 @@ pub fn resolve_inline_skills_with(
     // Dedupe preserving first-seen order (mirrors the TUI resolver).
     let mut seen: HashSet<&str> = HashSet::new();
     let mut bodies: Vec<String> = Vec::new();
+    let mut resolved_names: HashSet<String> = HashSet::new();
     let mut unresolved: Vec<String> = Vec::new();
     for name in &names {
         if !seen.insert(name.as_str()) {
             continue;
         }
         match skills.iter().find(|s| &s.name == name) {
-            Some(sk) => bodies.push(sk.body.clone()),
+            Some(sk) => {
+                bodies.push(sk.body.clone());
+                resolved_names.insert(name.clone());
+            }
             None => unresolved.push(name.clone()),
         }
     }
     if !bodies.is_empty() {
         session.set_skill(Some(bodies.join("\n\n")));
     }
+    // Rebuild `clean` so ONLY resolved tokens are stripped — unresolved `$name`
+    // bytes stay as literal text, preventing content loss.
+    let clean = opencoder_core::strip_resolved_skill_tokens(text, &resolved_names);
     (clean, unresolved)
 }
 
@@ -149,7 +158,8 @@ mod tests {
     fn unresolved_skill_reported_and_skill_untouched() {
         let s = make_session();
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$bogus text", &[]);
-        assert_eq!(clean, " text");
+        // Unresolved `$bogus` is preserved verbatim (no content loss).
+        assert_eq!(clean, "$bogus text");
         assert_eq!(unresolved, vec!["bogus"]);
         assert!(
             s.skill_prompt_cloned().is_none(),
@@ -172,7 +182,8 @@ mod tests {
         let s = make_session();
         let skills = vec![skill("review", "R")];
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$review $bogus", &skills);
-        assert_eq!(clean, " ");
+        // Resolved `review` stripped; unresolved `$bogus` preserved verbatim.
+        assert_eq!(clean, " $bogus");
         assert_eq!(unresolved, vec!["bogus"]);
         assert_eq!(s.skill_prompt_cloned().as_deref(), Some("R"));
     }

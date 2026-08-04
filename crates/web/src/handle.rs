@@ -12,21 +12,23 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use opencoder_core::Config;
-use opencoder_llm::ChatStream;
+use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_session::compaction;
+use opencoder_session::plan_handoff;
+use opencoder_session::tools::registry as build_registry;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
-use opencoder_store::{Delivery, EventKind, SessionInput, Store};
-use tokio::sync::{broadcast, Mutex};
+use opencoder_store::{Delivery, EventKind, SessionInput, SessionPatch, Store};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use crate::cmd::DrainCmd;
+
 /// Shared SSE envelope (re-exported from `opencoder-core` so the server and a
-/// remote client agree on the wire shape). Construct live via
-/// [`sse_from_session_event`].
+/// remote client agree on the wire shape).
 pub use opencoder_core::SseEvt;
 
-/// Build the wire SSE event + coarse DB kind from a session event. `SseEvt`
-/// lives in `opencoder-core` (no dep on session/store), so this conversion is a
-/// free function here where both layers are visible.
+/// Build the wire SSE event + coarse DB kind from a session event.
 pub fn sse_from_session_event(_session_id: &str, ev: &SessionEvent) -> (SseEvt, EventKind) {
     let ts = opencoder_core::message::now_ms();
     (
@@ -41,48 +43,35 @@ pub fn sse_from_session_event(_session_id: &str, ev: &SessionEvent) -> (SseEvt, 
 }
 
 /// Per-session runtime state shared across HTTP requests, SSE subscribers, and
-/// the background drain task. A handle is get-or-created by either `/events`
-/// (to share the broadcast channel with future live events) or `/prompt` (to
-/// drive a drain). Whether a drain is *actually running* is tracked by
-/// `draining`, NOT by map presence — otherwise an early SSE subscriber's handle
-/// would block the drain from spawning (`/prompt` would admit then never run).
+/// the background drain task.
 pub struct SessionHandle {
     pub tx: broadcast::Sender<SseEvt>,
-    /// Per-drain cancel token, refreshed on each spawn so a prior interrupt's
-    /// permanent cancellation can't poison a subsequent drain.
     pub cancel: Mutex<CancellationToken>,
-    /// mutable runtime overrides applied at the next drain boundary
     pub overrides: Mutex<RuntimeOverrides>,
-    /// CAS guard: the first caller to flip this `true` owns the drain spawn.
-    /// Cleared by `DrainGuard` when the drain ends (normal/early/panic).
     pub draining: AtomicBool,
-    /// Registry of child subagent turn-cancel tokens, keyed by task_id (call_id).
-    /// Shared (via Arc) with the session's `SessionState.child_turn_cancels` so
-    /// the `post_subagent_steer` handler can fire a specific child's turn
-    /// interrupt to force immediate steer absorption.
-    ///
-    /// Uses `std::sync::Mutex` (not tokio's) to match
-    /// `SessionState.child_turn_cancels`, enabling the same `Arc` to be shared
-    /// between the handle and the live session state.
-    pub child_turn_cancels: Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
-    /// Registry of child subagent cancel tokens (derived via `child_token()`),
-    /// keyed by task_id (call_id). Shared with `SessionState.child_cancels` so
-    /// that a parent steer (POST /prompt or TUI `>`) can cancel all running
-    /// children without ending the parent's run_loop.
+    /// Sender for drain commands (compact, handoff, skill, config reload).
+    pub cmd_tx: mpsc::UnboundedSender<DrainCmd>,
+    /// Receiver for drain commands. `Option` so the drain task can `take()` it
+    /// for exclusive access, then put it back. Panic-safe via `CmdRxGuard`.
+    pub cmd_rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<DrainCmd>>>,
+    pub child_turn_cancels:
+        Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
     pub child_cancels: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
 }
 
 const BROADCAST_CAPACITY: usize = 256;
 
 impl SessionHandle {
-    /// Fresh handle with a non-cancelled token and `draining = false`.
     pub fn new() -> Arc<Self> {
         let (tx, _rx) = broadcast::channel::<SseEvt>(BROADCAST_CAPACITY);
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<DrainCmd>();
         Arc::new(SessionHandle {
             tx,
             cancel: Mutex::new(CancellationToken::new()),
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
+            cmd_tx,
+            cmd_rx: std::sync::Mutex::new(Some(cmd_rx)),
             child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             child_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
@@ -95,16 +84,13 @@ pub struct RuntimeOverrides {
     pub model: Option<String>,
 }
 
-/// The registry of live session handles, keyed by session id.
 pub type HandleMap = Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>;
 
 pub fn new_handle_map() -> HandleMap {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-/// RAII guard that clears the handle's `draining` flag on drop. Covers normal
-/// completion, early returns, and task panic (tokio unwinds spawned futures so
-/// `Drop` still runs), ensuring a crashed/idle drain can be re-spawned.
+/// RAII guard that clears `draining` on drop (panic-safe).
 struct DrainGuard {
     handle: Arc<SessionHandle>,
 }
@@ -115,12 +101,23 @@ impl Drop for DrainGuard {
     }
 }
 
-/// Admit a prompt durably, then ensure exactly one drain task is running for the
-/// session. Returns the admitted input's seq. A handle is get-or-created to
-/// share the broadcast channel (so early SSE subscribers receive live events);
-/// a `draining` CAS picks the single drain owner, independent of handle
-/// presence. A running drain absorbs the new input at its next turn boundary
-/// (steer) or idle point (queue).
+/// RAII guard that restores `cmd_rx` into the handle on drop.
+struct CmdRxGuard {
+    handle: Arc<SessionHandle>,
+    rx: Option<mpsc::UnboundedReceiver<DrainCmd>>,
+}
+
+impl Drop for CmdRxGuard {
+    fn drop(&mut self) {
+        if let Some(rx) = self.rx.take() {
+            if let Ok(mut g) = self.handle.cmd_rx.lock() {
+                *g = Some(rx);
+            }
+        }
+    }
+}
+
+/// Admit a prompt durably, then ensure exactly one drain task is running.
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_and_drain(
     handles: HandleMap,
@@ -146,8 +143,6 @@ pub async fn admit_and_drain(
     };
     let seq = store.admit_input(&input).await?;
 
-    // get-or-create the channel handle so an early /events subscriber (which
-    // may have created it) keeps receiving once the drain broadcasts here.
     let handle = {
         let mut map = handles.lock().await;
         map.entry(session_id.to_string())
@@ -155,12 +150,7 @@ pub async fn admit_and_drain(
             .clone()
     };
 
-    // CAS: first to flip draining true owns the spawn. Handle presence alone
-    // (e.g. a handle created by /events with no drain) must NOT gate spawning,
-    // otherwise the prompt is admitted but never processed.
     if !handle.draining.swap(true, Ordering::SeqCst) {
-        // refresh the cancel token so a previous interrupt's permanent cancel
-        // cannot immediately abort this fresh drain.
         let token = CancellationToken::new();
         *handle.cancel.lock().await = token.clone();
         let handles_clone = handles.clone();
@@ -172,22 +162,11 @@ pub async fn admit_and_drain(
         let handle_clone = handle.clone();
         tokio::spawn(async move {
             drain_to_completion(
-                handles_clone,
-                store_clone,
-                &sid,
-                client_clone,
-                wd,
-                cfg,
-                handle_clone,
+                handles_clone, store_clone, &sid, client_clone, wd, cfg, handle_clone,
             )
             .await;
         });
     } else {
-        // Lost the CAS: a drain appears to be running. But it may have
-        // already passed its final queue check and be exiting (draining
-        // still true until DrainGuard drops). Spawn a lightweight watchdog
-        // that waits for the drain to clear, then re-checks for our
-        // admitted input and spawns a fresh drain if needed.
         let handles_w = handles.clone();
         let store_w = store.clone();
         let sid_w = session_id.to_string();
@@ -196,19 +175,15 @@ pub async fn admit_and_drain(
         let wd_w = workdir.clone();
         let handle_w = handle.clone();
         tokio::spawn(async move {
-            // Wait for the current drain to finish (max ~5s).
             for _ in 0..100 {
                 if !handle_w.draining.load(Ordering::SeqCst) {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
-            // If draining is still true after timeout, assume it's stuck;
-            // don't spawn a duplicate. If it cleared, check for pending work.
             if handle_w.draining.load(Ordering::SeqCst) {
                 return;
             }
-            // Check if our admitted input (or any queue input) is still pending.
             let pending = store_w
                 .pending_inputs(&sid_w, opencoder_store::Delivery::Queue)
                 .await
@@ -216,37 +191,152 @@ pub async fn admit_and_drain(
             if pending.is_empty() {
                 return;
             }
-            // Race to spawn: try to flip draining false→true.
             if !handle_w.draining.swap(true, Ordering::SeqCst) {
                 let token = CancellationToken::new();
                 *handle_w.cancel.lock().await = token.clone();
-                drain_to_completion(
-                    handles_w,
-                    store_w,
-                    &sid_w,
-                    client_w,
-                    wd_w,
-                    cfg_w,
-                    handle_w,
-                )
-                .await;
+                drain_to_completion(handles_w, store_w, &sid_w, client_w, wd_w, cfg_w, handle_w)
+                    .await;
             }
         });
     }
-    // If a drain is already running with child subagents in flight, cancel
-    // them so the parent's run_loop returns from run_subagent and absorbs
-    // this newly-admitted steer at the next turn boundary. When no drain is
-    // running (fresh spawn), the registry is empty so this is a no-op.
     let _ = opencoder_session::fire_child_cancels(&handle.child_cancels);
     Ok(seq)
 }
 
-/// Drive the session runner to completion, broadcasting events. Applies runtime
-/// overrides (agent/model) before starting. The handle is left in the map when
-/// the drain ends (normal or interrupted) so late SSE subscribers can still
-/// replay from the store and a fresh prompt spawns a new drain; the `DrainGuard`
-/// clears `draining` on any exit path. On a missing session row the handle is
-/// removed (nothing is replayable and the caller must POST /sessions first).
+/// Ensure exactly one drain task is running WITHOUT admitting a prompt.
+/// Used by command endpoints (POST /compact, /handoff, etc.).
+pub async fn ensure_drain(
+    handles: HandleMap,
+    store: Arc<dyn Store>,
+    session_id: &str,
+    client: Arc<dyn ChatStream>,
+    workdir: std::path::PathBuf,
+    config: Config,
+) {
+    let handle = {
+        let mut map = handles.lock().await;
+        map.entry(session_id.to_string())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+    if !handle.draining.swap(true, Ordering::SeqCst) {
+        let token = CancellationToken::new();
+        *handle.cancel.lock().await = token.clone();
+        let handles_clone = handles.clone();
+        let store_clone = store.clone();
+        let sid = session_id.to_string();
+        let cfg = config.clone();
+        let client_clone = client.clone();
+        let wd = workdir.clone();
+        let handle_clone = handle.clone();
+        tokio::spawn(async move {
+            drain_to_completion(
+                handles_clone, store_clone, &sid, client_clone, wd, cfg, handle_clone,
+            )
+            .await;
+        });
+    }
+}
+
+/// Send a drain command to the session's handle.
+pub async fn send_cmd(handles: &HandleMap, session_id: &str, cmd: DrainCmd) -> bool {
+    let map = handles.lock().await;
+    if let Some(h) = map.get(session_id) {
+        let _ = h.cmd_tx.send(cmd);
+        true
+    } else {
+        false
+    }
+}
+
+/// Apply a single drain command to the live `&mut SessionState`.
+async fn apply_drain_cmd(
+    session: &mut opencoder_session::SessionState,
+    cmd: DrainCmd,
+    tx: &broadcast::Sender<SseEvt>,
+    sid: &str,
+    workdir: &std::path::Path,
+) {
+    let mut broadcast = |ev: SessionEvent| {
+        let (sse, _) = sse_from_session_event(sid, &ev);
+        let _ = tx.send(sse);
+    };
+    match cmd {
+        DrainCmd::Compact => {
+            let registry = build_registry();
+            match compaction::compact(session, &registry, &mut broadcast).await {
+                Ok(_) => broadcast(SessionEvent::Done),
+                Err(e) => broadcast(SessionEvent::Error(format!("compact: {e:#}"))),
+            }
+        }
+        DrainCmd::Handoff { extra } => {
+            if let Some(plan) = plan_handoff::handoff(session, &extra) {
+                if let Some(store) = &session.store {
+                    let _ = store
+                        .update_session(
+                            &session.id,
+                            &SessionPatch {
+                                agent: Some("act".into()),
+                                handoff_seq: session.handoff_seq,
+                                handoff_plan: session.handoff_plan.clone(),
+                                updated_at: Some(opencoder_core::message::now_ms()),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                }
+                broadcast(SessionEvent::TranscriptReset(session.messages.clone()));
+                broadcast(SessionEvent::PlanHandoff(plan));
+                broadcast(SessionEvent::Done);
+            } else {
+                broadcast(SessionEvent::Error(
+                    "no plan to hand off".into(),
+                ));
+            }
+        }
+        DrainCmd::SetSkill(body) => {
+            session.set_skill(body);
+            broadcast(SessionEvent::Done);
+        }
+        DrainCmd::ReloadConfig => match Config::load(workdir) {
+            Ok(new_cfg) => {
+                match new_cfg.resolve_endpoint() {
+                    Ok(ep) => match ChatClient::new_with_read_timeout(
+                        &ep.base_url,
+                        &ep.api_key,
+                        &ep.headers,
+                        new_cfg.stream_idle_timeout(),
+                        new_cfg.network.proxy.as_deref(),
+                    ) {
+                        Ok(c) => session
+                            .apply_config_reload(new_cfg, Arc::new(c) as Arc<dyn ChatStream>),
+                        Err(_) => session.apply_config_reload_keep_client(new_cfg),
+                    },
+                    Err(_) => session.apply_config_reload_keep_client(new_cfg),
+                }
+                broadcast(SessionEvent::Done);
+            }
+            Err(e) => broadcast(SessionEvent::Error(format!("reload config: {e:#}"))),
+        },
+    }
+}
+
+/// Drain all pending commands from the receiver and apply them in order.
+async fn process_drain_cmds(
+    session: &mut opencoder_session::SessionState,
+    rx_guard: &mut CmdRxGuard,
+    tx: &broadcast::Sender<SseEvt>,
+    sid: &str,
+    workdir: &std::path::Path,
+) {
+    if let Some(rx) = rx_guard.rx.as_mut() {
+        while let Ok(cmd) = rx.try_recv() {
+            apply_drain_cmd(session, cmd, tx, sid, workdir).await;
+        }
+    }
+}
+
+/// Drive the session runner to completion, broadcasting events.
 async fn drain_to_completion(
     handles: HandleMap,
     store: Arc<dyn Store>,
@@ -256,12 +346,14 @@ async fn drain_to_completion(
     mut config: Config,
     handle: Arc<SessionHandle>,
 ) {
-    // clear `draining` on any exit (including panic) so the session is re-spawnable.
     let guard = DrainGuard {
         handle: handle.clone(),
     };
+    let mut rx_guard = CmdRxGuard {
+        handle: handle.clone(),
+        rx: handle.cmd_rx.lock().map(|mut g| g.take()).ok().flatten(),
+    };
 
-    // apply overrides
     {
         let ov = handle.overrides.lock().await;
         if let Some(a) = &ov.agent {
@@ -272,8 +364,6 @@ async fn drain_to_completion(
         }
     }
 
-    // build the session (resume if history exists)
-    // Obtain the handle's cancel token so the replay phase also respects interrupts.
     let cancel_token = handle.cancel.lock().await.clone();
     let mut session = match resume_session(
         store.clone(),
@@ -287,7 +377,6 @@ async fn drain_to_completion(
     {
         Ok(s) => s,
         Err(e) => {
-            // session row missing — caller must create it first (POST /sessions).
             warn!(session_id, error = %e, "drain: cannot resume (session row missing?)");
             let mut map = handles.lock().await;
             map.remove(session_id);
@@ -295,40 +384,30 @@ async fn drain_to_completion(
         }
     };
     session.cancel = Some(handle.cancel.lock().await.clone());
-    // Share the child turn-cancel registry with the session state so that when
-    // `run_subagent` inserts tokens into `session.child_turn_cancels`, the web
-    // handler can observe/fire them through the handle's `child_turn_cancels`.
     session.child_turn_cancels = handle.child_turn_cancels.clone();
     session.child_cancels = handle.child_cancels.clone();
 
     let tx = handle.tx.clone();
     let sid = session_id.to_string();
-    // Buffered persistence: a single flusher batches the high-frequency delta
-    // events into one transactional append_events per turn (O(turn) writes
-    // instead of O(tokens)) while losing zero events — structural events flush
-    // pending deltas first, and the awaited flusher guarantees a final flush.
     let (sink, flusher) =
         opencoder_session::spawn_event_flusher(Some(store.clone()), session_id.to_string());
     let result = run(&mut session, String::new(), |ev| {
         let (sse, _kind) = sse_from_session_event(&sid, &ev);
-        // broadcast (ignore lagging subscribers)
         let _ = tx.send(sse);
-        // enqueue for durable (batched) persistence — never blocks
         let _ = sink.push(&ev);
     })
     .await;
+
+    // After run completes, process any queued drain commands.
+    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sid, &workdir).await;
+
     drop(sink);
-    // Release the drain guard BEFORE awaiting the flusher so a new prompt
-    // can spawn a fresh drain while the old flusher persists events.
     drop(guard);
+    drop(rx_guard);
     if let Err(e) = flusher.await {
         warn!(session_id, error = %e, "final event flush failed");
     }
-
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");
     }
-
-    // idle: leave the handle in the map so SSE replay (from the store) and a
-    // later re-admit both work; `DrainGuard` has already cleared `draining`.
 }

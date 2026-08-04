@@ -33,6 +33,10 @@ fn enter_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
 }
 
+fn tab_key() -> KeyEvent {
+    KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
+}
+
 /// Drain the first real UiCmd from cmd_rx, skipping the ResetCancel preamble
 /// that start_turn always sends first.
 fn drain_cmd(cmd_rx: &mut mpsc::Receiver<UiCmd>) -> UiCmd {
@@ -330,4 +334,118 @@ async fn slash_act_from_plan_without_plan_dispatches_prompt() {
         UiCmd::Prompt(ref p, _) => assert_eq!(p, "/act"),
         _other => panic!("expected Prompt(\"/act\"), got unexpected variant"),
     }
+}
+
+/// Tab on a command in the popup fills the composer input with the command
+/// name plus a trailing space (so the user can type args or press Enter
+/// immediately). The popup closes and the composer is ready. No turn starts.
+#[tokio::test]
+async fn tab_fill_input_adds_trailing_space() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for("plan");
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        tab_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        "plan",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+    )
+    .await;
+
+    assert!(input.starts_with('/'), "input must start with /, got {input:?}");
+    assert!(
+        input.ends_with(' '),
+        "input must end with a trailing space, got {input:?}"
+    );
+    assert_eq!(input, "/plan ");
+    assert_eq!(cursor_idx, input.len(), "cursor must sit after the space");
+    assert!(!running, "FillInput must not start a turn");
+    assert!(command_menu.is_none(), "popup must close after Tab-fill");
+    assert!(
+        matches!(flow, LoopFlow::Redraw),
+        "FillInput must request a redraw"
+    );
+}
+
+/// The trailing-space UX is uniform across command categories: a local
+/// command (`/ps`) also gets the trailing space, so Enter still dispatches
+/// correctly (parse trims) while args can be appended.
+#[tokio::test]
+async fn tab_fill_local_command_adds_trailing_space() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for("ps");
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        tab_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        "act",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+    )
+    .await;
+
+    assert_eq!(input, "/ps ");
+    assert!(input.ends_with(' '));
+    assert_eq!(cursor_idx, input.len());
+    assert!(command_menu.is_none());
+    assert!(matches!(flow, LoopFlow::Redraw));
 }

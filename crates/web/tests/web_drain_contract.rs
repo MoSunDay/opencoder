@@ -310,6 +310,7 @@ async fn post_prompt_returns_500_on_malformed_config() {
             delivery: None,
             agent: None,
             model: None,
+            skill: None,
         }),
     )
     .await;

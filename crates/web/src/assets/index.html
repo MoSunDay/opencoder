@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>opencoder · sessions</title>
+  <!--STYLES-->
+</head>
+<body>
+  <aside id="side">
+    <div class="hdr"><span>opencoder</span><button class="new" onclick="newSession()">+ new</button></div>
+    <input id="search" type="text" placeholder="search sessions..." autocomplete="off"/>
+    <div id="sess-list" style="flex:1;margin-top:6px"></div>
+  </aside>
+  <main id="main">
+    <div id="top">
+      <span class="id" id="cur-id"></span>
+      <select id="mode" title="agent/mode" onchange="switchAgent()">
+        <option value="act">act</option>
+        <option value="plan">plan</option>
+      </select>
+      <input id="model" type="text" placeholder="model" onchange="switchModel()"/>
+      <button onclick="forkSession()">fork</button>
+      <button onclick="compactSession()">compact</button>
+      <button class="danger" onclick="delSession(currentId())">delete</button>
+    </div>
+    <div id="log"></div>
+    <div id="composer">
+      <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+        <textarea id="msg" rows="1" placeholder="Send a message...  (Enter=steer, Shift+Enter=queue, Esc=interrupt)"></textarea>
+        <div id="img-preview"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;align-items:center">
+        <label class="clip" title="attach image">&#x1f4ce;<input type="file" accept="image/*" multiple onchange="handleFileSelect(event)"/></label>
+        <button id="send" onclick="send('steer')">Send</button>
+      </div>
+    </div>
+  </main>
+  <!--JS_RENDER-->
+  <!--JS_APP-->
+</body>
+</html>

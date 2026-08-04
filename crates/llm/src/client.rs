@@ -16,12 +16,6 @@ use crate::sse::SseDecoder;
 use crate::stream::ChatStream;
 use crate::tool_call::{CompletedToolCall, ToolAccumulator};
 
-#[derive(Debug, Clone)]
-pub struct ChatParams {
-    pub temperature: Option<f64>,
-    pub max_tokens: Option<u64>,
-}
-
 #[derive(Clone)]
 pub struct ChatClient {
     http: reqwest::Client,
@@ -159,9 +153,8 @@ async fn run_stream(
             Err(OnceError::Connect(e)) => {
                 // Connection-level retries already exhausted inside
                 // `connect_with_retry`; surface as a terminal error.
-                let _ = tx
-                    .send(LlmEvent::Error(format!("stream failed: {e:#}")))
-                    .await;
+                // Don't emit LlmEvent::Error here — the spawn task in
+                // chat_stream catches the returned Err and emits it.
                 return Err(e);
             }
             Err(OnceError::Interrupted { reason, partial }) => {

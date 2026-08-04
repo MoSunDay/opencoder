@@ -18,7 +18,7 @@ pub struct SessionUiState {
     pub history: Vec<String>,
     pub scroll: u32,
     pub follow: bool,
-    /// Queue/steer panel scroll offset (0 = pinned to newest).
+    /// Queue/steer panel scroll offset (0 = pinned to top (oldest)).
     pub queue_scroll: u32,
     pub sys_tokens: u64,
     pub queue_items: Vec<(i64, String)>,

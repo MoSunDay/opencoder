@@ -97,7 +97,7 @@ pub(super) async fn run_app(
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
-    // Queue/steer panel scroll offset (0 = pinned to newest); snapshot/restored per-session.
+    // Queue/steer panel scroll offset (0 = pinned to top (oldest)); snapshot/restored per-session.
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());

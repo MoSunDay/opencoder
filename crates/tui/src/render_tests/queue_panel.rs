@@ -99,9 +99,9 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
 
 /// Overflowing panels (more entries than the 3-row viewport) draw a scrollbar
 /// in the rightmost column (track `│` / thumb `█`) and window by `scroll`:
-/// `scroll == 0` pins to the newest entries, `scroll == max_scroll` shows the
-/// oldest. The old static "↑N more" marker is gone — the scrollbar carries the
-/// overflow signal.
+/// `scroll == 0` pins to the oldest (top) entries, `scroll == max_scroll`
+/// shows the newest. The thumb tracks `scroll`, so it sits at the top when
+/// pinned and at the bottom when scrolled to the end.
 #[test]
 fn queue_panel_overflow_windows_and_scrollbar() {
     use crate::queue_panel::{QueueBtn, QueueBtnAction};
@@ -115,7 +115,7 @@ fn queue_panel_overflow_windows_and_scrollbar() {
         (5, "newest".into()),
     ];
 
-    // scroll = 0 → pinned to newest: rows are middle / newer / newest.
+    // scroll = 0 → pinned to top (oldest): rows are oldest / older / middle.
     let mut btns: Vec<QueueBtn> = Vec::new();
     terminal
         .draw(|f| {
@@ -126,25 +126,25 @@ fn queue_panel_overflow_windows_and_scrollbar() {
     let buf = terminal.backend().buffer();
     let row0 = row_text(buf, 0, 80);
     let row2 = row_text(buf, 2, 80);
-    assert!(row0.contains("middle"), "newest-anchored window: {row0}");
-    assert!(row2.contains("newest"), "newest-anchored window: {row2}");
+    assert!(row0.contains("oldest"), "top-anchored window: {row0}");
+    assert!(row2.contains("middle"), "top-anchored window: {row2}");
     assert!(
-        !row0.contains("oldest") && !row0.contains("older"),
-        "older entries must be hidden at scroll=0: {row0}"
+        !row0.contains("newer") && !row0.contains("newest"),
+        "newer entries must be hidden at scroll=0: {row0}"
     );
-    // Scrollbar: thumb sits at the top when pinned to newest.
+    // Scrollbar: thumb sits at the top when pinned to the oldest window.
     assert_eq!(row0.chars().last(), Some('\u{2588}'), "thumb at top");
     assert_eq!(row2.chars().last(), Some('\u{250a}'), "track below thumb");
     // Hit rects stay aligned with the (shifted-left) control strip.
     let del = btns
         .iter()
-        .filter(|b| b.seq == 5 && b.action == QueueBtnAction::Delete)
+        .filter(|b| b.seq == 1 && b.action == QueueBtnAction::Delete)
         .collect::<Vec<_>>();
-    assert_eq!(del.len(), 1, "one delete button for the newest row");
+    assert_eq!(del.len(), 1, "one delete button for the oldest row");
     assert_eq!(del[0].rect.x, 78, "delete glyph 1 col left of scrollbar");
-    assert_eq!(del[0].rect.y, 2);
+    assert_eq!(del[0].rect.y, 0);
 
-    // scroll = max_scroll (2) → oldest entries visible, thumb at the bottom.
+    // scroll = max_scroll (2) → newest entries visible, thumb at the bottom.
     let mut btns2: Vec<QueueBtn> = Vec::new();
     terminal
         .draw(|f| {
@@ -155,8 +155,8 @@ fn queue_panel_overflow_windows_and_scrollbar() {
     let buf = terminal.backend().buffer();
     let row0 = row_text(buf, 0, 80);
     let row2 = row_text(buf, 2, 80);
-    assert!(row0.contains("oldest"), "scrolled window: {row0}");
-    assert!(row2.contains("middle"), "scrolled window: {row2}");
+    assert!(row0.contains("middle"), "scrolled window: {row0}");
+    assert!(row2.contains("newest"), "scrolled window: {row2}");
     assert_eq!(row0.chars().last(), Some('\u{250a}'), "track above thumb");
     assert_eq!(row2.chars().last(), Some('\u{2588}'), "thumb at bottom");
 }

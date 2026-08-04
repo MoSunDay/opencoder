@@ -93,8 +93,7 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
         return;
     }
     session.maybe_tag_plan_prompt(&mut text);
-    let mut m = Message::user_with_images(new_id(), text, images);
-    m.synthetic = true;
+    let m = Message::user_with_images(new_id(), text, images);
     session.record(m).await;
 }
 
@@ -194,7 +193,7 @@ mod tests {
         // First plan input (count 0) -> no read-only tag appended.
         record_compound(&mut s, "review the code", &[]).await;
         assert_eq!(s.messages.len(), 1);
-        assert!(s.messages[0].synthetic, "recorded as synthetic");
+        assert!(!s.messages[0].synthetic, "text path records as real user input");
         assert!(
             s.messages[0].text().contains("review the code"),
             "cleaned text recorded"

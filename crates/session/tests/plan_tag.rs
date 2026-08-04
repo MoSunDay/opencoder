@@ -108,12 +108,23 @@ fn last_real_user_text(session: &SessionState) -> String {
         .unwrap_or_default()
 }
 
-/// Texts of every synthetic user message (steers / drained queue items).
-fn synthetic_user_texts(session: &SessionState) -> Vec<String> {
+/// Text of the first user message (the kickoff / initial prompt).
+fn kickoff_text(session: &SessionState) -> String {
     session
         .messages
         .iter()
-        .filter(|m| m.role == Role::User && m.synthetic)
+        .find(|m| m.role == Role::User)
+        .map(|m| m.text())
+        .unwrap_or_default()
+}
+
+/// Texts of every user message after the kickoff (steers / drained queue).
+fn promoted_user_texts(session: &SessionState) -> Vec<String> {
+    session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .skip(1)
         .map(|m| m.text())
         .collect()
 }
@@ -187,10 +198,10 @@ async fn steer_prompt_tagged_after_first() {
     // (count 1 -> 2, tagged) within a single run.
     run(&mut s, "kickoff".into(), |_| {}).await.unwrap();
 
-    assert_eq!(last_real_user_text(&s), "kickoff");
-    let synth = synthetic_user_texts(&s);
-    assert_eq!(synth.len(), 1, "exactly one steer promoted");
-    assert!(synth[0].contains(TAG), "steer must be tagged: {}", synth[0]);
+    assert_eq!(kickoff_text(&s), "kickoff");
+    let promoted = promoted_user_texts(&s);
+    assert_eq!(promoted.len(), 1, "exactly one steer promoted");
+    assert!(promoted[0].contains(TAG), "steer must be tagged: {}", promoted[0]);
     assert_eq!(s.plan_input_count, 2);
 
     let reqs = mock.requests();
@@ -226,13 +237,13 @@ async fn queued_prompt_tagged_after_first() {
 
     run(&mut s, "kickoff".into(), |_| {}).await.unwrap();
 
-    assert_eq!(last_real_user_text(&s), "kickoff");
-    let synth = synthetic_user_texts(&s);
-    assert_eq!(synth.len(), 1, "exactly one queued item drained");
+    assert_eq!(kickoff_text(&s), "kickoff");
+    let promoted = promoted_user_texts(&s);
+    assert_eq!(promoted.len(), 1, "exactly one queued item drained");
     assert!(
-        synth[0].contains(TAG),
+        promoted[0].contains(TAG),
         "queued prompt must be tagged: {}",
-        synth[0]
+        promoted[0]
     );
     assert_eq!(s.plan_input_count, 2);
 

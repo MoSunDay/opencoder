@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
@@ -223,7 +223,7 @@ async fn multiple_steers_at_one_boundary_promoted_once() {
     let msgs = store.load_messages("drain-sess").await.unwrap();
     let promoted_count = msgs
         .iter()
-        .filter(|m| m.synthetic && m.text().starts_with("multi-"))
+        .filter(|m| m.role == Role::User && m.text().starts_with("multi-"))
         .count();
     assert_eq!(
         promoted_count, 3,
@@ -266,7 +266,7 @@ async fn queue_drains_all_fifo_in_single_run_then_done() {
     let msgs = store.load_messages("drain-sess").await.unwrap();
     let queued_promoted: Vec<String> = msgs
         .iter()
-        .filter(|m| m.synthetic && m.text().starts_with("QUEUE-"))
+        .filter(|m| m.role == Role::User && m.text().starts_with("QUEUE-"))
         .map(|m| m.text())
         .collect();
     assert_eq!(

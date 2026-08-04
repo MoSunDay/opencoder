@@ -99,7 +99,7 @@ async fn seed(
 }
 
 #[tokio::test]
-async fn health_ok() {
+async fn health_ok_carries_version_and_commit() {
     let (app, _) = app().await;
     let resp = app
         .oneshot(
@@ -111,6 +111,19 @@ async fn health_ok() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["ok"], true);
+    let version = body["version"].as_str().unwrap();
+    let commit = body["commit"].as_str().unwrap();
+    // The version must carry the build-time commit id.
+    assert!(
+        version.contains(commit),
+        "version={version} missing commit {commit}"
+    );
+    assert!(version.contains('(') && version.contains(')'));
 }
 
 #[tokio::test]

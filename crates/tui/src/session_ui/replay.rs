@@ -23,9 +23,10 @@ use crate::theme;
 pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMap<String, Vec<u8>>) {
     match msg.role {
         Role::User => {
-            // Synthetic user messages (steer/queue promotions, plan->act handoff,
-            // compaction summaries) are internal — skip `user:` blocks on replay, as
-            // the live event stream and compaction layer treat them.
+            // Synthetic user messages (plan->act handoff, compaction summaries,
+            // pure-skill triggers) are internal — skip `user:` blocks on replay.
+            // Steer/queue promotions are real user input and ARE rendered so the
+            // user sees their queued/steered prompts after resume.
             if msg.synthetic {
                 return;
             }

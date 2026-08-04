@@ -105,6 +105,24 @@ pub(super) async fn claim_one_queued(
     }
 }
 
+/// Peek (read-only) whether any Steer inputs are pending for this session,
+/// WITHOUT promoting them. Used at the idle boundary (text-only turn, empty
+/// queue) to close the race where a steer is admitted after the top-of-loop
+/// `claim_steers` but before `Done` would otherwise strand it. Returns false
+/// when no store is attached or the read fails (fail-open: go idle).
+pub(super) async fn has_pending_steers(session: &SessionState) -> bool {
+    let Some(store) = session.store.clone() else {
+        return false;
+    };
+    match store.pending_inputs(&session.id, Delivery::Steer).await {
+        Ok(v) => !v.is_empty(),
+        Err(e) => {
+            tracing::warn!(error = %e, "has_pending_steers: pending_inputs failed");
+            false
+        }
+    }
+}
+
 /// Resolves when a turn-level interrupt is requested. Like `await_cancel` but
 /// for the separate `turn_cancel` token: resolves when a subagent steer
 /// "submit-now" (the `>` button) fires the token. Stays pending forever when

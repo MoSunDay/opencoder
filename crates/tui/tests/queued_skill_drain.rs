@@ -1,4 +1,4 @@
-//! Regression: a Tab-queued `{$skill} + text` submission keeps its skill
+//! Regression: a Tab-queued `$skill + text` submission keeps its skill
 //! through the drain (the report: "queued 也是如果 skill插入+ 其他需求，
 //! skill 插入信息会消失").
 //!
@@ -67,7 +67,7 @@ async fn queued_combined_submission_drains_with_skill() {
     )
     .with_store(store.clone());
 
-    // Mirror `KeyAction::Queue`'s `resolve_persist` on `{$haiku} fix the bug`:
+    // Mirror `KeyAction::Queue`'s `resolve_persist` on `$haiku fix the bug`:
     // activate the skill through the shared Arc (same handle the worker's
     // `run_one_llm_call` reads) and persist `sessions.skill`, then admit only
     // the token-stripped clean text.
@@ -138,8 +138,8 @@ async fn queued_combined_submission_drains_with_skill() {
         user_msgs.iter().all(|m| {
             !m.get("content")
                 .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("{$"))
+                .is_some_and(|c| c.contains("$"))
         }),
-        "the {{$skill}} token must never reach the LLM: {user_msgs:?}"
+        "the $skill token must never reach the LLM: {user_msgs:?}"
     );
 }

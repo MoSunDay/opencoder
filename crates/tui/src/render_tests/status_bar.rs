@@ -57,7 +57,7 @@ fn status_bar_running_shows_spinner_and_status() {
 
 /// The status bar must NOT render a `skill:` badge (removed per user request
 /// — the skill is no longer surfaced in the bottom bar; only the echoed text
-/// in the body carries the {$name} token verbatim).
+/// in the body carries the $name token verbatim).
 #[test]
 fn status_bar_has_no_skill_badge() {
     let backend = TestBackend::new(120, 3);

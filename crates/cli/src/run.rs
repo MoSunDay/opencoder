@@ -198,7 +198,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         session.agent.prompt = format!("{}\n\n{}", body.trim(), opencoder_core::tool_preamble());
     }
 
-    // Extract and resolve {$skill-name} tokens from the prompt.
+    // Extract and resolve $skill-name tokens from the prompt.
     let prompt = {
         let (clean, names) = opencoder_core::extract_skill_tokens(&prompt);
         if !names.is_empty() {

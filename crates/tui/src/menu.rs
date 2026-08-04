@@ -17,7 +17,7 @@ use ratatui::Frame;
 
 /// Outcome of a keystroke while the skill menu is open. The caller maps this to
 /// its own `KeyAction`: `Quit` propagates, `Pick` activates a skill (inserting a
-/// `{$name}` token), and `Idle` leaves the menu open.
+/// `$name` token), and `Idle` leaves the menu open.
 pub enum MenuOutcome {
     Idle,
     Quit,

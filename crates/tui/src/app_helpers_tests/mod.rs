@@ -236,7 +236,7 @@ fn mk_input_with_images_passes_images_through() {
         "s1",
         opencoder_store::Delivery::Steer,
         "hello",
-        Some("{$skill} hello".to_string()),
+        Some("$skill hello".to_string()),
         &images,
     );
     assert_eq!(input.session_id, "s1");
@@ -245,7 +245,7 @@ fn mk_input_with_images_passes_images_through() {
     assert_eq!(input.delivery, opencoder_store::Delivery::Steer);
     assert_eq!(
         input.display_text.as_deref(),
-        Some("{$skill} hello"),
+        Some("$skill hello"),
         "display_text must be passed through verbatim"
     );
 }
@@ -300,12 +300,12 @@ fn mk_input_with_images_passes_display_text() {
         "s3",
         opencoder_store::Delivery::Queue,
         "clean prompt",
-        Some("{$repo-memory} clean prompt".to_string()),
+        Some("$repo-memory clean prompt".to_string()),
         &[],
     );
     assert_eq!(
         input.display_text.as_deref(),
-        Some("{$repo-memory} clean prompt"),
+        Some("$repo-memory clean prompt"),
         "the display form must be preserved verbatim while prompt stays clean"
     );
     assert_eq!(
@@ -344,7 +344,7 @@ fn pending_mirror_uses_display_text_with_prompt_fallback() {
             1,
             Delivery::Queue,
             "fix the bug",
-            Some("{$repo-memory} fix the bug"),
+            Some("$repo-memory fix the bug"),
         ),
         pending_row(11, "s", 2, Delivery::Steer, "steer me", None),
     ];
@@ -352,7 +352,7 @@ fn pending_mirror_uses_display_text_with_prompt_fallback() {
     assert_eq!(
         mirror,
         vec![
-            (10, "{$repo-memory} fix the bug".to_string()),
+            (10, "$repo-memory fix the bug".to_string()),
             (11, "steer me".to_string()),
         ],
         "display_text verbatim when present; prompt fallback when None"
@@ -371,14 +371,14 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
         })
         .await
         .unwrap();
-    // Queued input with a distinct display form (raw `{$skill}` original).
+    // Queued input with a distinct display form (raw `$skill` original).
     let row = pending_row(
         0,
         sid,
         1,
         Delivery::Queue,
         "fix the bug",
-        Some("{$repo-memory} fix the bug"),
+        Some("$repo-memory fix the bug"),
     );
     let q_seq = store.admit_input(&row).await.unwrap();
     // Steered input admitted without a display form (pre-display_text rows).
@@ -394,7 +394,7 @@ async fn restore_pending_mirrors_restores_display_text_at_reload() {
 
     assert_eq!(
         queue_items,
-        vec![(q_seq, "{$repo-memory} fix the bug".to_string())],
+        vec![(q_seq, "$repo-memory fix the bug".to_string())],
         "queue mirror restores the display original"
     );
     assert_eq!(
@@ -574,7 +574,7 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
 }
 
 /// Combined-content submit while running: when a prompt contains BOTH a
-/// `{$skill}` token AND other text, the skill is resolved (body injected into
+/// `$skill` token AND other text, the skill is resolved (body injected into
 /// the system prompt) while the **clean text** — not the skill trigger — is what
 /// reaches the queue. This is the critical contract for "skill + other input".
 #[tokio::test]
@@ -605,7 +605,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
         .unwrap();
 
     // The raw prompt a user typed: a skill token interleaved with prose.
-    let raw = "{$repo-memory} fix the bug in main.rs";
+    let raw = "$repo-memory fix the bug in main.rs";
     let (clean, names) = extract_skill_tokens(raw);
 
     // Precondition: the token parsed and clean text carries the real task.

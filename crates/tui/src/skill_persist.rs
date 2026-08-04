@@ -1,10 +1,10 @@
 //! Persisting the active skill so it survives resume/restart.
 //!
-//! When a `{$skill}` token is submitted inline — most importantly when it is
+//! When a `$skill` token is submitted inline — most importantly when it is
 //! **queued** via Tab while a turn is running — `resolve_and_warn` activates the
 //! skill in-memory (`SessionState::skill_prompt`) but, unlike the skill-menu
 //! (`SetSkill`) path, it never wrote the skill body to the store. A combined
-//! submission like `{$skill} fix the bug` therefore queued/persisted only the
+//! submission like `$skill fix the bug` therefore queued/persisted only the
 //! clean task text, so on resume the queued task ran **without** the skill.
 //!
 //! [`persist_skill`] mirrors the `SetSkill` path: a best-effort
@@ -55,7 +55,7 @@ pub(crate) async fn persist_skill(
 }
 
 
-/// Resolve `{$skill}` tokens in `text` (activating the skill in-memory) **and**
+/// Resolve `$skill` tokens in `text` (activating the skill in-memory) **and**
 /// persist the result to the store when it changed — the single composition
 /// `run_app` relies on for every Submit / Steer / Queue. Extracted so the
 /// three call sites stay byte-identical and the wiring itself is testable.
@@ -147,7 +147,7 @@ mod tests {
         Arc::new(Mutex::new(v.map(String::from)))
     }
 
-    /// Mirrors a combined `{$skill} do X` submit: the token resolves and sets
+    /// Mirrors a combined `$skill do X` submit: the token resolves and sets
     /// `skill_prompt` to `Some(body)` while `prev` (the pre-submit body) was
     /// `None`. The skill must land in the store so a later resume restores it.
     #[tokio::test]
@@ -202,7 +202,7 @@ mod tests {
         assert!(persisted.skill.is_none());
     }
 
-    /// Regression for the reported bug: a **queued** `{$skill} fix the bug`
+    /// Regression for the reported bug: a **queued** `$skill fix the bug`
     /// submission. `extract_skill_tokens` strips the token and yields the clean
     /// task text; the resolved skill body lands in `skill_prompt`. Previously
     /// that body was in-memory only, so on resume the queued task ran with no
@@ -212,7 +212,7 @@ mod tests {
         use opencoder_core::extract_skill_tokens;
 
         let store = fresh_store().await;
-        let raw = "{$repo-memory} fix the bug";
+        let raw = "$repo-memory fix the bug";
         let (clean, names) = extract_skill_tokens(raw);
 
         // Mirror resolve_and_warn: token parsed, clean task text carried, skill
@@ -232,7 +232,7 @@ mod tests {
         );
     }
 
-    /// Switching skills mid-session (`{$a}` then later `{$b}`) persists the new
+    /// Switching skills mid-session (`$a` then later `$b`) persists the new
     /// body, not the old one.
     #[tokio::test]
     async fn persist_skill_updates_when_skill_changes() {
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(persisted.skill.as_deref(), Some("body-b"));
     }
 
-    /// End-to-end composition: `{$alpha} fix the bug` through `resolve_persist`
+    /// End-to-end composition: `$alpha fix the bug` through `resolve_persist`
     /// activates the skill in-memory AND persists it to the store — the exact
     /// wiring `run_app`'s Submit/Steer/Queue branches rely on. Pins that the
     /// three call sites' "snapshot -> resolve -> persist" sequence is correct,
@@ -274,7 +274,7 @@ mod tests {
 
         let (clean, unresolved) = resolve_persist_with(
             &skills,
-            "{$alpha} fix the bug",
+            "$alpha fix the bug",
             &mut active_skill,
             &mut active_skill_body,
             &mut sys_tokens,

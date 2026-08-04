@@ -69,12 +69,12 @@ pub(crate) fn handle_key(
     if skill_menu.is_some() {
         return match handle_menu_key(skill_menu, k) {
             MenuOutcome::Quit => KeyAction::Quit,
-            // A skill pick inserts a `{$name}` token at the cursor (the `$`
+            // A skill pick inserts a `$name` token at the cursor (the `$`
             // that opened the menu was already consumed). The skill body is
             // resolved and loaded on submit, not here, so picking is cheap and
             // reversible (backspace removes the token).
             MenuOutcome::Pick((name, _body)) => {
-                let token = format!("{{${}}}", name);
+                let token = format!("${}", name);
                 let (s, i) = composer::insert_str(input, *cursor_idx, &token);
                 *input = s;
                 *cursor_idx = i;

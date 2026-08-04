@@ -1,6 +1,6 @@
 //! `apply_skill_tokens_with` tests — pure app_helpers tests, extracted here
 //! from `app_tests` (they test `app_helpers::apply_skill_tokens_with`, not
-//! `app::handle_key`). Includes combined-content cases where a `{$skill}`
+//! `app::handle_key`). Includes combined-content cases where a `$skill`
 //! token is mixed with other input text.
 
 
@@ -32,7 +32,7 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
     let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
         &skills,
-        "hello {$alpha} world",
+        "hello $alpha world",
         &mut active_skill,
         &mut active_skill_body,
         &mut sys_tokens,
@@ -72,7 +72,7 @@ async fn apply_skill_tokens_reports_unknown_skill() {
     let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
     let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
         &skills,
-        "go {$ghost} now",
+        "go $ghost now",
         &mut active_skill,
         &mut active_skill_body,
         &mut sys_tokens,
@@ -139,7 +139,7 @@ async fn apply_skill_tokens_no_tokens_leaves_skill_untouched() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn apply_skill_tokens_combined_content_token_at_end() {
-    // "do stuff {$alpha}" — token is at the tail, prose leads.
+    // "do stuff $alpha" — token is at the tail, prose leads.
     let dir = skill_tempdir("alpha", "alpha body");
     let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -151,7 +151,7 @@ async fn apply_skill_tokens_combined_content_token_at_end() {
     let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
     let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
         &skills,
-        "do stuff {$alpha}",
+        "do stuff $alpha",
         &mut active_skill,
         &mut active_skill_body,
         &mut sys_tokens,
@@ -173,7 +173,7 @@ async fn apply_skill_tokens_combined_content_token_at_end() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn apply_skill_tokens_combined_content_multiple_skills_with_text() {
-    // "{$alpha} do {$beta} stuff" — two skills interleaved with prose.
+    // "$alpha do $beta stuff" — two skills interleaved with prose.
     let dir = skill_tempdir("alpha", "alpha body");
     // second skill in the same skills dir
     std::fs::write(
@@ -192,7 +192,7 @@ async fn apply_skill_tokens_combined_content_multiple_skills_with_text() {
     let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
     let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
         &skills,
-        "{$alpha} do {$beta} stuff",
+        "$alpha do $beta stuff",
         &mut active_skill,
         &mut active_skill_body,
         &mut sys_tokens,
@@ -214,7 +214,7 @@ async fn apply_skill_tokens_combined_content_multiple_skills_with_text() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
-    // "{$alpha} do {$ghost} stuff" — one known, one unknown.
+    // "$alpha do $ghost stuff" — one known, one unknown.
     let dir = skill_tempdir("alpha", "alpha body");
     let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -226,7 +226,7 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
     let skills = opencoder_core::discover_in(&dir.path().join(".opencoder").join("skills"));
     let (clean, unresolved) = crate::app_helpers::apply_skill_tokens_with(
         &skills,
-        "{$alpha} do {$ghost} stuff",
+        "$alpha do $ghost stuff",
         &mut active_skill,
         &mut active_skill_body,
         &mut sys_tokens,

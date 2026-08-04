@@ -1,5 +1,5 @@
 //! Latent tool gating: tools that exist in the registry but are hidden from
-//! the model until a corresponding skill is activated via `{$skill-name}`.
+//! the model until a corresponding skill is activated via `$skill-name`.
 //!
 //! This is the third filtering layer (after `ToolFilter` and
 //! `CapabilitiesConfig`). A latent tool passes the agent allowlist and

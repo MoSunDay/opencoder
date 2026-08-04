@@ -227,7 +227,7 @@ pub(crate) async fn run_loop(
                     ) && crate::control_cmd::is_clear_context_handoff(
                         session.handoff_plan.as_deref().unwrap_or(""),
                     );
-                    // Compound (/plan review): record the rest as a synthetic
+                    // Compound (/plan review): record the rest as a real
                     // user message in the new mode.
                     if let Some(rest) = rest {
                         clear_sentinel = false;
@@ -236,7 +236,7 @@ pub(crate) async fn run_loop(
                     continue;
                 }
                 clear_sentinel = false;
-                // Resolve `$skill` tokens, apply plan tag, record as synthetic.
+                // Resolve `$skill` tokens, apply plan tag, record as real user turn.
                 crate::skill_resolve::record_compound(session, p, imgs).await;
             }
             // Sentinel ClearContext: go idle without an LM call.

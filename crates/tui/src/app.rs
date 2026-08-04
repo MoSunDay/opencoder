@@ -8,7 +8,7 @@ use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -540,8 +540,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         chat.steer_items.push((seq, display.clone()));
-                                        // Echo immediately (not deferred to SteerConsumed).
-                                        chat.push_marker(Line::from(Span::styled(format!("steer: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))));
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `$name` token): admit the trigger
@@ -552,7 +550,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         chat.steer_items.push((seq, display.clone()));
-                                        chat.push_marker(Line::from(Span::styled(format!("steer: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))));
                                     }
                                 }
                                 // Fire interrupt immediately so the steer is
@@ -578,8 +575,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
-                                        // Echo immediately (not deferred to QueueConsumed).
-                                        chat.push_marker(Line::from(Span::styled(format!("queued: {display}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
                                         chat.note_requirement_submitted();
                                     }
                                 } else if let Some(skill_name) = active_skill.as_deref() {
@@ -590,7 +585,6 @@ pub(super) async fn run_app(
                                     if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
-                                        chat.push_marker(Line::from(Span::styled(format!("queued: {display}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
                                         chat.note_requirement_submitted();
                                     }
                                 }

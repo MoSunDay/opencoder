@@ -17,7 +17,7 @@ use crossterm::event::KeyEvent;
 use opencoder_core::Config;
 use opencoder_session::SessionEvent;
 use opencoder_store::Store;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -271,9 +271,10 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
                 if let SessionEvent::QueueConsumed { seq } = &sev {
-                    // The queued prompt was already echoed into the transcript at
-                    // admit time (app.rs). Here we only drop the consumed entry
-                    // by seq from the pending mirror.
+                    // Echo at consume time (prompt was visible in pending panel).
+                    if let Some((_, d)) = queue_items.iter().find(|(s, _)| s == seq).cloned() {
+                        chat.push_marker(Line::from(Span::styled(format!("queued: {d}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
+                    }
                     queue_items.retain(|(s, _)| s != seq);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {

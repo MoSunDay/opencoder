@@ -107,17 +107,18 @@ pub(crate) fn handle_key(
         }
     }
     // Queue/steer panel scroll keys: Shift+PageUp looks at older pending
-    // entries, Shift+PageDown returns to the newest. Plain PageUp/PageDown
-    // keep scrolling the body (below). A stale offset is clamped on the next
-    // render, so these are safe even while the panel is hidden (plan mode).
+    // entries (toward the top), Shift+PageDown moves toward newer ones
+    // (toward the bottom). Plain PageUp/PageDown keep scrolling the body
+    // (below). A stale offset is clamped on the next render, so these are
+    // safe even while the panel is hidden (plan mode).
     if k.modifiers.contains(KeyModifiers::SHIFT) {
         match k.code {
             KeyCode::PageUp => {
-                *queue_scroll = queue_scroll.saturating_add(1);
+                *queue_scroll = queue_scroll.saturating_sub(1);
                 return KeyAction::None;
             }
             KeyCode::PageDown => {
-                *queue_scroll = queue_scroll.saturating_sub(1);
+                *queue_scroll = queue_scroll.saturating_add(1);
                 return KeyAction::None;
             }
             _ => {}

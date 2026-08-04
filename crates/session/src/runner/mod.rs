@@ -26,7 +26,7 @@ use event::{Sink, DOOM_THRESHOLD};
 use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
-use steer::{claim_one_queued, claim_steers, is_turn_cancelled, reset_turn_cancel};
+use steer::{claim_one_queued, claim_steers, has_pending_steers, is_turn_cancelled, reset_turn_cancel};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -336,10 +336,10 @@ pub(crate) async fn run_loop(
 
         if tool_calls.is_empty() {
             // Idle boundary: drain FIFO queued follow-ups until empty. Control
-            // commands (/act, /plan, /act_clear_context) are applied without an
-            // LLM turn, so multiple drain in sequence. A real prompt breaks the
-            // inner loop; the next idle boundary claims the next item (Done).
+            // commands apply without an LLM turn; a real prompt breaks to run.
             let mut got_real_prompt = false;
+            // Late steer admitted mid-turn (after the top-of-loop claim).
+            let mut late_steer = false;
             loop {
                 if let Some((seq, q, imgs)) = claim_one_queued(session).await {
                     on_event(SessionEvent::QueueConsumed { seq });
@@ -371,12 +371,18 @@ pub(crate) async fn run_loop(
                     got_real_prompt = true;
                     break;
                 }
-                // Queue empty: go idle.
+                // Queue empty: peek for a late steer admitted mid-turn; if
+                // pending, skip Done so claim_steers absorbs it next loop.
+                if has_pending_steers(session).await {
+                    late_steer = true;
+                    break;
+                }
+                // Queue empty and no late steer: go idle.
                 on_event(SessionEvent::Done);
                 break;
             }
-            if got_real_prompt {
-                continue; // outer loop: LLM processes the recorded prompt
+            if got_real_prompt || late_steer {
+                continue; // outer loop: LLM processes the recorded prompt / steer
             }
             break; // outer loop: idle (Done emitted)
         }

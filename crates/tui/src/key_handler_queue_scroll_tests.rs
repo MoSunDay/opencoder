@@ -17,7 +17,7 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
+    let mut queue_scroll: u32 = 2;
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT),
@@ -41,13 +41,13 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 1, "Shift+PageUp looks at older entries");
+    assert_eq!(queue_scroll, 1, "Shift+PageUp looks at older entries (top)");
     assert_eq!(scroll, 50, "body scroll untouched");
     assert!(!follow, "body follow untouched");
 }
 
 #[test]
-fn shift_page_down_returns_to_newest() {
+fn shift_page_down_advances_toward_newest() {
     let mut input = String::new();
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
@@ -83,13 +83,13 @@ fn shift_page_down_returns_to_newest() {
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 2, "Shift+PageDown moves toward newest");
+    assert_eq!(queue_scroll, 4, "Shift+PageDown moves toward newer entries (bottom)");
     assert_eq!(scroll, 50, "body scroll untouched");
     assert!(follow, "body follow untouched");
 }
 
 #[test]
-fn shift_page_down_floors_at_zero() {
+fn shift_page_up_floors_at_zero() {
     // The floor crossing (1 -> 0) must clamp, and a further press must stay
     // pinned at 0 — never negative.
     let mut input = String::new();
@@ -107,7 +107,7 @@ fn shift_page_down_floors_at_zero() {
 
     for _ in 0..2 {
         let action = handle_key(
-            KeyEvent::new(KeyCode::PageDown, KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT),
             &mut input,
             &mut cursor,
             &history,
@@ -129,7 +129,7 @@ fn shift_page_down_floors_at_zero() {
         );
         assert!(matches!(action, KeyAction::None));
     }
-    assert_eq!(queue_scroll, 0, "crossed the floor and pinned at zero");
+    assert_eq!(queue_scroll, 0, "floor at top, pinned at zero");
 }
 
 #[test]

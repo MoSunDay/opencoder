@@ -150,7 +150,7 @@ pub(crate) fn visible_window(total: usize, height: usize, scroll: u32) -> (usize
     let overflow = total > height;
     let max_scroll = total.saturating_sub(height);
     let s = (scroll as usize).min(max_scroll);
-    (max_scroll - s, max_scroll, overflow)
+    (s, max_scroll, overflow)
 }
 
 /// Thin scrollbar drawn in the rightmost panel column when entries overflow
@@ -226,8 +226,8 @@ pub(crate) fn render_queue_panel(
     }
 
     let max_lines = (area.height as usize).min(3);
-    // `scroll == 0` pins to the newest entries (drain order); `scroll > 0`
-    // looks back at older ones. `visible_window` clamps stale offsets.
+    // `scroll == 0` pins to the top (oldest entries); `scroll > 0` looks
+    // ahead at newer ones. `visible_window` clamps stale offsets.
     let (start, max_scroll, overflow) = visible_window(total, max_lines, scroll);
     // When overflowing, the scrollbar takes the rightmost column: the control
     // strip shifts one column left so the visible glyphs stay aligned with
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_window_pins_to_newest_when_fits() {
+    fn visible_window_pins_to_top_when_fits() {
         // No overflow: whole list visible, start = 0, no scrolling possible.
         assert_eq!(visible_window(3, 3, 0), (0, 0, false));
         assert_eq!(visible_window(2, 3, 99), (0, 0, false));
@@ -427,12 +427,13 @@ mod tests {
 
     #[test]
     fn visible_window_clamps_stale_scroll() {
-        // 5 entries in a 3-row panel: max_scroll = 2, newest at scroll = 0.
-        assert_eq!(visible_window(5, 3, 0), (2, 2, true));
+        // 5 entries in a 3-row panel: max_scroll = 2. Top-anchored, so
+        // scroll = 0 shows the oldest (top) window and start tracks scroll.
+        assert_eq!(visible_window(5, 3, 0), (0, 2, true));
         assert_eq!(visible_window(5, 3, 1), (1, 2, true));
-        assert_eq!(visible_window(5, 3, 2), (0, 2, true));
-        // Stale offset beyond max_scroll clamps to the oldest window.
-        assert_eq!(visible_window(5, 3, 9), (0, 2, true));
+        assert_eq!(visible_window(5, 3, 2), (2, 2, true));
+        // Stale offset beyond max_scroll clamps to the newest (bottom) window.
+        assert_eq!(visible_window(5, 3, 9), (2, 2, true));
         // Panel shrank after deletes: 3 entries now fit, offset resets.
         assert_eq!(visible_window(3, 3, 4), (0, 0, false));
         // Empty panel: degenerate but safe.

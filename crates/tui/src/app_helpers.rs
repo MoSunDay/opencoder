@@ -711,12 +711,10 @@ pub(crate) async fn handle_mouse(
             *dbl_click = false;
         }
         MouseEventKind::ScrollUp => {
-            // Wheel-up over the queue/steer panel looks at older entries (rects never overlap the body).
+            // Wheel-up over the queue/steer panel looks at older entries (toward the top; rects never overlap the body).
             if let Some(r) = hits.queue_panel {
                 if in_rect(r, m.column, m.row) {
-                    // Clamp to the cached panel total (mirrors the body clamp) so burst wheels can't overshoot.
-                    let max_scroll = hits.queue_total.saturating_sub(r.height as usize);
-                    *queue_scroll = queue_scroll.saturating_add(1).min(max_scroll as u32);
+                    *queue_scroll = queue_scroll.saturating_sub(1);
                     return MouseOutcome::None;
                 }
             }
@@ -728,10 +726,12 @@ pub(crate) async fn handle_mouse(
             }
         }
         MouseEventKind::ScrollDown => {
-            // Wheel-down over the queue/steer panel returns toward newest (0 = pinned).
+            // Wheel-down over the queue/steer panel moves toward newer entries (toward the bottom).
             if let Some(r) = hits.queue_panel {
                 if in_rect(r, m.column, m.row) {
-                    *queue_scroll = queue_scroll.saturating_sub(1);
+                    // Clamp to the cached panel total (mirrors the body clamp) so burst wheels can't overshoot.
+                    let max_scroll = hits.queue_total.saturating_sub(r.height as usize);
+                    *queue_scroll = queue_scroll.saturating_add(1).min(max_scroll as u32);
                     return MouseOutcome::None;
                 }
             }

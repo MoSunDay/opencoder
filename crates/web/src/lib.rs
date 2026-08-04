@@ -43,8 +43,8 @@ pub async fn serve(
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let addr = listener.local_addr()?;
-    tracing::info!("opencoder server listening on http://{addr}");
-    println!("opencoder server listening on http://{addr}");
+    tracing::info!("opencoder {} listening on http://{addr}", opencoder_core::version::VERSION_LONG);
+    println!("opencoder {} listening on http://{addr}", opencoder_core::version::VERSION_LONG);
     axum::serve(listener, app).await?;
     Ok(())
 }

@@ -566,7 +566,11 @@ pub async fn get_events(
 }
 
 pub async fn health() -> impl IntoResponse {
-    Json(json!({ "ok": true }))
+    Json(json!({
+        "ok": true,
+        "version": opencoder_core::version::VERSION_LONG,
+        "commit": opencoder_core::version::GIT_COMMIT,
+    }))
 }
 
 /// Highest persisted event seq for a session (0 if none). A remote client uses

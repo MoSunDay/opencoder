@@ -516,6 +516,7 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::FillInput(s) => {
             input.clear();
             input.push_str(&s);
+            input.push(' ');  // trailing space so args/Enter work immediately
             *cursor_idx = input.len();
             return LoopFlow::Redraw;
         }

@@ -46,9 +46,9 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
     // plan->act handoff / clear-context marker (handoff_seq) — in which case
     // the store count is `skip + len - 1`. Mirrors SessionState::store_message_count.
     let store_msg_count = if let Some(skip) = session.summary_seq {
-        skip as usize + session.messages.len() - 1
+        skip as usize + session.messages.len().saturating_sub(1)
     } else if let Some(skip) = session.handoff_seq {
-        skip as usize + session.messages.len() - 1
+        skip as usize + session.messages.len().saturating_sub(1)
     } else {
         session.messages.len()
     };

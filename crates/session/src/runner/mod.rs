@@ -248,13 +248,38 @@ pub(crate) async fn run_loop(
         }
 
         if compaction::should_compact(session) {
-            match compaction::compact(session, registry, &mut *on_event).await {
-                Ok(Some(summary)) => {
-                    on_event(SessionEvent::TranscriptReset(session.messages.clone()));
-                    on_event(SessionEvent::Compaction(summary));
+            // Retry compaction a few times (transient LLM failures like rate
+            // limits are common) before giving up. On final failure return Err
+            // so the caller decides what to do — falling through to
+            // run_one_llm_call with an over-budget transcript would guarantee
+            // a context-length 400 and kill the session.
+            let mut last_err: Option<anyhow::Error> = None;
+            for attempt in 0..=2u8 {
+                match compaction::compact(session, registry, &mut *on_event).await {
+                    Ok(Some(summary)) => {
+                        on_event(SessionEvent::TranscriptReset(session.messages.clone()));
+                        on_event(SessionEvent::Compaction(summary));
+                        last_err = None;
+                        break;
+                    }
+                    Ok(None) => {
+                        last_err = None;
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                        if attempt < 2 {
+                            on_event(SessionEvent::Status(format!(
+                                "compaction retry {}/2",
+                                attempt + 1
+                            )));
+                        }
+                    }
                 }
-                Ok(None) => {}
-                Err(e) => on_event(SessionEvent::Error(format!("compaction failed: {e:#}"))),
+            }
+            if let Some(e) = last_err {
+                on_event(SessionEvent::Error(format!("compaction failed: {e:#}")));
+                return Err(e);
             }
         }
 

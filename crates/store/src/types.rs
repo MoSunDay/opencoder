@@ -57,6 +57,10 @@ pub struct SessionPatch {
     pub handoff_plan: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_handoff: bool,
+    /// When true, sets `skill` to NULL (clears the active skill). Used
+    /// separately from `skill: None` (which means "don't touch").
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_skill: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

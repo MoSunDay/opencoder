@@ -26,7 +26,7 @@ pub async fn admit(conn: &Connection, input: &SessionInput) -> Result<i64> {
         )
         .await
         .context("insert input")?;
-        last_input_seq_in_tx(conn).await
+        last_input_seq_in_tx(conn, &input.session_id).await
     })
     .await
 }
@@ -68,7 +68,7 @@ pub async fn promote(
         }
         drop(stmt);
         drop(rows);
-        let promoted_seq = last_input_seq_in_tx(conn).await? + 1;
+        let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
         for s in &seqs {
             let n = conn
                 .execute(
@@ -99,7 +99,7 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
         drop(stmt);
         drop(rows);
         if let Some(s) = target {
-            let promoted_seq = last_input_seq_in_tx(conn).await? + 1;
+            let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
             conn.execute(
                 "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
                 params![promoted_seq, s],
@@ -137,7 +137,7 @@ pub async fn claim_next_queue(
         drop(stmt);
         drop(rows);
         if let Some((seq, input)) = claimed {
-            let promoted_seq = last_input_seq_in_tx(conn).await? + 1;
+            let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
             conn.execute(
                 "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
                 params![promoted_seq, seq],
@@ -220,9 +220,11 @@ async fn next_admitted_seq(conn: &Connection, session_id: &str) -> Result<i64> {
     }
 }
 
-async fn last_input_seq_in_tx(conn: &Connection) -> Result<i64> {
-    let stmt = conn.prepare("SELECT MAX(seq) FROM session_inputs").await?;
-    let mut rows = stmt.query(()).await?;
+async fn last_input_seq_in_tx(conn: &Connection, session_id: &str) -> Result<i64> {
+    let stmt = conn
+        .prepare("SELECT MAX(seq) FROM session_inputs WHERE session_id = ?")
+        .await?;
+    let mut rows = stmt.query(params![session_id]).await?;
     if let Some(r) = rows.next().await? {
         Ok(r.get::<Option<i64>>(0)?.unwrap_or(0))
     } else {

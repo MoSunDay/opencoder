@@ -152,6 +152,9 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("skill = ?");
         args.push(v.clone().into());
     }
+    if patch.clear_skill {
+        sets.push("skill = NULL");
+    }
     if let Some(v) = patch.updated_at {
         sets.push("updated_at = ?");
         args.push(v.into());

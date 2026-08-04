@@ -119,7 +119,13 @@ impl Tool for BashTool {
         // process-group id equals its pid, so `kill(-pgid, SIGKILL)` reaps the
         // whole descendant tree on timeout.
         let mut child = cmd.spawn()?;
-        let pid = child.id().unwrap_or(0);
+        // Guard against a None pid: `unwrap_or(0)` would make `kill(-0, ...)`
+        // target our own process group. A successful `spawn()` always yields a
+        // pid on Unix, so this early return is purely defensive.
+        let pid = match child.id() {
+            Some(p) => p,
+            None => return Ok(ToolOutput::err("failed to get child pid")),
+        };
         #[cfg(unix)]
         let pgid = pid as libc::pid_t;
         // On non-unix there is no process group; `pid` only feeds the registry

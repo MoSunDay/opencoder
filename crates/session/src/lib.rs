@@ -340,9 +340,9 @@ impl SessionState {
         // cases the true store count is `skip + len - 1`; with no synthetic
         // head every in-memory message is already persisted.
         if let Some(skip) = self.summary_seq {
-            skip as usize + self.messages.len() - 1
+            skip as usize + self.messages.len().saturating_sub(1)
         } else if let Some(skip) = self.handoff_seq {
-            skip as usize + self.messages.len() - 1
+            skip as usize + self.messages.len().saturating_sub(1)
         } else {
             self.messages.len()
         }
@@ -659,5 +659,72 @@ mod compaction_after_handoff_tests {
         assert_eq!(prev_skip, 20);
         s.after_compaction("s".into(), 20);
         assert!(s.handoff_seq.is_none());
+    }
+}
+
+#[cfg(test)]
+mod store_message_count_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    fn make_session() -> SessionState {
+        SessionState::new(
+            "test",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            PathBuf::from("."),
+        )
+    }
+
+    #[test]
+    fn store_message_count_no_synthetic_head() {
+        let mut s = make_session();
+        s.messages.push(Message::user("u1", "hi"));
+        s.messages.push(Message::assistant("a1"));
+        assert_eq!(s.store_message_count(), 2);
+    }
+
+    #[test]
+    fn store_message_count_with_summary_seq() {
+        let mut s = make_session();
+        s.summary_seq = Some(5);
+        // The synthetic summary at index 0 is NOT in the store, so the
+        // store count is 5 + (2 - 1) = 6.
+        s.messages.push(Message::user("u1", "summary"));
+        s.messages.push(Message::assistant("a1"));
+        assert_eq!(s.store_message_count(), 6);
+    }
+
+    #[test]
+    fn store_message_count_with_handoff_seq() {
+        let mut s = make_session();
+        s.handoff_seq = Some(3);
+        s.messages.push(Message::user("u1", "handoff"));
+        s.messages.push(Message::assistant("a1"));
+        // 3 + (2 - 1) = 4
+        assert_eq!(s.store_message_count(), 4);
+    }
+
+    #[test]
+    fn store_message_count_empty_with_summary_seq_does_not_overflow() {
+        // This is the bug: messages.len() == 0 with summary_seq set would
+        // underflow. saturating_sub prevents the panic.
+        let mut s = make_session();
+        s.summary_seq = Some(5);
+        s.messages.clear();
+        // skip=5 + saturating_sub(0,1)=0 = 5
+        assert_eq!(s.store_message_count(), 5);
+    }
+
+    #[test]
+    fn store_message_count_empty_with_handoff_seq_does_not_overflow() {
+        let mut s = make_session();
+        s.handoff_seq = Some(3);
+        s.messages.clear();
+        assert_eq!(s.store_message_count(), 3);
     }
 }

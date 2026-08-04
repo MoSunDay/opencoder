@@ -128,7 +128,10 @@ pub async fn get_messages(
 }
 
 async fn messages_response(state: &AppState, id: &str) -> Result<Response, Response> {
-    let meta = state.store.get_session(id).await.ok().flatten();
+    let meta = match state.store.get_session(id).await {
+        Ok(m) => m,
+        Err(e) => return Err(error_500(format!("get_session: {e:#}"))),
+    };
     let messages = state
         .store
         .load_messages(id)
@@ -148,6 +151,9 @@ pub struct PromptBody {
     pub delivery: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
+    /// Optional skill name. Persisted to session meta and live-applied to a
+    /// running drain (resume restores it automatically).
+    pub skill: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -203,6 +209,20 @@ pub async fn post_prompt(
     if let Err(e) = ensure_session_row(&state, &id, &body.prompt, &config).await {
         return error_500(e);
     }
+    // Persist skill if provided (resume will restore it on the next drain).
+    if let Some(skill) = &body.skill {
+        let _ = state
+            .store
+            .update_session(
+                &id,
+                &SessionPatch {
+                    skill: Some(skill.clone()),
+                    updated_at: Some(opencoder_core::message::now_ms()),
+                    ..Default::default()
+                },
+            )
+            .await;
+    }
     match admit_and_drain(
         state.handles.clone(),
         state.store.clone(),
@@ -227,8 +247,10 @@ async fn ensure_session_row(
     prompt: &str,
     config: &Config,
 ) -> Result<(), String> {
-    if state.store.get_session(id).await.ok().flatten().is_some() {
-        return Ok(());
+    match state.store.get_session(id).await {
+        Ok(Some(_)) => return Ok(()),
+        Ok(None) => {}
+        Err(e) => return Err(format!("get_session: {e:#}")),
     }
     let now = opencoder_core::message::now_ms();
     state
@@ -442,8 +464,10 @@ pub async fn get_events(
 
     // Reject non-existent sessions: otherwise a get-or-created handle would
     // subscribe to a broadcast that never fires, hanging the SSE stream forever.
-    if state.store.get_session(&id).await.ok().flatten().is_none() {
-        return error_404("session not found");
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404("session not found"),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
     }
 
     // Subscribe FIRST, then query persisted events. This closes the race where

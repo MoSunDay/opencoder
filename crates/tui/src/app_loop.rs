@@ -169,13 +169,20 @@ pub(crate) async fn handle_switch_agent(
     active_skill_body: &Option<String>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
+    if plan_to_act && chat.plan_submitted && *running {
+        // Plan turn still running — Shift+Tab is a no-op. sys_tokens is NOT
+        // updated here: the agent stays in plan mode, so the context meter must
+        // keep the plan-mode baseline. (Updating it to the act-mode count would
+        // corrupt the meter for the remainder of the running plan turn.)
+        *mode_flash = Some(("\u{21bb} plan running\u{2026}".into(), anim_tick));
+        return SwitchOutcome::Proceed;
+    }
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
+    // Optimistically reflect the switch so the status chip is correct even if
+    // AgentSwitch is dropped under channel pressure. Covers non-turning switches
+    // (Alt+Tab) that emit no TurnDone to reconcile against.
+    chat.agent = name.clone();
     if plan_to_act && chat.plan_submitted {
-        if *running {
-            // Plan turn still running — Shift+Tab is a no-op.
-            *mode_flash = Some(("\u{21bb} plan running\u{2026}".into(), anim_tick));
-            return SwitchOutcome::Proceed;
-        }
         // Idle: handoff immediately, carrying any input text.
         let extra = std::mem::take(input);
         *cursor_idx = 0;
@@ -327,7 +334,12 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
             }
-            UiEvent::TurnDone => {
+            UiEvent::TurnDone(agent) => {
+                // Reconcile the status chip from the authoritative agent.
+                // AgentSwitch (the only other writer of chat.agent) is delivered
+                // via try_send and may be dropped when the UI channel saturates.
+                // TurnDone uses send().await (always lands).
+                chat.agent = agent;
                 // Safety net: SessionEvent::Done (which triggers
                 // finalize_assistant -> markdown::render) is sent via
                 // try_send and may be dropped during token bursts.

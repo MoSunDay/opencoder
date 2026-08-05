@@ -324,3 +324,114 @@ fn tee_to_real_file_blocked() {
     ));
 }
 
+/// Regression for bug B1: command wrappers (`env`, `nohup`, `timeout`, …) used
+/// to mask the real command so plan-mode writes slipped through as ReadOnly.
+/// `classify_segment` now strips wrappers before extracting the command name.
+#[test]
+fn wrapper_commands_dont_mask_writes() {
+    // Each of these wraps a mutating command and must still be blocked.
+    assert!(matches!(
+        classify("env rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    assert!(matches!(classify("nohup rm"), BashVerdict::WriteBlocked(_)));
+    assert!(matches!(
+        classify("timeout 10 rm -rf x"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    // Double sudo is still fully unwrapped.
+    assert!(matches!(
+        classify("sudo sudo rm"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    // Other wrappers over mutating commands.
+    assert!(matches!(
+        classify("nice rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    assert!(matches!(
+        classify("command mv a b"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    assert!(matches!(
+        classify("ionice rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    // Nested wrappers are fully unwrapped before classification.
+    assert!(matches!(
+        classify("env FOO=bar nohup rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    // sudo + wrapper + mutating command.
+    assert!(matches!(
+        classify("sudo env rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+}
+
+/// `env` with only variable assignments (no real write beneath it) stays
+/// read-only — the wrapper stripping must not over-block.
+#[test]
+fn env_with_only_assignment_is_read_only() {
+    assert_eq!(classify("env FOO=bar ls"), BashVerdict::ReadOnly);
+    assert_eq!(classify("env VAR=1 git status"), BashVerdict::ReadOnly);
+    assert_eq!(
+        classify("env A=1 B=2 cat file"),
+        BashVerdict::ReadOnly
+    );
+}
+
+/// `exec`/`eval`/`source` keep their dedicated verdict even though `exec` is
+/// also a wrapper that `strip_wrappers` would otherwise peel away.
+#[test]
+fn exec_eval_source_still_blocked_directly() {
+    assert!(matches!(classify("exec ls"), BashVerdict::WriteBlocked(_)));
+    assert!(matches!(
+        classify("eval 'rm x'"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    assert!(matches!(
+        classify("source script.sh"),
+        BashVerdict::WriteBlocked(_)
+    ));
+    assert!(matches!(classify("sudo exec ls"), BashVerdict::WriteBlocked(_)));
+    // But `env exec rm` unwraps to the mutating command beneath.
+    assert!(matches!(
+        classify("env exec rm file"),
+        BashVerdict::WriteBlocked(_)
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Shared command-parsing helpers (extracted from tools::ssh_pty)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn strip_leading_sudo_peels_privilege_escalators() {
+    assert_eq!(strip_leading_sudo("sudo rm -rf /"), "rm -rf /");
+    assert_eq!(strip_leading_sudo("doas vim"), "vim");
+    assert_eq!(strip_leading_sudo("sudo doas vim"), "vim");
+    assert_eq!(strip_leading_sudo("ls"), "ls");
+}
+
+#[test]
+fn cmd_base_extracts_binary_name() {
+    assert_eq!(cmd_base("/usr/bin/vim"), "vim");
+    assert_eq!(cmd_base("ls -la"), "ls");
+    assert_eq!(cmd_base("python3"), "python3");
+}
+
+#[test]
+fn strip_wrappers_unwraps_delegating_prefixes() {
+    assert_eq!(strip_wrappers("env rm file"), "rm file");
+    assert_eq!(strip_wrappers("env FOO=bar ls"), "ls");
+    assert_eq!(strip_wrappers("nohup rm"), "rm");
+    assert_eq!(strip_wrappers("timeout 5 rm -rf x"), "rm -rf x");
+    assert_eq!(strip_wrappers("nice rm"), "rm");
+    assert_eq!(strip_wrappers("command mv a b"), "mv a b");
+    assert_eq!(strip_wrappers("sudo env rm"), "rm");
+    assert_eq!(strip_wrappers("strace -f rm x"), "rm x");
+    // Read-only command passes through unwrapped.
+    assert_eq!(strip_wrappers("ls -la"), "ls -la");
+}
+

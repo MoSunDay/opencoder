@@ -262,12 +262,19 @@ async fn apply_drain_cmd(
     session: &mut opencoder_session::SessionState,
     cmd: DrainCmd,
     tx: &broadcast::Sender<SseEvt>,
+    sink: &opencoder_session::EventSink,
     sid: &str,
     workdir: &std::path::Path,
 ) {
+    // Mirror the main `run` callback: broadcast to live SSE subscribers AND
+    // persist the event to the `session_events` table via the sink. Without
+    // the `sink.push`, drain-command events (Compaction, Done,
+    // TranscriptReset, PlanHandoff, …) would never reach disk, so an SSE
+    // reconnect replay (`?after=<seq>`) would silently miss them.
     let mut broadcast = |ev: SessionEvent| {
         let (sse, _) = sse_from_session_event(sid, &ev);
         let _ = tx.send(sse);
+        let _ = sink.push(&ev);
     };
     match cmd {
         DrainCmd::Compact => {
@@ -334,12 +341,13 @@ async fn process_drain_cmds(
     session: &mut opencoder_session::SessionState,
     rx_guard: &mut CmdRxGuard,
     tx: &broadcast::Sender<SseEvt>,
+    sink: &opencoder_session::EventSink,
     sid: &str,
     workdir: &std::path::Path,
 ) {
     if let Some(rx) = rx_guard.rx.as_mut() {
         while let Ok(cmd) = rx.try_recv() {
-            apply_drain_cmd(session, cmd, tx, sid, workdir).await;
+            apply_drain_cmd(session, cmd, tx, sink, sid, workdir).await;
         }
     }
 }
@@ -407,7 +415,7 @@ async fn drain_to_completion(
     .await;
 
     // After run completes, process any queued drain commands.
-    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sid, &workdir).await;
+    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
 
     drop(sink);
     drop(guard);

@@ -141,33 +141,64 @@ async fn import_bundle_inner(
     if depth > 0 || workdir_hash.is_some() {
         meta.workdir_hash = workdir_hash.map(|h| h.to_string());
     }
-    store.create_session(&meta).await?;
+    // The bundle's compaction/handoff markers reference message seqs from the
+    // SOURCE database, but `append_messages` below assigns FRESH auto-increment
+    // seqs to the imported messages. Carrying `summary_seq`/`handoff_seq` (and
+    // their text payloads) over unchanged would make them dangle — pointing at
+    // non-existent or wrong rows and corrupting compaction/handoff boundaries
+    // on resume. Reset them to match the jsonl importer (`import_jsonl_file`);
+    // resume recomputes compaction state as needed.
+    meta.summary = None;
+    meta.summary_seq = None;
+    meta.handoff_seq = None;
+    meta.handoff_plan = None;
 
-    // Bulk insert messages.
-    if !bundle.messages.is_empty() {
-        store.append_messages(&session_id, &bundle.messages).await?;
+    // Any failure AFTER `create_session` commits would leave an empty session
+    // stub behind, and the idempotency guard above would then skip this session
+    // on every retry — a permanent half-import. Wrap the whole body so that on
+    // ANY error we roll the stub back (deleting only THIS session; child
+    // subagent sessions are independent and self-protect via their own
+    // recursion-wrapped rollback), then propagate the error. Mirrors
+    // `import_jsonl_file`.
+    if let Err(e) = async {
+        store.create_session(&meta).await?;
+
+        // Bulk insert messages.
+        if !bundle.messages.is_empty() {
+            store.append_messages(&session_id, &bundle.messages).await?;
+        }
+
+        // Insert events (single batched transaction).
+        if !bundle.events.is_empty() {
+            store.append_events(&bundle.events).await?;
+        }
+
+        // Insert pending inputs.
+        for input in &bundle.inputs {
+            store.admit_input(input).await?;
+        }
+
+        // Recursively import subagent children (child session first, then
+        // link). A child failure propagates up and triggers THIS session's
+        // rollback; the child cleans itself via its own recursion-wrapped
+        // rollback, so we only delete `session_id` here.
+        for sub in &bundle.subagents {
+            Box::pin(import_bundle_inner(
+                store,
+                &sub.child,
+                workdir_hash,
+                depth + 1,
+            ))
+            .await?;
+            store.create_subagent_task(&sub.task).await?;
+        }
+
+        Ok::<_, anyhow::Error>(())
     }
-
-    // Insert events (single batched transaction).
-    if !bundle.events.is_empty() {
-        store.append_events(&bundle.events).await?;
-    }
-
-    // Insert pending inputs.
-    for input in &bundle.inputs {
-        store.admit_input(input).await?;
-    }
-
-    // Recursively import subagent children (child session first, then link).
-    for sub in &bundle.subagents {
-        Box::pin(import_bundle_inner(
-            store,
-            &sub.child,
-            workdir_hash,
-            depth + 1,
-        ))
-        .await?;
-        store.create_subagent_task(&sub.task).await?;
+    .await
+    {
+        let _ = store.delete_session(&session_id).await;
+        return Err(e);
     }
 
     Ok(session_id)
@@ -176,6 +207,8 @@ async fn import_bundle_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::EventKind;
+    use crate::LibsqlStore;
     use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
     fn sample_bundle() -> SessionBundle {
@@ -267,5 +300,123 @@ mod tests {
             msg.contains("too large"),
             "error should mention 'too large', got: {msg}"
         );
+    }
+
+    /// C1: stale compaction/handoff markers from the source DB must be reset on
+    /// import, since `append_messages` reassigns fresh auto-increment seqs (the
+    /// source seqs would otherwise dangle). Mirrors the jsonl importer.
+    #[tokio::test]
+    async fn import_bundle_resets_summary_handoff_seq() {
+        let store = LibsqlStore::open_memory().await.unwrap();
+
+        let bundle = SessionBundle {
+            meta: SessionMeta {
+                id: "sess-c1".into(),
+                title: Some("t".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: None,
+                created_at: 1,
+                updated_at: 2,
+                // Stale markers pointing at source-DB seqs that won't exist here.
+                summary: Some("stale summary".into()),
+                summary_seq: Some(3),
+                handoff_seq: Some(2),
+                handoff_plan: Some("stale plan".into()),
+                skill: None,
+                task_type: None,
+            },
+            messages: vec![Message::user("u1", "hi"), Message::assistant("a1")],
+            events: vec![],
+            inputs: vec![],
+            subagents: vec![],
+        };
+
+        let id = import_bundle(&store, &bundle, None).await.unwrap();
+        assert_eq!(id, "sess-c1");
+
+        let meta = store
+            .get_session("sess-c1")
+            .await
+            .unwrap()
+            .expect("session must be present after import");
+        assert_eq!(meta.summary_seq, None, "summary_seq must be reset on import");
+        assert_eq!(meta.handoff_seq, None, "handoff_seq must be reset on import");
+        assert_eq!(meta.handoff_plan, None, "handoff_plan must be reset on import");
+        assert_eq!(meta.summary, None, "summary must be reset on import");
+    }
+
+    /// C2: a failure AFTER `create_session` commits must roll the stub back so
+    /// the idempotency guard does not permanently block retries.
+    #[tokio::test]
+    async fn import_bundle_rolls_back_on_failure() {
+        let store = LibsqlStore::open_memory().await.unwrap();
+
+        // message ids are NOT unique in this schema, so a duplicate-id collision
+        // cannot trigger a failure. Instead, craft an event whose session_id
+        // references a session that does NOT exist: the `session_events` FK
+        // (foreign_keys=ON) rejects the INSERT, so `append_events` fails AFTER
+        // `create_session` + `append_messages` have already committed.
+        let bad = rollback_bundle("ghost-session");
+        let err = import_bundle(&store, &bad, None).await;
+        assert!(err.is_err(), "import must fail on the FK-violating event");
+
+        // Rollback: the stub session row and its already-committed messages
+        // (removed via ON DELETE CASCADE) must be gone.
+        assert!(
+            store.get_session("sess-rollback").await.unwrap().is_none(),
+            "failed import must roll back the session row"
+        );
+        assert!(
+            store.load_messages("sess-rollback").await.unwrap().is_empty(),
+            "messages committed before the failure must be cascaded away"
+        );
+
+        // Retry with a corrected event session_id. Because the stub was rolled
+        // back, the idempotency guard no longer skips it — the import succeeds.
+        let good = rollback_bundle("sess-rollback");
+        let id = import_bundle(&store, &good, None)
+            .await
+            .expect("retry must succeed after rollback");
+        assert_eq!(id, "sess-rollback");
+        assert_eq!(
+            store.load_messages("sess-rollback").await.unwrap().len(),
+            2
+        );
+        assert!(store.get_session("sess-rollback").await.unwrap().is_some());
+    }
+
+    /// Bundle for the rollback test: a valid session + 2 messages + one event
+    /// whose `session_id` is `event_session`. When `event_session` is a
+    /// non-existent id, `append_events` fails on the FK constraint.
+    fn rollback_bundle(event_session: &str) -> SessionBundle {
+        SessionBundle {
+            meta: SessionMeta {
+                id: "sess-rollback".into(),
+                title: Some("t".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: None,
+                created_at: 1,
+                updated_at: 2,
+                summary: None,
+                summary_seq: None,
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: None,
+            },
+            messages: vec![Message::user("u1", "hi"), Message::assistant("a1")],
+            events: vec![SessionEventRecord {
+                session_id: event_session.into(),
+                kind: EventKind::TextDelta,
+                payload: serde_json::json!({}),
+                ts: 1,
+                seq: None,
+                sse_kind: None,
+            }],
+            inputs: vec![],
+            subagents: vec![],
+        }
     }
 }

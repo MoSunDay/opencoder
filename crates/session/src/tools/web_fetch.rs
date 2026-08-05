@@ -15,7 +15,8 @@ use opencoder_core::{effective_proxy, json, tool::truncate_output, Tool, ToolCon
 use serde_json::Value;
 use std::time::Duration;
 
-use super::web_read::{self, BODY_LIMIT};
+use super::web_read;
+use super::truncate::truncate_body;
 
 pub struct WebFetchTool;
 
@@ -96,10 +97,7 @@ impl Tool for WebFetchTool {
         };
 
         let mut text = web_read::extract_readable_text(&html);
-        if text.len() > BODY_LIMIT {
-            text.truncate(BODY_LIMIT);
-            text.push_str("\n\n[truncated at 2 MB]");
-        }
+        truncate_body(&mut text);
         let body = format!("# {final_url}\n\n{text}");
         Ok(truncate_output(body, ctx.max_output))
     }

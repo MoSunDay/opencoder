@@ -249,7 +249,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(t) = obj.get("tool_guard").and_then(|v| v.as_object()) {
             if let Some(v) = t.get("max_consecutive_failures").and_then(|v| v.as_u64()) {
-                cfg.tool_guard.max_consecutive_failures = v as u32;
+                cfg.tool_guard.max_consecutive_failures = v.min(u32::MAX as u64) as u32;
             }
             if let Some(v) = t.get("backoff_base_ms").and_then(|v| v.as_u64()) {
                 cfg.tool_guard.backoff_base_ms = v;
@@ -261,5 +261,28 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         if let Some(v) = obj.get("subagent_drain_secs").and_then(|v| v.as_u64()) {
             cfg.subagent_drain_secs = Some(v);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_into;
+    use crate::config::Config;
+
+    /// Regression: `tool_guard.max_consecutive_failures` is a `u32` but the
+    /// merged JSON value is read as `u64`. An unclamped `v as u32` cast would
+    /// silently truncate `u32::MAX + 1` (= 4_294_967_296) to `0`, which per
+    /// `ToolGuardConfig` semantics means "guard disabled". The merge must clamp
+    /// to `u32::MAX` instead.
+    #[test]
+    fn tool_guard_max_consecutive_failures_clamps_overflow() {
+        let mut cfg = Config::default();
+        let value = serde_json::json!({
+            "tool_guard": {
+                "max_consecutive_failures": 4_294_967_296u64,
+            }
+        });
+        merge_into(&mut cfg, value);
+        assert_eq!(cfg.tool_guard.max_consecutive_failures, u32::MAX);
     }
 }

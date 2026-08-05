@@ -378,3 +378,103 @@ async fn events_stream_survives_subscriber_lag() {
         "lagged subscriber must still receive the most recent event; got: {text}"
     );
 }
+
+/// C4: drain-command events (a manual compact's Status + terminal Done, a
+/// plan→act handoff's TranscriptReset + PlanHandoff, a skill switch's Done, …)
+/// MUST be persisted to the `session_events` table so an SSE reconnect replay
+/// (`GET /events?after=<seq>`) is lossless.
+///
+/// Before the fix, `apply_drain_cmd`'s broadcast closure only `tx.send`-ed to
+/// live SSE subscribers and never pushed to the `EventSink` (unlike the main
+/// `run` callback, which does both). As a result the drain-command events
+/// silently vanished from disk and were missing on every replay. This drives
+/// the exact production path — enqueue a `DrainCmd` then `ensure_drain` — and
+/// asserts the events land in the store.
+#[tokio::test]
+async fn drain_cmd_events_persisted_for_sse_replay() {
+    let state = state().await;
+    let sid = "c4";
+    seed(&state, sid).await;
+
+    // Run one normal turn so the session has a transcript the drain can resume
+    // against (and so a first drain has run to completion and reset
+    // `draining`).
+    admit(&state, sid, "hello", "ok").await;
+    wait_idle(&state, sid).await;
+    assert!(
+        eventually_replied(&state, sid, "ok").await,
+        "baseline turn must persist before exercising the drain cmd"
+    );
+
+    // Cursor: everything persisted up to here is pre-drain-cmd. An SSE client
+    // reconnecting after this point must receive the drain-cmd events next.
+    let cursor = state.store.last_event_seq(sid).await.unwrap();
+
+    // Mirror POST /compact exactly: enqueue the command THEN ensure a drain is
+    // running. The drain resumes, `run` returns immediately (no pending
+    // inputs), then `process_drain_cmds` applies the Compact command.
+    let handle = {
+        let mut map = state.handles.lock().await;
+        map.entry(sid.to_string())
+            .or_insert_with(opencoder_web::handle::SessionHandle::new)
+            .clone()
+    };
+    let _ = handle.cmd_tx.send(opencoder_web::cmd::DrainCmd::Compact);
+    opencoder_web::handle::ensure_drain(
+        state.handles.clone(),
+        state.store.clone(),
+        sid,
+        mock_reply("ok"),
+        std::env::temp_dir(),
+        opencoder_core::Config {
+            model: "m/g".into(),
+            ..Default::default()
+        },
+    )
+    .await;
+    wait_idle(&state, sid).await;
+
+    // The drain resets `draining` before the background flusher's final flush
+    // lands, so poll the store until the compact's `Status("nothing to compact
+    // yet")` event appears past the cursor. That Status is the discriminator:
+    // the idle `run` (empty queue) emits only a terminal `Done`, whereas the
+    // Compact drain command emits this Status (compaction sees a single-turn
+    // transcript and short-circuits) followed by its own `Done`.
+    let mut replayed = Vec::new();
+    for _ in 0..160 {
+        replayed = state.store.events_after(sid, cursor).await.unwrap();
+        if replayed
+            .iter()
+            .any(|r| r.sse_kind.as_deref() == Some("status"))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Before C4 this slice held only the idle `run`'s `Done`: the drain
+    // command's broadcast never reached the sink, so the Status (and the
+    // compact's own Done) were missing — a reconnecting client saw nothing of
+    // the compact.
+    assert!(
+        replayed
+            .iter()
+            .any(|r| r.sse_kind.as_deref() == Some("status")),
+        "the compact drain command's Status event must be persisted for SSE \
+         replay; got kinds {:?}",
+        replayed.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+    );
+    // … and the compact's terminal Done must also be replayable (run's idle
+    // Done plus the command's own Done ⇒ at least two `done` events past the
+    // cursor).
+    let done_count = replayed
+        .iter()
+        .filter(|r| r.sse_kind.as_deref() == Some("done"))
+        .count();
+    assert!(
+        done_count >= 2,
+        "both the idle run Done and the compact command Done must be persisted \
+         (got {done_count} `done` events past cursor {cursor}); kinds {:?}",
+        replayed.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+    );
+}

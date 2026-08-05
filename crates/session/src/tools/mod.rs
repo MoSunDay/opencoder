@@ -20,6 +20,7 @@ pub mod task;
 pub mod view_image;
 pub mod web_extract;
 pub mod web_read;
+pub(crate) mod truncate;
 
 #[cfg(feature = "browser")]
 pub mod web_fetch;

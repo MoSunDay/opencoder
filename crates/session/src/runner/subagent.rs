@@ -29,6 +29,7 @@ pub(super) async fn run_subagent(
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
     activity: tokio::sync::mpsc::Sender<()>,
+    timed_out: Arc<std::sync::atomic::AtomicBool>,
 ) -> ToolOutput {
     let prompt = input
         .get("prompt")
@@ -285,6 +286,29 @@ pub(super) async fn run_subagent(
         .map(|c| c.is_cancelled())
         .unwrap_or(false);
     if cancelled {
+        // D1: distinguish a *timeout* from a parent steer. Both fire the
+        // child's hard-cancel token (execute.rs fires `fire_child_cancel`
+        // itself on timeout), so `child.cancel.is_cancelled()` is true in
+        // either case and the parent's own cancel is intact in both. The
+        // shared `timed_out` flag (set by execute.rs synchronously before the
+        // Phase-2 await) is the only way to tell them apart. Check it FIRST so
+        // a timeout is reported as a timeout, not mislabelled as a steer.
+        if timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+            const TIMEOUT_MSG: &str = "cancelled: timed out";
+            if let Some(store) = &parent.store {
+                let _ = store.cancel_subagent_task(&call_id).await;
+            }
+            emit(
+                sink,
+                SessionEvent::SubagentEnd {
+                    id: call_id.clone(),
+                    ok: false,
+                    cancelled: true,
+                    summary: TIMEOUT_MSG.to_string(),
+                },
+            );
+            return ToolOutput::err(TIMEOUT_MSG);
+        }
         let parent_aborted = parent
             .cancel
             .as_ref()

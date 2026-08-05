@@ -6,6 +6,17 @@ use crate::theme;
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
 
+/// Body lines of streaming assistant `raw`, mirroring `flatten_with`: drop the
+/// single trailing empty element from a terminating newline (interior blanks kept).
+/// Shared by `collect_headers` and `flatten_with` so they never diverge (A2/A3).
+fn assistant_rows(raw: &str) -> Vec<&str> {
+    let mut rows: Vec<&str> = raw.split('\n').collect();
+    if rows.last().is_some_and(|s| s.is_empty()) {
+        rows.pop();
+    }
+    rows
+}
+
 #[path = "chat_types.rs"]
 mod types;
 pub use types::*;
@@ -425,7 +436,7 @@ impl ChatView {
                     line_idx += if *done {
                         rendered.len()
                     } else {
-                        raw.split('\n').count()
+                        assistant_rows(raw).len()
                     };
                 }
                 ChatBlock::Thinking {
@@ -462,7 +473,8 @@ impl ChatView {
                     }
                 }
                 ChatBlock::Image { rendered, .. } => {
-                    line_idx += 1 + rendered.len() + 1;
+                    // Empty `rendered` -> flatten_with emits a placeholder line; count 1 not 0.
+                    line_idx += 1 + if rendered.is_empty() { 1 } else { rendered.len() } + 1;
                 }
                 ChatBlock::Subagent { .. } => {
                     sub.push(SubagentHeader {
@@ -519,11 +531,9 @@ impl ChatView {
                         // stream on `\n` and drop only the single trailing
                         // empty element produced by a terminating newline, so
                         // it does not render as an extra blank body line.
-                        // Interior blank lines are preserved.
-                        let mut rows: Vec<&str> = raw.split('\n').collect();
-                        if rows.last().is_some_and(|s| s.is_empty()) {
-                            rows.pop();
-                        }
+                        // Interior blank lines are preserved. Shared with
+                        // `collect_headers` so the two can never diverge.
+                        let rows = assistant_rows(raw);
                         for l in rows {
                             let l = l.strip_suffix('\r').unwrap_or(l);
                             out.push(Line::from(vec![indent.clone(), Span::raw(l.to_string())]));

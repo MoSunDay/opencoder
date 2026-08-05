@@ -94,6 +94,13 @@ pub(super) async fn execute_call_with_timeout(
         // bounded channel + non-blocking `try_send` keeps the signal lossy and
         // cheap (it is idempotent — only the most recent real activity matters).
         let (act_tx, mut act_rx) = tokio::sync::mpsc::channel::<()>(16);
+        // D1: shared flag distinguishing a *timeout* (we fired the child's hard
+        // token ourselves) from a genuine parent steer (only the child token
+        // fired). Both make `child.cancel.is_cancelled()` true in run_subagent's
+        // post-run check, so without this signal the timeout would be
+        // misreported as "redirected by parent steer". Set synchronously below,
+        // before the Phase-2 await, so it is visible to run_subagent's post-run.
+        let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut sub = Box::pin(run_subagent(
             tc.input.clone(),
             call_id.clone(),
@@ -101,6 +108,7 @@ pub(super) async fn execute_call_with_timeout(
             registry,
             sink,
             act_tx,
+            timed_out.clone(),
         ));
         let mut cancel_fut = std::pin::pin!(await_cancel(session));
         let mut turn_cancel_fut = std::pin::pin!(await_turn_cancel(session));
@@ -152,6 +160,10 @@ pub(super) async fn execute_call_with_timeout(
             crate::fire_child_turn_cancel(&child_turn_cancels, &call_id);
         }
         if matches!(signal, TaskSignal::Timeout) {
+            // D1: flag this as a *timeout*, not a parent steer, before the
+            // Phase-2 await so run_subagent's post-run cancelled branch
+            // reports the right summary + DB status.
+            timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::fire_child_cancel(&child_cancels, &call_id);
         }
         return match tokio::time::timeout(drain, &mut sub).await {

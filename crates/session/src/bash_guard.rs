@@ -274,22 +274,122 @@ fn split_segments(cmd: &str) -> Vec<String> {
     segments
 }
 
+// ---------------------------------------------------------------------------
+// Command-parsing helpers (shared with `tools::ssh_pty`).
+//
+// These unwrap privilege-escalators and command wrappers so a write command is
+// never mistaken for read-only just because it was prefixed with `env`,
+// `nohup`, `timeout`, `nice`, `command`, `strace`, …
+// ---------------------------------------------------------------------------
+
+/// Strip a *leading* `sudo`/`doas` prefix (recursively, so `sudo sudo rm`
+/// fully unwraps). Returns a slice of `s`; does not allocate.
+pub(crate) fn strip_leading_sudo(s: &str) -> &str {
+    let trimmed = s.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix("sudo ")
+        .or_else(|| trimmed.strip_prefix("doas "))
+    {
+        strip_leading_sudo(rest)
+    } else {
+        trimmed
+    }
+}
+
+/// Returns true when `tok` looks like an environment-variable assignment
+/// (`KEY=value`) that `env` consumes before the real command.
+fn is_env_assignment(tok: &str) -> bool {
+    if let Some(eq) = tok.find('=') {
+        let key = &tok[..eq];
+        !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    } else {
+        false
+    }
+}
+
+/// The trailing path component of the command's first token — e.g.
+/// `/usr/bin/rm -rf x` → `rm`. Returns `""` for empty/whitespace input.
+pub(crate) fn cmd_base(cmd: &str) -> &str {
+    let first = cmd.split_whitespace().next().unwrap_or("");
+    first.rsplit('/').next().unwrap_or(first)
+}
+
+/// Strip wrapper commands (`env`, `exec`, `command`, `nohup`, `timeout`,
+/// `strace`, `ltrace`, `perf`, `valgrind`, `nice`, `ionice`) — and a leading
+/// `sudo`/`doas` — that merely delegate to the real program. This prevents
+/// trivial guard bypasses like `env rm`, `exec rm`, or `nohup rm`.
+///
+/// Applies recursively so `env VAR=x exec sudo rm` is fully unwrapped.
+/// For `env`, skips leading `KEY=value` assignments. For `timeout`, skips the
+/// duration token. For tracing tools (`strace`/`ltrace`/`perf`/`valgrind`),
+/// skips leading flag tokens (`-flag`).
+pub(crate) fn strip_wrappers(cmd: &str) -> &str {
+    let stripped = strip_leading_sudo(cmd);
+    let first = stripped.split_whitespace().next().unwrap_or("");
+    let base = first.rsplit('/').next().unwrap_or(first);
+
+    match base {
+        "env" => {
+            let rest = stripped[first.len()..].trim_start();
+            let mut pos = rest;
+            while let Some(tok) = pos.split_whitespace().next() {
+                if is_env_assignment(tok) {
+                    pos = pos[tok.len()..].trim_start();
+                } else {
+                    break;
+                }
+            }
+            strip_wrappers(pos)
+        }
+        "exec" | "command" | "nohup" | "nice" | "ionice" => {
+            strip_wrappers(stripped[first.len()..].trim_start())
+        }
+        "timeout" => {
+            // timeout takes a duration argument before the command.
+            let rest = stripped[first.len()..].trim_start();
+            if let Some(end) = rest.find(char::is_whitespace) {
+                strip_wrappers(rest[end..].trim_start())
+            } else {
+                rest
+            }
+        }
+        "strace" | "ltrace" | "perf" | "valgrind" => {
+            let mut rest = stripped[first.len()..].trim_start();
+            while let Some(tok) = rest.split_whitespace().next() {
+                if tok.starts_with('-') {
+                    rest = rest[tok.len()..].trim_start();
+                } else {
+                    break;
+                }
+            }
+            strip_wrappers(rest)
+        }
+        _ => stripped,
+    }
+}
+
 /// Classify a single command segment (no separators).
 fn classify_segment(segment: &str) -> Option<String> {
-    // Check for "sudo <cmd>" — look at the second word.
-    let words: Vec<&str> = segment.split_whitespace().collect();
-    let cmd_words = if words.first() == Some(&"sudo") || words.first() == Some(&"doas") {
-        &words[1..]
-    } else {
-        &words[..]
-    };
+    // `exec`/`eval`/`source`/`.` can run arbitrary mutating commands. Inspect
+    // the leading token (after sudo/doas) *before* wrapper stripping: `exec` is
+    // itself a wrapper that `strip_wrappers` would peel away, so checking it up
+    // front preserves its dedicated verdict regardless of what follows.
+    let sudo_stripped = strip_leading_sudo(segment);
+    let first_base = cmd_base(sudo_stripped);
+    if matches!(first_base, "exec" | "eval" | "source" | ".") {
+        return Some(format!("indirect execution: {first_base}"));
+    }
 
+    // Strip wrapper commands (`env`, `nohup`, `timeout`, `nice`, `command`,
+    // `strace`, …) and leading `sudo`/`doas` to reveal the real command.
+    // Without this, plan-mode writes wrapped as `env rm file`, `nohup rm`, or
+    // `timeout 5 rm -rf x` are misclassified as read-only and bypass the guard.
+    let stripped = strip_wrappers(segment);
+    let cmd_words: Vec<&str> = stripped.split_whitespace().collect();
     if cmd_words.is_empty() {
         return None;
     }
-
-    let cmd_name = cmd_words[0];
-    let cmd_base = cmd_name.split('/').next_back().unwrap_or(cmd_name);
+    let cmd_base = cmd_base(stripped);
 
     // Check mutating commands
     if MUTATING_COMMANDS.contains(&cmd_base) {
@@ -356,11 +456,6 @@ fn classify_segment(segment: &str) -> Option<String> {
         })
     {
         return Some("perl -i (in-place edit)".into());
-    }
-
-    // Check for `exec`, `eval`, `source` — can run arbitrary mutating commands
-    if matches!(cmd_base, "exec" | "eval" | "source" | ".") {
-        return Some(format!("indirect execution: {cmd_base}"));
     }
 
     // Shell interpreters with -c/-s: `bash -c 'rm file'` etc.

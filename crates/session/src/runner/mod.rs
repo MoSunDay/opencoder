@@ -289,13 +289,15 @@ pub(crate) async fn run_loop(
                 return Err(e);
             }
         };
-        // Turn-level interrupt (subagent steer): the LLM call was cut short by
-        // a turn-cancel. Don't record the empty assistant message — just reset
-        // the token and continue to the top of the loop where claim_steers
-        // absorbs the pending steer.
+        // Interrupt handling: turn-cancel (subagent steer) → reset + continue;
+        // hard-cancel (web /stop) → break without persisting the empty turn
+        // ("interrupted" status was already emitted by run_one_llm_call).
         if is_turn_cancelled(session) {
             reset_turn_cancel(session);
             continue;
+        }
+        if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            break;
         }
         let (text, reasoning, tool_calls, usage) = turn;
         // Streamline the completed assistant text before it is persisted and
@@ -644,7 +646,6 @@ mod dedup_tests {
             input: json!({ "command": command }),
         }
     }
-
     fn other_tc(name: &str, id: &str) -> CompletedToolCall {
         CompletedToolCall {
             id: id.into(),
@@ -652,7 +653,6 @@ mod dedup_tests {
             input: json!({}),
         }
     }
-
     fn timeout_output(pid: u32) -> ToolOutput {
         ToolOutput {
             content: format!(
@@ -663,7 +663,6 @@ mod dedup_tests {
             images: vec![],
         }
     }
-
     fn normal_output(text: &str) -> ToolOutput {
         ToolOutput::ok(text)
     }

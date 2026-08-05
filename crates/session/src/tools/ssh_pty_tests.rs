@@ -32,21 +32,6 @@ fn tmux_name_sanitized() {
 }
 
 #[test]
-fn strip_sudo() {
-    assert_eq!(strip_leading_sudo("sudo rm -rf /"), "rm -rf /");
-    assert_eq!(strip_leading_sudo("doas vim"), "vim");
-    assert_eq!(strip_leading_sudo("sudo doas vim"), "vim");
-    assert_eq!(strip_leading_sudo("ls"), "ls");
-}
-
-#[test]
-fn cmd_base_extracts_binary() {
-    assert_eq!(cmd_base("/usr/bin/vim"), "vim");
-    assert_eq!(cmd_base("ls -la"), "ls");
-    assert_eq!(cmd_base("python3"), "python3");
-}
-
-#[test]
 fn port_validation_rejects_non_numeric() {
     assert!(validate_port("22").is_ok());
     assert!(validate_port("abc").is_err());
@@ -219,4 +204,28 @@ async fn unknown_action_returns_error() {
     let out = SshPtyTool.execute(input, &ctx).await.unwrap();
     assert!(out.is_error);
     assert!(out.content.contains("Unknown action"));
+}
+
+#[test]
+fn marker_is_on_new_line_not_swallowed_by_comment() {
+    // Regression: a command ending in a line comment must not have the
+    // completion-marker printf appended on the same line, otherwise the printf
+    // gets commented out and the command is falsely reported as a 30s timeout.
+    let command = "echo hi # note";
+    let marker = "__OC_DONE_123456789__";
+    let full_cmd = wrap_command_with_marker(command, marker);
+
+    // printf must start on a fresh line so it cannot be inside the comment.
+    assert!(
+        full_cmd.contains("\nprintf"),
+        "expected printf on its own line, got: {full_cmd}"
+    );
+    // Sanity: the original command and marker are still present.
+    assert!(full_cmd.starts_with(command));
+    assert!(full_cmd.contains(marker));
+    // The old buggy form (same-line `; printf`) must NOT be produced.
+    assert!(
+        !full_cmd.contains("# note; printf"),
+        "printf was appended on the commented line: {full_cmd}"
+    );
 }

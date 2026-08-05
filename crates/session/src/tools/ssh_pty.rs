@@ -109,87 +109,10 @@ const BARE_INTERACTIVE: &[&str] = &[
     "sftp",
 ];
 
-fn strip_leading_sudo(s: &str) -> &str {
-    let trimmed = s.trim();
-    if let Some(rest) = trimmed
-        .strip_prefix("sudo ")
-        .or_else(|| trimmed.strip_prefix("doas "))
-    {
-        strip_leading_sudo(rest)
-    } else {
-        trimmed
-    }
-}
-
-/// Returns true when `tok` looks like an environment-variable assignment
-/// (`KEY=value`) that `env` consumes before the real command.
-fn is_env_assignment(tok: &str) -> bool {
-    if let Some(eq) = tok.find('=') {
-        let key = &tok[..eq];
-        !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    } else {
-        false
-    }
-}
-
-/// Strip wrapper commands (`env`, `exec`, `command`, `nohup`, `timeout`,
-/// `strace`, `ltrace`, `perf`, `valgrind`, `nice`, `ionice`) that merely
-/// delegate to the real program. This prevents trivial denylist bypasses like
-/// `env vim`, `exec vim`, or `nohup top`.
-///
-/// Applies recursively so `env VAR=x exec sudo vim` is fully unwrapped.
-/// For `env`, skips leading `KEY=value` assignments. For `timeout`, skips the
-/// duration token. For tracing tools (`strace`/`ltrace`/`perf`/`valgrind`),
-/// skips leading flag tokens (`-flag`).
-fn strip_wrappers(cmd: &str) -> &str {
-    let stripped = strip_leading_sudo(cmd);
-    let first = stripped.split_whitespace().next().unwrap_or("");
-    let base = first.rsplit('/').next().unwrap_or(first);
-
-    match base {
-        "env" => {
-            let rest = stripped[first.len()..].trim_start();
-            let mut pos = rest;
-            while let Some(tok) = pos.split_whitespace().next() {
-                if is_env_assignment(tok) {
-                    pos = pos[tok.len()..].trim_start();
-                } else {
-                    break;
-                }
-            }
-            strip_wrappers(pos)
-        }
-        "exec" | "command" | "nohup" | "nice" | "ionice" => {
-            strip_wrappers(stripped[first.len()..].trim_start())
-        }
-        "timeout" => {
-            // timeout takes a duration argument before the command.
-            let rest = stripped[first.len()..].trim_start();
-            if let Some(end) = rest.find(char::is_whitespace) {
-                strip_wrappers(rest[end..].trim_start())
-            } else {
-                rest
-            }
-        }
-        "strace" | "ltrace" | "perf" | "valgrind" => {
-            let mut rest = stripped[first.len()..].trim_start();
-            while let Some(tok) = rest.split_whitespace().next() {
-                if tok.starts_with('-') {
-                    rest = rest[tok.len()..].trim_start();
-                } else {
-                    break;
-                }
-            }
-            strip_wrappers(rest)
-        }
-        _ => stripped,
-    }
-}
-
-fn cmd_base(cmd: &str) -> &str {
-    let first = cmd.split_whitespace().next().unwrap_or("");
-    first.rsplit('/').next().unwrap_or(first)
-}
+// `strip_wrappers` and `cmd_base` live in `crate::bash_guard` so the plan-mode
+// write guard and this SSH sanitiser share one implementation of
+// command-wrapper unwrapping.
+use crate::bash_guard::{cmd_base, strip_wrappers};
 
 /// Returns `Some(reason)` when the command launches an interactive program.
 fn is_interactive_command(cmd: &str) -> Option<String> {
@@ -412,6 +335,18 @@ async fn do_connect(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     )))
 }
 
+/// Build the full command string sent over the pty: the user's command,
+/// followed by a completion marker echo on its OWN line.
+///
+/// The printf is placed on a new line so that it cannot be swallowed by a
+/// trailing line comment in the user's command (e.g. `echo hi # note`). If it
+/// were appended with `;` on the same line, a trailing comment would comment
+/// out the marker, causing instant-completing commands to be falsely reported
+/// as a 30s timeout.
+fn wrap_command_with_marker(command: &str, marker: &str) -> String {
+    format!("{command}\nprintf '\\n{marker}\\n'")
+}
+
 async fn do_send(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
     if command.is_empty() {
@@ -440,7 +375,7 @@ async fn do_send(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     );
 
     // Send the command followed by the marker echo.
-    let full_cmd = format!("{}; printf '\\n{}\\n'", command, marker);
+    let full_cmd = wrap_command_with_marker(command, &marker);
     let _ = tokio::process::Command::new("tmux")
         .args(["send-keys", "-t", &tmux_name, "-l", &full_cmd])
         .output()

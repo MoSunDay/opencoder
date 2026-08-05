@@ -180,7 +180,7 @@
 
         // Fill the channel to near-capacity (leave <= DELTA_MIN_CAPACITY free).
         for _ in 0..DELTA_MIN_CAPACITY + 1 {
-            tx.try_send(UiEvent::TurnDone).unwrap();
+            tx.try_send(UiEvent::TurnDone("act".into())).unwrap();
         }
         // Now capacity() <= DELTA_MIN_CAPACITY — deltas should be dropped.
         assert!(tx.capacity() <= DELTA_MIN_CAPACITY);

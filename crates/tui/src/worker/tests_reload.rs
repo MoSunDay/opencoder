@@ -198,6 +198,6 @@ use super::*;
     fn variant_name(ev: &UiEvent) -> &'static str {
         match ev {
             UiEvent::Session(_) => "Session",
-            UiEvent::TurnDone => "TurnDone",
+            UiEvent::TurnDone(_) => "TurnDone",
         }
     }

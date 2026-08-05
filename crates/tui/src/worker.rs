@@ -46,7 +46,7 @@ pub enum UiCmd {
 #[derive(Debug)]
 pub enum UiEvent {
     Session(SessionEvent),
-    TurnDone,
+    TurnDone(String),
 }
 
 /// Rebind the main loop's session-scoped handles to a freshly switched session.
@@ -115,7 +115,9 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 /// is near-full, droppable streaming events (TextDelta, ReasoningDelta, and
 /// SubagentChild wrapping those) are dropped — their final text is always
 /// reconstructed from the store by `TurnDone → finalize_assistant()`, so no
-/// information is lost. Non-delta lifecycle events always get a slot.
+/// information is lost. Non-delta lifecycle events use try_send and MAY be
+/// dropped when the channel is fully saturated; the UI reconciles critical
+/// state (notably chat.agent) from the authoritative agent on TurnDone.
 const DELTA_MIN_CAPACITY: usize = 64;
 
 /// Returns true for events whose information is fully recoverable from the
@@ -137,7 +139,9 @@ fn is_droppable_delta(sev: &SessionEvent) -> bool {
 /// Forward a SessionEvent to the UI channel with backpressure-aware dropping.
 /// Droppable streaming deltas are discarded when the channel has <=
 /// DELTA_MIN_CAPACITY free slots (final text is always rebuilt from the store
-/// on TurnDone). Non-delta lifecycle events always get through via try_send.
+/// on TurnDone). Non-delta lifecycle events use try_send: on a fully saturated
+/// channel they can be dropped. The only lossless consequence is a stale status
+/// chip, reconciled on the next TurnDone (see TurnDone(agent)).
 fn forward_event(tx: &mpsc::Sender<UiEvent>, sev: SessionEvent) {
     if is_droppable_delta(&sev) && tx.capacity() <= DELTA_MIN_CAPACITY {
         return; // drop delta — final text rebuilt from store on TurnDone
@@ -198,7 +202,7 @@ pub async fn process_cmd(
             // performs a final flush — guaranteeing zero event loss this turn.
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone).await;
+            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
         }
         UiCmd::SwitchAgent(name) => {
             if let Some(a) = resolve_agent(&name) {
@@ -269,7 +273,7 @@ pub async fn process_cmd(
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone).await;
+            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
         }
         UiCmd::Compact => {
             let registry = opencoder_session::tools::registry();
@@ -303,7 +307,7 @@ pub async fn process_cmd(
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone).await;
+            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
         }
         UiCmd::SetSkill(body) => {
             sess.set_skill(body);

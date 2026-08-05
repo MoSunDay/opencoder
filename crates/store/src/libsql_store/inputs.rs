@@ -136,13 +136,14 @@ pub async fn claim_next_queue(
         };
         drop(stmt);
         drop(rows);
-        if let Some((seq, input)) = claimed {
+        if let Some((seq, mut input)) = claimed {
             let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
             conn.execute(
                 "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
                 params![promoted_seq, seq],
             )
             .await?;
+            input.promoted_seq = Some(promoted_seq);
             Ok(Some((seq, input)))
         } else {
             Ok(None)

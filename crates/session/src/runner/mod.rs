@@ -272,6 +272,13 @@ pub(crate) async fn run_loop(
                 on_event(SessionEvent::Error(format!("compaction failed: {e:#}")));
                 return Err(e);
             }
+            // Compaction replaced the transcript with a fresh summary, so
+            // stale doom-loop signatures, tool-failure counts, and
+            // bash-timeout dedup streaks from pre-compaction turns must be
+            // cleared to avoid false trips after compaction.
+            doom.clear();
+            tool_failures.clear();
+            bash_timeout_first = None;
         }
 
         let turn = match run_one_llm_call(session, registry, on_event).await {

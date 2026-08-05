@@ -5,6 +5,7 @@ mod compaction_state;
 mod steer_echo;
 mod agent_switch;
 mod image_render;
+mod line_accounting;
 mod plan_card;
 mod requirement_submit;
 mod subagent;

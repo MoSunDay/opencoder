@@ -445,6 +445,7 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim().to_string();
+                                let clean = crate::app_helpers::forward_skill_if_compound(&text, &clean);
                                 if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap: display-only
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
@@ -534,10 +535,11 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim();
+                                let clean = crate::app_helpers::forward_skill_if_compound(&text, clean);
                                 if !clean.is_empty() {
-                                    let display = queued_item_display(&text, clean);
+                                    let display = queued_item_display(&text, &clean);
                                     steer_fire::admit_keyboard_steer(
-                                        &store, &session_id, clean, &display,
+                                        &store, &session_id, &clean, &display,
                                         &mut pending_images, &mut chat,
                                     )
                                     .await;
@@ -568,10 +570,11 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim();
+                                let clean = crate::app_helpers::forward_skill_if_compound(&text, clean);
                                 if !clean.is_empty() {
-                                    let display = queued_item_display(&text, clean);
+                                    let display = queued_item_display(&text, &clean);
                                     let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, clean, Some(display.clone()), &image_uris)).await {
+                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(display.clone()), &image_uris)).await {
                                         pending_images.clear();
                                         queue_items.push((seq, display.clone()));
                                         chat.note_requirement_submitted();

@@ -201,8 +201,11 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
 
     // Extract and resolve $skill-name tokens from the prompt.
     let prompt = {
+        let raw = prompt.clone();
         let (clean, names) = opencoder_core::extract_skill_tokens(&prompt);
-        if !names.is_empty() {
+        let stripped = if names.is_empty() {
+            clean
+        } else {
             let skills = opencoder_core::discover_skills();
             let mut resolved_bodies = Vec::new();
             let mut resolved_names = std::collections::HashSet::new();
@@ -215,10 +218,25 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             if !resolved_bodies.is_empty() {
                 let body = resolved_bodies.join("\n\n");
                 session.set_skill(Some(body));
-                session.set_active_skill_names(resolved_names);
+                session.set_active_skill_names(resolved_names.clone());
             }
+            // Rebuild from the ORIGINAL prompt so only resolved tokens are
+            // stripped. extract_skill_tokens strips ALL $name sequences,
+            // silently deleting user content for names that matched no skill.
+            opencoder_core::strip_resolved_skill_tokens(&prompt, &resolved_names)
+        };
+        // When skill stripping collapses a compound control command (e.g.
+        // "/plan $skill" -> "/plan"), forward the original text so the runner
+        // resolves the skill and injects the trigger instead of treating it as
+        // a mode-switch-only no-op.
+        if !names.is_empty()
+            && opencoder_session::parse_control_cmd(&stripped).is_some()
+            && raw.trim() != stripped
+        {
+            raw.trim().to_string()
+        } else {
+            stripped
         }
-        clean
     };
 
     print_prompt_header(&session, &prompt);

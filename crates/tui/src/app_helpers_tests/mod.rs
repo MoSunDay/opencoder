@@ -725,3 +725,4 @@ fn apply_force_redraw_is_a_noop_when_needs_clear_false() {
 }
 
 mod skill_apply;
+mod forward_skill;

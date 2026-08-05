@@ -72,6 +72,7 @@ async fn setup_session(id: &str) -> Arc<dyn Store> {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            summary_images: vec![],
             handoff_seq: None,
             handoff_plan: None,
             skill: None,

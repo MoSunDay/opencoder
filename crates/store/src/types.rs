@@ -25,6 +25,11 @@ pub struct SessionMeta {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_seq: Option<i64>,
+    /// Image URLs preserved across compaction (most recent <=4), persisted
+    /// to `summary_images_json` so resume can rebuild the synthetic summary
+    /// message WITHOUT reloading the soft-deleted compacted head.
+    #[serde(default)]
+    pub summary_images: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_seq: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -52,9 +57,20 @@ pub struct SessionPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_seq: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_images: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_seq: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_plan: Option<String>,
+    /// When true, clears all compaction metadata: `summary`, `summary_seq`,
+    /// and `summary_images_json` are set to NULL. Used by the handoff path to
+    /// remove stale compaction state -- handoff and compaction are mutually
+    /// exclusive, and handoff supersedes any prior compaction. Without this,
+    /// a residual `summary_seq` would be picked over the newer `handoff_seq`
+    /// in `prev_skip = summary_seq.or(handoff_seq)`, producing an OFFSET that
+    /// is too small and re-loading already-summarized messages.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_summary: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_handoff: bool,
     /// When true, sets `skill` to NULL (clears the active skill). Used

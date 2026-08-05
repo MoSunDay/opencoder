@@ -100,14 +100,14 @@ fn skill_fields_are_complete() {
 }
 
 #[test]
-fn seed_builtin_skills_writes_all_packs_when_gate_absent() {
+fn seed_in_writes_all_packs_on_fresh_dir() {
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let names: Vec<String> = discover_in(root.path())
         .into_iter()
         .map(|s| s.name)
         .collect();
-    for expected in ["do-and-done", "repo-local-memory", "review", "submit"] {
+    for expected in ["task-plan", "do-and-done", "repo-local-memory", "review", "summary", "submit"] {
         assert!(
             names.iter().any(|n| n == expected),
             "expected seeded skill {expected:?}, got {names:?}"
@@ -136,6 +136,34 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     );
     // ...while the other packs are still written.
     assert!(root.path().join("review").join("SKILL.md").exists());
+}
+
+#[test]
+fn seed_in_adds_missing_skills_to_partial_dir() {
+    // Regression: previously a gate on `review` dir existing caused
+    // seed_builtin_skills to early-return, so a binary upgrade that ships a
+    // new built-in skill never landed it for existing installs. The writer
+    // core is now purely incremental: missing skills are added, existing
+    // files are untouched.
+    let root = tempfile::tempdir().unwrap();
+    let r = root.path();
+
+    // Simulate an existing install that has the old gate skill + a user edit.
+    let user = r.join("do-and-done").join("SKILL.md");
+    std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+    std::fs::write(&user, "user-authored\n").unwrap();
+    // `review` present — this was the old gate that short-circuited seeding.
+    std::fs::create_dir_all(r.join("review")).unwrap();
+
+    seed_builtin_skills_in(r).expect("seed");
+
+    // Existing user file preserved (never clobbered).
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "user-authored\n");
+    // Skills that were missing are now written — including ones added after
+    // the original install.
+    assert!(r.join("task-plan").join("SKILL.md").exists());
+    assert!(r.join("summary").join("SKILL.md").exists());
+    assert!(r.join("review").join("SKILL.md").exists());
 }
 
 #[test]

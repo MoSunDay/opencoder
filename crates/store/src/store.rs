@@ -30,6 +30,27 @@ pub trait Store: Send + Sync {
     async fn append_message(&self, session_id: &str, msg: &Message) -> Result<i64>;
     async fn append_messages(&self, session_id: &str, msgs: &[Message]) -> Result<Vec<i64>>;
     async fn load_messages(&self, session_id: &str) -> Result<Vec<Message>>;
+    /// Load messages for a session skipping the first `skip_count` persisted
+    /// rows (ordered by insertion `seq` ASC), returning only the tail. Used by
+    /// `resume` on the compaction path to avoid reloading the (potentially
+    /// huge) soft-deleted compacted head. The default impl falls back to a full
+    /// `load_messages` + in-memory drain so test fakes need not override it;
+    /// the libsql backend overrides with an `OFFSET` query that skips without
+    /// deserializing the dropped rows.
+    async fn load_messages_after(
+        &self,
+        session_id: &str,
+        skip_count: i64,
+    ) -> Result<Vec<Message>> {
+        let mut msgs = self.load_messages(session_id).await?;
+        let skip = skip_count.clamp(0, i64::MAX) as usize;
+        if skip < msgs.len() {
+            msgs.drain(..skip);
+        } else {
+            msgs.clear();
+        }
+        Ok(msgs)
+    }
     async fn last_message_seq(&self, session_id: &str) -> Result<i64>;
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64>;

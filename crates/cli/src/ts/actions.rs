@@ -235,6 +235,7 @@ async fn ensure_session(workdir: &Path, id: &str) -> Result<()> {
             updated_at: now,
             summary: None,
             summary_seq: None,
+            summary_images: vec![],
             handoff_seq: None,
             handoff_plan: None,
             skill: None,

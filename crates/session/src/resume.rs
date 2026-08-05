@@ -42,7 +42,20 @@ pub async fn resume(
         .or_else(|| resolve_agent("act"))
         .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?;
 
-    let mut messages: Vec<Message> = store.load_messages(id).await?;
+    // Loading strategy:
+    //  - Compaction path (summary_seq set, no handoff): load ONLY the tail
+    //    after the compacted head via OFFSET. The head's surviving images are
+    //    now persisted (summary_images), so the head never needs to be loaded
+    //    to re-derive them -- the fix for long-session resume stalls caused by
+    //    reloading + deserializing thousands of soft-deleted head messages.
+    //  - Handoff / no-compaction path: full load. Handoff is an early one-time
+    //    plan->act transition with small data; no-compaction has nothing to skip.
+    let mut messages: Vec<Message> =
+        if meta.handoff_seq.is_none() && matches!(meta.summary_seq, Some(sk) if sk > 0) {
+            store.load_messages_after(id, meta.summary_seq.unwrap()).await?
+        } else {
+            store.load_messages(id).await?
+        };
 
     // Reconcile subagent tasks stuck in Running state — the process was
     // interrupted mid-subagent. Mark them Cancelled (not Failed): a cancelled
@@ -92,23 +105,15 @@ pub async fn resume(
             }
             messages.insert(0, head_msg);
         }
-    } else if let Some(skip) = meta.summary_seq {
-        let mut preserved_images: Vec<String> = Vec::new();
-        if skip > 0 {
-            let skip = skip as usize;
-            if skip < messages.len() {
-                // The compacted head is still present in the store (compaction
-                // only sets summary_seq); re-derive its recent images here so
-                // they survive resume by attaching to the reconstructed summary.
-                preserved_images = crate::compaction::collect_head_images(&messages[..skip]);
-                messages = messages[skip..].to_vec();
-            } else {
-                messages = Vec::new();
-            }
-        }
+    } else if meta.summary_seq.is_some() {
+        // Compaction path: `messages` already holds ONLY the post-compaction tail
+        // (loaded via OFFSET above). Reconstruct the synthetic summary from the
+        // persisted summary text + persisted summary_images, avoiding the old
+        // collect_head_images call that forced a full head reload just to extract
+        // a few image URLs.
         if let Some(summary_text) = &meta.summary {
             let mut summary_msg = crate::compaction::compaction_message(summary_text.clone());
-            for url in &preserved_images {
+            for url in &meta.summary_images {
                 summary_msg.blocks.push(ContentBlock::Image {
                     url: url.clone(),
                     detail: None,
@@ -153,6 +158,19 @@ pub async fn resume(
     let n = messages.len();
     let model = config.model_id().to_string();
 
+    // Handoff supersedes compaction: if a handoff boundary exists, any
+    // residual compaction metadata (summary_seq / summary / summary_images)
+    // left in the store is stale. The handoff persistence path now clears it
+    // (clear_summary: true), but sessions created before that fix -- or any
+    // path that sets handoff without the clear -- may still carry the residue.
+    // Zero it out here so compaction's `prev_skip = summary_seq.or(handoff_seq)`
+    // picks the correct handoff_seq, not a stale smaller summary_seq.
+    let (summary, summary_seq, summary_images) = if meta.handoff_seq.is_some() {
+        (None, None, Vec::new())
+    } else {
+        (meta.summary.clone(), meta.summary_seq, meta.summary_images.clone())
+    };
+
     let s = SessionState {
         id: id.to_string(),
         messages,
@@ -171,8 +189,9 @@ pub async fn resume(
         turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
         child_cancels: Arc::new(Mutex::new(HashMap::new())),
-        summary: meta.summary,
-        summary_seq: meta.summary_seq,
+        summary,
+        summary_seq,
+        summary_images,
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         plan_input_count: 0,

@@ -62,6 +62,27 @@ pub async fn load(conn: &Connection, session_id: &str) -> Result<Vec<Message>> {
     Ok(out)
 }
 
+/// Load messages for a session skipping the first `skip_count` rows (by `seq`
+/// ASC), returning only the tail. Uses `LIMIT -1 OFFSET ?` so SQLite scans but
+/// does NOT deserialize the skipped rows' `blocks_json` -- the critical win over
+/// a full `load()` for long compacted sessions whose head accumulates thousands
+/// of soft-deleted messages. `skip_count <= 0` returns all rows.
+pub async fn load_after(
+    conn: &Connection,
+    session_id: &str,
+    skip_count: i64,
+) -> Result<Vec<Message>> {
+    let stmt = conn
+        .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
+        .await?;
+    let mut rows = stmt.query(params![session_id, skip_count]).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        out.push(row_to_message(&r)?);
+    }
+    Ok(out)
+}
+
 pub async fn last_seq(conn: &Connection, session_id: &str) -> Result<i64> {
     let stmt = conn
         .prepare("SELECT MAX(seq) FROM messages WHERE session_id = ?")

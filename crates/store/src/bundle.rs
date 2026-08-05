@@ -150,6 +150,7 @@ async fn import_bundle_inner(
     // resume recomputes compaction state as needed.
     meta.summary = None;
     meta.summary_seq = None;
+    meta.summary_images = Vec::new();
     meta.handoff_seq = None;
     meta.handoff_plan = None;
 
@@ -237,6 +238,7 @@ mod tests {
                 summary_seq: None,
                 handoff_seq: None,
                 handoff_plan: None,
+                summary_images: vec![],
                 skill: None,
                 task_type: None,
             },
@@ -321,6 +323,7 @@ mod tests {
                 // Stale markers pointing at source-DB seqs that won't exist here.
                 summary: Some("stale summary".into()),
                 summary_seq: Some(3),
+                summary_images: vec![],
                 handoff_seq: Some(2),
                 handoff_plan: Some("stale plan".into()),
                 skill: None,
@@ -400,6 +403,7 @@ mod tests {
                 created_at: 1,
                 updated_at: 2,
                 summary: None,
+                summary_images: vec![],
                 summary_seq: None,
                 handoff_seq: None,
                 handoff_plan: None,

@@ -2,6 +2,7 @@ pub mod client;
 pub mod display;
 pub mod exit_tips;
 pub mod run;
+mod run_image;
 pub mod server;
 pub mod session_cmd;
 pub mod ts;

@@ -240,6 +240,7 @@ pub async fn process_cmd(
                             &opencoder_store::SessionPatch {
                                 handoff_seq: sess.handoff_seq,
                                 handoff_plan: sess.handoff_plan.clone(),
+                                clear_skill: true,
                                 updated_at: Some(now_ms()),
                                 ..Default::default()
                             },

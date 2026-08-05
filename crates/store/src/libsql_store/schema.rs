@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA journal_mode=WAL",
@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   summary      TEXT,
-  summary_seq  INTEGER,
+  summary_seq      INTEGER,
+  summary_images_json TEXT,
   handoff_seq  INTEGER,
   handoff_plan TEXT,
   skill        TEXT,
@@ -223,9 +224,15 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // old rows keep NULL and display layers fall back to `prompt`.
         add_column_if_absent(conn, "session_inputs", "display_text", "TEXT").await?;
     }
+    if from < 7 {
+        // v7: image URLs preserved across compaction, persisted as
+        // `summary_images_json` so resume can rebuild the synthetic
+        // summary message without reloading the soft-deleted
+        // compacted head. Nullable so existing rows stay valid.
+        add_column_if_absent(conn, "sessions", "summary_images_json", "TEXT").await?;
+    }
     Ok(())
 }
-
 /// Return `true` if `table` has a column named `column`.
 ///
 /// Inspects `PRAGMA table_info(<table>)`, where the column-name lives at result

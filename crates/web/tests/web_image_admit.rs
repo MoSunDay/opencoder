@@ -45,6 +45,7 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            summary_images: vec![],
             handoff_seq: None,
             handoff_plan: None,
             skill: None,

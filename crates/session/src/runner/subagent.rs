@@ -131,6 +131,7 @@ pub(super) async fn run_subagent(
                 updated_at: now_ms(),
                 summary: None,
                 summary_seq: None,
+                summary_images: vec![],
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,

@@ -84,3 +84,140 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
     assert!(!cancelled, "stale cancel flag should be cleared");
     assert!(running, "the live (newer) turn must stay running");
 }
+
+// ----- drain_pending activation: stranded Queue/Steer must arm recovery -----
+
+/// When `SessionEvent::Done` arrives but the store still has a pending Queue
+/// input (e.g. it was stranded by a race), `drain_pending` must be armed so the
+/// subsequent `TurnDone` restarts the drain loop instead of going idle.
+#[tokio::test]
+async fn done_with_pending_queue_arms_drain_pending() {
+    use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
+
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "drain-test".into(),
+            title: Some("test".into()),
+            agent: Some("act".into()),
+            model: Some("m/g".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            summary_images: vec![],
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+            task_type: None,
+        })
+        .await
+        .unwrap();
+    // Admit a stranded Queue input.
+    store
+        .admit_input(&SessionInput {
+            seq: None,
+            id: "q-1".into(),
+            session_id: "drain-test".into(),
+            delivery: Delivery::Queue,
+            prompt: "stranded prompt".into(),
+            images: vec![],
+            admitted_seq: 0,
+            promoted_seq: None,
+            display_text: None,
+        })
+        .await
+        .unwrap();
+
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::Done)),
+        &mut chat,
+        &store,
+        "drain-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(drain_pending, "stranded queue must arm drain_pending");
+    assert!(running, "must NOT go idle while drain_pending is armed");
+    assert!(!queue_items.is_empty(), "queue mirror must reflect the stranded item");
+}
+
+/// When `SessionEvent::Done` arrives and the store has NO pending inputs,
+/// `drain_pending` stays false and `running` goes to false (normal idle).
+#[tokio::test]
+async fn done_with_empty_store_goes_idle() {
+    use opencoder_store::{LibsqlStore, SessionMeta, Store};
+
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "idle-test".into(),
+            title: Some("test".into()),
+            agent: Some("act".into()),
+            model: Some("m/g".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            summary_images: vec![],
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+            task_type: None,
+        })
+        .await
+        .unwrap();
+
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::Done)),
+        &mut chat,
+        &store,
+        "idle-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert!(!drain_pending, "empty store must NOT arm drain_pending");
+    assert!(!running, "must go idle when nothing is pending");
+}

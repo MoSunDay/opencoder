@@ -22,11 +22,10 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{paste_payload, start_turn, sys_tokens_for, worker_dead};
+use crate::app_helpers::{start_turn, sys_tokens_for, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
-use crate::composer;
 use crate::local_cmd;
 use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
 use crate::task::TaskPicker;
@@ -284,18 +283,15 @@ pub(crate) async fn fold_ui_events(
                         // potentially-new turn.
                         *cancelled = false;
                     } else if !*drain_pending {
-                        *running = false;
-                        chat.steer_items.clear();
                         if matches!(sev, SessionEvent::Done) {
-                            // Re-sync the queue mirror from the store as a
-                            // safety net. Under FIFO drain-to-empty semantics
-                            // Done normally means the queue is fully drained,
-                            // so pending_inputs should be empty — but a
-                            // cancel/interrupt can break the run early with
-                            // queued rows still pending, and those must remain
-                            // visible in the side panel. On Error, rows are
-                            // maintained per-item by QueueConsumed events as
-                            // before.
+                            // Re-sync both queue AND steer mirrors from the
+                            // store. Under FIFO drain-to-empty semantics Done
+                            // normally means everything is drained, but a
+                            // cancel/interrupt/race can break the run early
+                            // with inputs still pending. If any are found,
+                            // arm drain_pending so TurnDone restarts the drain
+                            // loop instead of going idle (which would strand
+                            // the inputs permanently).
                             *queue_items = crate::queue_panel::pending_mirror(
                                 store
                                     .pending_inputs(
@@ -305,6 +301,28 @@ pub(crate) async fn fold_ui_events(
                                     .await
                                     .unwrap_or_default(),
                             );
+                            chat.steer_items = crate::queue_panel::pending_mirror(
+                                store
+                                    .pending_inputs(
+                                        session_id,
+                                        opencoder_store::Delivery::Steer,
+                                    )
+                                    .await
+                                    .unwrap_or_default(),
+                            );
+                            if !queue_items.is_empty() || !chat.steer_items.is_empty() {
+                                // Stranded inputs found — arm drain_pending so
+                                // the next TurnDone restarts the drain loop.
+                                *drain_pending = true;
+                            } else {
+                                *running = false;
+                            }
+                        } else {
+                            // Error: go idle without auto-restart to avoid
+                            // error loops. Queue mirror is maintained per-item
+                            // by QueueConsumed events as before.
+                            *running = false;
+                            chat.steer_items.clear();
                         }
                     }
                 }
@@ -526,179 +544,6 @@ pub(crate) async fn dispatch_command(
     LoopFlow::Proceed
 }
 
-/// Paste an image (screenshot bitmap) from the system clipboard into the
-/// composer's `pending_images`. Triggered by `Ctrl+V`. Replaces the former
-/// `/clip` slash command. The blocking `arboard` clipboard read runs on a
-/// background thread so it can't stall the async event loop.
-pub(crate) async fn paste_clipboard_image(
-    chat: &mut ChatView,
-    pending_images: &mut Vec<(String, String)>,
-) -> LoopFlow {
-    match tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await {
-        Ok(Some(data_uri)) => {
-            let n = pending_images.len() + 1;
-            pending_images.push((data_uri, "clipboard.png".to_string()));
-            chat.push_marker(Line::from(Span::styled(
-                format!("\u{1f4ce} pasted image from clipboard ({n} attached)"),
-                Style::default().fg(theme::ok_color()),
-            )));
-        }
-        Ok(None) => {
-            chat.push_marker(Line::from(Span::styled(
-                "[clip] no image in clipboard",
-                Style::default().fg(theme::warn_color()),
-            )));
-        }
-        Err(e) => {
-            chat.push_marker(Line::from(Span::styled(
-                format!("[clip] clipboard read failed: {e}"),
-                Style::default().fg(theme::err_color()),
-            )));
-        }
-    }
-    LoopFlow::Proceed
-}
-
-/// Like [`paste_clipboard_image`] but silent on failure. Used when an empty
-/// bracketed-paste arrives — the terminal swallowed Ctrl+V because the
-/// clipboard holds an image, not text. Success still shows the 📎 marker;
-/// "no image" or clipboard errors are quietly ignored so the user is never
-/// disturbed by an empty paste.
-pub(crate) async fn paste_clipboard_image_silent(
-    chat: &mut ChatView,
-    pending_images: &mut Vec<(String, String)>,
-) {
-    if let Ok(Some(data_uri)) =
-        tokio::task::spawn_blocking(crate::clipboard::clipboard_image_data_uri).await
-    {
-        pending_images.push((data_uri, "clipboard.png".to_string()));
-        push_attach_marker(chat, pending_images.len(), "pasted image from clipboard");
-    }
-}
-
-/// Push a green `📎 {label} ({n} attached)` marker into the chat stream.
-fn push_attach_marker(chat: &mut ChatView, n: usize, label: &str) {
-    chat.push_marker(Line::from(Span::styled(
-        format!("\u{1f4ce} {label} ({n} attached)"),
-        Style::default().fg(theme::ok_color()),
-    )));
-}
-
-/// Route a paste payload by the same modal priority as key events: an open
-/// popup owns the paste, so it never reaches the main input hidden behind it.
-///
-/// Mirrors [`Event::Key`](crossterm::event::Event::Key)'s priority chain:
-/// - task picker / cache-salt menu open -> modal isolation (no text fields),
-///   swallow the paste;
-/// - model menu open -> feed the trimmed payload to its focused field via
-///   [`ModelMenu::paste`];
-/// - command menu open -> append to its query and refilter via
-///   [`CommandMenu::paste`];
-/// - otherwise -> resolve a dragged file to its absolute path (or insert the
-///   payload verbatim) into the main composer; image file paths are loaded
-///   into `pending_images` as data URIs instead.
-///
-/// Returns [`LoopFlow::Redraw`] when a modal consumed the paste (the caller
-/// re-renders), [`LoopFlow::Proceed`] when the main composer absorbed it
-/// (`input`/`cursor_idx` updated in place). Never returns `Quit`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn route_paste(
-    pasted: &str,
-    task_picker_open: bool,
-    cache_salt_menu_open: bool,
-    model_menu: &mut Option<ModelMenu>,
-    command_menu: &mut Option<CommandMenu>,
-    input: &mut String,
-    cursor_idx: &mut usize,
-    pending_images: &mut Vec<(String, String)>,
-    asm: &mut crate::image_chunk::Assembly,
-    chat: &mut ChatView,
-    workdir: &Path,
-) -> LoopFlow {
-    if task_picker_open || cache_salt_menu_open {
-        // No text fields here -- modal isolation: swallow the paste.
-        return LoopFlow::Redraw;
-    }
-    // Modal fields never resolve drag-and-drop file paths; only strip the
-    // trailing newline terminals append to pasted payloads.
-    let trimmed = pasted.trim_end_matches(['\r', '\n']);
-    if let Some(menu) = model_menu.as_mut() {
-        menu.paste(trimmed);
-        return LoopFlow::Redraw;
-    }
-    if let Some(menu) = command_menu.as_mut() {
-        menu.paste(trimmed);
-        return LoopFlow::Redraw;
-    }
-
-    // Chunked image frames (ocimg protocol): tmux/SSH may truncate huge
-    // single pastes, so scripts emit small self-delimiting frames the TUI
-    // reassembles. Non-frame lines in the same paste fall through to the
-    // composer as text.
-    if trimmed.lines().any(|l| l.starts_with("ocimg ")) {
-        let now = crate::image_chunk::now_ms();
-        let mut leftover = String::new();
-        for line in trimmed.lines() {
-            use crate::image_chunk::FeedOutcome;
-            match asm.feed_line(line, now) {
-                FeedOutcome::NotFrame => {
-                    if !leftover.is_empty() {
-                        leftover.push('\n');
-                    }
-                    leftover.push_str(line);
-                }
-                FeedOutcome::Pending => {}
-                FeedOutcome::Complete { uri, filename, chunks } => {
-                    let label = format!("{filename} ({chunks} chunks)");
-                    pending_images.push((uri, label.clone()));
-                    push_attach_marker(chat, pending_images.len(), &label);
-                }
-                FeedOutcome::Warn { message } => {
-                    chat.push_marker(Line::from(Span::styled(
-                        message,
-                        Style::default().fg(theme::warn_color()),
-                    )));
-                }
-            }
-        }
-        if !leftover.is_empty() {
-            let (new_input, new_idx) = composer::insert_str(input, *cursor_idx, &leftover);
-            *input = new_input;
-            *cursor_idx = new_idx;
-        }
-        return LoopFlow::Proceed;
-    }
-
-    // Inline data:image URI — attach verbatim (trailing newline already stripped).
-    if let Some(filename) = crate::image_chunk::image_data_uri_filename(trimmed) {
-        pending_images.push((trimmed.to_string(), filename.clone()));
-        push_attach_marker(chat, pending_images.len(), &filename);
-        return LoopFlow::Proceed;
-    }
-
-    // HTTP(S) URL pointing at an image — attach the URL with its filename.
-    if let Some(filename) = crate::image_chunk::image_url_filename(trimmed) {
-        pending_images.push((trimmed.to_string(), filename.clone()));
-        push_attach_marker(chat, pending_images.len(), &filename);
-        return LoopFlow::Proceed;
-    }
-
-    // Main composer: check if pasted content is an image file path.
-    if let Some((data_uri, filename)) = crate::image_util::try_load_image(trimmed, workdir) {
-        pending_images.push((data_uri, filename.clone()));
-        push_attach_marker(chat, pending_images.len(), &filename);
-        return LoopFlow::Proceed;
-    }
-    // Otherwise: drag a file in (or clipboard paste) arrives as one
-    // atomic payload; resolve an existing file to its absolute path, else
-    // insert verbatim.
-    let payload = paste_payload(pasted, workdir);
-    let (new_input, new_idx) = composer::insert_str(input, *cursor_idx, &payload);
-    *input = new_input;
-    *cursor_idx = new_idx;
-    LoopFlow::Proceed
-}
-
 /// Hard exit (Ctrl+C/Ctrl+D): interrupt any in-flight turn so the worker stops
 /// promptly. Without cancelling the shared token the worker stays blocked inside
 /// `run_session` and cannot read `UiCmd::Quit` until the turn naturally ends (up
@@ -797,3 +642,8 @@ mod bugfix_tests;
 mod app_loop_model;
 
 pub(crate) use app_loop_model::handle_model_outcome;
+
+#[path = "app_loop_paste.rs"]
+mod app_loop_paste;
+
+pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_silent, route_paste};

@@ -105,6 +105,7 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         updated_at: msgs.last().map(|m| m.created_at).unwrap_or(now),
         summary: None,
         summary_seq: None,
+        summary_images: Vec::new(),
         handoff_seq: None,
         handoff_plan: None,
         skill: None,

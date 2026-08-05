@@ -51,6 +51,7 @@ fn session_meta(id: &str, agent: &str) -> SessionMeta {
         updated_at: 0,
         summary: None,
         summary_seq: None,
+        summary_images: vec![],
         handoff_seq: None,
         handoff_plan: None,
         skill: None,
@@ -231,6 +232,7 @@ async fn resume_trims_summarized_head_and_prepends_summary() {
             &SessionPatch {
                 summary: Some("Summary of first 3 messages".into()),
                 summary_seq: Some(3),
+                summary_images: None,
                 updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },

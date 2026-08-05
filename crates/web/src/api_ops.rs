@@ -45,6 +45,7 @@ pub async fn fork_session(
         updated_at: now,
         summary: meta.summary.clone(),
         summary_seq: meta.summary_seq,
+        summary_images: vec![],
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         skill: meta.skill.clone(),

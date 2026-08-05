@@ -20,6 +20,7 @@
 # Usage:
 #   scripts/install.sh                       # build + install to /usr/local/bin
 #   scripts/install.sh --no-build            # install existing build only
+#   scripts/install.sh --backup              # also save a .bak before swap
 #   scripts/install.sh --dest /opt/bin/opencoder
 #   scripts/install.sh --source path/to/opencoder --no-build
 #   OPENCODER_INSTALL_DEST=/x scripts/install.sh
@@ -34,6 +35,7 @@ PROGNAME="$(basename "$0")"
 DEST="${OPENCODER_INSTALL_DEST:-/usr/local/bin/opencoder}"
 SOURCE=""
 NO_BUILD=0
+BACKUP="${OPENCODER_INSTALL_BACKUP:-0}"
 
 usage() {
   cat <<USAGE
@@ -46,6 +48,8 @@ Options:
                   or \$OPENCODER_INSTALL_DEST if set).
   --source PATH   Use this binary instead of auto-resolving via cargo metadata.
   --no-build      Skip \`cargo build --release\` (use the existing build).
+  --backup        Copy the existing destination to <dest>.bak.<timestamp> before
+                  overwriting. Default off. Or set \$OPENCODER_INSTALL_BACKUP=1.
   -h, --help      Show this help.
 
 Exit codes: 0 ok | 1 usage | 2 build | 3 source | 4 install | 5 self-check
@@ -57,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --dest)     DEST="$2"; shift 2;;
     --source)   SOURCE="$2"; shift 2;;
     --no-build) NO_BUILD=1; shift;;
+    --backup)   BACKUP=1; shift;;
     -h|--help)  usage; exit 0;;
     *) echo "$PROGNAME: unknown argument: $1" >&2; usage >&2; exit 1;;
   esac
@@ -100,6 +105,22 @@ dest_dir="$(dirname "$DEST")"
 if [[ ! -d "$dest_dir" ]]; then
   echo "$PROGNAME: destination directory does not exist: $dest_dir" >&2
   exit 4
+fi
+
+# --- optional backup of the current destination ---------------------------
+if [[ "$BACKUP" != "0" && -e "$DEST" ]]; then
+  # Don't back up if dest already IS the source file (same inode).
+  if [[ "$DEST" -ef "$SRC" ]]; then
+    echo "$PROGNAME: --backup: destination is already the source file (same inode); skipping backup"
+  else
+    BAK="$DEST.bak.$(date +%Y%m%d%H%M%S)"
+    if cp -a "$DEST" "$BAK"; then
+      echo "$PROGNAME: backed up existing $DEST -> $BAK"
+    else
+      echo "$PROGNAME: --backup: copy to $BAK failed" >&2
+      exit 4
+    fi
+  fi
 fi
 
 tmp="$DEST.new.$$"

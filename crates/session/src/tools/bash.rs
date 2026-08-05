@@ -12,12 +12,20 @@ use super::bg::{handoff, output_path, register, unregister, BgState};
 #[cfg(test)]
 use super::bg::{kill_all, list, test_registry_mutex};
 
-/// Foreground timeout for a bash command (seconds). When exceeded the command
-/// is moved to the background (see [`super::bg::handoff`]) instead of being
-/// killed — long-running builds keep going and their output lands in a temp
-/// file the model can read later. The runner keeps bash exempt from its own
-/// 600 s leaf-tool safety net (`runner::execute`) so the two deadlines never
-/// race; bash has its own shorter internal timeout.
+/// Real enforced foreground deadline for a bash command (seconds). When
+/// exceeded the command is moved to the background
+/// (see [`super::bg::handoff`]) instead of being killed — long-running
+/// builds keep going and their output lands in a temp file the model can read
+/// later. The runner keeps bash exempt from its own 600 s leaf-tool safety net
+/// (`runner::execute`) so the two deadlines never race; bash has its own
+/// shorter internal timeout.
+///
+/// NOTE: the number *shown to the model* in handoff/killed messages is
+/// [`BASH_TIMEOUT_DISPLAY_SECS`] (120 s), deliberately *lower* than this real
+/// deadline (130 s). The ~10 s gap is a buffer so the model is nudged to treat
+/// a command as "timed out → backgrounded" a little before the hard cutoff
+/// actually fires. Do NOT "fix" the two numbers to be equal — the mismatch is
+/// intentional and asserted at compile time below.
 ///
 /// Overridden to 1 s in unit tests so the handoff path is exercisable without
 /// a 130 s wait. Integration tests (`tests/`) link the non-`cfg(test)` build
@@ -26,6 +34,22 @@ use super::bg::{kill_all, list, test_registry_mutex};
 pub(crate) const BASH_TIMEOUT_SECS: u64 = 130;
 #[cfg(test)]
 pub(crate) const BASH_TIMEOUT_SECS: u64 = 1;
+
+/// Model-visible timeout (seconds): the value interpolated into the timeout
+/// handoff/killed messages the tool returns to the model. Deliberately *lower*
+/// than the real enforced deadline ([`BASH_TIMEOUT_SECS`]); see that constant's
+/// doc comment for the buffer rationale. Same 1 s override under `cfg(test)`.
+#[cfg(not(test))]
+pub(crate) const BASH_TIMEOUT_DISPLAY_SECS: u64 = 120;
+#[cfg(test)]
+pub(crate) const BASH_TIMEOUT_DISPLAY_SECS: u64 = 1;
+
+/// Compile-time guarantee the display value stays strictly below the real
+/// deadline — the ~10 s buffer is load-bearing. Only checked outside
+/// `cfg(test)` (where both collapse to 1 s and the relation is meaningless);
+/// a plain `cargo build` (not `cargo test`) enforces it.
+#[cfg(not(test))]
+const _: () = assert!(BASH_TIMEOUT_DISPLAY_SECS < BASH_TIMEOUT_SECS);
 
 /// Marker prefix the runner looks for to deduplicate consecutive bash-timeout
 /// tool results (see `runner::dedup_consecutive_bash_timeouts`). The closing
@@ -220,7 +244,7 @@ impl Tool for BashTool {
                     );
                     return Ok(ToolOutput {
                         content: format!(
-                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_SECS}s \u{2014} moved to background]\n\
+                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_DISPLAY_SECS}s \u{2014} moved to background]\n\
                              pid: {pid}\noutput: {}\n\n{captured}",
                             output_path(pid).display()
                         ),
@@ -236,7 +260,7 @@ impl Tool for BashTool {
                     let _ = child.kill().await;
                     return Ok(ToolOutput {
                         content: format!(
-                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_SECS}s \u{2014} killed]",
+                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_DISPLAY_SECS}s \u{2014} killed]",
                         ),
                         is_error: false,
                         images: vec![],
@@ -405,6 +429,26 @@ mod tests {
             out.content
         );
         // Clean up: kill the backgrounded process so it does not linger.
+        kill_all();
+    }
+
+    /// The handoff message reports the *display* timeout, not the real one.
+    /// Guards against a "fix" that switches the message back to the 130 s
+    /// constant. (Under cfg(test) both are 1 s, so this primarily pins the code
+    /// path to the display constant; the 120<130 invariant is enforced at
+    /// compile time by the `const _: () = assert!(...)` in non-test builds.)
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_timeout_message_uses_display_constant() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        let input = json!({"command": "sleep 3"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(
+            out.content.contains(&format!("after {BASH_TIMEOUT_DISPLAY_SECS}s")),
+            "handoff message must quote the display constant: {}",
+            out.content
+        );
         kill_all();
     }
 

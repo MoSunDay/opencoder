@@ -134,6 +134,15 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         messages::load(&conn, session_id).await
     }
+    async fn load_messages_after(
+        &self,
+        session_id: &str,
+        skip_count: i64,
+    ) -> Result<Vec<opencoder_core::Message>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        messages::load_after(&conn, session_id, skip_count).await
+    }
     async fn last_message_seq(&self, session_id: &str) -> Result<i64> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

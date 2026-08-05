@@ -20,13 +20,17 @@ mod execute;
 mod llm_call;
 mod steer;
 mod subagent;
+mod dedup;
 
 pub use event::SessionEvent;
 use event::{Sink, DOOM_THRESHOLD};
 use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
-use steer::{claim_one_queued, claim_steers, has_pending_steers, is_turn_cancelled, reset_turn_cancel};
+use steer::{
+    claim_steers, drain_mode_step,
+    idle_drain, is_turn_cancelled, reset_turn_cancel, DrainModeAction, IdleAction,
+};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -68,6 +72,11 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
+    // True when a ClearContext with a preserved plan was applied and the
+    // transcript now holds a handoff message awaiting an LLM execution turn
+    // (user_text was cleared). This keeps `drain_mode` false so run_loop makes
+    // the execution call instead of going idle.
+    let mut handoff_pending = false;
     // Control commands (/act, /plan) short-circuit without an LLM turn. A
     // compound input (/plan review) switches then runs the rest. EXCEPTION:
     // /act_clear_context with a preserved result falls through to run_loop.
@@ -82,6 +91,7 @@ pub async fn run_with_registry(
         {
             user_text.clear();
             images.clear();
+            handoff_pending = true;
         } else if let Some(rest) = rest {
             // Compound (/plan review): switch done; fall through to recording
             // which resolves `$skill` tokens and records user_text as prompt.
@@ -128,7 +138,8 @@ pub async fn run_with_registry(
         msg.synthetic = true;
         session.record(msg).await;
     }
-    run_loop(session, registry, &mut on_event).await?;
+    let drain_mode = !has_text && !has_images && !has_skill && !handoff_pending;
+    run_loop(session, registry, &mut on_event, drain_mode).await?;
     // Autopilot: after the initial task completes, hand control to the
     // PLAN -> ACT -> VERIFY loop so the agent self-drives toward the goal.
     if session.config.autopilot.enabled {
@@ -137,59 +148,11 @@ pub async fn run_with_registry(
     Ok(())
 }
 
-/// Deduplicate consecutive bash-timeout tool results.
-///
-/// When bash times out repeatedly (e.g. the model keeps running long commands
-/// across turns), only the first timeout's full message is kept \u{2014} subsequent
-/// ones are replaced with the first's content (same PID, same output file
-/// path, so the model reads the same file regardless). A non-timeout bash
-/// result resets the consecutive count. Non-bash tool calls do NOT reset it
-/// (they run independently and don't affect the bash timeout streak).
-///
-/// Deduplication only collapses timeouts for the SAME command: a different
-/// command has its own PID and output-file path, so reusing the first
-/// timeout's content would hide the real PID and point the model at the wrong
-/// background output file. A mismatched command starts a new streak.
-///
-/// `first` persists across turns (it lives in `run_loop`'s scope) so the
-/// dedup applies across turn boundaries, not just within a single batch.
-fn dedup_consecutive_bash_timeouts(
-    tool_calls: &[opencoder_llm::CompletedToolCall],
-    results: &mut [(usize, ToolOutput)],
-    first: &mut Option<(String, Value)>,
-) {
-    for (i, out) in results.iter_mut() {
-        let tc = tool_calls.get(*i);
-        let is_bash = tc.is_some_and(|tc| tc.name == "bash");
-        if is_bash
-            && out
-                .content
-                .starts_with(crate::tools::bash::BASH_TIMEOUT_MARKER)
-        {
-            // Capture the command input so timeouts for different commands
-            // are NOT collapsed onto each other.
-            let input = tc.map(|tc| tc.input.clone()).unwrap_or(Value::Null);
-            if let Some((first_content, first_input)) = first {
-                if *first_input == input {
-                    out.content = first_content.clone();
-                } else {
-                    // Different command — start a fresh streak so this
-                    // timeout's own PID / output file is preserved.
-                    *first = Some((out.content.clone(), input));
-                }
-            } else {
-                *first = Some((out.content.clone(), input));
-            }
-        } else if is_bash {
-            *first = None;
-        }
-    }
-}
-
 pub(crate) async fn run_loop(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    mut drain_mode: bool,
 ) -> Result<()> {
     let mut doom: VecDeque<String> = VecDeque::new();
     let mut tool_failures: crate::tool_guard::FailureMap = HashMap::new();
@@ -198,6 +161,7 @@ pub(crate) async fn run_loop(
     // deduplicated (same PID / output file). Different commands start a new
     // streak so their distinct PIDs are preserved.
     let mut bash_timeout_first: Option<(String, Value)> = None;
+    let mut skip_llm = false;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -208,8 +172,12 @@ pub(crate) async fn run_loop(
                 break;
             }
         }
+        // Capture+clear skip_llm from a previous bare-command drain.
+        let skip = std::mem::replace(&mut skip_llm, false);
+
         // Safe Provider-Turn Boundary: promote any steers admitted since the
         // last turn. A steer is absorbed into history HERE.
+        let mut steer_recorded = false;
         let steer_prompts = claim_steers(session).await;
         if !steer_prompts.is_empty() {
             // Track whether the last steer was a sentinel ClearContext so we
@@ -232,17 +200,41 @@ pub(crate) async fn run_loop(
                     if let Some(rest) = rest {
                         clear_sentinel = false;
                         crate::skill_resolve::record_compound(session, &rest, imgs).await;
+                        steer_recorded = true;
                     }
                     continue;
                 }
                 clear_sentinel = false;
                 // Resolve `$skill` tokens, apply plan tag, record as real user turn.
                 crate::skill_resolve::record_compound(session, p, imgs).await;
+                steer_recorded = true;
             }
             // Sentinel ClearContext: go idle without an LM call.
             if clear_sentinel {
                 on_event(SessionEvent::Done);
                 break;
+            }
+        }
+
+        // Drain-mode pre-consume: process queue before the first LLM call
+        // (web drain_to_completion). Bare commands loop via continue.
+        if drain_mode && steer_prompts.is_empty() {
+            match drain_mode_step(session, &mut *on_event).await? {
+                DrainModeAction::Proceed => drain_mode = false,
+                DrainModeAction::ConsumeNext => continue,
+                DrainModeAction::Idle => {
+                    on_event(SessionEvent::Done);
+                    break;
+                }
+            }
+        }
+
+        // Skip LLM: a bare control command was drained last idle boundary.
+        if skip && !steer_recorded {
+            match idle_drain(session, &mut *on_event).await? {
+                IdleAction::Continue => continue,
+                IdleAction::SkipLlm => { skip_llm = true; continue; }
+                IdleAction::Done => { on_event(SessionEvent::Done); break; }
             }
         }
 
@@ -337,56 +329,21 @@ pub(crate) async fn run_loop(
         session.record(assistant).await;
 
         if tool_calls.is_empty() {
-            // Idle boundary: drain FIFO queued follow-ups until empty. Control
-            // commands apply without an LLM turn; a real prompt breaks to run.
-            let mut got_real_prompt = false;
-            // Late steer admitted mid-turn (after the top-of-loop claim).
-            let mut late_steer = false;
-            loop {
-                if let Some((seq, q, imgs)) = claim_one_queued(session).await {
-                    on_event(SessionEvent::QueueConsumed { seq });
-                    if let Some((cmd, rest)) =
-                        crate::control_cmd::split_control_prefix(&q)
-                    {
-                        crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
-                        // ClearContext with a preserved result breaks to execute
-                        // it; sentinel path (no result) continues draining.
-                        if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
-                            && !crate::control_cmd::is_clear_context_handoff(
-                                session.handoff_plan.as_deref().unwrap_or(""),
-                            )
-                        {
-                            got_real_prompt = true;
-                            break;
-                        }
-                        // Compound (/plan review): rest is a real prompt in
-                        // the new mode — record it and break.
-                        if let Some(rest) = rest {
-                            crate::skill_resolve::record_compound(session, &rest, &imgs).await;
-                            got_real_prompt = true;
-                            break;
-                        }
-                        continue; // bare command: drain next item, no LLM turn
-                    }
-                    // Real prompt: resolve `$skill` tokens, record, break.
-                    crate::skill_resolve::record_compound(session, &q, &imgs).await;
-                    got_real_prompt = true;
-                    break;
-                }
-                // Queue empty: peek for a late steer admitted mid-turn; if
-                // pending, skip Done so claim_steers absorbs it next loop.
-                if has_pending_steers(session).await {
-                    late_steer = true;
-                    break;
-                }
-                // Queue empty and no late steer: go idle.
-                on_event(SessionEvent::Done);
-                break;
+            // Late turn-cancel: capture an interrupt fired during
+            // record().await above so it does not strand a queued input
+            // via the biased select in idle_drain → claim_one_queued.
+            if is_turn_cancelled(session) {
+                reset_turn_cancel(session);
+                continue;
             }
-            if got_real_prompt || late_steer {
-                continue; // outer loop: LLM processes the recorded prompt / steer
+            // Idle boundary: pop exactly one queued follow-up. Bare control
+            // commands set skip_llm for the next iteration; a real prompt
+            // continues the outer loop for an LLM turn.
+            match idle_drain(session, &mut *on_event).await? {
+                IdleAction::Continue => continue,
+                IdleAction::SkipLlm => { skip_llm = true; continue; }
+                IdleAction::Done => { on_event(SessionEvent::Done); break; }
             }
-            break; // outer loop: idle (Done emitted)
         }
 
         // ---- Tool execution: independent tool calls run concurrently so that,
@@ -486,7 +443,7 @@ pub(crate) async fn run_loop(
             // Deduplicate consecutive bash-timeout results: only the first
             // timeout in a streak shows its full message; subsequent ones
             // reuse the first content (same PID, same output file).
-            dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut bash_timeout_first);
+            dedup::dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut bash_timeout_first);
             // Tool-failure guard: track consecutive failures per tool name
             // and apply exponential backoff before continuing.
             {
@@ -630,170 +587,4 @@ pub async fn run_once(
     let mut session = SessionState::new(new_id(), agent, config, client, working_dir);
     run(&mut session, prompt, on_event).await?;
     Ok(session)
-}
-
-#[cfg(test)]
-mod dedup_tests {
-    use super::dedup_consecutive_bash_timeouts;
-    use opencoder_core::ToolOutput;
-    use opencoder_llm::CompletedToolCall;
-    use serde_json::json;
-
-    fn bash_tc(id: &str, command: &str) -> CompletedToolCall {
-        CompletedToolCall {
-            id: id.into(),
-            name: "bash".into(),
-            input: json!({ "command": command }),
-        }
-    }
-    fn other_tc(name: &str, id: &str) -> CompletedToolCall {
-        CompletedToolCall {
-            id: id.into(),
-            name: name.into(),
-            input: json!({}),
-        }
-    }
-    fn timeout_output(pid: u32) -> ToolOutput {
-        ToolOutput {
-            content: format!(
-                "[bash-timeout: command timed out after 1s \u{2014} moved to background]\n\
-                 pid: {pid}\noutput: /tmp/opencoder_bg_{pid}.output\n\n"
-            ),
-            is_error: false,
-            images: vec![],
-        }
-    }
-    fn normal_output(text: &str) -> ToolOutput {
-        ToolOutput::ok(text)
-    }
-
-    #[test]
-    fn first_timeout_stored_subsequent_replaced() {
-        let tool_calls = vec![bash_tc("1", "sleep 10"), bash_tc("2", "sleep 10")];
-        let mut results = vec![(0, timeout_output(100)), (1, timeout_output(200))];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
-        assert_eq!(
-            results[0].1.content, results[1].1.content,
-            "second timeout content must match first"
-        );
-        assert!(results[0].1.content.contains("pid: 100"));
-        assert!(
-            results[1].1.content.contains("pid: 100"),
-            "second must be replaced with first content (pid 100)"
-        );
-    }
-
-    #[test]
-    fn non_timeout_bash_resets_count() {
-        let tool_calls = vec![
-            bash_tc("1", "sleep 10"),
-            bash_tc("2", "ls"),
-            bash_tc("3", "sleep 10"),
-        ];
-        let mut results = vec![
-            (0, timeout_output(100)),
-            (1, normal_output("done")),
-            (2, timeout_output(300)),
-        ];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
-        assert!(results[0].1.content.contains("pid: 100"));
-        assert!(results[1].1.content.contains("done"));
-        assert!(
-            results[2].1.content.contains("pid: 300"),
-            "third timeout must have own content after reset"
-        );
-    }
-
-    #[test]
-    fn non_bash_tool_does_not_reset_count() {
-        let tool_calls = vec![
-            bash_tc("1", "sleep 10"),
-            other_tc("edit", "2"),
-            bash_tc("3", "sleep 10"),
-        ];
-        let mut results = vec![
-            (0, timeout_output(100)),
-            (1, normal_output("edited")),
-            (2, timeout_output(300)),
-        ];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
-        assert!(results[0].1.content.contains("pid: 100"));
-        assert!(results[1].1.content.contains("edited"));
-        assert!(
-            results[2].1.content.contains("pid: 100"),
-            "third timeout must reuse first content (non-bash didn't reset)"
-        );
-    }
-
-    #[test]
-    fn first_persists_across_batches() {
-        let tool_calls_a = vec![bash_tc("1", "sleep 10")];
-        let mut results_a = vec![(0, timeout_output(100))];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls_a, &mut results_a, &mut first);
-
-        let tool_calls_b = vec![bash_tc("2", "sleep 10")];
-        let mut results_b = vec![(0, timeout_output(200))];
-        dedup_consecutive_bash_timeouts(&tool_calls_b, &mut results_b, &mut first);
-
-        assert!(
-            results_b[0].1.content.contains("pid: 100"),
-            "second-batch timeout must reuse first-batch content"
-        );
-    }
-
-    #[test]
-    fn different_commands_not_deduped() {
-        // Two consecutive bash timeouts for DIFFERENT commands must NOT be
-        // collapsed onto each other: each has its own PID / output file, and
-        // reusing the first's content would hide the real PID and point the
-        // model at the wrong background output file.
-        let tool_calls = vec![bash_tc("1", "cargo build"), bash_tc("2", "npm test")];
-        let mut results = vec![(0, timeout_output(100)), (1, timeout_output(200))];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
-        assert!(
-            results[0].1.content.contains("pid: 100"),
-            "first timeout keeps its own pid"
-        );
-        assert!(
-            results[1].1.content.contains("pid: 200"),
-            "different-command timeout must keep its own pid (not deduped)"
-        );
-        assert!(
-            !results[1].1.content.contains("pid: 100"),
-            "different-command timeout must not inherit the first's pid"
-        );
-    }
-
-    #[test]
-    fn command_mismatch_starts_new_streak() {
-        // timeout(A) -> timeout(B) -> timeout(A): the third (A) should dedup
-        // against the SECOND (B), not the first (A), because B started a new
-        // streak. Verifies the streak state updates on a mismatch.
-        let tool_calls = vec![
-            bash_tc("1", "cargo build"),
-            bash_tc("2", "npm test"),
-            bash_tc("3", "npm test"),
-        ];
-        let mut results = vec![
-            (0, timeout_output(100)),
-            (1, timeout_output(200)),
-            (2, timeout_output(300)),
-        ];
-        let mut first = None;
-        dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut first);
-        assert!(results[0].1.content.contains("pid: 100"));
-        assert!(
-            results[1].1.content.contains("pid: 200"),
-            "mismatched command keeps its own pid (new streak)"
-        );
-        assert!(
-            results[2].1.content.contains("pid: 200"),
-            "third dedups against the second (same command, same streak)"
-        );
-    }
 }

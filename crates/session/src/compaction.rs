@@ -139,6 +139,7 @@ pub async fn compact(
     };
     let new_skip = prev_skip + head_store_msgs as i64;
     session.after_compaction(summary.clone(), new_skip);
+    session.summary_images = preserved.clone();
     if let Some(store) = &session.store {
         store
             .update_session(
@@ -146,6 +147,11 @@ pub async fn compact(
                 &SessionPatch {
                     summary: Some(summary.clone()),
                     summary_seq: Some(new_skip),
+                    // Persist the head images that survived compaction so resume
+                    // can rebuild the summary message WITHOUT reloading the
+                    // soft-deleted compacted head (the fix for long-session
+                    // resume stalls).
+                    summary_images: Some(preserved.clone()),
                     updated_at: Some(now_ms()),
                     clear_handoff: true,
                     ..Default::default()

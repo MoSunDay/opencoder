@@ -536,30 +536,29 @@ pub(super) async fn run_app(
                                 let clean = clean.trim();
                                 if !clean.is_empty() {
                                     let display = queued_item_display(&text, clean);
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, clean, Some(display.clone()), &image_uris)).await {
-                                        pending_images.clear();
-                                        chat.steer_items.push((seq, display.clone()));
-                                    }
+                                    steer_fire::admit_keyboard_steer(
+                                        &store, &session_id, clean, &display,
+                                        &mut pending_images, &mut chat,
+                                    )
+                                    .await;
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `$name` token): admit the trigger
                                     // as a steer so the injected skill body is acted on, not dropped.
                                     let trigger = skill_trigger(skill_name);
                                     let display = skill_token_display(skill_name);
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Steer, &trigger, Some(display.clone()), &image_uris)).await {
-                                        pending_images.clear();
-                                        chat.steer_items.push((seq, display.clone()));
-                                    }
+                                    steer_fire::admit_keyboard_steer(
+                                        &store, &session_id, &trigger, &display,
+                                        &mut pending_images, &mut chat,
+                                    )
+                                    .await;
                                 }
-                                // Fire interrupt immediately so the steer is
-                                // absorbed at the next turn boundary — same as
-                                // clicking the `>` button.
-                                let _ = steer_fire::fire_steer_interrupt(
-                                    subagent_focus, running,
-                                    &child_cancels, &child_turn_cancels,
-                                    &turn_cancel, &chat,
-                                );
+                                // Enter while running admits the steer WITHOUT
+                                // interrupting the current turn. The steer sits
+                                // in the pending panel until the turn completes
+                                // naturally, then is absorbed at the next turn
+                                // boundary (idle-boundary late-steer peek or next
+                                // loop's claim_steers). Click the `>` button on
+                                // the pending row to interrupt immediately.
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {

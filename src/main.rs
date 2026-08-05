@@ -18,9 +18,9 @@ async fn main() -> Result<()> {
     };
     init_logging(cli.verbose, log_sink.as_deref());
 
-    // Seed the built-in skill packs (do-and-done, repo-local-memory, review,
-    // submit) into ~/.opencoder/skills on first run. Idempotent: a no-op once
-    // the `review` skill directory exists.
+    // Seed the built-in skill packs into ~/.opencoder/skills. Incremental:
+    // missing skills are written, existing files are never clobbered, so a
+    // binary upgrade lands new built-in skills on the next startup.
     opencoder_core::seed_builtin_skills();
     opencoder_core::seed_dep_gated_skills();
     opencoder_core::write_install_script();

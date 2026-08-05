@@ -138,7 +138,7 @@ async fn import_bundle_inner(
 
     // Create session row with target workdir_hash.
     let mut meta = bundle.meta.clone();
-    if depth > 0 || workdir_hash.is_some() {
+    if workdir_hash.is_some() {
         meta.workdir_hash = workdir_hash.map(|h| h.to_string());
     }
     // The bundle's compaction/handoff markers reference message seqs from the
@@ -208,7 +208,7 @@ async fn import_bundle_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::EventKind;
+    use crate::types::{EventKind, SubagentStatus};
     use crate::LibsqlStore;
     use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
@@ -347,6 +347,107 @@ mod tests {
         assert_eq!(meta.handoff_seq, None, "handoff_seq must be reset on import");
         assert_eq!(meta.handoff_plan, None, "handoff_plan must be reset on import");
         assert_eq!(meta.summary, None, "summary must be reset on import");
+    }
+
+    /// Bug 5: when `import_bundle` is called with `workdir_hash=None`, a
+    /// subagent child must preserve its OWN `workdir_hash` from the bundle
+    /// rather than being wiped to `None`. Previously the `depth > 0` branch
+    /// of the workdir-override condition nulled children even when the caller
+    /// passed no override — defeating the doc guarantee that every session
+    /// row carries a workdir_hash.
+    #[tokio::test]
+    async fn import_bundle_preserves_child_workdir_hash_when_none() {
+        let store = LibsqlStore::open_memory().await.unwrap();
+
+        // Child bundle carries its own workdir_hash.
+        let child = SessionBundle {
+            meta: SessionMeta {
+                id: "child-1".into(),
+                title: Some("t".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: Some("abc123".into()),
+                created_at: 1,
+                updated_at: 2,
+                summary: None,
+                summary_seq: None,
+                summary_images: vec![],
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: None,
+            },
+            messages: vec![],
+            events: vec![],
+            inputs: vec![],
+            subagents: vec![],
+        };
+
+        let bundle = SessionBundle {
+            meta: SessionMeta {
+                id: "parent-1".into(),
+                title: Some("t".into()),
+                agent: Some("act".into()),
+                model: Some("m".into()),
+                workdir_hash: Some("parent-hash".into()),
+                created_at: 1,
+                updated_at: 2,
+                summary: None,
+                summary_seq: None,
+                summary_images: vec![],
+                handoff_seq: None,
+                handoff_plan: None,
+                skill: None,
+                task_type: None,
+            },
+            messages: vec![],
+            events: vec![],
+            inputs: vec![],
+            subagents: vec![SubagentBundle {
+                task: SubagentTaskRecord {
+                    task_id: "task-1".into(),
+                    parent_session_id: "parent-1".into(),
+                    child_session_id: "child-1".into(),
+                    parent_message_id: None,
+                    agent: "explore".into(),
+                    prompt: "explore the code".into(),
+                    result: None,
+                    status: SubagentStatus::Completed,
+                    ok: None,
+                    started_at: 1,
+                    completed_at: None,
+                },
+                child,
+            }],
+        };
+
+        // Import with NO workdir_hash override: the bundle's own hashes must win.
+        let id = import_bundle(&store, &bundle, None).await.unwrap();
+        assert_eq!(id, "parent-1");
+
+        // Root preserves its own bundle workdir_hash (no override passed).
+        let parent_meta = store
+            .get_session("parent-1")
+            .await
+            .unwrap()
+            .expect("parent must exist");
+        assert_eq!(
+            parent_meta.workdir_hash.as_deref(),
+            Some("parent-hash"),
+            "parent workdir_hash must be preserved when caller passes None"
+        );
+
+        // The child must preserve its OWN workdir_hash (not nulled by depth>0).
+        let child_meta = store
+            .get_session("child-1")
+            .await
+            .unwrap()
+            .expect("child must exist");
+        assert_eq!(
+            child_meta.workdir_hash.as_deref(),
+            Some("abc123"),
+            "child workdir_hash must be preserved when caller passes None"
+        );
     }
 
     /// C2: a failure AFTER `create_session` commits must roll the stub back so

@@ -405,6 +405,9 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
             images: Vec::new(),
         });
     }
+    if backfill.is_empty() {
+        return;
+    }
     let tool_msg = Message {
         id: crate::runner::new_id(),
         role: Role::Tool,

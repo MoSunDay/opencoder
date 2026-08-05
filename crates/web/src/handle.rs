@@ -158,7 +158,8 @@ pub async fn admit_and_drain(
             .clone()
     };
 
-    if !handle.draining.swap(true, Ordering::SeqCst) {
+    let started_new_drain = !handle.draining.swap(true, Ordering::SeqCst);
+    if started_new_drain {
         let token = CancellationToken::new();
         *handle.cancel.lock().await = token.clone();
         // Reset the turn-level token so the new drain starts clean (a
@@ -231,7 +232,9 @@ pub async fn admit_and_drain(
             }
         });
     }
-    let _ = opencoder_session::fire_child_cancels(&handle.child_cancels);
+    if started_new_drain {
+        let _ = opencoder_session::fire_child_cancels(&handle.child_cancels);
+    }
     Ok(seq)
 }
 
@@ -446,11 +449,11 @@ async fn drain_to_completion(
     process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
 
     drop(sink);
-    drop(guard);
-    drop(rx_guard);
     if let Err(e) = flusher.await {
         warn!(session_id, error = %e, "final event flush failed");
     }
+    drop(guard);
+    drop(rx_guard);
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");
     }

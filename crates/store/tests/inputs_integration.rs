@@ -314,6 +314,45 @@ async fn claim_next_queue_returns_seq_marks_promoted_and_idempotent_delete() {
         .is_empty());
 }
 
+/// Bug 8: `claim_next_queue` materializes the `SessionInput` from the row
+/// BEFORE the in-tx `UPDATE` that sets `promoted_seq`, and the SELECT filters
+/// `promoted_seq IS NULL` — so the returned `promoted_seq` was always `None`
+/// even though the DB row now holds a real value. The fix mirrors the new
+/// column value onto the returned struct after the UPDATE.
+#[tokio::test]
+async fn claim_next_queue_returns_promoted_seq() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let input = SessionInput {
+        seq: None,
+        id: "in-1".into(),
+        session_id: "s".into(),
+        delivery: Delivery::Queue,
+        prompt: "hello".into(),
+        images: Vec::new(),
+        display_text: None,
+        admitted_seq: 1,
+        promoted_seq: None,
+    };
+    store.admit_input(&input).await.unwrap();
+
+    let (_seq, claimed) = store
+        .claim_next_queue("s")
+        .await
+        .unwrap()
+        .expect("should claim");
+    assert!(
+        claimed.promoted_seq.is_some(),
+        "claimed input must have promoted_seq set after claim_next_queue"
+    );
+    // The promoted_seq must be a real, positive sequence number.
+    assert!(
+        claimed.promoted_seq.unwrap() > 0,
+        "promoted_seq must be a positive sequence number"
+    );
+}
+
 /// Regression guard: `admitted_seq` is a per-session counter (resets to 1 in a
 /// new session) while the row PK `seq` is a table-wide AUTOINCREMENT (never
 /// resets). Interleaving admissions across two sessions proves the two

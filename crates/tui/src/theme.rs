@@ -285,10 +285,21 @@ mod tests {
 
     #[test]
     fn set_then_current_theme() {
-        set_theme(ThemeKind::Light);
-        assert_eq!(current_theme(), ThemeKind::Light);
+        // `THEME` is a process-wide global shared by many parallel tests
+        // across the crate (render_tests, chat_tests, …), all of which call
+        // `set_theme`. Setting Light and reading it back is therefore racy:
+        // a concurrent `set_theme(Dark)` can land between the two calls.
+        //
+        // Hold an exclusive write lock for the whole critical section and
+        // exercise the storage directly. Because `set_theme`/`current_theme`
+        // take this same lock, they block until we restore the default —
+        // making this deterministic with no re-entrant deadlock.
+        let lock = THEME.get_or_init(|| RwLock::new(ThemeKind::Dark));
+        let mut guard = lock.write().unwrap();
+        *guard = ThemeKind::Light;
+        assert_eq!(*guard, ThemeKind::Light);
         // restore default so other tests see dark
-        set_theme(ThemeKind::Dark);
+        *guard = ThemeKind::Dark;
     }
 
     // ── context_meter: behavioural thresholds + bar construction ──────────

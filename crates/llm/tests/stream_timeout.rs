@@ -142,3 +142,89 @@ async fn continuous_stream_not_interrupted_by_read_timeout() {
     );
     assert!(!has_error, "no error expected for a healthy stream");
 }
+
+/// A stream that goes "keep-alive only" mid-response must be interrupted by
+/// the event-level idle watchdog, producing an `LlmEvent::Error` — not
+/// hanging until the HTTP layer's own timeout (600 s by default).
+///
+/// After delivering one data chunk, the upstream keeps the connection alive
+/// with SSE comment frames (`: keep-alive\n\n`) but sends no more data. Bytes
+/// keep flowing (so reqwest's byte-level `read_timeout` never trips), yet no
+/// decoded SSE *data* event arrives — exactly the stall the `IdleTimeout`
+/// guard in `run_stream_once` exists to catch.
+///
+/// This regression-tests the idle-timeout watchdog (`last_event_at`) plus the
+/// `tokio::time::timeout(idle_timeout, stream.next())` wrapper: a
+/// keep-alive-only upstream can never hold the consumer hostage.
+#[tokio::test]
+async fn stalled_stream_interrupted_by_idle_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base_url = format!("http://{addr}");
+
+    // Very short read_timeout so the test completes quickly.
+    let read_timeout = Duration::from_millis(300);
+
+    tokio::spawn(async move {
+        // The stream retry loop reconnects up to MAX_STREAM_ATTEMPTS (3) times
+        // when an idle timeout fires, so accept that many connections. Each
+        // one is serviced in its own task because every handler holds its
+        // connection open (stalled) while the next reconnect is accepted.
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            stream.set_nodelay(true).unwrap();
+            tokio::spawn(async move {
+                consume_http_request(&mut stream).await;
+                write_sse_header(&mut stream).await;
+
+                // Send one data frame, then switch to keep-alive-only.
+                stream
+                    .write_all(sse_text("partial").as_bytes())
+                    .await
+                    .unwrap();
+                stream.flush().await.unwrap();
+
+                // SSE comment frames (`: keep-alive\n\n`) carry no `data:`
+                // line, so the decoder yields nothing — yet the bytes keep
+                // reqwest's byte-level read_timeout satisfied. With no decoded
+                // data event arriving, the event-level idle watchdog in
+                // `run_stream_once` trips (IdleTimeout), not the byte-level
+                // timeout (ChunkError). Heartbeats every 40 ms — well inside
+                // the 300 ms read window — mirror a real keep-alive-only
+                // stall; ~3 s comfortably outlasts one attempt's idle window.
+                for _ in 0..75 {
+                    // `let _ =`: the client drops this connection when it
+                    // retries after the idle timeout, so later writes hit a
+                    // broken pipe — ignore them and let the loop wind down.
+                    let _ = stream.write_all(b": keep-alive\n\n").await;
+                    let _ = stream.flush().await;
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
+            });
+        }
+        // Keep the listener bound while the spawned handlers run.
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    });
+
+    let client =
+        ChatClient::new_with_read_timeout(&base_url, "test-key", &[], read_timeout, None).unwrap();
+    let mut rx = client.chat_stream(make_request()).unwrap();
+
+    let events = drain(&mut rx).await;
+
+    // Must contain at least the partial text delta.
+    let has_text = events
+        .iter()
+        .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "partial"));
+    assert!(has_text, "partial text must arrive before stall");
+
+    // Must end with an Error (idle timeout after retries), NOT hang.
+    let has_error = events
+        .iter()
+        .any(|e| matches!(e, LlmEvent::Error(msg) if msg.contains("idle timeout")));
+    assert!(
+        has_error,
+        "stalled stream must be interrupted by idle timeout, got: {:?}",
+        events.last()
+    );
+}

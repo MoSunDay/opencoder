@@ -20,6 +20,7 @@ fn meta(id: &str) -> SessionMeta {
         updated_at: 0,
         summary: None,
         summary_seq: None,
+        summary_images: vec![],
         handoff_seq: Some(42),
         handoff_plan: Some("do-the-thing".into()),
         skill: None,

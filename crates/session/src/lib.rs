@@ -161,6 +161,11 @@ pub struct SessionState {
     /// Number of messages in the store that have been summarized (skipped
     /// on resume). `None` means no compaction has occurred.
     pub summary_seq: Option<i64>,
+    /// Image URLs preserved across compaction, mirrored from the persisted
+    /// `summary_images_json` so the in-memory state stays coherent with the
+    /// store. The authoritative copy lives in the store; this field is used
+    /// only for in-memory bookkeeping symmetry with `summary`/`summary_seq`.
+    pub summary_images: Vec<String>,
     /// Plan→act handoff boundary: number of store messages predating the
     /// handoff (the plan-mode history). On resume these are trimmed and the
     /// handoff plan instruction is re-attached. `None` = no handoff occurred.
@@ -205,6 +210,7 @@ impl SessionState {
             child_cancels: Arc::new(Mutex::new(HashMap::new())),
             summary: None,
             summary_seq: None,
+            summary_images: Vec::new(),
             handoff_seq: None,
             handoff_plan: None,
             plan_input_count: 0,
@@ -316,6 +322,7 @@ impl SessionState {
                 updated_at: now,
                 summary: self.summary.clone(),
                 summary_seq: self.summary_seq,
+                summary_images: vec![],
                 handoff_seq: self.handoff_seq,
                 handoff_plan: self.handoff_plan.clone(),
                 skill: self.skill_prompt_cloned(),

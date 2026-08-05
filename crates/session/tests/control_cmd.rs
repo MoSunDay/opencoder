@@ -824,6 +824,65 @@ async fn queue_compound_pure_skill_injects_trigger() {
     );
 }
 
+
+/// `/plan $review` as the IDLE prompt (direct run, not queued/drained):
+/// switches to plan, activates the skill, and injects the skill trigger so
+/// the model begins executing the skill body. This is the path the TUI idle
+/// submit takes when the frontend forwards the raw compound text.
+#[tokio::test]
+async fn idle_compound_plan_pure_skill_injects_trigger() {
+    let home = tempfile::tempdir().unwrap();
+    let _guard = lock_home(home.path());
+    opencoder_core::seed_builtin_skills();
+
+    let store = mem_store().await;
+    seed(&store, "idle-pure-skill", "act").await;
+    let mock = Arc::new(
+        MockChatClient::new().push_script(vec![done_turn("skill reply")]),
+    ) as Arc<dyn ChatStream>;
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "idle-pure-skill",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+
+    run(&mut session, "/plan $review".into(), |_| {})
+        .await
+        .unwrap();
+
+    assert_eq!(session.agent.name, "plan", "switched to plan");
+    assert!(session.skill_prompt_cloned().is_some(), "skill activated");
+
+    let user_msgs: Vec<String> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .map(|m| m.text())
+        .collect();
+    let has_trigger = user_msgs
+        .iter()
+        .any(|t| t.contains("active skill is now in effect"));
+    assert!(has_trigger, "trigger injected: {:?}", user_msgs);
+
+    assert!(
+        !user_msgs.iter().any(|t| t.is_empty()),
+        "no empty user message: {:?}",
+        user_msgs
+    );
+
+    let assistant_turns = session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::Assistant)
+        .count();
+    assert_eq!(assistant_turns, 1, "one assistant turn for the skill trigger");
+}
+
 /// Plain `$review do the work` queued with NO `/plan` prefix: the skill body
 /// activates and the `$review` token is stripped, leaving "do the work" as the
 /// recorded prompt. Agent stays "act" (no switch).

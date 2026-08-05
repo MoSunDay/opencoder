@@ -92,7 +92,8 @@ pub(crate) fn fire_steer_interrupt(
                 subagent_focus,
             );
         }
-        steer_dispatch::Action::SteerParent => {
+        steer_dispatch::Action::SteerParent
+        | steer_dispatch::Action::CancelChildrenAndSteer => {
             opencoder_session::fire_turn_cancel(turn_cancel);
         }
         _ => {}
@@ -144,6 +145,39 @@ mod tests {
         assert!(
             turn_cancel.lock().unwrap().is_cancelled(),
             "running parent with a pending steer must fire the turn_cancel"
+        );
+    }
+
+    // G2 guard: a running parent with live children AND a pending steer must
+    // fire turn_cancel (interrupt the parent turn) so the steer is absorbed in
+    // one click. Previously this path only cancelled children and the user had to
+    // click `>` a second time.
+    #[test]
+    fn running_parent_with_children_and_steer_fires_turn_cancel() {
+        let turn_cancel = fresh_cancel();
+        let child_cancels: Arc<Mutex<HashMap<String, CancellationToken>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        child_cancels
+            .lock()
+            .unwrap()
+            .insert("child-1".into(), CancellationToken::new());
+        let child_turn_cancels = empty_turn_cancels();
+        let mut chat = ChatView::default();
+        chat.steer_items.push((1, "stop now".into()));
+
+        let action = fire_steer_interrupt(
+            None,
+            true,
+            &child_cancels,
+            &child_turn_cancels,
+            &turn_cancel,
+            &chat,
+        );
+
+        assert_eq!(action, steer_dispatch::Action::CancelChildrenAndSteer);
+        assert!(
+            turn_cancel.lock().unwrap().is_cancelled(),
+            "parent > with children + pending steer must fire turn_cancel"
         );
     }
 

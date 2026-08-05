@@ -17,6 +17,10 @@ pub(crate) enum Action {
     /// The parent is running with live children — they were just cancelled so
     /// the parent absorbs the steer at the next turn boundary.
     CancelChildren,
+    /// The parent is running with live children AND a steer is pending — children
+    /// were just cancelled, and the parent's current turn is interrupted via
+    /// `fire_turn_cancel` so the steer is absorbed immediately (one click).
+    CancelChildrenAndSteer,
     /// The parent is running with NO children but a steer is pending — steer
     /// the parent's own current turn via `fire_turn_cancel`. This is the G1
     /// fix: previously this path called `cancel.cancel()` (hard abort).
@@ -45,7 +49,11 @@ pub(crate) fn resolve(
         Action::Subagent
     } else if running {
         if has_children {
-            Action::CancelChildren
+            if has_pending_steer {
+                Action::CancelChildrenAndSteer
+            } else {
+                Action::CancelChildren
+            }
         } else if has_pending_steer {
             Action::SteerParent
         } else {
@@ -84,8 +92,20 @@ mod tests {
 
     #[test]
     fn running_parent_with_children_cancels_children() {
-        assert_eq!(resolve(false, true, true, true), Action::CancelChildren);
+        // No pending steer: just cancel children, let parent finish naturally.
         assert_eq!(resolve(false, true, true, false), Action::CancelChildren);
+    }
+
+    // G2 regression guard: a parent `>` with running children AND a pending steer
+    // must resolve to CancelChildrenAndSteer — cancel children AND immediately
+    // steer the parent so the steer is absorbed in one click, not two.
+    #[test]
+    fn running_parent_with_children_and_steer_steers_parent_too() {
+        assert_eq!(
+            resolve(false, true, true, true),
+            Action::CancelChildrenAndSteer,
+            "parent > with children + pending steer must cancel children AND steer"
+        );
     }
 
     #[test]

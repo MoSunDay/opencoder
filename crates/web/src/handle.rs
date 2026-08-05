@@ -57,6 +57,13 @@ pub struct SessionHandle {
     pub child_turn_cancels:
         Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
     pub child_cancels: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
+    /// Parent turn-level cancel token. When a steer is admitted while a drain
+    /// is running, this fires so the current LLM turn / tool execution is
+    /// interrupted immediately and the steer is absorbed at the next turn
+    /// boundary — mirroring the TUI's `fire_steer_interrupt` → `SteerParent`
+    /// path. Shared (Arc) with `SessionState` so `run_loop` can reset it
+    /// after absorbing the cancelled turn.
+    pub turn_cancel: opencoder_session::SharedCancel,
 }
 
 const BROADCAST_CAPACITY: usize = 256;
@@ -74,6 +81,7 @@ impl SessionHandle {
             cmd_rx: std::sync::Mutex::new(Some(cmd_rx)),
             child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             child_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            turn_cancel: Arc::new(std::sync::Mutex::new(CancellationToken::new())),
         })
     }
 }
@@ -153,6 +161,11 @@ pub async fn admit_and_drain(
     if !handle.draining.swap(true, Ordering::SeqCst) {
         let token = CancellationToken::new();
         *handle.cancel.lock().await = token.clone();
+        // Reset the turn-level token so the new drain starts clean (a
+        // previous drain may have been turn-cancelled without resetting).
+        if let Ok(mut g) = handle.turn_cancel.lock() {
+            *g = CancellationToken::new();
+        }
         let handles_clone = handles.clone();
         let store_clone = store.clone();
         let sid = session_id.to_string();
@@ -167,6 +180,14 @@ pub async fn admit_and_drain(
             .await;
         });
     } else {
+        // Steer admitted while a drain is running: fire the parent's
+        // turn-level cancel so the current LLM turn (or tool execution) is
+        // interrupted immediately and the steer is absorbed at the next turn
+        // boundary. Mirrors the TUI's SteerParent path. Queue inputs are
+        // consumed at idle — no interrupt needed.
+        if delivery == Delivery::Steer {
+            opencoder_session::fire_turn_cancel(&handle.turn_cancel);
+        }
         let handles_w = handles.clone();
         let store_w = store.clone();
         let sid_w = session_id.to_string();
@@ -202,6 +223,9 @@ pub async fn admit_and_drain(
             if !handle_w.draining.swap(true, Ordering::SeqCst) {
                 let token = CancellationToken::new();
                 *handle_w.cancel.lock().await = token.clone();
+                if let Ok(mut g) = handle_w.turn_cancel.lock() {
+                    *g = CancellationToken::new();
+                }
                 drain_to_completion(handles_w, store_w, &sid_w, client_w, wd_w, cfg_w, handle_w)
                     .await;
             }
@@ -230,6 +254,9 @@ pub async fn ensure_drain(
     if !handle.draining.swap(true, Ordering::SeqCst) {
         let token = CancellationToken::new();
         *handle.cancel.lock().await = token.clone();
+        if let Ok(mut g) = handle.turn_cancel.lock() {
+            *g = CancellationToken::new();
+        }
         let handles_clone = handles.clone();
         let store_clone = store.clone();
         let sid = session_id.to_string();
@@ -402,6 +429,7 @@ async fn drain_to_completion(
     session.cancel = Some(handle.cancel.lock().await.clone());
     session.child_turn_cancels = handle.child_turn_cancels.clone();
     session.child_cancels = handle.child_cancels.clone();
+    session.turn_cancel = Some(handle.turn_cancel.clone());
 
     let tx = handle.tx.clone();
     let sid = session_id.to_string();

@@ -51,7 +51,7 @@ pub async fn run_plan_phase(
     let mut msg = Message::user(new_id(), continuation_prompt(&state.goal));
     msg.synthetic = true;
     session.record(msg).await;
-    run_loop(session, registry, on_event).await
+    run_loop(session, registry, on_event, false).await
 }
 
 /// ACT phase: reset the transcript via plan→act handoff so ACT only sees the
@@ -73,6 +73,8 @@ pub async fn run_act_phase(
                     &SessionPatch {
                         handoff_seq: session.handoff_seq,
                         handoff_plan: session.handoff_plan.clone(),
+                        clear_summary: true,
+                        clear_skill: true,
                         updated_at: Some(now_ms()),
                         ..Default::default()
                     },
@@ -84,13 +86,13 @@ pub async fn run_act_phase(
         switch_agent(session, "act", on_event);
         // The handoff message already carries execution directives
         // (HANDOFF_PREFIX), so no separate execute_prompt is injected.
-        run_loop(session, registry, on_event).await
+        run_loop(session, registry, on_event, false).await
     } else {
         session.set_skill(None);
         switch_agent(session, "act", on_event);
         let mut msg = Message::user(new_id(), execute_prompt());
         msg.synthetic = true;
         session.record(msg).await;
-        run_loop(session, registry, on_event).await
+        run_loop(session, registry, on_event, false).await
     }
 }

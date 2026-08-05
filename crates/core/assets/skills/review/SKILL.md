@@ -20,7 +20,7 @@ description: Read-only post-completion assessment that meets the repo go-live st
 - 任何时候被要求「看看还有没有问题 / 能不能上线」。
 
 ## 输入
-- 最近一次 `task-plan` 的 STATUS 块（goal / todos / evidence）——**仅作参考，不盲信**（见下）。
+- 最近一次 `task-plan` 的 STATUS 块（顶层字段：goal / progress / baseline / todos / gate；`evidence` 是每条 `completed` TODO 的子字段，非顶层）——**仅作参考，不盲信**（见下）。
 - 工作区实际状态：`git status`、`git diff`、`git diff --cached`。
 - 本仓库 go-live gate（rules/02 + rules/01 + rules/03；见下）。
 
@@ -45,7 +45,7 @@ cargo build --workspace                      # 零错误
 ```
 捕获每条的输出尾段（`test result: ok. N passed; 0 failed` / `Finished` / 警告数）作证据。
 
-**2b. 回归基线**：当次 `passed` 数 ≥ 迭代开始基线 + 本轮新增功能数；下降即 ❌（rules/02 回归基线）。
+**2b. 回归基线**：当次 `passed` 数 ≥ STATUS 块的 `baseline` 字段（task-plan 首次规划时记录，后续不变）+ 本轮新增功能数；下降即 ❌（rules/02 回归基线）。
 
 **2c. 防修绿 diff 扫描**（rules/02 五禁）：`git diff` 扫以下，任一命中即 ❌ 并要求整改：
 - 新增 `#[ignore]`（无注释豁免的）。
@@ -106,7 +106,7 @@ cargo build --workspace                      # 零错误
 - changelog 已写，且**测试覆盖表数字 = 当次实跑输出**（rules/02）
 - 范围外脏改动已识别并排除（不混入本次范围）
 
-仓库可在 `AGENTS.md` 或 `.opencode/golive.md` 覆盖此清单；存在时优先遵循仓库规则。目录无对应工具的 gate 标 `N/A`（附理由）。
+此清单与 `task-plan` 的默认 gate **同源**（task-plan 规划时记录到 STATUS 块的 `gate` 字段，review 评审时复跑取当次证据）。仓库可在 `AGENTS.md` 或 `.opencode/golive.md` 覆盖；存在时优先遵循仓库规则。目录无对应工具的 gate 标 `N/A`（附理由）。
 
 ## 固定输出 —— REVIEW 块（每次评审必须输出）
 ```
@@ -142,6 +142,6 @@ gaps: <若 not ready，逐条列出阻塞项与建议；ready 则 none>
 - review 只给结论与缺口，**不自行修改代码或提交**。需要修 → 回实现循环；需要提交 → 用 `submit` skill。
 
 ## 与其它 skill 的衔接
-- 消费 `task-plan` 的 STATUS 块作参考，但**以自取当次证据为准**。
-- 结论 `not ready` 时把 `gaps` 喂回 `do-and-done` 继续推进。
+- 消费 `task-plan` 的 STATUS 块（goal / progress / baseline / todos / gate）作参考，但**以自取当次证据为准**。STATUS 块的 `gate` 清单与本文 `go_live_gates` 同源——task-plan 规划时记录，review 评审时复跑核对。
+- 结论 `not ready` 时把 `gaps` 喂回：验证层面缺口（测试不够 / 断言弱 / 调试输出）→ `do-and-done` 修复；规划层面缺口（验收方案缺失 / 影响分析不全 / TODO 拆分不当）→ `task-plan` 重新规划。
 - 结论 `go-live ready` 后，提交动作交给 `submit` skill（提交本身不可逆，按其暂停协议）。

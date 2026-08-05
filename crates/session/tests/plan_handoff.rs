@@ -355,6 +355,7 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            summary_images: vec![],
             handoff_seq,
             handoff_plan: handoff_plan.map(str::to_string),
             skill: None,

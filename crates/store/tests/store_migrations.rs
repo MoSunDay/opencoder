@@ -3,7 +3,7 @@
 //! Each test hand-writes an OLD on-disk schema (v1 / v2 / stale-version) with
 //! `libsql::Builder`, then reopens through `LibsqlStore::open` to trigger
 //! bootstrap -> migrate(), and asserts the resulting schema/version/behavior:
-//! - schema_migration_versioning: bootstrap records schema version 6
+//! - schema_migration_versioning: bootstrap records schema version 7
 //! - schema_migration_v1_to_v2_adds_sse_kind: v1 events gain sse_kind (NULL)
 //! - schema_migration_v2_to_v3_adds_handoff_and_skill: v2 sessions gain the
 //!   v3 handoff_seq/handoff_plan/skill columns
@@ -32,7 +32,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 6, "schema_version must be 6 after bootstrap");
+    assert_eq!(v, 7, "schema_version must be 7 after bootstrap");
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 6, "schema version must be 6 after migration");
+        assert_eq!(v, 7, "schema version must be 7 after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -138,7 +138,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 6, "schema version stays 6 after idempotent re-open");
+    assert_eq!(v, 7, "schema version stays 7 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -234,7 +234,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 6, "schema version must be 6 after v2→v3 migration");
+        assert_eq!(v, 7, "schema version must be 7 after v2→v3 migration");
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
@@ -249,7 +249,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 6, "schema version stays 6 after idempotent re-open");
+    assert_eq!(v, 7, "schema version stays 7 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -337,7 +337,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 6, "schema version must be 6 after migration");
+        assert_eq!(v, 7, "schema version must be 7 after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -367,5 +367,86 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 6, "schema version stays 6 after idempotent re-open");
+    assert_eq!(v, 7, "schema version stays 7 after idempotent re-open");
+}
+
+/// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
+/// `summary_images_json`) must add the column so compaction images can be
+/// persisted, and pre-existing rows read back as an empty vec (NULL default).
+#[tokio::test]
+async fn schema_migration_v6_to_v7_adds_summary_images() {
+    use libsql::Builder;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate-v7.db");
+
+    // Phase 1: hand-write a v6 sessions table (no summary_images_json column).
+    {
+        let db = Builder::new_local(&db_path).build().await.unwrap();
+        let conn = db.connect().unwrap();
+        conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)", ())
+            .await
+            .unwrap();
+        // sessions at v6: full column set EXCEPT summary_images_json.
+        conn.execute(
+            "CREATE TABLE sessions (\
+               id TEXT PRIMARY KEY, title TEXT, agent TEXT, model TEXT, workdir_hash TEXT,\
+               created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,\
+               summary TEXT, summary_seq INTEGER, handoff_seq INTEGER, handoff_plan TEXT,\
+               skill TEXT, task_type TEXT NOT NULL DEFAULT 'parent')",
+            (),
+        )
+        .await
+        .unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (6)", ())
+            .await
+            .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('s6', 1, 1)",
+            (),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Phase 2: reopen — migrate(conn, 6) runs the `if from < 7` block, adding
+    // summary_images_json to sessions.
+    let store = LibsqlStore::open(&db_path).await.unwrap();
+
+    // (1) Pre-existing row survives; the new column is NULL -> empty vec.
+    let m0 = store.get_session("s6").await.unwrap().unwrap();
+    assert_eq!(m0.id, "s6");
+    assert!(m0.summary_images.is_empty(), "v6 row: summary_images reads as empty");
+
+    // (2) The migrated column round-trips through SessionPatch.
+    store
+        .update_session(
+            "s6",
+            &SessionPatch {
+                summary_images: Some(vec!["img-a.png".into(), "img-b.png".into()]),
+                updated_at: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let m1 = store.get_session("s6").await.unwrap().unwrap();
+    assert_eq!(
+        m1.summary_images,
+        vec!["img-a.png".to_string(), "img-b.png".to_string()],
+        "migrated summary_images_json round-trips"
+    );
+
+    // (3) Schema version bumped to 7.
+    {
+        let conn = store.conn().await.unwrap();
+        let stmt = conn
+            .prepare("SELECT version FROM schema_version LIMIT 1")
+            .await
+            .unwrap();
+        let mut rows = stmt.query(()).await.unwrap();
+        let r = rows.next().await.unwrap().unwrap();
+        let v: i64 = r.get(0).unwrap();
+        assert_eq!(v, 7, "schema version must be 7 after v6->v7 migration");
+    }
 }

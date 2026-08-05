@@ -4,8 +4,8 @@ use libsql::{params, params_from_iter, Connection, Value};
 use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill, task_type)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
@@ -20,6 +20,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
             meta.updated_at,
             meta.summary.as_deref(),
             meta.summary_seq,
+            serde_json::to_string(&meta.summary_images).unwrap_or_else(|_| "[]".into()),
             meta.handoff_seq,
             meta.handoff_plan.as_deref(),
             meta.skill.as_deref(),
@@ -33,7 +34,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, handoff_seq, handoff_plan, skill, task_type FROM sessions WHERE id = ?")
+        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -136,6 +137,10 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("summary_seq = ?");
         args.push(v.into());
     }
+    if let Some(v) = &patch.summary_images {
+        sets.push("summary_images_json = ?");
+        args.push(serde_json::to_string(v).unwrap_or_else(|_| "[]".into()).into());
+    }
     if let Some(v) = patch.handoff_seq {
         sets.push("handoff_seq = ?");
         args.push(v.into());
@@ -143,6 +148,11 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if let Some(v) = &patch.handoff_plan {
         sets.push("handoff_plan = ?");
         args.push(v.clone().into());
+    }
+    if patch.clear_summary {
+        sets.push("summary = NULL");
+        sets.push("summary_seq = NULL");
+        sets.push("summary_images_json = NULL");
     }
     if patch.clear_handoff {
         sets.push("handoff_seq = NULL");
@@ -196,10 +206,14 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
         updated_at: r.get::<i64>(6)?,
         summary: r.get::<Option<String>>(7)?,
         summary_seq: r.get::<Option<i64>>(8)?,
-        handoff_seq: r.get::<Option<i64>>(9)?,
-        handoff_plan: r.get::<Option<String>>(10)?,
-        skill: r.get::<Option<String>>(11)?,
-        task_type: r.get::<Option<String>>(12)?,
+        summary_images: serde_json::from_str(
+            r.get::<Option<String>>(9)?.as_deref().unwrap_or("[]"),
+        )
+        .unwrap_or_default(),
+        handoff_seq: r.get::<Option<i64>>(10)?,
+        handoff_plan: r.get::<Option<String>>(11)?,
+        skill: r.get::<Option<String>>(12)?,
+        task_type: r.get::<Option<String>>(13)?,
     })
 }
 

@@ -123,6 +123,7 @@ async fn turn_cancel_interrupts_llm_without_hard_abort() {
             updated_at: 0,
             summary: None,
             summary_seq: None,
+            summary_images: vec![],
             handoff_seq: None,
             handoff_plan: None,
             skill: None,

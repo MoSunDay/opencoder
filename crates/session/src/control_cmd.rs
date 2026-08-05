@@ -193,6 +193,8 @@ async fn persist_clear(session: &SessionState) {
                     agent: Some("act".into()),
                     handoff_seq: session.handoff_seq,
                     handoff_plan: session.handoff_plan.clone(),
+                    clear_summary: true,
+                    clear_skill: true,
                     updated_at: Some(now_ms()),
                     ..Default::default()
                 },
@@ -468,6 +470,77 @@ mod tests {
                 .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
             "no PlanHandoff when there is no plan"
         );
+    }
+
+    #[tokio::test]
+    async fn apply_clear_context_clears_skill_in_store() {
+        // Regression: /act_clear_context cleared the in-memory skill but left
+        // the store's `skill` column populated, so resume() reloaded a stale
+        // skill. Both layers must now be empty after the clear.
+        let store =
+            Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "sess-ctrl".into(),
+                agent: Some("plan".into()),
+                skill: Some("reviewer".into()),
+                created_at: 0,
+                updated_at: 0,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut session = make_session(Some(store.clone()));
+        session.agent = resolve_agent("plan").unwrap();
+        session.messages.push(Message::user("u1", "hello"));
+        let mut a = Message::assistant("a1");
+        a.blocks.push(ContentBlock::text("plan text"));
+        session.messages.push(a);
+        // A skill is active both in the store and in memory.
+        session.set_skill(Some("reviewer".into()));
+        assert_eq!(session.skill_prompt_cloned().as_deref(), Some("reviewer"));
+
+        let _ = collect_events(&mut session, ControlCmd::ClearContext);
+
+        // In-memory skill cleared.
+        assert_eq!(
+            session.skill_prompt_cloned(),
+            None,
+            "in-memory skill must be cleared"
+        );
+        // Persisted skill cleared -- the exact regression this guards.
+        let persisted = store.get_session("sess-ctrl").await.unwrap().unwrap();
+        assert_eq!(
+            persisted.skill,
+            None,
+            "store skill must be NULL after clear-context (resume must not reload it)"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_clear_context_with_no_skill_is_harmless() {
+        // No skill was ever set: clearing must be a no-op, never panic/error.
+        let store =
+            Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "sess-ctrl".into(),
+                agent: Some("plan".into()),
+                created_at: 0,
+                updated_at: 0,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut session = make_session(Some(store.clone()));
+        session.agent = resolve_agent("plan").unwrap();
+        session.messages.push(Message::user("u1", "hello"));
+
+        let _ = collect_events(&mut session, ControlCmd::ClearContext);
+
+        assert_eq!(session.skill_prompt_cloned(), None);
+        let persisted = store.get_session("sess-ctrl").await.unwrap().unwrap();
+        assert_eq!(persisted.skill, None, "skill stays None");
     }
 
     #[test]

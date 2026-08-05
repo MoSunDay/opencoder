@@ -33,6 +33,7 @@ async fn make_session(store: &LibsqlStore, id: &str) {
         updated_at: 1000,
         summary: None,
         summary_seq: None,
+        summary_images: vec![],
         handoff_seq: None,
         handoff_plan: None,
         skill: None,

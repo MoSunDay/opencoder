@@ -57,6 +57,7 @@ fn meta(id: &str) -> SessionMeta {
         updated_at: 0,
         summary: None,
         summary_seq: None,
+        summary_images: vec![],
         handoff_seq: None,
         handoff_plan: None,
         skill: None,
@@ -86,6 +87,10 @@ async fn resume_after_compaction_preserves_head_image() {
             "c1",
             &SessionPatch {
                 summary_seq: Some(head.len() as i64),
+                // Images must now be PERSISTED to survive resume: the compacted
+                // head is no longer reloaded (it is skipped via OFFSET), so the
+                // surviving image URLs are read back from this persisted field.
+                summary_images: Some(vec!["img1.png".into()]),
                 summary: Some("[Conversation summary so far] discussed an image".into()),
                 updated_at: Some(0),
                 ..Default::default()

@@ -241,7 +241,38 @@ async fn run_stream_once(
     let mut last_event_at = Instant::now();
 
     use futures::StreamExt;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        // Cooperative shutdown: if the consumer dropped the receiver (e.g.
+        // the session runner returned after a cancel), stop immediately
+        // instead of lingering for up to `idle_timeout`.
+        if tx.is_closed() {
+            return Ok(());
+        }
+        let chunk = match tokio::time::timeout(idle_timeout, stream.next()).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                // No chunk received within idle_timeout — the upstream is
+                // silent (not even sending keep-alive bytes). Treat as idle
+                // timeout.
+                if finished {
+                    let tool_calls = tools.finish_all().unwrap_or_default();
+                    let _ = tx
+                        .send(LlmEvent::Completed {
+                            text: std::mem::take(&mut text_buf),
+                            tool_calls,
+                            usage,
+                        })
+                        .await;
+                    return Ok(());
+                }
+                return Err(OnceError::Interrupted {
+                    reason: StreamInterruption::IdleTimeout,
+                    partial: snapshot(text_buf, &mut tools, usage),
+                });
+            }
+        };
+        // --- The rest of the original loop body stays the same ---
         let bytes = match chunk {
             Ok(b) => b,
             Err(e) => {

@@ -50,8 +50,14 @@ pub fn skills_dir() -> PathBuf {
 /// Built-in skills shipped with the binary and embedded at compile time via
 /// [`include_str!`]. Each entry is `(skill_dir, &[(file_name, contents)])`.
 /// Seeded into `~/.opencoder/skills` on first startup so a fresh install ships
-/// the `do-and-done -> review -> submit` workflow plus `repo-local-memory`.
+/// the `task-plan -> do-and-done -> review -> submit` workflow, the orthogonal
+/// `summary` retrospective tool (read-only task recap at any checkpoint), plus
+/// `repo-local-memory`.
 const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "task-plan",
+        &[("SKILL.md", include_str!("../assets/skills/task-plan/SKILL.md"))],
+    ),
     (
         "do-and-done",
         &[(
@@ -81,6 +87,10 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
         &[("SKILL.md", include_str!("../assets/skills/review/SKILL.md"))],
     ),
     (
+        "summary",
+        &[("SKILL.md", include_str!("../assets/skills/summary/SKILL.md"))],
+    ),
+    (
         "submit",
         &[("SKILL.md", include_str!("../assets/skills/submit/SKILL.md"))],
     ),
@@ -107,28 +117,21 @@ const DEP_GATED_SKILLS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
-/// Skill directory whose presence means "built-ins already seeded". Gating on
-/// `review` means a user deleting any other skill won't trigger a full reseed,
-/// but a truly fresh install (no `review` dir) gets the full default set.
-const SEED_GATE: &str = "review";
-
 /// Sentinel file (inside [`skills_dir`]) whose presence means the user ran
 /// `install-skills-dep.sh` and the optional-dependency skills should be
-/// seeded. Independent of `SEED_GATE`.
+/// seeded. Independent of built-in skill seeding.
 pub const DEPS_SENTINEL: &str = ".skills-deps";
 
-/// Seed the built-in skills into `~/.opencoder/skills` if they are missing.
+/// Seed the built-in skills into `~/.opencoder/skills`.
 ///
-/// Idempotent and best-effort: if the gate directory (`review`) already exists
-/// we assume the user has their own setup and touch nothing; otherwise we write
-/// every shipped skill, skipping files that already exist so partial user edits
-/// are never clobbered. Errors are logged via `tracing` and never propagated —
-/// seeding must never block startup.
+/// Incremental and best-effort: every shipped skill is checked individually —
+/// missing files are written, existing files are never clobbered (so user edits
+/// survive). This means a binary upgrade that ships a *new* built-in skill
+/// lands it on the next startup even for users who installed an earlier
+/// version. Errors are logged via `tracing` and never propagated — seeding
+/// must never block startup.
 pub fn seed_builtin_skills() {
     let root = skills_dir();
-    if root.join(SEED_GATE).exists() {
-        return;
-    }
     if let Err(e) = seed_builtin_skills_in(&root) {
         tracing::warn!(
             "failed to seed built-in skills into {}: {e}",
@@ -139,9 +142,10 @@ pub fn seed_builtin_skills() {
 
 /// Filesystem-writing core, factored out so tests can target a tempdir.
 ///
-/// Always writes every shipped skill (creating its directory), but never
-/// overwrites a file that already exists. The gate check lives in the public
-/// [`seed_builtin_skills`] entry point; this fn is the pure writer.
+/// Incremental: creates each skill directory and writes files that don't yet
+/// exist, never overwriting existing files (user edits survive). This is the
+/// single source of seeding logic — the public [`seed_builtin_skills`] entry
+/// point merely resolves `~/.opencoder/skills` and forwards here.
 pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
     for (skill_dir, files) in BUILTIN_SKILLS {
         let dir = root.join(skill_dir);

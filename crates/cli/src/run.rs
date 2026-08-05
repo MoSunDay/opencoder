@@ -5,7 +5,6 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use anyhow::{anyhow, Context, Result};
-use base64::Engine as _;
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
@@ -15,6 +14,8 @@ use opencoder_store::{SessionFilter, SessionPatch, Store};
 
 use crate::display::{print_event, truncate};
 use crate::Cli;
+
+pub(crate) use crate::run_image::load_image_data_uris;
 
 /// Apply a `--model` override (format `provider/model_id`) to the config.
 /// Must be called before `resolve_endpoint` so the LLM client is built against
@@ -327,6 +328,7 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
         updated_at: now,
         summary: meta.summary.clone(),
         summary_seq: meta.summary_seq,
+        summary_images: vec![],
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         skill: meta.skill.clone(),
@@ -429,40 +431,6 @@ fn resume_hint(id: &str) -> String {
 #[allow(dead_code)]
 pub fn _duration() -> Duration {
     Duration::from_secs(0)
-}
-
-/// Read each `--image` file path into a `data:image/<fmt>;base64,<...>` URI
-/// suitable for the `ContentBlock::Image` / OpenAI `image_url` field. Returns
-/// an empty vec when no paths were given. A missing/unreadable file errors.
-pub(crate) fn load_image_data_uris(paths: &[String]) -> Result<Vec<String>> {
-    let mut out = Vec::with_capacity(paths.len());
-    for p in paths {
-        let path = std::path::Path::new(p);
-        let bytes =
-            std::fs::read(path).with_context(|| format!("--image {p}: cannot read file"))?;
-        let mime = mime_from_ext(path);
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        out.push(format!("data:{mime};base64,{b64}"));
-    }
-    Ok(out)
-}
-
-/// Map a file extension to an image MIME type. Unknown extensions fall back to
-/// `image/png`, the most widely supported default for vision endpoints.
-fn mime_from_ext(path: &std::path::Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("bmp") => "image/bmp",
-        _ => "image/png",
-    }
 }
 
 #[cfg(test)]
@@ -568,6 +536,7 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                summary_images: vec![],
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
@@ -588,6 +557,7 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                summary_images: vec![],
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,
@@ -643,6 +613,7 @@ mod tests {
                 updated_at: 0,
                 summary: None,
                 summary_seq: None,
+                summary_images: vec![],
                 handoff_seq: None,
                 handoff_plan: None,
                 skill: None,

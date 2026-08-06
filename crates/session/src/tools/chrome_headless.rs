@@ -9,11 +9,11 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use opencoder_core::{json, tool::truncate_output, Tool, ToolContext, ToolOutput};
+use opencoder_core::{effective_proxy, json, tool::truncate_output, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use url::Url;
 
-use super::{web_extract, web_read};
+use super::{serp, web_extract, web_read};
 
 pub struct ChromeHeadlessTool;
 
@@ -22,6 +22,11 @@ pub struct ChromeHeadlessTool;
 /// call via the `ua` input.
 const REAL_CHROME_UA: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+/// Loopback hosts that bypass `--proxy-server`, in Chrome's semicolon-separated
+/// `--proxy-bypass-list` syntax (mirrors `net::LOOPBACK_NO_PROXY` but Chrome
+/// uses `;` not `,` as separator).
+const CHROME_PROXY_BYPASS: &str = "<local>;127.0.0.1;localhost;::1;0.0.0.0";
 
 /// Locate a Chrome/Chromium binary. Checks `$CHROME_PATH` first, then common
 /// binary names on `$PATH`.
@@ -98,7 +103,7 @@ fn normalise_url(raw: &str) -> Result<String, String> {
 /// Shared Chrome flags: container-safe sandbox/gpu flags plus anti-detection
 /// (real UA, `AutomationControlled` off) and a zh-CN locale so Chinese sites
 /// and search engines behave like a normal browser.
-fn chrome_base_args(user_agent: Option<&str>) -> Vec<String> {
+fn chrome_base_args(user_agent: Option<&str>, proxy: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "--headless=new".to_string(),
         "--no-sandbox".to_string(),
@@ -109,6 +114,10 @@ fn chrome_base_args(user_agent: Option<&str>) -> Vec<String> {
     let ua = user_agent.unwrap_or(REAL_CHROME_UA);
     if !ua.is_empty() {
         args.push(format!("--user-agent={ua}"));
+    }
+    if let Some(p) = proxy.map(str::trim).filter(|s| !s.is_empty()) {
+        args.push(format!("--proxy-server={p}"));
+        args.push(format!("--proxy-bypass-list={CHROME_PROXY_BYPASS}"));
     }
     args
 }
@@ -132,13 +141,14 @@ pub(crate) async fn dump_dom(
     url: &str,
     wait_ms: Option<u64>,
     ua: Option<&str>,
+    proxy: Option<&str>,
 ) -> Result<String, String> {
     let chrome = find_chrome().ok_or_else(not_found_msg)?;
     let profile = temp_profile_dir();
     let _ = std::fs::create_dir_all(&profile);
 
     let mut cmd = tokio::process::Command::new(&chrome);
-    cmd.args(chrome_base_args(ua));
+    cmd.args(chrome_base_args(ua, proxy));
     cmd.arg("--dump-dom");
     cmd.arg(format!("--user-data-dir={}", profile.display()));
     if let Some(wait) = wait_ms.filter(|&w| w > 0) {
@@ -210,7 +220,7 @@ fn base_join(base: &str, href: &str) -> Result<Url, url::ParseError> {
 /// Render structured SERP results as a clean numbered markdown list. The header
 /// echoes the source URL so callers can tell which query produced the rows; the
 /// snippet and url lines are omitted when empty.
-fn format_serp_output(url: &str, results: &[web_read::SearchResult]) -> String {
+fn format_serp_output(url: &str, results: &[serp::SearchResult]) -> String {
     let mut out = format!("# Search results: {url}\n");
     for (i, r) in results.iter().enumerate() {
         let n = i + 1;
@@ -239,7 +249,8 @@ async fn do_fetch(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
         .get("ua")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty());
-    let html = match dump_dom(&url, wait, ua).await {
+    let proxy = effective_proxy(ctx.proxy.as_deref());
+    let html = match dump_dom(&url, wait, ua, proxy.as_deref()).await {
         Ok(h) => h,
         Err(e) => return Ok(ToolOutput::err(e)),
     };
@@ -248,7 +259,7 @@ async fn do_fetch(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let parsed_url = Url::parse(&url).ok();
     let serp = parsed_url
         .as_ref()
-        .map(|u| web_read::parse_search_results(u, &html, 12))
+        .map(|u| serp::parse_search_results(u, &html, 12))
         .filter(|v| !v.is_empty());
     let body = match serp {
         Some(results) => format_serp_output(&url, &results),
@@ -281,7 +292,8 @@ async fn do_resolve(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
         .get("wait")
         .and_then(|v| v.as_u64())
         .or_else(|| is_redirect_url(&url).then_some(2000));
-    let html = match dump_dom(&url, wait, ua).await {
+    let proxy = effective_proxy(ctx.proxy.as_deref());
+    let html = match dump_dom(&url, wait, ua, proxy.as_deref()).await {
         Ok(h) => h,
         Err(e) => return Ok(ToolOutput::err(e)),
     };
@@ -318,7 +330,8 @@ async fn do_html(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
         .get("ua")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty());
-    let html = match dump_dom(&url, wait, ua).await {
+    let proxy = effective_proxy(ctx.proxy.as_deref());
+    let html = match dump_dom(&url, wait, ua, proxy.as_deref()).await {
         Ok(h) => h,
         Err(e) => return Ok(ToolOutput::err(e)),
     };
@@ -328,7 +341,7 @@ async fn do_html(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     ))
 }
 
-async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+async fn do_screenshot(input: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let raw_url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
     if raw_url.is_empty() {
         return Ok(ToolOutput::err("Missing required parameter: url."));
@@ -345,6 +358,7 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
         .get("ua")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty());
+    let proxy = effective_proxy(ctx.proxy.as_deref());
 
     let tmp = std::env::temp_dir().join(format!(
         "oc-chrome-{}.png",
@@ -358,7 +372,7 @@ async fn do_screenshot(input: &Value, _ctx: &ToolContext) -> Result<ToolOutput> 
     let screenshot_arg = format!("--screenshot={}", tmp.display());
 
     let mut cmd = tokio::process::Command::new(&chrome);
-    cmd.args(chrome_base_args(ua));
+    cmd.args(chrome_base_args(ua, proxy.as_deref()));
     cmd.args([&screenshot_arg, "--window-size=1920,1080"]);
     cmd.arg(format!("--user-data-dir={}", profile.display()));
     if let Some(wait) = input
@@ -501,12 +515,12 @@ mod tests {
     #[test]
     fn format_serp_output_renders_markdown_list() {
         let results = vec![
-            web_read::SearchResult {
+            serp::SearchResult {
                 title: "First".to_string(),
                 url: "http://www.baidu.com/link?url=a".to_string(),
                 snippet: "snippet one".to_string(),
             },
-            web_read::SearchResult {
+            serp::SearchResult {
                 title: "Second".to_string(),
                 url: String::new(),
                 snippet: String::new(),
@@ -526,7 +540,7 @@ mod tests {
 
     #[test]
     fn base_args_use_real_ua_and_anti_detection() {
-        let args = chrome_base_args(None);
+        let args = chrome_base_args(None, None);
         let joined = args.join(" ");
         assert!(joined.contains("--headless=new"));
         assert!(joined.contains("--no-sandbox"));
@@ -535,7 +549,7 @@ mod tests {
         assert!(joined.contains("--user-agent=Mozilla/5.0"));
         assert!(!joined.contains("HeadlessChrome"));
         // ua override replaces the default
-        let custom = chrome_base_args(Some("CustomUA/1.0"));
+        let custom = chrome_base_args(Some("CustomUA/1.0"), None);
         assert!(custom.iter().any(|a| a == "--user-agent=CustomUA/1.0"));
         assert!(!custom.iter().any(|a| a.contains("Mozilla/5.0")));
     }
@@ -585,6 +599,54 @@ mod tests {
         assert_eq!(
             extract_final_url(html, "https://example.com/x"),
             "https://example.com/x"
+        );
+    }
+
+
+    #[test]
+    fn chrome_base_args_includes_proxy_server_when_provided() {
+        let args = chrome_base_args(None, Some("socks5://127.0.0.1:1080"));
+        assert!(
+            args.iter().any(|a| a == "--proxy-server=socks5://127.0.0.1:1080"),
+            "should include --proxy-server when proxy is provided"
+        );
+    }
+
+    #[test]
+    fn chrome_base_args_omits_proxy_when_none() {
+        let args = chrome_base_args(None, None);
+        assert!(
+            !args.iter().any(|a| a.starts_with("--proxy-server")),
+            "should not include --proxy-server when proxy is None"
+        );
+        assert!(
+            !args.iter().any(|a| a.starts_with("--proxy-bypass-list")),
+            "should not include --proxy-bypass-list when proxy is None"
+        );
+    }
+
+    #[test]
+    fn chrome_base_args_includes_proxy_bypass_list() {
+        let args = chrome_base_args(None, Some("http://proxy:8080"));
+        assert!(
+            args.iter().any(|a| a.starts_with("--proxy-bypass-list=")),
+            "should include --proxy-bypass-list when proxy is provided"
+        );
+        let bypass = args
+            .iter()
+            .find(|a| a.starts_with("--proxy-bypass-list="))
+            .unwrap();
+        assert!(bypass.contains("127.0.0.1"));
+        assert!(bypass.contains("localhost"));
+        assert!(bypass.contains(';'), "Chrome uses semicolons, not commas");
+    }
+
+    #[test]
+    fn chrome_base_args_ignores_empty_proxy() {
+        let args = chrome_base_args(None, Some("   "));
+        assert!(
+            !args.iter().any(|a| a.starts_with("--proxy-server")),
+            "empty/whitespace proxy should be ignored"
         );
     }
 

@@ -114,6 +114,15 @@ pub static SITE_PROFILES: &[SiteProfile] = &[
         None,
         None
     ),
+    // HuggingFace model/discussion pages: og:title for title, model card body.
+    profile!(
+        &["huggingface.co"],
+        None,
+        &[".SVELTE_HYDRATER", "#model-card", "main"],
+        &["aside", "footer", ".prose hr"],
+        None,
+        None
+    ),
 ];
 
 /// A distilled article: metadata plus cleaned body text.

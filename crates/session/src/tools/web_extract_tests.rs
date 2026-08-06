@@ -110,6 +110,13 @@ fn format_article_renders_markdown() {
     assert!(out.ends_with("正文。"));
 }
 
+
+#[test]
+fn huggingface_uses_og_title_and_model_card() {
+    check("https://huggingface.co/deepseek-ai/DeepSeek-R1",
+        "<div class=\"SVELTE_HYDRATER\"><p>DeepSeek-R1 is a reasoning model.</p></div>",
+        "", &["DeepSeek-R1 is a reasoning model."], &[]);
+}
 #[tokio::test]
 async fn web_extract_tool_executes() {
     use opencoder_core::ToolContext;

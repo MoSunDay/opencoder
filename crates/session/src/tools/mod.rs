@@ -14,6 +14,7 @@ pub mod latent;
 pub mod ls;
 pub mod read;
 pub mod research;
+pub mod serp;
 pub mod search;
 pub mod ssh_pty;
 pub mod task;

@@ -883,6 +883,12 @@ mod tests {
     }
 
     #[test]
+    fn has_editable_key_recognizes_enable_tmux_session() {
+        let v = serde_json::json!({ "enable_tmux_session": true });
+        assert!(super::merge::has_editable_key(&v));
+    }
+
+    #[test]
     fn merge_into_applies_theme() {
         let mut c = Config::default();
         super::merge::merge_into(

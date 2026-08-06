@@ -37,6 +37,7 @@ pub mod supervisor;
 pub mod task;
 pub mod terminal;
 pub mod theme;
+pub mod tmux_bar;
 pub mod undo;
 pub mod vim;
 pub mod welcome;

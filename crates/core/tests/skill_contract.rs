@@ -174,13 +174,11 @@ fn seed_dep_gated_skills_only_when_sentinel() {
     // Without sentinel: dep-gated skills should NOT be seeded.
     seed_dep_gated_skills_in(root).unwrap();
     assert!(!root.join("ssh-pty").exists());
-    assert!(!root.join("chrome-headless").exists());
 
     // With sentinel: dep-gated skills SHOULD be seeded.
     std::fs::write(root.join(DEPS_SENTINEL), "").unwrap();
     seed_dep_gated_skills_in(root).unwrap();
     assert!(root.join("ssh-pty/SKILL.md").exists());
-    assert!(root.join("chrome-headless/SKILL.md").exists());
 
     // Content should be non-empty.
     let ssh_body = std::fs::read_to_string(root.join("ssh-pty/SKILL.md")).unwrap();
@@ -203,7 +201,4 @@ fn dep_gated_skills_do_not_clobber_existing() {
     // User file preserved.
     let body = std::fs::read_to_string(root.join("ssh-pty/SKILL.md")).unwrap();
     assert_eq!(body, "my custom skill");
-
-    // chrome-headless still written (didn't exist).
-    assert!(root.join("chrome-headless/SKILL.md").exists());
 }

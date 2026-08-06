@@ -2,15 +2,11 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
-/// by agent kind and the `tools_subagent` capability. Plan mode omits 'build';
-/// a disabled capability omits 'tools'.
-pub(super) fn valid_subagent_options(plan: bool, tools_on: bool) -> String {
+/// by agent kind. Plan mode omits 'build' (it is read-only).
+pub(super) fn valid_subagent_options(plan: bool) -> String {
     let mut parts: Vec<&str> = vec!["'explore' (read-only)"];
     if !plan {
         parts.push("'build' (full tools)");
-    }
-    if tools_on {
-        parts.push("'tools' (browser/computer-use)");
     }
     match parts.len() {
         1 => parts[0].to_string(),
@@ -45,24 +41,12 @@ pub(super) async fn run_subagent(
         .unwrap_or("explore")
         .to_string();
     let plan = parent.agent.kind == AgentKind::Plan;
-    let tools_on = parent.config.capabilities.tools_subagent_enabled();
-    // 'tools' umbrella subagent requires its capability switch. Reject before
-    // the plan/act classification so the error never advertises 'tools' when
-    // the capability is disabled.
-    if kind == "tools" && !tools_on {
+    // Plan mode may only spawn read-only subagents: 'explore' (filesystem).
+    // 'build' stays rejected so the model is never told it exists.
+    if plan && kind != "explore" {
         return ToolOutput::err(format!(
             "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(plan, tools_on)
-        ));
-    }
-    // Plan mode may only spawn read-only subagents: 'explore' (filesystem) and,
-    // when enabled, 'tools' (browser fetch/search + computer-use are read-only
-    // w.r.t. the repo). 'build' stays rejected so the model is never told it
-    // exists.
-    if plan && !matches!(kind.as_str(), "explore" | "tools") {
-        return ToolOutput::err(format!(
-            "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(plan, tools_on)
+            valid_subagent_options(plan)
         ));
     }
     let agent = match resolve_agent(&kind) {
@@ -70,7 +54,7 @@ pub(super) async fn run_subagent(
         None => {
             return ToolOutput::err(format!(
                 "Unknown subagent_type '{kind}'. Valid options: {}",
-                valid_subagent_options(plan, tools_on)
+                valid_subagent_options(plan)
             ));
         }
     };

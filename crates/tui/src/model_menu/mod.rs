@@ -1,7 +1,7 @@
 //! `/config` and `/model` modals for the TUI.
 //!
 //! - `/config` — generation-parameter form (reasoning, interleave, max_tokens,
-//!   threshold, fps, capabilities). No model/base_url/api_key — those moved
+//!   threshold, fps). No model/base_url/api_key — those moved
 //!   to `/model`.
 //! - `/model` — provider CRUD: list (select/edit/add/delete) and add/edit form
 //!   (name, model_id, base_url, api_key, custom headers).

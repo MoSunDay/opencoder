@@ -96,11 +96,12 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     // the old "cleanup only ran on the happy path" trap that bricked the
     // terminal on any panic, leaving the user with a frozen last frame, no
     // echo, and ineffective Ctrl+C/D.
+    let tmux_bar_prev = crate::tmux_bar::hide();
     let _guard = TerminalGuard::enter()?;
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Term::new(backend)?;
 
-    let final_id = super::run_app(
+    let result = super::run_app(
         &mut terminal,
         session,
         store,
@@ -112,11 +113,13 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         config,
         client,
     )
-    .await?;
+    .await;
 
-    // Restore the real terminal *before* printing so the hint lands on the
-    // actual screen instead of being swallowed by the alt-screen buffer.
+    // Restore the tmux status bar and the real terminal on every exit path
+    // (normal return or `?` error) before printing the resume hint.
+    crate::tmux_bar::restore(tmux_bar_prev);
     drop(_guard);
+    let final_id = result?;
     eprintln!("\n\x1b[2m{}\x1b[0m", resume_hint(&final_id));
     Ok(())
 }

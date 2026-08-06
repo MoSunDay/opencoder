@@ -50,71 +50,85 @@ impl Tool for SearchTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+        let pattern = input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if pattern.is_empty() {
             return Ok(ToolOutput::err("search requires a non-empty 'pattern'"));
         }
-        let matcher = match RegexMatcherBuilder::new().build(pattern) {
-            Ok(m) => m,
-            Err(e) => return Ok(ToolOutput::err(format!("invalid regex: {e}"))),
-        };
-
         let path_str = input
             .get("path")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        let include = input.get("include").and_then(|v| v.as_str());
+        let include = input
+            .get("include")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         let base = match &path_str {
             Some(p) => super::read::resolve(ctx, p),
             None => ctx.working_dir.clone(),
         };
+        let max_output = ctx.max_output;
 
-        let mut collector = Collector {
-            results: Vec::new(),
-            rel: String::new(),
-            max: MAX_MATCHES,
-        };
-        let mut searcher = SearcherBuilder::new().line_number(true).build();
+        let out = tokio::task::spawn_blocking(move || -> ToolOutput {
+            let matcher = match RegexMatcherBuilder::new().build(&pattern) {
+                Ok(m) => m,
+                Err(e) => return ToolOutput::err(format!("invalid regex: {e}")),
+            };
 
-        if base.is_file() {
-            collector.rel = path_str
-                .clone()
-                .unwrap_or_else(|| base.display().to_string());
-            let _ = searcher.search_path(&matcher, &base, &mut collector);
-        } else {
-            let mut wb = WalkBuilder::new(&base);
-            // Follow symlinks (parity with the former grep tool); the `ignore`
-            // walker performs its own loop/cycle detection so this is safe.
-            wb.follow_links(true);
-            if let Some(inc) = include {
-                if let Ok(built) = ov_build(&base, inc) {
-                    wb.overrides(built);
+            let mut collector = Collector {
+                results: Vec::new(),
+                rel: String::new(),
+                max: MAX_MATCHES,
+            };
+            let mut searcher = SearcherBuilder::new().line_number(true).build();
+
+            if base.is_file() {
+                collector.rel = path_str
+                    .clone()
+                    .unwrap_or_else(|| base.display().to_string());
+                let _ = searcher.search_path(&matcher, &base, &mut collector);
+            } else {
+                let mut wb = WalkBuilder::new(&base);
+                // Follow symlinks (parity with the former grep tool); the `ignore`
+                // walker performs its own loop/cycle detection so this is safe.
+                wb.follow_links(true);
+                if let Some(inc) = include.as_deref() {
+                    if let Ok(built) = ov_build(&base, inc) {
+                        wb.overrides(built);
+                    }
+                }
+                for entry in wb.build() {
+                    if collector.results.len() >= collector.max {
+                        break;
+                    }
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        continue;
+                    }
+                    collector.rel = rel_path(&base, entry.path());
+                    let _ = searcher.search_path(&matcher, entry.path(), &mut collector);
                 }
             }
-            for entry in wb.build() {
-                if collector.results.len() >= collector.max {
-                    break;
-                }
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    continue;
-                }
-                collector.rel = rel_path(&base, entry.path());
-                let _ = searcher.search_path(&matcher, entry.path(), &mut collector);
-            }
-        }
 
-        if collector.results.is_empty() {
-            return Ok(ToolOutput::ok("no matches"));
-        }
-        let mut out = collector.results.join("\n");
-        if collector.results.len() >= collector.max {
-            out.push_str(&format!("\n(truncated at {MAX_MATCHES} matches)"));
-        }
-        Ok(truncate_output(out, ctx.max_output))
+            if collector.results.is_empty() {
+                return ToolOutput::ok("no matches");
+            }
+            let mut out = collector.results.join("\n");
+            if collector.results.len() >= collector.max {
+                out.push_str(&format!("\n(truncated at {MAX_MATCHES} matches)"));
+            }
+            truncate_output(out, max_output)
+        })
+        .await
+        .unwrap_or_else(|e| ToolOutput::err(format!("search task failed: {e}")));
+
+        Ok(out)
     }
 }
 
@@ -153,5 +167,77 @@ impl Sink for Collector {
         self.results
             .push(format!("{}:{}: {}", self.rel, line, text));
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencoder_core::Tool;
+    use serde_json::json;
+    use std::io::Write;
+
+    fn ctx_for(dir: &tempfile::TempDir) -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            message_id: "test".into(),
+            agent: "explore".into(),
+            working_dir: dir.path().to_path_buf(),
+            max_output: 4096,
+            proxy: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn search_finds_matching_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("greet.rs")).unwrap();
+        writeln!(f, "fn main() {{").unwrap();
+        writeln!(f, "    println!(\"hello world\");").unwrap();
+        writeln!(f, "}}").unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tool
+            .execute(json!({ "pattern": "hello world" }), &ctx)
+            .await
+            .unwrap();
+        assert!(!out.is_error, "expected success, got: {}", out.content);
+        // Match line is line 2 in `greet.rs`; expect `greet.rs:2: ...hello world...`.
+        assert!(
+            out.content.contains("greet.rs:2:"),
+            "expected match path:line marker, got: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("hello world"),
+            "expected match content, got: {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn search_no_matches_returns_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut f = std::fs::File::create(dir.path().join("f.txt")).unwrap();
+        writeln!(f, "alpha").unwrap();
+        writeln!(f, "beta").unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tool
+            .execute(json!({ "pattern": "this_pattern_does_not_exist" }), &ctx)
+            .await
+            .unwrap();
+        assert!(!out.is_error, "no matches is not an error");
+        assert_eq!(out.content, "no matches");
+    }
+
+    #[tokio::test]
+    async fn search_empty_pattern_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = ctx_for(&dir);
+        let tool = SearchTool;
+        let out = tool.execute(json!({ "pattern": "" }), &ctx).await.unwrap();
+        assert!(out.is_error, "empty pattern must be an error");
+        assert!(out.content.contains("non-empty"));
     }
 }

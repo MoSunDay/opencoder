@@ -96,17 +96,6 @@ pub fn builtin_agents() -> Vec<Agent> {
             ]),
         },
         Agent {
-            name: "tools".into(),
-            kind: AgentKind::Subagent,
-            mode: AgentMode::Subagent,
-            description: "Umbrella subagent for optional capabilities: browser (web_fetch, web_search) and computer_use, plus read-only filesystem tools (read, search, ls). Use for web research or computer-use tasks.".into(),
-            prompt: base_prompt_tools(),
-            tools: ToolFilter::Allow(vec![
-                "web_fetch".into(), "web_search".into(), "computer_use".into(),
-                "read".into(), "search".into(), "ls".into(),
-            ]),
-        },
-        Agent {
             name: "command".into(),
             kind: AgentKind::Command,
             mode: AgentMode::Primary,
@@ -123,17 +112,14 @@ pub fn base_prompt_act() -> String {
 
 /// Bash + subagent usage preamble appended to a custom `--prompt-file` prompt.
 ///
-/// It advertises the `bash` and `task` tools and the `explore`/`build`/`tools`
+/// It advertises the `bash` and `task` tools and the `explore`/`build`
 /// delegation, so a user-supplied role prompt still drives correct tool use.
-/// The `tools` umbrella advertisement is the exact [`TOOLS_SUBAGENT_AD`] line,
-/// so [`strip_tools_subagent_ad`] can hide it when the `tools_subagent`
-/// capability is off; the `'build'` delegation clause matches the substring
-/// targeted by `base_prompt_plan` for the same reason.
+/// The `'build'` delegation clause matches the substring targeted by
+/// `base_prompt_plan` for build-stripping in plan mode.
 pub fn tool_preamble() -> &'static str {
     "## Tools
 - You have two tools: bash (terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
 - For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
-- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.
 - Run tool calls in parallel when none needs the other's output; otherwise run sequentially. You MAY emit multiple `task` blocks in a single response -- independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
 - Keep responses concise and friendly. Do not dump large files; reference paths only.
 - When a tool errors, read the error, fix the approach, and retry; do not loop on the same failing command.
@@ -165,16 +151,6 @@ pub fn base_prompt_build() -> String {
         .to_string()
 }
 
-pub fn base_prompt_tools() -> String {
-    "You are the tools subagent: the home of optional capabilities — browser (web_fetch, web_search) \
-     and computer-use (computer_use) — plus read-only filesystem tools (read, search, ls). \
-     Complete the specific task delegated to you. Browser and computer-use tools are only present when \
-     the user has enabled the corresponding capability, so fall back to read-only investigation if a \
-     tool is unavailable. Do not ask questions; infer reasonable defaults and proceed. \
-     After finishing, briefly state what you did and return any fetched content or action trace."
-        .to_string()
-}
-
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
@@ -188,7 +164,6 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 - Default to doing the work without asking questions. Infer missing details by reading the codebase and following existing conventions.
 - You have two tools: bash (for terminal ops: git, builds, tests, running scripts) and task (to spawn subagents).
 - For file operations, delegate to subagents: use 'explore' (read-only) for investigation, 'build' (full tools) for implementation.
-- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.
 - Run tool calls in parallel when none needs the other's output; otherwise run sequentially.
 - You MAY emit multiple `task` blocks in a single response. Independent subagents dispatched this way run concurrently, so prefer batching independent investigations.
 - Keep responses concise and friendly. Do not dump large files; reference paths only.
@@ -203,44 +178,9 @@ You are OpenCoder, a high-performance coding agent in a terminal.
 - After finishing, briefly state what you did and the key files, and suggest logical next steps (tests, build, commit).
 ";
 
-/// The single BASE_PROMPT line that advertises the `tools` umbrella subagent.
-/// Stripped from the system prompt when the `tools_subagent` capability is off
-/// so the model is never told the `tools` subagent exists. Mirrors the inline
-/// `.replace()` strategy of [`base_prompt_plan`].
-pub const TOOLS_SUBAGENT_AD: &str =
-    "- For browser (web fetch/search) or computer-use tasks, delegate to the 'tools' subagent.";
-
-/// Remove the `tools` subagent advertisement line (including its trailing
-/// newline) from a base prompt. A no-op when the ad is already absent.
-pub fn strip_tools_subagent_ad(base: &str) -> String {
-    base.replace(&format!("{TOOLS_SUBAGENT_AD}\n"), "")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Guards `strip_tools_subagent_ad`: if BASE_PROMPT's wording drifts so the
-    /// replace target disappears, this fails loudly. Also asserts the strip
-    /// actually removes the 'tools' advertisement while leaving 'explore' intact.
-    #[test]
-    fn strip_tools_subagent_ad_removes_the_advertisement() {
-        assert!(
-            base_prompt_act().contains(TOOLS_SUBAGENT_AD),
-            "BASE_PROMPT no longer contains the TOOLS_SUBAGENT_AD substring              {TOOLS_SUBAGENT_AD:?}. Update the constant."
-        );
-        let stripped = strip_tools_subagent_ad(&base_prompt_act());
-        assert!(
-            !stripped.contains("'tools' subagent"),
-            "stripped prompt must not advertise the 'tools' subagent, got: {stripped}"
-        );
-        assert!(
-            stripped.contains("'explore' (read-only)"),
-            "stripping must leave 'explore' intact, got: {stripped}"
-        );
-        // Idempotent: stripping an already-stripped prompt is a no-op.
-        assert_eq!(strip_tools_subagent_ad(&stripped), stripped);
-    }
 
     /// Guards the `.replace()` in `base_prompt_plan()`: if BASE_PROMPT's wording
     /// ever drifts so the replace becomes a no-op, the build subagent advertisement
@@ -270,51 +210,6 @@ mod tests {
         assert!(
             plan.contains("'explore' (read-only)"),
             "plan prompt must still advertise 'explore', got: {plan}"
-        );
-    }
-
-    /// The `tools` umbrella subagent must resolve and carry exactly the
-    /// capability + read-only filesystem tools (browser/computer-use are
-    /// runtime-gated by config + the `browser` cargo feature).
-    #[test]
-    fn tools_subagent_is_registered_with_capability_tools() {
-        let tools_agent = resolve_agent("tools").expect("tools subagent registered");
-        assert_eq!(tools_agent.mode, AgentMode::Subagent);
-        for required in [
-            "web_fetch",
-            "web_search",
-            "computer_use",
-            "read",
-            "search",
-            "ls",
-        ] {
-            assert!(
-                tools_agent.tools.allows(required),
-                "tools subagent must allow '{required}'"
-            );
-        }
-        // tools is plan-visible: act and plan prompts both advertise it.
-        assert!(base_prompt_act().contains("'tools' subagent"));
-        assert!(base_prompt_plan().contains("'tools' subagent"));
-    }
-
-    /// Guards `tool_preamble`: it must contain the exact [`TOOLS_SUBAGENT_AD`]
-    /// line (so [`strip_tools_subagent_ad`] keeps working on a custom prompt)
-    /// and advertise the `build` subagent.
-    #[test]
-    fn tool_preamble_contains_substrings() {
-        let p = tool_preamble();
-        assert!(
-            p.contains(TOOLS_SUBAGENT_AD),
-            "tool_preamble must contain the exact TOOLS_SUBAGENT_AD line so              strip_tools_subagent_ad still works on --prompt-file prompts"
-        );
-        assert!(
-            p.contains("'build'"),
-            "tool_preamble must advertise the 'build' subagent"
-        );
-        assert!(
-            p.contains("'tools' subagent"),
-            "tool_preamble must advertise the 'tools' subagent"
         );
     }
 

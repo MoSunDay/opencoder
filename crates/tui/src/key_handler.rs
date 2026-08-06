@@ -20,8 +20,6 @@ pub(crate) enum KeyAction {
     None,
     Submit(String),
     Steer(String),
-    /// Steer submitted to a focused subagent's child session (not the parent).
-    SubagentSteer(String),
     Queue(String),
     /// Tab-queue attempted while a running subagent is focused. A queue
     /// normally targets the *parent* session, which would leak input into
@@ -283,7 +281,17 @@ pub(crate) fn handle_key(
     }
     match k.code {
         KeyCode::BackTab => {
-            // Shift+Tab = primary mode switch (codex-cli style).
+            // Shift+Tab = primary mode switch (codex-cli style), BUT a
+            // compound `/plan <content>` input is submitted as a plan-mode
+            // prompt rather than just toggling the agent (mirrors the
+            // Enter/Tab submit + buffer-clear flow).
+            if let Some(text) = crate::control_helpers::plan_compound_for_submit(input) {
+                input.clear();
+                *cursor_idx = 0;
+                *hist_idx = None;
+                crate::undo::reset(undo_state, input, *cursor_idx);
+                return KeyAction::Submit(text);
+            }
             let next = if agent == "plan" { "act" } else { "plan" };
             KeyAction::SwitchAgent(next.into())
         }
@@ -306,11 +314,8 @@ pub(crate) fn handle_key(
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
-            // Enter = SubagentSteer when a running subagent is focused;
-            // Steer when the parent is running; Submit when idle.
-            if subagent_focused {
-                KeyAction::SubagentSteer(text)
-            } else if running {
+            // Enter = Steer when the parent is running; Submit when idle.
+            if running {
                 KeyAction::Steer(text)
             } else {
                 KeyAction::Submit(text)

@@ -54,7 +54,7 @@ fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'stat
 // ── /config form ──────────────────────────────────────────────────────────
 
 fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &ConfigForm) {
-    let want_h = 18u16;
+    let want_h = 15u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -133,45 +133,6 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "1-30, \u{2190}/\u{2192} cursor, digits, Backspace",
         ),
         field_line(
-            "browser:",
-            &format!(
-                "[ {} ]",
-                if form.capabilities_browser {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            form.focus == ConfigField::Browser,
-            "\u{2190}/\u{2192}/Space toggle",
-        ),
-        field_line(
-            "computer_use:",
-            &format!(
-                "[ {} ]",
-                if form.capabilities_computer_use {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            form.focus == ConfigField::ComputerUse,
-            "\u{2190}/\u{2192}/Space toggle",
-        ),
-        field_line(
-            "tools_sub:",
-            &format!(
-                "[ {} ]",
-                if form.capabilities_tools_subagent {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            form.focus == ConfigField::ToolsSubagent,
-            "\u{2190}/\u{2192}/Space toggle",
-        ),
-        field_line(
             "ap max_iter:",
             &if form.ap_max_iter_input.is_empty() {
                 "(empty)".to_string()
@@ -229,7 +190,7 @@ fn text_field_row(field: ConfigField) -> Option<usize> {
         ConfigField::ContextSize => Some(3),
         ConfigField::Threshold => Some(4),
         ConfigField::Fps => Some(5),
-        ConfigField::ApMaxIter => Some(10),
+        ConfigField::ApMaxIter => Some(6),
         _ => None,
     }
 }

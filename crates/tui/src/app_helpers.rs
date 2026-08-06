@@ -469,16 +469,7 @@ pub(crate) fn push_user(
     chat.push_marker(Line::from(""));
 }
 
-pub(crate) fn data_dir_for(workdir: &Path) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    workdir.hash(&mut h);
-    let digest = h.finish();
-    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencoder");
-    base.push(format!("{digest:x}"));
-    base
-}
+pub(crate) use opencoder_core::data_dir_for;
 
 /// Outcome of a mouse event: `None` for normal handling (all effects are side
 /// effects on the caller's locals), or `SteerSubmit` when the user clicked the

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod computer_use;
 pub mod config;
+pub mod data_dir;
 pub mod error;
 pub mod json;
 pub mod message;
@@ -25,6 +26,7 @@ pub use config::{
     CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
 };
+pub use data_dir::data_dir_for;
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;
 

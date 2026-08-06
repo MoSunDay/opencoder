@@ -8,7 +8,7 @@
 //! session state so headless / queue / steer submissions get the same
 //! treatment.
 //!
-//! Latent tools (ssh_pty, chrome_headless) unlock automatically: the runner
+//! Latent tools (ssh_pty) unlock automatically: the runner
 //! derives unlocked tools from the skill *body* text
 //! ([`crate::tools::latent::unlocked_from_body`]), so simply setting the body
 //! is sufficient — no separate tool-registry update is needed here.

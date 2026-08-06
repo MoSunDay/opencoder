@@ -338,13 +338,7 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         Some(a) => a,
         None => return 0,
     };
-    let text = opencoder_session::prompt::build_system(
-        &agent,
-        workdir,
-        skill,
-        &opencoder_core::CapabilitiesConfig::default(),
-    )
-    .text();
+    let text = opencoder_session::prompt::build_system(&agent, workdir, skill).text();
     estimate(&text) as u64
 }
 

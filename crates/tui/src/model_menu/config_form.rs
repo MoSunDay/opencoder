@@ -79,9 +79,6 @@ pub enum ConfigField {
     ContextSize,
     Threshold,
     Fps,
-    Browser,
-    ComputerUse,
-    ToolsSubagent,
     ApMaxIter,
     Theme,
     EnableTmuxSession,
@@ -90,16 +87,13 @@ pub enum ConfigField {
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 14] = [
+    const ORDER: [ConfigField; 11] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
         ConfigField::ContextSize,
         ConfigField::Threshold,
         ConfigField::Fps,
-        ConfigField::Browser,
-        ConfigField::ComputerUse,
-        ConfigField::ToolsSubagent,
         ConfigField::ApMaxIter,
         ConfigField::Theme,
         ConfigField::EnableTmuxSession,
@@ -136,9 +130,6 @@ pub struct ConfigForm {
     pub fps_input: String,
     /// Char-index edit cursor within `fps_input`.
     pub fps_cursor: usize,
-    pub capabilities_browser: bool,
-    pub capabilities_computer_use: bool,
-    pub capabilities_tools_subagent: bool,
     pub ap_max_iter_input: String,
     /// Char-index edit cursor within `ap_max_iter_input`.
     pub ap_max_iter_cursor: usize,
@@ -168,9 +159,6 @@ impl ConfigForm {
             context_size_cursor: context_size_input.chars().count(),
             fps_input: fps_input.clone(),
             fps_cursor: fps_input.chars().count(),
-            capabilities_browser: config.capabilities.browser,
-            capabilities_computer_use: config.capabilities.computer_use,
-            capabilities_tools_subagent: config.capabilities.tools_subagent,
             ap_max_iter_input: ap_max_iter_input.clone(),
             ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             theme: crate::theme::ThemeKind::from_label(&config.theme),
@@ -230,9 +218,6 @@ impl ConfigForm {
             context_threshold: threshold,
             context_limit: context_size,
             fps,
-            capabilities_browser: self.capabilities_browser,
-            capabilities_computer_use: self.capabilities_computer_use,
-            capabilities_tools_subagent: self.capabilities_tools_subagent,
             ap_max_iter,
             theme: self.theme.label().to_string(),
             enable_tmux_session: Some(self.enable_tmux_session),
@@ -312,13 +297,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
-            ConfigField::ComputerUse => {
-                form.capabilities_computer_use = !form.capabilities_computer_use
-            }
-            ConfigField::ToolsSubagent => {
-                form.capabilities_tools_subagent = !form.capabilities_tools_subagent
-            }
             ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
             ConfigField::MaxTokens
@@ -332,13 +310,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::Reasoning => form.reasoning = form.reasoning.next(),
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
-            }
-            ConfigField::Browser => form.capabilities_browser = !form.capabilities_browser,
-            ConfigField::ComputerUse => {
-                form.capabilities_computer_use = !form.capabilities_computer_use
-            }
-            ConfigField::ToolsSubagent => {
-                form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
@@ -374,15 +345,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::Reasoning if c == ' ' => form.reasoning = form.reasoning.next(),
             ConfigField::InterleavedThinking if c == ' ' => {
                 form.interleaved_thinking = !form.interleaved_thinking
-            }
-            ConfigField::Browser if c == ' ' => {
-                form.capabilities_browser = !form.capabilities_browser
-            }
-            ConfigField::ComputerUse if c == ' ' => {
-                form.capabilities_computer_use = !form.capabilities_computer_use
-            }
-            ConfigField::ToolsSubagent if c == ' ' => {
-                form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession if c == ' ' => {

@@ -8,9 +8,6 @@ pub struct ConfigPatch {
     pub context_threshold: u64,
     pub context_limit: u64,
     pub fps: u32,
-    pub capabilities_browser: bool,
-    pub capabilities_computer_use: bool,
-    pub capabilities_tools_subagent: bool,
     pub ap_max_iter: u32,
     pub theme: String,
     pub enable_tmux_session: Option<bool>,
@@ -25,11 +22,6 @@ impl ConfigPatch {
             "compaction": { "context_threshold": self.context_threshold },
             "fps": self.fps,
             "theme": self.theme,
-            "capabilities": {
-                "browser": self.capabilities_browser,
-                "computer_use": self.capabilities_computer_use,
-                "tools_subagent": self.capabilities_tools_subagent,
-            },
             "autopilot": {
                 "max_iterations": self.ap_max_iter,
             },

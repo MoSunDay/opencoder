@@ -40,7 +40,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
     ("/ap", "切换 autopilot 自动模式（不计入模型上下文）"),
-    ("/install_tools", "检测并安装所有 tools 依赖（tmux + chromium）"),
+    ("/install_tools", "检测并安装所有 tools 依赖（tmux）"),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -60,7 +60,7 @@ pub enum SlashAction {
     Stop,
     /// Display-only: toggle autopilot (never enters model context).
     Ap,
-    /// `/install_tools`: detect + install optional tool deps (tmux + chromium).
+    /// `/install_tools`: detect + install optional tool deps (tmux).
     InstallTools,
 }
 

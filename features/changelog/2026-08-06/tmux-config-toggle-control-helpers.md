@@ -45,6 +45,7 @@ Commit: (working-tree, pre-initial-commit)
 | tmux 开关在 config None 时默认 off | config_form_tmux_defaults_off_when_config_none | crates/tui/src/model_menu/tests/config_tests.rs |
 | Enter 链路过 tmux 到 Save | enter_chains_through_config_fields_to_save | crates/tui/src/model_menu/tests/config_tests.rs |
 | ConfigPatch 含 tmux 字段 | config_patch_serializes_all_fields | crates/tui/src/model_menu/tests/config_tests.rs |
+| has_editable_key 识别 enable_tmux_session | has_editable_key_recognizes_enable_tmux_session | crates/core/src/config.rs |
 | 表单光标位置随行数偏移更新 | config_form_cursor_on_max_tokens 等 | crates/tui/src/model_menu/tests/{config,cursor_editing}_tests.rs |
 | 纯控制命令判定 (bare) | bare_plan_is_pure / bare_act_is_pure / bare_act_clear_context_is_pure / whitespace_padded_bare_plan_is_pure | crates/tui/src/control_helpers_tests/is_pure_control.rs |
 | 复合命令非纯（含内容需回显） | plan_with_skill_is_not_pure / plan_with_plain_text_is_not_pure / act_with_skill_is_not_pure 等 | crates/tui/src/control_helpers_tests/is_pure_control.rs |

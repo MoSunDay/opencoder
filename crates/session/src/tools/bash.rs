@@ -274,10 +274,25 @@ impl Tool for BashTool {
         #[cfg(unix)]
         unregister(pid);
 
-        // Normal completion: await drain tasks (they resolve at EOF when the
-        // child exits) then read the captured buffers.
-        let _ = stdout_task.await;
-        let _ = stderr_task.await;
+        // Kill the process group so any grandchildren that inherited the pipe
+        // write-ends die and the drain tasks reach EOF. Without this, a command
+        // like `cmd &` leaves a grandchild holding the pipe open and the drain
+        // awaits below hang forever — and bash is exempt from the runner's
+        // safety net (None deadline), so nothing breaks the hang. Mirrors the
+        // handoff supervisor's group kill in bg.rs.
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::kill(-pgid, libc::SIGKILL);
+        }
+
+        // Bounded drain: grandchildren are now dead so EOF is imminent, but cap
+        // defensively (mirrors handoff's 2s ceiling in bg.rs). A process that
+        // somehow escaped the group kill just times out instead of hanging.
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+        })
+        .await;
         let (stdout, stderr) = {
             let st = state.lock().unwrap();
             (
@@ -388,6 +403,36 @@ mod tests {
             "short command must not trigger timeout handoff: {}",
             out.content
         );
+    }
+
+    /// A command that backgrounds a grandchild (e.g. `cmd &`) which inherits
+    /// the stdout pipe returns promptly on natural completion: the group kill
+    /// reaps the leaked grandchild so the drain tasks reach EOF instead of
+    /// hanging forever (bash has no runner deadline, so nothing else breaks it).
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_returns_when_grandchild_leaks_pipe() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        // `sleep 30 &` spawns a process that inherits stdout; bash exits at
+        // once (wait returns Ok) but the grandchild keeps the pipe open.
+        let input = json!({"command": "echo done; sleep 30 &"});
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            tool.execute(input, &ctx()),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "bash should return within 10s even when a grandchild holds the pipe"
+        );
+        let out = result.unwrap().unwrap();
+        assert!(
+            out.content.contains("done"),
+            "expected the command's output, got: {}",
+            out.content
+        );
+        kill_all();
     }
 
     /// A command that exceeds the foreground timeout is handed off to the

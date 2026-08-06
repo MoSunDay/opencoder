@@ -162,8 +162,8 @@ fn config_form_cursor_renders_at_edit_position() {
         })
         .unwrap();
 
-    // cx = 4 + 1(border) + 15(label) + 2 = 22, cy = 6 + 1 + 2 = 9
-    terminal.backend_mut().assert_cursor_position((22, 9));
+    // cx = 4 + 1(border) + 15(label) + 2 = 22, cy = 5 + 1 + 2 = 8
+    terminal.backend_mut().assert_cursor_position((22, 8));
 }
 
 // ── ProviderForm cursor editing ───────────────────────────────────────────

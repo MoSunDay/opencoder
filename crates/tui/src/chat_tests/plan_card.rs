@@ -147,15 +147,15 @@ fn begin_turn_preserves_transcript() {
 
 #[test]
 fn steer_consumed_echoes_marker_and_drops_entry() {
-    // SteerConsumed echoes the `steer:` marker at consume time (turn boundary)
+    // SteerConsumed echoes the `user:` marker at consume time (turn boundary)
     // and drops the consumed entry by seq from steer_items. The marker is NOT
     // pushed at admit time — it only appears when the steer executes.
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
     let before = block_text(&v);
-    v.apply(&SessionEvent::SteerConsumed { seq: 7 });
+    v.apply(&SessionEvent::SteerConsumed { seq: 7, text: "use python".into() });
     assert!(
-        block_text(&v).contains("steer: use python"),
+        block_text(&v).contains("user: use python"),
         "SteerConsumed must echo the marker at consume time"
     );
     assert_ne!(
@@ -176,7 +176,7 @@ fn steer_consumed_unknown_seq_is_noop() {
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
     let before = block_text(&v);
-    v.apply(&SessionEvent::SteerConsumed { seq: 999 });
+    v.apply(&SessionEvent::SteerConsumed { seq: 999, text: String::new() });
     assert_eq!(block_text(&v), before, "unknown seq must not push a marker");
     assert_eq!(
         v.steer_items.len(),

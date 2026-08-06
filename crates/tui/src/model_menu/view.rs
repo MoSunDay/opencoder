@@ -54,7 +54,7 @@ fn field_line(label: &str, value: &str, focused: bool, hint: &str) -> Line<'stat
 // ── /config form ──────────────────────────────────────────────────────────
 
 fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &ConfigForm) {
-    let want_h = 17u16;
+    let want_h = 18u16;
     let h = want_h.min(composer_top.max(1));
     let w = 72u16.min(area.width.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -186,6 +186,19 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             &format!("[ {} ]", form.theme.label()),
             form.focus == ConfigField::Theme,
             "\u{2190}/\u{2192}/Space cycle",
+        ),
+        field_line(
+            "tmux:",
+            &format!(
+                "[ {} ]",
+                if form.enable_tmux_session {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+            form.focus == ConfigField::EnableTmuxSession,
+            "\u{2190}/\u{2192}/Space toggle",
         ),
         button_line_cfg(form),
         Line::raw(""),

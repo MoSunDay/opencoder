@@ -445,7 +445,7 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim().to_string();
-                                let clean = crate::app_helpers::forward_skill_if_compound(&text, &clean);
+                                let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
                                 if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap: display-only
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
@@ -493,11 +493,12 @@ pub(super) async fn run_app(
                                         queue_items.push((seq, queued_item_display(&text, &clean)));
                                     }
                                 } else {
-                                    // Control commands (/act, /plan, /act_clear_context) apply
-                                    // without recording a user message — skip the echo so they
-                                    // don't appear as literal text in the transcript.
-                                    let is_control = opencoder_session::parse_control_cmd(&clean).is_some();
-                                    if !is_control {
+                                    // Only suppress the transcript echo for BARE control commands
+                                    // (/plan, /act, /act_clear_context). Compound inputs
+                                    // (/plan $review, /plan fix the bug) carry user content and
+                                    // must be echoed before execution.
+                                    let is_pure_control = crate::control_helpers::is_pure_control_cmd(&clean);
+                                    if !is_pure_control {
                                         push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                         chat.context_used += estimate(&clean) as u64;
                                     }
@@ -535,7 +536,7 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim();
-                                let clean = crate::app_helpers::forward_skill_if_compound(&text, clean);
+                                let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
                                 if !clean.is_empty() {
                                     let display = queued_item_display(&text, &clean);
                                     steer_fire::admit_keyboard_steer(
@@ -570,7 +571,7 @@ pub(super) async fn run_app(
                                     &store, &session_id,
                                 ).await;
                                 let clean = clean.trim();
-                                let clean = crate::app_helpers::forward_skill_if_compound(&text, clean);
+                                let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
                                 if !clean.is_empty() {
                                     let display = queued_item_display(&text, &clean);
                                     let image_uris = snapshot_image_uris(&pending_images);

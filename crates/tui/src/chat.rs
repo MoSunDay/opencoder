@@ -237,15 +237,14 @@ impl ChatView {
             }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
-            SessionEvent::SteerConsumed { seq } => {
-                // Echo at consume time: the steer prompt was already visible in
-                // the pending panel above the input while queued. Now that it is
-                // promoted at the turn boundary, show it entering the transcript.
-                if let Some((_, display)) = self.steer_items.iter().find(|(s, _)| s == seq).cloned() {
-                    self.push_marker(Line::from(Span::styled(
-                        format!("steer: {display}"),
-                        Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD),
-                    )));
+            SessionEvent::SteerConsumed { seq, text } => {
+                let display = if !text.is_empty() { text.clone() }
+                    else { self.steer_items.iter().find(|(s, _)| s == seq).map(|(_, d)| d.clone()).unwrap_or_default() };
+                if !display.is_empty() {
+                    self.push_marker_lines(vec![
+                        Line::from(Span::styled(format!("user: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))),
+                        Line::from(""),
+                    ]);
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
             }

@@ -113,6 +113,11 @@ fn classify(id: &str, tmux_by_id: &HashMap<String, &ManagedSession>) -> TmuxStat
     }
 }
 
+/// Command-hint legend printed below the `ts -l` table. Extracted as a
+/// constant so a regression test can assert it never advertises a removed
+/// flag (e.g. `--new`) and always lists the live commands.
+const LIST_LEGEND: &str = "resume: opencode ts -r <id>   clean: opencode ts -c";
+
 /// `opencode ts -l` -- Store-first unified panel. Lists ALL sessions (live +
 /// stopped) from the store, annotating each with its tmux state.
 ///
@@ -181,7 +186,7 @@ pub(crate) async fn ts_list(cli: &Cli) -> Result<()> {
     }
     println!();
     println!("* attached  \u{00b7} live(detached)  (space) stopped");
-    println!("resume: opencode ts -r <id>   new: opencode ts --new   clean: opencode ts -c");
+    println!("{}", LIST_LEGEND);
     Ok(())
 }
 
@@ -298,6 +303,19 @@ mod tests {
     fn explicit_attach_target_session_not_live_returns_none() {
         // `--session <id>` but the tmux session is dead -> create fresh.
         assert_eq!(explicit_attach_target(Some("01ABCD"), false), None);
+    }
+
+    #[test]
+    fn list_legend_has_no_removed_flags() {
+        // The `--new` flag was removed: a bare `ts` always creates, so the
+        // legend must not advertise it. Advertising a dead command is a
+        // silent regression this guard catches.
+        assert!(
+            !LIST_LEGEND.contains("--new"),
+            "legend must not reference removed --new: {LIST_LEGEND}"
+        );
+        assert!(LIST_LEGEND.contains("resume"), "must advertise resume: {LIST_LEGEND}");
+        assert!(LIST_LEGEND.contains("clean"), "must advertise clean: {LIST_LEGEND}");
     }
 
     fn mk_managed(id: &str, attached: u8) -> ManagedSession {

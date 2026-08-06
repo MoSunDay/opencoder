@@ -240,6 +240,24 @@ fn reasoning_effort_defaults_to_none() {
 }
 
 #[test]
+fn reasoning_effort_empty_string_resolves_to_none() {
+    // The TUI form emits "" for Off; merge_into must treat it as None so
+    // the key persists in the file but runtime reasoning stays off.
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{"reasoning_effort":""}"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert!(
+        cfg.reasoning_effort.is_none(),
+        "empty-string reasoning_effort must resolve to None"
+    );
+}
+
+#[test]
 fn interleaved_thinking_defaults_to_true() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();

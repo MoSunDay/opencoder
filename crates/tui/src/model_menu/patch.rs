@@ -16,19 +16,25 @@ pub struct ConfigPatch {
 impl ConfigPatch {
     pub fn to_json(&self) -> serde_json::Value {
         let mut root = serde_json::json!({
-            "reasoning_effort": self.reasoning_effort,
+            // Off serializes to "" so the key persists on disk.
+            // (merge_json treats null as delete, which would drop the key.)
+            "reasoning_effort": self.reasoning_effort.clone().unwrap_or_default(),
             "context_limit": self.context_limit,
-            "interleaved_thinking": self.interleaved_thinking,
             "compaction": { "context_threshold": self.context_threshold },
             "fps": self.fps,
             "theme": self.theme,
             "autopilot": {
                 "max_iterations": self.ap_max_iter,
             },
-            "enable_tmux_session": self.enable_tmux_session,
         });
         if let Some(mt) = self.max_tokens {
             root["max_tokens"] = serde_json::json!(mt);
+        }
+        if let Some(it) = self.interleaved_thinking {
+            root["interleaved_thinking"] = serde_json::json!(it);
+        }
+        if let Some(ets) = self.enable_tmux_session {
+            root["enable_tmux_session"] = serde_json::json!(ets);
         }
         root
     }

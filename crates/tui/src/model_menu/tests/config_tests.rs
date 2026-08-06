@@ -37,7 +37,10 @@ fn config_patch_serializes_all_fields() {
     assert_eq!(v["context_limit"], serde_json::json!(128_000));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
     assert_eq!(v["theme"], serde_json::json!("dark"));
-    assert_eq!(v["enable_tmux_session"], serde_json::json!(null));
+    assert!(
+        v.get("enable_tmux_session").is_none(),
+        "enable_tmux_session must be absent when None"
+    );
 }
 
 #[test]
@@ -57,6 +60,37 @@ fn config_patch_omits_max_tokens_when_none() {
     assert!(
         v.get("max_tokens").is_none(),
         "max_tokens must be absent when None"
+    );
+}
+
+#[test]
+fn config_patch_off_reasoning_emits_empty_string_not_null() {
+    // Off (None) must emit "" so the key survives merge_json.  A null would
+    // be treated as delete, silently dropping reasoning_effort from disk.
+    let p = ConfigPatch {
+        reasoning_effort: None,
+        interleaved_thinking: Some(true),
+        max_tokens: None,
+        context_threshold: 1000,
+        context_limit: 128_000,
+        fps: 10,
+        ap_max_iter: 10,
+        theme: "dark".into(),
+        enable_tmux_session: None,
+    };
+    let v = p.to_json();
+    assert_eq!(
+        v["reasoning_effort"],
+        serde_json::json!(""),
+        "Off must emit empty string, not null"
+    );
+    assert!(
+        v.get("interleaved_thinking").is_some(),
+        "interleaved_thinking must be present when Some"
+    );
+    assert!(
+        v.get("enable_tmux_session").is_none(),
+        "enable_tmux_session must be absent when None"
     );
 }
 

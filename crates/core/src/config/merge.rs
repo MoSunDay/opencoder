@@ -135,7 +135,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 cfg.provider.base_url = b.to_string();
             }
             if let Some(k) = p.get("api_key").and_then(|v| v.as_str()) {
-                cfg.provider.api_key = Some(super::resolve_env(k));
+                cfg.provider.api_key = Some(super::env::resolve_env(k));
             }
         }
         if let Some(providers) = obj.get("providers").and_then(|v| v.as_object()) {
@@ -146,7 +146,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                         entry.base_url = b.to_string();
                     }
                     if let Some(k) = pcfg.get("api_key").and_then(|v| v.as_str()) {
-                        entry.api_key = Some(super::resolve_env(k));
+                        entry.api_key = Some(super::env::resolve_env(k));
                     }
                     if let Some(m) = pcfg.get("model").and_then(|v| v.as_str()) {
                         entry.model = Some(m.to_string());

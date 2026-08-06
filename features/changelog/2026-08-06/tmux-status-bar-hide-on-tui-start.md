@@ -54,7 +54,7 @@ tmux 底部状态栏占据一整行屏幕。当 opencode TUI 全屏运行时，�
 
 | 项 | 结果 |
 |----|------|
-| `cargo test --workspace` | 1898 passed / 0 failed |
+| `cargo test --workspace` | 1895 passed / 0 failed |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 零警告 |
 | `cargo build --workspace` | Finished，零错误 |
 
@@ -68,5 +68,8 @@ tmux 底部状态栏占据一整行屏幕。当 opencode TUI 全屏运行时，�
 
 ## 备注
 
+- Gate 计数：当次实跑 **1895 passed / 0 failed / 0 ignored / 0 filtered**。本 changelog 所在
+  commit（a4b3395）一并移除了 web/browser/SERP/computer-use 工具及其测试，使全工作区测试
+  总数相对早期 changelog 标注的 1898 下降约 9；1895 为本特性当前树状态的真实计数。
 - 工作区存在与本特性无关的预存 flaky 测试（`data_dir::tests::is_deterministic`、
   `model_menu` 部分游标位置测试），偶发失败、重跑即过，不属于本次变更范围。

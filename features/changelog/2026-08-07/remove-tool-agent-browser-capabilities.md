@@ -74,8 +74,8 @@ tools_subagent}` 三个开关门控，并在 `/config` 表单与 `~/.opencoder/c
 ## 测试覆盖（当次实跑）
 - `cargo build --workspace` → Finished，0 error
 - `cargo clippy --workspace --all-targets -- -D warnings` → 0 warning
-- `cargo test --workspace` → 1898 passed / 0 failed
-  - opencoder-core: 154 / opencoder-session: 469 / opencoder-tui: 952
+- `cargo test --workspace` → 1895 passed / 0 failed
+  - opencoder-core: 151 / opencoder-session: 469 / opencoder-tui: 952
   - opencoder-cli: 82 / opencoder-web: 65（余为 store/llm/client/doctest）
 - 删除的测试均为被移除特性专用（capabilities_and_tools.rs、web_extract/research/serp/
   chrome_headless/computer_use 内联测试、agent.rs tools-subagent 测试等）。

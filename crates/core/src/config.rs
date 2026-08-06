@@ -353,7 +353,7 @@ impl Config {
         // override the global base (matches opencoder). This lets ~/.opencoder
         // provide the provider+key while a project opencoder.json overrides only
         // the model — `opencoder` then runs directly from any directory.
-        let mut candidates = config_candidates(working_dir);
+        let mut candidates = env::config_candidates(working_dir);
         candidates.reverse(); // global first, project last (wins)
         for p in candidates {
             if p.exists() {
@@ -381,7 +381,7 @@ impl Config {
                 merge::merge_into(&mut cfg, parsed);
             }
         }
-        apply_env(&mut cfg);
+        env::apply_env(&mut cfg);
         warn_if_suspicious_model(&cfg.model);
         Ok(cfg)
     }
@@ -463,7 +463,7 @@ impl Config {
         self.provider_for(name)
             .and_then(|p| p.api_key.clone())
             .or_else(|| self.provider.api_key.clone())
-            .or_else(|| env_get("OPENAI_API_KEY"))
+            .or_else(|| env::env_get("OPENAI_API_KEY"))
             .filter(|s| !s.is_empty())
             .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
     }
@@ -481,7 +481,7 @@ impl Config {
         };
         let headers: Vec<(String, String)> = headers_src
             .iter()
-            .map(|h| (h.name.clone(), resolve_env(&h.value)))
+            .map(|h| (h.name.clone(), env::resolve_env(&h.value)))
             .collect();
         Ok(Endpoint {
             base_url: self.base_url_for(name),
@@ -504,7 +504,7 @@ impl Config {
     /// fallback): the first existing candidate that already holds any of the
     /// editable keys; if none, create the project-local `./opencoder.json`.
     pub fn save_target(working_dir: &Path) -> PathBuf {
-        let candidates = config_candidates(working_dir);
+        let candidates = env::config_candidates(working_dir);
         // candidates are ordered project-first (index 0) → global-last, which
         // is exactly the priority we want for picking a save target.
         for p in &candidates {

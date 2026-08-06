@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use super::Config;
+
 /// `true` when `s` looks like an environment-variable name (uppercase +
 /// underscores/digits). Used by the `/model` menu to decide whether to wrap an
 /// api-key value as `"{NAME}"` (preserving env-var indirection via

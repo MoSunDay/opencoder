@@ -1,8 +1,8 @@
-//! `/install_tools`: detect the optional tools dependencies (tmux + chromium)
-//! and, if any are missing, suspend the TUI so the embedded
+//! `/install_tools`: detect the optional tools dependencies (tmux)
+//! and, if missing, suspend the TUI so the embedded
 //! `install-skills-dep.sh` can run with inherited stdio (it needs an
 //! interactive TTY for the `sudo` password), then resume the TUI and re-seed
-//! the now-unlocked `ssh-pty` / `chrome-headless` skills.
+//! the now-unlocked `ssh-pty` skill.
 
 use std::process::Command;
 
@@ -35,7 +35,7 @@ pub(crate) fn run(terminal: &mut Term, chat: &mut ChatView) {
     let status = check_tool_deps();
     if all_installed(&status) {
         chat.push_marker(Line::from(Span::styled(
-            "[install_tools] tmux + chromium already installed \u{2014} nothing to do",
+            "[install_tools] tmux already installed \u{2014} nothing to do",
             Style::default().fg(theme::ok_color()),
         )));
         return;
@@ -103,16 +103,15 @@ fn format_result(exit_code: i32, status: &ToolDepStatus) -> Vec<Line<'static>> {
     )));
     lines.push(Line::from(Span::styled(
         format!(
-            "  tmux: {}  |  chromium: {}  |  sentinel: {}",
+            "  tmux: {}  |  sentinel: {}",
             yn(status.tmux),
-            yn(status.chrome),
             yn(status.sentinel),
         ),
         Style::default().fg(theme::local_color()),
     )));
     if ok && all_installed(status) {
         lines.push(Line::from(Span::styled(
-            "  all tools deps installed \u{2014} ssh-pty / chrome-headless skills \
+            "  all tools deps installed \u{2014} ssh-pty skill \
              unlocked (press $ to activate)",
             Style::default().fg(theme::ok_color()),
         )));
@@ -153,7 +152,6 @@ mod tests {
     fn format_result_success_all_installed() {
         let status = ToolDepStatus {
             tmux: true,
-            chrome: true,
             sentinel: true,
         };
         let lines = format_result(0, &status);
@@ -168,7 +166,6 @@ mod tests {
     fn format_result_success_but_still_missing() {
         let status = ToolDepStatus {
             tmux: false,
-            chrome: true,
             sentinel: false,
         };
         let lines = format_result(0, &status);
@@ -182,7 +179,6 @@ mod tests {
     fn format_result_failure_has_no_tail() {
         let status = ToolDepStatus {
             tmux: false,
-            chrome: false,
             sentinel: false,
         };
         let lines = format_result(2, &status);
@@ -195,7 +191,6 @@ mod tests {
     fn format_result_failure_even_if_deps_present() {
         let status = ToolDepStatus {
             tmux: true,
-            chrome: true,
             sentinel: true,
         };
         let lines = format_result(1, &status);

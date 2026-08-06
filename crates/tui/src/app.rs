@@ -33,8 +33,6 @@ pub(crate) mod app_loop;
 mod app_task;
 #[path = "app_bootstrap.rs"]
 mod app_bootstrap;
-#[path = "subagent_input.rs"]
-mod subagent_input;
 #[path = "app_display.rs"]
 mod app_display;
 
@@ -77,7 +75,6 @@ pub(super) async fn run_app(
         .turn_cancel
         .clone()
         .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
-    let child_turn_cancels = session.child_turn_cancels.clone();
     let child_cancels = session.child_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
     let mut chat = initial_chat_view(&session, &store).await;
@@ -516,19 +513,6 @@ pub(super) async fn run_app(
                                     chat.begin_turn();
                                 }
                             }
-                            KeyAction::SubagentSteer(text) => {
-                                let image_uris = snapshot_image_uris(&pending_images);
-                                subagent_input::admit_subagent_steer(
-                                    &store,
-                                    &mut chat,
-                                    subagent_focus,
-                                    &text,
-                                    &image_uris,
-                                )
-                                .await;
-                                pending_images.clear();
-                                follow = true;
-                            }
                             KeyAction::Steer(text) => {
                                 let (clean, _unresolved) = resolve_persist(
                                     &text, &mut active_skill, &mut active_skill_body,
@@ -537,13 +521,13 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
-                                if !clean.is_empty() {
+                                let admitted = if !clean.is_empty() {
                                     let display = queued_item_display(&text, &clean);
                                     steer_fire::admit_keyboard_steer(
                                         &store, &session_id, &clean, &display,
                                         &mut pending_images, &mut chat,
                                     )
-                                    .await;
+                                    .await
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `$name` token): admit the trigger
                                     // as a steer so the injected skill body is acted on, not dropped.
@@ -553,7 +537,15 @@ pub(super) async fn run_app(
                                         &store, &session_id, &trigger, &display,
                                         &mut pending_images, &mut chat,
                                     )
-                                    .await;
+                                    .await
+                                } else {
+                                    None
+                                };
+                                // Exit subagent focus on a successful parent steer
+                                // so the queue panel returns to the parent view
+                                // and the `>` button becomes visible.
+                                if admitted.is_some() && subagent_focus.is_some() {
+                                    subagent_focus = None;
                                 }
                                 // Enter while running admits the steer WITHOUT
                                 // interrupting the current turn. The steer sits
@@ -655,6 +647,7 @@ pub(super) async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 cancel.cancel();
+                                opencoder_session::fire_child_cancels(&child_cancels);
                                 // Double-Esc hard-abort: also drop any pending
                                 // steer/queue inputs so they don't resurface on
                                 // resume. delete_input is idempotent.
@@ -710,9 +703,10 @@ pub(super) async fn run_app(
                         }
                         if outcome == MouseOutcome::SteerSubmit {
                             let action = steer_fire::fire_steer_interrupt(
-                                subagent_focus, running,
-                                &child_cancels, &child_turn_cancels,
-                                &turn_cancel, &chat,
+                                running,
+                                &child_cancels,
+                                &turn_cancel,
+                                &chat,
                             );
                             if action == steer_dispatch::Action::StartTurn {
                                 start_turn(&cmd_tx, &mut cancel,

@@ -156,6 +156,57 @@ async fn queue_admit_to_running_drain_does_not_cancel_children() {
 }
 
 // ---------------------------------------------------------------------------
+// Steer admit to a *running* drain MUST cancel child subagents — this aligns
+// with the TUI's CancelChildrenAndSteer path. Previously only turn_cancel was
+// fired and children kept running.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn steer_admit_to_running_drain_cancels_children() {
+    let st = state().await;
+    seed(&st, "s1").await;
+    let handle = handle_for(&st, "s1").await;
+
+    // Simulate an already-running drain: `draining` is true, so
+    // `started_new_drain` will be false and the steer-into-running-drain
+    // branch fires turn_cancel + fire_child_cancels.
+    handle.draining.store(true, Ordering::SeqCst);
+
+    // Register a fake in-flight subagent child cancel token.
+    let child_token = CancellationToken::new();
+    {
+        let mut cancels = handle
+            .child_cancels
+            .lock()
+            .expect("child_cancels mutex poisoned");
+        let mut map: HashMap<String, CancellationToken> = HashMap::new();
+        map.insert("child-steer".to_string(), child_token.clone());
+        *cancels = map;
+    }
+
+    // Admit a Steer input to the running drain — this should cancel children.
+    let seq = opencoder_web::handle::admit_and_drain(
+        st.handles.clone(),
+        st.store.clone(),
+        "s1",
+        "change direction".into(),
+        Vec::new(),
+        Delivery::Steer,
+        mock_reply("ok"),
+        std::env::temp_dir(),
+        config(),
+    )
+    .await
+    .expect("admit_and_drain must succeed");
+
+    assert!(seq > 0, "input must be admitted");
+    assert!(
+        child_token.is_cancelled(),
+        "Steer delivery to a running drain must cancel child subagents"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Bug 2: when `draining` clears, all events must already be persisted.
 // ---------------------------------------------------------------------------
 

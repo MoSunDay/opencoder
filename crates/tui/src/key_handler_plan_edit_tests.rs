@@ -1,6 +1,6 @@
 //! Unit tests for `handle_key` history / plan-edit / subagent behavior:
 //! history cycling (`move_hist`), Shift+I plan-edit entry gating, soft-wrap
-//! row navigation, and Enter -> Steer / SubagentSteer dispatch. Extracted from
+//! row navigation, and Enter -> Steer dispatch. Extracted from
 //! `key_handler.rs` to keep it under the 800-line file-size cap.
 
 use super::*;
@@ -307,7 +307,7 @@ fn up_down_navigate_soft_wrapped_rows() {
 }
 
 #[test]
-fn enter_produces_subagent_steer_when_focused() {
+fn enter_produces_steer_when_subagent_focused() {
     let mut input = String::from("steer the subagent");
     let mut cursor = input.len();
     let history: Vec<String> = vec![];
@@ -321,8 +321,8 @@ fn enter_produces_subagent_steer_when_focused() {
     let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
-    // Enter with a running subagent focused produces SubagentSteer (not
-    // Steer/Submit), and the input line is cleared.
+    // Enter with a running subagent focused now produces a parent Steer
+    // (not a child-session steer), and the input line is cleared.
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &mut input,
@@ -345,7 +345,7 @@ fn enter_produces_subagent_steer_when_focused() {
             &mut queue_scroll,
     );
 
-    assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer the subagent"));
+    assert!(matches!(action, KeyAction::Steer(ref t) if t == "steer the subagent"));
     assert!(input.is_empty(), "input cleared after steer submit");
     assert_eq!(cursor, 0);
 }
@@ -353,7 +353,7 @@ fn enter_produces_subagent_steer_when_focused() {
 #[test]
 fn enter_produces_steer_when_running_and_not_subagent_focused() {
     // When no subagent is focused but the parent is running, Enter should
-    // produce a plain Steer (the default behaviour), NOT SubagentSteer.
+    // produce a plain Steer (the default behaviour).
     let mut input = String::from("steer the parent");
     let mut cursor = input.len();
     let history: Vec<String> = vec![];

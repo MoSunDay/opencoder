@@ -29,3 +29,24 @@ pub(crate) fn is_pure_control_cmd(clean: &str) -> bool {
         Some((_, None))
     )
 }
+
+/// When the input is a **compound** `/plan <content>` submission (i.e. `/plan`
+/// followed by substantive text or a `$skill` token), return the trimmed input
+/// so the caller submits it as a plan-mode prompt instead of merely toggling
+/// the agent. Bare `/plan`, whitespace-padded `/plan   `, `/act <content>`, and
+/// plain text all return `None` (fall back to a normal mode toggle).
+///
+/// `split_control_prefix` is the single source of truth for "is there real
+/// trailing content?": its internal `split_whitespace` strips every kind of
+/// inter-token whitespace, so `/plan   ` (only trailing spaces) resolves to a
+/// bare command (`rest == None`) and is correctly treated as a toggle.
+pub(crate) fn plan_compound_for_submit(input: &str) -> Option<String> {
+    match opencoder_session::split_control_prefix(input) {
+        Some((opencoder_session::ControlCmd::SwitchAgent(mode), Some(_rest)))
+            if mode == "plan" =>
+        {
+            Some(input.trim().to_string())
+        }
+        _ => None,
+    }
+}

@@ -188,6 +188,7 @@ pub async fn admit_and_drain(
         // consumed at idle — no interrupt needed.
         if delivery == Delivery::Steer {
             opencoder_session::fire_turn_cancel(&handle.turn_cancel);
+            opencoder_session::fire_child_cancels(&handle.child_cancels);
         }
         let handles_w = handles.clone();
         let store_w = store.clone();

@@ -1,15 +1,14 @@
 //! Latent tool gating: tools that exist in the registry but are hidden from
 //! the model until a corresponding skill is activated via `$skill-name`.
 //!
-//! This is the third filtering layer (after `ToolFilter` and
-//! `CapabilitiesConfig`). A latent tool passes the agent allowlist and
-//! capability gate but is still withheld unless its owning skill's name is in
-//! the session's `active_skill_names` set.
+//! This is the third filtering layer (after `ToolFilter` and the registry
+//! itself). A latent tool passes the agent allowlist but is still withheld
+//! unless its owning skill's name is in the session's `active_skill_names` set.
 
 use std::collections::HashSet;
 
 /// All tool names that are latent (hidden until their skill is activated).
-const LATENT_TOOLS: &[&str] = &["ssh_pty", "chrome_headless"];
+const LATENT_TOOLS: &[&str] = &["ssh_pty"];
 
 /// True when `name` is a latent tool.
 pub fn is_latent_tool(name: &str) -> bool {
@@ -21,7 +20,6 @@ pub fn is_latent_tool(name: &str) -> bool {
 pub fn latent_tools_for_skill(skill_name: &str) -> &'static [&'static str] {
     match skill_name {
         "ssh-pty" => &["ssh_pty"],
-        "chrome-headless" => &["chrome_headless"],
         _ => &[],
     }
 }
@@ -50,11 +48,6 @@ pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
                 out.insert(*t);
             }
         }
-        if prefix.contains("chrome_headless") || prefix.contains("chrome-headless") {
-            for t in latent_tools_for_skill("chrome-headless") {
-                out.insert(*t);
-            }
-        }
     }
     out
 }
@@ -64,25 +57,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ssh_pty_and_chrome_are_latent() {
+    fn ssh_pty_is_latent() {
         assert!(is_latent_tool("ssh_pty"));
-        assert!(is_latent_tool("chrome_headless"));
     }
 
     #[test]
     fn normal_tools_not_latent() {
         assert!(!is_latent_tool("bash"));
         assert!(!is_latent_tool("read"));
-        assert!(!is_latent_tool("web_fetch"));
     }
 
     #[test]
     fn skill_to_tool_mapping() {
         assert_eq!(latent_tools_for_skill("ssh-pty"), &["ssh_pty"]);
-        assert_eq!(
-            latent_tools_for_skill("chrome-headless"),
-            &["chrome_headless"]
-        );
         assert!(latent_tools_for_skill("unknown").is_empty());
     }
 
@@ -92,23 +79,13 @@ mod tests {
         names.insert("ssh-pty".to_string());
         let unlocked = unlocked_tools(&names);
         assert!(unlocked.contains("ssh_pty"));
-        assert!(!unlocked.contains("chrome_headless"));
-
-        names.insert("chrome-headless".to_string());
-        let unlocked = unlocked_tools(&names);
-        assert!(unlocked.contains("ssh_pty"));
-        assert!(unlocked.contains("chrome_headless"));
     }
 
     #[test]
-    fn unlocked_from_body_detects_skills() {
+    fn unlocked_from_body_detects_ssh_pty() {
         let body = Some("# ssh-pty skill\n\nYou have ssh_pty...");
         let unlocked = unlocked_from_body(body);
         assert!(unlocked.contains("ssh_pty"));
-
-        let body2 = Some("chrome-headless skill chrome_headless tool");
-        let unlocked2 = unlocked_from_body(body2);
-        assert!(unlocked2.contains("chrome_headless"));
     }
 
     #[test]

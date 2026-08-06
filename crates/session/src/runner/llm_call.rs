@@ -21,7 +21,6 @@ pub(super) async fn run_one_llm_call(
         &session.agent,
         &session.working_dir,
         session.skill_prompt_cloned().as_deref(),
-        &session.config.capabilities,
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
@@ -33,13 +32,12 @@ pub(super) async fn run_one_llm_call(
         .iter()
         .filter(|(name, _)| {
             session.agent.tools.allows(name)
-                && session.config.capabilities.tool_enabled(name)
                 && (!crate::tools::latent::is_latent_tool(name.as_str())
                     || unlocked.contains(name.as_str()))
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let tool_schemas = schema_for(&allowed, session.agent.kind, &session.config.capabilities);
+    let tool_schemas = schema_for(&allowed, session.agent.kind);
 
     let req = ChatRequest {
         model: session.model.clone(),

@@ -129,7 +129,7 @@ pub struct SessionState {
     /// `None` means no skill is active. Set from the TUI `$` picker.
     pub skill_prompt: Arc<Mutex<Option<String>>>,
     /// Names of skills currently activated via `$name` tokens. Used to
-    /// unlock latent tools (ssh_pty, chrome_headless) in the runner filter.
+    /// unlock latent tools (ssh_pty) in the runner filter.
     pub active_skill_names: Arc<Mutex<HashSet<String>>>,
     /// Number of messages already persisted to `store` (loaded on resume).
     persisted_count: usize,

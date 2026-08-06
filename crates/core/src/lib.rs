@@ -1,5 +1,4 @@
 pub mod agent;
-pub mod computer_use;
 pub mod config;
 pub mod data_dir;
 pub mod error;
@@ -14,15 +13,11 @@ pub mod tool_deps;
 pub mod tool_guard_config;
 
 pub use agent::{
-    builtin_agents, resolve_agent, strip_tools_subagent_ad, tool_preamble, Agent, AgentKind,
-    AgentMode, ToolFilter, TOOLS_SUBAGENT_AD,
-};
-pub use computer_use::{
-    ComputerAction, ComputerUseExecutor, ComputerUseLoop, LoopOutcome, Observation,
-    ProviderBackend, RecordingExecutor,
+    builtin_agents, resolve_agent, tool_preamble, Agent, AgentKind,
+    AgentMode, ToolFilter,
 };
 pub use config::{
-    looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig, CapabilitiesConfig,
+    looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig,
     CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
 };

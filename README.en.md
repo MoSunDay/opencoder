@@ -276,18 +276,6 @@ opencoder/
 └── src/main.rs    # Binary entry point
 ```
 
-## 🙏 Acknowledgements
-
-This project's optional capabilities stand on the shoulders of these excellent projects:
-
-| Project | How it contributes |
-| --- | --- |
-| [obscura](https://github.com/h4ckf0r0day/obscura) | Underlying browser engine dependency (feature-gated `browser`): headless rendering based on deno_core / V8, driving the JS execution and anti-bot handling behind `web_fetch` / `web_search`. |
-| [agent-browser](https://github.com/h4ckf0r0day/agent-browser) | Content-extraction algorithm reference for `crates/session/src/tools/web_read.rs`: markdown Accept negotiation, `.md` fallback, `llms.txt` / `llms-full.txt` ancestor crawling, readable main-text extraction. |
-| [cua](https://github.com/h4ckf0r0day/cua) | Computer-use loop reference for `crates/core/src/computer_use.rs`: the perceive → act loop is distilled into the native `ComputerUseExecutor` trait + `ComputerUseLoop`. |
-
-All three are independent implementations: obscura is wired in as a rev-pinned git dependency; the algorithms/ideas of agent-browser and cua are ported / distilled into pure Rust (no source dependency on them).
-
 ## 📄 License
 
 [MIT](LICENSE)

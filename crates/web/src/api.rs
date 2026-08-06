@@ -114,6 +114,7 @@ pub async fn delete_session(
             // DELETE and keeps making LLM requests on a gone session).
             if let Some(h) = state.handles.lock().await.remove(&id) {
                 h.cancel.lock().await.cancel();
+            opencoder_session::fire_child_cancels(&h.child_cancels);
             }
             Json(json!({ "ok": true, "id": id })).into_response()
         }
@@ -373,6 +374,7 @@ pub async fn post_interrupt(
         // handle has no live drain task to cancel.
         Some(h) if h.draining.load(Ordering::SeqCst) => {
             h.cancel.lock().await.cancel();
+            opencoder_session::fire_child_cancels(&h.child_cancels);
             Json(json!({ "ok": true }))
         }
         Some(_) => Json(json!({ "ok": false, "error": "no active drain running" })),

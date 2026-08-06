@@ -49,17 +49,6 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         return true;
     }
     if obj
-        .get("capabilities")
-        .and_then(|v| v.as_object())
-        .is_some_and(|c| {
-            c.contains_key("browser")
-                || c.contains_key("computer_use")
-                || c.contains_key("tools_subagent")
-        })
-    {
-        return true;
-    }
-    if obj
         .get("autopilot")
         .and_then(|v| v.as_object())
         .is_some_and(|a| {
@@ -206,17 +195,6 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 } else {
                     Some(t.to_string())
                 };
-            }
-        }
-        if let Some(c) = obj.get("capabilities").and_then(|v| v.as_object()) {
-            if let Some(b) = c.get("browser").and_then(|v| v.as_bool()) {
-                cfg.capabilities.browser = b;
-            }
-            if let Some(b) = c.get("computer_use").and_then(|v| v.as_bool()) {
-                cfg.capabilities.computer_use = b;
-            }
-            if let Some(b) = c.get("tools_subagent").and_then(|v| v.as_bool()) {
-                cfg.capabilities.tools_subagent = b;
             }
         }
         if let Some(v) = obj.get("stream_idle_timeout_secs").and_then(|v| v.as_u64()) {

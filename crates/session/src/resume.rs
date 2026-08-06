@@ -672,9 +672,6 @@ fn infer_skill_names(body: &Option<String>) -> std::collections::HashSet<String>
         if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
             names.insert("ssh-pty".to_string());
         }
-        if prefix.contains("chrome_headless") || prefix.contains("chrome-headless") {
-            names.insert("chrome-headless".to_string());
-        }
     }
     names
 }
@@ -708,23 +705,6 @@ mod tests {
         let body = Some("Active skill: ssh-pty".to_string());
         let names = infer_skill_names(&body);
         assert_eq!(names, HashSet::from(["ssh-pty".to_string()]));
-    }
-
-    #[test]
-    fn infer_skill_names_detects_chrome_headless() {
-        let body = Some("Use chrome_headless tool".to_string());
-        let names = infer_skill_names(&body);
-        assert_eq!(names, HashSet::from(["chrome-headless".to_string()]));
-    }
-
-    #[test]
-    fn infer_skill_names_detects_both() {
-        let body = Some("ssh_pty and chrome-headless are active".to_string());
-        let names = infer_skill_names(&body);
-        assert_eq!(
-            names,
-            HashSet::from(["ssh-pty".to_string(), "chrome-headless".to_string()])
-        );
     }
 
     #[test]

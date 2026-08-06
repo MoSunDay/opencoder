@@ -23,7 +23,6 @@ use tokio_util::sync::CancellationToken;
 use crate::app_helpers::{mk_input_with_images, snapshot_image_uris};
 use crate::chat::ChatView;
 use super::steer_dispatch;
-use super::subagent_input;
 
 /// Admit a steer submitted via the keyboard Enter path: persist it to the
 /// store and push it onto the pending steer panel, WITHOUT interrupting the
@@ -66,32 +65,19 @@ pub(crate) async fn admit_keyboard_steer(
 /// `StartTurn` (which requires async `start_turn` and mutable state not
 /// available in this synchronous helper).
 pub(crate) fn fire_steer_interrupt(
-    subagent_focus: Option<usize>,
     running: bool,
     child_cancels: &Arc<Mutex<HashMap<String, CancellationToken>>>,
-    child_turn_cancels: &Arc<Mutex<HashMap<String, SharedCancel>>>,
     turn_cancel: &SharedCancel,
     chat: &ChatView,
 ) -> steer_dispatch::Action {
-    let sub_focused = subagent_focus.is_some();
     // fire_child_cancels both checks AND cancels children.
-    let has_children = !sub_focused
-        && running
-        && opencoder_session::fire_child_cancels(child_cancels);
+    let has_children = running && opencoder_session::fire_child_cancels(child_cancels);
     let action = steer_dispatch::resolve(
-        sub_focused,
         running,
         has_children,
         !chat.steer_items.is_empty(),
     );
     match action {
-        steer_dispatch::Action::Subagent => {
-            subagent_input::fire_subagent_turn_cancel(
-                child_turn_cancels,
-                chat,
-                subagent_focus,
-            );
-        }
         steer_dispatch::Action::SteerParent
         | steer_dispatch::Action::CancelChildrenAndSteer => {
             opencoder_session::fire_turn_cancel(turn_cancel);
@@ -116,10 +102,6 @@ mod tests {
         Arc::new(Mutex::new(HashMap::new()))
     }
 
-    fn empty_turn_cancels() -> Arc<Mutex<HashMap<String, SharedCancel>>> {
-        Arc::new(Mutex::new(HashMap::new()))
-    }
-
     // Core wiring test: a running parent with a pending steer must resolve to
     // SteerParent AND actually fire the shared turn_cancel token. The `>` button
     // (`SteerSubmit`) routes through `fire_steer_interrupt`; the keyboard Enter
@@ -128,15 +110,12 @@ mod tests {
     fn running_parent_with_steer_fires_turn_cancel() {
         let turn_cancel = fresh_cancel();
         let child_cancels = empty_cancels();
-        let child_turn_cancels = empty_turn_cancels();
         let mut chat = ChatView::default();
         chat.steer_items.push((1, "stop now".into()));
 
         let action = fire_steer_interrupt(
-            None,
             true,
             &child_cancels,
-            &child_turn_cancels,
             &turn_cancel,
             &chat,
         );
@@ -161,15 +140,12 @@ mod tests {
             .lock()
             .unwrap()
             .insert("child-1".into(), CancellationToken::new());
-        let child_turn_cancels = empty_turn_cancels();
         let mut chat = ChatView::default();
         chat.steer_items.push((1, "stop now".into()));
 
         let action = fire_steer_interrupt(
-            None,
             true,
             &child_cancels,
-            &child_turn_cancels,
             &turn_cancel,
             &chat,
         );
@@ -187,14 +163,11 @@ mod tests {
     fn idle_parent_resolves_start_turn_without_firing() {
         let turn_cancel = fresh_cancel();
         let child_cancels = empty_cancels();
-        let child_turn_cancels = empty_turn_cancels();
         let chat = ChatView::default();
 
         let action = fire_steer_interrupt(
-            None,
             false,
             &child_cancels,
-            &child_turn_cancels,
             &turn_cancel,
             &chat,
         );
@@ -211,14 +184,11 @@ mod tests {
     fn running_parent_with_nothing_pending_is_noop() {
         let turn_cancel = fresh_cancel();
         let child_cancels = empty_cancels();
-        let child_turn_cancels = empty_turn_cancels();
         let chat = ChatView::default();
 
         let action = fire_steer_interrupt(
-            None,
             true,
             &child_cancels,
-            &child_turn_cancels,
             &turn_cancel,
             &chat,
         );
@@ -246,7 +216,7 @@ mod tests {
     fn only_button_path_interrupts_running_turn_with_steer() {
         // `>` button: running parent, pending steer, no children -> interrupt.
         assert_eq!(
-            steer_dispatch::resolve(false, true, false, true),
+            steer_dispatch::resolve(true, false, true),
             steer_dispatch::Action::SteerParent,
             "`>` button must resolve to SteerParent (interrupt) when running"
         );
@@ -258,7 +228,7 @@ mod tests {
         // button resolves to StartTurn, and the keyboard Enter path would
         // simply admit (a fresh turn is started by the Submit path instead).
         assert_eq!(
-            steer_dispatch::resolve(false, false, false, true),
+            steer_dispatch::resolve(false, false, true),
             steer_dispatch::Action::StartTurn,
             "idle `>` with a pending steer must start a turn, not interrupt"
         );
@@ -313,10 +283,8 @@ mod tests {
 
         // Contrast: the `>` button path interrupts the very same running turn.
         let action = fire_steer_interrupt(
-            None,
             true,
             &empty_cancels(),
-            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );

@@ -99,20 +99,13 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
 /// Dependency-gated skills — hidden until the user runs
 /// `install-skills-dep.sh` which creates a sentinel file in `skills_dir()`.
 /// Seeded independently of [`BUILTIN_SKILLS`] so a fresh install does not get
-/// these skills unless the optional deps (tmux, chromium) are installed.
+/// these skills unless the optional dep (tmux) is installed.
 const DEP_GATED_SKILLS: &[(&str, &[(&str, &str)])] = &[
     (
         "ssh-pty",
         &[(
             "SKILL.md",
             include_str!("../assets/skills/ssh-pty/SKILL.md"),
-        )],
-    ),
-    (
-        "chrome-headless",
-        &[(
-            "SKILL.md",
-            include_str!("../assets/skills/chrome-headless/SKILL.md"),
         )],
     ),
 ];
@@ -161,7 +154,7 @@ pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Seed the dependency-gated skills (ssh-pty, chrome-headless) into
+/// Seed the dependency-gated skills (ssh-pty) into
 /// `~/.opencoder/skills` if the [`DEPS_SENTINEL`] file exists.
 ///
 /// Independent of [`seed_builtin_skills`]: a fresh install gets only the

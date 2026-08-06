@@ -32,13 +32,10 @@ pub fn print_exit_tips() {
 
     if missing_deps {
         lines.push(String::from(
-            "  \x1b[33m-Optional skill deps not installed\x1b[0m — unlock 2 skills:",
+            "  \x1b[33m-Optional skill deps not installed\x1b[0m — unlock 1 skill:",
         ));
         lines.push(String::from(
             "    - ssh-pty: persistent SSH sessions via send/read",
-        ));
-        lines.push(String::from(
-            "    - chrome-headless: headless browser for JS-heavy pages + screenshots",
         ));
         lines.push(String::from(""));
         lines.push(String::from(

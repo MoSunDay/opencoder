@@ -23,8 +23,8 @@ enum TaskSignal {
 }
 
 /// Safety-net timeout for a single leaf-tool execution. Prevents a hung tool
-/// (e.g. an ssh_pty tmux call that never returns, a stalled web_fetch, or a
-/// browser/computer-use tool whose future never resolves) from freezing the
+/// (e.g. an ssh_pty tmux call that never returns, or a hung tool whose future
+/// never resolves) from freezing the
 /// run loop forever. Generous enough that legitimate long-running tools are
 /// unaffected. `bash` is exempt entirely: it passes `None` and relies on its
 /// own internal foreground timeout (`tools::bash::BASH_TIMEOUT_SECS`): when
@@ -431,6 +431,118 @@ mod tests {
         assert_eq!(out.content, "done");
     }
 
+
+    /// A tool that wraps synchronous blocking work in `spawn_blocking` and
+    /// sleeps ~200ms, simulating a real search/ls directory scan. Exercises
+    /// the turn_cancel interrupt path: with `spawn_blocking` the async worker
+    /// thread is free to poll the cancel token, so firing turn_cancel mid-scan
+    /// produces "turn interrupted" rather than blocking until completion.
+    struct BlockingTool;
+
+    #[async_trait]
+    impl Tool for BlockingTool {
+        fn name(&self) -> &str {
+            "block"
+        }
+        fn description(&self) -> &str {
+            "blocks for 200ms in spawn_blocking"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            json!({})
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &ToolContext,
+        ) -> anyhow::Result<ToolOutput> {
+            let out = tokio::task::spawn_blocking(move || -> ToolOutput {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                ToolOutput::ok("blocking done")
+            })
+            .await
+            .unwrap_or_else(|e| ToolOutput::err(format!("blocking task failed: {e}")));
+            Ok(out)
+        }
+    }
+
+    // turn_cancel must interrupt a spawn_blocking tool mid-execution. Before the
+    // search/ls fix, synchronous tools hijacked the worker thread and the
+    // cancel token was never polled. With spawn_blocking the blocking work runs
+    // on a dedicated thread, so the async select! can poll turn_cancel and win.
+    #[tokio::test]
+    async fn turn_cancel_interrupts_blocking_tool() {
+        let session = make_session();
+        let registry: HashMap<String, ToolArc> =
+            [("block".to_string(), Arc::new(BlockingTool) as ToolArc)]
+                .into_iter()
+                .collect();
+        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
+        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
+        let tc = CompletedToolCall {
+            id: "tc-block".into(),
+            name: "block".into(),
+            input: json!({}),
+        };
+
+        // Grab the turn_cancel token before executing.
+        let turn_cancel = session.turn_cancel.as_ref().unwrap().clone();
+
+        // Fire turn_cancel concurrently after a short delay (well within the
+        // 200ms blocking window).
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if let Ok(g) = turn_cancel.lock() {
+                g.cancel();
+            }
+        });
+
+        let out = execute_call_with_timeout(
+            &tc,
+            &session,
+            &registry,
+            &sink,
+            // Generous timeout so only turn_cancel can win.
+            Some(Duration::from_secs(10)),
+        )
+        .await;
+
+        assert!(out.is_error);
+        assert!(
+            out.content.contains("turn interrupted"),
+            "expected 'turn interrupted', got: {}",
+            out.content
+        );
+    }
+
+    // The blocking tool must still complete normally when no cancel fires —
+    // spawn_blocking does not break the happy path.
+    #[tokio::test]
+    async fn blocking_tool_completes_when_not_interrupted() {
+        let session = make_session();
+        let registry: HashMap<String, ToolArc> =
+            [("block".to_string(), Arc::new(BlockingTool) as ToolArc)]
+                .into_iter()
+                .collect();
+        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
+        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
+        let tc = CompletedToolCall {
+            id: "tc-block-ok".into(),
+            name: "block".into(),
+            input: json!({}),
+        };
+
+        let out = execute_call_with_timeout(
+            &tc,
+            &session,
+            &registry,
+            &sink,
+            Some(Duration::from_secs(10)),
+        )
+        .await;
+
+        assert!(!out.is_error);
+        assert_eq!(out.content, "blocking done");
+    }
     /// With `timeout: None` the safety net must never fire: a perpetually-pending
     /// tool stays pending (responds only to a cancel), rather than erroring with a
     /// "timed out" message. This is the bash exemption — bash has its own internal

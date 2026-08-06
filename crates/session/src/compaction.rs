@@ -45,7 +45,6 @@ fn estimated_tokens(session: &SessionState) -> u64 {
         &session.agent,
         &session.working_dir,
         session.skill_prompt_cloned().as_deref(),
-        &session.config.capabilities,
     );
     estimate_messages(&session.messages).saturating_add(estimate(&system.text())) as u64
 }

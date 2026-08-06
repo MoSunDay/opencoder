@@ -5,9 +5,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 mod autopilot;
+mod env;
 mod merge;
 
 pub use autopilot::AutoPilotConfig;
+pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -75,15 +77,11 @@ pub struct Config {
     /// into the semantic colour palette used across rendering modules.
     #[serde(default = "default_theme")]
     pub theme: String,
-    /// Outbound proxy for LLM + browser traffic. Accepts `socks5://`,
+    /// Outbound proxy for LLM traffic. Accepts `socks5://`,
     /// `socks5h://`, `http://`, `https://`. The effective value also honors
     /// `OPENCODER_PROXY` / `ALL_PROXY` env vars (see `net::effective_proxy`).
     #[serde(default)]
     pub network: NetworkConfig,
-    /// Capability toggles gating the optional browser + computer-use tools and
-    /// the `tools` umbrella subagent. All three default to off.
-    #[serde(default)]
-    pub capabilities: CapabilitiesConfig,
     /// Tool-failure guard: consecutive-failure threshold and exponential
     /// backoff. Defaults: 20 consecutive failures → abort; 200 ms → 2000 ms
     /// exponential backoff.
@@ -307,52 +305,13 @@ fn default_reserved() -> u64 {
     20_000
 }
 
-/// Networking options for outbound LLM + browser traffic.
+/// Networking options for outbound LLM traffic.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NetworkConfig {
     /// Proxy URL (`socks5://`, `socks5h://`, `http://`, `https://`). `None`
     /// means a direct connection (subject to env-var fallback at use time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
-}
-
-/// Capability switches. Each gates a family of optional tools so the model only
-/// sees (and the registry only activates) capabilities the user has opted into.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CapabilitiesConfig {
-    /// Enable `web_fetch` / `web_search` + the `tools` subagent's browser tools.
-    /// Requires the `browser` cargo feature at compile time.
-    #[serde(default)]
-    pub browser: bool,
-    /// Enable the `computer_use` tool + the `tools` subagent's computer-use tool.
-    #[serde(default)]
-    pub computer_use: bool,
-    /// Enable the `tools` umbrella subagent (browser/computer-use delegation).
-    /// When off, the system prompt drops the 'tools' advertisement, the task
-    /// schema omits the 'tools' subagent_type, and `run_subagent` rejects
-    /// `subagent_type: "tools"`.
-    #[serde(default)]
-    pub tools_subagent: bool,
-}
-
-impl CapabilitiesConfig {
-    /// Whether a given tool name is enabled by the capability switches.
-    /// Capability-gated tools (`web_fetch`/`web_search`, `computer_use`) return
-    /// `false` unless their switch is on; every other tool is always enabled.
-    pub fn tool_enabled(&self, name: &str) -> bool {
-        match name {
-            "web_fetch" | "web_search" => self.browser,
-            "computer_use" => self.computer_use,
-            _ => true,
-        }
-    }
-
-    /// Whether the `tools` umbrella subagent is enabled. When false, the system
-    /// prompt drops the 'tools' advertisement, the task schema omits the 'tools'
-    /// subagent_type, and `run_subagent` rejects `subagent_type: "tools"`.
-    pub fn tools_subagent_enabled(&self) -> bool {
-        self.tools_subagent
-    }
 }
 
 impl Default for Config {
@@ -376,7 +335,6 @@ impl Default for Config {
             fps: None,
             theme: default_theme(),
             network: NetworkConfig::default(),
-            capabilities: CapabilitiesConfig::default(),
             tool_guard: ToolGuardConfig::default(),
             stream_idle_timeout_secs: None,
             task_timeout_secs: None,
@@ -617,392 +575,5 @@ impl Config {
     }
 }
 
-/// `true` when `s` looks like an environment-variable name (uppercase +
-/// underscores/digits). Used by the `/model` menu to decide whether to wrap an
-/// api-key value as `"{NAME}"` (preserving env-var indirection via
-/// `resolve_env`) or store it verbatim.
-pub fn looks_like_env_var(s: &str) -> bool {
-    let t = s.trim();
-    !t.is_empty()
-        && t.chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-        && t.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-}
-
-/// Thread-local override that redirects config discovery + env overlays away
-/// from the process-global environment.
-///
-/// `std::env::set_var`/`remove_var` are thread-unsafe at the libc level: under
-/// parallel test execution a concurrent `getenv` can observe a transiently
-/// corrupt environ and crash the whole test binary (taking unrelated tests
-/// with it). This thread-local lets a test isolate config discovery to a
-/// tempdir on the *current thread only* — no process-env mutation, so no UB —
-/// while production code (which never sets it) keeps reading the real env.
-///
-/// When set, [`config_candidates`] resolves every global candidate inside the
-/// override dir, and [`env_get`] returns `None` for every name (so env overlays
-/// like `OPENCODER_MODEL` / `OPENAI_API_KEY` never leak in from the host).
-pub fn scoped_config_home(home: PathBuf) -> ScopedConfigHome {
-    let prev = ISOLATION.with(|c| c.borrow_mut().replace(home));
-    ScopedConfigHome { prev }
-}
-
-/// RAII guard restoring the prior isolation state on drop. Created by
-/// [`scoped_config_home`]; drop unwinds the override even if a test panics.
-pub struct ScopedConfigHome {
-    prev: Option<PathBuf>,
-}
-
-impl Drop for ScopedConfigHome {
-    fn drop(&mut self) {
-        ISOLATION.with(|c| *c.borrow_mut() = self.prev.take());
-    }
-}
-
-thread_local! {
-    static ISOLATION: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
-}
-
-/// The override dir when a test has installed [`scoped_config_home`].
-fn isolated_home() -> Option<PathBuf> {
-    ISOLATION.with(|c| c.borrow().clone())
-}
-
-/// Resolve the home dir for config discovery: the thread-local override when a
-/// test set it, otherwise the real `dirs::home_dir()`.
-fn config_home_dir() -> Option<PathBuf> {
-    isolated_home().or_else(dirs::home_dir)
-}
-
-/// Resolve the XDG config dir: the thread-local override when a test set it
-/// (mirrors the tests that pointed both `HOME` and `XDG_CONFIG_HOME` at one
-/// tempdir), otherwise the real `dirs::config_dir()`.
-fn config_xdg_dir() -> Option<PathBuf> {
-    isolated_home().or_else(dirs::config_dir)
-}
-
-/// Read an env var, *unless* a test isolation override is active on this
-/// thread — in which case return `None` so host env never contaminates the
-/// isolated config under test.
-fn env_get(name: &str) -> Option<String> {
-    if isolated_home().is_some() {
-        None
-    } else {
-        std::env::var(name).ok()
-    }
-}
-
-fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
-    let mut v = vec![
-        working_dir.join(".opencoder").join("config.json"),
-        working_dir.join("opencoder.json"),
-    ];
-    if let Some(home) = config_home_dir() {
-        // ~/.opencoder/ (this binary's own config home) — highest-priority global,
-        // so `opencoder` runs directly from any directory with no project config.
-        v.push(home.join(".opencoder").join("config.json"));
-        v.push(home.join(".opencoder").join("opencoder.json"));
-    }
-    if let Some(cfg) = config_xdg_dir() {
-        v.push(cfg.join("opencoder").join("config.json"));
-    }
-    v
-}
-
-fn apply_env(cfg: &mut Config) {
-    if let Some(b) = env_get("OPENAI_BASE_URL") {
-        if !b.is_empty() {
-            cfg.provider.base_url = b.trim_end_matches('/').to_string();
-        }
-    }
-    if let Some(m) = env_get("OPENCODER_MODEL") {
-        if !m.is_empty() {
-            cfg.model = m;
-        }
-    }
-    if let Some(m) = env_get("OPENCODER_SMALL_MODEL") {
-        if !m.is_empty() {
-            cfg.small_model = Some(m);
-        }
-    }
-    if let Some(v) = env_get("OPENCODER_CONTEXT_LIMIT") {
-        if let Ok(n) = v.parse::<u64>() {
-            cfg.context_limit = Some(n);
-        }
-    }
-    if let Some(raw) = env_get("OPENCODER_CACHE_SALT") {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "true" | "1" | "yes" => cfg.cache_salt = Some(true),
-            "false" | "0" | "no" => cfg.cache_salt = Some(false),
-            _ => {}
-        }
-    }
-    // Proxy overlay: explicit OPENCODER_PROXY wins, then ALL_PROXY. Only set
-    // when the user has not already configured `network.proxy` directly.
-    if cfg.network.proxy.is_none() {
-        for var in ["OPENCODER_PROXY", "ALL_PROXY"] {
-            if let Some(v) = env_get(var) {
-                let t = v.trim();
-                if !t.is_empty() {
-                    cfg.network.proxy = Some(t.to_string());
-                    break;
-                }
-            }
-        }
-    }
-}
-
-pub(super) fn resolve_env(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.starts_with('{') && trimmed.ends_with('}') {
-        let name = &trimmed[1..trimmed.len() - 1];
-        std::env::var(name).unwrap_or_default()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::{is_suspicious_model, Config};
-
-    #[test]
-    fn empty_model_is_not_suspicious() {
-        assert!(!is_suspicious_model(""));
-    }
-
-    #[test]
-    fn well_formed_scoped_model_is_not_suspicious() {
-        assert!(!is_suspicious_model("openai/gpt-4o"));
-        assert!(!is_suspicious_model("anthropic/claude-3.5-sonnet"));
-    }
-
-    #[test]
-    fn boundary_two_char_sides_are_not_suspicious() {
-        // provider.len() == 2 && mid.len() == 2 is the minimum valid scoped model
-        assert!(!is_suspicious_model("ab/cd"));
-    }
-
-    #[test]
-    fn unscoped_short_model_is_suspicious() {
-        assert!(is_suspicious_model("x")); // len < 3, no slash
-    }
-
-    #[test]
-    fn unscoped_three_char_model_is_not_suspicious() {
-        // len == 3 is the minimum valid unscoped model (boundary)
-        assert!(!is_suspicious_model("abc"));
-    }
-
-    #[test]
-    fn short_provider_side_is_suspicious() {
-        assert!(is_suspicious_model("a/bc")); // provider.len() < 2
-    }
-
-    #[test]
-    fn short_model_side_is_suspicious() {
-        assert!(is_suspicious_model("ab/c")); // mid.len() < 2
-    }
-
-    #[test]
-    fn stream_idle_timeout_defaults_to_600s() {
-        assert_eq!(
-            Config::default().stream_idle_timeout(),
-            std::time::Duration::from_secs(600)
-        );
-    }
-
-    #[test]
-    fn stream_idle_timeout_is_configurable() {
-        let c = Config {
-            stream_idle_timeout_secs: Some(60),
-            ..Default::default()
-        };
-        assert_eq!(c.stream_idle_timeout(), std::time::Duration::from_secs(60));
-    }
-
-    #[test]
-    fn task_timeout_defaults_to_1800s() {
-        assert_eq!(
-            Config::default().task_timeout(),
-            std::time::Duration::from_secs(1800)
-        );
-    }
-
-    #[test]
-    fn task_timeout_is_configurable() {
-        let c = Config {
-            task_timeout_secs: Some(300),
-            ..Default::default()
-        };
-        assert_eq!(c.task_timeout(), std::time::Duration::from_secs(300));
-    }
-    #[test]
-    fn replay_timeout_defaults_to_300s() {
-        assert_eq!(
-            Config::default().replay_timeout(),
-            std::time::Duration::from_secs(300)
-        );
-    }
-
-    #[test]
-    fn replay_timeout_is_configurable() {
-        let c = Config {
-            replay_timeout_secs: Some(60),
-            ..Default::default()
-        };
-        assert_eq!(c.replay_timeout(), std::time::Duration::from_secs(60));
-    }
-
-    #[test]
-    fn subagent_drain_defaults_to_15s() {
-        assert_eq!(
-            Config::default().subagent_drain(),
-            std::time::Duration::from_secs(15)
-        );
-    }
-
-    #[test]
-    fn subagent_drain_is_configurable() {
-        let c = Config {
-            subagent_drain_secs: Some(5),
-            ..Default::default()
-        };
-        assert_eq!(c.subagent_drain(), std::time::Duration::from_secs(5));
-    }
-
-    #[test]
-    fn theme_defaults_to_dark() {
-        assert_eq!(Config::default().theme, "dark");
-    }
-
-    #[test]
-    fn has_editable_key_recognizes_theme() {
-        let v = serde_json::json!({ "theme": "light" });
-        assert!(super::merge::has_editable_key(&v));
-    }
-
-    #[test]
-    fn has_editable_key_recognizes_enable_tmux_session() {
-        let v = serde_json::json!({ "enable_tmux_session": true });
-        assert!(super::merge::has_editable_key(&v));
-    }
-
-    #[test]
-    fn merge_into_applies_theme() {
-        let mut c = Config::default();
-        super::merge::merge_into(
-            &mut c,
-            serde_json::json!({ "theme": "light", "model": "openai/gpt-4o" }),
-        );
-        assert_eq!(c.theme, "light");
-    }
-
-    // --- Bug 3: AgentDefaults serde default must agree with Default impl ---
-    #[test]
-    fn agent_defaults_empty_object_deserializes_to_act() {
-        // Deserializing {} must match the Default impl ("act"), not "".
-        let ad: super::AgentDefaults = serde_json::from_str("{}").unwrap();
-        assert_eq!(ad.default, "act");
-        assert_eq!(ad.default, super::AgentDefaults::default().default);
-    }
-
-    // --- Bug 1: Config::save must not silently wipe a corrupt config file ---
-    // HOME is isolated to the temp dir so `save_target` resolves entirely
-    // within it — otherwise a real ~/.opencoder/config.json carrying editable
-    // keys would shadow the temp file. Both cases share one test so there is a
-    // single HOME override, and HOME is restored before any assertion can panic.
-    #[test]
-    fn save_handles_corrupt_and_empty_config_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("opencoder.json");
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", dir.path());
-
-        // Corrupt file: save must refuse and leave it untouched.
-        let corrupt = "{ this is :: not valid json";
-        std::fs::write(&target, corrupt).unwrap();
-        let corrupt_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
-        let corrupt_contents = std::fs::read_to_string(&target).unwrap();
-
-        // Empty/whitespace file: treated as an empty object, patch applied.
-        std::fs::write(&target, "   \n  ").unwrap();
-        let empty_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
-        let empty_written: Option<serde_json::Value> = empty_res
-            .ok()
-            .and_then(|p| serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok());
-
-        // Restore HOME before asserting so a failing assert can't leak the
-        // override into the rest of the process.
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-
-        assert!(
-            corrupt_res.is_err(),
-            "save should refuse a corrupt file, got {corrupt_res:?}"
-        );
-        assert_eq!(
-            corrupt_contents, corrupt,
-            "corrupt file must be left untouched"
-        );
-        let written = empty_written.expect("save of an empty/whitespace file should succeed");
-        assert_eq!(written["theme"], "light");
-    }
-
-    // --- Bug 2: non-object config files are tolerated (warned, not errored) ---
-    #[test]
-    fn load_tolerates_non_object_config_file() {
-        let dir = tempfile::tempdir().unwrap();
-        // A valid-JSON-but-not-object candidate must not break load.
-        std::fs::write(dir.path().join("opencoder.json"), "[1, 2, 3]").unwrap();
-        let cfg = Config::load(dir.path());
-        assert!(cfg.is_ok(), "load should not error on a non-object file");
-    }
-
-    // --- Bug 4: provider headers must be merged (appended), not replaced ---
-    #[test]
-    fn merge_into_appends_provider_headers() {
-        let mut c = Config::default();
-        c.providers.insert(
-            "foo".into(),
-            super::ProviderConfig {
-                headers: vec![super::HttpHeader {
-                    name: "X-Global".into(),
-                    value: "1".into(),
-                }],
-                ..Default::default()
-            },
-        );
-        super::merge::merge_into(
-            &mut c,
-            serde_json::json!({
-                "providers": {
-                    "foo": {
-                        "headers": [{ "name": "X-Project", "value": "2" }]
-                    }
-                }
-            }),
-        );
-        let headers = &c.providers["foo"].headers;
-        assert_eq!(headers.len(), 2, "project headers should append to global");
-        assert_eq!(headers[0].name, "X-Global");
-        assert_eq!(headers[1].name, "X-Project");
-    }
-
-    #[test]
-    fn enable_tmux_session_defaults_to_none() {
-        assert!(Config::default().enable_tmux_session.is_none());
-    }
-
-    #[test]
-    fn merge_into_applies_enable_tmux_session() {
-        let mut c = Config::default();
-        super::merge::merge_into(
-            &mut c,
-            serde_json::json!({ "enable_tmux_session": true }),
-        );
-        assert_eq!(c.enable_tmux_session, Some(true));
-    }
-}
+mod tests;

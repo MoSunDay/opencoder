@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
             .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             // If already inside tmux, run the TUI inline (never nest tmux).
             if opencoder_cli::ts::runs_inline(
                 *list,
@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
                 opencoder_cli::exit_tips::print_exit_tips();
                 return r;
             }
-            opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *new, *clean).await
+            opencoder_cli::ts::ts_dispatch(&cli, *list, resume.as_deref(), *clean).await
         }
         Some(Command::Config { sub }) => {
             opencoder_cli::session_cmd::config_dispatch(&cli, sub).await
@@ -159,7 +159,7 @@ async fn maybe_wrap_tui_in_tmux(cli: &Cli) -> Result<bool> {
     };
     let config = opencoder_core::Config::load(&workdir)?;
     if config.enable_tmux_session.unwrap_or(false) {
-        opencoder_cli::ts::ts_dispatch(cli, false, None, false, false).await?;
+        opencoder_cli::ts::ts_dispatch(cli, false, None, false).await?;
         Ok(true)
     } else {
         Ok(false)

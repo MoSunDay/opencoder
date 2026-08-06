@@ -15,33 +15,49 @@ use super::env::tmux_available;
 use super::naming::{fresh_id, id_from_name, resolve_target, session_name};
 use super::tmux::{attach, list_managed, session_exists, ManagedSession, tmux_bin};
 
-/// `opencode ts`/`rs` (bare). When not forced-new:
-/// - If `--session <id>` is set and live, attach it.
-/// - Else if any live session exists, attach the most recent one.
-/// - Else create a fresh session.
+/// `opencode ts`/`rs` (bare). A bare `ts`/`rs` **always creates a fresh
+/// session**; it never reuses an existing live one. This avoids the surprising
+/// case where running `ts` in repo B silently attached to a session created in
+/// repo A. To resume an existing session use `ts -r <id>`.
 ///
-/// `--new` (`force_new`) skips reuse and always creates.
-pub(crate) async fn ts_start(cli: &Cli, force_new: bool) -> Result<()> {
+/// The single reuse exception is `--session <id>`: if that exact session's tmux
+/// instance is already live, we attach it rather than spawning a duplicate.
+pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
     if !tmux_available() {
         bail!(
             "tmux is not installed. Install it (e.g. `apt install tmux`), or run \
              `opencode tui` for a non-persistent session."
         );
     }
-    if !force_new {
-        if let Some(id) = &cli.session {
-            let name = session_name(id);
-            if session_exists(&name)? {
-                return attach(&name);
-            }
-        } else if let Some(live) = list_managed()?.into_iter().next() {
-            return attach(&live.name);
+    // Attach only via the explicit `--session <id>` shortcut: if that exact
+    // session is already live in tmux, reattach instead of spawning a clone.
+    // A bare `ts` (no --session) always falls through to create a fresh one.
+    let attach_name = match &cli.session {
+        Some(id) => {
+            let exists = session_exists(&session_name(id))?;
+            explicit_attach_target(Some(id), exists)
         }
+        None => explicit_attach_target(None, false),
+    };
+    if let Some(name) = attach_name {
+        return attach(&name);
     }
     let workdir = current_workdir(cli)?;
     let id = cli.session.clone().unwrap_or_else(fresh_id);
     ensure_session(&workdir, &id).await?;
     spawn_session(&workdir, &id)
+}
+
+/// Pure decision: a bare `ts` always creates a new session. The only attach
+/// shortcut is an explicit `--session <id>` whose tmux session already exists.
+/// Returns the name to attach to, if any.
+///
+/// `exists` reflects whether the tmux session named `opencode-<id>` is live.
+pub(crate) fn explicit_attach_target(session_arg: Option<&str>, exists: bool) -> Option<String> {
+    match session_arg {
+        Some(id) if exists => Some(session_name(id)),
+        _ => None,
+    }
 }
 
 /// Spawn `tmux new-session` running `<exe> tui --session <id> --workdir <wd>`.
@@ -261,6 +277,28 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_attach_target_bare_ts_returns_none() {
+        // A bare `ts` (no --session) always creates a new session -- never attaches.
+        assert_eq!(explicit_attach_target(None, false), None);
+        assert_eq!(explicit_attach_target(None, true), None);
+    }
+
+    #[test]
+    fn explicit_attach_target_session_exists_attaches() {
+        // `--session <id>` whose tmux session is live -> attach to it.
+        assert_eq!(
+            explicit_attach_target(Some("01ABCD"), true),
+            Some(session_name("01ABCD"))
+        );
+    }
+
+    #[test]
+    fn explicit_attach_target_session_not_live_returns_none() {
+        // `--session <id>` but the tmux session is dead -> create fresh.
+        assert_eq!(explicit_attach_target(Some("01ABCD"), false), None);
+    }
 
     fn mk_managed(id: &str, attached: u8) -> ManagedSession {
         ManagedSession {

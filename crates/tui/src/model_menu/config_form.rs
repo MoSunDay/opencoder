@@ -7,7 +7,7 @@ use opencoder_core::Config;
 use super::patch::ConfigPatch;
 use super::state::{ModelMenu, ModelOutcome};
 
-/// Reasoning-effort selector state. `Off` serializes to `null` (omit field).
+/// Reasoning-effort selector state. `Off` serializes to "" (key preserved).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reasoning {
     Off,

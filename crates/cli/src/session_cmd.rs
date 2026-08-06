@@ -3,7 +3,7 @@
 //! `config show` / `models` are pure P1 (resolved-config display).
 //! `session list|show|delete` reads the libsql store — shared with P3 resume.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
@@ -213,28 +213,10 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
     std::env::current_dir().context("get current dir")
 }
 
-pub(crate) async fn open_store(workdir: &PathBuf) -> Result<LibsqlStore> {
-    let data_dir = data_dir_for(workdir);
+pub(crate) async fn open_store(workdir: &Path) -> Result<LibsqlStore> {
+    let data_dir = opencoder_core::data_dir_for(workdir);
     tokio::fs::create_dir_all(&data_dir).await.ok();
     LibsqlStore::open(data_dir.join("opencoder.db")).await
-}
-
-fn data_dir_for(workdir: &PathBuf) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-
-    // Canonicalize first so `/proj` and `/proj/` (and symlinks) collapse to one
-    // data dir. Fall back to the raw path when canonicalization fails (e.g. the
-    // dir does not exist yet) rather than erroring out. Hashing the canonical
-    // string representation (instead of the platform-dependent Path Hash impl)
-    // keeps the mapping stable across runs.
-    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.clone());
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    canonical.to_string_lossy().hash(&mut h);
-    let digest = h.finish();
-    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencoder");
-    base.push(format!("{digest:x}"));
-    base
 }
 
 #[cfg(test)]
@@ -478,36 +460,4 @@ mod tests {
         assert_eq!(cfg["model"], "openai/gpt-4o");
     }
 
-    #[test]
-    fn data_dir_for_canonicalizes_symlinks_and_trailing_slash() {
-        use super::data_dir_for;
-        use std::path::PathBuf;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let real = tmp.path().canonicalize().unwrap();
-
-        // A trailing slash on the input must NOT change the data dir.
-        let with_slash: PathBuf = format!("{}/", real.to_string_lossy()).into();
-        assert_eq!(
-            data_dir_for(&real),
-            data_dir_for(&with_slash),
-            "trailing slash must collapse to the same data dir"
-        );
-
-        // A symlink to the same dir must map to the same data dir (canonicalize
-        // resolves the link). Symlinks are a unix feature; skip elsewhere.
-        #[cfg(unix)]
-        {
-            let link_dir = tmp.path().join("link-target");
-            std::os::unix::fs::symlink(&real, &link_dir).unwrap();
-            assert_eq!(
-                data_dir_for(&real),
-                data_dir_for(&link_dir),
-                "symlink and target must map to the same data dir"
-            );
-        }
-
-        // Deterministic: same input twice -> same output.
-        assert_eq!(data_dir_for(&real), data_dir_for(&real));
-    }
 }

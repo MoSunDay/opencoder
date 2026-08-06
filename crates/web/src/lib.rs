@@ -90,36 +90,26 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
     app
 }
 
-pub fn data_dir_for(workdir: &std::path::Path) -> std::path::PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".opencoder"))
-        .join("opencoder")
-        .join(hash_of(workdir))
-}
-
-fn hash_of(p: &std::path::Path) -> String {
-    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut h = FNV_OFFSET;
-    for byte in p.as_os_str().as_encoded_bytes() {
-        h ^= u64::from(*byte);
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    format!("{h:016x}")
-}
+pub use opencoder_core::data_dir_for;
 
 #[cfg(test)]
 mod tests {
-    use super::hash_of;
+    use super::data_dir_for;
     use std::path::Path;
 
     #[test]
-    fn hash_of_is_stable_and_pinned() {
-        assert_eq!(hash_of(Path::new("/tmp/opencoder-pin")), "ecd58ecfd9089443");
+    fn data_dir_for_is_deterministic() {
+        assert_eq!(
+            data_dir_for(Path::new("/tmp/opencoder-pin")),
+            data_dir_for(Path::new("/tmp/opencoder-pin"))
+        );
     }
 
     #[test]
-    fn hash_of_distinguishes_paths() {
-        assert_ne!(hash_of(Path::new("/a/b")), hash_of(Path::new("/a/bb")));
+    fn data_dir_for_distinguishes_paths() {
+        assert_ne!(
+            data_dir_for(Path::new("/a/b")),
+            data_dir_for(Path::new("/a/bb"))
+        );
     }
 }

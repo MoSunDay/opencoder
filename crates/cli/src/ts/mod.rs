@@ -33,7 +33,6 @@ pub async fn ts_dispatch(
     cli: &Cli,
     list: bool,
     resume: Option<&str>,
-    force_new: bool,
     clean: bool,
 ) -> Result<()> {
     if list {
@@ -43,7 +42,7 @@ pub async fn ts_dispatch(
     } else if clean {
         actions::ts_cleanup(cli).await
     } else {
-        actions::ts_start(cli, force_new).await
+        actions::ts_start(cli).await
     }
 }
 

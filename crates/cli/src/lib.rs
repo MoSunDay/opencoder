@@ -73,8 +73,8 @@ pub enum Command {
     /// Run the TUI inside a tmux session that survives SSH disconnect.
     /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists all sessions
     /// (live + stopped), `rs -r <id>` reattaches or cold-starts a stopped one,
-    /// `rs -c` cleans up stopped sessions. A bare `ts`/`rs` reuses the latest
-    /// live session or creates a new one if none exist.
+    /// `rs -c` cleans up stopped sessions. A bare `ts`/`rs` **always creates a
+    /// fresh session**; resume an existing one with `ts -r <id>`.
     #[command(alias = "rs")]
     Ts {
         /// List all sessions (Store-first: shows live + stopped).
@@ -84,9 +84,6 @@ pub enum Command {
         /// from Store history). Accepts `opencode-<id>`, bare id, or `$index`.
         #[arg(short, long)]
         resume: Option<String>,
-        /// Force-create a new session instead of reusing the latest live one.
-        #[arg(long, default_value_t = false)]
-        new: bool,
         /// Clean up (delete) stopped sessions that are no longer running in tmux.
         #[arg(short, long, default_value_t = false)]
         clean: bool,

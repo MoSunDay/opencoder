@@ -225,10 +225,9 @@ fn prompt_file_flag_parsed() {
 fn ts_subcommand_parses_list_flag() {
     let cli = parse(&["opencode", "ts", "-l"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             assert!(list);
             assert!(resume.is_none());
-            assert!(!new);
             assert!(!clean);
         }
         _ => panic!("expected Ts"),
@@ -239,24 +238,9 @@ fn ts_subcommand_parses_list_flag() {
 fn ts_subcommand_parses_resume_target() {
     let cli = parse(&["opencode", "ts", "-r", "01HZ"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             assert!(!list);
             assert_eq!(resume.as_deref(), Some("01HZ"));
-            assert!(!new);
-            assert!(!clean);
-        }
-        _ => panic!("expected Ts"),
-    }
-}
-
-#[test]
-fn ts_subcommand_parses_new_flag() {
-    let cli = parse(&["opencode", "ts", "--new"]);
-    match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
-            assert!(!list);
-            assert!(resume.is_none());
-            assert!(new);
             assert!(!clean);
         }
         _ => panic!("expected Ts"),
@@ -268,14 +252,27 @@ fn ts_subcommand_defaults_to_no_flags() {
     // Bare `opencode ts` -> Ts with every flag at its default.
     let cli = parse(&["opencode", "ts"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
-            assert!(!new);
             assert!(!clean);
         }
         _ => panic!("expected Ts"),
     }
+}
+
+#[test]
+fn ts_subcommand_rejects_new_flag() {
+    // `--new` was removed: creating is now the default behavior, so clap must
+    // reject it as an unknown argument.
+    use clap::error::ErrorKind;
+    let res = opencoder_cli::Cli::try_parse_from(["opencode", "ts", "--new"]);
+    assert!(res.is_err(), "--new should be rejected");
+    let kind = res.unwrap_err().kind();
+    assert!(
+        matches!(kind, ErrorKind::UnknownArgument),
+        "--new must be an unknown argument, got {kind:?}"
+    );
 }
 
 #[test]
@@ -342,10 +339,9 @@ fn rs_alias_resume_target() {
 fn rs_alias_defaults() {
     let cli = parse(&["opencode", "rs"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
-            assert!(!new);
             assert!(!clean);
         }
         _ => panic!("expected Ts via rs alias"),
@@ -383,10 +379,9 @@ fn update_subcommand() {
 fn ts_subcommand_parses_clean_flag() {
     let cli = parse(&["opencode", "ts", "-c"]);
     match cli.command {
-        Some(Command::Ts { list, resume, new, clean }) => {
+        Some(Command::Ts { list, resume, clean }) => {
             assert!(!list);
             assert!(resume.is_none());
-            assert!(!new);
             assert!(clean);
         }
         _ => panic!("expected Ts"),

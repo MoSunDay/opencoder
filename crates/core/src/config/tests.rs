@@ -1,4 +1,4 @@
-    use super::{is_suspicious_model, Config};
+    use super::{is_suspicious_model, scoped_config_home, Config};
 
     #[test]
     fn empty_model_is_not_suspicious() {
@@ -150,8 +150,11 @@
     fn save_handles_corrupt_and_empty_config_files() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("opencoder.json");
-        let prev_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", dir.path());
+        // Thread-local isolation (no process-env mutation): keeps `save_target`'s
+        // global candidates inside the tempdir so a real ~/.opencoder/config.json
+        // can't shadow it — without racing concurrent `dirs::data_local_dir()`
+        // reads under parallel test execution (the setenv/getenv UB flake).
+        let _home = scoped_config_home(dir.path().to_path_buf());
 
         // Corrupt file: save must refuse and leave it untouched.
         let corrupt = "{ this is :: not valid json";
@@ -166,12 +169,8 @@
             .ok()
             .and_then(|p| serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok());
 
-        // Restore HOME before asserting so a failing assert can't leak the
-        // override into the rest of the process.
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
+        // `_home` restores the prior isolation state on drop (even on panic), so
+        // no override leaks into the rest of the process.
 
         assert!(
             corrupt_res.is_err(),

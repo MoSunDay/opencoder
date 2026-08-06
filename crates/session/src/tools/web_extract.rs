@@ -306,7 +306,7 @@ impl Tool for WebExtractTool {
     fn description(&self) -> &str {
         "Extract a structured article (title/author/date/body) from raw rendered HTML. \
          Site-aware profiles for zhihu, csdn, juejin, weixin, cnblogs, wikipedia, github, \
-         36kr, stackoverflow; generic fallback otherwise. Pair with \
+         36kr, stackoverflow, huggingface; generic fallback otherwise. Pair with \
          chrome_headless(action=\"html\")."
     }
     fn parameters(&self) -> Value {

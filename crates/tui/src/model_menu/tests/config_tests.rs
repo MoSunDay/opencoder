@@ -26,6 +26,7 @@ fn config_patch_serializes_all_fields() {
         capabilities_tools_subagent: false,
         ap_max_iter: 15,
         theme: "dark".into(),
+        enable_tmux_session: None,
     };
     let v = p.to_json();
     assert_eq!(v["reasoning_effort"], serde_json::json!("high"));
@@ -40,6 +41,7 @@ fn config_patch_serializes_all_fields() {
     assert_eq!(v["capabilities"]["browser"], serde_json::json!(true));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
     assert_eq!(v["theme"], serde_json::json!("dark"));
+    assert_eq!(v["enable_tmux_session"], serde_json::json!(null));
 }
 
 #[test]
@@ -56,6 +58,7 @@ fn config_patch_omits_max_tokens_when_none() {
         capabilities_tools_subagent: false,
         ap_max_iter: 10,
         theme: "dark".into(),
+        enable_tmux_session: None,
     };
     let v = p.to_json();
     assert!(
@@ -100,6 +103,7 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::ToolsSubagent,
         ConfigField::ApMaxIter,
         ConfigField::Theme,
+        ConfigField::EnableTmuxSession,
         ConfigField::Save,
     ];
     for expect in &order {
@@ -451,9 +455,9 @@ fn config_form_cursor_on_max_tokens() {
         })
         .unwrap();
 
-    // popup: x=4, y=6; max_tokens is row 2; "8192" has 4 chars
-    // cx = 4 + 1(border) + 15(label) + 4 = 24, cy = 6 + 1(border) + 2 = 9
-    terminal.backend_mut().assert_cursor_position((24, 9));
+    // popup: x=4, y=5; max_tokens is row 2; "8192" has 4 chars
+    // cx = 4 + 1(border) + 15(label) + 4 = 24, cy = 5 + 1(border) + 2 = 8
+    terminal.backend_mut().assert_cursor_position((24, 8));
 }
 
 #[test]
@@ -472,10 +476,10 @@ fn config_form_cursor_on_context_size() {
         })
         .unwrap();
 
-    // popup: x=4, y=6; ctx size is row 3; "128000" has 6 chars
-    // cx = 4 + 1 + 15 + 6 = 26, cy = 6 + 1 + 3 = 10
+    // popup: x=4, y=5; ctx size is row 3; "128000" has 6 chars
+    // cx = 4 + 1 + 15 + 6 = 26, cy = 5 + 1 + 3 = 9
     // cursor sits at end of raw "128000", before decorative " tokens" suffix
-    terminal.backend_mut().assert_cursor_position((26, 10));
+    terminal.backend_mut().assert_cursor_position((26, 9));
 }
 
 #[test]
@@ -648,4 +652,54 @@ fn ctrl_d_still_quits_in_config() {
     let out = handle_model_key(&mut slot, ctrl('d'));
     assert!(matches!(out, ModelOutcome::Quit), "Ctrl+D must quit modal");
     assert!(slot.is_none());
+}
+
+// ── enable_tmux_session toggle ────────────────────────────────────────────
+
+#[test]
+fn config_form_tmux_defaults_off_when_config_none() {
+    let form = ConfigForm::new(&cfg());
+    assert!(
+        !form.enable_tmux_session,
+        "enable_tmux_session must default to false when Config field is None"
+    );
+}
+
+#[test]
+fn config_form_tmux_reads_true_from_config() {
+    let mut c = cfg();
+    c.enable_tmux_session = Some(true);
+    let form = ConfigForm::new(&c);
+    assert!(form.enable_tmux_session);
+}
+
+#[test]
+fn config_form_tmux_toggles_on_left_right_and_space() {
+    for k in [left(), right(), key(' ')] {
+        let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
+        {
+            let f = match slot.as_mut().unwrap() {
+                ModelMenu::Config(f) => f,
+                _ => unreachable!(),
+            };
+            f.focus = ConfigField::EnableTmuxSession;
+        }
+        handle_model_key(&mut slot, k);
+        let f = match slot.as_ref().unwrap() {
+            ModelMenu::Config(f) => f,
+            _ => unreachable!(),
+        };
+        assert!(
+            f.enable_tmux_session,
+            "Left/Right/Space must flip the tmux toggle on"
+        );
+    }
+}
+
+#[test]
+fn config_form_tmux_patch_serializes_true_when_on() {
+    let mut form = ConfigForm::new(&cfg());
+    form.enable_tmux_session = true;
+    let v = form.build_patch().to_json();
+    assert_eq!(v["enable_tmux_session"], serde_json::json!(true));
 }

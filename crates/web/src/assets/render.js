@@ -116,6 +116,20 @@ function ensureThink() {
 function appendText(el, text) { el.textContent += text; scrollEnd(); }
 function scrollEnd() { const log = $('#log'); log.scrollTop = log.scrollHeight; }
 
+function echoUserPrompt(text) {
+  if (!text) return;
+  // A consumed prompt starts a fresh visual turn: null out the current
+  // assistant/tool/think blocks so the next text_delta creates a new
+  // assistant div AFTER this echo, not appended to the previous turn.
+  curAssistant = null; curTool = null; curThink = null;
+  const div = document.createElement('div'); div.className = 'm user';
+  const role = document.createElement('div'); role.className = 'r'; role.textContent = 'user';
+  div.appendChild(role);
+  const body = document.createElement('div'); body.className = 'b'; body.textContent = text;
+  div.appendChild(body);
+  $('#log').appendChild(div); scrollEnd();
+}
+
 function openStream() {
   if (es) es.close();
   if (!cur) return;
@@ -192,5 +206,7 @@ function bindSSE(stream) {
     if (es && es.readyState === EventSource.CLOSED) { es = null; }
     busy = false; updateSendBtn();
   });
+  stream.addEventListener('queue_consumed', e => { const d = JSON.parse(e.data); echoUserPrompt(d.text || ''); });
+  stream.addEventListener('steer_consumed', e => { const d = JSON.parse(e.data); echoUserPrompt(d.text || ''); });
   stream.addEventListener('done', () => { busy = false; updateSendBtn(); curAssistant = curTool = curThink = null; load(); });
 }

@@ -184,7 +184,7 @@ pub(crate) async fn run_loop(
             // can go idle without an LM call.
             let mut clear_sentinel = false;
             for (seq, p, imgs) in &steer_prompts {
-                on_event(SessionEvent::SteerConsumed { seq: *seq });
+                on_event(SessionEvent::SteerConsumed { seq: *seq, text: p.clone() });
                 // Defensive: a steered control command is applied immediately and
                 // NOT recorded as user text, so "/plan" never leaks to the LLM.
                 if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {

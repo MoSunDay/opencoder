@@ -1,7 +1,7 @@
 //! Multi-engine web search, gated behind the `browser` cargo feature. Loads
 //! the SERP page (Bing / Baidu / Sogou / DuckDuckGo) through obscura (so it
 //! survives anti-bot walls), then parses `{title, url, snippet}` rows via
-//! [`super::web_read::parse_search_results`], which dispatches by URL host.
+//! [`super::serp::parse_search_results`], which dispatches by URL host.
 //!
 //! Like [`super::web_fetch`], the obscura interaction runs on a dedicated
 //! blocking thread (`current_thread` runtime + `LocalSet`) because obscura
@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use super::research;
-use super::web_read::{self, SearchResult};
+use super::serp::{self, SearchResult};
 
 /// CSS selector that marks a loaded result container, per engine — used to
 /// wait for the SERP to render before reading the DOM.
@@ -120,7 +120,7 @@ impl Tool for WebSearchTool {
             Err(e) => return Ok(ToolOutput::err(format!("worker join failed: {e}"))),
         };
 
-        let results: Vec<SearchResult> = web_read::parse_search_results(&search_url, &html, limit);
+        let results: Vec<SearchResult> = serp::parse_search_results(&search_url, &html, limit);
         if results.is_empty() {
             return Ok(ToolOutput::err(format!(
                 "no results parsed (engine '{engine}' layout may have changed or is blocked)"
@@ -174,10 +174,10 @@ mod tests {
         );
         // unknown engine: bing URL (serp_url fallback) + ddg selector
         assert_eq!(
-            research::serp_url("google", "rust").as_str(),
+            research::serp_url("unknownengine", "rust").as_str(),
             "https://cn.bing.com/search?q=rust"
         );
-        assert_eq!(wait_selector("google"), ".result");
+        assert_eq!(wait_selector("unknownengine"), ".result");
     }
 
     #[test]

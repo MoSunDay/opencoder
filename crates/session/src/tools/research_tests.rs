@@ -19,9 +19,28 @@ fn serp_url_builds_per_engine_urls() {
         serp_url("ddg", q).as_str(),
         "https://html.duckduckgo.com/html/?q=Rust+%E6%80%A7%E8%83%BD"
     );
-    // unknown engine falls back to bing
+    // google
     assert_eq!(
         serp_url("google", q).as_str(),
+        "https://www.google.com/search?q=Rust+%E6%80%A7%E8%83%BD&hl=en&num=10&nfpr=1"
+    );
+    // github
+    assert_eq!(
+        serp_url("github", q).as_str(),
+        "https://github.com/search?q=Rust+%E6%80%A7%E8%83%BD&type=repositories"
+    );
+    // hf / huggingface
+    assert_eq!(
+        serp_url("hf", q).as_str(),
+        "https://huggingface.co/models?search=Rust+%E6%80%A7%E8%83%BD"
+    );
+    assert_eq!(
+        serp_url("huggingface", q).as_str(),
+        "https://huggingface.co/models?search=Rust+%E6%80%A7%E8%83%BD"
+    );
+    // unknown engine falls back to bing
+    assert_eq!(
+        serp_url("unknownengine", q).as_str(),
         "https://cn.bing.com/search?q=Rust+%E6%80%A7%E8%83%BD"
     );
 }
@@ -122,15 +141,15 @@ fn build_report_truncates_excerpt() {
 #[ignore = "requires real Chrome and network; run manually"]
 async fn research_smoke_bing_wikipedia() {
     let serp = serp_url("bing", "Rust programming language");
-    let html = chrome_headless::dump_dom(serp.as_str(), Some(4000), None)
+    let html = chrome_headless::dump_dom(serp.as_str(), Some(4000), None, None)
         .await
         .unwrap();
-    let results = web_read::parse_search_results(&serp, &html, 8);
+    let results = serp::parse_search_results(&serp, &html, 8);
     let wiki = results
         .iter()
         .find(|r| r.url.contains("wikipedia.org"))
         .expect("expected a wikipedia result in the bing SERP");
-    let page = chrome_headless::dump_dom(&wiki.url, Some(4000), None)
+    let page = chrome_headless::dump_dom(&wiki.url, Some(4000), None, None)
         .await
         .unwrap();
     let final_url = chrome_headless::extract_final_url(&page, &wiki.url);

@@ -8,15 +8,16 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use opencoder_core::{json, tool::truncate_output, Tool, ToolContext, ToolOutput};
+use opencoder_core::{effective_proxy, json, tool::truncate_output, Tool, ToolContext, ToolOutput};
 use serde_json::Value;
 use url::Url;
 
-use super::web_read::SearchResult;
-use super::{chrome_headless, web_extract, web_read};
+use super::serp::SearchResult;
+use super::{chrome_headless, serp, web_extract};
 
-/// Build the SERP URL for `engine` (bing / baidu / sogou / ddg). Unknown
-/// engines fall back to Bing. The query is form-encoded for its key.
+/// Build the SERP URL for `engine`. Supported engines: bing (default), baidu,
+/// sogou, ddg, google, github (repo search), hf / huggingface (model search).
+/// Unknown engines fall back to Bing. The query is form-encoded for its key.
 pub fn serp_url(engine: &str, query: &str) -> Url {
     let enc = |key: &str| {
         url::form_urlencoded::Serializer::new(String::new())
@@ -27,6 +28,9 @@ pub fn serp_url(engine: &str, query: &str) -> Url {
         "baidu" => format!("https://www.baidu.com/s?{}", enc("wd")),
         "sogou" => format!("https://www.sogou.com/web?{}", enc("query")),
         "ddg" => format!("https://html.duckduckgo.com/html/?{}", enc("q")),
+        "google" => format!("https://www.google.com/search?{}&hl=en&num=10&nfpr=1", enc("q")),
+        "github" => format!("https://github.com/search?{}&type=repositories", enc("q")),
+        "hf" | "huggingface" => format!("https://huggingface.co/models?{}", enc("search")),
         _ => format!("https://cn.bing.com/search?{}", enc("q")),
     };
     Url::parse(&raw).expect("engine SERP URLs are static and always parseable")
@@ -168,7 +172,7 @@ impl Tool for ResearchTool {
             "engines".into(),
             serde_json::json!({
                 "type": "array",
-                "items": {"type": "string", "enum": ["bing", "baidu", "sogou", "ddg"]},
+                "items": {"type": "string", "enum": ["bing", "baidu", "sogou", "ddg", "google", "github", "hf"]},
                 "description": "Engines to query (default [\"bing\", \"baidu\"])."
             }),
         );
@@ -211,15 +215,16 @@ impl Tool for ResearchTool {
         if engines.is_empty() {
             return Ok(ToolOutput::err("engines must not be empty"));
         }
+        let proxy = effective_proxy(ctx.proxy.as_deref());
 
         // 1. Render each engine SERP; engines that fail or parse empty are
         //    skipped so one anti-bot wall never kills the whole pipeline.
         let mut per_engine = Vec::new();
         for engine in &engines {
             let serp = serp_url(engine, &query);
-            match chrome_headless::dump_dom(serp.as_str(), Some(3000), None).await {
+            match chrome_headless::dump_dom(serp.as_str(), Some(3000), None, proxy.as_deref()).await {
                 Ok(html) => {
-                    let results = web_read::parse_search_results(&serp, &html, 10);
+                    let results = serp::parse_search_results(&serp, &html, 10);
                     if results.is_empty() {
                         tracing::warn!(
                             "research: engine {engine} returned no parseable results, skipping"
@@ -242,7 +247,7 @@ impl Tool for ResearchTool {
         let mut sources = Vec::new();
         let mut failures = 0usize;
         for r in &merged {
-            match chrome_headless::dump_dom(&r.url, Some(3000), None).await {
+            match chrome_headless::dump_dom(&r.url, Some(3000), None, proxy.as_deref()).await {
                 Ok(html) => {
                     let final_url = chrome_headless::extract_final_url(&html, &r.url);
                     let u = Url::parse(&final_url).unwrap_or_else(|_| Url::parse(&r.url).unwrap());

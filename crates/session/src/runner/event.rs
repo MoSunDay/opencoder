@@ -73,12 +73,21 @@ pub enum SessionEvent {
     /// mirror instead of leaving a stale `[queued]` row until `Done`.
     QueueConsumed {
         seq: i64,
+        /// The consumed prompt text so display surfaces can echo it at the
+        /// exact activation instant — without this, stateless clients (web /
+        /// CLI) cannot show the text until the turn finishes and `/messages`
+        /// is re-fetched. Defaults to empty for old persisted events.
+        #[serde(default)]
+        text: String,
     },
     /// A steered input was consumed (promoted) at a turn boundary. Carries
     /// the consumed input's row seq so the TUI can drop it from its pending
     /// mirror instead of leaving a stale `steer` row until `Done`.
     SteerConsumed {
         seq: i64,
+        /// The promoted steer prompt text, same rationale as `QueueConsumed`.
+        #[serde(default)]
+        text: String,
     },
     /// Autopilot loop progress: which phase is starting and the
     /// 0-based iteration index. Emitted by `autopilot::drive`.
@@ -169,8 +178,8 @@ impl SessionEvent {
             }
             SessionEvent::PlanHandoff(plan) => serde_json::json!({ "plan": plan }),
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
-            SessionEvent::QueueConsumed { seq } => serde_json::json!({ "seq": seq }),
-            SessionEvent::SteerConsumed { seq } => serde_json::json!({ "seq": seq }),
+            SessionEvent::QueueConsumed { seq, text } => serde_json::json!({ "seq": seq, "text": text }),
+            SessionEvent::SteerConsumed { seq, text } => serde_json::json!({ "seq": seq, "text": text }),
         }
     }
 
@@ -239,9 +248,11 @@ impl SessionEvent {
             }
             "queue_consumed" => SessionEvent::QueueConsumed {
                 seq: data.get("seq")?.as_i64()?,
+                text: data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             },
             "steer_consumed" => SessionEvent::SteerConsumed {
                 seq: data.get("seq")?.as_i64()?,
+                text: data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             },
             "autopilot" => {
                 let iteration = data.get("iteration")?.as_u64()? as u32;
@@ -345,8 +356,8 @@ mod from_sse_tests {
             },
             SessionEvent::PlanHandoff("# plan".into()),
             SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
-            SessionEvent::QueueConsumed { seq: 7 },
-            SessionEvent::SteerConsumed { seq: 9 },
+            SessionEvent::QueueConsumed { seq: 7, text: "q".into() },
+            SessionEvent::SteerConsumed { seq: 9, text: "s".into() },
             SessionEvent::AutoPilot {
                 phase: ApPhase::Plan,
                 iteration: 0,
@@ -390,6 +401,76 @@ mod from_sse_tests {
     fn from_sse_missing_field_is_none() {
         // tool_start without the required `name` field
         assert!(SessionEvent::from_sse("tool_start", serde_json::json!({"id":"x"})).is_none());
+    }
+
+    #[test]
+    fn queue_consumed_carries_text_through_sse() {
+        let ev = SessionEvent::QueueConsumed {
+            seq: 5,
+            text: "hello queued".into(),
+        };
+        let kind = ev.sse_kind();
+        assert_eq!(kind, "queue_consumed");
+        let data = ev.sse_data();
+        assert_eq!(data["text"], "hello queued");
+        assert_eq!(data["seq"], 5);
+        let back = SessionEvent::from_sse(kind, data).expect("roundtrip");
+        match back {
+            SessionEvent::QueueConsumed { seq, text } => {
+                assert_eq!(seq, 5);
+                assert_eq!(text, "hello queued");
+            }
+            other => panic!("expected QueueConsumed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn steer_consumed_carries_text_through_sse() {
+        let ev = SessionEvent::SteerConsumed {
+            seq: 9,
+            text: "steered away".into(),
+        };
+        let kind = ev.sse_kind();
+        assert_eq!(kind, "steer_consumed");
+        let data = ev.sse_data();
+        assert_eq!(data["text"], "steered away");
+        assert_eq!(data["seq"], 9);
+        let back = SessionEvent::from_sse(kind, data).expect("roundtrip");
+        match back {
+            SessionEvent::SteerConsumed { seq, text } => {
+                assert_eq!(seq, 9);
+                assert_eq!(text, "steered away");
+            }
+            other => panic!("expected SteerConsumed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn queue_consumed_without_text_field_is_backward_compatible() {
+        // Old persisted events predate the `text` field. A queue_consumed SSE
+        // payload without the key must still deserialize (defaults to empty).
+        let data = serde_json::json!({ "seq": 11 });
+        let ev = SessionEvent::from_sse("queue_consumed", data).expect("old event");
+        match ev {
+            SessionEvent::QueueConsumed { seq, text } => {
+                assert_eq!(seq, 11);
+                assert!(text.is_empty(), "missing text must default to empty");
+            }
+            other => panic!("expected QueueConsumed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn steer_consumed_without_text_field_is_backward_compatible() {
+        let data = serde_json::json!({ "seq": 13 });
+        let ev = SessionEvent::from_sse("steer_consumed", data).expect("old event");
+        match ev {
+            SessionEvent::SteerConsumed { seq, text } => {
+                assert_eq!(seq, 13);
+                assert!(text.is_empty());
+            }
+            other => panic!("expected SteerConsumed, got {other:?}"),
+        }
     }
 
     #[test]

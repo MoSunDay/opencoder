@@ -181,7 +181,7 @@ pub(super) async fn drain_one_queued(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<DrainOutcome> {
     if let Some((seq, q, imgs)) = claim_one_queued(session).await {
-        on_event(SessionEvent::QueueConsumed { seq });
+        on_event(SessionEvent::QueueConsumed { seq, text: q.clone() });
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&q) {
             crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
             // ClearContext with a preserved result breaks to execute it;

@@ -14,7 +14,8 @@ pub mod tool_guard;
 pub mod tools;
 
 pub use control_cmd::{
-    apply as apply_control_cmd, is_clear_context_handoff, parse as parse_control_cmd, ControlCmd,
+    apply as apply_control_cmd, is_clear_context_handoff, parse as parse_control_cmd,
+    split_control_prefix, ControlCmd,
 };
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};

@@ -66,8 +66,16 @@ pub(crate) fn print_event(ev: &SessionEvent) {
             eprintln!("\n\x1b[33m\u{2500}\u{2500} plan \u{2500}\u{2500}\x1b[0m\n{plan}\n");
         }
         SessionEvent::TranscriptReset(_) => {}
-        SessionEvent::QueueConsumed { .. } => {}
-        SessionEvent::SteerConsumed { .. } => {}
+        SessionEvent::QueueConsumed { text, .. } => {
+            if !text.is_empty() {
+                println!("user: {text}");
+            }
+        }
+        SessionEvent::SteerConsumed { text, .. } => {
+            if !text.is_empty() {
+                println!("user: {text}");
+            }
+        }
         SessionEvent::SubagentChild { .. } => {}
         SessionEvent::AutoPilot { phase, iteration } => {
             eprintln!("\n\x1b[35m\u{25c9} autopilot: {phase:?} (iteration {iteration})\x1b[0m");

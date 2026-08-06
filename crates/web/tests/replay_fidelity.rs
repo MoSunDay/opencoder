@@ -54,8 +54,8 @@ fn all_variants() -> Vec<SessionEvent> {
         },
         SessionEvent::TranscriptReset(vec![]),
         SessionEvent::PlanHandoff("plan text".into()),
-        SessionEvent::QueueConsumed { seq: 42 },
-        SessionEvent::SteerConsumed { seq: 7 },
+        SessionEvent::QueueConsumed { seq: 42, text: "queued".into() },
+        SessionEvent::SteerConsumed { seq: 7, text: "steered".into() },
         SessionEvent::Done,
         SessionEvent::Error("oops".into()),
     ]

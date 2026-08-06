@@ -382,7 +382,7 @@ async fn steer_consumed_carries_pk_seq_not_admitted_seq() {
         .unwrap()
         .iter()
         .filter_map(|ev| match ev {
-            SessionEvent::SteerConsumed { seq } => Some(*seq),
+            SessionEvent::SteerConsumed { seq, .. } => Some(*seq),
             _ => None,
         })
         .collect();
@@ -434,7 +434,7 @@ async fn multiple_steers_consumed_each_carries_distinct_pk_seq() {
         .unwrap()
         .iter()
         .filter_map(|ev| match ev {
-            SessionEvent::SteerConsumed { seq } => Some(*seq),
+            SessionEvent::SteerConsumed { seq, .. } => Some(*seq),
             _ => None,
         })
         .collect();

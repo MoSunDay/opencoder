@@ -16,6 +16,7 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("context_limit")
         || obj.contains_key("fps")
         || obj.contains_key("theme")
+        || obj.contains_key("enable_tmux_session")
     {
         return true;
     }

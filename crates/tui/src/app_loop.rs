@@ -276,10 +276,26 @@ pub(crate) async fn fold_ui_events(
                         *skip_next_render = true;
                     }
                 }
-                if let SessionEvent::QueueConsumed { seq } = &sev {
+                if let SessionEvent::QueueConsumed { seq, text } = &sev {
                     // Echo at consume time (prompt was visible in pending panel).
-                    if let Some((_, d)) = queue_items.iter().find(|(s, _)| s == seq).cloned() {
-                        chat.push_marker(Line::from(Span::styled(format!("queued: {d}"), Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD))));
+                    // Prefer the text carried by the event (robust against a
+                    // saturated UI channel dropping the mirror update); fall
+                    // back to the local mirror for old events without text.
+                    let display = if !text.is_empty() {
+                        text.clone()
+                    } else {
+                        queue_items
+                            .iter()
+                            .find(|(s, _)| s == seq)
+                            .map(|(_, d)| d.clone())
+                            .unwrap_or_default()
+                    };
+                    if !display.is_empty() {
+                        chat.push_marker(Line::from(Span::styled(
+                            format!("user: {display}"),
+                            Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD),
+                        )));
+                        chat.push_marker(Line::from(""));
                     }
                     queue_items.retain(|(s, _)| s != seq);
                 }

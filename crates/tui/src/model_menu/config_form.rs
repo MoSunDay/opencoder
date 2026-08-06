@@ -84,12 +84,13 @@ pub enum ConfigField {
     ToolsSubagent,
     ApMaxIter,
     Theme,
+    EnableTmuxSession,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 13] = [
+    const ORDER: [ConfigField; 14] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -101,6 +102,7 @@ impl ConfigField {
         ConfigField::ToolsSubagent,
         ConfigField::ApMaxIter,
         ConfigField::Theme,
+        ConfigField::EnableTmuxSession,
         ConfigField::Save,
         ConfigField::Cancel,
     ];
@@ -141,6 +143,7 @@ pub struct ConfigForm {
     /// Char-index edit cursor within `ap_max_iter_input`.
     pub ap_max_iter_cursor: usize,
     pub theme: crate::theme::ThemeKind,
+    pub enable_tmux_session: bool,
     pub focus: ConfigField,
     pub error: Option<String>,
 }
@@ -171,6 +174,7 @@ impl ConfigForm {
             ap_max_iter_input: ap_max_iter_input.clone(),
             ap_max_iter_cursor: ap_max_iter_input.chars().count(),
             theme: crate::theme::ThemeKind::from_label(&config.theme),
+            enable_tmux_session: config.enable_tmux_session.unwrap_or(false),
             focus: ConfigField::Reasoning,
             error: None,
         }
@@ -231,6 +235,7 @@ impl ConfigForm {
             capabilities_tools_subagent: self.capabilities_tools_subagent,
             ap_max_iter,
             theme: self.theme.label().to_string(),
+            enable_tmux_session: Some(self.enable_tmux_session),
         }
     }
 
@@ -315,6 +320,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::Theme => form.theme = form.theme.next(),
+            ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
@@ -335,6 +341,7 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::Theme => form.theme = form.theme.next(),
+            ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold
@@ -378,6 +385,9 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
                 form.capabilities_tools_subagent = !form.capabilities_tools_subagent
             }
             ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
+            ConfigField::EnableTmuxSession if c == ' ' => {
+                form.enable_tmux_session = !form.enable_tmux_session
+            }
             ConfigField::MaxTokens
             | ConfigField::ContextSize
             | ConfigField::Threshold

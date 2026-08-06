@@ -25,7 +25,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/model", "切换供应商 / 模型 (provider picker)"),
     (
         "/config",
-        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率",
+        "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",
     ),
     (
         "/compact",

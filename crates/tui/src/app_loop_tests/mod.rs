@@ -521,7 +521,7 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
 
     let before = crate::chat::block_text(&chat);
     let _flow = fold_ui_events(
-        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 30 })),
+        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 30, text: "queued prompt X".into() })),
         &mut chat,
         &store,
         "test-session",
@@ -537,9 +537,9 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
     )
     .await;
 
-    // A `queued:` marker is pushed into the transcript at consume time.
+    // A `user:` marker is pushed into the transcript at consume time.
     assert!(
-        crate::chat::block_text(&chat).contains("queued: queued prompt X"),
+        crate::chat::block_text(&chat).contains("user: queued prompt X"),
         "QueueConsumed must echo the marker at consume time"
     );
     assert_ne!(
@@ -574,7 +574,7 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
 
     let before = crate::chat::block_text(&chat);
     let _flow = fold_ui_events(
-        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 999 })),
+        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 999, text: String::new() })),
         &mut chat,
         &store,
         "test-session",

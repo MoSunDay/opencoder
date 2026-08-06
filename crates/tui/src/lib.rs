@@ -1,5 +1,6 @@
 pub mod app;
 pub mod app_helpers;
+pub mod control_helpers;
 pub mod cache_salt_menu;
 pub mod chat;
 pub mod chat_plan;

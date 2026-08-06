@@ -13,6 +13,7 @@ pub struct ConfigPatch {
     pub capabilities_tools_subagent: bool,
     pub ap_max_iter: u32,
     pub theme: String,
+    pub enable_tmux_session: Option<bool>,
 }
 
 impl ConfigPatch {
@@ -32,6 +33,7 @@ impl ConfigPatch {
             "autopilot": {
                 "max_iterations": self.ap_max_iter,
             },
+            "enable_tmux_session": self.enable_tmux_session,
         });
         if let Some(mt) = self.max_tokens {
             root["max_tokens"] = serde_json::json!(mt);

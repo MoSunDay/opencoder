@@ -17,6 +17,7 @@ use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutc
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::input::spawn_input_pump;
+use crate::terminal::consume_modifier_or_release;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
@@ -133,7 +134,7 @@ pub(super) async fn run_app(
     // current selection originated from a double-click (forces copy even for a
     // single-line / lo==hi selection).
     let mut last_click: Option<Instant> = None;
-    let mut dbl_click: bool = false;
+    let (mut dbl_click, mut shift_held) = (false, false);
     // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
@@ -277,6 +278,7 @@ pub(super) async fn run_app(
                 dirty = true;
                 match ev {
                     Event::Key(k) => {
+                        if consume_modifier_or_release(&k, &mut shift_held) { continue; }
                         copy_status = None;
                         // Plan edit modal: intercept all keys while active.
                         if plan_edit.is_some() {

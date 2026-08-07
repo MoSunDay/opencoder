@@ -19,7 +19,8 @@ use anyhow::Result;
 
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyCode,
+    KeyEvent, KeyEventKind, ModifierKeyCode,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -41,7 +42,9 @@ impl TerminalGuard {
             use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
             // Best-effort: terminals without the Kitty protocol ignore this.
             let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
+                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
             let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
         }
         if let Err(e) = execute!(
@@ -157,13 +160,67 @@ pub(crate) fn resume_screen() -> Result<()> {
     {
         use crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-            | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS;
+            | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
         let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
     }
     execute!(stdout, EnterAlternateScreen, SetCursorStyle::SteadyBar,
              EnableMouseCapture, EnableBracketedPaste)?;
     enable_raw_mode()?;
     Ok(())
+}
+
+/// Suspend mouse capture so the terminal performs native text selection
+/// (hold Shift). Best-effort — callers ignore errors.
+pub(crate) fn suspend_mouse_capture() -> Result<()> {
+    execute!(std::io::stdout(), DisableMouseCapture)?;
+    Ok(())
+}
+
+/// Re-enable mouse capture for click interactions (release Shift).
+pub(crate) fn resume_mouse_capture() -> Result<()> {
+    execute!(std::io::stdout(), EnableMouseCapture)?;
+    Ok(())
+}
+
+/// Handle a key event for mouse-capture toggling and modifier/release filtering.
+///
+/// Returns `true` if the event was consumed (Shift toggle, other bare modifier,
+/// or key-release) and should NOT be processed further by the app's key handler.
+/// Returns `false` for normal key presses that the app should handle.
+///
+/// When the user holds Shift, mouse capture is suspended so the terminal
+/// performs native text selection; releasing Shift restores it.
+pub(crate) fn consume_modifier_or_release(k: &KeyEvent, shift_held: &mut bool) -> bool {
+    let is_shift = matches!(
+        k.code,
+        KeyCode::Modifier(ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift)
+    );
+    if is_shift {
+        match k.kind {
+            KeyEventKind::Press | KeyEventKind::Repeat => {
+                if !*shift_held {
+                    *shift_held = true;
+                    let _ = suspend_mouse_capture();
+                }
+            }
+            KeyEventKind::Release => {
+                if *shift_held {
+                    *shift_held = false;
+                    let _ = resume_mouse_capture();
+                }
+            }
+        }
+        return true;
+    }
+    // Ignore bare modifier presses (Ctrl, Alt, Super, …).
+    if matches!(k.code, KeyCode::Modifier(_)) {
+        return true;
+    }
+    // With REPORT_EVENT_TYPES active, ignore key-release events for all
+    // other keys (prevents double-trigger).
+    k.kind == KeyEventKind::Release
 }
 
 /// Write the ANSI restoration sequences (pop Kitty enhancement, disable mouse
@@ -186,6 +243,7 @@ use std::io::Write;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyModifiers;
 
     /// `restore` must be idempotent and panic-free even when the terminal was
     /// never put into raw/alt-screen mode (e.g. running under CI without a
@@ -194,6 +252,125 @@ mod tests {
     fn restore_is_idempotent_without_a_tty() {
         TerminalGuard::restore();
         TerminalGuard::restore();
+    }
+
+    /// Mouse capture toggle helpers must be safe without a TTY (best-effort).
+    #[test]
+    fn mouse_capture_toggle_is_safe_without_tty() {
+        let _ = suspend_mouse_capture();
+        let _ = resume_mouse_capture();
+    }
+
+    /// Build a bare shift-key event of the given kind (Left/Right, Press/Repeat/Release).
+    fn shift_event(side: ModifierKeyCode, kind: KeyEventKind) -> KeyEvent {
+        KeyEvent::new_with_kind(KeyCode::Modifier(side), KeyModifiers::SHIFT, kind)
+    }
+
+    /// Shift Left press sets `shift_held = true`; a repeat is idempotent; a
+    /// release restores `shift_held = false`. Each event is consumed (true).
+    #[test]
+    fn consume_modifier_toggle_on_shift_left_press_repeat_release() {
+        let mut held = false;
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Press),
+            &mut held,
+        ));
+        assert!(held, "Shift Left press must set shift_held = true");
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Repeat),
+            &mut held,
+        ));
+        assert!(held, "Shift Left repeat must keep shift_held = true");
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Release),
+            &mut held,
+        ));
+        assert!(!held, "Shift Left release must set shift_held = false");
+    }
+
+    /// Shift Right mirrors Shift Left for both press and release transitions.
+    #[test]
+    fn consume_modifier_toggle_on_shift_right_press_release() {
+        let mut held = false;
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::RightShift, KeyEventKind::Press),
+            &mut held,
+        ));
+        assert!(held);
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::RightShift, KeyEventKind::Release),
+            &mut held,
+        ));
+        assert!(!held);
+    }
+
+    /// Non-shift bare modifiers (Ctrl, Alt) are consumed but must NOT alter
+    /// `shift_held`, whether it was false or already true.
+    #[test]
+    fn consume_modifier_consumes_non_shift_modifiers_without_state_change() {
+        let mut held = false;
+
+        assert!(consume_modifier_or_release(
+            &KeyEvent::new_with_kind(
+                KeyCode::Modifier(ModifierKeyCode::LeftControl),
+                KeyModifiers::CONTROL,
+                KeyEventKind::Press,
+            ),
+            &mut held,
+        ));
+        assert!(!held, "Ctrl press must not set shift_held");
+
+        held = true;
+        assert!(consume_modifier_or_release(
+            &KeyEvent::new_with_kind(
+                KeyCode::Modifier(ModifierKeyCode::LeftAlt),
+                KeyModifiers::ALT,
+                KeyEventKind::Press,
+            ),
+            &mut held,
+        ));
+        assert!(held, "non-shift modifier must not alter a held shift");
+    }
+
+    /// A normal key press (e.g. 'a') passes through (returns false) and never
+    /// touches `shift_held`, even when shift is already held.
+    #[test]
+    fn consume_modifier_passes_through_normal_key_press() {
+        let mut held = false;
+        assert!(!consume_modifier_or_release(
+            &KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            &mut held,
+        ));
+        assert!(!held);
+
+        held = true;
+        assert!(!consume_modifier_or_release(
+            &KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            &mut held,
+        ));
+        assert!(held, "normal key must not clear a held shift");
+    }
+
+    /// Under REPORT_EVENT_TYPES the Release of a non-shift key is filtered out
+    /// (returns true) so the app does not double-trigger, without touching
+    /// `shift_held`.
+    #[test]
+    fn consume_modifier_filters_non_shift_key_release() {
+        let mut held = false;
+        assert!(consume_modifier_or_release(
+            &KeyEvent::new_with_kind(
+                KeyCode::Char('a'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ),
+            &mut held,
+        ));
+        assert!(!held, "release filtering must not set shift_held");
     }
 
     /// The restoration payload must carry the four sequences that reverse the

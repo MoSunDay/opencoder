@@ -265,6 +265,66 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
 /// trigger the handoff (SwitchAndStart → context cleared) rather than a pure
 /// agent swap. Pins the wiring contract between the queue admit path and the
 /// `handle_switch_agent` gate.
+/// Compound `/plan <content>` submitted from **act** mode arms the handoff
+/// *deferred*: the app sets `pending_plan_arm`, the runner's async
+/// `AgentSwitch("plan")` consumes it to re-arm `plan_submitted` (which the
+/// event would otherwise reset). The subsequent idle Shift+Tab must then
+/// trigger the handoff (SwitchAndStart) rather than a pure agent swap —
+/// keeping the created plan and starting the task.
+#[tokio::test]
+async fn compound_plan_from_act_armed_then_shift_tab_triggers_handoff() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        plan_submitted: false,
+        ..Default::default()
+    };
+    // What the Submit/Steer/Queue branches do for `/plan <content>`.
+    chat.pending_plan_arm = true;
+    // The runner applies the mode switch asynchronously...
+    chat.apply(&SessionEvent::AgentSwitch("plan".into()));
+    assert!(
+        chat.plan_submitted,
+        "compound /plan from act must arm the plan→act handoff"
+    );
+
+    let mut running = false;
+    let mut follow = false;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let outcome = handle_switch_agent(
+        "act".into(),
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+    )
+    .await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    assert!(running, "Shift+Tab after an armed plan must start the task");
+    // ResetCancel precedes the handoff command (same as the Enter-armed path).
+    assert!(matches!(cmd_rx.try_recv().unwrap(), UiCmd::ResetCancel(_)));
+    match cmd_rx.try_recv().unwrap() {
+        UiCmd::SwitchAndStart(ref n, _) => assert_eq!(n, "act"),
+        _ => panic!("expected SwitchAndStart after compound-/plan-armed plan→act switch"),
+    }
+}
+
 #[tokio::test]
 async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
     let mut chat = ChatView {
@@ -376,6 +436,70 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
         "plan_submitted must survive TranscriptReset (compaction); \
          this is the P1 regression — without the fix, the replay would \
          reset it to false"
+    );
+}
+
+/// A dropped `AgentSwitch("plan")` (try_send saturation, the documented
+/// hazard family) must not leave a stale `pending_plan_arm`: the next
+/// TurnDone carries the authoritative agent, and an unconsumed arm at
+/// TurnDone(plan) can only mean the switch event was dropped (FIFO channel).
+/// Consume the arm there so the compound-/plan handoff still fires, without
+/// risking a spurious re-arm of a later plan-mode entry.
+#[tokio::test]
+async fn fold_turn_done_plan_consumes_stale_pending_arm() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "p2-test".into(),
+            agent: Some("act".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // Compound `/plan <content>` was submitted from act mode; the runner
+    // switched to plan but the AgentSwitch event was dropped (try_send).
+    let mut chat = ChatView {
+        agent: "act".into(),
+        pending_plan_arm: true,
+        plan_submitted: false,
+        ..Default::default()
+    };
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut running = false;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    let _flow = fold_ui_events(
+        Some(UiEvent::TurnDone("plan".into())),
+        &mut chat,
+        &store,
+        "p2-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+
+    assert_eq!(chat.agent, "plan");
+    assert!(
+        chat.plan_submitted,
+        "TurnDone(plan) must consume a stale pending_plan_arm (dropped AgentSwitch)"
+    );
+    assert!(
+        !chat.pending_plan_arm,
+        "the arm must be consumed exactly once"
     );
 }
 

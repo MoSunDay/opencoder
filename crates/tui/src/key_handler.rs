@@ -20,6 +20,11 @@ pub(crate) enum KeyAction {
     None,
     Submit(String),
     Steer(String),
+    /// Enter on a focused RUNNING subagent — steer the CHILD session, not the
+    /// parent. The steer is admitted to the child session and pushed onto the
+    /// child view's steer panel (see `subagent_input::admit_subagent_steer`);
+    /// the parent's turn, skill tokens and steer panel are untouched.
+    SubagentSteer(String),
     Queue(String),
     /// Tab-queue attempted while a running subagent is focused. A queue
     /// normally targets the *parent* session, which would leak input into
@@ -314,8 +319,11 @@ pub(crate) fn handle_key(
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
-            // Enter = Steer when the parent is running; Submit when idle.
-            if running {
+            // Enter = steer the focused CHILD session when a running subagent
+            // is focused; steer the parent when it is running; Submit when idle.
+            if subagent_focused {
+                KeyAction::SubagentSteer(text)
+            } else if running {
                 KeyAction::Steer(text)
             } else {
                 KeyAction::Submit(text)
@@ -407,7 +415,16 @@ pub(crate) fn handle_key(
             KeyAction::None
         }
         KeyCode::Char(c) => {
-            // Shift+I (uppercase I) enters plan-edit mode — but ONLY when in
+            // Alt+Char: tmux escape-time merges Esc into Alt+char, so unhandled
+            // Alt combos must never reach the input box (ghost garbage guard).
+            // Explicit Alt bindings (f/F/b/B/Tab) are handled above; Alt+Ctrl
+            // combos keep their raw semantics.
+            if k.modifiers.contains(KeyModifiers::ALT)
+                && !k.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                return KeyAction::None;
+            }
+            // Shift+I (uppercase I) enters plan-mode edit — ONLY when in
             // plan mode, idle, and the input box is empty. Once the user starts
             // typing, regular `I` insertion resumes.
             if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {

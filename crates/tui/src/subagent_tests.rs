@@ -276,3 +276,50 @@ fn subagent_events_render() {
     assert!(block_text(&v).contains("found it"));
     assert_eq!(v.context_used, parent_ctx + estimate("found it") as u64);
 }
+
+/// A steer admitted to a running child (via `SubagentSteer`) that the child
+/// never absorbed (it finished first) must be cleared when the child ends —
+/// otherwise the leftover row would sit on the pending panel forever.
+#[test]
+fn subagent_end_clears_leftover_child_steer_rows() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::SubagentStart {
+        id: "s1".into(),
+        kind: "explore".into(),
+        prompt: "p1".into(),
+        child_session_id: "cs1".into(),
+    });
+    // Child steer admitted while running, never absorbed.
+    if let Some(ChatBlock::Subagent { view, .. }) = v.blocks.last_mut() {
+        view.steer_items.push((1, "late steer".into()));
+    }
+    assert_eq!(
+        v.blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::Subagent { view, .. } => Some(view.steer_items.len()),
+                _ => None,
+            })
+            .sum::<usize>(),
+        1,
+        "leftover steer must be present before the child ends"
+    );
+
+    v.apply(&SessionEvent::SubagentEnd {
+        id: "s1".into(),
+        ok: true,
+        cancelled: false,
+        summary: "done".into(),
+    });
+
+    assert!(
+        v.blocks
+            .iter()
+            .filter_map(|b| match b {
+                ChatBlock::Subagent { view, .. } => Some(view.steer_items.len()),
+                _ => None,
+            })
+            .all(|n| n == 0),
+        "completed subagent must not retain leftover steer rows"
+    );
+}

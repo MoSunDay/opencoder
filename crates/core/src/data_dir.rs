@@ -9,6 +9,19 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
+/// Root data directory shared by every workdir store: `<data_local>/opencoder`.
+///
+/// Each workdir's store lives in a `<data_root>/<hash>` subdirectory (see
+/// [`data_dir_for`]). Exposed as its own function so global operations (e.g.
+/// `opencode ts -l`) can scan *every* per-workdir store regardless of the
+/// current directory — the same algorithm used by [`data_dir_for`] cannot
+/// drift from it.
+pub fn data_root() -> PathBuf {
+    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
+    base.push("opencoder");
+    base
+}
+
 /// Resolve the on-disk data directory for a given workdir.
 ///
 /// The path is `<data_local>/opencoder/<hash>` where `hash` is the hex digest
@@ -24,10 +37,7 @@ pub fn data_dir_for(workdir: &Path) -> PathBuf {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     canonical.to_string_lossy().hash(&mut h);
     let digest = h.finish();
-    let mut base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    base.push("opencoder");
-    base.push(format!("{digest:x}"));
-    base
+    data_root().join(format!("{digest:x}"))
 }
 
 #[cfg(test)]
@@ -70,6 +80,26 @@ mod tests {
                 "symlink and target must map to the same data dir"
             );
         }
+    }
+
+    #[test]
+    fn data_root_is_opencoder_dir_under_data_local() {
+        let root = super::data_root();
+        assert_eq!(
+            root.file_name().and_then(|s| s.to_str()),
+            Some("opencoder"),
+            "data_root must end with the opencoder dir"
+        );
+        // Every per-workdir dir nests under the root.
+        let dir = tempfile::tempdir().unwrap();
+        let d = data_dir_for(dir.path());
+        assert!(
+            d.starts_with(&root),
+            "data_dir_for({}) = {} must start with data_root {}",
+            dir.path().display(),
+            d.display(),
+            root.display()
+        );
     }
 
     #[test]

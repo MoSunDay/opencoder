@@ -21,7 +21,7 @@ pub use config::{
     CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
 };
-pub use data_dir::data_dir_for;
+pub use data_dir::{data_dir_for, data_root};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;
 

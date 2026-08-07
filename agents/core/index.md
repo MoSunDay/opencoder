@@ -14,7 +14,7 @@ Commit: (working-tree, pre-initial-commit)
 - `CompactionConfig`（`src/config.rs`）：`auto/context_threshold/tail_turns/reserved/buffer`（`prune` 字段已移除——曾为死配置）。
 - `OutputStreamlineConfig`（`src/config.rs`）：`enabled/trim_trailing/collapse_blank_lines/trim_outer`（默认全开）+ `collapse_inline_ws`（默认关，opt-in）。session 在 `run_loop` 持久化前对完成的 assistant 文本做保义精简（见 session 模块）。
 - `net` 模块（`src/net.rs`）：`build_http_client`/`build_http_client_with_read_timeout`/`effective_proxy`——proxy-aware reqwest 客户端，**loopback bypass**（`127.0.0.1`/`localhost`/`::1`/`0.0.0.0` 永不经代理，否则本地 mock/自连在代理环境下被截断）。被 llm client 使用。
-- `data_dir` 模块（`src/data_dir.rs`）：`data_dir_for(workdir: &Path) -> PathBuf`——唯一的 per-workdir 数据目录解析（`<data_local>/opencoder/<hash>`，hash 为 DefaultHasher over workdir 规范化字符串形式，先 canonicalize 故 `/p` 与 `/p/` 及 symlink 折叠为同一目录）。替代此前 cli/web/tui 三处各自漂移的副本，三进程对同一 workdir 解析出同一 data dir，使 session 跨进程可见。经 `lib.rs` re-export。
+- `data_dir` 模块（`src/data_dir.rs`）：`data_dir_for(workdir: &Path) -> PathBuf`——唯一的 per-workdir 数据目录解析（`<data_local>/opencoder/<hash>`，hash 为 DefaultHasher over workdir 规范化字符串形式，先 canonicalize 故 `/p` 与 `/p/` 及 symlink 折叠为同一目录）。替代此前 cli/web/tui 三处各自漂移的副本，三进程对同一 workdir 解析出同一 data dir，使 session 跨进程可见。同模块另暴露 `data_root() -> PathBuf`（=`<data_local>/opencoder`，`data_dir_for` 即 `data_root().join(hash)`），供 `ts -l` 等全局操作扫描**所有** workdir 的 store。二者均经 `lib.rs` re-export。
 
 ## 主流程
 Config::load 顺序：默认 → 全部已存在候选**深度合并**（global base → project override，project 后写后赢）→ env 覆盖。候选顺序（从最具体到最全局）：`<workdir>/.opencoder/config.json`、`<workdir>/opencoder.json`、`~/.opencoder/config.json`、`~/.opencoder/opencoder.json`、`~/.config/opencoder/config.json`。这样 `~/.opencoder` 提供 provider+key 作为基底，项目 opencoder.json 仅覆盖 model 等字段——`opencoder` 从任意目录直接执行。

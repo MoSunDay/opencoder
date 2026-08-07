@@ -21,6 +21,14 @@ use base64::Engine;
 
 use crate::chat::ChatView;
 
+/// `tmux load-buffer` invocation for the clipboard fallback. No `-b NAME`:
+/// an explicitly named buffer is non-automatic, and tmux's default paste
+/// (`paste-buffer` without `-b` — what `prefix ]` runs) only ever targets the
+/// most recent automatic buffer. The auto-named `bufferN` load is what makes
+/// the "paste with prefix ]" hint true. Kept as a const so the unit test can
+/// pin the contract.
+pub(crate) const TMUX_LOAD_BUFFER_ARGS: &[&str] = &["load-buffer", "-"];
+
 /// An active selection: an absolute content-row range `[a, b]` (inclusive,
 /// un-normalised — either end may be the anchor or the current drag position).
 /// `None` means no active selection. Absolute rows are `screen_row + scroll`.
@@ -41,6 +49,10 @@ pub struct CopyReport {
     pub osc52_reliable: bool,
     /// The local clipboard tool that succeeded, if any.
     pub local_tool: Option<&'static str>,
+    /// True when the text was loaded into a tmux buffer (`tmux load-buffer`),
+    /// so it is pasteable with `prefix ]` inside tmux even when OSC52 is
+    /// silently dropped (`set-clipboard off`).
+    pub tmux_buffer: bool,
     /// Running inside tmux (drives the failure hint).
     pub tmux: bool,
     /// Running over SSH (drives the failure hint).
@@ -54,12 +66,15 @@ impl CopyReport {
     pub fn status_message(&self) -> String {
         match self.local_tool {
             Some(tool) => format!("\u{1f4cb} Copied {} line(s) ({})", self.lines, tool),
+            None if self.tmux_buffer => {
+                format!("\u{1f4cb} Copied {} line(s) (tmux buffer)", self.lines)
+            }
             None if self.osc52_reliable => {
                 format!("\u{1f4cb} Copied {} line(s) via OSC52", self.lines)
             }
             None => {
                 let hint = if self.tmux {
-                    "tmux: set -g set-clipboard on, or install xclip"
+                    "tmux: set -g set-clipboard on (system clipboard), or paste with prefix ]"
                 } else if self.ssh {
                     "terminal may not support OSC52 — install xclip/xsel locally"
                 } else {
@@ -208,11 +223,23 @@ pub fn copy_to_clipboard(text: &str) -> CopyReport {
     // terminals); the *message* reflects the probe's confidence, not the send.
     copy_osc52(text);
     let local_tool = crate::clip_probe::copy_local_smart(&probe, text);
+    // tmux fallback: with `set-clipboard off` (the default in many setups)
+    // tmux silently drops OSC52, and SSH sessions have no usable local tool.
+    // Loading the text into a tmux buffer still makes it pasteable via
+    // `prefix ]` inside tmux — an honest, achievable fallback. Deliberately
+    // no `-b NAME`: tmux's default paste (`paste-buffer`, bound to `prefix ]`)
+    // resolves only to the most recent *automatic* buffer (`paste_get_top`
+    // skips explicitly named buffers), so a named load would never paste.
+    let tmux_buffer = local_tool.is_none()
+        && probe.is_tmux
+        && !probe.osc52_reliable
+        && crate::clip_probe::try_spawn("tmux", TMUX_LOAD_BUFFER_ARGS, text).is_some();
     CopyReport {
         lines: text.lines().count(),
         chars: text.chars().count(),
         osc52_reliable: probe.osc52_reliable,
         local_tool,
+        tmux_buffer,
         tmux: probe.is_tmux,
         ssh: probe.is_ssh,
     }
@@ -338,6 +365,7 @@ mod tests {
             chars: 42,
             osc52_reliable: true,
             local_tool: Some("xclip"),
+            tmux_buffer: false,
             tmux: false,
             ssh: false,
         };
@@ -355,6 +383,7 @@ mod tests {
             chars: 5,
             osc52_reliable: true,
             local_tool: None,
+            tmux_buffer: false,
             tmux: false,
             ssh: false,
         };
@@ -372,6 +401,7 @@ mod tests {
             chars: 9,
             osc52_reliable: false,
             local_tool: None,
+            tmux_buffer: false,
             tmux: true,
             ssh: false,
         };
@@ -387,6 +417,7 @@ mod tests {
             chars: 9,
             osc52_reliable: false,
             local_tool: None,
+            tmux_buffer: false,
             tmux: false,
             ssh: true,
         };
@@ -403,12 +434,44 @@ mod tests {
             chars: 40,
             osc52_reliable: false,
             local_tool: None,
+            tmux_buffer: false,
             tmux: false,
             ssh: false,
         };
         let msg = report.status_message();
         assert!(msg.contains("\u{26a0}"));
         assert!(msg.contains("install xclip"));
+    }
+
+    #[test]
+    fn tmux_fallback_loads_automatic_buffer_not_named() {
+        // `prefix ]` runs `paste-buffer` without `-b`; tmux resolves that to
+        // the most recent *automatic* buffer only (paste_get_top skips
+        // explicitly named buffers, and none exists on a fresh server, so a
+        // named load is unpasteable). Regression: the fallback must not pass
+        // `-b opencoder`, or the "paste with prefix ]" promise breaks.
+        assert_eq!(TMUX_LOAD_BUFFER_ARGS, &["load-buffer", "-"]);
+        assert!(!TMUX_LOAD_BUFFER_ARGS.contains(&"-b"));
+    }
+
+    #[test]
+    fn copy_report_status_with_tmux_buffer() {
+        // tmux load-buffer succeeded: green message naming the tmux buffer,
+        // no "unreliable" warning even though OSC52 is off.
+        let report = CopyReport {
+            lines: 2,
+            chars: 9,
+            osc52_reliable: false,
+            local_tool: None,
+            tmux_buffer: true,
+            tmux: true,
+            ssh: false,
+        };
+        let msg = report.status_message();
+        assert!(msg.contains("tmux buffer"));
+        assert!(msg.contains("2 line(s)"));
+        assert!(!msg.contains("\u{26a0}"));
+        assert!(!msg.contains("set-clipboard"));
     }
 
     #[test]

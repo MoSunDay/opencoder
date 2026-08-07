@@ -42,15 +42,34 @@ pub(super) async fn execute_call(
     registry: &HashMap<String, ToolArc>,
     sink: &Sink<'_>,
 ) -> ToolOutput {
-    // `bash` has its own internal foreground timeout (BASH_TIMEOUT_SECS) that
-    // hands long-running commands to the background, so it is exempt from the
-    // leaf-tool safety net; every other tool keeps it.
-    let timeout = if tc.name == "bash" {
-        None
-    } else {
-        Some(DEFAULT_TOOL_TIMEOUT)
-    };
+    let timeout = leaf_tool_timeout(&tc.name);
     execute_call_with_timeout(tc, session, registry, sink, timeout).await
+}
+
+/// Wall-clock timeout the run loop wraps a single leaf tool in. Decides the
+/// safety-net fuse per tool name:
+///
+/// - `bash` → `None` (exempt). Bash runs its own internal foreground deadline
+///   (`tools::bash::BASH_TIMEOUT_SECS`) that hands long-running commands to the
+///   background rather than killing them. Exempting it here keeps the two
+///   deadlines from racing.
+/// - `read` / `edit` / `search` → the same budget as bash
+///   (`BASH_TIMEOUT_SECS`). These are local, fast tools; a hang past ~2 min is a
+///   real problem. Unlike bash, on expiry they are simply cancelled with a
+///   "timed out" message (the generic leaf-tool path below drops the future —
+///   no background continuation, no handoff).
+/// - everything else → [`DEFAULT_TOOL_TIMEOUT`] (the 10-minute net). `task`
+///   early-returns before this is reached.
+///
+/// Pure (no state) so the routing is directly unit-testable.
+pub(crate) fn leaf_tool_timeout(name: &str) -> Option<Duration> {
+    match name {
+        "bash" => None,
+        "read" | "edit" | "search" => {
+            Some(Duration::from_secs(crate::tools::bash::BASH_TIMEOUT_SECS))
+        }
+        _ => Some(DEFAULT_TOOL_TIMEOUT),
+    }
 }
 
 /// Like [`execute_call`] but with an injectable timeout, so the safety net is
@@ -431,7 +450,6 @@ mod tests {
         assert_eq!(out.content, "done");
     }
 
-
     /// A tool that wraps synchronous blocking work in `spawn_blocking` and
     /// sleeps ~200ms, simulating a real search/ls directory scan. Exercises
     /// the turn_cancel interrupt path: with `spawn_blocking` the async worker
@@ -700,6 +718,65 @@ mod tests {
         assert!(
             session.child_turn_cancels.lock().unwrap().is_empty(),
             "child_turn_cancels must be empty after force_cancel"
+        );
+    }
+
+    /// Pure routing unit tests: `leaf_tool_timeout` must give read/edit/search
+    /// the bash budget, leave bash exempt, and default everything else.
+    #[test]
+    fn leaf_tool_timeout_routes_read_edit_search_to_bash_budget() {
+        let expected = Some(Duration::from_secs(crate::tools::bash::BASH_TIMEOUT_SECS));
+        assert_eq!(leaf_tool_timeout("read"), expected);
+        assert_eq!(leaf_tool_timeout("edit"), expected);
+        assert_eq!(leaf_tool_timeout("search"), expected);
+    }
+
+    #[test]
+    fn leaf_tool_timeout_exempts_bash() {
+        assert_eq!(leaf_tool_timeout("bash"), None);
+    }
+
+    #[test]
+    fn leaf_tool_timeout_defaults_unknown_tools() {
+        assert_eq!(leaf_tool_timeout("ls"), Some(DEFAULT_TOOL_TIMEOUT));
+        assert_eq!(
+            leaf_tool_timeout("not_a_real_tool"),
+            Some(DEFAULT_TOOL_TIMEOUT)
+        );
+    }
+
+    /// Integration test through `execute_call` (not the `_with_timeout`
+    /// variant): a tool registered under the key `"read"` that never resolves
+    /// must trip the routed timeout — NOT the 600 s default net — and resolve
+    /// with a "timed out" message. The outer 5 s `tokio::time::timeout` fails
+    /// the test fast if the 600 s net is mistakenly used.
+    #[tokio::test]
+    async fn read_tool_times_out_via_execute_call_routing() {
+        let session = make_session();
+        let registry: HashMap<String, ToolArc> =
+            [("read".to_string(), Arc::new(HangingTool) as ToolArc)]
+                .into_iter()
+                .collect();
+        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
+        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
+        let tc = CompletedToolCall {
+            id: "tc-read-route".into(),
+            name: "read".into(),
+            input: json!({}),
+        };
+        // Under cfg(test) BASH_TIMEOUT_SECS == 1, so execute_call must resolve
+        // in ~1 s. Wrap in a 5 s outer guard: if the 600 s default net were
+        // used instead, this would hang and the outer timeout would fire.
+        let out = tokio::time::timeout(Duration::from_secs(5), async {
+            execute_call(&tc, &session, &registry, &sink).await
+        })
+        .await
+        .expect("read tool should trip the routed bash budget, not the 600s net");
+        assert!(out.is_error);
+        assert!(
+            out.content.contains("timed out"),
+            "expected timeout message, got: {}",
+            out.content
         );
     }
 }

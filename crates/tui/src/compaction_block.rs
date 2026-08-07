@@ -1,20 +1,17 @@
 //! Collapsible compaction-summary block: shared rendering + state helpers.
 //! Extracted from `chat.rs` to keep that file under the size limit. Mirrors
-//! the Thinking block — muted italic styling, default collapsed, click-to-
+//! the Thinking block — plain (unstyled) text, default collapsed, click-to-
 //! expand — so compaction output is visually consistent with reasoning.
 
 use crate::chat::{ChatBlock, ChatView, CompactionHeader};
-use crate::theme;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 /// Render a collapsible text block (used by both Thinking and Compaction).
 ///
-/// When collapsed: a single muted header line showing the icon + label and a
+/// When collapsed: a single plain header line showing the icon + label and a
 /// `(N lines)` count summarizing how many lines are hidden.
-/// When expanded: a muted italic-bold header followed by each line indented
-/// 2 spaces in muted italic. Click-to-expand is wired separately via the
-/// hit-rect pipeline.
+/// When expanded: a plain header followed by each line indented 2 spaces.
+/// Click-to-expand is wired separately via the hit-rect pipeline.
 pub(crate) fn render_collapsible(
     icon: &str,
     label: &str,
@@ -24,24 +21,11 @@ pub(crate) fn render_collapsible(
     let mut out = Vec::new();
     if collapsed {
         let n = text.lines().count();
-        out.push(Line::from(Span::styled(
-            format!("{icon} {label} ({n} lines)"),
-            Style::default().fg(theme::muted()),
-        )));
+        out.push(Line::from(format!("{icon} {label} ({n} lines)")));
     } else {
-        out.push(Line::from(Span::styled(
-            format!("{icon} {label}"),
-            Style::default()
-                .fg(theme::muted())
-                .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-        )));
+        out.push(Line::from(format!("{icon} {label}")));
         for l in text.lines() {
-            out.push(Line::from(Span::styled(
-                format!("  {l}"),
-                Style::default()
-                    .fg(theme::muted())
-                    .add_modifier(Modifier::ITALIC),
-            )));
+            out.push(Line::from(format!("  {l}")));
         }
     }
     out

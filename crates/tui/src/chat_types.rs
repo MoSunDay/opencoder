@@ -28,13 +28,13 @@ pub enum ChatBlock {
         rendered: Vec<Line<'static>>,
         done: bool,
     },
-    /// Collapsible reasoning/thinking block with dimmed italic styling.
+    /// Collapsible reasoning/thinking block (plain text, click-to-expand).
     Thinking {
         text: String,
         collapsed: bool,
         sealed: bool,
     },
-    /// Collapsible compaction-summary block with muted italic styling.
+    /// Collapsible compaction-summary block (plain text, click-to-expand).
     /// Mirrors Thinking: click-to-expand. While `streaming` is true the block
     /// is expanded and its `text` grows with each `CompactionDelta` so the user
     /// sees the summary as it is generated. The final `Compaction(summary)`

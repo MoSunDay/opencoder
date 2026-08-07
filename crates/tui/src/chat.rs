@@ -483,7 +483,7 @@ impl ChatView {
                 }
                 ChatBlock::Compaction { text, collapsed, .. } => {
                     out.extend(render_collapsible(
-                        "\u{1f5dc}",
+                        "\u{1f4e6}",
                         "Compaction",
                         text,
                         *collapsed,

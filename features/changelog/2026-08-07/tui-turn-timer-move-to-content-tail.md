@@ -30,9 +30,12 @@ Commit: (working-tree, pre-initial-commit)
 
 - **`crates/tui/src/app.rs`**：
   - 提取 `now = now_ms()`（消除重复调用）。
-  - 计算 `display_turn_ms`：聚焦 subagent 且其 `done == false` 时使用
-    `now - started_at_ms`（实时）；否则回退到 `run_elapsed_ms`。
   - `render_frame` 的 `now_ms` 参数改用提取的 `now`，`run_ms` 参数改用 `display_turn_ms`。
+- **`crates/tui/src/app_display.rs`**：
+  - 新增纯函数 `display_turn_ms(chat, subagent_focus, run_elapsed_ms, now) -> u64`：
+    聚焦 subagent 且其 `done == false` 时使用 `now - started_at_ms`（实时）；
+    否则回退到 `run_elapsed_ms`。从 `app.rs` 提取以保持 app.rs ≤ 800 行且可独立单测。
+  - 新增 3 个单元测试覆盖该函数的全部分支（见测试覆盖表）。
 
 ### 3. 测试更新
 
@@ -50,12 +53,15 @@ Commit: (working-tree, pre-initial-commit)
 | body 尾部显示计时 | `body_shows_turn_timer_at_content_tail` | `crates/tui/src/render_tests/timer.rs` |
 | turn_ms=0 不显示 | `body_hides_turn_timer_when_zero` | `crates/tui/src/render_tests/timer.rs` |
 | 计时在内容文本之后 | `body_turn_timer_after_content` | `crates/tui/src/render_tests/timer.rs` |
+| 运行中 subagent 实时计时 | `running_subagent_shows_live_elapsed` | `crates/tui/src/app_display.rs` |
+| done subagent 计时归零 | `done_subagent_returns_zero` | `crates/tui/src/app_display.rs` |
+| 无 subagent 聚焦回退 run_elapsed | `no_subagent_focus_falls_back_to_run_elapsed` | `crates/tui/src/app_display.rs` |
 | tick_clock 边界逻辑（未改） | `tick_clock_resets_elapsed_on_turn_*` | `crates/tui/src/app_loop_bugfix_tests.rs` |
 
 - 全量回归：`cargo test --workspace` → 全绿（0 failed）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 编译干净
-- 行数：`render.rs` 795 ≤ 800；`app.rs` 810（+16 行逻辑，pre-existing 794）
+- 行数：`render.rs` 795 ≤ 800；`app.rs` 797 ≤ 800；`app_display.rs` 102 ≤ 800
 
 ## Impact Surface
 

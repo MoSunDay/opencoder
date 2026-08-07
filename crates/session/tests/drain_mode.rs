@@ -122,7 +122,10 @@ async fn drain_mode_queue_plan_switches_before_llm() {
             .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
         "AgentSwitch(plan) emitted"
     );
-    assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)), "Done emitted");
+    assert!(
+        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+        "Done emitted"
+    );
     assert_eq!(
         mock.requests().len(),
         1,
@@ -163,7 +166,10 @@ async fn drain_mode_queue_bare_plan_goes_idle() {
             .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
         "AgentSwitch(plan) emitted"
     );
-    assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)), "Done emitted");
+    assert!(
+        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+        "Done emitted"
+    );
     assert_no_llm_calls(&evs);
     assert!(mock.requests().is_empty(), "zero LLM calls");
 }
@@ -202,7 +208,10 @@ async fn drain_mode_queue_act_switches_before_llm() {
             .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act")),
         "AgentSwitch(act) emitted"
     );
-    assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)), "Done emitted");
+    assert!(
+        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+        "Done emitted"
+    );
     assert_no_llm_calls(&evs);
     assert!(mock.requests().is_empty(), "zero LLM calls");
 }
@@ -265,7 +274,11 @@ async fn drain_mode_queue_skill_consumed() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input("dr-skill", Delivery::Queue, "$review analyze code"))
+        .admit_input(&mk_input(
+            "dr-skill",
+            Delivery::Queue,
+            "$review analyze code",
+        ))
         .await
         .unwrap();
 
@@ -275,7 +288,10 @@ async fn drain_mode_queue_skill_consumed() {
         session.skill_prompt_cloned().is_some(),
         "skill activated by $review token"
     );
-    assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)), "Done emitted");
+    assert!(
+        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+        "Done emitted"
+    );
     assert_eq!(
         mock.requests().len(),
         1,

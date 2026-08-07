@@ -460,9 +460,7 @@ fn classify_segment(segment: &str) -> Option<String> {
 
     // Shell interpreters with -c/-s: `bash -c 'rm file'` etc.
     if SHELL_INTERPRETERS.contains(&cmd_base)
-        && cmd_words[1..]
-            .iter()
-            .any(|w| *w == "-c" || *w == "-s")
+        && cmd_words[1..].iter().any(|w| *w == "-c" || *w == "-s")
     {
         return Some(format!("indirect execution: {cmd_base} -c/-s"));
     }

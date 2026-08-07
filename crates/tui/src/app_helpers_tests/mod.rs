@@ -168,6 +168,7 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
         let mut needs_clear = false;
         let consumed = pre_key_intercept(
             key,
+            &KeyBindings::default(),
             &mut subagent_focus,
             &mut follow,
             &mut selection,

@@ -28,6 +28,7 @@ use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
 use crate::local_cmd;
 use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
+use crate::keymap_menu::KeymapMenu;
 use crate::task::TaskPicker;
 use crate::theme;
 use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
@@ -132,10 +133,30 @@ pub(crate) fn compute_display<'a>(
     }
 }
 
-/// Advance the status-bar run-timer: accumulates wall-clock elapsed time while
-/// a turn is running. Called every loop iteration before the select.
-pub(crate) fn tick_clock(running: bool, last_clock: &mut Instant, run_elapsed_ms: &mut u64) {
+/// Advance the status-bar run-timer: counts wall-clock elapsed while a turn is
+/// running, resets to zero when the task goes idle.
+///
+/// - `false -> true` (task started): reset elapsed to zero and snap the dt
+///   baseline to `now` so the idle gap between turns isn't counted.
+/// - `true -> false` (task ended): reset elapsed to zero so the duration is
+///   cleared from the status bar (not frozen/lingering).
+/// - `running` stays `true` (drain loop, subagent): accumulate normally.
+pub(crate) fn tick_clock(
+    running: bool,
+    prev_running: &mut bool,
+    last_clock: &mut Instant,
+    run_elapsed_ms: &mut u64,
+) {
     let now = Instant::now();
+    if running && !*prev_running {
+        // Task started: reset the timer and snap the dt baseline.
+        *run_elapsed_ms = 0;
+        *last_clock = now;
+    } else if !running && *prev_running {
+        // Task ended: clear the timer so the status bar drops the duration.
+        *run_elapsed_ms = 0;
+    }
+    *prev_running = running;
     let dt = now.duration_since(*last_clock).as_millis() as u64;
     *last_clock = now;
     if running {
@@ -442,6 +463,7 @@ pub(crate) async fn dispatch_command(
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
+    keymap_menu: &mut Option<KeymapMenu>,
     agent_name: &str,
     input: &mut String,
     cursor_idx: &mut usize,
@@ -572,6 +594,9 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::Dispatch(SlashAction::InstallTools) => {
             return LoopFlow::InstallTools;
         }
+        CommandOutcome::Dispatch(SlashAction::ShortKey) => {
+            *keymap_menu = Some(KeymapMenu::new(&config.keymap));
+        }
         CommandOutcome::FillInput(s) => {
             input.clear();
             input.push_str(&s);
@@ -687,3 +712,44 @@ pub(crate) use app_loop_model::handle_model_outcome;
 mod app_loop_paste;
 
 pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_silent, route_paste};
+
+/// Handle a keystroke while the `/short_key` keymap modal is open. On `Save`,
+/// persists the changed keymap fields to disk, reloads config, and rebuilds
+/// the `KeyBindings` so the new shortcuts take effect immediately. On `Quit`,
+/// sends `UiCmd::Quit` and returns [`LoopFlow::Quit`].
+pub(crate) async fn handle_keymap_outcome(
+    keymap_menu: &mut Option<KeymapMenu>,
+    k: KeyEvent,
+    config: &mut Config,
+    keymap: &mut crate::keymap::KeyBindings,
+    workdir: &Path,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+) -> LoopFlow {
+    use crate::keymap_menu::{handle_keymap_key, KeymapOutcome};
+    match handle_keymap_key(keymap_menu, k) {
+        KeymapOutcome::Quit => {
+            let _ = cmd_tx.send(UiCmd::Quit).await;
+            LoopFlow::Quit
+        }
+        KeymapOutcome::Save(patch) => {
+            if Config::save(workdir, &patch).is_ok() {
+                if let Ok(new_config) = Config::load(workdir) {
+                    *config = new_config;
+                    *keymap = crate::keymap::KeyBindings::from_config(config);
+                }
+            }
+            LoopFlow::Proceed
+        }
+        KeymapOutcome::Cancel | KeymapOutcome::Idle => LoopFlow::Proceed,
+    }
+}
+
+/// Check if `clean` is the `/short_key` command and return a new
+/// [`KeymapMenu`] if so. Used by the free-text Submit path.
+pub(crate) fn try_keymap_command(clean: &str, config: &Config) -> Option<KeymapMenu> {
+    if matches!(clean, "/short_key" | "/sk") {
+        Some(KeymapMenu::new(&config.keymap))
+    } else {
+        None
+    }
+}

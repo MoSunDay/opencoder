@@ -50,10 +50,7 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
         .map(|t| {
             let name = t.name();
             let (description, parameters) = if name == "task" {
-                (
-                    task::description_for(plan),
-                    task::parameters_for(plan),
-                )
+                (task::description_for(plan), task::parameters_for(plan))
             } else {
                 (t.description().to_string(), t.parameters())
             };

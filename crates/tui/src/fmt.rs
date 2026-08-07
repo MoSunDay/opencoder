@@ -35,6 +35,22 @@ pub fn context_percent(used: u64, window: u64, baseline: u64) -> u8 {
     pct.round().clamp(0.0, 100.0) as u8
 }
 
+/// Format a run-duration in ms as a short label: `42s`, `3m5s`, `1h5m30s`.
+/// Always shows the seconds component; largest unit is hours.
+pub fn format_run_duration(ms: u64) -> String {
+    let secs = ms / 1000;
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h{m}m{s}s")
+    } else if m > 0 {
+        format!("{m}m{s}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +86,20 @@ mod tests {
         assert_eq!(context_percent(500_000, 200_000, 12_000), 100);
         // zero window → 0 (no panic)
         assert_eq!(context_percent(100, 0, 0), 0);
+    }
+
+    #[test]
+    fn run_duration_formats_correctly() {
+        assert_eq!(format_run_duration(0), "0s");
+        assert_eq!(format_run_duration(999), "0s");
+        assert_eq!(format_run_duration(1000), "1s");
+        assert_eq!(format_run_duration(59000), "59s");
+        assert_eq!(format_run_duration(60000), "1m0s");
+        assert_eq!(format_run_duration(119000), "1m59s");
+        assert_eq!(format_run_duration(120000), "2m0s");
+        assert_eq!(format_run_duration(3599000), "59m59s");
+        assert_eq!(format_run_duration(3600000), "1h0m0s");
+        assert_eq!(format_run_duration(3900000), "1h5m0s");
+        assert_eq!(format_run_duration(7384000), "2h3m4s");
     }
 }

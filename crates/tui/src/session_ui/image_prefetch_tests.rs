@@ -126,6 +126,8 @@ fn replay_one_prefetched_tool_image_renders() {
         header: Line::from("test"),
         output: Vec::new(),
         collapsed: false,
+        started_at_ms: 0,
+        elapsed_ms: None,
     });
     replay_one(&mut chat, &msg, &prefetched);
 

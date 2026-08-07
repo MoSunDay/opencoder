@@ -375,10 +375,7 @@ fn wrapper_commands_dont_mask_writes() {
 fn env_with_only_assignment_is_read_only() {
     assert_eq!(classify("env FOO=bar ls"), BashVerdict::ReadOnly);
     assert_eq!(classify("env VAR=1 git status"), BashVerdict::ReadOnly);
-    assert_eq!(
-        classify("env A=1 B=2 cat file"),
-        BashVerdict::ReadOnly
-    );
+    assert_eq!(classify("env A=1 B=2 cat file"), BashVerdict::ReadOnly);
 }
 
 /// `exec`/`eval`/`source` keep their dedicated verdict even though `exec` is
@@ -394,7 +391,10 @@ fn exec_eval_source_still_blocked_directly() {
         classify("source script.sh"),
         BashVerdict::WriteBlocked(_)
     ));
-    assert!(matches!(classify("sudo exec ls"), BashVerdict::WriteBlocked(_)));
+    assert!(matches!(
+        classify("sudo exec ls"),
+        BashVerdict::WriteBlocked(_)
+    ));
     // But `env exec rm` unwraps to the mutating command beneath.
     assert!(matches!(
         classify("env exec rm file"),
@@ -434,4 +434,3 @@ fn strip_wrappers_unwraps_delegating_prefixes() {
     // Read-only command passes through unwrapped.
     assert_eq!(strip_wrappers("ls -la"), "ls -la");
 }
-

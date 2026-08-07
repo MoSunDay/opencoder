@@ -59,6 +59,13 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     {
         return true;
     }
+    if root
+        .get("keymap")
+        .and_then(|v| v.as_object())
+        .is_some_and(|o| !o.is_empty())
+    {
+        return true;
+    }
     false
 }
 
@@ -239,6 +246,13 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(v) = obj.get("subagent_drain_secs").and_then(|v| v.as_u64()) {
             cfg.subagent_drain_secs = Some(v);
+        }
+        if let Some(km) = obj.get("keymap").and_then(|v| v.as_object()) {
+            for (key, val) in km {
+                if let Some(s) = val.as_str() {
+                    cfg.keymap.set(key, s.to_string());
+                }
+            }
         }
     }
 }

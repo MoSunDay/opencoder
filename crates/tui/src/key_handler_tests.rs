@@ -50,6 +50,7 @@ fn handle_key_disabled_blocks_char() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -90,6 +91,7 @@ fn handle_key_disabled_blocks_enter() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -129,6 +131,7 @@ fn handle_key_disabled_allows_scroll() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -170,6 +173,7 @@ fn handle_key_disabled_allows_quit() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -209,6 +213,7 @@ fn ctrl_v_returns_clip() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -250,6 +255,7 @@ fn handle_key_disabled_blocks_alt_tab() {
     // view) so the parent agent is not switched prematurely.
     let action = handle_key(
         KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -274,6 +280,7 @@ fn handle_key_disabled_blocks_alt_tab() {
     // Alt+BackTab variant.
     let action = handle_key(
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::ALT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -315,6 +322,7 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
     // disabled so the parent agent is not switched prematurely.
     let action = handle_key(
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -339,6 +347,7 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
     // kitty: Tab+CONTROL+SHIFT.
     let action = handle_key(
         KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -384,6 +393,7 @@ fn undo_restores_previous_text() {
     for ch in ['h', 'i'] {
         handle_key(
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
+            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
             &mut input,
             &mut cursor,
             &history,
@@ -409,6 +419,7 @@ fn undo_restores_previous_text() {
     // Ctrl+Z undoes both chars (collapsed) back to ""
     handle_key(
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -433,6 +444,7 @@ fn undo_restores_previous_text() {
     // Ctrl+Y redoes
     handle_key(
         KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -473,6 +485,7 @@ fn undo_after_backspace() {
     // Backspace
     handle_key(
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -497,6 +510,7 @@ fn undo_after_backspace() {
     // Undo
     handle_key(
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -540,6 +554,7 @@ fn help_open_down_arrow_increments_scroll() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -580,6 +595,7 @@ fn help_open_page_down_jumps_scroll() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -625,6 +641,7 @@ fn up_arrow_browses_history_when_single_row() {
     // Single-row input (7 chars < row_w=78), so Up browses history.
     handle_key(
         KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -669,6 +686,7 @@ fn up_arrow_moves_cursor_when_multi_row() {
     let cursor_before = cursor;
     handle_key(
         KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -714,6 +732,7 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -757,6 +776,7 @@ fn handle_key_alt_f_still_moves_word() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,

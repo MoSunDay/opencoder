@@ -19,7 +19,7 @@ pub use agent::{
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig,
     CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
-    ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
+    ProviderConfig, ScopedConfigHome, KeymapConfig, KEYMAP_INFO, DEFAULT_CONTEXT_LIMIT,
 };
 pub use data_dir::{data_dir_for, data_root};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};

@@ -116,7 +116,10 @@ async fn resume_compaction_loads_only_tail_and_persisted_images() {
     );
 
     // The tail is exactly messages[skip..] -- proving the head was never loaded.
-    let tail_ids: Vec<&str> = resumed.messages[1..].iter().map(|m| m.id.as_str()).collect();
+    let tail_ids: Vec<&str> = resumed.messages[1..]
+        .iter()
+        .map(|m| m.id.as_str())
+        .collect();
     assert_eq!(tail_ids, vec!["t0", "t1", "t2"]);
 
     // No head message id leaks into the resumed transcript.
@@ -126,7 +129,11 @@ async fn resume_compaction_loads_only_tail_and_persisted_images() {
             "head user message {} must not be reloaded",
             m.id
         );
-        assert!(!m.id.starts_with('a'), "head assistant {} must not be reloaded", m.id);
+        assert!(
+            !m.id.starts_with('a'),
+            "head assistant {} must not be reloaded",
+            m.id
+        );
     }
     // (u0/u1/u2 are head users; t2 is a tail user but non-synthetic -- the
     // guard above checks ids that start with 'u' OR 'a'; t2 starts with 't'.)

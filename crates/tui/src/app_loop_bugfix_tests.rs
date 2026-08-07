@@ -409,3 +409,96 @@ async fn handle_switch_agent_sets_agent_optimistically() {
         "a non-turning switch must still send SwitchAgent to the worker"
     );
 }
+
+// ----- Status-bar per-turn timer reset (false→true boundary) -----
+
+/// A new turn starts: `running` goes `false → true`. The accumulated elapsed
+/// must reset to zero so the status bar shows this turn's duration, not the
+/// session total.
+#[test]
+fn tick_clock_resets_elapsed_on_turn_start() {
+    let mut prev = false;
+    let mut last = Instant::now();
+    let mut elapsed = 999_999u64; // leftover from a prior turn
+
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+
+    assert_eq!(elapsed, 0, "turn start must reset elapsed to zero");
+    assert!(prev, "prev_running tracks running after the call");
+}
+
+/// Within a single running turn, consecutive ticks must accumulate without
+/// resetting (no spurious reset on `true → true`). Sleeps long enough that the
+/// measured dt is deterministically positive (sub-ms noise cannot mask it).
+#[test]
+fn tick_clock_accumulates_without_reset_while_running() {
+    let mut prev = false;
+    let mut last = Instant::now();
+    let mut elapsed = 0u64;
+
+    // Start the turn: resets to 0.
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    assert_eq!(elapsed, 0, "turn start resets elapsed to zero");
+
+    // Tick again while still running: must accumulate real wall-clock dt,
+    // NOT reset back to zero. 20ms is well above timer granularity so dt > 0.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+
+    assert!(
+        elapsed > 0,
+        "consecutive running ticks must accumulate, not reset; elapsed={}",
+        elapsed
+    );
+    assert!(
+        elapsed < 5_000,
+        "single tick accumulation must be small; elapsed={}",
+        elapsed
+    );
+}
+
+/// When the turn ends (`running` goes `true -> false`) the elapsed must reset
+/// to zero — the status bar clears the duration rather than freezing it.
+#[test]
+fn tick_clock_resets_elapsed_on_turn_end() {
+    let mut prev = false;
+    let mut last = Instant::now();
+    let mut elapsed = 0u64;
+
+    // Run a tick while running to build up some elapsed.
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    assert!(elapsed > 0, "elapsed should have accumulated while running");
+
+    // Turn ends: must reset to zero, not freeze.
+    tick_clock(false, &mut prev, &mut last, &mut elapsed);
+
+    assert_eq!(elapsed, 0, "turn end must reset elapsed to zero");
+    assert!(!prev, "prev_running tracks running=false");
+
+    // Subsequent idle ticks must keep it at zero.
+    tick_clock(false, &mut prev, &mut last, &mut elapsed);
+    assert_eq!(elapsed, 0, "idle ticks must not advance elapsed");
+}
+
+/// A second turn (after an idle gap) must reset again to zero — confirming
+/// the per-turn semantics hold across multiple turns, not just the first.
+#[test]
+fn tick_clock_resets_again_on_second_turn_start() {
+    let mut prev = false;
+    let mut last = Instant::now();
+    let mut elapsed = 0u64;
+
+    // First turn.
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    // Idle.
+    tick_clock(false, &mut prev, &mut last, &mut elapsed);
+    // Inject a non-zero leftover to prove the reset happens.
+    elapsed = 5_000;
+
+    // Second turn starts: must reset.
+    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+
+    assert_eq!(elapsed, 0, "second turn start must reset elapsed to zero");
+}

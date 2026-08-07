@@ -103,18 +103,18 @@ async fn queue_consumed_carries_text_and_precedes_output() {
     let evs = events.lock().unwrap();
 
     // (a) QueueConsumed carries the exact prompt text.
-    let qc_idx = evs.iter().position(|e| {
-        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "queued task")
-    });
+    let qc_idx = evs.iter().position(
+        |e| matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "queued task"),
+    );
     assert!(
         qc_idx.is_some(),
         "QueueConsumed must carry the prompt text \"queued task\""
     );
 
     // (b) It precedes the TextDelta of the turn it triggered.
-    let td_idx = evs.iter().position(|e| {
-        matches!(e, SessionEvent::TextDelta(t) if t.contains("queued reply"))
-    });
+    let td_idx = evs
+        .iter()
+        .position(|e| matches!(e, SessionEvent::TextDelta(t) if t.contains("queued reply")));
     assert!(
         td_idx.is_some(),
         "expected a TextDelta for the queued-reply turn"
@@ -151,7 +151,11 @@ async fn queue_consumed_compound_carries_raw_text() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input("echo-cmp", Delivery::Queue, "/plan review the code"))
+        .admit_input(&mk_input(
+            "echo-cmp",
+            Delivery::Queue,
+            "/plan review the code",
+        ))
         .await
         .unwrap();
 

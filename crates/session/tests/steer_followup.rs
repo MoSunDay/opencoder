@@ -282,7 +282,10 @@ async fn queue_drains_all_fifo_in_single_run_then_done() {
         .pending_inputs("drain-sess", Delivery::Queue)
         .await
         .unwrap();
-    assert!(still_pending.is_empty(), "queue fully drained after single run");
+    assert!(
+        still_pending.is_empty(),
+        "queue fully drained after single run"
+    );
 }
 
 #[tokio::test]
@@ -547,7 +550,10 @@ async fn late_steer_absorbed_at_idle_boundary() {
         .unwrap()
         .iter()
         .any(|ev| matches!(ev, SessionEvent::SteerConsumed { .. }));
-    assert!(steer_consumed, "late steer must be consumed (SteerConsumed)");
+    assert!(
+        steer_consumed,
+        "late steer must be consumed (SteerConsumed)"
+    );
 
     // ...its text promoted into history...
     let msgs = store.load_messages("drain-sess").await.unwrap();

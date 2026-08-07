@@ -144,7 +144,10 @@ async fn parent_steer_makes_subagent_task_terminal_failed() {
 
     // Parent steer: cancel only the child token, NOT the parent's cancel.
     let fired = fire_child_cancels(&child_cancels);
-    assert!(fired, "fire_child_cancels should have found the running child");
+    assert!(
+        fired,
+        "fire_child_cancels should have found the running child"
+    );
 
     // Must finish well under the 30s sleep.
     let result = tokio::time::timeout(Duration::from_secs(15), handle).await;

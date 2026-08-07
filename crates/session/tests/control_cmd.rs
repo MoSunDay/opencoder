@@ -235,9 +235,8 @@ async fn clear_context_survives_resume() {
 
     // ClearContext with a preserved result now EXECUTES it — push a mock
     // response for the execution turn.
-    let mock = Arc::new(
-        MockChatClient::new().push_script(vec![done_turn("done")]),
-    ) as Arc<dyn ChatStream>;
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("done")])) as Arc<dyn ChatStream>;
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-sess",
@@ -316,14 +315,12 @@ async fn clear_context_executes_preserved_result() {
     let store = mem_store().await;
     seed(&store, "exec-sess", "act").await;
 
-    let msgs = vec![
-        Message::user("u1", "implement feature X"),
-        {
-            let mut m = Message::assistant("a1");
-            m.blocks.push(ContentBlock::text("I will implement X by..."));
-            m
-        },
-    ];
+    let msgs = vec![Message::user("u1", "implement feature X"), {
+        let mut m = Message::assistant("a1");
+        m.blocks
+            .push(ContentBlock::text("I will implement X by..."));
+        m
+    }];
     store.append_messages("exec-sess", &msgs).await.unwrap();
 
     let mock: Arc<MockChatClient> =
@@ -346,7 +343,11 @@ async fn clear_context_executes_preserved_result() {
 
     // The LLM was called exactly once (the execution turn).
     let requests = mock.requests();
-    assert_eq!(requests.len(), 1, "one LLM call to execute the preserved result");
+    assert_eq!(
+        requests.len(),
+        1,
+        "one LLM call to execute the preserved result"
+    );
 
     // The preserved result text appears in the model context.
     let body = requests[0].to_body().to_string();
@@ -422,8 +423,7 @@ async fn clear_context_no_plan_survives_resume() {
             "TranscriptReset emitted"
         );
         assert!(
-            !evs
-                .iter()
+            !evs.iter()
                 .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
             "no PlanHandoff when there is no plan"
         );
@@ -623,13 +623,16 @@ async fn idle_compound_plan_arg_switches_then_runs() {
     .with_store(store.clone())
     .mark_session_created();
 
-    run(&mut session, "/plan review".into(), |_| {}).await.unwrap();
+    run(&mut session, "/plan review".into(), |_| {})
+        .await
+        .unwrap();
 
     assert_eq!(session.agent.name, "plan", "switched to plan");
     // "review" was recorded as a real user prompt (not the raw "/plan review").
-    let has_review = session.messages.iter().any(|m| {
-        m.role == Role::User && m.text().contains("review") && !m.synthetic
-    });
+    let has_review = session
+        .messages
+        .iter()
+        .any(|m| m.role == Role::User && m.text().contains("review") && !m.synthetic);
     assert!(has_review, "trailing arg recorded as a real user prompt");
     // Exactly one LLM turn ran (the "review" prompt).
     let assistant_turns = session
@@ -699,11 +702,7 @@ async fn queue_compound_plan_arg_switches_then_runs() {
         .iter()
         .filter(|m| m.role == Role::Assistant)
         .count();
-    assert_eq!(
-        assistant_turns,
-        2,
-        "kickoff turn + review turn"
-    );
+    assert_eq!(assistant_turns, 2, "kickoff turn + review turn");
     let has_review = session
         .messages
         .iter()
@@ -724,8 +723,8 @@ async fn compound_plan_with_dollar_activates_skill() {
 
     let store = mem_store().await;
     seed(&store, "compound-skill", "act").await;
-    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]))
-        as Arc<dyn ChatStream>;
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")])) as Arc<dyn ChatStream>;
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "compound-skill",
@@ -745,7 +744,10 @@ async fn compound_plan_with_dollar_activates_skill() {
     // The review skill body was activated.
     let skill = session.skill_prompt_cloned();
     assert!(skill.is_some(), "skill activated by $review token");
-    assert!(!skill.as_ref().unwrap().is_empty(), "skill body is non-empty");
+    assert!(
+        !skill.as_ref().unwrap().is_empty(),
+        "skill body is non-empty"
+    );
     // The recorded prompt has the `$review` token stripped, keeps the text.
     let has_explain = session
         .messages
@@ -796,9 +798,7 @@ async fn queue_compound_pure_skill_injects_trigger() {
         .await
         .unwrap();
 
-    run(&mut session, "kickoff".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
     assert_eq!(session.agent.name, "plan", "switched to plan");
     let skill = session.skill_prompt_cloned();
@@ -824,7 +824,6 @@ async fn queue_compound_pure_skill_injects_trigger() {
     );
 }
 
-
 /// `/plan $review` as the IDLE prompt (direct run, not queued/drained):
 /// switches to plan, activates the skill, and injects the skill trigger so
 /// the model begins executing the skill body. This is the path the TUI idle
@@ -837,9 +836,8 @@ async fn idle_compound_plan_pure_skill_injects_trigger() {
 
     let store = mem_store().await;
     seed(&store, "idle-pure-skill", "act").await;
-    let mock = Arc::new(
-        MockChatClient::new().push_script(vec![done_turn("skill reply")]),
-    ) as Arc<dyn ChatStream>;
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("skill reply")]))
+        as Arc<dyn ChatStream>;
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "idle-pure-skill",
@@ -880,7 +878,10 @@ async fn idle_compound_plan_pure_skill_injects_trigger() {
         .iter()
         .filter(|m| m.role == Role::Assistant)
         .count();
-    assert_eq!(assistant_turns, 1, "one assistant turn for the skill trigger");
+    assert_eq!(
+        assistant_turns, 1,
+        "one assistant turn for the skill trigger"
+    );
 }
 
 /// Plain `$review do the work` queued with NO `/plan` prefix: the skill body
@@ -919,11 +920,12 @@ async fn queue_plain_skill_prompt_resolves() {
         .await
         .unwrap();
 
-    run(&mut session, "kickoff".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
-    assert_eq!(session.agent.name, "act", "no agent switch for plain prompt");
+    assert_eq!(
+        session.agent.name, "act",
+        "no agent switch for plain prompt"
+    );
     let skill = session.skill_prompt_cloned();
     assert!(skill.is_some(), "skill activated by $review token");
 
@@ -980,9 +982,7 @@ async fn steer_plain_skill_prompt_resolves() {
         .await
         .unwrap();
 
-    run(&mut session, "kickoff".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
     let skill = session.skill_prompt_cloned();
     assert!(skill.is_some(), "skill activated by $review token");

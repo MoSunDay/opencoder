@@ -32,6 +32,7 @@ fn draw_frame(
     chat: &ChatView,
     scroll: &mut u32,
     queue_scroll: &mut u32,
+    keymap_menu: Option<&crate::keymap_menu::KeymapMenu>,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
 ) {
@@ -60,12 +61,14 @@ fn draw_frame(
         true,
         queue_scroll,
         0,
+        0,
         None,
         None,
         None,
         None,
         None,
         None,
+        keymap_menu,
         hits,
         viewport,
         None,
@@ -104,6 +107,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &chat_a,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );
@@ -122,6 +126,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &chat_b,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );
@@ -130,6 +135,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         &chat_b,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );
@@ -172,6 +178,7 @@ fn startup_clear_wipes_glyphs_persisted_by_previous_run() {
         &chat_a,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );
@@ -195,6 +202,7 @@ fn startup_clear_wipes_glyphs_persisted_by_previous_run() {
         &chat_b,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );
@@ -212,6 +220,7 @@ fn startup_clear_wipes_glyphs_persisted_by_previous_run() {
         &chat_b,
         &mut scroll,
         &mut queue_scroll,
+        None,
         &mut hits,
         &mut viewport,
     );

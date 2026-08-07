@@ -11,6 +11,7 @@ mod requirement_submit;
 mod subagent;
 mod thinking_state;
 mod tool_collapse;
+mod timer;
 
 #[test]
 fn text_delta_appends_to_assistant_block() {

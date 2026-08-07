@@ -181,7 +181,10 @@ pub(super) async fn drain_one_queued(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<DrainOutcome> {
     if let Some((seq, q, imgs)) = claim_one_queued(session).await {
-        on_event(SessionEvent::QueueConsumed { seq, text: q.clone() });
+        on_event(SessionEvent::QueueConsumed {
+            seq,
+            text: q.clone(),
+        });
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&q) {
             crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
             // ClearContext with a preserved result breaks to execute it;
@@ -353,7 +356,10 @@ pub(crate) fn reset_turn_cancel(session: &mut SessionState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{claim_one_queued, claim_steers, drain_one_queued, has_pending_queues, has_pending_steers, match_promoted, DrainOutcome};
+    use super::{
+        claim_one_queued, claim_steers, drain_one_queued, has_pending_queues, has_pending_steers,
+        match_promoted, DrainOutcome,
+    };
     use crate::SessionState;
     use crate::SharedCancel;
     use opencoder_core::{resolve_agent, Config};
@@ -382,11 +388,7 @@ mod tests {
         // seq 2 between pending_inputs and promote_inputs). Zip would pair
         // seq 3 with "beta" (position 1); seq-match correctly pairs it with
         // "gamma".
-        let pending = vec![
-            input(1, "alpha"),
-            input(2, "beta"),
-            input(3, "gamma"),
-        ];
+        let pending = vec![input(1, "alpha"), input(2, "beta"), input(3, "gamma")];
         let promoted = vec![1_i64, 3];
         let result = match_promoted(&pending, &promoted);
         assert_eq!(result.len(), 2);
@@ -406,11 +408,7 @@ mod tests {
 
     #[test]
     fn match_promoted_preserves_happy_path_order() {
-        let pending = vec![
-            input(1, "alpha"),
-            input(2, "beta"),
-            input(3, "gamma"),
-        ];
+        let pending = vec![input(1, "alpha"), input(2, "beta"), input(3, "gamma")];
         let promoted = vec![1_i64, 2, 3];
         let result = match_promoted(&pending, &promoted);
         assert_eq!(result.len(), 3);
@@ -566,7 +564,6 @@ mod tests {
         );
     }
 
-
     // ---- drain_one_queued: single-pop semantics ----
 
     async fn session_with_queue(prompts: &[&str]) -> (SessionState, Arc<dyn Store>, SharedCancel) {
@@ -628,13 +625,17 @@ mod tests {
     async fn drain_one_queued_bare_control_cmd_returns_control_cmd() {
         let (mut session, _store, _token) = session_with_queue(&["/plan"]).await;
         let mut events = Vec::new();
-        let outcome = drain_one_queued(&mut session, &mut |e| events.push(e)).await.unwrap();
+        let outcome = drain_one_queued(&mut session, &mut |e| events.push(e))
+            .await
+            .unwrap();
         assert!(
             matches!(outcome, DrainOutcome::ControlCmd),
             "bare /plan should return ControlCmd, got {outcome:?}"
         );
         // Queue should still have zero items after one pop.
-        let outcome2 = drain_one_queued(&mut session, &mut |e| events.push(e)).await.unwrap();
+        let outcome2 = drain_one_queued(&mut session, &mut |e| events.push(e))
+            .await
+            .unwrap();
         assert!(
             matches!(outcome2, DrainOutcome::Empty),
             "empty queue should return Empty, got {outcome2:?}"

@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::chat::ChatView;
+use crate::keymap::KeyBindings;
 use crate::theme;
 use crate::worker::UiCmd;
 
@@ -122,6 +123,7 @@ pub(crate) async fn initial_chat_view(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,
+    bindings: &KeyBindings,
     subagent_focus: &mut Option<usize>,
     follow: &mut bool,
     selection: &mut Option<SelRange>,
@@ -140,9 +142,9 @@ pub(crate) fn pre_key_intercept(
         *last_esc = None;
         return true;
     }
-    // Ctrl+L: collapse all thinking + tool-output blocks, exit subagent view
-    // if in one, return to follow mode, and clear the input (Ctrl+F = redraw).
-    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('l')) {
+    // collapse_blocks (default: Ctrl+L): collapse all thinking + tool-output
+    // blocks, exit subagent view if in one, return to follow mode, clear input.
+    if bindings.collapse_blocks.matches(&k) {
         if let Some(idx) = *subagent_focus {
             if let Some(crate::chat::ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
                 view.collapse_all_collapsible();
@@ -157,9 +159,9 @@ pub(crate) fn pre_key_intercept(
         *cursor_idx = 0;
         return true;
     }
-    // Ctrl+F: force a full-screen redraw. The caller resets the terminal's
-    // diff buffer via `terminal.clear()` so the next draw repaints every cell.
-    if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('f')) {
+    // force_redraw (default: Ctrl+F): force a full-screen redraw. The caller
+    // resets the terminal's diff buffer via `terminal.clear()`.
+    if bindings.force_redraw.matches(&k) {
         *needs_clear = true;
         return true;
     }

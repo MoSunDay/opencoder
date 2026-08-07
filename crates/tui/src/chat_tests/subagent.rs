@@ -1,7 +1,7 @@
 use super::super::*;
 
 fn block_text_for_tick(v: &ChatView, tick: u32) -> String {
-    v.flatten_with(tick)
+    v.flatten_with(tick, 0)
         .iter()
         .flat_map(|l| l.spans.iter())
         .map(|s| s.content.clone())

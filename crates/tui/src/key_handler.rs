@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::keymap::KeyBindings;
+
 use opencoder_core::discover_skills;
 
 use crate::composer;
@@ -49,6 +51,7 @@ pub(crate) enum KeyAction {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_key(
     k: KeyEvent,
+    bindings: &KeyBindings,
     input: &mut String,
     cursor_idx: &mut usize,
     history: &[String],
@@ -136,153 +139,117 @@ pub(crate) fn handle_key(
     // Subagent-focus view: disable text input, submit, steer, queue. Only
     // scroll (handled above) and global keys (Quit, Help) are honoured.
     if input_disabled {
-        if k.modifiers.contains(KeyModifiers::CONTROL) {
-            match k.code {
-                KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
-                // Ctrl+C: interrupt the running task (same as double-Esc), when one
-                // is active. When idle it is a no-op (use Ctrl+D to quit).
-                KeyCode::Char('c') => {
-                    return if running {
-                        KeyAction::Cancel
-                    } else {
-                        KeyAction::None
-                    };
-                }
-                KeyCode::Char('h') => {
-                    *show_help = !*show_help;
-                    return KeyAction::None;
-                }
-                _ => {}
-            }
+        if bindings.quit.matches(&k) {
+            return KeyAction::Quit;
+        }
+        if bindings.cancel.matches(&k) {
+            return if running {
+                KeyAction::Cancel
+            } else {
+                KeyAction::None
+            };
+        }
+        if bindings.help.matches(&k) {
+            *show_help = !*show_help;
+            return KeyAction::None;
         }
         return KeyAction::None;
     }
 
-    // Alt+Tab (and Shift+Tab) switches act <-> plan mode.
-    if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Tab | KeyCode::BackTab)
-    {
+    // switch_mode_clear (default: Alt+Tab): switches act <-> plan mode.
+    if bindings.switch_mode_clear.matches(&k) {
         let next = if agent == "plan" { "act" } else { "plan" };
         return KeyAction::SwitchAgent(next.into());
     }
 
-    // Alt+F / Alt+B: readline-style forward/backward word movement.
-    if k.modifiers.contains(KeyModifiers::ALT) {
-        match k.code {
-            KeyCode::Char('f') | KeyCode::Char('F') => {
-                *cursor_idx = composer::forward_word(input, *cursor_idx);
-                return KeyAction::None;
-            }
-            KeyCode::Char('b') | KeyCode::Char('B') => {
-                *cursor_idx = composer::backward_word(input, *cursor_idx);
-                return KeyAction::None;
-            }
-            _ => {}
-        }
+    // forward_word / backward_word (default: Alt+F / Alt+B).
+    if bindings.forward_word.matches(&k) {
+        *cursor_idx = composer::forward_word(input, *cursor_idx);
+        return KeyAction::None;
+    }
+    if bindings.backward_word.matches(&k) {
+        *cursor_idx = composer::backward_word(input, *cursor_idx);
+        return KeyAction::None;
     }
 
-    // Ctrl+Shift+Tab: switch act <-> plan mode WITHOUT clearing context or
-    // auto-executing (pure mode toggle, keeps the full transcript). Must be
-    // checked before the CONTROL branch which would otherwise swallow
-    // Tab/BackTab. Terminals report this as BackTab+CONTROL, or (under kitty
-    // keyboard protocol with full disambiguation) Tab+CONTROL+SHIFT.
-    if k.modifiers.contains(KeyModifiers::CONTROL)
-        && (matches!(k.code, KeyCode::BackTab)
-            || (k.modifiers.contains(KeyModifiers::SHIFT) && matches!(k.code, KeyCode::Tab)))
-    {
+    // switch_mode_keep (default: Ctrl+Shift+Tab): toggle act <-> plan mode
+    // WITHOUT clearing context. The `matches` method normalizes BackTab ≡
+    // Tab+SHIFT so both terminal variants are covered.
+    if bindings.switch_mode_keep.matches(&k) {
         let next = if agent == "plan" { "act" } else { "plan" };
         return KeyAction::SwitchAgentNoClear(next.into());
     }
 
-    if k.modifiers.contains(KeyModifiers::CONTROL) {
-        match k.code {
-            // Ctrl+D quits. Under Kitty keyboard protocol
-            // (DISAMBIGUATE_ESCAPE_CODES) crossterm reports this as the raw
-            // control char `\u{4}` (EOT) with the CONTROL modifier set.
-            KeyCode::Char('d') | KeyCode::Char('\u{4}') => return KeyAction::Quit,
-            KeyCode::Char('h') => {
-                *show_help = !*show_help;
-                return KeyAction::None;
-            }
-            KeyCode::Char('j') => {
-                let (s, i) = composer::insert_newline(input, *cursor_idx);
-                *input = s;
-                *cursor_idx = i;
-                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
-                return KeyAction::None;
-            }
-            // Ctrl+A / Ctrl+E: cursor to start / end of the input buffer.
-            KeyCode::Char('a') => {
-                *cursor_idx = 0;
-                return KeyAction::None;
-            }
-            KeyCode::Char('e') => {
-                *cursor_idx = input.chars().count();
-                return KeyAction::None;
-            }
-            // Ctrl+W: delete the word before the cursor (readline
-            // backward-kill-word / unix-word-rubout, same as terminal).
-            KeyCode::Char('w') => {
-                if let Some((s, i)) = composer::delete_word_back(input, *cursor_idx) {
-                    *input = s;
-                    *cursor_idx = i;
-                    crate::undo::snapshot(undo_state, input, *cursor_idx, false);
-                }
-                return KeyAction::None;
-            }
-            // Ctrl+U: clear the entire input line (readline unix-line-discard).
-            // Undoable via snapshot so Ctrl+Z can restore, consistent with Ctrl+W.
-            // Under kitty keyboard protocol crossterm may report the raw control
-            // char `\u{15}` (NAK) with the CONTROL modifier set.
-            KeyCode::Char('u') | KeyCode::Char('\u{15}') => {
-                if !input.is_empty() {
-                    input.clear();
-                    *cursor_idx = 0;
-                    crate::undo::snapshot(undo_state, input, *cursor_idx, false);
-                }
-                return KeyAction::None;
-            }
-            // Ctrl+T: switch act <-> plan mode WITHOUT clearing context
-            // or auto-executing (pure mode toggle, same as Ctrl+Shift+Tab).
-            // Preferred on terminals where Ctrl+Shift+Tab is captured by the
-            // OS/shell before reaching the app. Input is left untouched.
-            KeyCode::Char('t') => {
-                let next = if agent == "plan" { "act" } else { "plan" };
-                return KeyAction::SwitchAgentNoClear(next.into());
-            }
-            // Ctrl+V: paste image (screenshot bitmap) from the system
-            // clipboard. Mirrors the legacy /clip command. Under kitty
-            // keyboard protocol crossterm may report the raw control char
-            // `\u{16}` (SYN) with the CONTROL modifier set.
-            KeyCode::Char('v') | KeyCode::Char('\u{16}') => return KeyAction::Clip,
-            // B4: Ctrl+C cancels the running task (equivalent to double-Esc).
-            // Under raw mode Ctrl+C arrives as the ETX character (\u{3}),
-            // not SIGINT, so it does not conflict with the supervisor's
-            // signal handling. Also handled below via the raw-ETX fallback.
-            KeyCode::Char('c') => {
-                return if running {
-                    KeyAction::Cancel
-                } else {
-                    KeyAction::None
-                };
-            }
-            // Ctrl+Z: undo last edit.
-            KeyCode::Char('z') => {
-                if let Some((s, i)) = crate::undo::undo(undo_state, input, *cursor_idx) {
-                    *input = s;
-                    *cursor_idx = i;
-                }
-                return KeyAction::None;
-            }
-            // Ctrl+Y: redo last undone edit.
-            KeyCode::Char('y') => {
-                if let Some((s, i)) = crate::undo::redo(undo_state, input, *cursor_idx) {
-                    *input = s;
-                    *cursor_idx = i;
-                }
-                return KeyAction::None;
-            }
-            _ => return KeyAction::None,
+    // --- Config-driven Ctrl bindings ---
+    if bindings.quit.matches(&k) {
+        return KeyAction::Quit;
+    }
+    if bindings.help.matches(&k) {
+        *show_help = !*show_help;
+        return KeyAction::None;
+    }
+    if bindings.newline.matches(&k) {
+        let (s, i) = composer::insert_newline(input, *cursor_idx);
+        *input = s;
+        *cursor_idx = i;
+        crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+        return KeyAction::None;
+    }
+    if bindings.cursor_home.matches(&k) {
+        *cursor_idx = 0;
+        return KeyAction::None;
+    }
+    if bindings.cursor_end.matches(&k) {
+        *cursor_idx = input.chars().count();
+        return KeyAction::None;
+    }
+    if bindings.delete_word.matches(&k) {
+        if let Some((s, i)) = composer::delete_word_back(input, *cursor_idx) {
+            *input = s;
+            *cursor_idx = i;
+            crate::undo::snapshot(undo_state, input, *cursor_idx, false);
         }
+        return KeyAction::None;
+    }
+    if bindings.clear_input.matches(&k) {
+        if !input.is_empty() {
+            input.clear();
+            *cursor_idx = 0;
+            crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+        }
+        return KeyAction::None;
+    }
+    if bindings.switch_mode.matches(&k) {
+        let next = if agent == "plan" { "act" } else { "plan" };
+        return KeyAction::SwitchAgentNoClear(next.into());
+    }
+    if bindings.paste_image.matches(&k) {
+        return KeyAction::Clip;
+    }
+    if bindings.cancel.matches(&k) {
+        return if running {
+            KeyAction::Cancel
+        } else {
+            KeyAction::None
+        };
+    }
+    if bindings.undo.matches(&k) {
+        if let Some((s, i)) = crate::undo::undo(undo_state, input, *cursor_idx) {
+            *input = s;
+            *cursor_idx = i;
+        }
+        return KeyAction::None;
+    }
+    if bindings.redo.matches(&k) {
+        if let Some((s, i)) = crate::undo::redo(undo_state, input, *cursor_idx) {
+            *input = s;
+            *cursor_idx = i;
+        }
+        return KeyAction::None;
+    }
+    // Swallow any remaining Ctrl+key that didn't match a binding.
+    if k.modifiers.contains(KeyModifiers::CONTROL) {
+        return KeyAction::None;
     }
     match k.code {
         KeyCode::BackTab => {
@@ -429,23 +396,6 @@ pub(crate) fn handle_key(
             // typing, regular `I` insertion resumes.
             if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {
                 return KeyAction::EnterPlanEdit;
-            }
-            // Fallback quit for terminals/crossterm configs that deliver Ctrl+D
-            // (EOT, 0x04) as a raw control char without the CONTROL modifier
-            // flag (the Ctrl-block match above would miss it).
-            if c == '\u{4}' {
-                return KeyAction::Quit;
-            }
-            // Raw ETX (Ctrl+C, 0x03) delivered without the CONTROL modifier
-            // flag: interrupt the running task if one is active (mirrors the
-            // Ctrl-block handling above); otherwise swallow it so it is not
-            // inserted as a literal control char into the input buffer.
-            if c == '\u{3}' {
-                return if running {
-                    KeyAction::Cancel
-                } else {
-                    KeyAction::None
-                };
             }
             if c == '$' {
                 *skill_menu = Some(SkillMenu::new(discover_skills()));

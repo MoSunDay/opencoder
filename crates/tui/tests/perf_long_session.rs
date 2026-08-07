@@ -60,7 +60,7 @@ fn time_build_and_slice(n: usize) -> (u128, u128) {
     let chat = build_large_chat(n);
 
     let t0 = Instant::now();
-    let cache = ViewportCache::build(&chat, 80, 0);
+    let cache = ViewportCache::build(&chat, 80, 0, 0);
     let build_ms = t0.elapsed().as_millis();
 
     // Probe the middle of the content so the binary search lands on a non-zero
@@ -155,8 +155,8 @@ fn time_per_frame_loop(cache: &ViewportCache, iters: usize) -> u128 {
 fn per_frame_cost_bounded_by_visible_h_not_block_count() {
     let chat_1k = build_large_chat(1_000);
     let chat_10k = build_large_chat(10_000);
-    let cache_1k = ViewportCache::build(&chat_1k, 80, 0);
-    let cache_10k = ViewportCache::build(&chat_10k, 80, 0);
+    let cache_1k = ViewportCache::build(&chat_1k, 80, 0, 0);
+    let cache_10k = ViewportCache::build(&chat_10k, 80, 0, 0);
 
     let total_1k = time_per_frame_loop(&cache_1k, 100);
     let total_10k = time_per_frame_loop(&cache_10k, 100);

@@ -29,10 +29,7 @@ fn shell_interpreters_with_c_flag_blocked() {
 
 #[test]
 fn shell_interpreters_with_s_flag_blocked() {
-    assert!(matches!(
-        classify("bash -s"),
-        BashVerdict::WriteBlocked(_)
-    ));
+    assert!(matches!(classify("bash -s"), BashVerdict::WriteBlocked(_)));
 }
 
 #[test]

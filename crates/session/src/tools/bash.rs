@@ -56,6 +56,21 @@ const _: () = assert!(BASH_TIMEOUT_DISPLAY_SECS < BASH_TIMEOUT_SECS);
 /// `]` is part of the full message, not the marker itself.
 pub(crate) const BASH_TIMEOUT_MARKER: &str = "[bash-timeout:";
 
+/// Lower bound a `timeout N;` override prefix may resolve to (seconds).
+/// Prevents the model from shrinking the foreground deadline below a sane
+/// floor. In production this is 120 s; under `cfg(test)` it drops to 1 s so the
+/// override path is exercisable without a 120 s wait (mirroring how
+/// [`BASH_TIMEOUT_SECS`] itself is cfg-gated).
+#[cfg(not(test))]
+pub(crate) const BASH_TIMEOUT_MIN_SECS: u64 = 120;
+#[cfg(test)]
+pub(crate) const BASH_TIMEOUT_MIN_SECS: u64 = 1;
+
+/// Upper bound a `timeout N;` override may resolve to (seconds). Caps an
+/// otherwise unbounded model-authored deadline. Identical in tests and prod.
+pub(crate) const BASH_TIMEOUT_MAX_SECS: u64 = 600;
+
+
 pub struct BashTool;
 
 /// Merge captured stdout and stderr into one string, prefixing stderr with a
@@ -75,6 +90,61 @@ fn merge_streams(stdout: &str, stderr: &str) -> String {
         combined.push_str(stderr);
     }
     combined
+}
+
+/// Parse a leading `timeout <secs>;` override prefix with a pure string scan
+/// (no regex). Recognises: the keyword `timeout`, one or more ASCII whitespace,
+/// one or more ASCII digits (value >= 1), optional whitespace, then a `;`. On a
+/// match returns `(parsed_seconds, command_after_the_semicolon)`; otherwise
+/// `None`.
+///
+/// Only a *prefix* is matched, so an embedded occurrence such as
+/// `echo "timeout 5"` never triggers. Time suffixes (`5m`, `2h`) are not
+/// supported -- the value is bare seconds, matching the unit of the internal
+/// deadline. The returned value is **unclamped**; callers apply [`clamp_timeout`]
+/// to keep it within `[BASH_TIMEOUT_MIN_SECS, BASH_TIMEOUT_MAX_SECS]`.
+fn parse_command_timeout(command: &str) -> Option<(u64, &str)> {
+    let s = command.strip_prefix("timeout")?;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    // Require >= 1 whitespace between the keyword and the number.
+    let ws_start = i;
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
+        i += 1;
+    }
+    if i == ws_start {
+        return None;
+    }
+    // Collect the digit run.
+    let digits_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == digits_start {
+        return None;
+    }
+    let digits = &s[digits_start..i];
+    // Skip optional whitespace between the number and the semicolon.
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t') {
+        i += 1;
+    }
+    // A semicolon must immediately follow (the override ends here).
+    if i >= bytes.len() || bytes[i] != b';' {
+        return None;
+    }
+    // `digits` is a non-empty ASCII-digit slice, so parsing cannot fail in
+    // practice -- guard defensively regardless.
+    let secs = digits.parse::<u64>().ok()?;
+    if secs == 0 {
+        return None;
+    }
+    Some((secs, &s[i + 1..]))
+}
+
+/// Clamp a model-authored timeout override into the allowed band
+/// `[BASH_TIMEOUT_MIN_SECS, BASH_TIMEOUT_MAX_SECS]`.
+fn clamp_timeout(raw: u64) -> u64 {
+    raw.clamp(BASH_TIMEOUT_MIN_SECS, BASH_TIMEOUT_MAX_SECS)
 }
 
 #[async_trait]
@@ -103,6 +173,24 @@ impl Tool for BashTool {
         if command.trim().is_empty() {
             return Ok(ToolOutput::err("empty command"));
         }
+        // Silent per-command timeout override: a leading `timeout <secs>;`
+        // prefix (parsed by pure string match -- NOT exposed in the schema)
+        // widens or narrows both the real foreground deadline and the number
+        // shown to the model, clamped to
+        // [BASH_TIMEOUT_MIN_SECS, BASH_TIMEOUT_MAX_SECS]. The prefix is stripped
+        // from the command actually run so GNU `timeout` is never invoked -- it
+        // would error with exit 125 / stderr noise when given only a duration
+        // and no subcommand.
+        let (timeout_secs, display_secs, run_cmd) = match parse_command_timeout(command) {
+            Some((raw, rest)) => {
+                if rest.trim().is_empty() {
+                    return Ok(ToolOutput::err("empty command"));
+                }
+                let secs = clamp_timeout(raw);
+                (secs, secs, rest)
+            }
+            None => (BASH_TIMEOUT_SECS, BASH_TIMEOUT_DISPLAY_SECS, command),
+        };
         let workdir = input
             .get("workdir")
             .and_then(|v| v.as_str())
@@ -111,7 +199,7 @@ impl Tool for BashTool {
 
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-lc")
-            .arg(command)
+            .arg(run_cmd)
             .current_dir(&workdir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -215,7 +303,7 @@ impl Tool for BashTool {
         // on bash either (see `runner::execute`) — bash has its own shorter
         // internal timeout, avoiding a race between the two deadlines.
         let exit_status = match tokio::time::timeout(
-            Duration::from_secs(BASH_TIMEOUT_SECS),
+            Duration::from_secs(timeout_secs),
             child.wait(),
         )
         .await
@@ -244,7 +332,7 @@ impl Tool for BashTool {
                     );
                     return Ok(ToolOutput {
                         content: format!(
-                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_DISPLAY_SECS}s \u{2014} moved to background]\n\
+                            "{BASH_TIMEOUT_MARKER} command timed out after {display_secs}s \u{2014} moved to background]\n\
                              pid: {pid}\noutput: {}\n\n{captured}",
                             output_path(pid).display()
                         ),
@@ -260,7 +348,7 @@ impl Tool for BashTool {
                     let _ = child.kill().await;
                     return Ok(ToolOutput {
                         content: format!(
-                            "{BASH_TIMEOUT_MARKER} command timed out after {BASH_TIMEOUT_DISPLAY_SECS}s \u{2014} killed]",
+                            "{BASH_TIMEOUT_MARKER} command timed out after {display_secs}s \u{2014} killed]",
                         ),
                         is_error: false,
                         images: vec![],
@@ -417,11 +505,8 @@ mod tests {
         // `sleep 30 &` spawns a process that inherits stdout; bash exits at
         // once (wait returns Ok) but the grandchild keeps the pipe open.
         let input = json!({"command": "echo done; sleep 30 &"});
-        let result = tokio::time::timeout(
-            Duration::from_secs(10),
-            tool.execute(input, &ctx()),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(10), tool.execute(input, &ctx())).await;
         assert!(
             result.is_ok(),
             "bash should return within 10s even when a grandchild holds the pipe"
@@ -490,7 +575,8 @@ mod tests {
         let input = json!({"command": "sleep 3"});
         let out = tool.execute(input, &ctx()).await.unwrap();
         assert!(
-            out.content.contains(&format!("after {BASH_TIMEOUT_DISPLAY_SECS}s")),
+            out.content
+                .contains(&format!("after {BASH_TIMEOUT_DISPLAY_SECS}s")),
             "handoff message must quote the display constant: {}",
             out.content
         );
@@ -572,4 +658,142 @@ mod tests {
             "timeout must NOT be exposed in the model-facing schema"
         );
     }
+    /// --- timeout-override prefix parsing ---
+
+    #[test]
+    fn parse_command_timeout_basic() {
+        let (secs, rest) = parse_command_timeout("timeout 5; echo hi").expect("basic prefix");
+        assert_eq!(secs, 5);
+        assert_eq!(rest, " echo hi");
+    }
+
+    #[test]
+    fn parse_command_timeout_extra_whitespace() {
+        // Multiple spaces after the keyword...
+        let (secs, rest) = parse_command_timeout("timeout   10; cmd").unwrap();
+        assert_eq!(secs, 10);
+        assert_eq!(rest, " cmd");
+        // ...and between the number and the semicolon.
+        let (secs2, rest2) = parse_command_timeout("timeout 7  ; cmd").unwrap();
+        assert_eq!(secs2, 7);
+        assert_eq!(rest2, " cmd");
+        // A tab counts as whitespace too.
+        let (secs3, _) = parse_command_timeout("timeout\t3; cmd").unwrap();
+        assert_eq!(secs3, 3);
+    }
+
+    #[test]
+    fn parse_command_timeout_large_number_unclamped() {
+        // parse returns the raw value; clamping is the caller's job.
+        let (secs, _) = parse_command_timeout("timeout 99999; cmd").unwrap();
+        assert_eq!(secs, 99999);
+    }
+
+    #[test]
+    fn parse_command_timeout_rejects_invalid() {
+        // no prefix at all
+        assert!(parse_command_timeout("echo hi").is_none());
+        // not a prefix (keyword appears mid-command)
+        assert!(parse_command_timeout("echo timeout 5; x").is_none());
+        // no whitespace after keyword
+        assert!(parse_command_timeout("timeout5; cmd").is_none());
+        // bare keyword, no number
+        assert!(parse_command_timeout("timeout; cmd").is_none());
+        // non-digit where a number is expected
+        assert!(parse_command_timeout("timeout abc; cmd").is_none());
+        // number but no terminating semicolon
+        assert!(parse_command_timeout("timeout 60").is_none());
+        // zero is not a valid override
+        assert!(parse_command_timeout("timeout 0; cmd").is_none());
+        // empty command
+        assert!(parse_command_timeout("").is_none());
+    }
+
+    #[test]
+    fn clamp_timeout_stays_in_band() {
+        // The cfg(test) MIN is 1 s (kept low so the integration tests below can
+        // exercise the override quickly); MAX is 600 s in both builds.
+        assert_eq!(clamp_timeout(0), BASH_TIMEOUT_MIN_SECS);
+        assert_eq!(clamp_timeout(BASH_TIMEOUT_MIN_SECS), BASH_TIMEOUT_MIN_SECS);
+        assert_eq!(clamp_timeout(300), 300);
+        assert_eq!(clamp_timeout(BASH_TIMEOUT_MAX_SECS), BASH_TIMEOUT_MAX_SECS);
+        assert_eq!(clamp_timeout(u64::MAX / 2), BASH_TIMEOUT_MAX_SECS);
+        // The *production* floor/ceiling (120/600) are honoured for explicit
+        // bounds, regardless of cfg:
+        assert_eq!(50u64.clamp(120, 600), 120);
+        assert_eq!(900u64.clamp(120, 600), 600);
+        assert_eq!(300u64.clamp(120, 600), 300);
+    }
+
+    /// `timeout 2; sleep 5` resolves to a 2 s deadline (override=2; the MIN is
+    /// 1 s under cfg(test)); `sleep 5` exceeds it, triggering the background
+    /// handoff. The message must report the *override* value (2 s), proving both
+    /// that the deadline was overridden and that the displayed number tracks `x`
+    /// rather than the default 1 s.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_timeout_override_triggers_handoff() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        let input = json!({"command": "timeout 2; sleep 5"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(
+            !out.is_error,
+            "timeout is not an error -- command still runs in background: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains(BASH_TIMEOUT_MARKER),
+            "expected timeout handoff marker: {}",
+            out.content
+        );
+        assert!(
+            out.content.contains("after 2s"),
+            "handoff message must report the overridden deadline (2s), got: {}",
+            out.content
+        );
+        kill_all();
+    }
+
+    /// `timeout 5; sleep 2; echo ok` resolves to a 5 s deadline. `sleep 2`
+    /// exceeds the *default* test deadline (1 s) yet finishes well inside the
+    /// 5 s override, so the command completes in the foreground: no handoff and
+    /// the command's own output ("ok") is returned. This proves the override
+    /// widens the deadline beyond the default rather than being a no-op.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn bash_timeout_override_widens_deadline() {
+        let _g = test_registry_mutex().lock().await;
+        let tool = BashTool;
+        let input = json!({"command": "timeout 5; sleep 2; echo ok"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(!out.is_error, "expected success, got: {}", out.content);
+        assert!(
+            out.content.contains("ok"),
+            "expected the command's own output, got: {}",
+            out.content
+        );
+        assert!(
+            !out.content.contains(BASH_TIMEOUT_MARKER),
+            "override (5s) should outlast sleep 2 -- no handoff: {}",
+            out.content
+        );
+    }
+
+    /// `timeout 7;` with nothing after it is an empty command once the prefix
+    /// is stripped -- it must hit the empty-command error path, not spawn an
+    /// empty shell.
+    #[tokio::test]
+    async fn bash_timeout_override_empty_rest_errors() {
+        let tool = BashTool;
+        let input = json!({"command": "timeout 7;"});
+        let out = tool.execute(input, &ctx()).await.unwrap();
+        assert!(out.is_error, "expected empty-command error: {}", out.content);
+        assert!(
+            out.content.contains("empty command"),
+            "expected the empty-command error message, got: {}",
+            out.content
+        );
+    }
+
 }

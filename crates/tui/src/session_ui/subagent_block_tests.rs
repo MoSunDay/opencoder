@@ -243,3 +243,23 @@ async fn subagent_block_running_maps_to_interrupted() {
         other => panic!("expected Subagent block, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn replay_subagent_block_carries_duration_from_task() {
+    let store: Arc<dyn opencoder_store::Store> = Arc::new(EmptyChildStore);
+    let mut task = task_record(SubagentStatus::Completed, Some("done"), Some(true));
+    task.started_at = 1_000_000;
+    task.completed_at = Some(1_018_000);
+    let block = build_subagent_block(&task, &store).await;
+    match block {
+        ChatBlock::Subagent {
+            started_at_ms,
+            elapsed_ms,
+            ..
+        } => {
+            assert_eq!(started_at_ms, 1_000_000);
+            assert_eq!(elapsed_ms, Some(18_000));
+        }
+        _ => panic!("expected Subagent block"),
+    }
+}

@@ -8,11 +8,9 @@ use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, MockChatClient};
-use opencoder_session::SessionState;
 use opencoder_session::resume::replay_cancelled_tasks;
-use opencoder_store::{
-    LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord,
-};
+use opencoder_session::SessionState;
+use opencoder_store::{LibsqlStore, SessionMeta, Store, SubagentStatus, SubagentTaskRecord};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]

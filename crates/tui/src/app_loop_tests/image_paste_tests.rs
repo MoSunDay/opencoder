@@ -18,6 +18,7 @@ fn paste(
         pasted,
         false,
         false,
+        false,
         &mut mm,
         &mut cm,
         input,

@@ -14,7 +14,7 @@ fn compaction_view() -> ChatView {
 #[test]
 fn collapsed_header_visible_gets_hit_rect() {
     let v = compaction_view();
-    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0, 0);
     let headers = v.compaction_headers();
     assert_eq!(headers.len(), 1);
     assert_eq!(headers[0].header_line_idx, 0);
@@ -33,7 +33,7 @@ fn expanded_header_row_unchanged() {
     let mut v = compaction_view();
     v.toggle_compaction_at(v.compaction_headers()[0].block_idx);
     let lines = v.flatten();
-    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0, 0);
     let mut hits = Vec::new();
     super::hit_records::record_compaction_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert_eq!(hits.len(), 1);
@@ -48,7 +48,7 @@ fn expanded_header_row_unchanged() {
 #[test]
 fn header_scrolled_above_is_not_hittable() {
     let v = compaction_view();
-    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0, 0);
     let mut hits = Vec::new();
     super::hit_records::record_compaction_hits(&v, &cache, 40, 1, 10, 1, 2, &mut hits);
     assert!(
@@ -63,7 +63,7 @@ fn no_compaction_blocks_means_no_hits() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::TextDelta("just text".into()));
     v.apply(&SessionEvent::Done);
-    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0, 0);
     let mut hits = Vec::new();
     super::hit_records::record_compaction_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     assert!(hits.is_empty());
@@ -73,7 +73,7 @@ fn no_compaction_blocks_means_no_hits() {
 #[test]
 fn hit_rect_matches_click_on_header_row() {
     let v = compaction_view();
-    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0);
+    let cache = crate::render_viewport::ViewportCache::build(&v, 40, 0, 0);
     let mut hits = Vec::new();
     super::hit_records::record_compaction_hits(&v, &cache, 40, 0, 10, 1, 2, &mut hits);
     let rect = hits[0].rect;

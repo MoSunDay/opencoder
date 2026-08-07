@@ -51,6 +51,8 @@ pub enum ChatBlock {
         header: Line<'static>,
         output: Vec<Line<'static>>,
         collapsed: bool,
+        started_at_ms: i64,
+        elapsed_ms: Option<u64>,
     },
     /// Inline image attachment rendered as half-block ASCII art.
     /// `filename` is the display name; `rendered` is the pre-computed
@@ -73,6 +75,8 @@ pub enum ChatBlock {
         ok: bool,
         cancelled: bool,
         summary: String,
+        started_at_ms: i64,
+        elapsed_ms: Option<u64>,
     },
     /// Read-only plan card shown after plan→act handoff. `raw` holds the
     /// original markdown source so it can be edited in plan mode; `rendered`

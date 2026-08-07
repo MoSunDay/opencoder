@@ -312,7 +312,11 @@ async fn doom_loop_guard_terminates_act_phase() {
     let result = drive(&mut session, &reg, &mut on_event).await;
     // Doom-loop during ACT returns Err, aborting the drive entirely.
     // Verify must NOT have been called (the "yes" script remains unconsumed).
-    assert!(result.is_err(), "doom-loop should abort drive, got {:?}", result.ok());
+    assert!(
+        result.is_err(),
+        "doom-loop should abort drive, got {:?}",
+        result.ok()
+    );
 }
 
 #[tokio::test]

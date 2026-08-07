@@ -140,13 +140,21 @@ async fn hard_cancel_midstream_no_empty_assistant() {
         .messages
         .iter()
         .filter(|m| m.role == Role::Assistant)
-        .find(|m| m.blocks.iter().all(|b| matches!(b, ContentBlock::Text { text } if text.trim().is_empty()))
-            || m.blocks.is_empty());
+        .find(|m| {
+            m.blocks
+                .iter()
+                .all(|b| matches!(b, ContentBlock::Text { text } if text.trim().is_empty()))
+                || m.blocks.is_empty()
+        });
     assert!(
         empty_assistant.is_none(),
         "hard-cancel mid-stream must not persist an empty assistant message (D2 bug); \
          messages: {:?}",
-        session.messages.iter().map(|m| (m.role, m.blocks.len())).collect::<Vec<_>>()
+        session
+            .messages
+            .iter()
+            .map(|m| (m.role, m.blocks.len()))
+            .collect::<Vec<_>>()
     );
 
     // Stronger: since the only LLM call was interrupted before completing,
@@ -155,6 +163,10 @@ async fn hard_cancel_midstream_no_empty_assistant() {
     assert!(
         !any_assistant,
         "an interrupted LLM stream must leave no assistant message behind; got {} assistant msgs",
-        session.messages.iter().filter(|m| m.role == Role::Assistant).count()
+        session
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .count()
     );
 }

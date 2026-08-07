@@ -6,10 +6,13 @@ use std::path::{Path, PathBuf};
 
 mod autopilot;
 mod env;
+mod keymap;
 mod merge;
 
 pub use autopilot::AutoPilotConfig;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
+pub use keymap::KeymapConfig;
+pub use keymap::KEYMAP_INFO;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -119,6 +122,9 @@ pub struct Config {
     /// survives SSH disconnect). Off by default; requires tmux installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_tmux_session: Option<bool>,
+    /// User-configurable keyboard shortcuts (see [`KEYMAP_INFO`]).
+    #[serde(default)]
+    pub keymap: KeymapConfig,
 }
 
 fn default_interleaved_thinking() -> Option<bool> {
@@ -342,6 +348,7 @@ impl Default for Config {
             subagent_drain_secs: None,
             autopilot: AutoPilotConfig::default(),
             enable_tmux_session: None,
+            keymap: KeymapConfig::default(),
         }
     }
 }

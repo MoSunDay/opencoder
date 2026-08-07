@@ -77,7 +77,10 @@ async fn compaction_persists_surviving_images_to_store() {
     assert!(outcome.is_ok(), "compaction must succeed: {outcome:?}");
 
     // The in-memory summary carries the image (existing contract)...
-    assert!(s.messages[0].has_image(), "summary message carries the preserved image");
+    assert!(
+        s.messages[0].has_image(),
+        "summary message carries the preserved image"
+    );
 
     // ...AND the store row now persists the image URLs + compaction metadata,
     // so resume can rebuild the summary without reloading the head.
@@ -104,7 +107,11 @@ async fn compaction_persists_surviving_images_to_store() {
     .await
     .expect("resume must succeed");
     // summary(1) + tail u2,a2 = 3. The compacted head (u1,a1) is NOT reloaded.
-    assert_eq!(resumed.messages.len(), 3, "resume loads only summary + tail");
+    assert_eq!(
+        resumed.messages.len(),
+        3,
+        "resume loads only summary + tail"
+    );
     let urls: Vec<String> = resumed.messages[0]
         .blocks
         .iter()

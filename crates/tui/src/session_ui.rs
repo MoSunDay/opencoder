@@ -470,3 +470,6 @@ mod subagent_block_tests;
 #[cfg(test)]
 mod image_prefetch_tests;
 
+#[cfg(test)]
+mod replay_duration_tests;
+

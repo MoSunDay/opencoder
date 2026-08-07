@@ -12,6 +12,7 @@ use ratatui::Frame;
 use ratatui::Terminal;
 
 use crate::cache_salt_menu::CacheSaltMenu;
+use crate::keymap_menu::KeymapMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
@@ -27,22 +28,6 @@ pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
 /// Context baseline subtracted from used/window so small sessions read ~0%.
 const CONTEXT_BASELINE: u64 = 4_000;
-
-/// Format a run-duration in ms as a short status-bar label: `42s`, `3m5s`, `1h5m30s`.
-/// Always shows the seconds component; largest unit is hours.
-fn format_run_duration(ms: u64) -> String {
-    let secs = ms / 1000;
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    if h > 0 {
-        format!("{h}h{m}m{s}s")
-    } else if m > 0 {
-        format!("{m}m{s}s")
-    } else {
-        format!("{s}s")
-    }
-}
 
 /// Braille spinner frames shown while a task is running.
 const SPINNER: [&str; 10] = [
@@ -130,12 +115,14 @@ pub(crate) fn render<B: Backend>(
     follow: bool,
     queue_scroll: &mut u32,
     anim_tick: u32,
+    now_ms: i64,
     mode_flash: Option<&str>,
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
+    keymap_menu: Option<&KeymapMenu>,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
     selection: Option<crate::selection::SelRange>,
@@ -220,6 +207,7 @@ pub(crate) fn render<B: Backend>(
                 scroll,
                 follow,
                 anim_tick,
+                now_ms,
                 &mut hits.body,
                 &mut hits.jump_btn,
                 &mut hits.top_btn,
@@ -306,6 +294,9 @@ pub(crate) fn render<B: Backend>(
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
         }
+        if let Some(km) = keymap_menu {
+            crate::keymap_menu::render_keymap_popup(f, area, km);
+        }
         if ap_enabled {
             render_status_chip(f, composer_area, "AP", theme::local_color());
         }
@@ -340,6 +331,7 @@ fn render_body(
     scroll: &mut u32,
     follow: bool,
     anim_tick: u32,
+    now_ms: i64,
     body_out: &mut Option<Rect>,
     jump_btn: &mut Option<Rect>,
     top_btn: &mut Option<Rect>,
@@ -379,7 +371,7 @@ fn render_body(
     // cost O(visible_h) instead of O(total_content).
     let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
     if needs_rebuild {
-        *viewport = Some(ViewportCache::build(chat, text_w, anim_tick));
+        *viewport = Some(ViewportCache::build(chat, text_w, anim_tick, now_ms));
     }
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
@@ -740,19 +732,6 @@ fn render_status(
         Style::default().fg(ctx_color),
     ));
 
-    // Run-duration timer: shown on the right of ctx when a turn has been
-    // running (run_ms > 0).
-    if run_ms > 0 {
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            format_run_duration(run_ms),
-            Style::default().fg(if running {
-                theme::warn_color()
-            } else {
-                theme::muted()
-            }),
-        ));
-    }
     spans.push(Span::raw("  "));
 
     if running {
@@ -765,6 +744,21 @@ fn render_status(
         spans.push(Span::styled(
             format!("\u{00b7} {status}"),
             Style::default().fg(theme::muted()),
+        ));
+    }
+
+    // Run-duration timer at the tail of the status line (after status text).
+    // Shown only while a turn is running (run_ms > 0); it is reset to zero
+    // when the task ends (see `tick_clock`), so it drops from the bar once idle.
+    if run_ms > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            fmtmod::format_run_duration(run_ms),
+            Style::default().fg(if running {
+                theme::warn_color()
+            } else {
+                theme::muted()
+            }),
         ));
     }
 

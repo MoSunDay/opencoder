@@ -121,8 +121,7 @@ pub async fn apply(
                 // Total store messages that predate the clear (the history to
                 // trim on resume). Accounts for any in-memory-only summary.
                 let store_msg_count = session.store_message_count();
-                let preserved_images =
-                    crate::compaction::collect_head_images(&session.messages);
+                let preserved_images = crate::compaction::collect_head_images(&session.messages);
                 let mut marker = fresh_start_message();
                 for url in &preserved_images {
                     marker.blocks.push(ContentBlock::Image {
@@ -133,8 +132,7 @@ pub async fn apply(
                 session.messages = vec![marker];
                 // Record the boundary so resume reconstructs the fresh marker,
                 // not the full cleared history.
-                session
-                    .after_handoff(store_msg_count as i64, CLEAR_CONTEXT_SENTINEL.to_string());
+                session.after_handoff(store_msg_count as i64, CLEAR_CONTEXT_SENTINEL.to_string());
             }
 
             // Clear context always switches to act.
@@ -465,8 +463,7 @@ mod tests {
             "TranscriptReset emitted"
         );
         assert!(
-            !evs
-                .iter()
+            !evs.iter()
                 .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
             "no PlanHandoff when there is no plan"
         );
@@ -511,8 +508,7 @@ mod tests {
         // Persisted skill cleared -- the exact regression this guards.
         let persisted = store.get_session("sess-ctrl").await.unwrap().unwrap();
         assert_eq!(
-            persisted.skill,
-            None,
+            persisted.skill, None,
             "store skill must be NULL after clear-context (resume must not reload it)"
         );
     }

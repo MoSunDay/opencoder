@@ -65,12 +65,7 @@ impl Store for FailingUpdateStore {
     async fn pending_inputs(&self, sid: &str, d: Delivery) -> Result<Vec<SessionInput>> {
         self.inner.pending_inputs(sid, d).await
     }
-    async fn promote_inputs(
-        &self,
-        sid: &str,
-        up_to: i64,
-        d: Delivery,
-    ) -> Result<Vec<i64>> {
+    async fn promote_inputs(&self, sid: &str, up_to: i64, d: Delivery) -> Result<Vec<i64>> {
         self.inner.promote_inputs(sid, up_to, d).await
     }
     async fn promote_next_queued(&self, sid: &str) -> Result<Option<i64>> {
@@ -123,18 +118,19 @@ async fn compact_returns_err_when_store_rejects_metadata_persistence() {
     let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingUpdateStore { inner });
 
-    let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
-        LlmEvent::Completed {
-            text: "conversation summary".into(),
-            tool_calls: Vec::<CompletedToolCall>::new(),
-            usage: Some(Usage {
-                input_tokens: 5,
-                output_tokens: 3,
-                total_tokens: 8,
-                ..Default::default()
-            }),
-        },
-    ]));
+    let mock: Arc<dyn ChatStream> =
+        Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "conversation summary".into(),
+                tool_calls: Vec::<CompletedToolCall>::new(),
+                usage: Some(Usage {
+                    input_tokens: 5,
+                    output_tokens: 3,
+                    total_tokens: 8,
+                    ..Default::default()
+                }),
+            }]),
+        );
 
     let agent = resolve_agent("act").expect("act agent resolves");
     let mut s = SessionState::new(

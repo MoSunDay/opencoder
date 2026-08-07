@@ -111,9 +111,15 @@ async fn hard_abort_during_subagent_marks_task_cancelled() {
 
     let agent = resolve_agent("act").unwrap();
     let cancel = CancellationToken::new();
-    let mut session = SessionState::new("hard-abort-sub", agent, config(), mock, std::env::temp_dir())
-        .with_cancel(cancel.clone())
-        .with_store(store.clone());
+    let mut session = SessionState::new(
+        "hard-abort-sub",
+        agent,
+        config(),
+        mock,
+        std::env::temp_dir(),
+    )
+    .with_cancel(cancel.clone())
+    .with_store(store.clone());
     let child_cancels = session.child_cancels.clone();
     let child_turn_cancels = session.child_turn_cancels.clone();
     let session_id = session.id.clone();
@@ -160,10 +166,7 @@ async fn hard_abort_during_subagent_marks_task_cancelled() {
         let saw_interrupted = evs
             .iter()
             .any(|e| matches!(e, SessionEvent::Status(msg) if msg == "interrupted"));
-        assert!(
-            saw_interrupted,
-            "expected Status(interrupted) after cancel"
-        );
+        assert!(saw_interrupted, "expected Status(interrupted) after cancel");
     }
 
     // Registry entries must be pruned by the cleanup path.
@@ -198,10 +201,15 @@ async fn continue_after_hard_abort_does_not_hang() {
 
     let agent = resolve_agent("act").unwrap();
     let cancel = CancellationToken::new();
-    let mut session =
-        SessionState::new("hard-abort-continue", agent, config(), mock, std::env::temp_dir())
-            .with_cancel(cancel.clone())
-            .with_store(store.clone());
+    let mut session = SessionState::new(
+        "hard-abort-continue",
+        agent,
+        config(),
+        mock,
+        std::env::temp_dir(),
+    )
+    .with_cancel(cancel.clone())
+    .with_store(store.clone());
     let session_id = session.id.clone();
 
     // ---- Run 1: dispatch a subagent, then hard-abort it mid-tool. ----
@@ -255,10 +263,7 @@ async fn continue_after_hard_abort_does_not_hang() {
     {
         let evs2 = events2.lock().unwrap();
         let saw_done = evs2.iter().any(|e| matches!(e, SessionEvent::Done));
-        assert!(
-            saw_done,
-            "expected Done event after continuing post-abort"
-        );
+        assert!(saw_done, "expected Done event after continuing post-abort");
     }
 
     // The old task must be terminal (not Running), so it never causes a 400.

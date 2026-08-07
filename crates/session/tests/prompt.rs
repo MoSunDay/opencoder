@@ -24,11 +24,7 @@ fn build_system_includes_agent_prompt_and_environment() {
 fn build_system_appends_skill_when_provided() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp");
-    let msg = build_system(
-        &agent,
-        dir,
-        Some("Always use tabs for indentation."),
-    );
+    let msg = build_system(&agent, dir, Some("Always use tabs for indentation."));
     let text = msg.text();
     assert!(text.contains("Active skill"));
     assert!(text.contains("Always use tabs"));

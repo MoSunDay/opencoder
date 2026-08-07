@@ -21,6 +21,7 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -63,6 +64,7 @@ fn shift_page_down_advances_toward_newest() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageDown, KeyModifiers::SHIFT),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -108,6 +110,7 @@ fn shift_page_up_floors_at_zero() {
     for _ in 0..2 {
         let action = handle_key(
             KeyEvent::new(KeyCode::PageUp, KeyModifiers::SHIFT),
+            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
             &mut input,
             &mut cursor,
             &history,
@@ -151,6 +154,7 @@ fn plain_page_up_still_scrolls_body() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,

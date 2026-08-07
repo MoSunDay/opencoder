@@ -102,6 +102,8 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                         ]),
                         output: Vec::new(),
                         collapsed: true,
+                        started_at_ms: 0,
+                        elapsed_ms: Some(0),
                     });
                 }
             }
@@ -151,6 +153,8 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                                 )),
                                 output: out,
                                 collapsed: true,
+                                started_at_ms: 0,
+                                elapsed_ms: Some(0),
                             });
                         }
                     }
@@ -281,6 +285,10 @@ pub(super) async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<
         ok,
         cancelled,
         summary,
+        started_at_ms: task.started_at,
+        elapsed_ms: task
+            .completed_at
+            .map(|c| ((c - task.started_at).max(0)) as u64),
     }
 }
 

@@ -46,7 +46,7 @@ impl ViewportCache {
     ///
     /// A `width` of 0 (e.g. terminal too narrow) yields an empty cache so
     /// callers can short-circuit without dividing by zero.
-    pub fn build(chat: &crate::chat::ChatView, width: u16, anim_tick: u32) -> Self {
+    pub fn build(chat: &crate::chat::ChatView, width: u16, anim_tick: u32, now_ms: i64) -> Self {
         if width == 0 {
             return ViewportCache {
                 lines: Vec::new(),
@@ -56,7 +56,7 @@ impl ViewportCache {
                 width: 0,
             };
         }
-        let lines = chat.flatten_with(anim_tick);
+        let lines = chat.flatten_with(anim_tick, now_ms);
         // cum_rows[i] = rows consumed by lines[0..i]; cum_rows[0] == 0.
         let mut cum_rows = Vec::with_capacity(lines.len() + 1);
         cum_rows.push(0);

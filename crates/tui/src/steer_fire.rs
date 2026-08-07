@@ -289,6 +289,8 @@ mod tests {
             ok: false,
             cancelled: false,
             summary: String::new(),
+            started_at_ms: 0,
+            elapsed_ms: None,
         });
 
         let action = fire_steer_interrupt(

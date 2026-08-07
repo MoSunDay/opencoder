@@ -67,7 +67,7 @@ fn header_line_indices_aligned_with_flatten_while_withheld() {
         "preamble must be withheld"
     );
     assert_eq!(v.subagents_running, 2);
-    let flat = v.flatten_with(0);
+    let flat = v.flatten_with(0, 0);
 
     let line_text =
         |idx: usize| -> String { flat[idx].spans.iter().map(|s| s.content.clone()).collect() };
@@ -170,6 +170,8 @@ fn ap_chip_visible_only_when_autopilot_enabled() {
             true,
             &mut queue_scroll,
             0,
+            0,
+            None,
             None,
             None,
             None,
@@ -216,6 +218,8 @@ fn ap_chip_visible_only_when_autopilot_enabled() {
             true,
             &mut queue_scroll,
             0,
+            0,
+            None,
             None,
             None,
             None,

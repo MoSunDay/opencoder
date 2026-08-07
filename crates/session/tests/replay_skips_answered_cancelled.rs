@@ -120,10 +120,7 @@ async fn replay_skips_cancelled_task_with_existing_tool_result() {
         created_at: 0,
         synthetic: false,
     };
-    store
-        .append_message("parent-to", &tool_msg)
-        .await
-        .unwrap();
+    store.append_message("parent-to", &tool_msg).await.unwrap();
 
     store
         .append_message("child-to", &Message::user("cu", "explore"))

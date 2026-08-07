@@ -178,8 +178,12 @@ impl SessionEvent {
             }
             SessionEvent::PlanHandoff(plan) => serde_json::json!({ "plan": plan }),
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
-            SessionEvent::QueueConsumed { seq, text } => serde_json::json!({ "seq": seq, "text": text }),
-            SessionEvent::SteerConsumed { seq, text } => serde_json::json!({ "seq": seq, "text": text }),
+            SessionEvent::QueueConsumed { seq, text } => {
+                serde_json::json!({ "seq": seq, "text": text })
+            }
+            SessionEvent::SteerConsumed { seq, text } => {
+                serde_json::json!({ "seq": seq, "text": text })
+            }
         }
     }
 
@@ -248,11 +252,19 @@ impl SessionEvent {
             }
             "queue_consumed" => SessionEvent::QueueConsumed {
                 seq: data.get("seq")?.as_i64()?,
-                text: data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                text: data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             },
             "steer_consumed" => SessionEvent::SteerConsumed {
                 seq: data.get("seq")?.as_i64()?,
-                text: data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                text: data
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             },
             "autopilot" => {
                 let iteration = data.get("iteration")?.as_u64()? as u32;
@@ -356,8 +368,14 @@ mod from_sse_tests {
             },
             SessionEvent::PlanHandoff("# plan".into()),
             SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
-            SessionEvent::QueueConsumed { seq: 7, text: "q".into() },
-            SessionEvent::SteerConsumed { seq: 9, text: "s".into() },
+            SessionEvent::QueueConsumed {
+                seq: 7,
+                text: "q".into(),
+            },
+            SessionEvent::SteerConsumed {
+                seq: 9,
+                text: "s".into(),
+            },
             SessionEvent::AutoPilot {
                 phase: ApPhase::Plan,
                 iteration: 0,

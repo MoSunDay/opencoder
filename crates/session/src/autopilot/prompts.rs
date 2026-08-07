@@ -15,8 +15,10 @@ pub fn continuation_prompt(goal: &str) -> String {
     )
 }
 
-/// Injected at the start of the ACT phase. Context is carried over from PLAN
-/// (no handoff reset) so the execution agent sees the full conversation.
+/// Fallback execute prompt for the ACT phase, injected only when the plan→act
+/// handoff finds no plan to focus the transcript. The normal ACT path resets
+/// the transcript via handoff (whose message carries execution directives) and
+/// does not inject this prompt.
 pub fn execute_prompt() -> String {
     "Autopilot ACT phase. Execute the plan you just produced using your tools. \
      Make real progress toward the goal. When you have done as much as you \

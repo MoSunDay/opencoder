@@ -31,6 +31,7 @@ pub(super) fn run_handle(
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         input,
         cursor_idx,
         &history,
@@ -73,6 +74,7 @@ pub(super) fn run_handle_disabled(
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         input,
         cursor_idx,
         &history,
@@ -114,6 +116,7 @@ pub(super) fn run_handle_subagent(
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         input,
         cursor_idx,
         &history,
@@ -154,6 +157,7 @@ pub(super) fn run_handle_menu(
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         input,
         cursor_idx,
         &history,

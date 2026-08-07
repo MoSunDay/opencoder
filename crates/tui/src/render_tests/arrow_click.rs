@@ -56,6 +56,8 @@ async fn render_then_click_arrow_targets_jump_view() {
             false, // not following -> arrow visible
             &mut queue_scroll,
             0,
+            0,
+            None,
             None,
             None,
             None,
@@ -144,6 +146,8 @@ async fn render_then_click_arrow_targets_jump_view() {
             false,
             &mut queue_scroll,
             0,
+            0,
+            None,
             None,
             None,
             None,

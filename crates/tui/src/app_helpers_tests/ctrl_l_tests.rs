@@ -4,6 +4,7 @@
 
 use crate::app_helpers::pre_key_intercept;
 use crate::chat::{ChatBlock, ChatView};
+use crate::keymap::KeyBindings;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_session::SessionEvent;
 
@@ -63,6 +64,7 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
     let mut needs_clear = false;
     let consumed = pre_key_intercept(
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
         &mut selection,
@@ -118,6 +120,7 @@ fn esc_exits_subagent_and_returns_to_follow_mode() {
     let mut needs_clear = false;
     let consumed = pre_key_intercept(
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
         &mut selection,
@@ -159,6 +162,7 @@ fn ctrl_l_without_subagent_returns_to_follow_mode() {
     let mut needs_clear = false;
     let consumed = pre_key_intercept(
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+        &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
         &mut selection,

@@ -61,9 +61,8 @@ async fn resume_and_replay_replays_cancelled_task() {
     store.cancel_subagent_task("task-cancelled").await.unwrap();
 
     // Mock: the child's continuation produces a final answer.
-    let mock = Arc::new(
-        MockChatClient::new().push_script(vec![done_event("found 3 files: a, b, c")]),
-    );
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![done_event("found 3 files: a, b, c")]));
 
     let _session = resume_and_replay(
         store.clone(),
@@ -146,7 +145,10 @@ async fn resume_and_replay_mixed_running_and_cancelled() {
         .await
         .unwrap();
     store
-        .append_message("parent", &parent_task_turn(&["task-running", "task-cancelled"]))
+        .append_message(
+            "parent",
+            &parent_task_turn(&["task-running", "task-cancelled"]),
+        )
         .await
         .unwrap();
     store

@@ -62,7 +62,13 @@ async fn seed(store: &Arc<dyn Store>, id: &str) {
 }
 
 /// Admit a store-backed input (steer or queue) for `session_id`.
-async fn admit(store: &Arc<dyn Store>, session_id: &str, id: &str, prompt: &str, delivery: Delivery) {
+async fn admit(
+    store: &Arc<dyn Store>,
+    session_id: &str,
+    id: &str,
+    prompt: &str,
+    delivery: Delivery,
+) {
     store
         .admit_input(&SessionInput {
             seq: None,
@@ -166,13 +172,19 @@ async fn direct_prompt_tags_only_after_first() {
         second.starts_with("second requirement"),
         "unexpected second prompt: {second}"
     );
-    assert!(second.contains(TAG), "second prompt must carry tag: {second}");
+    assert!(
+        second.contains(TAG),
+        "second prompt must carry tag: {second}"
+    );
     assert_eq!(s.plan_input_count, 2);
 
     // The model saw the tag only from the second turn onward.
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "one LLM call per requirement");
-    assert!(!request_has_tag(&reqs[0]), "turn-1 request must not carry tag");
+    assert!(
+        !request_has_tag(&reqs[0]),
+        "turn-1 request must not carry tag"
+    );
     assert!(request_has_tag(&reqs[1]), "turn-2 request must carry tag");
 }
 
@@ -201,7 +213,11 @@ async fn steer_prompt_tagged_after_first() {
     assert_eq!(kickoff_text(&s), "kickoff");
     let promoted = promoted_user_texts(&s);
     assert_eq!(promoted.len(), 1, "exactly one steer promoted");
-    assert!(promoted[0].contains(TAG), "steer must be tagged: {}", promoted[0]);
+    assert!(
+        promoted[0].contains(TAG),
+        "steer must be tagged: {}",
+        promoted[0]
+    );
     assert_eq!(s.plan_input_count, 2);
 
     let reqs = mock.requests();
@@ -249,6 +265,9 @@ async fn queued_prompt_tagged_after_first() {
 
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "kickoff turn + queued turn");
-    assert!(!request_has_tag(&reqs[0]), "kickoff turn must not carry tag");
+    assert!(
+        !request_has_tag(&reqs[0]),
+        "kickoff turn must not carry tag"
+    );
     assert!(request_has_tag(&reqs[1]), "queued turn must carry tag");
 }

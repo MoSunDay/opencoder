@@ -112,7 +112,9 @@ impl ChatStream for TaskThenBlockStream {
                 // Parent follow-up after the timed-out subagent: complete so
                 // the run finishes instead of hanging.
                 tokio::spawn(async move {
-                    let _ = tx.send(text_done("subagent was interrupted, stopping")).await;
+                    let _ = tx
+                        .send(text_done("subagent was interrupted, stopping"))
+                        .await;
                 });
             }
         }
@@ -170,7 +172,9 @@ async fn subagent_timeout_reports_timeout_not_steer() {
         .find(|ev| matches!(ev, SessionEvent::SubagentEnd { .. }))
         .cloned();
     let summary = match end {
-        Some(SessionEvent::SubagentEnd { summary, cancelled, .. }) => {
+        Some(SessionEvent::SubagentEnd {
+            summary, cancelled, ..
+        }) => {
             assert!(cancelled, "SubagentEnd must be marked cancelled");
             summary
         }

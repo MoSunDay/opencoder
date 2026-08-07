@@ -67,6 +67,7 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
     // the plan-text editor.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -111,6 +112,7 @@ fn shift_i_in_act_mode_does_not_enter_plan_edit() {
     // Shift+I in act mode is a plain char insertion, not plan-edit entry.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -152,6 +154,7 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
     // Even in plan mode, Shift+I while running just inserts the char.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -193,6 +196,7 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
     // Once the user has started typing, Shift+I resumes normal insertion.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -234,6 +238,7 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
     // Lowercase 'i' is unaffected by the plan-edit intercept: plain insert.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -279,6 +284,7 @@ fn up_down_navigate_soft_wrapped_rows() {
     let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
     let res = handle_key(
         up,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -325,6 +331,7 @@ fn enter_produces_steer_when_subagent_focused() {
     // clears the input line (parent steer/queue untouched).
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,
@@ -369,6 +376,7 @@ fn enter_produces_steer_when_running_and_not_subagent_focused() {
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut cursor,
         &history,

@@ -204,7 +204,10 @@ mod tests {
         // First plan input (count 0) -> no read-only tag appended.
         record_compound(&mut s, "review the code", &[]).await;
         assert_eq!(s.messages.len(), 1);
-        assert!(!s.messages[0].synthetic, "text path records as real user input");
+        assert!(
+            !s.messages[0].synthetic,
+            "text path records as real user input"
+        );
         assert!(
             s.messages[0].text().contains("review the code"),
             "cleaned text recorded"

@@ -15,12 +15,12 @@ use crate::compaction;
 use crate::tools::registry as build_registry;
 use crate::SessionState;
 
+mod dedup;
 mod event;
 mod execute;
 mod llm_call;
 mod steer;
 mod subagent;
-mod dedup;
 
 pub use event::SessionEvent;
 use event::{Sink, DOOM_THRESHOLD};
@@ -28,8 +28,8 @@ use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
 use steer::{
-    claim_steers, drain_mode_step,
-    idle_drain, is_turn_cancelled, reset_turn_cancel, DrainModeAction, IdleAction,
+    claim_steers, drain_mode_step, idle_drain, is_turn_cancelled, reset_turn_cancel,
+    DrainModeAction, IdleAction,
 };
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
@@ -184,17 +184,18 @@ pub(crate) async fn run_loop(
             // can go idle without an LM call.
             let mut clear_sentinel = false;
             for (seq, p, imgs) in &steer_prompts {
-                on_event(SessionEvent::SteerConsumed { seq: *seq, text: p.clone() });
+                on_event(SessionEvent::SteerConsumed {
+                    seq: *seq,
+                    text: p.clone(),
+                });
                 // Defensive: a steered control command is applied immediately and
                 // NOT recorded as user text, so "/plan" never leaks to the LLM.
                 if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
                     crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
-                    clear_sentinel = matches!(
-                        cmd,
-                        crate::control_cmd::ControlCmd::ClearContext
-                    ) && crate::control_cmd::is_clear_context_handoff(
-                        session.handoff_plan.as_deref().unwrap_or(""),
-                    );
+                    clear_sentinel = matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
+                        && crate::control_cmd::is_clear_context_handoff(
+                            session.handoff_plan.as_deref().unwrap_or(""),
+                        );
                     // Compound (/plan review): record the rest as a real
                     // user message in the new mode.
                     if let Some(rest) = rest {
@@ -233,8 +234,14 @@ pub(crate) async fn run_loop(
         if skip && !steer_recorded {
             match idle_drain(session, &mut *on_event).await? {
                 IdleAction::Continue => continue,
-                IdleAction::SkipLlm => { skip_llm = true; continue; }
-                IdleAction::Done => { on_event(SessionEvent::Done); break; }
+                IdleAction::SkipLlm => {
+                    skip_llm = true;
+                    continue;
+                }
+                IdleAction::Done => {
+                    on_event(SessionEvent::Done);
+                    break;
+                }
             }
         }
 
@@ -348,8 +355,14 @@ pub(crate) async fn run_loop(
             // continues the outer loop for an LLM turn.
             match idle_drain(session, &mut *on_event).await? {
                 IdleAction::Continue => continue,
-                IdleAction::SkipLlm => { skip_llm = true; continue; }
-                IdleAction::Done => { on_event(SessionEvent::Done); break; }
+                IdleAction::SkipLlm => {
+                    skip_llm = true;
+                    continue;
+                }
+                IdleAction::Done => {
+                    on_event(SessionEvent::Done);
+                    break;
+                }
             }
         }
 
@@ -450,7 +463,11 @@ pub(crate) async fn run_loop(
             // Deduplicate consecutive bash-timeout results: only the first
             // timeout in a streak shows its full message; subsequent ones
             // reuse the first content (same PID, same output file).
-            dedup::dedup_consecutive_bash_timeouts(&tool_calls, &mut results, &mut bash_timeout_first);
+            dedup::dedup_consecutive_bash_timeouts(
+                &tool_calls,
+                &mut results,
+                &mut bash_timeout_first,
+            );
             // Tool-failure guard: track consecutive failures per tool name
             // and apply exponential backoff before continuing.
             {

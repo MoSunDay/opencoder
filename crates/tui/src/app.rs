@@ -88,6 +88,7 @@ pub(super) async fn run_app(
     let mut history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
     let mut running = false;
+    let mut prev_running = false;
     let mut run_elapsed_ms: u64 = 0;
     let mut last_clock = Instant::now();
     let mut cancelled = false;
@@ -117,6 +118,8 @@ pub(super) async fn run_app(
     let mut command_menu: Option<CommandMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
+    let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
+    let mut keymap = crate::keymap::KeyBindings::from_config(&config);
     let mut active_skill: Option<String> = None;
     let mut active_skill_body: Option<String> = None;
     let mut anim_tick: u32 = 0;
@@ -186,7 +189,7 @@ pub(super) async fn run_app(
     // Idle-resize safety net: on kernel-size mismatch (lost Resize — tmux/fast drag) force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
     loop {
-        app_loop::tick_clock(running, &mut last_clock, &mut run_elapsed_ms);
+        app_loop::tick_clock(running, &mut prev_running, &mut last_clock, &mut run_elapsed_ms);
         let app_loop::DisplayState {
             agent_name,
             status,
@@ -238,12 +241,14 @@ pub(super) async fn run_app(
                     follow,
                     &mut queue_scroll,
                     anim_tick,
+                    opencoder_core::message::now_ms(),
                     &mode_flash,
                     skill_menu.as_ref(),
                     task_picker.as_ref(),
                     command_menu.as_ref(),
                     model_menu.as_ref(),
                     cache_salt_menu.as_ref(),
+                    keymap_menu.as_ref(),
                     &mut hits,
                     &mut viewport,
                     selection,
@@ -341,32 +346,20 @@ pub(super) async fn run_app(
                             }
                             continue;
                         }
-                        // `/config` modal: intercept all keys while open.
                         if model_menu.is_some() {
-                            match app_loop::handle_model_outcome(
-                                &mut model_menu, k, &mut client, &mut config, &mut model_label,
-                                &mut compaction_threshold, &mut context_limit, &mut frame_ms,
-                                &mut frame_ticker, &cmd_tx, &mut chat, &workdir,
-                            )
-                            .await
-                            {
-                                app_loop::LoopFlow::Quit => break,
-                                app_loop::LoopFlow::Proceed => {}
-                                app_loop::LoopFlow::InstallTools => {}
-                                app_loop::LoopFlow::Redraw => continue,
+                            match app_loop::handle_model_outcome(&mut model_menu, k, &mut client, &mut config, &mut model_label,
+                                &mut compaction_threshold, &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx, &mut chat, &workdir).await {
+                                app_loop::LoopFlow::Quit => break, app_loop::LoopFlow::Redraw => continue, _ => {}
                             }
                             continue;
                         }
-                        // `/cache_salt` read-only panel: intercept all keys while open.
                         if cache_salt_menu.is_some() {
-                            match handle_cache_salt_key(&mut cache_salt_menu, k) {
-                                CacheSaltOutcome::Quit => {
-                                    let _ = cmd_tx.send(UiCmd::Quit).await;
-                                    break;
-                                }
-                                CacheSaltOutcome::Cancel | CacheSaltOutcome::Idle => {}
-                            }
+                            if matches!(handle_cache_salt_key(&mut cache_salt_menu, k), CacheSaltOutcome::Quit) { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                             continue;
+                        }
+                        if keymap_menu.is_some() {
+                            if let app_loop::LoopFlow::Quit = app_loop::handle_keymap_outcome(&mut keymap_menu, k, &mut config, &mut keymap, &workdir, &cmd_tx).await { break }
+                            dirty = true; render_pending = true; continue;
                         }
                         // `/` command picker: intercept all keys while open.
                         if command_menu.is_some() {
@@ -374,7 +367,7 @@ pub(super) async fn run_app(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
                                 &session_id, &mut task_picker, &mut model_menu,
-                                &mut cache_salt_menu, &agent_name,
+                                &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
                                 &mut mode_flash, anim_tick, &mut sys_tokens,
@@ -396,6 +389,7 @@ pub(super) async fn run_app(
                         let mut needs_clear = false;
                         if pre_key_intercept(
                             k,
+                            &keymap,
                             &mut subagent_focus,
                             &mut follow,
                             &mut selection,
@@ -415,6 +409,7 @@ pub(super) async fn run_app(
                         }
                         match handle_key(
                             k,
+                            &keymap,
                             &mut input,
                             &mut cursor_idx,
                             &history,
@@ -454,7 +449,7 @@ pub(super) async fn run_app(
                                 // to re-arm. Shift+Tab after the plan turn then keeps the plan
                                 // and starts the task instead of plain-swapping.
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap: display-only
+                                if let Some(km) = app_loop::try_keymap_command(&clean, &config) { keymap_menu = Some(km); dirty = true; render_pending = true; } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {
@@ -734,7 +729,7 @@ pub(super) async fn run_app(
                         }
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
-                            &pasted, task_picker.is_some(), cache_salt_menu.is_some(),
+                            &pasted, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(),
                             &mut model_menu, &mut command_menu, &mut input,
                             &mut cursor_idx, &mut pending_images, &mut img_asm,
                             &mut chat, &workdir,

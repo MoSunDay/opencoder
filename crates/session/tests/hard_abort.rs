@@ -120,7 +120,9 @@ async fn cancel_hard_aborts_a_running_tool() {
         .iter()
         .flat_map(|m| m.blocks.iter())
         .filter_map(|b| match b {
-            ContentBlock::ToolUse { id, .. } if !answered.contains(id.as_str()) => Some(id.as_str()),
+            ContentBlock::ToolUse { id, .. } if !answered.contains(id.as_str()) => {
+                Some(id.as_str())
+            }
             _ => None,
         })
         .collect();

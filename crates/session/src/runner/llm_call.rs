@@ -226,10 +226,7 @@ mod tests {
             events: std::sync::Mutex::new(Some(vec![
                 LlmEvent::TextDelta("partial ".into()),
                 LlmEvent::ReasoningDelta("dead-thought".into()),
-                LlmEvent::Retrying {
-                    attempt: 1,
-                    max: 3,
-                },
+                LlmEvent::Retrying { attempt: 1, max: 3 },
                 LlmEvent::TextDelta("final".into()),
                 LlmEvent::ReasoningDelta("live-thought".into()),
                 LlmEvent::Completed {

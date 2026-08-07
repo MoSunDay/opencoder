@@ -192,10 +192,9 @@ async fn hard_cancel_mixed_batch_records_non_task_result_then_continue_is_wellfo
 
     let agent = resolve_agent("act").unwrap();
     let cancel = CancellationToken::new();
-    let mut session =
-        SessionState::new("mixed-abort", agent, config(), mock, std::env::temp_dir())
-            .with_cancel(cancel.clone())
-            .with_store(store.clone());
+    let mut session = SessionState::new("mixed-abort", agent, config(), mock, std::env::temp_dir())
+        .with_cancel(cancel.clone())
+        .with_store(store.clone());
     let session_id = session.id.clone();
 
     // Run 1: dispatch [task, bash sleep 30], cancel hard once the child is
@@ -295,9 +294,14 @@ async fn in_process_continue_reconciles_preexisting_dangling_non_task() {
     let mock: Arc<dyn ChatStream> = mock;
 
     let agent = resolve_agent("act").unwrap();
-    let mut session =
-        SessionState::new("dangling-reconcile", agent, config(), mock, std::env::temp_dir())
-            .with_store(store.clone());
+    let mut session = SessionState::new(
+        "dangling-reconcile",
+        agent,
+        config(),
+        mock,
+        std::env::temp_dir(),
+    )
+    .with_store(store.clone());
 
     // Hand-build a transcript with a dangling non-task tool_use — the exact
     // state a mid-batch hard cancel used to leave behind (tool message
@@ -344,7 +348,10 @@ async fn in_process_continue_reconciles_preexisting_dangling_non_task() {
     // transcript (index 2: user, assistant(tool_use), tool(error)), i.e.
     // right before the new user turn.
     let synth = &session.messages[2];
-    assert!(synth.synthetic, "synthesized tool message must be flagged synthetic");
+    assert!(
+        synth.synthetic,
+        "synthesized tool message must be flagged synthetic"
+    );
     assert_eq!(synth.role, opencoder_core::Role::Tool);
     let orphan_result = synth.blocks.iter().any(|b| {
         matches!(
@@ -356,7 +363,10 @@ async fn in_process_continue_reconciles_preexisting_dangling_non_task() {
             } if tool_use_id == "call_orphan"
         )
     });
-    assert!(orphan_result, "expected synthetic error ToolResult for call_orphan");
+    assert!(
+        orphan_result,
+        "expected synthetic error ToolResult for call_orphan"
+    );
 
     // And the mock must never have been asked to produce a request carrying an
     // unanswered tool_call (the transcript the provider would reject).

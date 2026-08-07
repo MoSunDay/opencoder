@@ -112,6 +112,8 @@ mod tests {
             ok: !done,
             cancelled: false,
             summary: String::new(),
+            started_at_ms: 0,
+            elapsed_ms: None,
         }
     }
 

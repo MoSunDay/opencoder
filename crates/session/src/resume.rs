@@ -52,7 +52,9 @@ pub async fn resume(
     //    plan->act transition with small data; no-compaction has nothing to skip.
     let mut messages: Vec<Message> =
         if meta.handoff_seq.is_none() && matches!(meta.summary_seq, Some(sk) if sk > 0) {
-            store.load_messages_after(id, meta.summary_seq.unwrap()).await?
+            store
+                .load_messages_after(id, meta.summary_seq.unwrap())
+                .await?
         } else {
             store.load_messages(id).await?
         };
@@ -168,7 +170,11 @@ pub async fn resume(
     let (summary, summary_seq, summary_images) = if meta.handoff_seq.is_some() {
         (None, None, Vec::new())
     } else {
-        (meta.summary.clone(), meta.summary_seq, meta.summary_images.clone())
+        (
+            meta.summary.clone(),
+            meta.summary_seq,
+            meta.summary_images.clone(),
+        )
     };
 
     let s = SessionState {
@@ -225,7 +231,12 @@ pub async fn resume_and_replay(
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter(|t| matches!(t.status, SubagentStatus::Running | SubagentStatus::Cancelled))
+        .filter(|t| {
+            matches!(
+                t.status,
+                SubagentStatus::Running | SubagentStatus::Cancelled
+            )
+        })
         .collect();
 
     // Replay each non-terminal child (Running or Cancelled), collecting results to backfill in ONE Tool

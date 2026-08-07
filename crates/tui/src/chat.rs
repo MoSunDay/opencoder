@@ -32,6 +32,29 @@ mod compaction_block;
 mod headers;
 pub(crate) use compaction_block::render_collapsible;
 
+/// Append a styled duration span to the header. Running → live warn-color
+/// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
+fn push_duration_span(
+    spans: &mut Vec<Span<'static>>,
+    started_at_ms: i64,
+    elapsed_ms: Option<u64>,
+    now_ms: i64,
+) {
+    let (dur_ms, color) = match elapsed_ms {
+        Some(e) if e >= 1000 => (e, theme::muted()),
+        Some(_) => return,
+        None => {
+            let live = ((now_ms - started_at_ms).max(0)) as u64;
+            (live, theme::warn_color())
+        }
+    };
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        crate::fmt::format_run_duration(dur_ms),
+        Style::default().fg(color),
+    ));
+}
+
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
         self.track_context(ev);
@@ -72,6 +95,8 @@ impl ChatView {
                     ]),
                     output: Vec::new(),
                     collapsed: true,
+                    started_at_ms: opencoder_core::message::now_ms(),
+                    elapsed_ms: None,
                 });
             }
             SessionEvent::ToolEnd {
@@ -95,13 +120,20 @@ impl ChatView {
                     .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
                     .collect();
-                if let Some(ChatBlock::Tool { output: o, .. }) = self
+                if let Some(ChatBlock::Tool {
+                    output: o,
+                    started_at_ms,
+                    elapsed_ms,
+                    ..
+                }) = self
                     .blocks
                     .iter_mut()
                     .rev()
                     .find(|b| matches!(b, ChatBlock::Tool { id: bid, .. } if bid == id))
                 {
                     o.extend(out);
+                    *elapsed_ms =
+                        Some(((opencoder_core::message::now_ms() - *started_at_ms).max(0)) as u64);
                 } else {
                     self.blocks.push(ChatBlock::Tool {
                         id: id.clone(),
@@ -111,6 +143,8 @@ impl ChatView {
                         )),
                         output: out,
                         collapsed: true,
+                        started_at_ms: opencoder_core::message::now_ms(),
+                        elapsed_ms: None,
                     });
                 }
                 // Render tool-returned images inline after the text output.
@@ -183,6 +217,8 @@ impl ChatView {
                     ok: false,
                     cancelled: false,
                     summary: String::new(),
+                    started_at_ms: opencoder_core::message::now_ms(),
+                    elapsed_ms: None,
                 });
             }
             SessionEvent::SubagentChild { id, ev } => {
@@ -393,7 +429,7 @@ impl ChatView {
     /// by `flatten()` (which passes `0`) for non-render callers (selection,
     /// scroll-counting, tests) — line counts are identical across tick values,
     /// so hit-rects and selection math stay aligned with the live render.
-    pub fn flatten_with(&self, anim_tick: u32) -> Vec<Line<'static>> {
+    pub fn flatten_with(&self, anim_tick: u32, now_ms: i64) -> Vec<Line<'static>> {
         let mut out = Vec::with_capacity(self.blocks.len() * 2);
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
@@ -457,6 +493,8 @@ impl ChatView {
                     header,
                     output,
                     collapsed,
+                    started_at_ms,
+                    elapsed_ms,
                     ..
                 } => {
                     if *collapsed {
@@ -468,6 +506,7 @@ impl ChatView {
                                 Style::default().fg(theme::muted()),
                             ));
                         }
+                        push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
                         out.push(Line::from(spans));
                     } else {
                         let mut spans = header.spans.clone();
@@ -485,6 +524,7 @@ impl ChatView {
                             " [\u{2191}]",
                             Style::default().fg(theme::muted()),
                         ));
+                        push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
                         out.push(Line::from(spans));
                         out.extend(output.iter().cloned());
                         out.push(Line::from(""));
@@ -533,6 +573,8 @@ impl ChatView {
                     ok,
                     cancelled,
                     summary,
+                    started_at_ms,
+                    elapsed_ms,
                     ..
                 } => {
                     let tool_count = view
@@ -571,8 +613,12 @@ impl ChatView {
                             format!("{mark} {status_word}, {tool_count} tools"),
                             Style::default().fg(mark_color),
                         ),
-                        Span::styled(" [\u{2192} view]", Style::default().fg(theme::muted())),
                     ];
+                    push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
+                    spans.push(Span::styled(
+                        " [\u{2192} view]",
+                        Style::default().fg(theme::muted()),
+                    ));
                     if *done && !summary.is_empty() {
                         spans.push(Span::styled(
                             format!("  {summary}"),
@@ -593,7 +639,7 @@ impl ChatView {
     /// Non-animated flatten for callers that don't render (selection extract,
     /// scroll-counting, tests). Line counts match `flatten_with` exactly.
     pub fn flatten(&self) -> Vec<Line<'static>> {
-        self.flatten_with(0)
+        self.flatten_with(0, opencoder_core::message::now_ms())
     }
 
     /// Whether the block at `idx` is currently withheld from the rendered
@@ -615,6 +661,8 @@ impl ChatView {
             cancelled: bcan,
             summary: smry,
             view,
+            started_at_ms,
+            elapsed_ms,
             ..
         }) = self
             .blocks
@@ -630,6 +678,8 @@ impl ChatView {
             // running but never claimed) would otherwise sit on the pending
             // panel forever — clear them with the block.
             view.steer_items.clear();
+            *elapsed_ms =
+                Some(((opencoder_core::message::now_ms() - *started_at_ms).max(0)) as u64);
         } else {
             let (mark, color) = if cancelled {
                 ("\u{2298}", theme::muted())

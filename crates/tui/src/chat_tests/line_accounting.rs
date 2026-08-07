@@ -52,6 +52,8 @@ fn tool_collapsed() -> ChatBlock {
         header: Line::from(Span::raw("bash")),
         output: vec![Line::from(Span::raw("hi"))],
         collapsed: true,
+        started_at_ms: 0,
+        elapsed_ms: None,
     }
 }
 
@@ -60,7 +62,7 @@ fn tool_collapsed() -> ChatBlock {
 /// to exactly the number of lines `flatten_with` emits. If any single block
 /// mis-counts, the total drifts and `expected != actual`.
 fn assert_line_accounting_matches(view: &ChatView) {
-    let actual = view.flatten_with(0).len();
+    let actual = view.flatten_with(0, 0).len();
 
     // Reconstruct the expected total by running the SAME per-block accounting
     // that collect_headers uses. We do it independently here so a divergence

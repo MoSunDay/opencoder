@@ -304,6 +304,7 @@ fn double_esc_while_running_cancels() {
 
     let first = handle_key(
         esc,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut idx,
         &history,
@@ -331,6 +332,7 @@ fn double_esc_while_running_cancels() {
 
     let second = handle_key(
         esc,
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
         &mut input,
         &mut idx,
         &history,

@@ -130,17 +130,33 @@ async fn resume_handoff_clears_stale_summary_seq() {
     .expect("resume must succeed");
 
     // The core fix: residual compaction metadata is zeroed in the SessionState.
-    assert_eq!(resumed.summary_seq, None, "stale summary_seq must be cleared on handoff resume");
+    assert_eq!(
+        resumed.summary_seq, None,
+        "stale summary_seq must be cleared on handoff resume"
+    );
     assert_eq!(resumed.summary, None, "stale summary text must be cleared");
-    assert!(resumed.summary_images.is_empty(), "stale summary_images must be cleared");
+    assert!(
+        resumed.summary_images.is_empty(),
+        "stale summary_images must be cleared"
+    );
     assert_eq!(resumed.handoff_seq, Some(4), "handoff boundary preserved");
 
     // Loading used the handoff path (full load + trim), not a corrupted OFFSET:
     // [plan_instruction, u3, a3] only -- the plan-mode head is gone.
-    assert_eq!(resumed.messages.len(), 3, "resumed transcript is plan instruction + tail only");
+    assert_eq!(
+        resumed.messages.len(),
+        3,
+        "resumed transcript is plan instruction + tail only"
+    );
     assert_eq!(resumed.messages[0].role, Role::User);
-    assert!(resumed.messages[0].synthetic, "first message is the handoff instruction");
-    assert!(resumed.messages[0].text().contains("## Plan"), "plan text present");
+    assert!(
+        resumed.messages[0].synthetic,
+        "first message is the handoff instruction"
+    );
+    assert!(
+        resumed.messages[0].text().contains("## Plan"),
+        "plan text present"
+    );
     assert_eq!(resumed.messages[1].id, "u3");
     assert_eq!(resumed.messages[2].id, "a3");
 }
@@ -195,8 +211,8 @@ async fn clear_summary_prevents_offset_corruption() {
     store.append_messages("s2", &all).await.unwrap();
 
     let handoff_seq = plan_head.len() as i64; // 4
-    // Dirty state: stale summary_seq=2 < handoff_seq=4. This is exactly the
-    // data shape that, pre-fix, made compaction pick the wrong OFFSET.
+                                              // Dirty state: stale summary_seq=2 < handoff_seq=4. This is exactly the
+                                              // data shape that, pre-fix, made compaction pick the wrong OFFSET.
     store
         .update_session(
             "s2",
@@ -249,5 +265,9 @@ async fn clear_summary_prevents_offset_corruption() {
 
     // The store row reflects the corrected OFFSET.
     let m = store.get_session("s2").await.unwrap().unwrap();
-    assert_eq!(m.summary_seq, Some(8), "persisted summary_seq matches the corrected OFFSET");
+    assert_eq!(
+        m.summary_seq,
+        Some(8),
+        "persisted summary_seq matches the corrected OFFSET"
+    );
 }

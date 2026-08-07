@@ -216,6 +216,22 @@ pub(super) async fn run_app(
         let (display_steers, display_queue) =
             app_display::steer_queue_sources(&chat, subagent_focus, &queue_items);
         let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
+        let now = opencoder_core::message::now_ms();
+        // Turn-duration timer value for the body content tail. When viewing a
+        // subagent, use the subagent block's own elapsed (live while running);
+        // otherwise use the top-level turn accumulator.
+        let display_turn_ms = if let Some(idx) = subagent_focus {
+            match chat.blocks.get(idx) {
+                Some(crate::chat::ChatBlock::Subagent {
+                    started_at_ms,
+                    done: false,
+                    ..
+                }) => ((now - *started_at_ms).max(0)) as u64,
+                _ => 0,
+            }
+        } else {
+            run_elapsed_ms
+        };
 
         if dirty && render_pending {
             if !skip_next_render {
@@ -241,7 +257,7 @@ pub(super) async fn run_app(
                     follow,
                     &mut queue_scroll,
                     anim_tick,
-                    opencoder_core::message::now_ms(),
+                    now,
                     &mode_flash,
                     skill_menu.as_ref(),
                     task_picker.as_ref(),
@@ -255,7 +271,7 @@ pub(super) async fn run_app(
                     &copy_status,
                     &pending_images,
                     input_disabled,
-                    run_elapsed_ms,
+                    display_turn_ms,
                     help_scroll,
                     subagent_focus.is_none(),
                     config.autopilot.enabled,

@@ -9,7 +9,7 @@ fn status_bar_omits_branding() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 200000);
         })
         .unwrap();
 
@@ -34,7 +34,7 @@ fn status_bar_running_shows_spinner_and_status() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 200000);
         })
         .unwrap();
 
@@ -65,7 +65,7 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
+            render_status(f, area, false, "", "glm-4.6", "act", 0, 0, 200000, 200000);
         })
         .unwrap();
 
@@ -88,7 +88,7 @@ fn status_bar_has_no_steer_queue_or_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
+            render_status(f, area, true, "thinking", "glm-4.6", "act", 0, 0, 200000, 200000);
         })
         .unwrap();
 

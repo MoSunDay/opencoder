@@ -1,88 +1,80 @@
 use super::*;
+use crate::chat::ChatView;
+use opencoder_session::SessionEvent;
+use ratatui::backend::TestBackend;
 
-// ----- Run-duration timer tests -----
-
-/// When running with a non-zero run_ms, the status bar shows the duration.
-#[test]
-fn status_bar_shows_run_duration() {
-    let backend = TestBackend::new(120, 3);
+fn render_body_with_turn(turn_ms: u64, width: u16, height: u16) -> String {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hello world".into()));
+    v.apply(&SessionEvent::Done);
+    let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
+    let mut scroll = 0u32;
     terminal
         .draw(|f| {
-            render_status(
+            render_body(
                 f,
                 f.area(),
+                &v,
+                "test",
+                &mut scroll,
                 true,
-                "working",
-                "glm-4.6",
-                "act",
                 0,
-                5000,
-                200000,
-                200000,
-                42000,
+                0,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+                &mut None,
+                true,
+                turn_ms,
             );
         })
         .unwrap();
+    (0..height)
+        .map(|y| row_text(terminal.backend().buffer(), y, width))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    let row = row_text(terminal.backend().buffer(), 0, 120);
+/// When turn_ms > 0, the body shows the turn-duration timer at the tail of
+/// the last content line.
+#[test]
+fn body_shows_turn_timer_at_content_tail() {
+    let full = render_body_with_turn(42000, 60, 8);
     assert!(
-        row.contains("42s"),
-        "status bar should show run duration; got: {row}"
+        full.contains("42s"),
+        "body should show turn timer at content tail; got:\n{full}"
     );
 }
 
-/// When run_ms is 0, no duration is shown (idle session).
+/// When turn_ms is 0, no timer is shown.
 #[test]
-fn status_bar_hides_duration_when_zero() {
-    let backend = TestBackend::new(120, 3);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_status(f, f.area(), false, "", "glm-4.6", "act", 0, 0, 200000, 200000, 0);
-        })
-        .unwrap();
-
-    let row = row_text(terminal.backend().buffer(), 0, 120);
+fn body_hides_turn_timer_when_zero() {
+    let full = render_body_with_turn(0, 60, 8);
     assert!(
-        !row.contains("0s"),
-        "zero duration should not be rendered; got: {row}"
+        !full.contains("0s"),
+        "zero turn timer should not render; got:\n{full}"
     );
 }
 
-/// While running, the run-duration timer appears at the *tail* of the status
-/// line — after the spinner and status text, not between ctx and status.
+/// The turn timer appears at the tail — after the content text on the same line.
 #[test]
-fn status_bar_timer_at_tail_after_status() {
-    let backend = TestBackend::new(120, 3);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|f| {
-            render_status(
-                f,
-                f.area(),
-                true,
-                "working",
-                "glm-4.6",
-                "act",
-                0,
-                5000,
-                200000,
-                200000,
-                42000,
+fn body_turn_timer_after_content() {
+    let full = render_body_with_turn(42000, 60, 8);
+    for row in full.lines() {
+        if let Some(content_pos) = row.find("hello world") {
+            let timer_pos = row.find("42s");
+            assert!(
+                timer_pos.is_some() && timer_pos > Some(content_pos),
+                "timer must appear after content text on the same line; got: {row}"
             );
-        })
-        .unwrap();
-
-    let row = row_text(terminal.backend().buffer(), 0, 120);
-    let timer_pos = row.find("42s");
-    let status_pos = row.find("working");
-    assert!(
-        timer_pos.is_some() && status_pos.is_some(),
-        "both timer and status text should be present; got: {row}"
-    );
-    assert!(
-        timer_pos > status_pos,
-        "timer must appear after status text (at the tail of the line); got: {row}"
-    );
+            return;
+        }
+    }
+    panic!("content row not found in body output:\n{full}");
 }

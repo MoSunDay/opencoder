@@ -218,6 +218,7 @@ pub(crate) fn render<B: Backend>(
                 selection,
                 viewport,
                 is_top_level,
+                run_ms,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -276,7 +277,6 @@ pub(crate) fn render<B: Backend>(
             context_used + sys_tokens,
             compaction_threshold,
             context_limit,
-            run_ms,
         );
 
         if show_help {
@@ -342,6 +342,7 @@ fn render_body(
     selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
+    turn_ms: u64,
 ) {
     *body_out = Some(area);
     let block = theme::rounded_block(title);
@@ -422,8 +423,24 @@ fn render_body(
     // A1: Virtualization — slice only the visible window from cached lines
     // instead of passing the entire transcript to Paragraph. This avoids
     // ratatui internally processing all lines for wrapping/rendering.
+    let n = cache.lines().len();
     let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
-    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    // Turn-duration timer at the tail of the last content line. Shown only
+    // while a turn is running and the bottom of the transcript is in view.
+    if turn_ms > 0 && end == n {
+        if let Some(last) = visible_lines.iter_mut().rev().find(|l| {
+            l.spans
+                .iter()
+                .any(|s| s.content.chars().any(|c| !c.is_whitespace()))
+        }) {
+            last.spans.push(Span::raw("  "));
+            last.spans.push(Span::styled(
+                fmtmod::format_run_duration(turn_ms),
+                Style::default().fg(theme::warn_color()),
+            ));
+        }
+    }
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), text_area);
 
@@ -697,7 +714,6 @@ fn render_status(
     used: u64,
     compaction_threshold: u64,
     context_limit: u64,
-    run_ms: u64,
 ) {
     let mut spans = vec![
         Span::raw(" "),
@@ -744,21 +760,6 @@ fn render_status(
         spans.push(Span::styled(
             format!("\u{00b7} {status}"),
             Style::default().fg(theme::muted()),
-        ));
-    }
-
-    // Run-duration timer at the tail of the status line (after status text).
-    // Shown only while a turn is running (run_ms > 0); it is reset to zero
-    // when the task ends (see `tick_clock`), so it drops from the bar once idle.
-    if run_ms > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            fmtmod::format_run_duration(run_ms),
-            Style::default().fg(if running {
-                theme::warn_color()
-            } else {
-                theme::muted()
-            }),
         ));
     }
 

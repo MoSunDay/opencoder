@@ -37,6 +37,7 @@ fn body_follow_indicator_when_not_following() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -90,6 +91,7 @@ fn body_follow_label_when_following() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -142,6 +144,7 @@ fn body_top_arrow_when_scrolled_down() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -194,6 +197,7 @@ fn body_no_top_arrow_when_at_top() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -246,6 +250,7 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -288,6 +293,7 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 None,
                 &mut None,
                 true,
+                0,
             );
         })
         .unwrap();
@@ -340,6 +346,7 @@ fn empty_child_view_does_not_show_tutorial() {
                 None,
                 &mut None,
                 false,
+                0,
             );
         })
         .unwrap();

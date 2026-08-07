@@ -12,6 +12,8 @@
 /// Action the SteerSubmit handler should take.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Action {
+    /// A child subagent block is focused — fire that child's turn-cancel.
+    Subagent,
     /// The parent is running with live children — they were just cancelled so
     /// the parent absorbs the steer at the next turn boundary.
     CancelChildren,
@@ -31,17 +33,25 @@ pub(crate) enum Action {
 
 /// Resolve which action the `>` steer button should take.
 ///
+/// * `subagent_focused` — a running subagent block is focused; `>` then
+///   targets ONLY that child's own turn token, never the parent (the focused
+///   child's steer rows are what the queue panel shows).
 /// * `running` — the parent session has a turn in flight.
 /// * `has_children` — at least one child cancellation token was registered
 ///   (and has now been fired by `fire_child_cancels`).
 /// * `has_pending_steer` — `chat.steer_items` is non-empty (a steer row was
 ///   clicked and is waiting to be absorbed).
 pub(crate) fn resolve(
+    subagent_focused: bool,
     running: bool,
     has_children: bool,
     has_pending_steer: bool,
 ) -> Action {
-    if running {
+    if subagent_focused {
+        // Focused child takes precedence over every parent-path decision:
+        // the interrupt fires that child's own turn token in fire_steer_interrupt.
+        Action::Subagent
+    } else if running {
         if has_children {
             if has_pending_steer {
                 Action::CancelChildrenAndSteer
@@ -68,7 +78,7 @@ mod tests {
     #[test]
     fn running_parent_with_pending_steer_steers_not_aborts() {
         assert_eq!(
-            resolve(true, false, true),
+            resolve(false, true, false, true),
             Action::SteerParent,
             "parent > with pending steer must steer, not hard-abort"
         );
@@ -78,7 +88,7 @@ mod tests {
     #[test]
     fn running_parent_with_nothing_to_do_is_noop() {
         assert_eq!(
-            resolve(true, false, false),
+            resolve(false, true, false, false),
             Action::Noop,
             "parent > with nothing pending must be a no-op, not an abort"
         );
@@ -87,7 +97,7 @@ mod tests {
     #[test]
     fn running_parent_with_children_cancels_children() {
         // No pending steer: just cancel children, let parent finish naturally.
-        assert_eq!(resolve(true, true, false), Action::CancelChildren);
+        assert_eq!(resolve(false, true, true, false), Action::CancelChildren);
     }
 
     // G2 regression guard: a parent `>` with running children AND a pending steer
@@ -96,7 +106,7 @@ mod tests {
     #[test]
     fn running_parent_with_children_and_steer_steers_parent_too() {
         assert_eq!(
-            resolve(true, true, true),
+            resolve(false, true, true, true),
             Action::CancelChildrenAndSteer,
             "parent > with children + pending steer must cancel children AND steer"
         );
@@ -104,7 +114,18 @@ mod tests {
 
     #[test]
     fn idle_parent_starts_new_turn() {
-        assert_eq!(resolve(false, false, false), Action::StartTurn);
-        assert_eq!(resolve(false, true, true), Action::StartTurn);
+        assert_eq!(resolve(false, false, false, false), Action::StartTurn);
+        assert_eq!(resolve(false, false, true, true), Action::StartTurn);
+    }
+
+    #[test]
+    fn subagent_focused_always_targets_subagent() {
+        // `>` while a subagent block is focused fires ONLY that child's own
+        // turn token — never the parent — regardless of parent running state,
+        // live children or pending steer rows.
+        assert_eq!(resolve(true, true, true, true), Action::Subagent);
+        assert_eq!(resolve(true, true, false, false), Action::Subagent);
+        assert_eq!(resolve(true, false, false, false), Action::Subagent);
+        assert_eq!(resolve(true, false, true, true), Action::Subagent);
     }
 }

@@ -71,3 +71,18 @@ fn padded_plan_with_content_is_trimmed_and_compound() {
         Some("/plan review".to_string())
     );
 }
+
+#[test]
+fn compound_plan_cmd_matches_plan_compound() {
+    // `/plan <content>` — with plain text and/or a skill token — is a compound
+    // plan prompt; everything else (bare toggle, `/act`, plain text) is not.
+    assert!(is_compound_plan_cmd("/plan fix the bug"));
+    assert!(is_compound_plan_cmd("/plan $review"));
+    assert!(is_compound_plan_cmd("/plan $review do stuff"));
+    assert!(!is_compound_plan_cmd("/plan"));
+    assert!(!is_compound_plan_cmd("/plan   "));
+    assert!(!is_compound_plan_cmd("/act fix the bug"));
+    assert!(!is_compound_plan_cmd("/act_clear_context"));
+    assert!(!is_compound_plan_cmd("fix the bug"));
+    assert!(!is_compound_plan_cmd(""));
+}

@@ -265,9 +265,11 @@ pub(crate) async fn fold_ui_events(
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
                     let agent = chat.agent.clone();
                     let saved_plan_submitted = chat.plan_submitted;
+                    let saved_pending_plan_arm = chat.pending_plan_arm;
                     *chat =
                         crate::session_ui::replay_into_chat(&agent, msgs, store, session_id).await;
                     chat.plan_submitted = saved_plan_submitted;
+                    chat.pending_plan_arm = saved_pending_plan_arm;
                 } else {
                     chat.apply(&sev);
                     if matches!(sev, SessionEvent::ReasoningDelta(_))
@@ -355,6 +357,16 @@ pub(crate) async fn fold_ui_events(
                 // AgentSwitch (the only other writer of chat.agent) is delivered
                 // via try_send and may be dropped when the UI channel saturates.
                 // TurnDone uses send().await (always lands).
+                // A dropped AgentSwitch("plan") would leave a stale
+                // pending_plan_arm behind, spuriously re-arming plan_submitted
+                // on a *later* plan-mode entry. The event channel is FIFO, so
+                // an unconsumed arm at TurnDone(plan) means exactly that the
+                // switch event was dropped — consume the arm against the
+                // authoritative agent here (before `agent` is moved below).
+                if agent == "plan" && chat.pending_plan_arm {
+                    chat.plan_submitted = true;
+                    chat.pending_plan_arm = false;
+                }
                 chat.agent = agent;
                 // Safety net: SessionEvent::Done (which triggers
                 // finalize_assistant -> markdown::render) is sent via

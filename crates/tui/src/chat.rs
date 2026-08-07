@@ -28,6 +28,8 @@ pub(crate) use helpers::{short, summarize};
 
 #[path = "compaction_block.rs"]
 mod compaction_block;
+#[path = "chat_headers.rs"]
+mod headers;
 pub(crate) use compaction_block::render_collapsible;
 
 impl ChatView {
@@ -124,8 +126,15 @@ impl ChatView {
                 self.finalize_assistant();
                 self.agent = to.clone();
                 if to == "plan" {
-                    self.plan_submitted = false;
+                    // A compound `/plan <content>` submitted from act mode arms
+                    // the handoff *deferred*: the switch event that lands here
+                    // otherwise resets `plan_submitted`, so re-arm it from the
+                    // pending flag the submit path left behind. Consume the
+                    // flag on every switch so a stale arm can never re-arm a
+                    // later plan-mode entry.
+                    self.plan_submitted = self.pending_plan_arm;
                 }
+                self.pending_plan_arm = false;
             }
             SessionEvent::ModelSwitch(m) => {
                 self.finalize_assistant();
@@ -379,117 +388,6 @@ impl ChatView {
         }
     }
 
-    /// Return each Thinking block's `(block_idx, header_line_idx)`, where
-    /// `header_line_idx` is the index in `flatten()` of its header line. Walks
-    /// the blocks with the same per-block line accounting `flatten()` uses, so
-    /// the indices stay in sync with what is rendered. Used by `render_body`
-    /// to build click hit-rects.
-    pub fn thinking_headers(&self) -> Vec<ThinkingHeader> {
-        self.collect_headers().0
-    }
-
-    /// Return each Subagent block's `(block_idx, header_line_idx)`. Mirrors
-    /// `thinking_headers`; used to build click hit-rects for subagent headers.
-    pub fn subagent_headers(&self) -> Vec<SubagentHeader> {
-        self.collect_headers().1
-    }
-
-    /// Return each Tool block's `(block_idx, header_line_idx)`. Mirrors
-    /// `thinking_headers`; used to build click hit-rects for tool headers.
-    pub fn tool_headers(&self) -> Vec<ToolHeader> {
-        self.collect_headers().2
-    }
-
-    /// Single pass over all blocks computing the header line index of every
-    /// Thinking / Subagent / Tool block, using the identical per-block line
-    /// accounting that `flatten_with()` emits. Keeping the accounting in one
-    /// place guarantees hit-rect indices stay aligned with the live render.
-    fn collect_headers(
-        &self,
-    ) -> (
-        Vec<ThinkingHeader>,
-        Vec<SubagentHeader>,
-        Vec<ToolHeader>,
-        Vec<CompactionHeader>,
-    ) {
-        let mut think = Vec::new();
-        let mut sub = Vec::new();
-        let mut tool = Vec::new();
-        let mut compaction = Vec::new();
-        let mut line_idx = 0usize;
-        for (block_idx, block) in self.blocks.iter().enumerate() {
-            match block {
-                ChatBlock::Marker(lines) => line_idx += lines.len(),
-                ChatBlock::Assistant {
-                    raw,
-                    rendered,
-                    done,
-                } => {
-                    // Withheld preamble renders zero lines (issue #5); skip it
-                    // so header line indices stay aligned with `flatten_with`.
-                    if self.is_withheld(block_idx) {
-                        continue;
-                    }
-                    // +1 for the "say:" header line emitted by flatten().
-                    line_idx += 1;
-                    line_idx += if *done {
-                        rendered.len()
-                    } else {
-                        assistant_rows(raw).len()
-                    };
-                }
-                ChatBlock::Thinking {
-                    text, collapsed, ..
-                } => {
-                    think.push(ThinkingHeader {
-                        block_idx,
-                        header_line_idx: line_idx,
-                    });
-                    // Header line always emitted; content lines only when expanded.
-                    line_idx += 1;
-                    if !collapsed {
-                        line_idx += text.lines().count();
-                    }
-                }
-                ChatBlock::Tool {
-                    output, collapsed, ..
-                } => {
-                    tool.push(ToolHeader {
-                        block_idx,
-                        header_line_idx: line_idx,
-                    });
-                    // Header always rendered; output + trailing blank only when expanded.
-                    line_idx += 1 + if *collapsed { 0 } else { output.len() + 1 };
-                }
-                ChatBlock::Compaction { text, collapsed, .. } => {
-                    compaction.push(CompactionHeader {
-                        block_idx,
-                        header_line_idx: line_idx,
-                    });
-                    line_idx += 1;
-                    if !collapsed {
-                        line_idx += text.lines().count();
-                    }
-                }
-                ChatBlock::Image { rendered, .. } => {
-                    // Empty `rendered` -> flatten_with emits a placeholder line; count 1 not 0.
-                    line_idx += 1 + if rendered.is_empty() { 1 } else { rendered.len() } + 1;
-                }
-                ChatBlock::Subagent { .. } => {
-                    sub.push(SubagentHeader {
-                        block_idx,
-                        header_line_idx: line_idx,
-                    });
-                    line_idx += 1; // header only — no inline expansion
-                }
-                ChatBlock::Plan { rendered, .. } => {
-                    line_idx += 1 + rendered.len() + 1;
-                }
-            }
-        }
-        (think, sub, tool, compaction)
-    }
-
     /// Flatten all blocks into a single `Vec<Line>` for rendering, using
     /// `anim_tick` only to advance the running-subagent spinner. Delegated to
     /// by `flatten()` (which passes `0`) for non-render callers (selection,
@@ -716,6 +614,7 @@ impl ChatView {
             ok: bok,
             cancelled: bcan,
             summary: smry,
+            view,
             ..
         }) = self
             .blocks
@@ -727,6 +626,10 @@ impl ChatView {
             *bok = ok;
             *bcan = cancelled;
             *smry = summary.to_string();
+            // Leftover child steer rows (steers queued while the child was
+            // running but never claimed) would otherwise sit on the pending
+            // panel forever — clear them with the block.
+            view.steer_items.clear();
         } else {
             let (mark, color) = if cancelled {
                 ("\u{2298}", theme::muted())

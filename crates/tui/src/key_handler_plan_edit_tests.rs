@@ -321,8 +321,8 @@ fn enter_produces_steer_when_subagent_focused() {
     let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
-    // Enter with a running subagent focused now produces a parent Steer
-    // (not a child-session steer), and the input line is cleared.
+    // Enter with a running subagent focused steers the CHILD session and
+    // clears the input line (parent steer/queue untouched).
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &mut input,
@@ -345,7 +345,7 @@ fn enter_produces_steer_when_subagent_focused() {
             &mut queue_scroll,
     );
 
-    assert!(matches!(action, KeyAction::Steer(ref t) if t == "steer the subagent"));
+    assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer the subagent"));
     assert!(input.is_empty(), "input cleared after steer submit");
     assert_eq!(cursor, 0);
 }

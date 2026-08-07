@@ -71,22 +71,32 @@ pub enum Command {
     /// Start the interactive TUI.
     Tui,
     /// Run the TUI inside a tmux session that survives SSH disconnect.
-    /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists all sessions
-    /// (live + stopped), `rs -r <id>` reattaches or cold-starts a stopped one,
-    /// `rs -c` cleans up stopped sessions. A bare `ts`/`rs` **always creates a
-    /// fresh session**; resume an existing one with `ts -r <id>`.
+    /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists managed tmux
+    /// sessions **globally** (every workdir, each with its live workdir path)
+    /// plus stopped sessions that were registered via ts across all stores,
+    /// `rs -r <id>` globally reattaches or cold-starts a stopped one in its
+    /// recorded workdir, `rs -c` globally
+    /// cleans stopped ts-owned sessions across all workdirs, and `rs -d <id>`
+    /// removes one exact global session. A bare `ts`/`rs` **always
+    /// creates a fresh session**; resume an existing one with `ts -r <id>`.
     #[command(alias = "rs")]
     Ts {
-        /// List all sessions (Store-first: shows live + stopped).
-        #[arg(short, long)]
+        /// List all sessions: live managed tmux sessions from every workdir
+        /// (path from tmux) plus ts-registered stopped sessions from all stores.
+        #[arg(short, long, conflicts_with_all = ["resume", "clean", "delete"])]
         list: bool,
-        /// Resume/attach a session by id (live: attach; stopped: cold-start
-        /// from Store history). Accepts `opencode-<id>`, bare id, or `$index`.
-        #[arg(short, long)]
+        /// Globally resume/attach by id (live: attach; stopped: cold-start in
+        /// its recorded workdir). Accepts a unique displayed id prefix, a full
+        /// `opencode-<id>`/bare id, or `$index`.
+        #[arg(short, long, conflicts_with_all = ["list", "clean", "delete"])]
         resume: Option<String>,
-        /// Clean up (delete) stopped sessions that are no longer running in tmux.
-        #[arg(short, long, default_value_t = false)]
+        /// Globally delete stopped ts-owned sessions no longer running in tmux.
+        #[arg(short, long, default_value_t = false, conflicts_with_all = ["list", "resume", "delete"])]
         clean: bool,
+        /// Remove one global tmux session and its ts-owned Store record. Accepts
+        /// the unique id prefix shown by `ts -l`, a full id, or live `$index`.
+        #[arg(short = 'd', long = "delete", value_name = "ID", conflicts_with_all = ["list", "resume", "clean"])]
+        delete: Option<String>,
     },
     /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),
     /// protected by a bearer token. (`serve` is accepted as an alias.)

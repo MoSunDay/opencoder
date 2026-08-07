@@ -25,12 +25,18 @@ pub struct ClipProbe {
     pub is_screen: bool,
     /// True when running inside tmux (`$TMUX` set).
     pub is_tmux: bool,
+    /// tmux `set-clipboard` server option, when inside tmux: `Some(true)` for
+    /// `on`/`external` (OSC52 is forwarded to the terminal clipboard),
+    /// `Some(false)` for `off` (tmux silently drops OSC52), `None` when not in
+    /// tmux or the query failed.
+    pub tmux_clipboard: Option<bool>,
     /// True when this looks like an SSH session (`$SSH_CONNECTION` /
     /// `$SSH_TTY`).
     pub is_ssh: bool,
     /// Whether OSC 52 can be trusted to reach the clipboard. OSC 52 is widely
     /// supported, so this is `true` by default and `false` only for known
-    /// stragglers (VTE-based terminals, GNU screen).
+    /// stragglers (VTE-based terminals, GNU screen, and tmux with
+    /// `set-clipboard` anything other than on/external).
     pub osc52_reliable: bool,
     /// True when `$WAYLAND_DISPLAY` is set.
     pub wayland: bool,
@@ -43,23 +49,48 @@ pub struct ClipProbe {
 /// Substrings indicating a VTE-based terminal when found in `TERM_PROGRAM`,
 /// `COLORTERM`, or `TERM`.
 const VTE_HINTS: &[&str] = &[
-    "gnome", "terminator", "xfce", "mate", "vte", "guake", "tilix",
-    "GNOME", "Terminator", "Xfce", "MATE", "VTE", "Guake", "Tilix",
+    "gnome",
+    "terminator",
+    "xfce",
+    "mate",
+    "vte",
+    "guake",
+    "tilix",
+    "GNOME",
+    "Terminator",
+    "Xfce",
+    "MATE",
+    "VTE",
+    "Guake",
+    "Tilix",
 ];
 
 /// Check whether any of `VTE_HINTS` appears in the given env-var values.
 fn is_vte_terminal(term_program: &str, colorterm: &str, term: &str) -> bool {
-    VTE_HINTS.iter().any(|hint| {
-        term_program.contains(hint) || colorterm.contains(hint) || term.contains(hint)
-    })
+    VTE_HINTS
+        .iter()
+        .any(|hint| term_program.contains(hint) || colorterm.contains(hint) || term.contains(hint))
 }
 
 /// OSC 52 is widely supported (xterm, iTerm2, WezTerm, Alacritty, kitty,
-/// foot, Windows Terminal, ...). Only VTE-based terminals and GNU screen are
-/// known to silently drop the sequence, so we treat OSC52 as reliable by
-/// default and only exclude those.
-fn osc52_is_reliable(is_vte: bool, is_screen: bool) -> bool {
-    !(is_vte || is_screen)
+/// foot, Windows Terminal, ...). Known silent droppers: VTE-based terminals,
+/// GNU screen, and tmux with `set-clipboard` other than `on`/`external`
+/// (tmux only forwards OSC52 when the option is enabled). `tmux_clipboard` is
+/// `None` when not inside tmux or the option could not be queried — under
+/// tmux that fails closed (unreliable) rather than risking a silent drop.
+fn osc52_is_reliable(
+    is_vte: bool,
+    is_screen: bool,
+    is_tmux: bool,
+    tmux_clipboard: Option<bool>,
+) -> bool {
+    if is_vte || is_screen {
+        return false;
+    }
+    if is_tmux && tmux_clipboard != Some(true) {
+        return false;
+    }
+    true
 }
 
 /// Classify the terminal and display environment. Pure function: takes a
@@ -76,12 +107,16 @@ fn classify_terminal(get_var: impl Fn(&str) -> Option<String>) -> ClipProbe {
     let x11 = get_var("DISPLAY").is_some();
 
     let is_vte = is_vte_terminal(&term_program, &colorterm, &term);
-    let osc52_reliable = osc52_is_reliable(is_vte, is_screen);
+    // The pure classifier cannot run the tmux query; tmux_clipboard stays
+    // None and osc52 fails closed (unreliable under tmux). `probe_clipboard`
+    // re-derives the verdict with the real option value.
+    let osc52_reliable = osc52_is_reliable(is_vte, is_screen, is_tmux, None);
 
     ClipProbe {
         is_vte,
         is_screen,
         is_tmux,
+        tmux_clipboard: None,
         is_ssh,
         osc52_reliable,
         wayland,
@@ -94,8 +129,44 @@ fn classify_terminal(get_var: impl Fn(&str) -> Option<String>) -> ClipProbe {
 pub fn probe_clipboard() -> ClipProbe {
     static CACHE: OnceLock<ClipProbe> = OnceLock::new();
     CACHE
-        .get_or_init(|| classify_terminal(|k| std::env::var(k).ok()))
+        .get_or_init(|| {
+            let mut p = classify_terminal(|k| std::env::var(k).ok());
+            // Only relevant (and only queryable) when actually inside tmux.
+            p.tmux_clipboard = if p.is_tmux {
+                tmux_set_clipboard_status()
+            } else {
+                None
+            };
+            p.osc52_reliable =
+                osc52_is_reliable(p.is_vte, p.is_screen, p.is_tmux, p.tmux_clipboard);
+            p
+        })
         .clone()
+}
+
+/// Query the tmux `set-clipboard` server option via
+/// `tmux show-options -g set-clipboard`. I/O wrapper — exempt from unit
+/// testing per rules/01; the parsing logic is covered by table tests.
+pub(crate) fn tmux_set_clipboard_status() -> Option<bool> {
+    let out = std::process::Command::new("tmux")
+        .args(["show-options", "-g", "set-clipboard"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_tmux_clipboard(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parse `tmux show-options -g set-clipboard` stdout (e.g. `set-clipboard on`).
+/// `on`/`external` → `Some(true)` (OSC52 forwarded to the terminal clipboard),
+/// `off` → `Some(false)`, anything else (empty output, unknown value) → `None`.
+fn parse_tmux_clipboard(raw: &str) -> Option<bool> {
+    match raw.split_whitespace().last()? {
+        "on" | "external" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
 }
 
 // ── Local clipboard command dispatch ───────────────────────────────
@@ -249,6 +320,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_tmux_clipboard_values() {
+        // on / external forward OSC52 to the terminal clipboard.
+        assert_eq!(parse_tmux_clipboard("set-clipboard on\n"), Some(true));
+        assert_eq!(parse_tmux_clipboard("set-clipboard external\n"), Some(true));
+        // off: tmux silently drops OSC52.
+        assert_eq!(parse_tmux_clipboard("set-clipboard off\n"), Some(false));
+        // Empty output / unknown value: cannot tell -> None.
+        assert_eq!(parse_tmux_clipboard(""), None);
+        assert_eq!(parse_tmux_clipboard("set-clipboard maybe"), None);
+    }
+
+    #[test]
+    fn osc52_reliable_respects_tmux_clipboard() {
+        // tmux with on/external: OSC52 reaches the terminal clipboard.
+        assert!(osc52_is_reliable(false, false, true, Some(true)));
+        // off or unqueryable (None): fail closed, OSC52 would be dropped.
+        assert!(!osc52_is_reliable(false, false, true, Some(false)));
+        assert!(!osc52_is_reliable(false, false, true, None));
+        // Non-tmux terminals unaffected by the tmux rule.
+        assert!(osc52_is_reliable(false, false, false, None));
+        // VTE / GNU screen remain unreliable regardless of tmux.
+        assert!(!osc52_is_reliable(true, false, false, None));
+        assert!(!osc52_is_reliable(false, true, false, None));
+    }
+
+    #[test]
+    fn classify_tmux_fails_closed_until_probed() {
+        // The pure classifier cannot run the tmux query: under tmux it must
+        // report OSC52 as unreliable (None clipboard) rather than assume on.
+        let p = classify(&[("TMUX", "/tmp/tmux-0/default,1234,0")]);
+        assert!(p.is_tmux);
+        assert_eq!(p.tmux_clipboard, None);
+        assert!(!p.osc52_reliable);
+    }
+
+    #[test]
     fn detects_ssh_via_ssh_connection() {
         let p = classify(&[("SSH_CONNECTION", "10.0.0.1 1234 10.0.0.2 22")]);
         assert!(p.is_ssh);
@@ -304,10 +411,7 @@ mod tests {
 
     #[test]
     fn wayland_detection() {
-        let p = classify(&[
-            ("WAYLAND_DISPLAY", "wayland-0"),
-            ("DISPLAY", ":0"),
-        ]);
+        let p = classify(&[("WAYLAND_DISPLAY", "wayland-0"), ("DISPLAY", ":0")]);
         assert!(p.wayland);
         assert!(p.x11);
     }

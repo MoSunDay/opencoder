@@ -45,6 +45,33 @@ pub(crate) fn session_exists(target: &str) -> Result<bool> {
     Ok(status.success())
 }
 
+/// Kill one exact tmux session. The caller resolves and validates ownership.
+pub(crate) fn kill_session(target: &str) -> Result<()> {
+    let status = Command::new(tmux_bin()?)
+        .args(["kill-session", "-t", target])
+        .status()
+        .context("spawn tmux kill-session")?;
+    if !status.success() {
+        bail!("tmux kill-session failed for {target}");
+    }
+    Ok(())
+}
+
+/// Current tmux session name, or `None` outside tmux.
+pub(crate) fn current_session_name() -> Result<Option<String>> {
+    if !super::env::inside_tmux() {
+        return Ok(None);
+    }
+    let output = Command::new(tmux_bin()?)
+        .args(["display-message", "-p", "#{session_name}"])
+        .output()
+        .context("spawn tmux display-message")?;
+    if !output.status.success() {
+        bail!("tmux display-message failed");
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+}
+
 /// One managed tmux session observed via `list-sessions`.
 #[derive(Debug, Clone)]
 pub(crate) struct ManagedSession {

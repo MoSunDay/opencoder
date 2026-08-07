@@ -2,6 +2,7 @@ pub const HELP: &str = "\
 快捷键列表：
 
   Shift+Tab        切换模式 act <--> plan（plan→act 清空上下文；Alt+Tab 同效）
+                   /plan + 内容 提交后算需求输入，Shift+Tab 保留计划开始执行任务
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
   Ctrl+Shift+Tab  切换模式（保留上下文，不重置）

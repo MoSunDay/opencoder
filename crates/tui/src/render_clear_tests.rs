@@ -140,3 +140,85 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
         "per-frame Clear must wipe stale glyphs; found leftover: {text:?}"
     );
 }
+
+/// Regression: the startup `Terminal::clear()` added to `app_bootstrap` (after
+/// entering the alt screen) must wipe glyphs persisted by the *previous run*.
+/// tmux keeps one alt-screen grid per pane: a fresh ratatui `Terminal` starts
+/// with empty buffers, so the first draw's diff (empty vs empty) emits no
+/// bytes for the trailing cells — the old frame stays visible forever unless
+/// the startup path issues a real clear (ESC[2J). `TestBackend` models the
+/// persistent grid: its content survives unless `Terminal::clear()` resets it.
+///
+/// The test paints a marker (the previous run's last frame), resets the ratatui
+/// buffers to the "fresh run" state WITHOUT clearing the backend, and shows the
+/// marker persisting through an empty frame — then applies the fix and shows it
+/// gone. The ghost step doubles as a self-check: without it the final assertion
+/// would be vacuous.
+#[test]
+fn startup_clear_wipes_glyphs_persisted_by_previous_run() {
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    let mut scroll = 0u32;
+    let mut queue_scroll: u32 = 0;
+    let mut hits = MouseHits::default();
+    let mut viewport: Option<ViewportCache> = None;
+
+    // Frame 1: body holds a distinctive marker — the previous run's last frame
+    // left on the tmux alt-screen grid.
+    let mut chat_a = ChatView::default();
+    chat_a.apply(&SessionEvent::TextDelta("markerword\n".into()));
+    chat_a.apply(&SessionEvent::Done);
+    draw_frame(
+        &mut terminal,
+        &chat_a,
+        &mut scroll,
+        &mut queue_scroll,
+        &mut hits,
+        &mut viewport,
+    );
+    assert!(
+        buffer_text(terminal.backend().buffer()).contains("markerword"),
+        "frame 1 must paint the marker into the body (else the regression \
+         assertion below is vacuous)"
+    );
+
+    // Simulate the pre-fix state at the start of a NEW run: the ratatui
+    // buffers are fresh (as if a new Terminal was created — swap_buffers
+    // resets the marker frame out of the buffer side) while the terminal
+    // grid (TestBackend) still holds the old frame. Drawing an empty frame
+    // then diffs empty vs empty — no bytes are emitted — so the stale marker
+    // persists.
+    terminal.swap_buffers();
+    terminal.current_buffer_mut().reset();
+    let chat_b = ChatView::default();
+    draw_frame(
+        &mut terminal,
+        &chat_b,
+        &mut scroll,
+        &mut queue_scroll,
+        &mut hits,
+        &mut viewport,
+    );
+    assert!(
+        buffer_text(terminal.backend().buffer()).contains("markerword"),
+        "precondition: without a startup clear the stale glyph must persist \
+         through an empty diff (this is the ghost the fix removes)"
+    );
+
+    // The fix: a real `Terminal::clear()` — ESC[2J to the grid plus a reset
+    // diff baseline. The next empty frame must not resurrect the marker.
+    terminal.clear().unwrap();
+    draw_frame(
+        &mut terminal,
+        &chat_b,
+        &mut scroll,
+        &mut queue_scroll,
+        &mut hits,
+        &mut viewport,
+    );
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        !text.contains("markerword"),
+        "startup clear must wipe glyphs persisted by the previous run; \
+         leftover: {text:?}"
+    );
+}

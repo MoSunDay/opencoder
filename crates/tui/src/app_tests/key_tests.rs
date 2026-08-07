@@ -175,8 +175,10 @@ fn tab_on_focused_subagent_rejected_not_queued() {
 }
 
 #[test]
-fn enter_on_focused_subagent_still_steers() {
-    // Enter on a focused running subagent now steers the PARENT (not the child).
+fn enter_on_focused_subagent_steers_the_child() {
+    // Enter on a focused running subagent steers the CHILD session — the
+    // parent's steer panel, turn and queue are all untouched, and the input
+    // line is cleared for the next child steer.
     let mut input = String::from("steer it");
     let mut idx = 8usize;
     let action = run_handle_subagent(
@@ -185,7 +187,7 @@ fn enter_on_focused_subagent_still_steers() {
         &mut idx,
         "act",
     );
-    assert!(matches!(action, KeyAction::Steer(ref t) if t == "steer it"));
+    assert!(matches!(action, KeyAction::SubagentSteer(ref t) if t == "steer it"));
     assert!(input.is_empty());
     assert_eq!(idx, 0);
 }

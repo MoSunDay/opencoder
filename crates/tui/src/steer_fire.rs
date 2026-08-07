@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use crate::app_helpers::{mk_input_with_images, snapshot_image_uris};
 use crate::chat::ChatView;
 use super::steer_dispatch;
+use super::subagent_input;
 
 /// Admit a steer submitted via the keyboard Enter path: persist it to the
 /// store and push it onto the pending steer panel, WITHOUT interrupting the
@@ -65,19 +66,34 @@ pub(crate) async fn admit_keyboard_steer(
 /// `StartTurn` (which requires async `start_turn` and mutable state not
 /// available in this synchronous helper).
 pub(crate) fn fire_steer_interrupt(
+    subagent_focus: Option<usize>,
     running: bool,
     child_cancels: &Arc<Mutex<HashMap<String, CancellationToken>>>,
+    child_turn_cancels: &Arc<Mutex<HashMap<String, SharedCancel>>>,
     turn_cancel: &SharedCancel,
     chat: &ChatView,
 ) -> steer_dispatch::Action {
-    // fire_child_cancels both checks AND cancels children.
-    let has_children = running && opencoder_session::fire_child_cancels(child_cancels);
+    let sub_focused = subagent_focus.is_some();
+    // fire_child_cancels both checks AND cancels children. While a running
+    // subagent is focused the `>` targets the CHILD's own turn token, so the
+    // siblings are left untouched (no cascade).
+    let has_children = !sub_focused
+        && running
+        && opencoder_session::fire_child_cancels(child_cancels);
     let action = steer_dispatch::resolve(
+        sub_focused,
         running,
         has_children,
         !chat.steer_items.is_empty(),
     );
     match action {
+        steer_dispatch::Action::Subagent => {
+            subagent_input::fire_subagent_turn_cancel(
+                child_turn_cancels,
+                chat,
+                subagent_focus,
+            );
+        }
         steer_dispatch::Action::SteerParent
         | steer_dispatch::Action::CancelChildrenAndSteer => {
             opencoder_session::fire_turn_cancel(turn_cancel);
@@ -85,6 +101,41 @@ pub(crate) fn fire_steer_interrupt(
         _ => {}
     }
     action
+}
+
+/// Outcome of a `>` button submit: the turn token was fired (steer admitted,
+/// turn interrupted) or `StartTurn` — nothing pending, so the caller should
+/// start a fresh turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SteerSubmitOutcome {
+    StartTurn,
+    SteerOnly,
+}
+
+/// `>` button submit path: resolve + fire interrupts, and tell the caller
+/// whether a fresh turn must be started. Kept here (rather than in `app.rs`)
+/// so the sync interrupt logic and its outcome stay next to
+/// [`fire_steer_interrupt`].
+pub(crate) fn handle_steer_submit(
+    subagent_focus: Option<usize>,
+    running: bool,
+    child_cancels: &Arc<Mutex<HashMap<String, CancellationToken>>>,
+    child_turn_cancels: &Arc<Mutex<HashMap<String, SharedCancel>>>,
+    turn_cancel: &SharedCancel,
+    chat: &ChatView,
+) -> SteerSubmitOutcome {
+    let action = fire_steer_interrupt(
+        subagent_focus,
+        running,
+        child_cancels,
+        child_turn_cancels,
+        turn_cancel,
+        chat,
+    );
+    match action {
+        steer_dispatch::Action::StartTurn => SteerSubmitOutcome::StartTurn,
+        _ => SteerSubmitOutcome::SteerOnly,
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +153,10 @@ mod tests {
         Arc::new(Mutex::new(HashMap::new()))
     }
 
+    fn empty_turn_cancels() -> Arc<Mutex<HashMap<String, SharedCancel>>> {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
     // Core wiring test: a running parent with a pending steer must resolve to
     // SteerParent AND actually fire the shared turn_cancel token. The `>` button
     // (`SteerSubmit`) routes through `fire_steer_interrupt`; the keyboard Enter
@@ -114,8 +169,10 @@ mod tests {
         chat.steer_items.push((1, "stop now".into()));
 
         let action = fire_steer_interrupt(
+            None,
             true,
             &child_cancels,
+            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );
@@ -144,8 +201,10 @@ mod tests {
         chat.steer_items.push((1, "stop now".into()));
 
         let action = fire_steer_interrupt(
+            None,
             true,
             &child_cancels,
+            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );
@@ -166,8 +225,10 @@ mod tests {
         let chat = ChatView::default();
 
         let action = fire_steer_interrupt(
+            None,
             false,
             &child_cancels,
+            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );
@@ -187,8 +248,10 @@ mod tests {
         let chat = ChatView::default();
 
         let action = fire_steer_interrupt(
+            None,
             true,
             &child_cancels,
+            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );
@@ -197,6 +260,54 @@ mod tests {
         assert!(
             !turn_cancel.lock().unwrap().is_cancelled(),
             "no-op path must not fire the turn_cancel"
+        );
+    }
+
+    // Subagent steer: while a running subagent is focused, `>` must fire ONLY
+    // that child's own turn token — the parent turn_cancel and the sibling
+    // hard-cancels stay untouched.
+    #[test]
+    fn focused_running_subagent_fires_only_its_own_turn_token() {
+        let parent_turn = fresh_cancel();
+        let child_turn = fresh_cancel();
+        let child_cancels = empty_cancels();
+        let child_turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        child_turn_cancels
+            .lock()
+            .unwrap()
+            .insert("child-1".into(), child_turn.clone());
+
+        let mut chat = ChatView::default();
+        chat.blocks.push(crate::chat::ChatBlock::Subagent {
+            id: "child-1".into(),
+            child_session_id: "sub-s".into(),
+            kind: "explore".into(),
+            prompt: "investigate".into(),
+            view: ChatView::default(),
+            done: false,
+            ok: false,
+            cancelled: false,
+            summary: String::new(),
+        });
+
+        let action = fire_steer_interrupt(
+            Some(0),
+            true,
+            &child_cancels,
+            &child_turn_cancels,
+            &parent_turn,
+            &chat,
+        );
+
+        assert_eq!(action, steer_dispatch::Action::Subagent);
+        assert!(
+            child_turn.lock().unwrap().is_cancelled(),
+            "focused subagent's own turn token must fire"
+        );
+        assert!(
+            !parent_turn.lock().unwrap().is_cancelled(),
+            "parent turn_cancel must NOT fire while a subagent is focused"
         );
     }
 
@@ -216,7 +327,7 @@ mod tests {
     fn only_button_path_interrupts_running_turn_with_steer() {
         // `>` button: running parent, pending steer, no children -> interrupt.
         assert_eq!(
-            steer_dispatch::resolve(true, false, true),
+            steer_dispatch::resolve(false, true, false, true),
             steer_dispatch::Action::SteerParent,
             "`>` button must resolve to SteerParent (interrupt) when running"
         );
@@ -228,7 +339,7 @@ mod tests {
         // button resolves to StartTurn, and the keyboard Enter path would
         // simply admit (a fresh turn is started by the Submit path instead).
         assert_eq!(
-            steer_dispatch::resolve(false, false, true),
+            steer_dispatch::resolve(false, false, false, true),
             steer_dispatch::Action::StartTurn,
             "idle `>` with a pending steer must start a turn, not interrupt"
         );
@@ -283,8 +394,10 @@ mod tests {
 
         // Contrast: the `>` button path interrupts the very same running turn.
         let action = fire_steer_interrupt(
+            None,
             true,
             &empty_cancels(),
+            &empty_turn_cancels(),
             &turn_cancel,
             &chat,
         );

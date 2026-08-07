@@ -693,3 +693,93 @@ fn up_arrow_moves_cursor_when_multi_row() {
     assert_eq!(input, input_text);
     assert_eq!(hist_idx, None);
 }
+
+#[test]
+fn handle_key_alt_char_is_dropped_not_inserted() {
+    // Esc+char (tmux escape-time merges into Alt+char; some terminals deliver
+    // Alt as an ESC prefix) must never reach the input box: unhandled Alt
+    // combos are dropped, not typed as garbage like `[D` / `[A`.
+    let mut input = String::new();
+    let mut cursor = 0usize;
+    let history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
+    let mut show_help = false;
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
+
+    let action = handle_key(
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
+        &mut queue_scroll,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert!(input.is_empty());
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn handle_key_alt_f_still_moves_word() {
+    // Alt+F (readline forward-word) is an explicit binding and must survive
+    // the Alt+Char guard (it is handled before the Char fallback).
+    let mut input = "hello".to_string();
+    let mut cursor = 0usize;
+    let history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
+    let mut show_help = false;
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("hello", 0);
+    let mut help_scroll: u16 = 0;
+    let mut queue_scroll: u32 = 0;
+
+    let action = handle_key(
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
+        &mut input,
+        &mut cursor,
+        &history,
+        &mut hist_idx,
+        false,
+        "act",
+        &mut show_help,
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut help_scroll,
+        &mut queue_scroll,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "hello");
+    assert_eq!(
+        cursor, 5,
+        "Alt+F must still move the cursor to the word end"
+    );
+}

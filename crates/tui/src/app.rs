@@ -40,6 +40,7 @@ mod app_display;
 mod steer_dispatch;
 #[path = "steer_fire.rs"]
 mod steer_fire;
+#[path = "subagent_input.rs"] mod subagent_input;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
@@ -76,6 +77,7 @@ pub(super) async fn run_app(
         .clone()
         .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
     let child_cancels = session.child_cancels.clone();
+    let child_turn_cancels = session.child_turn_cancels.clone();
     let mut skill_handle = session.skill_prompt.clone();
     let mut chat = initial_chat_view(&session, &store).await;
     let mut input = String::new();
@@ -443,6 +445,13 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
+                                // A compound `/plan <content>` delivered while the agent is still
+                                // `act` arms the plan->act handoff *deferred*: the mode switch
+                                // lands asynchronously via `AgentSwitch("plan")`, which would
+                                // reset `plan_submitted`, so leave a pending flag for that event
+                                // to re-arm. Shift+Tab after the plan turn then keeps the plan
+                                // and starts the task instead of plain-swapping.
+                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
                                 if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap: display-only
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
@@ -513,6 +522,14 @@ pub(super) async fn run_app(
                                     chat.begin_turn();
                                 }
                             }
+                            KeyAction::SubagentSteer(text) => {
+                                // Steer goes to the CHILD session; stay in the subagent view.
+                                subagent_input::admit_subagent_steer(
+                                    &store, &mut chat, subagent_focus, &text, &mut pending_images,
+                                )
+                                .await;
+                                follow = true;
+                            }
                             KeyAction::Steer(text) => {
                                 let (clean, _unresolved) = resolve_persist(
                                     &text, &mut active_skill, &mut active_skill_body,
@@ -521,13 +538,14 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
-                                let admitted = if !clean.is_empty() {
+                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
+                                if !clean.is_empty() {
                                     let display = queued_item_display(&text, &clean);
                                     steer_fire::admit_keyboard_steer(
                                         &store, &session_id, &clean, &display,
                                         &mut pending_images, &mut chat,
                                     )
-                                    .await
+                                    .await;
                                 } else if let Some(skill_name) = active_skill.as_deref() {
                                     // Pure-skill submit (only a `$name` token): admit the trigger
                                     // as a steer so the injected skill body is acted on, not dropped.
@@ -537,23 +555,9 @@ pub(super) async fn run_app(
                                         &store, &session_id, &trigger, &display,
                                         &mut pending_images, &mut chat,
                                     )
-                                    .await
-                                } else {
-                                    None
-                                };
-                                // Exit subagent focus on a successful parent steer
-                                // so the queue panel returns to the parent view
-                                // and the `>` button becomes visible.
-                                if admitted.is_some() && subagent_focus.is_some() {
-                                    subagent_focus = None;
+                                    .await;
                                 }
-                                // Enter while running admits the steer WITHOUT
-                                // interrupting the current turn. The steer sits
-                                // in the pending panel until the turn completes
-                                // naturally, then is absorbed at the next turn
-                                // boundary (idle-boundary late-steer peek or next
-                                // loop's claim_steers). Click the `>` button on
-                                // the pending row to interrupt immediately.
+                                // Enter admits without interrupting (`>` interrupts instead).
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
@@ -564,6 +568,7 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
+                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
                                 if !clean.is_empty() {
                                     let display = queued_item_display(&text, &clean);
                                     let image_uris = snapshot_image_uris(&pending_images);
@@ -646,6 +651,9 @@ pub(super) async fn run_app(
                                     .await;
                             }
                             KeyAction::Cancel => {
+                                // A cancelled compound `/plan` never reaches the runner's
+                                // AgentSwitch, so drop the deferred arming it left behind.
+                                chat.pending_plan_arm = false;
                                 cancel.cancel();
                                 opencoder_session::fire_child_cancels(&child_cancels);
                                 // Double-Esc hard-abort: also drop any pending
@@ -702,15 +710,12 @@ pub(super) async fn run_app(
                             copy_status = Some((msg, Instant::now()));
                         }
                         if outcome == MouseOutcome::SteerSubmit {
-                            let action = steer_fire::fire_steer_interrupt(
-                                running,
-                                &child_cancels,
-                                &turn_cancel,
-                                &chat,
+                            let outcome = steer_fire::handle_steer_submit(
+                                subagent_focus, running, &child_cancels,
+                                &child_turn_cancels, &turn_cancel, &chat,
                             );
-                            if action == steer_dispatch::Action::StartTurn {
-                                start_turn(&cmd_tx, &mut cancel,
-                                    UiCmd::Prompt(String::new(), Vec::new())).await;
+                            if outcome == steer_fire::SteerSubmitOutcome::StartTurn {
+                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
                                 running = true;
                                 chat.begin_turn();
                             }
@@ -718,7 +723,7 @@ pub(super) async fn run_app(
                         }
                         dirty = true;
                     }
-                    Event::Resize(_, _) => on_resize_event(terminal, &mut last_size),
+                    Event::Resize(_, _) => on_resize_event(terminal, &mut last_size)?,
                     Event::Paste(pasted) => {
                         if pasted.trim().is_empty() {
                             app_loop::paste_clipboard_image_silent(&mut chat, &mut pending_images).await;
@@ -760,7 +765,7 @@ pub(super) async fn run_app(
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;
-                if poll_idle_resize(terminal, &mut last_size) {
+                if poll_idle_resize(terminal, &mut last_size)? {
                     dirty = true;
                 }
             }

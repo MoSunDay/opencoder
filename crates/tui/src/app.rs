@@ -217,21 +217,8 @@ pub(super) async fn run_app(
             app_display::steer_queue_sources(&chat, subagent_focus, &queue_items);
         let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
         let now = opencoder_core::message::now_ms();
-        // Turn-duration timer value for the body content tail. When viewing a
-        // subagent, use the subagent block's own elapsed (live while running);
-        // otherwise use the top-level turn accumulator.
-        let display_turn_ms = if let Some(idx) = subagent_focus {
-            match chat.blocks.get(idx) {
-                Some(crate::chat::ChatBlock::Subagent {
-                    started_at_ms,
-                    done: false,
-                    ..
-                }) => ((now - *started_at_ms).max(0)) as u64,
-                _ => 0,
-            }
-        } else {
-            run_elapsed_ms
-        };
+        let display_turn_ms =
+            app_display::display_turn_ms(&chat, subagent_focus, run_elapsed_ms, now);
 
         if dirty && render_pending {
             if !skip_next_render {

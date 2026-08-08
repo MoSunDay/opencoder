@@ -15,6 +15,8 @@ use ratatui::Frame;
 pub enum TaskPick {
     New,
     Resume(String),
+    /// Fork (clone) the selected session's context into a brand-new session.
+    Fork(String),
 }
 
 #[derive(Debug)]
@@ -29,10 +31,22 @@ pub enum TaskOutcome {
     },
 }
 
-/// Modal session picker shown when the user types `/task`.
+/// Which interaction mode the picker is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickerMode {
+    /// `/task` — switch to / create a session ("+ New task", "Clear all" rows).
+    Switch,
+    /// `/fork` — pick a session to clone context from (sessions only, no
+    /// "+ New task" / "Clear all" rows).
+    Fork,
+}
+
+/// Modal session picker shown when the user types `/task` or `/fork`.
 pub struct TaskPicker {
     sessions: Vec<SessionListItem>,
     selected: usize,
+    /// Interaction mode: session switching (default) vs. fork selection.
+    mode: PickerMode,
     /// The currently-active session id — always preserved by "Clear all", and
     /// tagged `(current)` in the rendered list.
     current_session_id: String,
@@ -59,10 +73,23 @@ impl TaskPicker {
         TaskPicker {
             sessions,
             selected: 0,
+            mode: PickerMode::Switch,
             current_session_id,
             confirm_clear: false,
             skills,
         }
+    }
+
+    /// Build a fork-mode picker (`/fork`): every listed session is a fork
+    /// source, and Enter forks the highlighted session's context.
+    pub fn new_fork(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
+        let mut p = Self::with_skills(
+            sessions,
+            current_session_id,
+            opencoder_core::discover_skills(),
+        );
+        p.mode = PickerMode::Fork;
+        p
     }
 
     /// Resolve a stored skill body to a display tag (`[name]`), matching
@@ -115,6 +142,10 @@ impl TaskPicker {
     /// Index of the "Clear all" row, or `None` when there is nothing deletable
     /// to clear (only the current session, or empty).
     fn clear_row_index(&self) -> Option<usize> {
+        // Fork mode has no "Clear all" row (and no confirm_clear arming).
+        if self.mode == PickerMode::Fork {
+            return None;
+        }
         if self.deletable_count() == 0 {
             return None;
         }
@@ -122,11 +153,18 @@ impl TaskPicker {
     }
 
     fn row_count(&self) -> usize {
-        let base = 1 + self.sessions.len(); // "+ New task" + sessions
-        if self.clear_row_index().is_some() {
-            base + 1
-        } else {
-            base
+        match self.mode {
+            // "+ New task" + sessions (+ "Clear all" when anything deletable).
+            PickerMode::Switch => {
+                let base = 1 + self.sessions.len();
+                if self.clear_row_index().is_some() {
+                    base + 1
+                } else {
+                    base
+                }
+            }
+            // Fork mode lists the sessions themselves (no auxiliary rows).
+            PickerMode::Fork => self.sessions.len(),
         }
     }
 
@@ -145,12 +183,20 @@ impl TaskPicker {
     }
 
     pub fn selection(&self) -> Option<TaskPick> {
-        if self.selected == 0 {
-            Some(TaskPick::New)
-        } else {
-            self.sessions
-                .get(self.selected - 1)
-                .map(|s| TaskPick::Resume(s.id.clone()))
+        match self.mode {
+            PickerMode::Switch => {
+                if self.selected == 0 {
+                    Some(TaskPick::New)
+                } else {
+                    self.sessions
+                        .get(self.selected - 1)
+                        .map(|s| TaskPick::Resume(s.id.clone()))
+                }
+            }
+            PickerMode::Fork => self
+                .sessions
+                .get(self.selected)
+                .map(|s| TaskPick::Fork(s.id.clone())),
         }
     }
 }
@@ -225,24 +271,30 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
+    let is_fork = picker.mode == PickerMode::Fork;
+    // Session rows start at index 1 behind "+ New task" in switch mode, and
+    // at index 0 in fork mode (no auxiliary rows).
+    let row_offset = if is_fork { 0 } else { 1 };
     let mut items: Vec<ListItem> = Vec::with_capacity(visible);
 
-    // "+ New task" row
-    let new_style = if picker.selected == 0 {
-        Style::default()
-            .fg(theme::ok_color())
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::ok_color())
-    };
-    items.push(ListItem::new(Line::from(vec![
-        Span::styled("+ ", new_style),
-        Span::styled("New task", new_style),
-    ])));
+    // "+ New task" row (switch mode only)
+    if !is_fork {
+        let new_style = if picker.selected == 0 {
+            Style::default()
+                .fg(theme::ok_color())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::ok_color())
+        };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("+ ", new_style),
+            Span::styled("New task", new_style),
+        ])));
+    }
 
     // Session rows
     for (i, s) in picker.sessions.iter().enumerate() {
-        let selected = picker.selected == i + 1;
+        let selected = picker.selected == i + row_offset;
         let is_current = s.id == picker.current_session_id;
         let agent = s.agent.as_deref().unwrap_or("act");
         let title = s.title.as_deref().unwrap_or("(untitled)");
@@ -339,6 +391,8 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
             ),
             Style::default().fg(theme::err_color()).add_modifier(Modifier::BOLD),
         ))
+    } else if is_fork {
+        Line::from(" Fork (\u{2191}/\u{2193} select, Enter=fork context, Esc=cancel) ")
     } else {
         Line::from(" Tasks (\u{2191}/\u{2193} select, Enter=switch, Esc=cancel) ")
     };
@@ -658,5 +712,49 @@ mod tests {
         assert_eq!(short_preview(&preview, 40).chars().count(), 40, "39 cols + ellipsis fits 40");
         assert_eq!(short_preview(&preview, 8).chars().count(), 8, "7 cols + ellipsis fits 8");
         assert_eq!(short_preview("short", 40), "short", "fits unchanged");
+    }
+
+    #[test]
+    fn fork_mode_has_no_new_or_clear_rows() {
+        let p = TaskPicker::new_fork(vec![item("a"), item("b")], "cur".into());
+        assert_eq!(p.row_count(), 2, "sessions only, no +New / Clear all");
+        assert!(p.clear_row_index().is_none(), "clear is unreachable in fork mode");
+        assert!(!p.confirm_clear);
+    }
+
+    #[test]
+    fn fork_mode_selection_returns_fork_ids() {
+        let mut p = TaskPicker::new_fork(vec![item("a"), item("b")], "cur".into());
+        assert!(matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "a"));
+        p.move_down();
+        assert!(matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "b"));
+        p.move_down();
+        assert!(matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "a"), "wraps");
+    }
+
+    #[test]
+    fn fork_mode_enter_returns_pick_and_closes() {
+        let mut picker = Some(TaskPicker::new_fork(vec![item("a"), item("b")], "cur".into()));
+        let out = handle_task_key(&mut picker, key(KeyCode::Enter));
+        assert!(matches!(out, TaskOutcome::Pick(TaskPick::Fork(id)) if id == "a"));
+        assert!(picker.is_none(), "picker closes after fork pick");
+    }
+
+    #[test]
+    fn fork_mode_render_shows_fork_title_and_hides_aux_rows() {
+        let picker = TaskPicker::new_fork(vec![item("s1")], "cur".into());
+        let text = render_picker_to_text(&picker);
+        assert!(text.contains("Fork"), "fork title:\n{text}");
+        assert!(!text.contains("New task"), "no +New row:\n{text}");
+        assert!(!text.contains("Clear all"), "no Clear-all row:\n{text}");
+    }
+
+    #[test]
+    fn fork_mode_empty_sessions_enter_returns_idle() {
+        let mut picker = Some(TaskPicker::new_fork(vec![], "cur".into()));
+        assert_eq!(picker.as_ref().unwrap().row_count(), 0);
+        let out = handle_task_key(&mut picker, key(KeyCode::Enter));
+        assert!(matches!(out, TaskOutcome::Idle));
+        assert!(picker.is_none(), "empty fork picker closes without a pick");
     }
 }

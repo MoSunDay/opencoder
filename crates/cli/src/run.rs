@@ -114,7 +114,9 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             .clone()
             .ok_or_else(|| anyhow!("store unavailable for resume"))?;
         let effective_id = if cli.fork {
-            fork_session(st.as_ref(), &id).await?
+            let fid = opencoder_session::fork::fork_session(st.as_ref(), &id).await?;
+            eprintln!("\n\x1b[2m[forked {id} \u{2192} {fid}]\x1b[0m");
+            fid
         } else {
             id
         };
@@ -324,40 +326,6 @@ async fn pick_resume_id(cli: &Cli, store: Option<&dyn Store>) -> Result<Option<S
         return Ok(list.into_iter().next().map(|i| i.id));
     }
     Ok(None)
-}
-
-/// Copy a session's meta and messages into a new session id, leaving the
-/// original untouched. Returns the new id.
-pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> {
-    let meta = store
-        .get_session(parent_id)
-        .await?
-        .ok_or_else(|| anyhow!("session not found: {parent_id}"))?;
-    let messages = store.load_messages(parent_id).await?;
-    let new_id = opencoder_session::runner::new_id();
-    let now = opencoder_core::message::now_ms();
-    let forked = opencoder_store::SessionMeta {
-        id: new_id.clone(),
-        title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
-        agent: meta.agent.clone(),
-        model: meta.model.clone(),
-        workdir_hash: meta.workdir_hash.clone(),
-        created_at: now,
-        updated_at: now,
-        summary: meta.summary.clone(),
-        summary_seq: meta.summary_seq,
-        summary_images: vec![],
-        handoff_seq: meta.handoff_seq,
-        handoff_plan: meta.handoff_plan.clone(),
-        skill: meta.skill.clone(),
-        task_type: None,
-    };
-    store.create_session(&forked).await?;
-    if !messages.is_empty() {
-        store.append_messages(&new_id, &messages).await?;
-    }
-    eprintln!("\n\x1b[2m[forked {parent_id} \u{2192} {new_id}]\x1b[0m");
-    Ok(new_id)
 }
 
 #[allow(dead_code)]

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use opencoder_cli::run::fork_session;
+use opencoder_session::fork::fork_session;
 use opencoder_core::{ContentBlock, Message};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 

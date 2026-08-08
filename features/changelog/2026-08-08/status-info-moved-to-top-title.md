@@ -35,13 +35,20 @@ Commit: (working-tree, pre-initial-commit)
 | 顺序 workdir → mode → model → effort，effort 徽标拼接 | `compute_display_title_with_effort_strips_prefix` | unit |
 | 空白 reasoning_effort 省略末尾徽标 | `compute_display_title_omits_blank_effort` | unit |
 | body 顶部标题行含完整组合序列 | `body_title_row_shows_full_top_composition` | unit(render) |
+| rounded_block_line 首尾空格 padding 与 rounded_block 一致（直接单测） | `rounded_block_line_pads_title_like_rounded_block` | unit(theme) |
 | 底部状态栏不再含 model / [mode]（已上移），仍含 ctx、无品牌 | `status_bar_omits_branding_and_top_moved_info` | unit(render) |
 | 既有 status_bar/status_ctx 各用例随 `render_status` 签名更新后全绿 | `status_bar_*` / `status_ctx_*`（8 例） | unit(render) |
 
 ## Gate
 
-- 全量回归：`cargo test --workspace` → **2023 passed / 0 failed / 0 ignored**（当次实跑）
+- 全量回归：`cargo test --workspace` → **2024 passed / 0 failed / 0 ignored**（当次实跑，含补测 `rounded_block_line_pads_title_like_rounded_block`）
+
+- 回归基线归因：基线 b1e1e7f 记录 2023 passed；当次树 2023 = 基线 2023 + 本 scope 新增 9
+  测试 − 9（并行 agent 在 0cff6e0 同树删除 help/short_key 旧功能测试并重构旧 task timer
+  测试，删改均由其 changelog `tui-ctrl-h-keymap-menu-migration.md` 文档化）——净计数持平
+  基线而非 +9，非本 scope 静默回归。
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → 零错误
-- 行数：app_loop.rs 762 / render.rs 792 / app.rs 794（均 < 800），theme.rs 416（新增
-  `rounded_block_line` 11 行）
+- 行数：app_loop.rs 762 / render.rs 792 / app.rs 794（均 < 800），theme.rs 455（含
+  `rounded_block_line` 实现 + 直接单测；该单测由本次整改补入）。app_loop_tests/mod.rs
+  已由后续提交 451738f 拆分为 display_title_tests.rs（789 + 102 行，均达标）

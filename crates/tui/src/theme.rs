@@ -413,4 +413,46 @@ mod tests {
         set_theme(ThemeKind::Dark);
         assert_eq!(local_style().fg, Some(LOCAL));
     }
+
+    // ── rounded_block_line ──────────────────────────────────────────────
+
+    #[test]
+    fn rounded_block_line_pads_title_like_rounded_block() {
+        set_theme(ThemeKind::Dark);
+        // multi-span styled title (per-segment colors kept by the Line)
+        let line = Line::from(vec![
+            Span::styled("workdir", Style::default().fg(Color::Cyan)),
+            Span::raw(" \u{00b7} [act]"),
+        ]);
+        let from_line = rounded_block_line(&line);
+        let from_str = rounded_block("workdir \u{00b7} [act]");
+
+        let top_row = |block: Block<'static>| {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
+            terminal
+                .draw(|f| f.render_widget(block, f.area()))
+                .unwrap();
+            let buf = terminal.backend().buffer();
+            let mut s = String::new();
+            for x in 0..40 {
+                if let Some(cell) = buf.cell((x, 0)) {
+                    s.push_str(cell.symbol());
+                }
+            }
+            s
+        };
+
+        let line_row = top_row(from_line);
+        let str_row = top_row(from_str);
+        assert_eq!(
+            line_row, str_row,
+            "rounded_block_line must render the identical title row (same \
+             leading/trailing space padding) as rounded_block"
+        );
+        assert!(
+            line_row.contains(" workdir \u{00b7} [act] "),
+            "title must carry one padding space on each side; got: {line_row}"
+        );
+    }
 }

@@ -17,9 +17,14 @@ use crate::model_session_switch::switch_session;
 use crate::theme;
 use crate::worker::UiCmd;
 
-use super::env_model_override;
 use super::LoopFlow;
 
+/// The `match handle_model_key(...)` block from the `/config` modal: on
+/// `Save(json)` persists config, reloads it, rebuilds the outer client / config
+/// / model label / context limit / frame ticker, sends `ReloadConfig` and posts
+/// a marker. `Cancel | Idle` does nothing. `Quit` sends `UiCmd::Quit` and was a
+/// `break`. Returns [`LoopFlow::Quit`] for the `Quit` arm, otherwise
+/// [`LoopFlow::Proceed`] (the caller keeps the post-match `continue` inline).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_model_outcome(
     model_menu: &mut Option<ModelMenu>,
@@ -145,4 +150,24 @@ pub(crate) async fn handle_model_outcome(
         }
     }
     LoopFlow::Proceed
+}
+
+/// Detect whether an exported `OPENCODER_MODEL` silently overrode a `/model`
+/// switch. `Config::load` runs `apply_env` on every load, so an exported
+/// `OPENCODER_MODEL` re-pins `cfg.model` and reverts a just-saved menu switch
+/// -- leaving the status bar showing an unexpected model with no feedback.
+///
+/// Pure (no env I/O) so it is unit-testable without flaky process-wide env.
+/// Returns the env model value when an override occurred, else `None`.
+pub(crate) fn env_model_override(
+    intended_model: Option<&str>,
+    effective_model: &str,
+    env_model: Option<&str>,
+) -> Option<String> {
+    let intended = intended_model?;
+    let env = env_model?.trim();
+    if env.is_empty() {
+        return None;
+    }
+    (effective_model != intended).then(|| env.to_string())
 }

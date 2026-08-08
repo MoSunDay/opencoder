@@ -57,6 +57,7 @@ pub(crate) enum LoopFlow {
 /// `&ChatView` rather than cloning.
 pub(crate) struct DisplayState<'a> {
     pub(crate) agent_name: String,
+    pub(crate) display_mode: String,
     pub(crate) status: String,
     pub(crate) display_chat: &'a ChatView,
     /// Body block title. Top level: `workdir · model · effort`; subagent
@@ -87,7 +88,7 @@ pub(crate) fn compute_display<'a>(
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
     // The body title keeps the "Ctrl+L back" hint.
-    let (display_chat, display_title, display_ctx, display_sys) = if let Some(idx) = subagent_focus
+    let (display_chat, display_title, display_ctx, display_sys, display_mode) = if let Some(idx) = subagent_focus
     {
         match chat.blocks.get(idx) {
             Some(crate::chat::ChatBlock::Subagent {
@@ -99,12 +100,14 @@ pub(crate) fn compute_display<'a>(
                 )),
                 view.context_used,
                 subagent_sys,
+                kind.clone(),
             ),
             _ => (
                 chat,
                 Line::from(agent_name.clone()),
                 chat.context_used,
                 sys_tokens,
+                agent_name.clone(),
             ),
         }
     } else {
@@ -113,10 +116,11 @@ pub(crate) fn compute_display<'a>(
             config.model_id(),
             config.reasoning_effort.as_deref(),
         );
-        (chat, title, chat.context_used, sys_tokens)
+        (chat, title, chat.context_used, sys_tokens, agent_name.clone())
     };
     DisplayState {
         agent_name,
+        display_mode,
         status,
         display_chat,
         display_title,

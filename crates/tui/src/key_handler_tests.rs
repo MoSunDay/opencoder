@@ -39,13 +39,11 @@ fn handle_key_disabled_blocks_char() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -57,7 +55,6 @@ fn handle_key_disabled_blocks_char() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -67,7 +64,6 @@ fn handle_key_disabled_blocks_char() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -80,13 +76,11 @@ fn handle_key_disabled_blocks_enter() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -98,7 +92,6 @@ fn handle_key_disabled_blocks_enter() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -108,7 +101,6 @@ fn handle_key_disabled_blocks_enter() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -120,13 +112,11 @@ fn handle_key_disabled_allows_scroll() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 50u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -138,7 +128,6 @@ fn handle_key_disabled_allows_scroll() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -148,7 +137,6 @@ fn handle_key_disabled_allows_scroll() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -162,13 +150,11 @@ fn handle_key_disabled_allows_quit() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -180,7 +166,6 @@ fn handle_key_disabled_allows_quit() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -190,7 +175,6 @@ fn handle_key_disabled_allows_quit() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Quit));
@@ -202,13 +186,11 @@ fn ctrl_v_returns_clip() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -220,7 +202,6 @@ fn ctrl_v_returns_clip() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -230,7 +211,6 @@ fn ctrl_v_returns_clip() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Clip));
@@ -242,13 +222,11 @@ fn handle_key_disabled_blocks_alt_tab() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Alt+Tab must be blocked when input is disabled (subagent-focus
@@ -262,7 +240,6 @@ fn handle_key_disabled_blocks_alt_tab() {
         &mut hist_idx,
         false,
         "plan",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -272,7 +249,6 @@ fn handle_key_disabled_blocks_alt_tab() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -287,7 +263,6 @@ fn handle_key_disabled_blocks_alt_tab() {
         &mut hist_idx,
         false,
         "plan",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -297,7 +272,6 @@ fn handle_key_disabled_blocks_alt_tab() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -309,13 +283,11 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Ctrl+Shift+Tab (BackTab+CONTROL) must be blocked when input is
@@ -329,7 +301,6 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         &mut hist_idx,
         false,
         "plan",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -339,7 +310,6 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -354,7 +324,6 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         &mut hist_idx,
         false,
         "plan",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -364,7 +333,6 @@ fn handle_key_disabled_blocks_ctrl_shift_tab() {
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -380,13 +348,11 @@ fn undo_restores_previous_text() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Type "hi"
@@ -400,7 +366,6 @@ fn undo_restores_previous_text() {
             &mut hist_idx,
             false,
             "act",
-            &mut show_help,
             &mut scroll,
             &mut follow,
             &mut last_esc,
@@ -410,7 +375,6 @@ fn undo_restores_previous_text() {
             false,
             false,
             &mut undo_state,
-            &mut help_scroll,
             &mut queue_scroll,
         );
     }
@@ -426,7 +390,6 @@ fn undo_restores_previous_text() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -436,7 +399,6 @@ fn undo_restores_previous_text() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert_eq!(input, "");
@@ -451,7 +413,6 @@ fn undo_restores_previous_text() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -461,7 +422,6 @@ fn undo_restores_previous_text() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert_eq!(input, "hi");
@@ -473,13 +433,11 @@ fn undo_after_backspace() {
     let mut cursor = 5usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("hello", 5);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Backspace
@@ -492,7 +450,6 @@ fn undo_after_backspace() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -502,7 +459,6 @@ fn undo_after_backspace() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert_eq!(input, "hell");
@@ -517,7 +473,6 @@ fn undo_after_backspace() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -527,96 +482,9 @@ fn undo_after_backspace() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert_eq!(input, "hello");
-}
-
-// ---------------------------------------------------------------------------
-// Help popup scrolling
-// ---------------------------------------------------------------------------
-
-#[test]
-fn help_open_down_arrow_increments_scroll() {
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = true;
-    let mut scroll = 0u32;
-    let mut follow = true;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(help_scroll, 1);
-}
-
-#[test]
-fn help_open_page_down_jumps_scroll() {
-    let mut input = String::new();
-    let mut cursor = 0usize;
-    let history: Vec<String> = Vec::new();
-    let mut hist_idx: Option<usize> = None;
-    let mut show_help = true;
-    let mut scroll = 0u32;
-    let mut follow = true;
-    let mut last_esc: Option<Instant> = None;
-    let mut skill_menu: Option<SkillMenu> = None;
-    let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
-    let mut queue_scroll: u32 = 0;
-
-    let action = handle_key(
-        KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
-        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
-        &mut input,
-        &mut cursor,
-        &history,
-        &mut hist_idx,
-        false,
-        "act",
-        &mut show_help,
-        &mut scroll,
-        &mut follow,
-        &mut last_esc,
-        &mut skill_menu,
-        80,
-        2,
-        false,
-        false,
-        &mut undo_state,
-        &mut help_scroll,
-        &mut queue_scroll,
-    );
-    assert!(matches!(action, KeyAction::None));
-    assert_eq!(help_scroll, 0); // 5 - 10 saturated to 0
 }
 
 // ---------------------------------------------------------------------------
@@ -629,13 +497,11 @@ fn up_arrow_browses_history_when_single_row() {
     let mut cursor = 7usize;
     let history = vec!["older".to_string()];
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("current", 7);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Single-row input (7 chars < row_w=78), so Up browses history.
@@ -648,7 +514,6 @@ fn up_arrow_browses_history_when_single_row() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -658,7 +523,6 @@ fn up_arrow_browses_history_when_single_row() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert_eq!(input, "older");
@@ -673,13 +537,11 @@ fn up_arrow_moves_cursor_when_multi_row() {
     let mut cursor = 80usize; // row 1 (row_w=78)
     let history = vec!["older".to_string()];
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init(&input_text, 80);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     // Multi-row: cursor at row > 0, so Up moves cursor up (not history).
@@ -693,7 +555,6 @@ fn up_arrow_moves_cursor_when_multi_row() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -703,7 +564,6 @@ fn up_arrow_moves_cursor_when_multi_row() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     // Cursor moved up, input unchanged, history not browsed.
@@ -721,13 +581,11 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -739,7 +597,6 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -749,7 +606,6 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -765,13 +621,11 @@ fn handle_key_alt_f_still_moves_word() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("hello", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -783,7 +637,6 @@ fn handle_key_alt_f_still_moves_word() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -793,7 +646,6 @@ fn handle_key_alt_f_still_moves_word() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));

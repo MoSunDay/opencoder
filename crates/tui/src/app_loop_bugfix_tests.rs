@@ -410,95 +410,126 @@ async fn handle_switch_agent_sets_agent_optimistically() {
     );
 }
 
-// ----- Status-bar per-turn timer reset (false→true boundary) -----
+// ----- Status-bar task clock (false→true baseline snap) -----
 
-/// A new turn starts: `running` goes `false → true`. The accumulated elapsed
-/// must reset to zero so the status bar shows this turn's duration, not the
-/// session total.
+/// A new turn starts: `running` goes `false → true`. The task clock is
+/// never reset at a turn boundary — the accumulated task time survives. The
+/// dt baseline is snapped to now so the idle gap is excluded.
 #[test]
-fn tick_clock_resets_elapsed_on_turn_start() {
+fn tick_clock_does_not_reset_task_on_turn_start() {
     let mut prev = false;
     let mut last = Instant::now();
-    let mut elapsed = 999_999u64; // leftover from a prior turn
+    let mut task = 999_999u64; // leftover from a prior turn
 
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    tick_clock(true, &mut prev, &mut last, &mut task);
 
-    assert_eq!(elapsed, 0, "turn start must reset elapsed to zero");
+    assert_eq!(
+        task, 999_999,
+        "turn start must NOT reset the task clock (reset happens only on new task submission)"
+    );
     assert!(prev, "prev_running tracks running after the call");
 }
 
-/// Within a single running turn, consecutive ticks must accumulate without
-/// resetting (no spurious reset on `true → true`). Sleeps long enough that the
-/// measured dt is deterministically positive (sub-ms noise cannot mask it).
+/// Within a single running turn, consecutive ticks accumulate real wall-clock
+/// time. Sleeps long enough that dt is deterministically positive (sub-ms
+/// noise cannot mask it).
 #[test]
-fn tick_clock_accumulates_without_reset_while_running() {
+fn tick_clock_accumulates_task_while_running() {
     let mut prev = false;
     let mut last = Instant::now();
-    let mut elapsed = 0u64;
+    let mut task = 0u64;
 
-    // Start the turn: resets to 0.
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
-    assert_eq!(elapsed, 0, "turn start resets elapsed to zero");
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert_eq!(task, 0, "baseline snap makes the first tick accumulate ~0");
 
-    // Tick again while still running: must accumulate real wall-clock dt,
-    // NOT reset back to zero. 20ms is well above timer granularity so dt > 0.
     std::thread::sleep(std::time::Duration::from_millis(20));
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    tick_clock(true, &mut prev, &mut last, &mut task);
 
     assert!(
-        elapsed > 0,
-        "consecutive running ticks must accumulate, not reset; elapsed={}",
-        elapsed
+        task > 0,
+        "consecutive running ticks must accumulate; task={}",
+        task
     );
     assert!(
-        elapsed < 5_000,
-        "single tick accumulation must be small; elapsed={}",
-        elapsed
+        task < 5_000,
+        "single tick accumulation must be small; task={}",
+        task
     );
 }
 
-/// When the turn ends (`running` goes `true -> false`) the elapsed must reset
-/// to zero — the status bar clears the duration rather than freezing it.
+/// The task clock survives turn boundaries: it freezes on `true -> false`,
+/// does not advance during idle, and keeps accumulating when a new turn
+/// starts.
 #[test]
-fn tick_clock_resets_elapsed_on_turn_end() {
+fn tick_clock_preserves_task_across_turn_end_and_idle() {
     let mut prev = false;
     let mut last = Instant::now();
-    let mut elapsed = 0u64;
+    let mut task = 0u64;
 
-    // Run a tick while running to build up some elapsed.
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    // Turn 1: accumulate.
+    tick_clock(true, &mut prev, &mut last, &mut task);
     std::thread::sleep(std::time::Duration::from_millis(20));
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
-    assert!(elapsed > 0, "elapsed should have accumulated while running");
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert!(task > 0, "task time should accumulate during turn 1");
+    let after_turn1 = task;
 
-    // Turn ends: must reset to zero, not freeze.
-    tick_clock(false, &mut prev, &mut last, &mut elapsed);
+    // Turn 1 ends: task time must NOT reset.
+    tick_clock(false, &mut prev, &mut last, &mut task);
+    assert_eq!(task, after_turn1, "task time must not change on turn end");
 
-    assert_eq!(elapsed, 0, "turn end must reset elapsed to zero");
-    assert!(!prev, "prev_running tracks running=false");
+    // Idle gap: task time must not advance while idle.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(false, &mut prev, &mut last, &mut task);
+    assert_eq!(task, after_turn1, "task time must not advance while idle");
 
-    // Subsequent idle ticks must keep it at zero.
-    tick_clock(false, &mut prev, &mut last, &mut elapsed);
-    assert_eq!(elapsed, 0, "idle ticks must not advance elapsed");
+    // Turn 2 starts: task time keeps accumulating from the preserved value.
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert_eq!(task, after_turn1, "task time preserved across turn boundary");
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert!(
+        task > after_turn1,
+        "task time must grow during turn 2; task={}, after_turn1={}",
+        task,
+        after_turn1
+    );
 }
 
-/// A second turn (after an idle gap) must reset again to zero — confirming
-/// the per-turn semantics hold across multiple turns, not just the first.
+/// `false -> true` snaps the dt baseline so a long idle gap between turns is
+/// never charged to the task clock.
 #[test]
-fn tick_clock_resets_again_on_second_turn_start() {
+fn tick_clock_false_to_true_excludes_idle_gap() {
     let mut prev = false;
     let mut last = Instant::now();
-    let mut elapsed = 0u64;
+    let mut task = 0u64;
 
-    // First turn.
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
-    // Idle.
-    tick_clock(false, &mut prev, &mut last, &mut elapsed);
-    // Inject a non-zero leftover to prove the reset happens.
-    elapsed = 5_000;
+    // First turn accumulates some task time.
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    let after_turn1 = task;
+    assert!(task > 0, "turn 1 must accumulate task time");
 
-    // Second turn starts: must reset.
-    tick_clock(true, &mut prev, &mut last, &mut elapsed);
+    // Idle: a tick that advances wall-clock but not the task clock.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(false, &mut prev, &mut last, &mut task);
+    assert_eq!(task, after_turn1, "idle tick must not accumulate");
 
-    assert_eq!(elapsed, 0, "second turn start must reset elapsed to zero");
+    // Turn 2 starts after an idle gap: the baseline is snapped to now, so the
+    // whole idle stretch is excluded from the very first tick of turn 2.
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert_eq!(
+        task, after_turn1,
+        "false→true must snap the baseline so the idle gap is not counted"
+    );
+
+    // Only subsequent running ticks charge the clock again.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    tick_clock(true, &mut prev, &mut last, &mut task);
+    assert!(
+        task > after_turn1,
+        "task time must grow after the turn-2 baseline snap"
+    );
 }
+

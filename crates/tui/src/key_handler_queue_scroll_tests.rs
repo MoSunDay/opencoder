@@ -10,13 +10,11 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 50u32;
     let mut follow = false;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 2;
 
     let action = handle_key(
@@ -28,7 +26,6 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -38,7 +35,6 @@ fn shift_page_up_scrolls_queue_panel_not_body() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -53,13 +49,11 @@ fn shift_page_down_advances_toward_newest() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 50u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 3;
 
     let action = handle_key(
@@ -71,7 +65,6 @@ fn shift_page_down_advances_toward_newest() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -81,7 +74,6 @@ fn shift_page_down_advances_toward_newest() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
@@ -98,13 +90,11 @@ fn shift_page_up_floors_at_zero() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 1;
 
     for _ in 0..2 {
@@ -117,7 +107,6 @@ fn shift_page_up_floors_at_zero() {
             &mut hist_idx,
             false,
             "act",
-            &mut show_help,
             &mut scroll,
             &mut follow,
             &mut last_esc,
@@ -127,7 +116,6 @@ fn shift_page_up_floors_at_zero() {
             false,
             false,
             &mut undo_state,
-            &mut help_scroll,
             &mut queue_scroll,
         );
         assert!(matches!(action, KeyAction::None));
@@ -143,13 +131,11 @@ fn plain_page_up_still_scrolls_body() {
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
     let mut hist_idx: Option<usize> = None;
-    let mut show_help = false;
     let mut scroll = 50u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
 
     let action = handle_key(
@@ -161,7 +147,6 @@ fn plain_page_up_still_scrolls_body() {
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -171,7 +156,6 @@ fn plain_page_up_still_scrolls_body() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));

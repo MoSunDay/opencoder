@@ -21,13 +21,11 @@ pub(super) fn run_handle(
 ) -> KeyAction {
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
@@ -38,7 +36,6 @@ pub(super) fn run_handle(
         &mut hist_idx,
         running,
         agent,
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -48,7 +45,6 @@ pub(super) fn run_handle(
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     )
 }
@@ -64,13 +60,11 @@ pub(super) fn run_handle_disabled(
 ) -> KeyAction {
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
@@ -81,7 +75,6 @@ pub(super) fn run_handle_disabled(
         &mut hist_idx,
         false,
         agent,
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -91,7 +84,6 @@ pub(super) fn run_handle_disabled(
         false,
         true,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     )
 }
@@ -106,13 +98,11 @@ pub(super) fn run_handle_subagent(
 ) -> KeyAction {
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
@@ -123,7 +113,6 @@ pub(super) fn run_handle_subagent(
         &mut hist_idx,
         true,
         agent,
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -133,7 +122,6 @@ pub(super) fn run_handle_subagent(
         true,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     )
 }
@@ -148,12 +136,10 @@ pub(super) fn run_handle_menu(
 ) -> KeyAction {
     let history: Vec<String> = vec![];
     let mut hist_idx = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
     handle_key(
         k,
@@ -164,7 +150,6 @@ pub(super) fn run_handle_menu(
         &mut hist_idx,
         false,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -174,7 +159,6 @@ pub(super) fn run_handle_menu(
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     )
 }

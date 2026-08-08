@@ -22,7 +22,7 @@ fn body_follow_indicator_when_not_following() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 false,
                 0,
@@ -76,7 +76,7 @@ fn body_follow_label_when_following() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 true,
                 0,
@@ -129,7 +129,7 @@ fn body_top_arrow_when_scrolled_down() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 false,
                 0,
@@ -182,7 +182,7 @@ fn body_no_top_arrow_when_at_top() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 false,
                 0,
@@ -235,7 +235,7 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 false,
                 0,
@@ -278,7 +278,7 @@ fn empty_session_shows_tutorial_then_hides_on_first_block() {
                 f,
                 f.area(),
                 &v2,
-                "test",
+                &Line::raw("test"),
                 &mut scroll2,
                 false,
                 0,
@@ -331,7 +331,7 @@ fn empty_child_view_does_not_show_tutorial() {
                 f,
                 f.area(),
                 &v,
-                "test",
+                &Line::raw("test"),
                 &mut scroll,
                 false,
                 0,
@@ -358,5 +358,58 @@ fn empty_child_view_does_not_show_tutorial() {
     assert!(
         !full.contains("OpenCoder"),
         "empty child view should NOT render the tutorial; got:\n{full}"
+    );
+}
+
+/// The body block's top border row carries the full top-title composition
+/// `workdir · [mode] · model · effort` (model/mode moved up from the status
+/// bar). The title is a styled multi-span Line; the text must appear on the
+/// title row in order.
+#[test]
+fn body_title_row_shows_full_top_composition() {
+    let v = ChatView::default(); // empty session -> tutorial path, title still rendered
+    let backend = TestBackend::new(100, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut body_out: Option<Rect> = None;
+    let mut jump_btn: Option<Rect> = None;
+    let mut top_btn: Option<Rect> = None;
+    let mut scroll = 0u32;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                &Line::from(vec![
+                    Span::raw("/root/opencoder"),
+                    Span::raw(" \u{00b7} "),
+                    Span::styled("[act]", Style::default().fg(Color::Cyan)),
+                    Span::raw(" \u{00b7} "),
+                    Span::raw("glm-5.2"),
+                    Span::raw(" \u{00b7}high"),
+                ]),
+                &mut scroll,
+                false,
+                0,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut top_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                None,
+                &mut None,
+                true,
+                0,
+            );
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 100);
+    assert!(
+        row.contains("/root/opencoder \u{00b7} [act] \u{00b7} glm-5.2 \u{00b7}high"),
+        "body title row must show workdir · [mode] · model · effort; got: {row}"
     );
 }

@@ -89,12 +89,10 @@ pub(super) async fn run_app(
     let mut hist_idx: Option<usize> = None;
     let mut running = false;
     let mut prev_running = false;
-    let mut run_elapsed_ms: u64 = 0;
+    let mut task_elapsed_ms: u64 = 0;
     let mut last_clock = Instant::now();
     let mut cancelled = false;
     let mut drain_pending = false;
-    let mut show_help = false;
-    let mut help_scroll: u16 = 0;
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
     let mut follow = true;
@@ -189,16 +187,14 @@ pub(super) async fn run_app(
     // Idle-resize safety net: on kernel-size mismatch (lost Resize — tmux/fast drag) force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
     loop {
-        app_loop::tick_clock(running, &mut prev_running, &mut last_clock, &mut run_elapsed_ms);
+        app_loop::tick_clock(running, &mut prev_running, &mut last_clock, &mut task_elapsed_ms);
         let app_loop::DisplayState {
             agent_name,
             status,
             display_chat,
             display_title,
-            display_status_agent,
             display_ctx,
             display_sys,
-            status_model,
         } = app_loop::compute_display(
             &chat,
             subagent_focus,
@@ -217,8 +213,7 @@ pub(super) async fn run_app(
             app_display::steer_queue_sources(&chat, subagent_focus, &queue_items);
         let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
         let now = opencoder_core::message::now_ms();
-        let display_turn_ms =
-            app_display::display_turn_ms(&chat, subagent_focus, run_elapsed_ms, now);
+        let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now);
 
         if dirty && render_pending {
             if !skip_next_render {
@@ -229,14 +224,11 @@ pub(super) async fn run_app(
                     &input,
                     cursor_idx,
                     &display_title,
-                    &display_status_agent,
                     running,
-                    show_help,
                     display_ctx,
                     display_sys,
                     compaction_threshold,
                     context_limit,
-                    &status_model,
                     &status,
                     display_steers,
                     display_queue,
@@ -258,8 +250,8 @@ pub(super) async fn run_app(
                     &copy_status,
                     &pending_images,
                     input_disabled,
-                    display_turn_ms,
-                    help_scroll,
+                    tail_ms,
+                    task_elapsed_ms,
                     subagent_focus.is_none(),
                     config.autopilot.enabled,
                 )?;
@@ -419,7 +411,6 @@ pub(super) async fn run_app(
                             &mut hist_idx,
                             running,
                             &agent_name,
-                            &mut show_help,
                             &mut scroll,
                             &mut follow,
                             &mut last_esc,
@@ -434,7 +425,6 @@ pub(super) async fn run_app(
                             subagent_focus.is_some(),
                             input_disabled,
                             &mut undo_state,
-                            &mut help_scroll,
                             &mut queue_scroll,
                         ) {
                             KeyAction::Submit(text) => {
@@ -452,7 +442,7 @@ pub(super) async fn run_app(
                                 // to re-arm. Shift+Tab after the plan turn then keeps the plan
                                 // and starts the task instead of plain-swapping.
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                if let Some(km) = app_loop::try_keymap_command(&clean, &config) { keymap_menu = Some(km); dirty = true; render_pending = true; } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
+                                if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {
@@ -470,6 +460,7 @@ pub(super) async fn run_app(
                                                 break;
                                             }
                                             pending_images.clear();
+                                            task_elapsed_ms = 0;
                                             running = true;
                                             follow = true;
                                             chat.note_requirement_submitted();
@@ -515,6 +506,7 @@ pub(super) async fn run_app(
                                         break;
                                     }
                                     pending_images.clear();
+                                    task_elapsed_ms = 0;
                                     cancelled = false; // B3: clear stale flag from a prior cancel
                                     running = true;
                                     follow = true;
@@ -678,6 +670,11 @@ pub(super) async fn run_app(
                             }
                             KeyAction::OpenCommand => {
                                 command_menu = Some(CommandMenu::new());
+                            }
+                            crate::key_handler::KeyAction::OpenKeymap => {
+                                keymap_menu = Some(crate::keymap_menu::KeymapMenu::new(&config.keymap));
+                                dirty = true;
+                                render_pending = true;
                             }
                             KeyAction::Quit => {
                                 app_loop::handle_quit(running, &cancel, &mut chat, &cmd_tx).await;

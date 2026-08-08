@@ -99,15 +99,12 @@ pub(crate) fn render<B: Backend>(
     chat: &ChatView,
     input: &str,
     cursor_idx: usize,
-    title: &str,
-    agent: &str,
+    title: &Line<'static>,
     running: bool,
-    show_help: bool,
     context_used: u64,
     sys_tokens: u64,
     compaction_threshold: u64,
     context_limit: u64,
-    model: &str,
     status: &str,
     steer_items: &[(i64, String)],
     queue_items: &[(i64, String)],
@@ -130,8 +127,8 @@ pub(crate) fn render<B: Backend>(
     pending_images: &[(String, String)],
     input_disabled: bool,
     plan_mode: Option<&str>,
-    run_ms: u64,
-    help_scroll: u16,
+    tail_ms: u64,
+    task_ms: u64,
     is_top_level: bool,
     ap_enabled: bool,
 ) -> Result<()> {
@@ -218,7 +215,7 @@ pub(crate) fn render<B: Backend>(
                 selection,
                 viewport,
                 is_top_level,
-                run_ms,
+                tail_ms,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -271,17 +268,13 @@ pub(crate) fn render<B: Backend>(
             chunks[ci],
             running,
             status,
-            model,
-            agent,
             anim_tick,
             context_used + sys_tokens,
             compaction_threshold,
             context_limit,
+            task_ms,
         );
 
-        if show_help {
-            crate::help::render_help(f, area, help_scroll);
-        }
         if let Some(tp) = task_picker {
             crate::task::render_task_picker(f, area, tp);
         }
@@ -327,7 +320,7 @@ fn render_body(
     f: &mut Frame,
     area: Rect,
     chat: &ChatView,
-    title: &str,
+    title: &Line<'static>,
     scroll: &mut u32,
     follow: bool,
     anim_tick: u32,
@@ -342,10 +335,10 @@ fn render_body(
     selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
-    turn_ms: u64,
+    tail_ms: u64,
 ) {
     *body_out = Some(area);
-    let block = theme::rounded_block(title);
+    let block = theme::rounded_block_line(title);
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -365,11 +358,9 @@ fn render_body(
         return;
     }
 
-    // A1: Build or refresh the viewport cache. Rebuilt when the cache is
-    // absent (first frame or invalidated by app.rs at body-refresh cadence)
-    // or when the terminal width changed (resize). Between rebuilds the
-    // cached flattened lines and row offsets are reused, making per-frame
-    // cost O(visible_h) instead of O(total_content).
+    // A1: Build or refresh the viewport cache (rebuilt on first frame,
+    // body-refresh invalidation, or width change). Cached lines/offsets
+    // make per-frame cost O(visible_h) instead of O(total_content).
     let needs_rebuild = viewport.as_ref().is_none_or(|v| v.width() != text_w);
     if needs_rebuild {
         *viewport = Some(ViewportCache::build(chat, text_w, anim_tick, now_ms));
@@ -426,19 +417,27 @@ fn render_body(
     let n = cache.lines().len();
     let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
     let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    // Turn-duration timer at the tail of the last content line. Shown only
-    // while a turn is running and the bottom of the transcript is in view.
-    if turn_ms > 0 && end == n {
+    // Tail-duration timer on the last content line: the current round of
+    // tool calls (or the focused subagent's live elapsed). Shown only while
+    // something is running and the bottom of the transcript is in view.
+    if tail_ms > 0 && end == n {
+        let timer = Span::styled(
+            format!("[call {}]", fmtmod::format_run_duration(tail_ms)),
+            Style::default().fg(theme::warn_color()),
+        );
         if let Some(last) = visible_lines.iter_mut().rev().find(|l| {
             l.spans
                 .iter()
                 .any(|s| s.content.chars().any(|c| !c.is_whitespace()))
         }) {
-            last.spans.push(Span::raw("  "));
-            last.spans.push(Span::styled(
-                fmtmod::format_run_duration(turn_ms),
-                Style::default().fg(theme::warn_color()),
-            ));
+            if last.width() + 2 + timer.width() <= usize::from(text_w) {
+                last.spans.push(Span::raw("  "));
+                last.spans.push(timer);
+            } else {
+                // The content line is full: put the timer on its own line so
+                // the call duration is never dropped.
+                visible_lines.push(Line::from(timer));
+            }
         }
     }
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
@@ -508,10 +507,8 @@ fn render_body(
     }
 }
 
-/// Manual scrollbar with correct thumb positioning even when content barely
-/// overflows the viewport. ratatui's `ScrollbarState` inflates the denominator
-/// by `viewport − 1`, which parks the thumb mid-track at the bottom when
-/// content ≈ viewport. This uses the simple ratio `scroll / max_scroll`.
+/// Manual scrollbar with correct thumb positioning (ratatui's
+/// `ScrollbarState` inflates the denominator, parking the thumb mid-track).
 fn draw_scrollbar(
     f: &mut Frame,
     inner: Rect,
@@ -654,10 +651,10 @@ fn render_composer(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Foreground color of the `[agent]` status chip (issue #6): Yellow in
-/// read-only plan mode (caution), Cyan for act. Was uniformly Magenta.
-/// Shared by the status bar and the `/task` picker so the two stay
-/// visually consistent.
+/// Foreground color of the `[mode]` chip (issue #6): Yellow in read-only
+/// plan mode (caution), Cyan for act. Was uniformly Magenta. Shared by the
+/// top body title and the `/task` picker so the two stay visually
+/// consistent.
 pub(crate) fn agent_chip_fg(agent: &str) -> Color {
     theme::agent_chip_fg(agent)
 }
@@ -708,22 +705,13 @@ fn render_status(
     area: Rect,
     running: bool,
     status: &str,
-    model: &str,
-    agent: &str,
     anim_tick: u32,
     used: u64,
     compaction_threshold: u64,
     context_limit: u64,
+    task_ms: u64,
 ) {
-    let mut spans = vec![
-        Span::raw(" "),
-        Span::styled(model.to_string(), Style::default().fg(theme::text())),
-        Span::raw(" \u{00b7} "),
-        Span::styled(
-            format!("[{agent}]"),
-            Style::default().fg(agent_chip_fg(agent)),
-        ),
-    ];
+    let mut spans = vec![Span::raw(" ")];
 
     // The progress meter + its colour track the compaction threshold (the
     // bar fills toward red as auto-compression nears). The trailing ctx text
@@ -747,7 +735,6 @@ fn render_status(
         ),
         Style::default().fg(ctx_color),
     ));
-
     spans.push(Span::raw("  "));
 
     if running {
@@ -760,6 +747,16 @@ fn render_status(
         spans.push(Span::styled(
             format!("\u{00b7} {status}"),
             Style::default().fg(theme::muted()),
+        ));
+    }
+
+    // Task-total duration sits AFTER the spinner/status so the eye goes
+    // motion → time; warn colour marks it as the active task clock.
+    if task_ms > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            fmtmod::format_run_duration(task_ms),
+            Style::default().fg(theme::warn_color()),
         ));
     }
 

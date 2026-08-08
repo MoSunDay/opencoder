@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-08
 **Crate:** `opencoder-store`
-**Baseline tests:** 72 (pre-existing) → **79 passed** (7 new regression tests)
+**Baseline tests:** 72 (pre-existing) → **80 passed** (7 new regression tests; +1 from sibling requirement v8 migration test)
 
 ## Problem
 
@@ -48,7 +48,7 @@ INSERT transactions caused WAL bloat and prolonged lock holds.
 | `concurrent_writers_no_deadlock` | 4 concurrent writers, no deadlock |
 
 ```
-cargo test -p opencoder-store → 79 passed; 0 failed
+cargo test -p opencoder-store → 80 passed; 0 failed
 cargo clippy -p opencoder-store --all-targets -- -D warnings → clean
 cargo build -p opencoder-store → success
 ```

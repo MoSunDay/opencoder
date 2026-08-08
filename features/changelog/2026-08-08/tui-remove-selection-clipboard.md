@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-08
 **Crate:** `opencoder-tui`
-**Baseline tests:** 2125 (workspace, pre-change) → **2072 passed**（net −53；54 TUI 测试随模块删除移除，store 侧 net +1）
+**Baseline tests:** 2125 (workspace, pre-change) → **2084 passed**（本特性净删 53：54 TUI 测试随模块移除、store 侧 net +1；同提交的 requirement 持久化 + store 并发加固回填 +12，故最终提交态总数 2084）
 
 ## 背景
 
@@ -52,7 +52,7 @@ OpenCoder TUI 此前实现了完整的应用级鼠标拖拽文本选择与 OSC52
 
 ## 测试说明
 
-移除的测试全部针对已删除的 `selection` / `clip_probe` 模块及其参数链调用点（功能已不存在）。TUI 侧净删除 54 个测试；store 侧 `store_concurrency.rs` 重写后净 +1（6→7）。workspace 净 −53，与 2125→2072 一致。**无任何"改测试以转绿"行为**——删除的测试所属模块已从源码中物理移除。
+移除的测试全部针对已删除的 `selection` / `clip_probe` 模块及其参数链调用点（功能已不存在）。TUI 侧净删除 54 个测试；store 侧 `store_concurrency.rs` 重写后净 +1（6→7）。本特性 workspace 净 −53（2125→2072）；同提交 sibling 特性（requirement 持久化、store 并发加固）新增 +12，故最终提交态全量回归为 2084。**无任何"改测试以转绿"行为**——删除的测试所属模块已从源码中物理移除。
 
 存活的鼠标测试仍覆盖：按钮命中（工具 / 折叠 / 跳转 / chip）、滚轮与拖动滚动、subagent focus 切换、composer 光标定位、内联图片渲染等非选择路径。
 
@@ -66,7 +66,7 @@ OpenCoder TUI 此前实现了完整的应用级鼠标拖拽文本选择与 OSC52
 
 - 构建：`cargo build --workspace` → 干净（EXIT=0）。
 - 静态检查：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告。
-- 全量回归：`cargo test --workspace --no-fail-fast` → 2072 passed; 0 failed。
+- 全量回归：`cargo test --workspace --no-fail-fast` → 2084 passed; 0 failed（最终提交态）。
 - 行数：所有改动文件 ≤800（render.rs 771、chat.rs 789、app.rs 784、app_helpers.rs 692、frame.rs 远低）。
 
 ## 影响面

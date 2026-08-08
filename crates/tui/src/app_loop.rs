@@ -424,32 +424,6 @@ pub(crate) async fn fold_ui_events(
     LoopFlow::Proceed
 }
 
-/// The `match handle_model_key(...)` block from the `/config` modal: on
-/// `Save(json)` persists config, reloads it, rebuilds the outer client / config
-/// / model label / context limit / frame ticker, sends `ReloadConfig` and posts
-/// a marker. `Cancel | Idle` does nothing. `Quit` sends `UiCmd::Quit` and was a
-/// `break`. Returns [`LoopFlow::Quit`] for the `Quit` arm, otherwise
-/// [`LoopFlow::Proceed`] (the caller keeps the post-match `continue` inline).
-/// Detect whether an exported `OPENCODER_MODEL` silently overrode a `/model`
-/// switch. `Config::load` runs `apply_env` on every load, so an exported
-/// `OPENCODER_MODEL` re-pins `cfg.model` and reverts a just-saved menu switch
-/// -- leaving the status bar showing an unexpected model with no feedback.
-///
-/// Pure (no env I/O) so it is unit-testable without flaky process-wide env.
-/// Returns the env model value when an override occurred, else `None`.
-pub(crate) fn env_model_override(
-    intended_model: Option<&str>,
-    effective_model: &str,
-    env_model: Option<&str>,
-) -> Option<String> {
-    let intended = intended_model?;
-    let env = env_model?.trim();
-    if env.is_empty() {
-        return None;
-    }
-    (effective_model != intended).then(|| env.to_string())
-}
-
 /// The `match outcome` block from the `/` command picker modal: dispatches the
 /// chosen `SlashAction` (open task picker, model/config menus, compact,
 /// cache-salt panel). `handle_command_key` also returns a `quit` flag which, if
@@ -761,6 +735,8 @@ mod bugfix_tests;
 mod app_loop_model;
 
 pub(crate) use app_loop_model::handle_model_outcome;
+#[cfg(test)]
+pub(crate) use app_loop_model::env_model_override;
 
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;

@@ -4,6 +4,7 @@
 
 use super::mouse_helpers::*;
 use crate::app_helpers::*;
+use crossterm::event::KeyModifiers;
 use ratatui::layout::Rect;
 
 fn scroll_down() -> MouseEvent {
@@ -50,14 +51,10 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
     hits.total_rows = child_rows;
     let mut scroll = 0u32;
     let mut follow = false;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus = Some(sub_idx);
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
 
     handle_mouse(
@@ -65,7 +62,6 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -73,9 +69,6 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -103,14 +96,10 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
     let hits = empty_hits(body);
     let mut scroll = 0u32;
     let mut follow = false;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
 
     handle_mouse(
@@ -118,7 +107,6 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -126,9 +114,6 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -166,13 +151,9 @@ async fn scrollup_advances_faster_than_default() {
     // yields 16 - 8 = 8, whereas the old 3-step would have left 16 - 3 = 13.
     let mut scroll = 16u32;
     let mut follow = true;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
@@ -181,7 +162,6 @@ async fn scrollup_advances_faster_than_default() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -189,9 +169,6 @@ async fn scrollup_advances_faster_than_default() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;

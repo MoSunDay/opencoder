@@ -114,16 +114,6 @@ pub fn empty_hits(body: Rect) -> MouseHits {
     }
 }
 
-/// Build a ChatView whose flattened lines are exactly the given strings
-/// (one Marker block per line), so tests are independent of the markdown
-/// renderer.
-pub fn view_from_lines(lines: &[&str]) -> ChatView {
-    let mut v = ChatView::default();
-    for &l in lines {
-        v.push_marker(ratatui::text::Line::from(l.to_string()));
-    }
-    v
-}
 
 /// Parent whose own content is short but wraps a long, unfinalized subagent
 /// child. The child view owns rows that do not exist in the parent, so

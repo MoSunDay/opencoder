@@ -111,6 +111,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();
@@ -189,6 +190,7 @@ async fn done_with_empty_store_goes_idle() {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();

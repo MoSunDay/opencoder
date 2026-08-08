@@ -41,6 +41,7 @@ fn make_session_meta(id: &str) -> SessionMeta {
         handoff_plan: None,
         skill: None,
         task_type: None,
+        requirement: None,
     }
 }
 

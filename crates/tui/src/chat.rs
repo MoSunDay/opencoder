@@ -520,7 +520,7 @@ impl ChatView {
                     text, collapsed, ..
                 } => {
                     out.extend(render_collapsible(
-                        "\u{1f4e6}",
+                        "\u{1f4dd}",
                         "Compaction",
                         text,
                         *collapsed,

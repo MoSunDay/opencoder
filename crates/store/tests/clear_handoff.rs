@@ -25,6 +25,7 @@ fn meta(id: &str) -> SessionMeta {
         handoff_plan: Some("do-the-thing".into()),
         skill: None,
         task_type: None,
+        requirement: None,
     }
 }
 

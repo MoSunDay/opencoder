@@ -16,6 +16,11 @@ pub(crate) const TOOL_OUTPUT_LINES: usize = 200;
 /// A single visual block in the transcript. Replaces the flat `Vec<Line>`
 /// model so we can have collapsible thinking blocks, streaming-vs-rendered
 /// assistant text, and tool blocks with structured output.
+/// UI transcript model held in `Vec<ChatBlock>` (heap-allocated). The
+/// `Subagent` variant deliberately nests a `ChatView` (which itself holds
+/// `Vec<ChatBlock>`) to fold subagent transcripts; this recursion makes one
+/// variant large by design.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChatBlock {
     /// User prompt, queued/steer marker, system notice — plain styled lines.
@@ -128,6 +133,11 @@ pub struct ChatView {
     /// hit-rects stay aligned. Cleared once all subagents finish (the content
     /// then appears in one shot).
     pub hidden_assistant_idx: Option<usize>,
+    /// Explicitly saved requirement text (from /requirement editor).
+    pub requirement_text: Option<String>,
+    /// First non-empty, non-slash user prompt — used to prefill the
+    /// requirement editor when no explicit requirement has been saved.
+    pub first_prompt: Option<String>,
 }
 
 /// Locates a `Thinking` block's header line for mouse hit-testing.

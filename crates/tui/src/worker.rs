@@ -33,6 +33,9 @@ pub enum UiCmd {
     /// which also rewrite the in-memory `messages` without appending a record).
     /// On resume the original (un-edited) plan is reloaded from the store.
     EditPlan(String),
+    /// Replace the requirement text on the session and persist it to the
+    /// store (unlike EditPlan which is in-memory only).
+    EditRequirement(String),
     /// Swap the session's cancellation token for a fresh, uncancelled one.
     /// Sent before every turn-starting command so a prior double-Esc abort
     /// doesn't leave `sess.cancel` permanently cancelled (which would make
@@ -466,6 +469,20 @@ pub async fn process_cmd(
                 });
                 msg.blocks = new_blocks;
                 break;
+            }
+        }
+        UiCmd::EditRequirement(text) => {
+            sess.requirement = Some(text.clone());
+            if let Some(store) = &sess.store {
+                let _ = store
+                    .update_session(
+                        &sess.id,
+                        &opencoder_store::SessionPatch {
+                            requirement: Some(text),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
             }
         }
         UiCmd::ResetCancel(c) => {

@@ -149,6 +149,7 @@ mod tests {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         }
     }
 

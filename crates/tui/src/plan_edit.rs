@@ -20,21 +20,44 @@ use crossterm::event::KeyEvent;
 
 use crate::vim::{self, VimMode, VimState};
 
+/// Which text the editor is editing — affects title, border color, and
+/// which save path the caller takes on `:wq`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKind {
+    Plan,
+    Requirement,
+}
+
 /// Plan editor — a thin adapter over [`VimState`] exposing the contract the app
 /// loop and renderer expect (text, cursor, mode label, modified flag).
 #[derive(Clone, Debug)]
 pub struct PlanEdit {
     vim: VimState,
+    kind: EditKind,
 }
 
 impl PlanEdit {
     /// Seed from existing plan text. Starts in Normal (view) mode, cursor at
     /// the top, so the user can read the plan before pressing `i`/`a` to edit.
     pub fn new(text: String) -> Self {
-        let mut vim = VimState::new(text);
-        vim.mode = VimMode::Normal;
-        vim.cursor = 0;
-        Self { vim }
+        let mut pe = Self {
+            vim: VimState::new(text),
+            kind: EditKind::Plan,
+        };
+        pe.vim.mode = VimMode::Normal;
+        pe.vim.cursor = 0;
+        pe
+    }
+
+    /// Create an editor for the requirement text (Normal mode, cursor at top).
+    pub fn new_requirement(text: String) -> Self {
+        let mut pe = Self {
+            vim: VimState::new(text),
+            kind: EditKind::Requirement,
+        };
+        pe.vim.mode = VimMode::Normal;
+        pe.vim.cursor = 0;
+        pe
     }
 
     /// The current editor text.
@@ -58,6 +81,26 @@ impl PlanEdit {
     pub fn mode_label(&self) -> String {
         self.vim.mode_label()
     }
+
+    pub fn kind(&self) -> EditKind {
+        self.kind
+    }
+
+    /// Title shown in the editor border (e.g. " edit plan ").
+    pub fn title(&self) -> &'static str {
+        match self.kind {
+            EditKind::Plan => "edit plan",
+            EditKind::Requirement => "edit requirement",
+        }
+    }
+
+    /// Border color for the editor (yellow for plan, green for requirement).
+    pub fn border_color(&self) -> ratatui::style::Color {
+        match self.kind {
+            EditKind::Plan => crate::theme::warn_color(),
+            EditKind::Requirement => crate::theme::ok_color(),
+        }
+    }
 }
 
 /// What the app loop should do after handling a plan-edit key.
@@ -79,6 +122,11 @@ pub fn handle_plan_edit_key(
         vim::VimAction::Continue => PlanEditAction::Continue,
         vim::VimAction::Exit => PlanEditAction::Exit,
     }
+}
+
+/// Open the editor for requirement text. The caller sets the mode_flash.
+pub fn enter_requirement(plan_edit: &mut Option<PlanEdit>, text: String) {
+    *plan_edit = Some(PlanEdit::new_requirement(text));
 }
 
 #[cfg(test)]
@@ -218,5 +266,30 @@ mod tests {
         handle_plan_edit_key(&mut pe, key('d'), W, 2);
         // only line1 remains
         assert_eq!(pe.text(), "line1");
+    }
+
+    #[test]
+    fn new_requirement_starts_normal_with_requirement_kind() {
+        let pe = PlanEdit::new_requirement("do something".into());
+        assert_eq!(pe.kind(), EditKind::Requirement);
+        assert_eq!(pe.title(), "edit requirement");
+        assert!(!pe.is_modified());
+    }
+
+    #[test]
+    fn new_plan_has_plan_kind_and_title() {
+        let pe = PlanEdit::new("plan text".into());
+        assert_eq!(pe.kind(), EditKind::Plan);
+        assert_eq!(pe.title(), "edit plan");
+    }
+
+    #[test]
+    fn enter_requirement_sets_editor() {
+        let mut pe: Option<PlanEdit> = None;
+        enter_requirement(&mut pe, "initial text".into());
+        assert!(pe.is_some());
+        let pe = pe.unwrap();
+        assert_eq!(pe.kind(), EditKind::Requirement);
+        assert_eq!(pe.text(), "initial text");
     }
 }

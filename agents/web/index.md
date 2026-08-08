@@ -24,7 +24,7 @@ GET /events：`events_after(after)` 重放 + 订阅 broadcast 实时转发（Bro
 GET /api/sessions/:id/seq（`get_event_seq`）：返回该 session 最高已持久化事件 seq（无则 0），供远端 client snapshot 事件游标（只取本次 prompt 产生的事件）。
 POST /agent|/model：更新 store meta + handle.overrides（下一轮 drain 生效）。`POST /model` body 新增 `persist_default: bool`（`#[serde(default)]`=false）：false（默认）= session-only（**不写盘**，与 TUI `/model` 默认一致）；true=额外 `Config::save` 写全局默认到 opencoder.json，失败返 500。
 POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
-- 8 个 feature-parity 端点（`src/api_ops.rs`，于 `src/lib.rs::build_app()` 注册）：fork（`POST /api/sessions/:id/fork`，内联实现以避开 web→cli 循环依赖）、compact、handoff、skill、config GET/PATCH（PATCH 经 `DrainCmd::ReloadConfig` 热重载）、bg list/stop。
+- 8 个 feature-parity 端点（`src/api_ops.rs`，于 `src/lib.rs::build_app()` 注册）：fork（`POST /api/sessions/:id/fork`，调共享实现 `opencoder_session::fork::fork_session`，404 语义在 handler 层判定）、compact、handoff、skill、config GET/PATCH（PATCH 经 `DrainCmd::ReloadConfig` 热重载）、bg list/stop。
 - SPA 前端 `GET /`（`src/html.rs`）：`src/assets/`（index.html、styles.css、render.js、app.js）经 `include_str!` + `LazyLock` 在编译期拼为单一内联 HTML 文档（单二进制，无静态文件服务）。SPA 覆盖全部 17 种 SSE 事件类型、interrupt、steer/queue 投递、model/agent 切换、image 上传、fork/compact。
 
 ## 依赖与接口

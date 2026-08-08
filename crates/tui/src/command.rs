@@ -22,6 +22,7 @@ use ratatui::Frame;
 /// the default highlight when the popup opens with an empty query.
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
+    ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
     (
         "/config",
@@ -48,6 +49,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashAction {
     Task,
+    Fork,
     Model,
     Config,
     Compact,
@@ -175,6 +177,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
     let bare = t.strip_prefix('/')?;
     match bare {
         "" | "t" | "task" => Some(SlashAction::Task),
+        "fork" | "fk" => Some(SlashAction::Fork),
         "model" | "mdl" => Some(SlashAction::Model),
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
@@ -193,6 +196,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
 fn dispatch(name: &str) -> Option<SlashAction> {
     match name {
         "/task" => Some(SlashAction::Task),
+        "/fork" => Some(SlashAction::Fork),
         "/model" => Some(SlashAction::Model),
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
@@ -601,6 +605,37 @@ mod tests {
             other => panic!("expected FillInput, got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Tab-fill");
+    }
+
+    #[test]
+    fn parse_fork() {
+        assert_eq!(parse("/fork"), Some(SlashAction::Fork));
+        assert_eq!(parse("/fk"), Some(SlashAction::Fork)); // alias
+        assert_eq!(parse("fork"), None); // bare name (no slash) -> None
+        assert_eq!(parse(" /fork "), Some(SlashAction::Fork)); // trimmed
+    }
+
+    #[test]
+    fn dispatch_fork() {
+        assert_eq!(dispatch("/fork"), Some(SlashAction::Fork));
+        assert_eq!(dispatch("/fk"), None); // alias resolved by parse, not dispatch
+    }
+
+    #[test]
+    fn enter_on_fork_dispatches() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "fork".chars() {
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
+        }
+        let (outcome, _quit) =
+            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            CommandOutcome::Dispatch(SlashAction::Fork) => {}
+            other => panic!("expected Dispatch(Fork), got {:?}", other),
+        }
+        assert!(menu.is_none(), "popup closed after Enter-dispatch");
     }
 
     #[test]

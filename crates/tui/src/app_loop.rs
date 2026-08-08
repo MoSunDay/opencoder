@@ -488,6 +488,15 @@ pub(crate) async fn dispatch_command(
                 .unwrap_or_default();
             *task_picker = Some(TaskPicker::new(sessions, session_id.to_string()));
         }
+        CommandOutcome::Dispatch(SlashAction::Fork) => {
+            // Same parent-session list, but in fork mode: Enter clones the
+            // highlighted session's context into a brand-new session.
+            let sessions = store
+                .list_sessions(&opencoder_store::SessionFilter::default())
+                .await
+                .unwrap_or_default();
+            *task_picker = Some(TaskPicker::new_fork(sessions, session_id.to_string()));
+        }
         CommandOutcome::Dispatch(SlashAction::Model) => {
             *model_menu = Some(ModelMenu::List(ProviderList::new(config)));
         }

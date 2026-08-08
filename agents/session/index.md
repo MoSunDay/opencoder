@@ -62,7 +62,7 @@ steer 与 queue 都是「先以 pending 落库（`admitted_seq` 列、`promoted_
 ## 代表性锚点
 - drain 语义测试：`tests/steer_followup.rs`（steer 边界提升、多 steer 同边界提升、queue idle 恰好一条、durable pending 跨进程）
 - 压缩配置测试：`tests/compaction_and_model.rs`（token 估算首轮触发、reserved 缩窗、small_model 用于摘要）
-- 恢复测试：`tests/recovery.rs`（字节级历史重建、continue 取最新、fork 不污染父、跨进程）；CLI `--fork` 实现在 `cli/src/run.rs::fork_session`（复制 meta+messages 到新 id，不修改原 session），测试在 `cli/tests/fork_session.rs`
+- 恢复测试：`tests/recovery.rs`（字节级历史重建、continue 取最新、fork 不污染父、跨进程）；fork 逻辑为共享实现 `session/src/fork.rs::fork_session`（复制 meta+messages 到新 id，不修改原 session，重置 task_type/summary_images），CLI `--fork`、Web `POST /api/sessions/:id/fork`、TUI `/fork` 三处共用；测试在 `session/src/fork.rs` 与 `cli/tests/fork_session.rs`
 - 硬中止测试：`tests/hard_abort.rs`（cancel 中止运行中的 bash `sleep`，sub-3s 返回 + `Status(interrupted)`；turn 边界 cancel 见 web 的 interrupt 测试）
 - plan→act handoff 测试：`tests/plan_handoff.rs`（压成单条合成指令、取最新非空 assistant、无计划时 no-op、真 LibsqlStore 验证 jsonl 不动）；TUI 接线集成测试 `crates/tui/tests/plan_act_handoff.rs`（真 `process_cmd(SwitchAndStart)` → 发 TranscriptReset、act 的 LLM 请求结构上只含 handoff user 消息）
 - 并发派发测试：`tests/subagent.rs::concurrent_subagent_dispatch_in_one_turn`（一轮多 task 经 `FuturesUnordered` 并发，各自跑完；加强断言第二个 SubagentStart 必须在第一个 SubagentEnd 之前到达）；`tests/subagent.rs::subagent_wraps_child_events_in_subagent_child`（子事件包装在 SubagentChild 中转发）

@@ -102,6 +102,24 @@ pub(crate) async fn switch_session(
             )
             .await?
         }
+        crate::task::TaskPick::Fork(id) => {
+            // Clone the selected session (meta + messages) into a fresh id,
+            // then resume it like any other stored session so the worker
+            // starts with the copied conversation context.
+            let new_id = opencoder_session::fork::fork_session(store.as_ref(), id).await?;
+            let new_config = Config::load(workdir).unwrap_or_else(|_| config.clone());
+            draw_resume_replay_banner(terminal, store, &new_id).await?;
+            let replay_cancel = CancellationToken::new();
+            opencoder_session::resume::resume_and_replay(
+                store.clone(),
+                &new_id,
+                new_config,
+                client.clone(),
+                workdir.to_path_buf(),
+                Some(replay_cancel),
+            )
+            .await?
+        }
     };
     let new_session_id = new_session.id.clone();
     *model_label = new_session.config.model.clone();
@@ -114,10 +132,11 @@ pub(crate) async fn switch_session(
         .clone()
         .unwrap_or_else(|| Arc::new(Mutex::new(CancellationToken::new())));
     let new_skill_handle = new_session.skill_prompt.clone();
-    let resumed_messages = if let crate::task::TaskPick::Resume(_) = &pick {
-        new_session.messages.clone()
-    } else {
-        Vec::new()
+    let resumed_messages = match &pick {
+        crate::task::TaskPick::Resume(_) | crate::task::TaskPick::Fork(_) => {
+            new_session.messages.clone()
+        }
+        crate::task::TaskPick::New => Vec::new(),
     };
     let (ntx, nrx) = mpsc::channel::<UiEvent>(512);
     let (n_cmd_tx, mut n_cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -157,7 +176,7 @@ pub(crate) async fn switch_session(
     // was dormant, so replaying from store
     // ensures the latest state is shown.
     *chat = match &pick {
-        crate::task::TaskPick::Resume(_) => {
+        crate::task::TaskPick::Resume(_) | crate::task::TaskPick::Fork(_) => {
             crate::session_ui::replay_into_chat(
                 &agent_name_for_tokens,
                 &resumed_messages,

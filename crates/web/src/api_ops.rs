@@ -11,7 +11,7 @@ use serde_json::json;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
-use opencoder_store::{SessionMeta, SessionPatch};
+use opencoder_store::SessionPatch;
 
 use crate::cmd::DrainCmd;
 use crate::handle::{ensure_drain, send_cmd, SessionHandle};
@@ -24,42 +24,13 @@ pub async fn fork_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    let meta = match state.store.get_session(&id).await {
-        Ok(Some(m)) => m,
-        Ok(None) => return error_404(&format!("session not found: {id}")),
-        Err(e) => return error_500(format!("get_session: {e:#}")),
-    };
-    let messages = match state.store.load_messages(&id).await {
-        Ok(m) => m,
-        Err(e) => return error_500(format!("load_messages: {e:#}")),
-    };
-    let new_id = opencoder_session::runner::new_id();
-    let now = opencoder_core::message::now_ms();
-    let forked = SessionMeta {
-        id: new_id.clone(),
-        title: meta.title.as_deref().map(|t| format!("{t} (fork)")),
-        agent: meta.agent.clone(),
-        model: meta.model.clone(),
-        workdir_hash: meta.workdir_hash.clone(),
-        created_at: now,
-        updated_at: now,
-        summary: meta.summary.clone(),
-        summary_seq: meta.summary_seq,
-        summary_images: vec![],
-        handoff_seq: meta.handoff_seq,
-        handoff_plan: meta.handoff_plan.clone(),
-        skill: meta.skill.clone(),
-        task_type: None,
-    };
-    if let Err(e) = state.store.create_session(&forked).await {
-        return error_500(format!("create_session: {e:#}"));
+    if state.store.get_session(&id).await.ok().flatten().is_none() {
+        return error_404(&format!("session not found: {id}"));
     }
-    if !messages.is_empty() {
-        if let Err(e) = state.store.append_messages(&new_id, &messages).await {
-            return error_500(format!("append_messages: {e:#}"));
-        }
+    match opencoder_session::fork::fork_session(state.store.as_ref(), &id).await {
+        Ok(new_id) => Json(json!({ "id": new_id })).into_response(),
+        Err(e) => error_500(format!("fork: {e:#}")),
     }
-    Json(json!({ "id": new_id })).into_response()
 }
 
 // ── compact ───────────────────────────────────────────────────────────────

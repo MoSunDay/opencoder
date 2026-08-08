@@ -1,4 +1,4 @@
-//! `opencode ts` actions: start / list / resume / cleanup, plus session seeding.
+//! `opencode ts` actions: start / list / resume / cleanup.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_store::{LibsqlStore, SessionListItem, SessionMeta, Store};
+use opencoder_store::{LibsqlStore, SessionListItem, Store};
 
 use crate::Cli;
 
@@ -59,7 +59,7 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
     }
     let workdir = current_workdir(cli)?;
     let id = cli.session.clone().unwrap_or_else(fresh_id);
-    ensure_session(&workdir, &id).await?;
+    record_workdir(&workdir).await?;
     spawn_session(&workdir, &id)
 }
 
@@ -500,35 +500,6 @@ fn cleanup_targets(
     targets
 }
 
-async fn ensure_session(workdir: &Path, id: &str) -> Result<()> {
-    record_workdir(workdir).await?;
-    let store = open_store_for(workdir).await?;
-    if store.get_session(id).await?.is_some() {
-        return Ok(());
-    }
-    let now = opencoder_core::message::now_ms();
-    store
-        .create_session(&SessionMeta {
-            id: id.to_string(),
-            title: None,
-            agent: None,
-            model: None,
-            workdir_hash: None,
-            created_at: now,
-            updated_at: now,
-            summary: None,
-            summary_seq: None,
-            summary_images: vec![],
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: None,
-        })
-        .await
-        .context("seed session for tmux")?;
-    Ok(())
-}
-
 async fn sync_live_workdirs(tmux: &[ManagedSession]) {
     for managed in tmux {
         if managed.pane_path.is_empty() {
@@ -538,11 +509,6 @@ async fn sync_live_workdirs(tmux: &[ManagedSession]) {
             tracing::warn!(session = %managed.name, %error, "ts: cannot record live workdir");
         }
     }
-}
-
-async fn open_store_for(workdir: &Path) -> Result<opencoder_store::LibsqlStore> {
-    let wd = PathBuf::from(workdir);
-    crate::session_cmd::open_store(&wd).await
 }
 
 fn current_workdir(cli: &Cli) -> Result<PathBuf> {
@@ -555,6 +521,7 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencoder_store::SessionMeta;
 
     #[test]
     fn explicit_attach_target_bare_ts_returns_none() {

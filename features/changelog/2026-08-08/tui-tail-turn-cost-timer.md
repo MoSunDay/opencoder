@@ -25,7 +25,8 @@ Tool，任一 finished Tool / 非 Tool block 都截断）。用户希望看到�
 - **`app.rs`**：run_app 状态新增 `turn_elapsed_ms`，每帧经 `tick_clock` 更新后传入
   `display_tail_ms`。
 - **`render.rs` `render_body`**：尾部标签由 `[call {}]` 改为 `[turn cost {}]`；注释改为
-  whole-turn 语义（turn 结束后冻结不消失）。
+  whole-turn 语义（turn 结束后冻结不消失）。**计时始终独占一行渲染**（不再拼到内容行
+  尾），避免混入内容或 bash/工具输出行。
 
 ## 测试清单（crates/tui，全部为 unit）
 
@@ -40,12 +41,16 @@ Tool，任一 finished Tool / 非 Tool block 都截断）。用户希望看到�
 | 聚焦已完成 subagent 返回 0（4 参签名） | `done_subagent_returns_zero` | unit(app_display) |
 | body 尾部显示 `[turn cost 42s]` | `body_shows_turn_cost_timer_at_content_tail` | unit(render) |
 | turn_ms 为 0 时不渲染计时 | `body_hides_turn_cost_timer_when_zero` | unit(render) |
-| 计时出现在内容文本之后同尾行 | `body_turn_cost_timer_after_content` | unit(render) |
-| 内容行放不下计时换行到独立行（不丢弃） | `body_turn_cost_timer_wraps_to_own_line_when_full` | unit(render) |
+| 计时始终独立成行，不与内容文本混排 | `body_turn_cost_timer_on_own_line` | unit(render) |
+| 宽内容下计时仍在独立行 | `body_turn_cost_timer_always_own_line` | unit(render) |
+| 回归：展开的 bash/工具输出行尾不附加计时 | `body_turn_cost_timer_not_mixed_into_tool_output` | unit(render) |
 
 ## Gate
 
-- 全量回归：`cargo test --workspace` → **2052 passed / 0 failed / 0 ignored**（当次实跑）
-- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
-- build：`cargo build --workspace` → 零错误
-- 行数：app.rs 800 / app_display.rs 251 / app_loop.rs 799 / render.rs 793（均 ≤ 800）
+- 全量回归（tui scope）：`cargo test -p opencoder-tui --lib` → **1075 passed / 0 failed**（当次实跑；含 5
+  个计时渲染测试）。注：`cargo test --workspace` 受并发会话的
+  `session/tests/steer_batch_recovery.rs` 失败影响（steer 批次/store 失败场景，与本次计时改动无关）。
+- clippy（tui scope）：计时改动 `render.rs`/`timer.rs` 零警告。注：`keymap_menu/view.rs:50` 的
+  `if_same_then_else` 为并发会话引入，不在本次范围。
+- build：`cargo build --workspace` → 零错误（当次实跑）。
+- 行数：app.rs 800 / app_display.rs 199 / app_loop.rs 786 / render.rs 777 / timer.rs 179（均 ≤ 800）。

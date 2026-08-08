@@ -183,6 +183,11 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::claim_next_queue(&conn, session_id).await
     }
+    async fn unpromote_inputs(&self, session_id: &str, seqs: &[i64]) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        inputs::unpromote(&conn, session_id, seqs).await
+    }
     async fn delete_input(&self, input_id: i64) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

@@ -186,7 +186,13 @@ pub(super) async fn drain_one_queued(
             text: q.clone(),
         });
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&q) {
-            crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+            if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
+            // P1-3: unpromote the claimed item so the next run retries it.
+            if let Some(store) = &session.store {
+                let _ = store.unpromote_inputs(&session.id, std::slice::from_ref(&seq)).await;
+            }
+            return Err(e);
+        }
             // ClearContext with a preserved result breaks to execute it;
             // sentinel path (no result) forces an outer iteration.
             if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)

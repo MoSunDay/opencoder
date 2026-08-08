@@ -138,6 +138,7 @@ pub struct SessionState {
     persisted_count: usize,
     /// Whether the session row has been created in the store.
     session_created: bool,
+    ts_origin: bool,
     /// Optional cancellation token. The run loop checks it at each turn
     /// boundary and stops cleanly when cancelled (web interrupt support).
     pub cancel: Option<CancellationToken>,
@@ -214,6 +215,7 @@ impl SessionState {
             active_skill_names: Arc::new(Mutex::new(HashSet::new())),
             persisted_count: 0,
             session_created: false,
+            ts_origin: false,
             cancel: None,
             turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
             child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
@@ -242,6 +244,16 @@ impl SessionState {
         self.session_created = true;
         self
     }
+
+    /// Mark this session as ts-owned (e.g. launched via `opencode ts`, which
+    /// allocates an id without seeding a session row). On the first `persist`
+    /// the session row is written with `agent: None` / `model: None`, the
+    /// ts-ownership marker that distinguishes it from normal sessions.
+    pub fn ts_origin(mut self) -> Self {
+        self.ts_origin = true;
+        self
+    }
+
 
     /// Attach a cancellation token so the run loop stops at the next turn boundary.
     pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
@@ -327,8 +339,8 @@ impl SessionState {
             let meta = SessionMeta {
                 id: self.id.clone(),
                 title: first_user_text(self.messages.as_slice()),
-                agent: Some(self.agent.name.clone()),
-                model: Some(self.config.model.clone()),
+                agent: if self.ts_origin { None } else { Some(self.agent.name.clone()) },
+                model: if self.ts_origin { None } else { Some(self.config.model.clone()) },
                 workdir_hash: None,
                 created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
                 updated_at: now,

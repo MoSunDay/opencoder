@@ -1,31 +1,41 @@
 //! Collapsible compaction-summary block: shared rendering + state helpers.
 //! Extracted from `chat.rs` to keep that file under the size limit. Mirrors
-//! the Thinking block — plain (unstyled) text, default collapsed, click-to-
-//! expand — so compaction output is visually consistent with reasoning.
+//! the Thinking block — default collapsed, click-to-expand — with per-call
+//! style (Thinking mirrors the bash-tool accent+muted palette, Compaction
+//! stays unstyled).
 
 use crate::chat::{ChatBlock, ChatView, CompactionHeader};
-use ratatui::text::Line;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 /// Render a collapsible text block (used by both Thinking and Compaction).
 ///
-/// When collapsed: a single plain header line showing the icon + label and a
+/// When collapsed: a single header line showing the icon + label and a
 /// `(N lines)` count summarizing how many lines are hidden.
-/// When expanded: a plain header followed by each line indented 2 spaces.
-/// Click-to-expand is wired separately via the hit-rect pipeline.
+/// When expanded: the header followed by each line indented 2 spaces.
+/// `header_style` / `body_style` let callers pick their own palette —
+/// Thinking mirrors the bash-tool accent+BOLD / muted scheme, Compaction
+/// passes `Style::default()` for plain output. Click-to-expand is wired
+/// separately via the hit-rect pipeline.
 pub(crate) fn render_collapsible(
     icon: &str,
     label: &str,
     text: &str,
     collapsed: bool,
+    header_style: Style,
+    body_style: Style,
 ) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     if collapsed {
         let n = text.lines().count();
-        out.push(Line::from(format!("{icon} {label} ({n} lines)")));
+        out.push(Line::from(Span::styled(
+            format!("{icon} {label} ({n} lines)"),
+            header_style,
+        )));
     } else {
-        out.push(Line::from(format!("{icon} {label}")));
+        out.push(Line::from(Span::styled(format!("{icon} {label}"), header_style)));
         for l in text.lines() {
-            out.push(Line::from(format!("  {l}")));
+            out.push(Line::from(Span::styled(format!("  {l}"), body_style)));
         }
     }
     out

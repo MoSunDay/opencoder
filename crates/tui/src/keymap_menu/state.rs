@@ -16,6 +16,15 @@ pub enum KeymapOutcome {
     Quit,
 }
 
+/// Which element inside the keymap modal currently has keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    /// The shortcut list (navigation / re-binding).
+    List,
+    /// The bottom button bar (退出 / 帮助).
+    Buttons,
+}
+
 /// Modal state for the keymap rebinding menu.
 pub struct KeymapMenu {
     /// Index of the highlighted row.
@@ -27,6 +36,14 @@ pub struct KeymapMenu {
     entries: Vec<(String, String, String)>,
     /// Original specs at construction time, for dirty detection.
     original_specs: Vec<String>,
+    /// Currently focused element.
+    focus: Focus,
+    /// 0 = Exit, 1 = Help.
+    selected_button: usize,
+    /// `true` while the help overlay is open on top of the modal.
+    help_open: bool,
+    /// Scroll offset of the help overlay.
+    help_scroll: u16,
 }
 
 impl KeymapMenu {
@@ -45,6 +62,10 @@ impl KeymapMenu {
             capturing: false,
             entries,
             original_specs,
+            focus: Focus::List,
+            selected_button: 0,
+            help_open: false,
+            help_scroll: 0,
         }
     }
 
@@ -75,6 +96,26 @@ impl KeymapMenu {
         self.entries.len()
     }
 
+    /// Which element currently has keyboard focus.
+    pub fn focus(&self) -> Focus {
+        self.focus
+    }
+
+    /// 0 = Exit, 1 = Help.
+    pub fn selected_button(&self) -> usize {
+        self.selected_button
+    }
+
+    /// `true` while the help overlay is visible.
+    pub fn help_open(&self) -> bool {
+        self.help_open
+    }
+
+    /// Current scroll offset of the help overlay.
+    pub fn help_scroll(&self) -> u16 {
+        self.help_scroll
+    }
+
     /// Move selection up (wraps around).
     fn move_up(&mut self) {
         if self.entries.is_empty() {
@@ -89,6 +130,16 @@ impl KeymapMenu {
             return;
         }
         self.selected = (self.selected + 1) % self.entries.len();
+    }
+
+    /// Cycle the button selection forward (0 → 1 → 0).
+    fn next_button(&mut self) {
+        self.selected_button = (self.selected_button + 1) % 2;
+    }
+
+    /// Cycle the button selection backward (0 → 1 → 0).
+    fn prev_button(&mut self) {
+        self.selected_button = (self.selected_button + 1) % 2;
     }
 
     /// Set the spec for the selected entry (during capture mode).
@@ -131,12 +182,46 @@ impl KeymapMenu {
     }
 }
 
+/// Close-and-save-or-cancel helper shared by Esc, Ctrl+D and the Exit button.
+/// If dirty, returns `Save(patch)`; otherwise returns `fallback`.
+fn close_with_save(menu: &mut Option<KeymapMenu>, fallback: KeymapOutcome) -> KeymapOutcome {
+    let m = menu.as_mut().unwrap();
+    let dirty = m.is_dirty();
+    let patch = if dirty { Some(m.build_patch()) } else { None };
+    *menu = None;
+    if let Some(p) = patch {
+        KeymapOutcome::Save(p)
+    } else {
+        fallback
+    }
+}
+
 /// Handle a key event while the keymap modal is open.
 /// On `Save`/`Cancel`/`Quit`, the caller closes the modal (`*menu = None`).
 pub fn handle_keymap_key(menu: &mut Option<KeymapMenu>, k: KeyEvent) -> KeymapOutcome {
     let Some(m) = menu.as_mut() else {
         return KeymapOutcome::Idle;
     };
+
+    // --- Help overlay open: only scroll + Esc/close ---
+    if m.help_open {
+        match k.code {
+            KeyCode::Up => m.help_scroll = m.help_scroll.saturating_sub(1),
+            KeyCode::Down => m.help_scroll = m.help_scroll.saturating_add(1),
+            KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                m.help_scroll = m.help_scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                m.help_scroll = m.help_scroll.saturating_sub(1);
+            }
+            KeyCode::Esc => {
+                m.help_open = false;
+                m.help_scroll = 0;
+            }
+            _ => {}
+        }
+        return KeymapOutcome::Idle;
+    }
 
     // --- Capture mode: next key becomes the new binding ---
     if m.capturing {
@@ -160,39 +245,68 @@ pub fn handle_keymap_key(menu: &mut Option<KeymapMenu>, k: KeyEvent) -> KeymapOu
         return KeymapOutcome::Idle;
     }
 
-    // --- Navigation mode ---
+    // --- Global shortcuts (work regardless of focus) ---
     match k.code {
-        KeyCode::Up => m.move_up(),
-        KeyCode::Down => m.move_down(),
-        KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => m.move_down(),
-        KeyCode::Char('k') if k.modifiers.contains(KeyModifiers::CONTROL) => m.move_up(),
-        KeyCode::Enter => {
-            m.capturing = true;
+        KeyCode::Tab => {
+            m.focus = match m.focus {
+                Focus::List => Focus::Buttons,
+                Focus::Buttons => Focus::List,
+            };
+            return KeymapOutcome::Idle;
         }
         KeyCode::Esc => {
-            let dirty = m.is_dirty();
-            let patch = if dirty { Some(m.build_patch()) } else { None };
-            *menu = None;
-            if let Some(p) = patch {
-                return KeymapOutcome::Save(p);
-            }
-            return KeymapOutcome::Cancel;
+            return close_with_save(menu, KeymapOutcome::Cancel);
         }
         KeyCode::Char('d') | KeyCode::Char('\u{4}')
             if k.modifiers.contains(KeyModifiers::CONTROL) =>
         {
-            let dirty = m.is_dirty();
-            let patch = if dirty { Some(m.build_patch()) } else { None };
-            *menu = None;
-            if let Some(p) = patch {
-                return KeymapOutcome::Save(p);
-            }
-            return KeymapOutcome::Quit;
-        }
-        KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-            m.reset_to_defaults();
+            return close_with_save(menu, KeymapOutcome::Quit);
         }
         _ => {}
+    }
+
+    // --- Focus-specific handling ---
+    match m.focus {
+        Focus::List => match k.code {
+            KeyCode::Up => m.move_up(),
+            KeyCode::Down => m.move_down(),
+            KeyCode::Char('j') if k.modifiers.contains(KeyModifiers::CONTROL) => m.move_down(),
+            KeyCode::Char('k') if k.modifiers.contains(KeyModifiers::CONTROL) => m.move_up(),
+            KeyCode::Enter => {
+                m.capturing = true;
+            }
+            KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                m.reset_to_defaults();
+            }
+            _ => {}
+        },
+        Focus::Buttons => match k.code {
+            KeyCode::Left | KeyCode::Char('k')
+                if k.code == KeyCode::Left || k.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                m.prev_button();
+            }
+            KeyCode::Right | KeyCode::Char('j')
+                if k.code == KeyCode::Right || k.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                m.next_button();
+            }
+            KeyCode::Enter => {
+                let button = m.selected_button;
+                match button {
+                    0 => return close_with_save(menu, KeymapOutcome::Quit),
+                    _ => {
+                        m.help_open = true;
+                        m.help_scroll = 0;
+                    }
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                // Move focus back to the list.
+                m.focus = Focus::List;
+            }
+            _ => {}
+        },
     }
     KeymapOutcome::Idle
 }
@@ -205,6 +319,10 @@ mod tests {
         KeymapMenu::new(&KeymapConfig::default())
     }
 
+    fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, mods)
+    }
+
     #[test]
     fn new_menu_has_18_entries() {
         let m = make_menu();
@@ -212,6 +330,9 @@ mod tests {
         assert_eq!(m.selected, 0);
         assert!(!m.capturing);
         assert!(!m.is_dirty());
+        assert_eq!(m.focus(), Focus::List);
+        assert_eq!(m.selected_button(), 0);
+        assert!(!m.help_open());
     }
 
     #[test]
@@ -235,7 +356,7 @@ mod tests {
     #[test]
     fn enter_starts_capture() {
         let mut menu = Some(make_menu());
-        let out = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(out, KeymapOutcome::Idle);
         assert!(menu.as_ref().unwrap().capturing);
     }
@@ -244,10 +365,10 @@ mod tests {
     fn capture_sets_spec_and_exits_capture() {
         let mut menu = Some(make_menu());
         // Enter to start capture
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(menu.as_ref().unwrap().capturing);
         // Press F1
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::F(1), KeyModifiers::NONE));
         // Capture mode exited
         assert!(!menu.as_ref().unwrap().capturing);
         // First entry spec is now f1
@@ -260,8 +381,8 @@ mod tests {
     #[test]
     fn capture_esc_cancels_without_change() {
         let mut menu = Some(make_menu());
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!menu.as_ref().unwrap().capturing);
         assert!(!menu.as_ref().unwrap().is_dirty());
     }
@@ -270,10 +391,10 @@ mod tests {
     fn save_patch_contains_only_changed_fields() {
         let mut menu = Some(make_menu());
         // Capture F1 for the first entry (help)
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::F(1), KeyModifiers::NONE));
         // Escape to save
-        let out = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Esc, KeyModifiers::NONE));
         match out {
             KeymapOutcome::Save(v) => {
                 let km = v.get("keymap").unwrap().as_object().unwrap();
@@ -287,7 +408,7 @@ mod tests {
     #[test]
     fn esc_without_changes_returns_cancel() {
         let mut menu = Some(make_menu());
-        let out = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(out, KeymapOutcome::Cancel);
         assert!(menu.is_none());
     }
@@ -295,10 +416,7 @@ mod tests {
     #[test]
     fn ctrl_d_quits_without_changes() {
         let mut menu = Some(make_menu());
-        let out = handle_keymap_key(
-            &mut menu,
-            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
-        );
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Char('d'), KeyModifiers::CONTROL));
         assert_eq!(out, KeymapOutcome::Quit);
         assert!(menu.is_none());
     }
@@ -325,16 +443,170 @@ mod tests {
     fn ctrl_r_resets_to_defaults() {
         let mut menu = Some(make_menu());
         // Start capturing for entry 0
-        let _ = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         // Press F1 to set a binding
-        let _ = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        let _ = handle_keymap_key(&mut menu, key(KeyCode::F(1), KeyModifiers::NONE));
         assert!(menu.as_ref().unwrap().is_dirty());
         // Press Ctrl+R to reset
-        let outcome = handle_keymap_key(
-            &mut menu,
-            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
-        );
+        let outcome =
+            handle_keymap_key(&mut menu, key(KeyCode::Char('r'), KeyModifiers::CONTROL));
         assert_eq!(outcome, KeymapOutcome::Idle);
         assert!(!menu.as_ref().unwrap().is_dirty());
+    }
+
+    // --- New tests for button bar + help overlay ---
+
+    #[test]
+    fn tab_toggles_focus_list_to_buttons() {
+        let mut menu = Some(make_menu());
+        assert_eq!(menu.as_ref().unwrap().focus(), Focus::List);
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().focus(), Focus::Buttons);
+    }
+
+    #[test]
+    fn tab_toggles_focus_buttons_to_list() {
+        let mut menu = Some(make_menu());
+        // List → Buttons
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        // Buttons → List
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().focus(), Focus::List);
+    }
+
+    #[test]
+    fn left_right_navigate_buttons() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 0);
+        // Right → button 1
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 1);
+        // Right again wraps → button 0
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 0);
+        // Left → button 1
+        handle_keymap_key(&mut menu, key(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 1);
+    }
+
+    #[test]
+    fn ctrl_j_ctrl_k_navigate_buttons() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 0);
+        // Ctrl+J → next
+        handle_keymap_key(&mut menu, key(KeyCode::Char('j'), KeyModifiers::CONTROL));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 1);
+        // Ctrl+K → prev
+        handle_keymap_key(&mut menu, key(KeyCode::Char('k'), KeyModifiers::CONTROL));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 0);
+    }
+
+    #[test]
+    fn exit_button_quits_without_changes() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        // Button 0 = Exit, Enter activates
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(out, KeymapOutcome::Quit);
+        assert!(menu.is_none());
+    }
+
+    #[test]
+    fn exit_button_saves_when_dirty_then_quits() {
+        let mut menu = Some(make_menu());
+        // Make a change
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::F(1), KeyModifiers::NONE));
+        assert!(menu.as_ref().unwrap().is_dirty());
+        // Tab to buttons
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        // Press Enter on Exit (button 0)
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        match out {
+            KeymapOutcome::Save(v) => {
+                assert_eq!(
+                    v.get("keymap").unwrap().get("help").unwrap(),
+                    "f1"
+                );
+            }
+            _ => panic!("expected Save, got {:?}", out),
+        }
+        assert!(menu.is_none());
+    }
+
+    #[test]
+    fn help_button_opens_overlay() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        // Select Help (button 1)
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().selected_button(), 1);
+        // Activate
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(out, KeymapOutcome::Idle);
+        assert!(menu.as_ref().unwrap().help_open());
+    }
+
+    #[test]
+    fn help_overlay_scroll_down_increments() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(menu.as_ref().unwrap().help_open());
+        let before = menu.as_ref().unwrap().help_scroll();
+        handle_keymap_key(&mut menu, key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().help_scroll(), before + 1);
+    }
+
+    #[test]
+    fn help_overlay_scroll_up_decrements() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        // Scroll down a few, then up
+        handle_keymap_key(&mut menu, key(KeyCode::Down, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Down, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Down, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().help_scroll(), 2);
+    }
+
+    #[test]
+    fn help_overlay_esc_closes() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(menu.as_ref().unwrap().help_open());
+        handle_keymap_key(&mut menu, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!menu.as_ref().unwrap().help_open());
+        assert_eq!(menu.as_ref().unwrap().help_scroll(), 0);
+        // Menu is still open (only help overlay closed)
+        assert!(menu.is_some());
+    }
+
+    #[test]
+    fn help_overlay_esc_does_not_close_modal() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Right, KeyModifiers::NONE));
+        handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
+        // Esc in help mode → closes overlay, NOT modal
+        let out = handle_keymap_key(&mut menu, key(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(out, KeymapOutcome::Idle);
+        assert!(menu.is_some());
+    }
+
+    #[test]
+    fn up_down_in_buttons_focus_returns_to_list() {
+        let mut menu = Some(make_menu());
+        handle_keymap_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().focus(), Focus::Buttons);
+        handle_keymap_key(&mut menu, key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(menu.as_ref().unwrap().focus(), Focus::List);
     }
 }

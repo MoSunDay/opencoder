@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::{
-    generate_title, resume_and_replay as resume_session, run_once, SessionState,
+    generate_title, resume_and_replay as resume_session, SessionState,
 };
 use opencoder_store::{SessionFilter, SessionPatch, Store};
 
@@ -328,17 +328,6 @@ async fn pick_resume_id(cli: &Cli, store: Option<&dyn Store>) -> Result<Option<S
     Ok(None)
 }
 
-#[allow(dead_code)]
-pub async fn run_once_inline(
-    agent_name: &str,
-    config: Config,
-    client: Arc<dyn ChatStream>,
-    workdir: PathBuf,
-    prompt: String,
-) -> Result<SessionState> {
-    run_once(agent_name, config, client, workdir, prompt, |_| {}).await
-}
-
 fn resolve_workdir(cli: &Cli) -> Result<PathBuf> {
     if let Some(w) = &cli.workdir {
         return Ok(w.clone());
@@ -412,11 +401,6 @@ fn print_prompt_header(_session: &SessionState, prompt: &str) {
 /// Copy-paste-ready command to resume a session by id.
 fn resume_hint(id: &str) -> String {
     format!("resume with: opencoder -s {id}")
-}
-
-#[allow(dead_code)]
-pub fn _duration() -> Duration {
-    Duration::from_secs(0)
 }
 
 #[cfg(test)]

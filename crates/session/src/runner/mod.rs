@@ -28,7 +28,7 @@ use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
 use steer::{
-    claim_steers, drain_mode_step, idle_drain, is_turn_cancelled, reset_turn_cancel,
+    claim_steers, drain_mode_step, has_pending_steers, idle_drain, is_turn_cancelled, reset_turn_cancel,
     DrainModeAction, IdleAction,
 };
 
@@ -140,6 +140,19 @@ pub async fn run_with_registry(
     }
     let drain_mode = !has_text && !has_images && !has_skill && !handoff_pending;
     run_loop(session, registry, &mut on_event, drain_mode).await?;
+
+    // P1-4: Bounded re-absorb — if a steer was admitted during the idle
+    // window (between run_loop's last pending_inputs poll and its return),
+    // re-run with drain_mode to absorb it. Without this, the TUI (which has
+    // no web-style reaper) would strand the steer until the next manual
+    // submit. Max 3 re-checks to bound latency.
+    let mut rechecks = 0u32;
+    const MAX_RECHECKS: u32 = 3;
+    while rechecks < MAX_RECHECKS && has_pending_steers(session).await {
+        rechecks += 1;
+        run_loop(session, registry, &mut on_event, true).await?;
+    }
+
     // Autopilot: after the initial task completes, hand control to the
     // PLAN -> ACT -> VERIFY loop so the agent self-drives toward the goal.
     if session.config.autopilot.enabled {
@@ -195,7 +208,7 @@ pub(crate) async fn run_loop(
             // Track whether the last steer was a sentinel ClearContext so we
             // can go idle without an LM call.
             let mut clear_sentinel = false;
-            for (seq, p, imgs) in &steer_prompts {
+            for (idx, (seq, p, imgs)) in steer_prompts.iter().enumerate() {
                 on_event(SessionEvent::SteerConsumed {
                     seq: *seq,
                     text: p.clone(),
@@ -203,7 +216,15 @@ pub(crate) async fn run_loop(
                 // Defensive: a steered control command is applied immediately and
                 // NOT recorded as user text, so "/plan" never leaks to the LLM.
                 if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
-                    crate::control_cmd::apply(session, &cmd, &mut *on_event).await?;
+                    if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
+                        // P1-3: unpromote the failed item and all remaining
+                        // unprocessed items so the next run re-absorbs them.
+                        let remaining: Vec<i64> = steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
+                        if let Some(store) = &session.store {
+                            let _ = store.unpromote_inputs(&session.id, &remaining).await;
+                        }
+                        return Err(e);
+                    }
                     clear_sentinel = matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
                         && crate::control_cmd::is_clear_context_handoff(
                             session.handoff_plan.as_deref().unwrap_or(""),

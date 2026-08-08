@@ -510,6 +510,10 @@ impl ChatView {
                         "Thinking",
                         text,
                         *collapsed,
+                        Style::default()
+                            .fg(theme::accent())
+                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme::muted()),
                     ));
                 }
                 ChatBlock::Compaction {
@@ -520,6 +524,8 @@ impl ChatView {
                         "Compaction",
                         text,
                         *collapsed,
+                        Style::default(),
+                        Style::default(),
                     ));
                 }
                 ChatBlock::Tool {

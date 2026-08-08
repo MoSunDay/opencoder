@@ -226,10 +226,6 @@ fn decode_cursor(c: &str) -> Option<(i64, String)> {
 }
 
 #[allow(dead_code)]
-pub fn encode_cursor(item: &SessionListItem) -> String {
-    format!("{}|{}", item.created_at, item.id)
-}
-
 fn extract_preview(blocks_json: &Option<String>) -> String {
     let raw = match blocks_json {
         Some(s) => s,

@@ -44,26 +44,45 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     // Resume an existing session if --session was given, otherwise start fresh.
     let replay_cancel = CancellationToken::new();
     let mut session = if let Some(id) = &opts.session {
-        // Try as a session ID first; if not found, try as a subagent
-        // task_id to resolve the parent session.
-        let effective_id = if store.get_session(id).await?.is_none() {
-            if let Some(task) = store.get_subagent_task(id).await? {
-                task.parent_session_id
-            } else {
-                id.clone()
-            }
+        let existing = store.get_session(id).await?;
+        // If not found as a session, try as a subagent task_id to resolve
+        // the parent session.
+        let task = if existing.is_none() {
+            store.get_subagent_task(id).await?
         } else {
-            id.clone()
+            None
         };
-        opencoder_session::resume::resume_and_replay(
-            store.clone(),
-            &effective_id,
-            config.clone(),
-            client.clone(),
-            workdir.clone(),
-            Some(replay_cancel.clone()),
-        )
-        .await?
+        if existing.is_none() && task.is_none() {
+            // Unknown id — this is the tmux launch path where `ts_start`
+            // allocated an id but deliberately did NOT seed a session row.
+            // Create a fresh session that persists lazily on first record.
+            let agent_name = config.agent.default.clone();
+            let agent = resolve_agent(&agent_name)
+                .or_else(|| resolve_agent("act"))
+                .context("agent")?;
+            SessionState::new(
+                id.clone(),
+                agent,
+                config.clone(),
+                client.clone(),
+                workdir.clone(),
+            )
+            .with_store(store.clone())
+            .ts_origin()
+        } else {
+            let effective_id = task
+                .map(|t| t.parent_session_id)
+                .unwrap_or_else(|| id.clone());
+            opencoder_session::resume::resume_and_replay(
+                store.clone(),
+                &effective_id,
+                config.clone(),
+                client.clone(),
+                workdir.clone(),
+                Some(replay_cancel.clone()),
+            )
+            .await?
+        }
     } else {
         let agent_name = config.agent.default.clone();
         let agent = resolve_agent(&agent_name)

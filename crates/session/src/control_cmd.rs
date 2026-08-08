@@ -107,7 +107,7 @@ pub async fn apply(
                 if name == "plan" {
                     session.plan_input_count = 0;
                 }
-                persist_agent(session, name).await;
+                persist_agent(session, name).await?;
                 on_event(SessionEvent::AgentSwitch(name.clone()));
             }
         }
@@ -141,7 +141,7 @@ pub async fn apply(
             }
             session.set_skill(None);
 
-            persist_clear(session).await;
+            persist_clear(session).await?;
             on_event(SessionEvent::AgentSwitch("act".into()));
             on_event(SessionEvent::TranscriptReset(session.messages.clone()));
             // When a plan was handed off, surface it so the display layer can
@@ -166,9 +166,9 @@ pub fn fresh_start_message() -> Message {
 /// resume-persistence gap where a mode switch via `UiCmd::SwitchAgent` (TUI
 /// key handler) was not durably recorded: the worker now calls this so
 /// `resume()` and the `/task` picker read the switched mode.
-pub async fn persist_agent(session: &SessionState, agent: &str) {
+pub async fn persist_agent(session: &SessionState, agent: &str) -> Result<()> {
     if let Some(store) = &session.store {
-        let _ = store
+        store
             .update_session(
                 &session.id,
                 &SessionPatch {
@@ -177,14 +177,15 @@ pub async fn persist_agent(session: &SessionState, agent: &str) {
                     ..Default::default()
                 },
             )
-            .await;
+            .await?;
     }
+    Ok(())
 }
 
 /// Persist the clear-context boundary: handoff metadata + agent = act.
-async fn persist_clear(session: &SessionState) {
+async fn persist_clear(session: &SessionState) -> Result<()> {
     if let Some(store) = &session.store {
-        let _ = store
+        store
             .update_session(
                 &session.id,
                 &SessionPatch {
@@ -197,8 +198,9 @@ async fn persist_clear(session: &SessionState) {
                     ..Default::default()
                 },
             )
-            .await;
+            .await?;
     }
+    Ok(())
 }
 
 #[cfg(test)]

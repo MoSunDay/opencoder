@@ -190,6 +190,7 @@ pub(super) async fn run_app(
         );
         let app_loop::DisplayState {
             agent_name,
+            display_mode,
             status,
             display_chat,
             display_title,
@@ -255,7 +256,7 @@ pub(super) async fn run_app(
                     tail_ms,
                     task_elapsed_ms,
                     subagent_focus.is_none(),
-                    config.autopilot.enabled,
+                    config.autopilot.enabled, &display_mode,
                 )?;
             }
             dirty = false;

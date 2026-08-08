@@ -74,6 +74,7 @@ fn draw_frame(
         0,
         true,
         false,
+        "act",
     )
     .unwrap();
 }

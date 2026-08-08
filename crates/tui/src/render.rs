@@ -131,6 +131,7 @@ pub(crate) fn render<B: Backend>(
     task_ms: u64,
     is_top_level: bool,
     ap_enabled: bool,
+    display_mode: &str,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
@@ -262,7 +263,7 @@ pub(crate) fn render<B: Backend>(
         render_status(
             f,
             chunks[ci],
-            &chat.agent,
+            display_mode,
             running,
             status,
             anim_tick,

@@ -1,4 +1,4 @@
-//! State + keystroke handling for the `/short_key` re-bind modal.
+//! State + keystroke handling for the keymap re-bind modal (Ctrl+H).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -111,6 +111,24 @@ impl KeymapMenu {
             .collect();
         serde_json::json!({ "keymap": changed })
     }
+
+    /// Reset all entries to their default key bindings.
+    pub fn reset_to_defaults(&mut self) {
+        let d = KeymapConfig::default();
+        for (key, _, spec) in &mut self.entries {
+            if let Some(v) = d.get(key) {
+                *spec = v.to_string();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_selected_spec_for_test(&mut self, idx: usize, spec: &str) {
+        if idx < self.entries.len() {
+            self.selected = idx;
+            self.set_selected_spec(spec.to_string());
+        }
+    }
 }
 
 /// Handle a key event while the keymap modal is open.
@@ -170,6 +188,9 @@ pub fn handle_keymap_key(menu: &mut Option<KeymapMenu>, k: KeyEvent) -> KeymapOu
                 return KeymapOutcome::Save(p);
             }
             return KeymapOutcome::Quit;
+        }
+        KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+            m.reset_to_defaults();
         }
         _ => {}
     }
@@ -280,5 +301,46 @@ mod tests {
         );
         assert_eq!(out, KeymapOutcome::Quit);
         assert!(menu.is_none());
+    }
+
+    #[test]
+    fn reset_to_defaults_restores_original() {
+        let mut menu = make_menu();
+        // Change a binding
+        let key = menu.entries()[0].0.clone();
+        let _ = key;
+        menu.set_selected_spec_for_test(0, "f1");
+        assert!(menu.is_dirty());
+        // Reset
+        menu.reset_to_defaults();
+        assert!(!menu.is_dirty());
+        // All entries match defaults
+        let d = KeymapConfig::default();
+        for (k, _, spec) in menu.entries().iter() {
+            assert_eq!(*spec, d.get(k).unwrap());
+        }
+    }
+
+    #[test]
+    fn ctrl_r_resets_to_defaults() {
+        let mut menu = Some(make_menu());
+        // Start capturing for entry 0
+        let _ = handle_keymap_key(
+            &mut menu,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        // Press F1 to set a binding
+        let _ = handle_keymap_key(
+            &mut menu,
+            KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE),
+        );
+        assert!(menu.as_ref().unwrap().is_dirty());
+        // Press Ctrl+R to reset
+        let outcome = handle_keymap_key(
+            &mut menu,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert_eq!(outcome, KeymapOutcome::Idle);
+        assert!(!menu.as_ref().unwrap().is_dirty());
     }
 }

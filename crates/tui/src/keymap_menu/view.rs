@@ -1,4 +1,4 @@
-//! Rendering for the `/short_key` keymap modal popup.
+//! Rendering for the keymap modal popup (Ctrl+H).
 
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -20,7 +20,7 @@ pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
     let popup = Rect::new(x, y, w, h);
     f.render_widget(Clear, popup);
 
-    let block = theme::rounded_block("Keyboard Shortcuts (/short_key)");
+    let block = theme::rounded_block("Keyboard Shortcuts");
 
     let sel_st = Style::default()
         .fg(theme::accent())
@@ -44,16 +44,14 @@ pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
         ];
 
         if is_sel && menu.capturing {
-            spans.clear();
-            spans.push(Span::styled("❯ ", cap_st));
-            spans.push(Span::styled("Press a key...", cap_st));
+            spans[1] = Span::styled("Press a key...  ", cap_st);
         }
         let _ = key; // key is the config key, not shown in the row
         lines.push(Line::from(spans));
     }
 
     lines.push(Line::from(Span::styled(
-        " Enter: rebind  |  Esc: save & close  |  Ctrl+D: quit",
+        " Enter: rebind   Ctrl+R: reset to default   Esc: close   Ctrl+D: quit",
         dim_st,
     )));
 

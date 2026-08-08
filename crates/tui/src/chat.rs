@@ -34,6 +34,8 @@ pub(crate) use compaction_block::render_collapsible;
 
 /// Append a styled duration span to the header. Running → live warn-color
 /// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
+/// NOTE: now used only by Subagent headers — the per-call Tool inline timers
+/// were removed; the body tail shows the tool-call round timer instead.
 fn push_duration_span(
     spans: &mut Vec<Span<'static>>,
     started_at_ms: i64,
@@ -493,8 +495,6 @@ impl ChatView {
                     header,
                     output,
                     collapsed,
-                    started_at_ms,
-                    elapsed_ms,
                     ..
                 } => {
                     if *collapsed {
@@ -506,7 +506,6 @@ impl ChatView {
                                 Style::default().fg(theme::muted()),
                             ));
                         }
-                        push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
                         out.push(Line::from(spans));
                     } else {
                         let mut spans = header.spans.clone();
@@ -524,7 +523,6 @@ impl ChatView {
                             " [\u{2191}]",
                             Style::default().fg(theme::muted()),
                         ));
-                        push_duration_span(&mut spans, *started_at_ms, *elapsed_ms, now_ms);
                         out.push(Line::from(spans));
                         out.extend(output.iter().cloned());
                         out.push(Line::from(""));

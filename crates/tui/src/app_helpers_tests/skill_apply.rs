@@ -3,7 +3,6 @@
 //! `app::handle_key`). Includes combined-content cases where a `$skill`
 //! token is mixed with other input text.
 
-
 // ---- apply_skill_tokens tests ----
 // These tests resolve skills against a tempdir by passing
 // `discover_in(tempdir)` straight into `apply_skill_tokens_with`, so they never
@@ -163,7 +162,11 @@ async fn apply_skill_tokens_combined_content_token_at_end() {
 
     assert_eq!(clean, "do stuff ", "prose must survive token extraction");
     assert!(unresolved.is_empty());
-    assert_eq!(active_skill.as_deref(), Some("alpha"), "skill must activate");
+    assert_eq!(
+        active_skill.as_deref(),
+        Some("alpha"),
+        "skill must activate"
+    );
     assert_eq!(active_skill_body.as_deref(), Some("alpha body"));
     assert_eq!(
         skill_handle.lock().unwrap().as_deref(),
@@ -247,4 +250,3 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
         "known skill body must still be injected despite an unknown peer"
     );
 }
-

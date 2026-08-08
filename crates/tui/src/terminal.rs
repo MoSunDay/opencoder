@@ -165,8 +165,13 @@ pub(crate) fn resume_screen() -> Result<()> {
             | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
         let _ = execute!(stdout, PushKeyboardEnhancementFlags(flags));
     }
-    execute!(stdout, EnterAlternateScreen, SetCursorStyle::SteadyBar,
-             EnableMouseCapture, EnableBracketedPaste)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        SetCursorStyle::SteadyBar,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     enable_raw_mode()?;
     Ok(())
 }

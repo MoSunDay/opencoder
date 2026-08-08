@@ -30,6 +30,7 @@ pub struct SessionUiState {
 impl SessionUiState {
     /// Create a fresh default state for a new session with the given agent.
     pub fn new(agent_name: String, sys_tokens: u64) -> Self {
+        let agent_name = crate::terminal_text::sanitize_single_line(&agent_name).into_owned();
         SessionUiState {
             running: false,
             chat: ChatView {
@@ -81,10 +82,10 @@ impl SessionUiState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::replay::replay_messages;
-    use opencoder_core::{ContentBlock, Message, Role};
+    use super::*;
     use crate::chat::ChatBlock;
+    use opencoder_core::{ContentBlock, Message, Role};
 
     fn sample_chat() -> ChatView {
         let mut c = ChatView {
@@ -473,3 +474,6 @@ mod image_prefetch_tests;
 #[cfg(test)]
 mod replay_duration_tests;
 
+#[cfg(test)]
+#[path = "session_ui/terminal_safety_tests.rs"]
+mod terminal_safety_tests;

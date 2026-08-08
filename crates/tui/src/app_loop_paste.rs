@@ -142,7 +142,11 @@ pub(crate) fn route_paste(
                     leftover.push_str(line);
                 }
                 FeedOutcome::Pending => {}
-                FeedOutcome::Complete { uri, filename, chunks } => {
+                FeedOutcome::Complete {
+                    uri,
+                    filename,
+                    chunks,
+                } => {
                     let label = format!("{filename} ({chunks} chunks)");
                     pending_images.push((uri, label.clone()));
                     push_attach_marker(chat, pending_images.len(), &label);

@@ -77,7 +77,10 @@ fn shift_page_down_advances_toward_newest() {
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::None));
-    assert_eq!(queue_scroll, 4, "Shift+PageDown moves toward newer entries (bottom)");
+    assert_eq!(
+        queue_scroll, 4,
+        "Shift+PageDown moves toward newer entries (bottom)"
+    );
     assert_eq!(scroll, 50, "body scroll untouched");
     assert!(follow, "body follow untouched");
 }

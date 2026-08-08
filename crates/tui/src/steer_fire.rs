@@ -20,10 +20,10 @@ use opencoder_session::SharedCancel;
 use opencoder_store::{Delivery, Store};
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{mk_input_with_images, snapshot_image_uris};
-use crate::chat::ChatView;
 use super::steer_dispatch;
 use super::subagent_input;
+use crate::app_helpers::{mk_input_with_images, snapshot_image_uris};
+use crate::chat::ChatView;
 
 /// Admit a steer submitted via the keyboard Enter path: persist it to the
 /// store and push it onto the pending steer panel, WITHOUT interrupting the
@@ -77,9 +77,8 @@ pub(crate) fn fire_steer_interrupt(
     // fire_child_cancels both checks AND cancels children. While a running
     // subagent is focused the `>` targets the CHILD's own turn token, so the
     // siblings are left untouched (no cascade).
-    let has_children = !sub_focused
-        && running
-        && opencoder_session::fire_child_cancels(child_cancels);
+    let has_children =
+        !sub_focused && running && opencoder_session::fire_child_cancels(child_cancels);
     let action = steer_dispatch::resolve(
         sub_focused,
         running,
@@ -88,14 +87,9 @@ pub(crate) fn fire_steer_interrupt(
     );
     match action {
         steer_dispatch::Action::Subagent => {
-            subagent_input::fire_subagent_turn_cancel(
-                child_turn_cancels,
-                chat,
-                subagent_focus,
-            );
+            subagent_input::fire_subagent_turn_cancel(child_turn_cancels, chat, subagent_focus);
         }
-        steer_dispatch::Action::SteerParent
-        | steer_dispatch::Action::CancelChildrenAndSteer => {
+        steer_dispatch::Action::SteerParent | steer_dispatch::Action::CancelChildrenAndSteer => {
             opencoder_session::fire_turn_cancel(turn_cancel);
         }
         _ => {}
@@ -359,8 +353,7 @@ mod tests {
         use opencoder_store::{LibsqlStore, SessionMeta};
 
         let turn_cancel = fresh_cancel();
-        let store: Arc<dyn Store> =
-            Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
                 id: "s".into(),
@@ -383,7 +376,10 @@ mod tests {
             &mut chat,
         )
         .await;
-        assert!(seq.is_some(), "keyboard steer must be admitted to the store");
+        assert!(
+            seq.is_some(),
+            "keyboard steer must be admitted to the store"
+        );
         assert_eq!(
             chat.steer_items.len(),
             1,
@@ -413,8 +409,8 @@ mod tests {
     use anyhow::Result;
     use opencoder_core::Message;
     use opencoder_store::{
-        Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-        SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
+        Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+        SessionMeta, SessionPatch, SubagentTaskRecord,
     };
 
     /// A Store wrapper that delegates everything to an inner LibsqlStore
@@ -425,34 +421,84 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Store for FailingAdmitStore {
-        fn backend_name(&self) -> &'static str { self.0.backend_name() }
-        async fn create_session(&self, m: &SessionMeta) -> Result<()> { self.0.create_session(m).await }
-        async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> { self.0.get_session(id).await }
-        async fn list_sessions(&self, f: &SessionFilter) -> Result<Vec<SessionListItem>> { self.0.list_sessions(f).await }
-        async fn update_session(&self, id: &str, p: &SessionPatch) -> Result<()> { self.0.update_session(id, p).await }
-        async fn delete_session(&self, id: &str) -> Result<()> { self.0.delete_session(id).await }
-        async fn clear_other_sessions(&self, k: &str) -> Result<u64> { self.0.clear_other_sessions(k).await }
-        async fn append_message(&self, sid: &str, m: &Message) -> Result<i64> { self.0.append_message(sid, m).await }
-        async fn append_messages(&self, sid: &str, m: &[Message]) -> Result<Vec<i64>> { self.0.append_messages(sid, m).await }
-        async fn load_messages(&self, sid: &str) -> Result<Vec<Message>> { self.0.load_messages(sid).await }
-        async fn last_message_seq(&self, sid: &str) -> Result<i64> { self.0.last_message_seq(sid).await }
+        fn backend_name(&self) -> &'static str {
+            self.0.backend_name()
+        }
+        async fn create_session(&self, m: &SessionMeta) -> Result<()> {
+            self.0.create_session(m).await
+        }
+        async fn get_session(&self, id: &str) -> Result<Option<SessionMeta>> {
+            self.0.get_session(id).await
+        }
+        async fn list_sessions(&self, f: &SessionFilter) -> Result<Vec<SessionListItem>> {
+            self.0.list_sessions(f).await
+        }
+        async fn update_session(&self, id: &str, p: &SessionPatch) -> Result<()> {
+            self.0.update_session(id, p).await
+        }
+        async fn delete_session(&self, id: &str) -> Result<()> {
+            self.0.delete_session(id).await
+        }
+        async fn clear_other_sessions(&self, k: &str) -> Result<u64> {
+            self.0.clear_other_sessions(k).await
+        }
+        async fn append_message(&self, sid: &str, m: &Message) -> Result<i64> {
+            self.0.append_message(sid, m).await
+        }
+        async fn append_messages(&self, sid: &str, m: &[Message]) -> Result<Vec<i64>> {
+            self.0.append_messages(sid, m).await
+        }
+        async fn load_messages(&self, sid: &str) -> Result<Vec<Message>> {
+            self.0.load_messages(sid).await
+        }
+        async fn last_message_seq(&self, sid: &str) -> Result<i64> {
+            self.0.last_message_seq(sid).await
+        }
         async fn admit_input(&self, _input: &SessionInput) -> Result<i64> {
             Err(anyhow::anyhow!("simulated store failure"))
         }
-        async fn pending_inputs(&self, sid: &str, d: Delivery) -> Result<Vec<SessionInput>> { self.0.pending_inputs(sid, d).await }
-        async fn promote_inputs(&self, sid: &str, up: i64, d: Delivery) -> Result<Vec<i64>> { self.0.promote_inputs(sid, up, d).await }
-        async fn promote_next_queued(&self, sid: &str) -> Result<Option<i64>> { self.0.promote_next_queued(sid).await }
-        async fn claim_next_queue(&self, sid: &str) -> Result<Option<(i64, SessionInput)>> { self.0.claim_next_queue(sid).await }
-        async fn delete_input(&self, id: i64) -> Result<()> { self.0.delete_input(id).await }
-        async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> Result<()> { self.0.swap_input_order(sid, a, b).await }
-        async fn append_events(&self, ev: &[SessionEventRecord]) -> Result<Vec<i64>> { self.0.append_events(ev).await }
-        async fn events_after(&self, sid: &str, s: i64) -> Result<Vec<SessionEventRecord>> { self.0.events_after(sid, s).await }
-        async fn last_event_seq(&self, sid: &str) -> Result<i64> { self.0.last_event_seq(sid).await }
-        async fn create_subagent_task(&self, r: &SubagentTaskRecord) -> Result<()> { self.0.create_subagent_task(r).await }
-        async fn complete_subagent_task(&self, id: &str, res: &str, ok: bool) -> Result<()> { self.0.complete_subagent_task(id, res, ok).await }
-        async fn list_subagent_tasks(&self, pid: &str) -> Result<Vec<SubagentTaskRecord>> { self.0.list_subagent_tasks(pid).await }
-        async fn get_subagent_task(&self, id: &str) -> Result<Option<SubagentTaskRecord>> { self.0.get_subagent_task(id).await }
-        async fn cancel_subagent_task(&self, id: &str) -> Result<()> { self.0.cancel_subagent_task(id).await }
+        async fn pending_inputs(&self, sid: &str, d: Delivery) -> Result<Vec<SessionInput>> {
+            self.0.pending_inputs(sid, d).await
+        }
+        async fn promote_inputs(&self, sid: &str, up: i64, d: Delivery) -> Result<Vec<i64>> {
+            self.0.promote_inputs(sid, up, d).await
+        }
+        async fn promote_next_queued(&self, sid: &str) -> Result<Option<i64>> {
+            self.0.promote_next_queued(sid).await
+        }
+        async fn claim_next_queue(&self, sid: &str) -> Result<Option<(i64, SessionInput)>> {
+            self.0.claim_next_queue(sid).await
+        }
+        async fn delete_input(&self, id: i64) -> Result<()> {
+            self.0.delete_input(id).await
+        }
+        async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> Result<()> {
+            self.0.swap_input_order(sid, a, b).await
+        }
+        async fn append_events(&self, ev: &[SessionEventRecord]) -> Result<Vec<i64>> {
+            self.0.append_events(ev).await
+        }
+        async fn events_after(&self, sid: &str, s: i64) -> Result<Vec<SessionEventRecord>> {
+            self.0.events_after(sid, s).await
+        }
+        async fn last_event_seq(&self, sid: &str) -> Result<i64> {
+            self.0.last_event_seq(sid).await
+        }
+        async fn create_subagent_task(&self, r: &SubagentTaskRecord) -> Result<()> {
+            self.0.create_subagent_task(r).await
+        }
+        async fn complete_subagent_task(&self, id: &str, res: &str, ok: bool) -> Result<()> {
+            self.0.complete_subagent_task(id, res, ok).await
+        }
+        async fn list_subagent_tasks(&self, pid: &str) -> Result<Vec<SubagentTaskRecord>> {
+            self.0.list_subagent_tasks(pid).await
+        }
+        async fn get_subagent_task(&self, id: &str) -> Result<Option<SubagentTaskRecord>> {
+            self.0.get_subagent_task(id).await
+        }
+        async fn cancel_subagent_task(&self, id: &str) -> Result<()> {
+            self.0.cancel_subagent_task(id).await
+        }
     }
 
     // When the store write fails, admit_keyboard_steer must return None AND
@@ -462,7 +508,10 @@ mod tests {
     async fn store_failure_returns_none_and_preserves_images() {
         let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
         inner
-            .create_session(&SessionMeta { id: "s".into(), ..Default::default() })
+            .create_session(&SessionMeta {
+                id: "s".into(),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let store: Arc<dyn Store> = Arc::new(FailingAdmitStore(inner));
@@ -470,10 +519,8 @@ mod tests {
         let mut chat = ChatView::default();
         let mut pending_images = vec![("img.png".to_string(), "data".to_string())];
 
-        let seq = admit_keyboard_steer(
-            &store, "s", "stop", "stop", &mut pending_images, &mut chat,
-        )
-        .await;
+        let seq =
+            admit_keyboard_steer(&store, "s", "stop", "stop", &mut pending_images, &mut chat).await;
 
         assert!(seq.is_none(), "store failure must return None");
         assert_eq!(
@@ -486,5 +533,4 @@ mod tests {
             "steer panel must not be mutated on store failure"
         );
     }
-
 }

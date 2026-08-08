@@ -23,7 +23,9 @@ use crate::app_helpers::sys_tokens_for;
 use crate::chat::ChatView;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{gate_clear_all, process_cmd, rebind_session, ClearAllGate, UiCmd, UiEvent};
+use crate::worker::{
+    gate_clear_all, process_cmd, rebind_session, ChildRuntimeHandles, ClearAllGate, UiCmd, UiEvent,
+};
 
 /// The `TaskOutcome::Pick(pick)` arm: perform a session switch. Builds a new
 /// `SessionState` (New or Resume), spawns a fresh worker for it, saves the
@@ -62,6 +64,7 @@ pub(crate) async fn switch_session(
     hist_idx: &mut Option<usize>,
     cancel: &mut CancellationToken,
     turn_cancel: &mut SharedCancel,
+    child_runtime: &mut ChildRuntimeHandles,
     skill_handle: &mut Arc<Mutex<Option<String>>>,
 ) -> Result<()> {
     // Perform session switch.
@@ -131,6 +134,7 @@ pub(crate) async fn switch_session(
         .turn_cancel
         .clone()
         .unwrap_or_else(|| Arc::new(Mutex::new(CancellationToken::new())));
+    let new_child_runtime = ChildRuntimeHandles::from_session(&new_session);
     let new_skill_handle = new_session.skill_prompt.clone();
     let resumed_messages = match &pick {
         crate::task::TaskPick::Resume(_) | crate::task::TaskPick::Fork(_) => {
@@ -186,7 +190,7 @@ pub(crate) async fn switch_session(
             .await
         }
         crate::task::TaskPick::New => ChatView {
-            agent: agent_name_for_tokens.clone(),
+            agent: crate::terminal_text::sanitize_single_line(&agent_name_for_tokens).into_owned(),
             ..Default::default()
         },
     };
@@ -232,11 +236,13 @@ pub(crate) async fn switch_session(
         session_id,
         cancel,
         turn_cancel,
+        child_runtime,
         n_cmd_tx,
         nrx,
         new_session_id,
         new_cancel,
         new_turn_cancel,
+        new_child_runtime,
     );
     // The freshly-spawned worker starts with no
     // skill prompt; re-sync the sticky skill so a
@@ -364,7 +370,6 @@ pub(crate) async fn draw_resume_replay_banner<B: Backend>(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,7 +419,10 @@ mod tests {
                 tasks.push(task_record(SubagentStatus::Running, &format!("run-{i}")));
             }
             for i in 0..self.cancelled {
-                tasks.push(task_record(SubagentStatus::Cancelled, &format!("cancelled-{i}")));
+                tasks.push(task_record(
+                    SubagentStatus::Cancelled,
+                    &format!("cancelled-{i}"),
+                ));
             }
             Ok(tasks)
         }
@@ -548,7 +556,10 @@ mod tests {
             .await
             .unwrap();
         let text = buffer_text(terminal.backend().buffer());
-        assert!(text.contains("Resuming session"), "banner missing; got: {text:?}");
+        assert!(
+            text.contains("Resuming session"),
+            "banner missing; got: {text:?}"
+        );
         assert!(
             text.contains("replaying 2 subagent(s)"),
             "running count must appear; got: {text:?}"
@@ -600,7 +611,10 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(10, 2)).unwrap();
         terminal
             .draw(|f| {
-                render_resume_replay_banner(f, "Resuming session \u{2014} replaying 9 subagent(s)\u{2026}");
+                render_resume_replay_banner(
+                    f,
+                    "Resuming session \u{2014} replaying 9 subagent(s)\u{2026}",
+                );
             })
             .unwrap();
         let text = buffer_text(terminal.backend().buffer());

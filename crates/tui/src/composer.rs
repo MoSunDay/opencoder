@@ -63,13 +63,7 @@ pub fn str_width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
 
-/// Whether a char is a terminal-corrupting control character: C0 controls
-/// (except TAB and LF), DEL, and C1 controls. These bytes, when rendered via
-/// `Span::raw`, are executed by the terminal as control codes (move cursor,
-/// ring bell, switch charset…) rather than drawn, scrambling the display and
-/// desynchronising the diff buffer. TAB and LF are kept: they are legitimate
-/// text the composer handles explicitly. CR is stripped so `\r\n` collapses
-/// to `\n`.
+/// Whether a character must not be inserted directly into the composer.
 fn is_corrupting_control(ch: char) -> bool {
     let cp = ch as u32;
     (cp <= 0x1F && cp != 0x09 && cp != 0x0A) // C0 except TAB and LF
@@ -77,12 +71,11 @@ fn is_corrupting_control(ch: char) -> bool {
         || (0x80..=0x9F).contains(&cp) // C1 control characters
 }
 
-/// Remove all terminal-corrupting control characters from `s`, preserving
-/// TAB, LF, and all printable text (ASCII, CJK, emoji). Applied at every
-/// input/paste entry point to keep the diff buffer consistent with what the
-/// terminal actually displays.
+/// Normalize composer text through the shared terminal-safety boundary.
+/// Newlines remain structural; tabs expand to spaces so cursor width and the
+/// physical terminal can never disagree.
 pub fn sanitize(s: &str) -> String {
-    s.chars().filter(|&c| !is_corrupting_control(c)).collect()
+    crate::terminal_text::sanitize_multiline(s).into_owned()
 }
 
 /// Truncate `s` to fit `max_w` display columns, appending an ellipsis (`…`,
@@ -113,6 +106,9 @@ pub fn clamp_idx(idx: usize, len: usize) -> usize {
 
 /// Insert a char at the cursor index, returning (new_text, new_idx).
 pub fn insert_char(text: &str, idx: usize, ch: char) -> (String, usize) {
+    if ch == '\t' {
+        return insert_str(text, idx, "\t");
+    }
     if is_corrupting_control(ch) {
         return (text.to_string(), idx);
     }
@@ -392,6 +388,23 @@ pub fn cursor_row_col(input: &str, char_idx: usize, inner_w: u16, prompt_w: u16)
         .map(char_width)
         .sum();
     (row, col)
+}
+
+/// Translate the logical composer cursor into terminal coordinates. Kept
+/// pure so rendering only applies the returned position to the frame.
+pub fn cursor_screen_position(
+    area_x: u16,
+    area_y: u16,
+    input: &str,
+    char_idx: usize,
+    inner_w: u16,
+    prompt_w: u16,
+    scroll: u16,
+) -> (u16, u16) {
+    let (row, col) = cursor_row_col(input, char_idx, inner_w, prompt_w);
+    let x = area_x + 1 + prompt_w + col as u16;
+    let y = area_y + 1 + (row as u16).saturating_sub(scroll);
+    (x, y)
 }
 
 /// Move the cursor up/down by one visual (wrapped) row, preserving the display

@@ -5,6 +5,7 @@ use opencoder_session::SessionEvent;
 /// Print a session event to stdout/stderr with ANSI colours.
 pub(crate) fn print_event(ev: &SessionEvent) {
     match ev {
+        SessionEvent::LlmRoundStart { .. } | SessionEvent::LlmRoundEnd => {}
         SessionEvent::TextDelta(t) => {
             print!("{t}");
             use std::io::Write;

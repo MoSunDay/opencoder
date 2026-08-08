@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencoder_session::{run, SessionEvent, SessionState};
+use opencoder_session::{run, SessionEvent, SessionState, SubagentSteerGate};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 async fn mem_store() -> Arc<dyn Store> {
@@ -470,6 +470,7 @@ struct SteerOnIdle {
     store: Arc<dyn Store>,
     session_id: String,
     admitted: Arc<AtomicBool>,
+    gate: Arc<SubagentSteerGate>,
 }
 
 impl ChatStream for SteerOnIdle {
@@ -482,11 +483,13 @@ impl ChatStream for SteerOnIdle {
         // admitted exactly once (on the first text-only Completed), not on
         // every text-only turn.
         let flag = self.admitted.clone();
+        let gate = self.gate.clone();
         tokio::spawn(async move {
             while let Some(ev) = rx.recv().await {
                 if let LlmEvent::Completed { ref tool_calls, .. } = ev {
                     if tool_calls.is_empty() && !flag.swap(true, Ordering::SeqCst) {
-                        let _ = store
+                        let reservation = gate.reserve().expect("child gate must be open");
+                        let admitted = store
                             .admit_input(&SessionInput {
                                 seq: None,
                                 id: "late-steer".into(),
@@ -499,6 +502,8 @@ impl ChatStream for SteerOnIdle {
                                 promoted_seq: None,
                             })
                             .await;
+                        assert!(admitted.is_ok(), "steer admission must succeed");
+                        assert!(reservation.commit(), "live child must accept steer");
                     }
                 }
                 if tx.send(ev).await.is_err() {
@@ -517,6 +522,7 @@ impl ChatStream for SteerOnIdle {
 #[tokio::test]
 async fn late_steer_absorbed_at_idle_boundary() {
     let store = mem_store().await;
+    let gate = SubagentSteerGate::new();
     // Turn 1 -> text-only "first-idle" (the wrapper admits LATE-STEER just
     // before forwarding this). Turn 2 -> text-only "after-steer" (the
     // follow-up turn the absorbed steer triggers).
@@ -531,9 +537,11 @@ async fn late_steer_absorbed_at_idle_boundary() {
         store: store.clone(),
         session_id: "drain-sess".into(),
         admitted: std::sync::Arc::new(AtomicBool::new(false)),
+        gate: gate.clone(),
     }) as Arc<dyn ChatStream>;
 
     let (_dir, mut s) = session(store.clone(), wrapper);
+    s.steer_gate = Some(gate);
     seed_session(&store).await;
 
     let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

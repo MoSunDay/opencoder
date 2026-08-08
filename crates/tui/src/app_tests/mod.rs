@@ -163,5 +163,74 @@ pub(super) fn run_handle_menu(
     )
 }
 
+/// Full flow: a text recorded by `push_history` (what the Enter/Tab Steer and
+/// Queue branches do while the agent is running) is recallable in the input
+/// via Up arrow, and Down arrow clears it back to empty.
+#[test]
+fn up_arrow_recalls_recorded_steer_or_queue_text() {
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
+    crate::app_helpers::push_history(&mut history, &mut hist_idx, "steer while running");
+
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut scroll = 0u32;
+    let mut follow = true;
+    let mut last_esc: Option<Instant> = None;
+    let mut skill_menu: Option<SkillMenu> = None;
+    let mut undo_state = crate::undo::init("", 0);
+    let mut queue_scroll: u32 = 0;
+
+    // Up arrow: newest history entry lands in the composer.
+    let action = handle_key(
+        key(KeyCode::Up, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        &mut input,
+        &mut cursor_idx,
+        &history,
+        &mut hist_idx,
+        true,
+        "act",
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut queue_scroll,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "steer while running");
+    assert_eq!(cursor_idx, "steer while running".chars().count());
+
+    // Down arrow: leaves history browsing back to an empty composer.
+    let action = handle_key(
+        key(KeyCode::Down, KeyModifiers::NONE),
+        &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+        &mut input,
+        &mut cursor_idx,
+        &history,
+        &mut hist_idx,
+        true,
+        "act",
+        &mut scroll,
+        &mut follow,
+        &mut last_esc,
+        &mut skill_menu,
+        80,
+        2,
+        false,
+        false,
+        &mut undo_state,
+        &mut queue_scroll,
+    );
+    assert!(matches!(action, KeyAction::None));
+    assert_eq!(input, "");
+    assert_eq!(hist_idx, None);
+}
+
 mod key_tests;
 mod skill_tests;

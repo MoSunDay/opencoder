@@ -93,7 +93,9 @@ pub async fn fetch_image_bytes(url: &str) -> Option<Vec<u8>> {
 /// rendered as half-block art; remote URLs yield a placeholder (empty lines)
 /// since we cannot fetch synchronously.
 pub fn build_image_block(url: &str) -> (String, Vec<Line<'static>>) {
-    let filename = crate::image_util::extract_filename(url);
+    let filename =
+        crate::terminal_text::sanitize_single_line(&crate::image_util::extract_filename(url))
+            .into_owned();
     let width = terminal_image_width();
     let rendered = decode_data_uri(url)
         .map(|bytes| render_image_halfblock(&bytes, width))
@@ -284,7 +286,9 @@ mod width_tests {
     /// `fetch_image_bytes` returns None for unrecognized schemes.
     #[tokio::test]
     async fn fetch_image_bytes_returns_none_for_unknown_scheme() {
-        assert!(fetch_image_bytes("ftp://example.com/img.png").await.is_none());
+        assert!(fetch_image_bytes("ftp://example.com/img.png")
+            .await
+            .is_none());
         assert!(fetch_image_bytes("not-a-url").await.is_none());
     }
 
@@ -293,8 +297,11 @@ mod width_tests {
     fn render_image_from_url_uses_prefetched_bytes() {
         // Build a small valid PNG
         let img = image::RgbaImage::from_raw(
-            2, 2,
-            vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255],
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+            ],
         )
         .unwrap();
         let mut buf = Vec::new();
@@ -316,8 +323,11 @@ mod width_tests {
     #[test]
     fn render_image_from_url_falls_back_to_data_uri() {
         let img = image::RgbaImage::from_raw(
-            2, 2,
-            vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255],
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+            ],
         )
         .unwrap();
         let mut buf = Vec::new();
@@ -340,18 +350,17 @@ mod width_tests {
     fn render_image_from_url_empty_for_missing_http() {
         let empty_map = HashMap::new();
         let lines = render_image_from_url("https://example.com/missing.png", &empty_map);
-        assert!(lines.is_empty(), "missing HTTP URL without prefetch should yield empty");
+        assert!(
+            lines.is_empty(),
+            "missing HTTP URL without prefetch should yield empty"
+        );
     }
 
     /// Triangle filter produces smooth output for a large image (smoke test
     /// ensuring the filter type change doesn't panic or produce zero output).
     #[test]
     fn triangle_filter_renders_large_image() {
-        let img = image::RgbaImage::from_raw(
-            400, 200,
-            vec![128; 400 * 200 * 4],
-        )
-        .unwrap();
+        let img = image::RgbaImage::from_raw(400, 200, vec![128; 400 * 200 * 4]).unwrap();
         let mut buf = Vec::new();
         image::codecs::png::PngEncoder::new(&mut buf)
             .write_image(img.as_raw(), 400, 200, image::ExtendedColorType::Rgba8)

@@ -1,18 +1,21 @@
 //! Tests for HTTP image pre-fetching during session replay.
 
-use super::*;
-use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
-use std::collections::HashMap;
-use crate::chat::ChatBlock;
-use ratatui::text::Line;
 use super::replay::{prefetch_image_bytes, replay_one};
+use super::*;
+use crate::chat::ChatBlock;
+use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
+use ratatui::text::Line;
+use std::collections::HashMap;
 
 /// Build a minimal valid 2x2 red PNG as raw bytes.
 fn red_png_bytes() -> Vec<u8> {
     use image::ImageEncoder;
     let img = image::RgbaImage::from_raw(
-        2, 2,
-        vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255],
+        2,
+        2,
+        vec![
+            255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+        ],
     )
     .unwrap();
     let mut buf = Vec::new();
@@ -32,8 +35,13 @@ fn replay_one_renders_prefetched_http_image() {
         id: "u1".into(),
         role: Role::User,
         blocks: vec![
-            ContentBlock::Text { text: "look at this".into() },
-            ContentBlock::Image { url: url.into(), detail: None },
+            ContentBlock::Text {
+                text: "look at this".into(),
+            },
+            ContentBlock::Image {
+                url: url.into(),
+                detail: None,
+            },
         ],
         model: None,
         agent: None,
@@ -69,8 +77,13 @@ fn replay_one_http_image_without_prefetch_is_placeholder() {
         id: "u2".into(),
         role: Role::User,
         blocks: vec![
-            ContentBlock::Text { text: "check this".into() },
-            ContentBlock::Image { url: url.into(), detail: None },
+            ContentBlock::Text {
+                text: "check this".into(),
+            },
+            ContentBlock::Image {
+                url: url.into(),
+                detail: None,
+            },
         ],
         model: None,
         agent: None,
@@ -139,10 +152,7 @@ fn replay_one_prefetched_tool_image_renders() {
     assert_eq!(images.len(), 1, "tool image should produce an Image block");
 
     if let ChatBlock::Image { rendered, .. } = images[0] {
-        assert!(
-            !rendered.is_empty(),
-            "prefetched tool image should render"
-        );
+        assert!(!rendered.is_empty(), "prefetched tool image should render");
     }
 }
 
@@ -157,7 +167,10 @@ async fn prefetch_skips_data_uris_and_collects_http() {
         role: Role::User,
         blocks: vec![
             ContentBlock::Text { text: "img".into() },
-            ContentBlock::Image { url: data_uri.into(), detail: None },
+            ContentBlock::Image {
+                url: data_uri.into(),
+                detail: None,
+            },
         ],
         model: None,
         agent: None,

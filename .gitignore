@@ -48,3 +48,10 @@ __pycache__/
 reference/
 target-rev/
 target-clean/
+
+# Gate-test build dirs
+.target-gate/
+.target-rv2/
+.target-rv3/
+.tgt-title-task/
+.target-release/

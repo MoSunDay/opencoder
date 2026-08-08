@@ -7,6 +7,7 @@
 //! stay class-free and need no shared mutable handle of their own.
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders};
 use std::sync::{OnceLock, RwLock};
 
@@ -166,6 +167,16 @@ pub fn rounded_block_plain() -> Block<'static> {
 /// Rounded block with a title and subtle (muted) border.
 pub fn rounded_block(title: &str) -> Block<'static> {
     rounded_block_plain().title(format!(" {} ", title))
+}
+
+/// Rounded block with a styled multi-span title (keeps per-segment colors,
+/// e.g. the top-title `workdir · [mode] · model` composition) and subtle
+/// (muted) border. Padded with a leading/trailing space like [`rounded_block`].
+pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(title.spans.iter().cloned());
+    spans.push(Span::raw(" "));
+    rounded_block_plain().title(Line::from(spans))
 }
 
 /// Rounded block with an accent-coloured border and title.

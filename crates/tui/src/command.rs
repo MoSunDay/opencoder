@@ -41,7 +41,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
     ("/ap", "切换 autopilot 自动模式（不计入模型上下文）"),
-    ("/short_key", "查看 / 重新绑定快捷键"),
     ("/install_tools", "检测并安装所有 tools 依赖（tmux）"),
 ];
 
@@ -63,8 +62,6 @@ pub enum SlashAction {
     Stop,
     /// Display-only: toggle autopilot (never enters model context).
     Ap,
-    /// `/short_key`: open the keymap rebinding modal.
-    ShortKey,
     /// `/install_tools`: detect + install optional tool deps (tmux).
     InstallTools,
 }
@@ -187,7 +184,6 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
-        "short_key" | "sk" => Some(SlashAction::ShortKey),
         "install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
@@ -206,7 +202,6 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/ap" => Some(SlashAction::Ap),
-        "/short_key" => Some(SlashAction::ShortKey),
         "/install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
@@ -680,31 +675,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_short_key() {
-        assert_eq!(parse("/short_key"), Some(SlashAction::ShortKey));
-        assert_eq!(parse("short_key"), None); // bare name (no slash) -> None
-        assert_eq!(parse("/sk"), Some(SlashAction::ShortKey)); // alias
-        assert_eq!(parse(" /short_key "), Some(SlashAction::ShortKey));
-    }
-
-    #[test]
-    fn dispatch_short_key() {
-        assert_eq!(dispatch("/short_key"), Some(SlashAction::ShortKey));
-    }
-
-    #[test]
-    fn enter_on_short_key_dispatches() {
-        let mut menu = Some(CommandMenu::new());
-        for c in "short_key".chars() {
-            if let Some(m) = menu.as_mut() { m.on_char(c); }
-        }
-        let (outcome, _quit) =
-            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
-        match outcome {
-            CommandOutcome::Dispatch(SlashAction::ShortKey) => {}
-            other => panic!("expected Dispatch(ShortKey), got {:?}", other),
-        }
-        assert!(menu.is_none(), "popup closed after Enter-dispatch");
+    fn short_key_command_removed() {
+        assert_eq!(parse("/short_key"), None);
+        assert_eq!(parse("/sk"), None);
+        assert_eq!(parse("short_key"), None);
+        assert_eq!(dispatch("/short_key"), None);
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

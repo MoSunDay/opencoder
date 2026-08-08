@@ -43,6 +43,7 @@ pub(crate) enum KeyAction {
     // row was removed, but the match arm in app.rs still handles it.
     #[allow(dead_code)]
     SetSkill(Option<(String, String)>),
+    OpenKeymap,
     Clip,
     OpenCommand,
     Quit,
@@ -58,7 +59,6 @@ pub(crate) fn handle_key(
     hist_idx: &mut Option<usize>,
     running: bool,
     agent: &str,
-    show_help: &mut bool,
     scroll: &mut u32,
     follow: &mut bool,
     last_esc: &mut Option<Instant>,
@@ -68,7 +68,6 @@ pub(crate) fn handle_key(
     subagent_focused: bool,
     input_disabled: bool,
     undo_state: &mut crate::undo::UndoState,
-    help_scroll: &mut u16,
     queue_scroll: &mut u32,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
@@ -89,28 +88,6 @@ pub(crate) fn handle_key(
             }
             MenuOutcome::Idle => KeyAction::None,
         };
-    }
-    // Help popup scroll: when help is open, intercept scroll keys.
-    if *show_help {
-        match k.code {
-            KeyCode::Up => {
-                *help_scroll = help_scroll.saturating_sub(1);
-                return KeyAction::None;
-            }
-            KeyCode::Down => {
-                *help_scroll = help_scroll.saturating_add(1);
-                return KeyAction::None;
-            }
-            KeyCode::PageUp => {
-                *help_scroll = help_scroll.saturating_sub(10);
-                return KeyAction::None;
-            }
-            KeyCode::PageDown => {
-                *help_scroll = help_scroll.saturating_add(10);
-                return KeyAction::None;
-            }
-            _ => {}
-        }
     }
     // Queue/steer panel scroll keys: Shift+PageUp looks at older pending
     // entries (toward the top), Shift+PageDown moves toward newer ones
@@ -150,8 +127,7 @@ pub(crate) fn handle_key(
             };
         }
         if bindings.help.matches(&k) {
-            *show_help = !*show_help;
-            return KeyAction::None;
+            return KeyAction::OpenKeymap;
         }
         return KeyAction::None;
     }
@@ -185,8 +161,7 @@ pub(crate) fn handle_key(
         return KeyAction::Quit;
     }
     if bindings.help.matches(&k) {
-        *show_help = !*show_help;
-        return KeyAction::None;
+        return KeyAction::OpenKeymap;
     }
     if bindings.newline.matches(&k) {
         let (s, i) = composer::insert_newline(input, *cursor_idx);
@@ -319,12 +294,7 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::Esc => {
-            // 1) If help is open, Esc just closes it.
-            if *show_help {
-                *show_help = false;
-                return KeyAction::None;
-            }
-            // 2) Double-Esc within the window while running => hard-abort.
+            // Double-Esc within the window while running => hard-abort.
             let now = Instant::now();
             let is_double = running
                 && last_esc

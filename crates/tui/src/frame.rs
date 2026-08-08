@@ -4,6 +4,8 @@
 
 use std::time::{Duration, Instant};
 
+use ratatui::text::Line;
+
 /// Lifetime (in animation ticks) of a transient mode flash shown in the
 /// status line (plan-edit / mode-switch hints).
 const MODE_FLASH_TICKS: u32 = 15;
@@ -42,15 +44,12 @@ pub(crate) fn render_frame(
     plan_edit: &Option<crate::plan_edit::PlanEdit>,
     input: &str,
     cursor_idx: usize,
-    title: &str,
-    agent: &str,
+    title: &Line<'static>,
     running: bool,
-    show_help: bool,
     ctx: u64,
     sys: u64,
     compaction_threshold: u64,
     context_limit: u64,
-    model: &str,
     status: &str,
     steer_items: &[(i64, String)],
     queue_items: &[(i64, String)],
@@ -72,8 +71,8 @@ pub(crate) fn render_frame(
     copy_status: &Option<(String, Instant)>,
     pending_images: &[(String, String)],
     input_disabled: bool,
-    run_ms: u64,
-    help_scroll: u16,
+    tail_ms: u64,
+    task_ms: u64,
     is_top_level: bool,
     ap_enabled: bool,
 ) -> anyhow::Result<()> {
@@ -89,14 +88,11 @@ pub(crate) fn render_frame(
         render_input,
         render_cursor,
         title,
-        agent,
         running,
-        show_help,
         ctx,
         sys,
         compaction_threshold,
         context_limit,
-        model,
         status,
         steer_items,
         queue_items,
@@ -119,8 +115,8 @@ pub(crate) fn render_frame(
         pending_images,
         input_disabled,
         plan_mode,
-        run_ms,
-        help_scroll,
+        tail_ms,
+        task_ms,
         is_top_level,
         ap_enabled,
     )

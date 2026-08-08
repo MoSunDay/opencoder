@@ -49,8 +49,8 @@ pub(crate) enum LoopFlow {
 }
 
 /// Per-iteration display state computed by [`compute_display`]: the chat view,
-/// titles, context stats and model label that vary depending on whether a
-/// subagent perspective is being viewed.
+/// titles and context stats that vary depending on whether a subagent
+/// perspective is being viewed.
 ///
 /// `display_chat` is a borrow into the live `ChatView` (either the parent's or a
 /// subagent block's child view), matching the original inline code which held a
@@ -59,17 +59,20 @@ pub(crate) struct DisplayState<'a> {
     pub(crate) agent_name: String,
     pub(crate) status: String,
     pub(crate) display_chat: &'a ChatView,
-    pub(crate) display_title: String,
-    pub(crate) display_status_agent: String,
+    /// Body block title. Top level: `workdir · [mode] · model` plus an
+    /// optional `· effort` badge (moved up from the status bar); subagent
+    /// focus: the back/navigation title.
+    pub(crate) display_title: Line<'static>,
     pub(crate) display_ctx: u64,
     pub(crate) display_sys: u64,
-    pub(crate) status_model: String,
 }
 
 /// Compute the per-iteration display values — `display_chat`, `display_title`,
-/// `display_status_agent`, `display_ctx`, `display_sys` and `status_model` —
-/// swapping in a subagent's child ChatView when one is focused. Pure: reads
-/// state, returns the values; the caller assigns them into its locals.
+/// `display_ctx` and `display_sys` — swapping in a subagent's child ChatView
+/// when one is focused. The top-level title carries the former status-bar
+/// mode/model info: `workdir · [mode] · model` (+ `· effort` when
+/// `reasoning_effort` is set). Pure: reads state, returns the values; the
+/// caller assigns them into its locals.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_display<'a>(
     chat: &'a ChatView,
@@ -83,84 +86,92 @@ pub(crate) fn compute_display<'a>(
     let status = chat.status.clone();
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
-    // The body title keeps the "Ctrl+L back" hint; the status bar uses the
-    // short subagent kind so it renders the same layout as the parent.
-    let (display_chat, display_title, display_status_agent, display_ctx, display_sys) =
-        if let Some(idx) = subagent_focus {
-            match chat.blocks.get(idx) {
-                Some(crate::chat::ChatBlock::Subagent {
-                    view, kind, prompt, ..
-                }) => (
-                    view as &crate::chat::ChatView,
-                    format!("\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"),
-                    kind.clone(),
-                    view.context_used,
-                    subagent_sys,
-                ),
-                _ => (
-                    chat,
-                    agent_name.clone(),
-                    agent_name.clone(),
-                    chat.context_used,
-                    sys_tokens,
-                ),
-            }
-        } else {
-            (
+    // The body title keeps the "Ctrl+L back" hint.
+    let (display_chat, display_title, display_ctx, display_sys) = if let Some(idx) =
+        subagent_focus
+    {
+        match chat.blocks.get(idx) {
+            Some(crate::chat::ChatBlock::Subagent {
+                view, kind, prompt, ..
+            }) => (
+                view as &crate::chat::ChatView,
+                Line::from(format!("\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}")),
+                view.context_used,
+                subagent_sys,
+            ),
+            _ => (
                 chat,
-                workdir.display().to_string(),
-                agent_name.clone(),
+                Line::from(agent_name.clone()),
                 chat.context_used,
                 sys_tokens,
-            )
-        };
-    // Status bar shows the bare model id (without provider prefix) plus an
-    // optional reasoning-effort badge, e.g. "glm-5.2 \u{00b7}high".
-    let mid = config.model_id();
-    let status_model = match &config.reasoning_effort {
-        Some(e) if !e.trim().is_empty() => format!("{mid} \u{00b7}{e}"),
-        _ => mid.to_string(),
+            ),
+        }
+    } else {
+        // Top-level title: `workdir · [mode] · model` (+ `· effort`), keeping
+        // the former status-bar segment colors (chip + text model id).
+        let mid = config.model_id();
+        let mut title_spans = vec![
+            Span::raw(workdir.display().to_string()),
+            Span::raw(" \u{00b7} "),
+            Span::styled(
+                format!("[{}]", agent_name),
+                Style::default().fg(theme::agent_chip_fg(&agent_name)),
+            ),
+            Span::raw(" \u{00b7} "),
+            Span::styled(mid.to_string(), Style::default().fg(theme::text())),
+        ];
+        if let Some(e) = &config.reasoning_effort {
+            if !e.trim().is_empty() {
+                title_spans.push(Span::styled(
+                    format!(" \u{00b7}{e}"),
+                    Style::default().fg(theme::text()),
+                ));
+            }
+        }
+        (
+            chat,
+            Line::from(title_spans),
+            chat.context_used,
+            sys_tokens,
+        )
     };
     DisplayState {
         agent_name,
         status,
         display_chat,
         display_title,
-        display_status_agent,
         display_ctx,
         display_sys,
-        status_model,
     }
 }
 
-/// Advance the status-bar run-timer: counts wall-clock elapsed while a turn is
-/// running, resets to zero when the task goes idle.
+/// Advance the task clock: `task_elapsed_ms` is the cumulative time spent
+/// running the current task (shown in the status bar, next to the spinner).
+/// It accumulates across all turns and is reset only when the user submits a
+/// new task.
 ///
-/// - `false -> true` (task started): reset elapsed to zero and snap the dt
-///   baseline to `now` so the idle gap between turns isn't counted.
-/// - `true -> false` (task ended): reset elapsed to zero so the duration is
-///   cleared from the status bar (not frozen/lingering).
+/// - `false -> true` (turn started): snap the dt baseline to `now` so the
+///   idle gap between turns is NOT counted. `task_elapsed_ms` is never reset
+///   here.
+/// - `true -> false` (turn ended): task time keeps its accumulated value;
+///   idle ticks (running == false) do not advance it.
 /// - `running` stays `true` (drain loop, subagent): accumulate normally.
 pub(crate) fn tick_clock(
     running: bool,
     prev_running: &mut bool,
     last_clock: &mut Instant,
-    run_elapsed_ms: &mut u64,
+    task_elapsed_ms: &mut u64,
 ) {
     let now = Instant::now();
     if running && !*prev_running {
-        // Task started: reset the timer and snap the dt baseline.
-        *run_elapsed_ms = 0;
+        // Turn started: snap the baseline so the idle gap isn't counted.
         *last_clock = now;
-    } else if !running && *prev_running {
-        // Task ended: clear the timer so the status bar drops the duration.
-        *run_elapsed_ms = 0;
     }
     *prev_running = running;
     let dt = now.duration_since(*last_clock).as_millis() as u64;
     *last_clock = now;
     if running {
-        *run_elapsed_ms = run_elapsed_ms.saturating_add(dt);
+        *task_elapsed_ms = task_elapsed_ms.saturating_add(dt);
     }
 }
 
@@ -463,7 +474,7 @@ pub(crate) async fn dispatch_command(
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
-    keymap_menu: &mut Option<KeymapMenu>,
+    _keymap_menu: &mut Option<KeymapMenu>,
     agent_name: &str,
     input: &mut String,
     cursor_idx: &mut usize,
@@ -603,9 +614,6 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::Dispatch(SlashAction::InstallTools) => {
             return LoopFlow::InstallTools;
         }
-        CommandOutcome::Dispatch(SlashAction::ShortKey) => {
-            *keymap_menu = Some(KeymapMenu::new(&config.keymap));
-        }
         CommandOutcome::FillInput(s) => {
             input.clear();
             input.push_str(&s);
@@ -722,7 +730,7 @@ mod app_loop_paste;
 
 pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_silent, route_paste};
 
-/// Handle a keystroke while the `/short_key` keymap modal is open. On `Save`,
+/// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds
 /// the `KeyBindings` so the new shortcuts take effect immediately. On `Quit`,
 /// sends `UiCmd::Quit` and returns [`LoopFlow::Quit`].
@@ -750,15 +758,5 @@ pub(crate) async fn handle_keymap_outcome(
             LoopFlow::Proceed
         }
         KeymapOutcome::Cancel | KeymapOutcome::Idle => LoopFlow::Proceed,
-    }
-}
-
-/// Check if `clean` is the `/short_key` command and return a new
-/// [`KeymapMenu`] if so. Used by the free-text Submit path.
-pub(crate) fn try_keymap_command(clean: &str, config: &Config) -> Option<KeymapMenu> {
-    if matches!(clean, "/short_key" | "/sk") {
-        Some(KeymapMenu::new(&config.keymap))
-    } else {
-        None
     }
 }

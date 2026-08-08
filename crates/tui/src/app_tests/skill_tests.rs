@@ -292,13 +292,11 @@ fn double_esc_while_running_cancels() {
     let mut input = String::from("draft");
     let mut idx = 5;
     let mut hist_idx = None;
-    let mut show_help = false;
     let mut scroll = 0u32;
     let mut follow = true;
     let mut last_esc: Option<Instant> = None;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
-    let mut help_scroll: u16 = 0;
     let mut queue_scroll: u32 = 0;
     let esc = key(KeyCode::Esc, KeyModifiers::NONE);
 
@@ -311,7 +309,6 @@ fn double_esc_while_running_cancels() {
         &mut hist_idx,
         true,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -321,7 +318,6 @@ fn double_esc_while_running_cancels() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(
@@ -339,7 +335,6 @@ fn double_esc_while_running_cancels() {
         &mut hist_idx,
         true,
         "act",
-        &mut show_help,
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -349,7 +344,6 @@ fn double_esc_while_running_cancels() {
         false,
         false,
         &mut undo_state,
-        &mut help_scroll,
         &mut queue_scroll,
     );
     assert!(

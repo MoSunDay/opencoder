@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Metadata for each bindable key: `(config_key, human_label)`.
 /// Order matches the field order in [`KeymapConfig`].
 pub const KEYMAP_INFO: &[(&str, &str)] = &[
-    ("help", "Toggle help popup"),
+    ("help", "Open shortcut settings"),
     ("quit", "Quit"),
     ("cancel", "Cancel running task"),
     ("newline", "Insert newline"),

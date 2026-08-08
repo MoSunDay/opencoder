@@ -85,6 +85,26 @@ pub async fn promote(
     .await
 }
 
+/// Reset promoted inputs back to pending. Idempotent: only touches rows where
+/// `promoted_seq IS NOT NULL`. Used by the runner's error-recovery path.
+pub async fn unpromote(conn: &Connection, session_id: &str, seqs: &[i64]) -> Result<()> {
+    if seqs.is_empty() {
+        return Ok(());
+    }
+    super::tx::run_tx(conn, "BEGIN", || async move {
+        for s in seqs {
+            conn.execute(
+                "UPDATE session_inputs SET promoted_seq = NULL WHERE session_id = ? AND seq = ? AND promoted_seq IS NOT NULL",
+                params![session_id, s],
+            )
+            .await
+            .context("unpromote input")?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+}
+
 /// Promote exactly one (oldest) queued input. Returns its seq, or None if none pending.
 pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
     super::tx::run_tx(conn, "BEGIN", || async move {

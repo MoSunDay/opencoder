@@ -70,6 +70,15 @@ pub trait Store: Send + Sync {
     /// mark it promoted. Used by the runner drain at idle to consume exactly one
     /// queued follow-up per cycle.
     async fn claim_next_queue(&self, session_id: &str) -> Result<Option<(i64, SessionInput)>>;
+    /// Reset promoted inputs back to unpromoted (pending) state. Used by the
+    /// runner's error-recovery path when a steer/queue batch fails
+    /// mid-processing: items that were promoted but not yet consumed are
+    /// restored so the next run picks them up. Idempotent — only touches rows
+    /// that are currently promoted. Default no-op so test fakes need not
+    /// override unless they exercise the promote/unpromote path.
+    async fn unpromote_inputs(&self, _session_id: &str, _seqs: &[i64]) -> Result<()> {
+        Ok(())
+    }
     /// Delete a pending input by its row id. Used by the TUI queue panel
     /// to let users remove a queued/steered prompt before it's consumed.
     async fn delete_input(&self, input_id: i64) -> Result<()>;

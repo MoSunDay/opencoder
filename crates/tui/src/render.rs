@@ -422,28 +422,17 @@ fn render_body(
     let n = cache.lines().len();
     let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
     let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    // Live provider/model-round timer on the last content line. It is visible
-    // only while a model round is active and the transcript tail is in view;
-    // completed rounds do not leave a frozen historical timer behind.
+    // Live provider/model-round timer at the body tail, on its own dedicated
+    // line. It is visible only while a model round is active and the transcript
+    // tail is in view; completed rounds leave no frozen historical timer behind.
     if tail_ms > 0 && end == n {
         let timer = Span::styled(
             format!("[turn cost {}]", fmtmod::format_run_duration(tail_ms)),
             Style::default().fg(theme::warn_color()),
         );
-        if let Some(last) = visible_lines.iter_mut().rev().find(|l| {
-            l.spans
-                .iter()
-                .any(|s| s.content.chars().any(|c| !c.is_whitespace()))
-        }) {
-            if last.width() + 2 + timer.width() <= usize::from(text_w) {
-                last.spans.push(Span::raw("  "));
-                last.spans.push(timer);
-            } else {
-                // The content line is full: put the timer on its own line so
-                // the turn duration is never dropped.
-                visible_lines.push(Line::from(timer));
-            }
-        }
+        // Always render the timer on its own dedicated line so the turn
+        // duration never blends into content or tool-output lines.
+        visible_lines.push(Line::from(timer));
     }
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), text_area);

@@ -275,7 +275,9 @@ pub async fn process_cmd(
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 persist_event(&sess.store, &sess.id, &ev).await;
                 forward_event(evt_tx, ev);
-                persist_session_agent(sess, &name).await;
+                if let Err(e) = persist_session_agent(sess, &name).await {
+                    tracing::warn!(error = %e, "persist_session_agent failed");
+                }
             }
         }
         UiCmd::SwitchAndStart(name, extra) => {
@@ -285,7 +287,9 @@ pub async fn process_cmd(
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 let _ = sink.push(&ev);
                 forward_event(evt_tx, ev);
-                persist_session_agent(sess, &name).await;
+                if let Err(e) = persist_session_agent(sess, &name).await {
+                    tracing::warn!(error = %e, "persist_session_agent failed");
+                }
             }
             // Plan→act handoff: clear the transcript so the act agent starts
             // from only the final plan, not the full read-only planning noise.

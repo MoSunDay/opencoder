@@ -285,7 +285,7 @@ impl SessionEvent {
                     .to_string(),
             },
             "autopilot" => {
-                let iteration = data.get("iteration")?.as_u64()? as u32;
+                let iteration = data.get("iteration")?.as_u64()?.min(u32::MAX as u64) as u32;
                 let phase = serde_json::from_value(data.get("phase")?.clone()).ok()?;
                 SessionEvent::AutoPilot { phase, iteration }
             }
@@ -558,6 +558,27 @@ mod from_sse_tests {
                 );
             }
             other => panic!("expected ToolEnd, got {other:?}"),
+        }
+    }
+
+    /// P2-6: `from_sse` must saturate `iteration` to u32::MAX when the JSON
+    /// value exceeds u32's range (e.g. u64::MAX). The old `as u32` cast
+    /// silently wrapped to a small number, producing a wrong iteration index.
+    #[test]
+    fn from_sse_autopilot_large_iteration_saturates() {
+        let data = serde_json::json!({
+            "phase": "act",
+            "iteration": u64::MAX,
+        });
+        let ev = SessionEvent::from_sse("autopilot", data).expect("must parse");
+        match ev {
+            SessionEvent::AutoPilot { iteration, .. } => {
+                assert_eq!(
+                    iteration, u32::MAX,
+                    "iteration must saturate to u32::MAX, not wrap"
+                );
+            }
+            other => panic!("expected AutoPilot, got {other:?}"),
         }
     }
 }

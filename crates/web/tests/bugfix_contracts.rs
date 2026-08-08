@@ -355,11 +355,15 @@ async fn events_subscribe_first_no_loss_no_dup() {
     };
 
     // (c) Re-broadcast E1 (already persisted -> would duplicate without dedup).
+    // Carry seq: Some(1) so tier-1 seq-based dedup (seq <= max_replay_seq)
+    // catches it. The live copy normally has seq: None until the flusher
+    // persists it, but a re-broadcast of an already-persisted event carries
+    // its seq — exercising the exact dedup path that prevents duplicates.
     let _ = tx.send(SseEvt {
         kind: "done".into(),
         data: e1.clone(),
         ts: 2,
-        seq: None,
+        seq: Some(1),
     });
     // (d) Broadcast E2 (live-only, never persisted -> would be lost without
     // subscribe-first capturing it on the live receiver).

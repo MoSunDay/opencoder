@@ -191,6 +191,7 @@ pub async fn resume(
         active_skill_names: Arc::new(Mutex::new(infer_skill_names(&meta.skill))),
         persisted_count: n,
         session_created: true,
+        ts_origin: false,
         cancel: None,
         turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),

@@ -303,6 +303,9 @@ pub async fn post_agent(
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("agent switch refused while drain running");
     }
+    // P1-5: Capture old meta for TOCTOU rollback. A drain may start between
+    // the draining check above and the update_session write below.
+    let old_agent = state.store.get_session(&id).await.ok().flatten();
     if let Err(e) = state
         .store
         .update_session(
@@ -316,6 +319,24 @@ pub async fn post_agent(
         .await
     {
         return error_500(format!("update_session: {e:#}"));
+    }
+    // P1-5: Re-check draining AFTER the write. If a drain started between
+    // the first check and this write (TOCTOU), rollback the meta change.
+    if handle.draining.load(Ordering::SeqCst) {
+        if let Some(old) = &old_agent {
+            let _ = state
+                .store
+                .update_session(
+                    &id,
+                    &SessionPatch {
+                        agent: old.agent.clone(),
+                        updated_at: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        return error_409("agent switch refused: drain started during write");
     }
     handle.overrides.lock().await.agent = Some(body.value.clone());
     Json(json!({ "ok": true, "agent": body.value })).into_response()
@@ -361,6 +382,8 @@ pub async fn post_model(
             return error_500(format!("persist_default failed: {e:#}"));
         }
     }
+    // P1-5: Capture old meta for TOCTOU rollback.
+    let old_model = state.store.get_session(&id).await.ok().flatten();
     if let Err(e) = state
         .store
         .update_session(
@@ -374,6 +397,24 @@ pub async fn post_model(
         .await
     {
         return error_500(format!("update_session: {e:#}"));
+    }
+    // P1-5: Re-check draining AFTER the write (TOCTOU). Rollback meta if a
+    // drain started during the write.
+    if handle.draining.load(Ordering::SeqCst) {
+        if let Some(old) = &old_model {
+            let _ = state
+                .store
+                .update_session(
+                    &id,
+                    &SessionPatch {
+                        model: old.model.clone(),
+                        updated_at: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        }
+        return error_409("model switch refused: drain started during write");
     }
     handle.overrides.lock().await.model = Some(body.value.clone());
     Json(json!({ "ok": true, "model": body.value })).into_response()
@@ -574,9 +615,22 @@ pub async fn get_events(
     //      here because the live copy has no seq to compare; tier (1) removes
     //      the collision risk whenever a seq is available.
     let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
+    // P0-1: Seed `seen` only from events persisted AFTER the subscription
+    // baseline, not from the entire replay window. The old code pre-filled
+    // `seen` with every replayed event's fingerprint. A live `done` (always
+    // `{}`, seq: None) colliding with ANY historical `done` fingerprint was
+    // silently dropped, freezing the UI (busy never resets, send disabled).
+    // By seeding only from seq > baseline (the true subscribe->query overlap
+    // window), historical `done` events can no longer suppress live ones.
+    let baseline = state
+        .store
+        .last_event_seq(&id)
+        .await
+        .unwrap_or(-1);
     let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(std::sync::Mutex::new(
         persisted
             .iter()
+            .filter(|e| e.seq.is_some_and(|s| s > baseline))
             .map(|e| (e.kind.clone(), e.data.to_string()))
             .collect(),
     ));

@@ -26,12 +26,12 @@ use crate::app_helpers::{start_turn, sys_tokens_for, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::keymap_menu::KeymapMenu;
 use crate::local_cmd;
 use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
-use crate::keymap_menu::KeymapMenu;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
+use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
@@ -59,8 +59,7 @@ pub(crate) struct DisplayState<'a> {
     pub(crate) agent_name: String,
     pub(crate) status: String,
     pub(crate) display_chat: &'a ChatView,
-    /// Body block title. Top level: `workdir · [mode] · model` plus an
-    /// optional `· effort` badge (moved up from the status bar); subagent
+    /// Body block title. Top level: `workdir · model · effort`; subagent
     /// focus: the back/navigation title.
     pub(crate) display_title: Line<'static>,
     pub(crate) display_ctx: u64,
@@ -69,10 +68,9 @@ pub(crate) struct DisplayState<'a> {
 
 /// Compute the per-iteration display values — `display_chat`, `display_title`,
 /// `display_ctx` and `display_sys` — swapping in a subagent's child ChatView
-/// when one is focused. The top-level title carries the former status-bar
-/// mode/model info: `workdir · [mode] · model` (+ `· effort` when
-/// `reasoning_effort` is set). Pure: reads state, returns the values; the
-/// caller assigns them into its locals.
+/// when one is focused. The top-level title renders workdir, model name, and
+/// thinking effort with the same plain style. The mode remains in the bottom
+/// status bar. Pure: reads state, returns the values; the caller assigns them.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_display<'a>(
     chat: &'a ChatView,
@@ -81,21 +79,24 @@ pub(crate) fn compute_display<'a>(
     sys_tokens: u64,
     config: &Config,
     workdir: &Path,
+    _row_width: u16,
+    _arrow_w: u16,
 ) -> DisplayState<'a> {
     let agent_name = chat.agent.clone();
     let status = chat.status.clone();
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
     // The body title keeps the "Ctrl+L back" hint.
-    let (display_chat, display_title, display_ctx, display_sys) = if let Some(idx) =
-        subagent_focus
+    let (display_chat, display_title, display_ctx, display_sys) = if let Some(idx) = subagent_focus
     {
         match chat.blocks.get(idx) {
             Some(crate::chat::ChatBlock::Subagent {
                 view, kind, prompt, ..
             }) => (
                 view as &crate::chat::ChatView,
-                Line::from(format!("\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}")),
+                Line::from(format!(
+                    "\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"
+                )),
                 view.context_used,
                 subagent_sys,
             ),
@@ -107,33 +108,12 @@ pub(crate) fn compute_display<'a>(
             ),
         }
     } else {
-        // Top-level title: `workdir · [mode] · model` (+ `· effort`), keeping
-        // the former status-bar segment colors (chip + text model id).
-        let mid = config.model_id();
-        let mut title_spans = vec![
-            Span::raw(workdir.display().to_string()),
-            Span::raw(" \u{00b7} "),
-            Span::styled(
-                format!("[{}]", agent_name),
-                Style::default().fg(theme::agent_chip_fg(&agent_name)),
-            ),
-            Span::raw(" \u{00b7} "),
-            Span::styled(mid.to_string(), Style::default().fg(theme::text())),
-        ];
-        if let Some(e) = &config.reasoning_effort {
-            if !e.trim().is_empty() {
-                title_spans.push(Span::styled(
-                    format!(" \u{00b7}{e}"),
-                    Style::default().fg(theme::text()),
-                ));
-            }
-        }
-        (
-            chat,
-            Line::from(title_spans),
-            chat.context_used,
-            sys_tokens,
-        )
+        let title = super::app_display::compose_top_title(
+            workdir,
+            config.model_id(),
+            config.reasoning_effort.as_deref(),
+        );
+        (chat, title, chat.context_used, sys_tokens)
     };
     DisplayState {
         agent_name,
@@ -145,17 +125,14 @@ pub(crate) fn compute_display<'a>(
     }
 }
 
-/// Advance the task clock: `task_elapsed_ms` is the cumulative time spent
-/// running the current task (shown in the status bar, next to the spinner).
-/// It accumulates across all turns and is reset only when the user submits a
-/// new task.
+/// Advance the task-total clock using a single `last_clock` dt baseline.
+/// Provider/model round timing is event-driven in `ChatView`; it is distinct
+/// from this outer task clock because one running task can contain many rounds.
 ///
-/// - `false -> true` (turn started): snap the dt baseline to `now` so the
-///   idle gap between turns is NOT counted. `task_elapsed_ms` is never reset
-///   here.
-/// - `true -> false` (turn ended): task time keeps its accumulated value;
-///   idle ticks (running == false) do not advance it.
-/// - `running` stays `true` (drain loop, subagent): accumulate normally.
+/// Order of operations (single shared `dt`/`last_clock` baseline):
+/// - `false -> true`: snap the baseline so idle time is not counted.
+/// - `true -> false`: freeze the task total.
+/// - `running` stays `true`: accumulate `dt` into the task total.
 pub(crate) fn tick_clock(
     running: bool,
     prev_running: &mut bool,
@@ -164,7 +141,7 @@ pub(crate) fn tick_clock(
 ) {
     let now = Instant::now();
     if running && !*prev_running {
-        // Turn started: snap the baseline so the idle gap isn't counted.
+        // Task started: snap the baseline so the idle gap isn't counted.
         *last_clock = now;
     }
     *prev_running = running;
@@ -182,11 +159,15 @@ pub(crate) enum SwitchOutcome {
     Quit,
 }
 
-/// Handle `KeyAction::SwitchAgent`: switch agent mode, and for plan→act with a
-/// submitted plan, handoff immediately when idle, no-op when running.
+/// Handle `KeyAction::SwitchAgent` (and `SwitchAgentNoClear`): switch agent
+/// mode, and for plan→act with a submitted plan, handoff immediately when idle,
+/// no-op when running. `no_handoff` (SwitchAgentNoClear / t+Tab chord) skips
+/// the plan→act handoff entirely — transcript preserved in full — but still
+/// honors the running-gate (deferred to the next clean idle boundary).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
+    no_handoff: bool,
     chat: &mut ChatView,
     running: &mut bool,
     follow: &mut bool,
@@ -201,20 +182,25 @@ pub(crate) async fn handle_switch_agent(
     active_skill_body: &Option<String>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
-    if plan_to_act && chat.plan_submitted && *running {
-        // Plan turn still running — Shift+Tab is a no-op. sys_tokens is NOT
-        // updated here: the agent stays in plan mode, so the context meter must
-        // keep the plan-mode baseline. (Updating it to the act-mode count would
-        // corrupt the meter for the remainder of the running plan turn.)
-        *mode_flash = Some(("\u{21bb} plan running\u{2026}".into(), anim_tick));
+    if *running {
+        // A turn is in flight — any mode switch is a no-op. The worker is
+        // mid-`run_session`; applying the switch now would start the next turn
+        // with a stale agent at an arbitrary partial boundary. sys_tokens is NOT
+        // updated here: the agent stays in its current mode, so the context
+        // meter must keep the current-mode baseline. (Updating it to the target
+        // mode's count would corrupt the meter for the remainder of the running
+        // turn.) The same rule covers plan→act with a submitted plan, act→plan,
+        // and plan→act without a submitted plan — all deferred to the next
+        // clean idle boundary.
+        *mode_flash = Some(("\u{23f3} busy \u{2014} switch when idle".into(), anim_tick));
         return SwitchOutcome::Proceed;
     }
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
     // Optimistically reflect the switch so the status chip is correct even if
     // AgentSwitch is dropped under channel pressure. Covers non-turning switches
     // (Alt+Tab) that emit no TurnDone to reconcile against.
-    chat.agent = name.clone();
-    if plan_to_act && chat.plan_submitted {
+    chat.agent = crate::terminal_text::sanitize_single_line(&name).into_owned();
+    if !no_handoff && plan_to_act && chat.plan_submitted {
         // Idle: handoff immediately, carrying any input text.
         let extra = std::mem::take(input);
         *cursor_idx = 0;
@@ -290,8 +276,15 @@ pub(crate) async fn fold_ui_events(
     while let Ok(ev) = evt_rx.try_recv() {
         events.push(ev);
     }
+    // A collapsed, already-visible Thinking block does not need a repaint for
+    // every appended reasoning token. The first delta that creates the block
+    // *does* need one so users immediately see that the model is thinking.
+    // Keep the whole coalesced batch renderable once any visible change occurs;
+    // a later hidden reasoning delta must not mask an earlier visible event.
+    let mut batch_needs_render = false;
     for ev in events {
         *skip_next_render = false;
+        let mut hidden_reasoning_append = false;
         match ev {
             UiEvent::Session(sev) => {
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
@@ -303,12 +296,9 @@ pub(crate) async fn fold_ui_events(
                     chat.plan_submitted = saved_plan_submitted;
                     chat.pending_plan_arm = saved_pending_plan_arm;
                 } else {
+                    hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
+                        && chat.last_open_thinking_collapsed();
                     chat.apply(&sev);
-                    if matches!(sev, SessionEvent::ReasoningDelta(_))
-                        && chat.last_thinking_collapsed()
-                    {
-                        *skip_next_render = true;
-                    }
                 }
                 if let SessionEvent::QueueConsumed { seq, text } = &sev {
                     // Echo at consume time (prompt was visible in pending panel).
@@ -327,7 +317,9 @@ pub(crate) async fn fold_ui_events(
                     if !display.is_empty() {
                         chat.push_marker(Line::from(Span::styled(
                             format!("user: {display}"),
-                            Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(theme::warn_color())
+                                .add_modifier(Modifier::BOLD),
                         )));
                         chat.push_marker(Line::from(""));
                     }
@@ -351,19 +343,13 @@ pub(crate) async fn fold_ui_events(
                             // the inputs permanently).
                             *queue_items = crate::queue_panel::pending_mirror(
                                 store
-                                    .pending_inputs(
-                                        session_id,
-                                        opencoder_store::Delivery::Queue,
-                                    )
+                                    .pending_inputs(session_id, opencoder_store::Delivery::Queue)
                                     .await
                                     .unwrap_or_default(),
                             );
                             chat.steer_items = crate::queue_panel::pending_mirror(
                                 store
-                                    .pending_inputs(
-                                        session_id,
-                                        opencoder_store::Delivery::Steer,
-                                    )
+                                    .pending_inputs(session_id, opencoder_store::Delivery::Steer)
                                     .await
                                     .unwrap_or_default(),
                             );
@@ -399,7 +385,7 @@ pub(crate) async fn fold_ui_events(
                     chat.plan_submitted = true;
                     chat.pending_plan_arm = false;
                 }
-                chat.agent = agent;
+                chat.agent = crate::terminal_text::sanitize_single_line(&agent).into_owned();
                 // Safety net: SessionEvent::Done (which triggers
                 // finalize_assistant -> markdown::render) is sent via
                 // try_send and may be dropped during token bursts.
@@ -424,6 +410,8 @@ pub(crate) async fn fold_ui_events(
                 }
             }
         }
+        batch_needs_render |= !hidden_reasoning_append;
+        *skip_next_render = !batch_needs_render;
     }
     LoopFlow::Proceed
 }
@@ -547,55 +535,87 @@ pub(crate) async fn dispatch_command(
         // /act_clear_context from plan mode with a submitted plan route through
         // SwitchAndStart (plan→act handoff) — same as Shift+Tab — preserving
         // the plan and starting execution instead of wiping the transcript.
-        CommandOutcome::Dispatch(SlashAction::Act) => {
-            if chat.agent == "plan" && chat.plan_submitted && !*running {
-                let extra = prep_plan_to_act(
-                    input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-                );
-                if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await {
+        // RUNNING-GATE: while a turn is in flight (`running`), all three are
+        // refused with a `[switch] busy — retry when idle` marker — a mode
+        // switch mid-turn would start the next turn with a stale agent at an
+        // arbitrary partial boundary (mirrors `/compact`'s SkipRunning).
+        CommandOutcome::Dispatch(SlashAction::Act) => match gate_switch(*running) {
+            SwitchGate::Run => {
+                if chat.agent == "plan" && chat.plan_submitted {
+                    let extra = prep_plan_to_act(
+                        input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+                    );
+                    if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await
+                    {
+                        worker_dead(chat);
+                        return LoopFlow::Quit;
+                    }
+                } else if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new()))
+                    .await
+                {
                     worker_dead(chat);
                     return LoopFlow::Quit;
                 }
-            } else if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new())).await {
-                worker_dead(chat);
-                return LoopFlow::Quit;
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
             }
-            *running = true;
-            *follow = true;
-            chat.begin_turn();
-        }
-        CommandOutcome::Dispatch(SlashAction::Plan) => {
-            if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/plan".into(), Vec::new())).await {
-                worker_dead(chat);
-                return LoopFlow::Quit;
+            SwitchGate::SkipRunning => {
+                chat.push_marker(Line::from(Span::styled(
+                    "[switch] busy \u{2014} retry when idle",
+                    Style::default().fg(theme::warn_color()),
+                )));
             }
-            *running = true;
-            *follow = true;
-            chat.begin_turn();
-        }
-        CommandOutcome::Dispatch(SlashAction::ClearContext) => {
-            if chat.agent == "plan" && chat.plan_submitted && !*running {
-                let extra = prep_plan_to_act(
-                    input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-                );
-                if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await {
+        },
+        CommandOutcome::Dispatch(SlashAction::Plan) => match gate_switch(*running) {
+            SwitchGate::Run => {
+                if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/plan".into(), Vec::new())).await {
                     worker_dead(chat);
                     return LoopFlow::Quit;
                 }
-            } else if !start_turn(
-                cmd_tx,
-                cancel,
-                UiCmd::Prompt("/act_clear_context".into(), Vec::new()),
-            )
-            .await
-            {
-                worker_dead(chat);
-                return LoopFlow::Quit;
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
             }
-            *running = true;
-            *follow = true;
-            chat.begin_turn();
-        }
+            SwitchGate::SkipRunning => {
+                chat.push_marker(Line::from(Span::styled(
+                    "[switch] busy \u{2014} retry when idle",
+                    Style::default().fg(theme::warn_color()),
+                )));
+            }
+        },
+        CommandOutcome::Dispatch(SlashAction::ClearContext) => match gate_switch(*running) {
+            SwitchGate::Run => {
+                if chat.agent == "plan" && chat.plan_submitted {
+                    let extra = prep_plan_to_act(
+                        input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+                    );
+                    if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await
+                    {
+                        worker_dead(chat);
+                        return LoopFlow::Quit;
+                    }
+                } else if !start_turn(
+                    cmd_tx,
+                    cancel,
+                    UiCmd::Prompt("/act_clear_context".into(), Vec::new()),
+                )
+                .await
+                {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
+                }
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
+            }
+            SwitchGate::SkipRunning => {
+                chat.push_marker(Line::from(Span::styled(
+                    "[switch] busy \u{2014} retry when idle",
+                    Style::default().fg(theme::warn_color()),
+                )));
+            }
+        },
         // Display-only commands: inspect / kill background bash, toggle
         // autopilot. Never start a turn and never reach session.messages —
         // the result is pushed as a purple marker. Work in any state
@@ -617,7 +637,7 @@ pub(crate) async fn dispatch_command(
         CommandOutcome::FillInput(s) => {
             input.clear();
             input.push_str(&s);
-            input.push(' ');  // trailing space so args/Enter work immediately
+            input.push(' '); // trailing space so args/Enter work immediately
             *cursor_idx = input.len();
             return LoopFlow::Redraw;
         }

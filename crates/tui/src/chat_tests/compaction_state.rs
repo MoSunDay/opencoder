@@ -24,7 +24,11 @@ fn compaction_delta_streams_into_expanded_block() {
 
     // The final Compaction event finalizes the block: collapsed, full text.
     v.apply(&SessionEvent::Compaction("final-summary".into()));
-    assert_eq!(v.blocks.len(), 1, "final Compaction must not add a second block");
+    assert_eq!(
+        v.blocks.len(),
+        1,
+        "final Compaction must not add a second block"
+    );
     assert!(v.last_compaction_collapsed());
     // Collapsed: the streamed chunks are gone (overwritten + hidden).
     assert!(!block_text(&v).contains("streamed-chunk"));
@@ -99,8 +103,7 @@ fn collapse_all_covers_compaction() {
 
     for b in &v.blocks {
         match b {
-            ChatBlock::Thinking { collapsed, .. }
-            | ChatBlock::Compaction { collapsed, .. } => {
+            ChatBlock::Thinking { collapsed, .. } | ChatBlock::Compaction { collapsed, .. } => {
                 assert!(*collapsed, "collapsible block must be collapsed");
             }
             _ => {}
@@ -128,5 +131,8 @@ fn header_text_shows_line_count() {
     let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
     assert!(header.contains("Compaction"));
     assert!(!header.contains("collapse"));
-    assert!(!header.contains("lines"), "expanded header has no line count");
+    assert!(
+        !header.contains("lines"),
+        "expanded header has no line count"
+    );
 }

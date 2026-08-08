@@ -31,6 +31,28 @@ fn body_includes_reasoning_effort_when_set() {
 }
 
 #[test]
+fn body_includes_reasoning_effort_xhigh() {
+    let body = req(Some("xhigh")).to_body();
+    assert_eq!(body["reasoning_effort"], serde_json::json!("xhigh"));
+}
+
+#[test]
+fn body_includes_reasoning_effort_max() {
+    let body = req(Some("max")).to_body();
+    assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
+}
+
+#[test]
+fn body_passes_all_effort_levels_verbatim() {
+    // Every supported level must round-trip verbatim — no normalization that
+    // could silently downgrade a max/xhigh reasoning request.
+    for level in ["low", "medium", "high", "xhigh", "max"] {
+        let body = req(Some(level)).to_body();
+        assert_eq!(body["reasoning_effort"], serde_json::json!(level), "{level}");
+    }
+}
+
+#[test]
 fn body_omits_reasoning_effort_when_empty() {
     let body = req(Some("   ")).to_body();
     assert!(

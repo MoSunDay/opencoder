@@ -60,7 +60,11 @@ pub struct TaskPicker {
 
 impl TaskPicker {
     pub fn new(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
-        Self::with_skills(sessions, current_session_id, opencoder_core::discover_skills())
+        Self::with_skills(
+            sessions,
+            current_session_id,
+            opencoder_core::discover_skills(),
+        )
     }
 
     /// Construct with an explicit skill slice so tests can inject a fake
@@ -308,8 +312,8 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         // Subagent-task status badges, derived from the persisted
         // `subagent_tasks` table: in-flight children (`Running`) and
         // interrupted ones pending replay on the next user turn (`Cancelled`).
-        let running_badge = (s.subagent_running > 0)
-            .then(|| format!("  \u{25cf} {} running", s.subagent_running));
+        let running_badge =
+            (s.subagent_running > 0).then(|| format!("  \u{25cf} {} running", s.subagent_running));
         let cancelled_badge = (s.subagent_cancelled > 0)
             .then(|| format!("  \u{2297} {} replay pending", s.subagent_cancelled));
         let agent_txt = format!("[{agent}] ");
@@ -354,7 +358,10 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
             Style::default().fg(theme::muted()),
         ));
         if let Some(badge) = running_badge {
-            spans.push(Span::styled(badge, Style::default().fg(theme::warn_color())));
+            spans.push(Span::styled(
+                badge,
+                Style::default().fg(theme::warn_color()),
+            ));
         }
         if let Some(badge) = cancelled_badge {
             spans.push(Span::styled(badge, Style::default().fg(theme::muted())));
@@ -372,7 +379,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     if let Some(clear_idx) = picker.clear_row_index() {
         let deletable = picker.deletable_count();
         let clear_style = if picker.selected == clear_idx {
-            Style::default().fg(theme::err_color()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::err_color())
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::err_color())
         };
@@ -389,7 +398,9 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
                 " \u{26a0} Clear ALL {} task(s)? Enter=confirm, Esc=cancel ",
                 picker.deletable_count()
             ),
-            Style::default().fg(theme::err_color()).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::err_color())
+                .add_modifier(Modifier::BOLD),
         ))
     } else if is_fork {
         Line::from(" Fork (\u{2191}/\u{2193} select, Enter=fork context, Esc=cancel) ")
@@ -595,10 +606,7 @@ mod tests {
 
     #[test]
     fn status_badges_render_running_and_replay_pending() {
-        let text = render_to_text(vec![
-            busy_item("s1", 2, 1),
-            busy_item("s2", 0, 0),
-        ]);
+        let text = render_to_text(vec![busy_item("s1", 2, 1), busy_item("s2", 0, 0)]);
         assert!(
             text.contains("\u{25cf} 2 running"),
             "running badge missing from picker:\n{text}"
@@ -709,8 +717,16 @@ mod tests {
     #[test]
     fn short_preview_respects_custom_budget() {
         let preview = "x".repeat(80);
-        assert_eq!(short_preview(&preview, 40).chars().count(), 40, "39 cols + ellipsis fits 40");
-        assert_eq!(short_preview(&preview, 8).chars().count(), 8, "7 cols + ellipsis fits 8");
+        assert_eq!(
+            short_preview(&preview, 40).chars().count(),
+            40,
+            "39 cols + ellipsis fits 40"
+        );
+        assert_eq!(
+            short_preview(&preview, 8).chars().count(),
+            8,
+            "7 cols + ellipsis fits 8"
+        );
         assert_eq!(short_preview("short", 40), "short", "fits unchanged");
     }
 
@@ -718,7 +734,10 @@ mod tests {
     fn fork_mode_has_no_new_or_clear_rows() {
         let p = TaskPicker::new_fork(vec![item("a"), item("b")], "cur".into());
         assert_eq!(p.row_count(), 2, "sessions only, no +New / Clear all");
-        assert!(p.clear_row_index().is_none(), "clear is unreachable in fork mode");
+        assert!(
+            p.clear_row_index().is_none(),
+            "clear is unreachable in fork mode"
+        );
         assert!(!p.confirm_clear);
     }
 
@@ -729,12 +748,18 @@ mod tests {
         p.move_down();
         assert!(matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "b"));
         p.move_down();
-        assert!(matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "a"), "wraps");
+        assert!(
+            matches!(p.selection(), Some(TaskPick::Fork(id)) if id == "a"),
+            "wraps"
+        );
     }
 
     #[test]
     fn fork_mode_enter_returns_pick_and_closes() {
-        let mut picker = Some(TaskPicker::new_fork(vec![item("a"), item("b")], "cur".into()));
+        let mut picker = Some(TaskPicker::new_fork(
+            vec![item("a"), item("b")],
+            "cur".into(),
+        ));
         let out = handle_task_key(&mut picker, key(KeyCode::Enter));
         assert!(matches!(out, TaskOutcome::Pick(TaskPick::Fork(id)) if id == "a"));
         assert!(picker.is_none(), "picker closes after fork pick");

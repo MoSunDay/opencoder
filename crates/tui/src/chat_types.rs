@@ -93,6 +93,9 @@ pub struct ChatView {
     pub blocks: Vec<ChatBlock>,
     pub agent: String,
     pub status: String,
+    /// Start of the currently-running provider/model round. Display-only:
+    /// this value never becomes a persisted model message or prompt content.
+    pub llm_round_started_at_ms: Option<i64>,
     /// Whether the user submitted a prompt while in plan mode since the last
     /// plan-mode entry. Reset to `false` on every `AgentSwitch` *to* plan.
     /// Drives the plan→act handoff decision: only hand off when the user

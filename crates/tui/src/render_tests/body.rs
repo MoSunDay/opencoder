@@ -361,10 +361,7 @@ fn empty_child_view_does_not_show_tutorial() {
     );
 }
 
-/// The body block's top border row carries the full top-title composition
-/// `workdir · [mode] · model · effort` (model/mode moved up from the status
-/// bar). The title is a styled multi-span Line; the text must appear on the
-/// title row in order.
+/// The body block's top border row carries the full top-title composition.
 #[test]
 fn body_title_row_shows_full_top_composition() {
     let v = ChatView::default(); // empty session -> tutorial path, title still rendered
@@ -383,10 +380,8 @@ fn body_title_row_shows_full_top_composition() {
                 &Line::from(vec![
                     Span::raw("/root/opencoder"),
                     Span::raw(" \u{00b7} "),
-                    Span::styled("[act]", Style::default().fg(Color::Cyan)),
-                    Span::raw(" \u{00b7} "),
                     Span::raw("glm-5.2"),
-                    Span::raw(" \u{00b7}high"),
+                    Span::raw(" \u{00b7} high"),
                 ]),
                 &mut scroll,
                 false,
@@ -409,7 +404,7 @@ fn body_title_row_shows_full_top_composition() {
 
     let row = row_text(terminal.backend().buffer(), 0, 100);
     assert!(
-        row.contains("/root/opencoder \u{00b7} [act] \u{00b7} glm-5.2 \u{00b7}high"),
-        "body title row must show workdir · [mode] · model · effort; got: {row}"
+        row.contains("/root/opencoder \u{00b7} glm-5.2 \u{00b7} high"),
+        "body title row must show workdir · model · effort; got: {row}"
     );
 }

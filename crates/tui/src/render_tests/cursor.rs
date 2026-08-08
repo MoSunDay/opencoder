@@ -1,5 +1,19 @@
 use super::*;
 
+fn place_cursor(
+    frame: &mut Frame,
+    area: Rect,
+    input: &str,
+    cursor_idx: usize,
+    inner_w: u16,
+    prompt_w: u16,
+    scroll: u16,
+) {
+    frame.set_cursor_position(crate::composer::cursor_screen_position(
+        area.x, area.y, input, cursor_idx, inner_w, prompt_w, scroll,
+    ));
+}
+
 /// Row 0 cursor: x = composer.x + border + prompt_w + col.
 #[test]
 fn place_cursor_row_zero() {

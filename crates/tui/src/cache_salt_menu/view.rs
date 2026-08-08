@@ -6,8 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::theme;
 use super::state::CacheSaltMenu;
+use crate::theme;
 
 /// Draw the salt panel as a centered modal: parent row first (highlighted with
 /// `*`), then every subagent of the current session with its lifecycle status.

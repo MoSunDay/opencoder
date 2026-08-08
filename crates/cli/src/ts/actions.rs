@@ -52,7 +52,7 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
         let globally_known = scan_required(&opencoder_core::data_root())
             .await?
             .iter()
-            .any(|stored| stored.item.id == *id && is_ts_seed(&stored.item));
+            .any(|stored| stored.item.id == *id && is_ts_owned(&stored.item));
         if globally_known {
             return ts_resume(cli, id).await;
         }
@@ -175,7 +175,7 @@ pub(crate) async fn ts_list(_cli: &Cli) -> Result<()> {
         let marker = match row.state {
             TmuxState::Attached => "*",
             TmuxState::Detached => "\u{00b7}",
-            TmuxState::Dead => " ",
+            TmuxState::Dead => "-",
         };
         println!(
             "{} {:<10} {:<9} {:<16} {}",
@@ -187,7 +187,7 @@ pub(crate) async fn ts_list(_cli: &Cli) -> Result<()> {
         );
     }
     println!();
-    println!("* attached  \u{00b7} live(detached)  (space) stopped");
+    println!("* attached  \u{00b7} live(detached)  - stopped");
     println!("{}", LIST_LEGEND);
     Ok(())
 }
@@ -269,22 +269,24 @@ fn build_rows(store_items: &[StoredSession], tmux: &[ManagedSession]) -> Vec<Glo
 
 /// Was this store session registered by the ts flow?
 ///
-/// Registration happens at `ts` seed time, which writes a row with *no*
-/// agent/model — a plain `tui`/`run` session always persists both at first
+/// Registration happens at `ts` seed time, which writes a row with `model`
+/// left NULL — a plain `tui`/`run` session always persists the model at first
 /// message. A registered row additionally counts only once it was actually
 /// started: the empty seed (no preview, no title) is not a session worth
 /// listing.
 fn is_registered(s: &SessionListItem) -> bool {
     let has_content = !s.preview.trim().is_empty()
         || s.title.as_deref().is_some_and(|t| !t.trim().is_empty());
-    is_ts_seed(s) && has_content
+    is_ts_owned(s) && has_content
 }
 
 /// A session row owned by the ts flow. The seed is inserted before the TUI
-/// starts and intentionally has no agent/model; plain tui/run rows persist
-/// both when they are created.
-fn is_ts_seed(s: &SessionListItem) -> bool {
-    s.agent.is_none() && s.model.is_none()
+/// starts with `model` left NULL; plain `tui`/`run` rows always persist the
+/// model at first message. The durable ts marker is therefore `model IS NULL`:
+/// mode switches (`/act`, `/plan`, `SwitchAgent`) patch only `agent`, so a
+/// used ts session keeps `model` NULL even after `persist_agent` set one.
+fn is_ts_owned(s: &SessionListItem) -> bool {
+    s.model.is_none()
 }
 
 /// Task head for a store session: preview (fallback title) truncated to 20
@@ -324,7 +326,7 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     // Dead: resolve its durable workdir from the global registry.
     let matches: Vec<&StoredSession> = records
         .iter()
-        .filter(|stored| stored.item.id == id && is_ts_seed(&stored.item))
+        .filter(|stored| stored.item.id == id && is_ts_owned(&stored.item))
         .collect();
     if matches.is_empty() {
         bail!(
@@ -400,7 +402,7 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
         .find(|managed| managed.id() == Some(id.as_str()));
     let stored: Vec<&StoredSession> = records
         .iter()
-        .filter(|record| record.item.id == id && is_ts_seed(&record.item))
+        .filter(|record| record.item.id == id && is_ts_owned(&record.item))
         .collect();
     if stored.len() > 1 {
         bail!("ambiguous global tmux session `{id}` exists in multiple stores");
@@ -463,7 +465,7 @@ fn resolve_managed_id(
     matches.extend(
         records
             .iter()
-            .filter(|stored| is_ts_seed(&stored.item))
+            .filter(|stored| is_ts_owned(&stored.item))
             .map(|stored| stored.item.id.as_str())
             .filter(|id| id.starts_with(query)),
     );
@@ -488,7 +490,7 @@ fn cleanup_targets(
     let mut targets = BTreeMap::<PathBuf, Vec<String>>::new();
     for stored in store_items {
         let session = &stored.item;
-        if is_ts_seed(session) && !live_ids.contains(session.id.as_str()) {
+        if is_ts_owned(session) && !live_ids.contains(session.id.as_str()) {
             targets
                 .entry(stored.store_dir.clone())
                 .or_default()
@@ -783,18 +785,26 @@ mod tests {
 
     #[test]
     fn build_rows_skips_never_started_seed_and_unregistered() {
-        // Only the seeded-and-used row survives; everything else is skipped.
+        // Seeded-and-used rows survive; never-started empty seeds and plain
+        // tui/run rows (model persisted) are skipped. A mode-switched ts
+        // session keeps `model` NULL (only `agent` is patched), so it MUST
+        // still count as ts-owned — the regression this guards.
         let store_items = vec![
             mk_stored("/a", Some("/work/a"), mk_item("S1", None, None, "started", Some("t"), 1)),
             mk_stored("/a", Some("/work/a"), mk_item("S2", None, None, "", None, 2)),
-            mk_stored("/b", Some("/work/b"), mk_item("S3", Some("act"), None, "no model", None, 3)),
-            mk_stored("/b", Some("/work/b"), mk_item("S4", None, Some("m"), "no agent", None, 4)),
+            // Used ts session after a mode switch: agent persisted, model still NULL.
+            mk_stored("/b", Some("/work/b"), mk_item("S3", Some("act"), None, "switched mode", Some("t"), 3)),
+            // Plain tui/run session: model persisted -> never listed.
+            mk_stored("/b", Some("/work/b"), mk_item("S4", None, Some("m"), "plain", None, 4)),
         ];
         let rows = build_rows(&store_items, &[]);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, "S1");
-        assert_eq!(rows[0].state, TmuxState::Dead);
-        assert_eq!(rows[0].path, "/work/a");
+        assert_eq!(rows.len(), 2);
+        let s1 = rows.iter().find(|r| r.id == "S1").expect("used seed listed");
+        assert_eq!(s1.state, TmuxState::Dead);
+        assert_eq!(s1.path, "/work/a");
+        let s3 = rows.iter().find(|r| r.id == "S3").expect("mode-switched ts row listed");
+        assert_eq!(s3.state, TmuxState::Dead);
+        assert_eq!(s3.path, "/work/b");
     }
 
     #[test]

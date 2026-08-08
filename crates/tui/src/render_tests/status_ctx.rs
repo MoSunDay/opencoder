@@ -28,7 +28,7 @@ fn status_bar_shows_ctx_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", 0, 5000, 80000, 200000, 0);
+            render_status(f, f.area(), "act", false, "", 0, 5000, 80000, 200000, 0);
         })
         .unwrap();
 
@@ -63,7 +63,7 @@ fn status_bar_ctx_red_at_high_usage() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), false, "", 0, 180000, 200000, 200000, 0);
+            render_status(f, f.area(), "act", false, "", 0, 180000, 200000, 200000, 0);
         })
         .unwrap();
 

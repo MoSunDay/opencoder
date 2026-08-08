@@ -26,11 +26,11 @@ pub(super) fn row_text(buf: &ratatui::buffer::Buffer, y: u16, width: u16) -> Str
 mod arrow_click;
 mod body;
 mod chips;
+mod compaction;
 mod composer;
 mod cursor;
 mod queue_panel;
 mod status_bar;
 mod status_ctx;
-mod compaction;
 mod thinking;
 mod timer;

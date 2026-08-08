@@ -14,9 +14,7 @@ fn image_empty(name: &str) -> ChatBlock {
 fn image_n(name: &str, n: usize) -> ChatBlock {
     ChatBlock::Image {
         filename: name.into(),
-        rendered: (0..n)
-            .map(|_| Line::from(Span::raw("#")))
-            .collect(),
+        rendered: (0..n).map(|_| Line::from(Span::raw("#"))).collect(),
     }
 }
 
@@ -33,9 +31,7 @@ fn assistant_streaming(raw: &str) -> ChatBlock {
 fn assistant_done(n: usize) -> ChatBlock {
     ChatBlock::Assistant {
         raw: String::new(),
-        rendered: (0..n)
-            .map(|_| Line::from(Span::raw("ok")))
-            .collect(),
+        rendered: (0..n).map(|_| Line::from(Span::raw("ok"))).collect(),
         done: true,
     }
 }
@@ -117,7 +113,12 @@ fn assert_line_accounting_matches(view: &ChatView) {
                 }
             }
             ChatBlock::Image { rendered, .. } => {
-                expected += 1 + if rendered.is_empty() { 1 } else { rendered.len() } + 1;
+                expected +=
+                    1 + if rendered.is_empty() {
+                        1
+                    } else {
+                        rendered.len()
+                    } + 1;
             }
             ChatBlock::Subagent { .. } => {
                 expected += 1;
@@ -145,17 +146,17 @@ impl WithheldPub for ChatView {
 }
 
 fn view_with(blocks: Vec<ChatBlock>) -> ChatView {
-    ChatView { blocks, ..Default::default() }
+    ChatView {
+        blocks,
+        ..Default::default()
+    }
 }
 
 #[test]
 fn image_empty_drifts_alignment_a2() {
     // Bug A2: an empty-rendered Image emits a "(unable to render)" placeholder
     // (3 lines total). A non-empty-following block must still align.
-    let v = view_with(vec![
-        image_empty("a.png"),
-        marker_n(2),
-    ]);
+    let v = view_with(vec![image_empty("a.png"), marker_n(2)]);
     assert_line_accounting_matches(&v);
 
     // The marker should start at line index 3 (header + placeholder + blank).
@@ -215,13 +216,13 @@ fn mixed_sequence_alignment() {
     // All six required cases composed, with a trailing tool header so we can
     // also verify header line indices point at the right rendered line.
     let v = view_with(vec![
-        image_empty("x.png"),            // 3 lines
-        image_n("y.png", 2),             // 4 lines
-        assistant_streaming("p\n"),      // 2 lines
-        assistant_streaming("q\nr"),     // 3 lines
-        assistant_done(2),               // 3 lines
-        marker_n(1),                     // 1 line
-        tool_collapsed(),                // 1 line
+        image_empty("x.png"),        // 3 lines
+        image_n("y.png", 2),         // 4 lines
+        assistant_streaming("p\n"),  // 2 lines
+        assistant_streaming("q\nr"), // 3 lines
+        assistant_done(2),           // 3 lines
+        marker_n(1),                 // 1 line
+        tool_collapsed(),            // 1 line
     ]);
     assert_line_accounting_matches(&v);
 

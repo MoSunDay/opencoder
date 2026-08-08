@@ -94,6 +94,19 @@ async fn seed_subagent(
     state.store.create_subagent_task(&rec).await.unwrap();
 }
 
+async fn seed_live_gate(state: &opencoder_web::AppState, parent_sid: &str, task_id: &str) {
+    let handle = opencoder_web::handle::SessionHandle::new();
+    handle.child_steer_gates.lock().unwrap().insert(
+        task_id.to_string(),
+        opencoder_session::SubagentSteerGate::new(),
+    );
+    state
+        .handles
+        .lock()
+        .await
+        .insert(parent_sid.to_string(), handle);
+}
+
 /// POST a steer request and return the response. Centralized so every test
 /// shares the exact same request shape.
 async fn post_steer(app: Router, parent_sid: &str, task_id: &str) -> axum::response::Response {
@@ -126,6 +139,7 @@ async fn steer_running_subagent_returns_ok() {
         SubagentStatus::Running,
     )
     .await;
+    seed_live_gate(&state, &parent_sid, &task_id).await;
 
     let resp = post_steer(app, &parent_sid, &task_id).await;
     assert_eq!(resp.status(), StatusCode::OK);
@@ -147,6 +161,31 @@ async fn steer_running_subagent_returns_ok() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].prompt, "redirect here");
     assert_eq!(pending[0].admitted_seq, seq);
+}
+
+#[tokio::test]
+async fn steer_running_row_without_live_gate_returns_409_and_does_not_admit() {
+    let (app, state) = app().await;
+    let parent_sid = Uuid::new_v4().to_string();
+    let child_sid = Uuid::new_v4().to_string();
+    let task_id = Uuid::new_v4().to_string();
+    seed_subagent(
+        &state,
+        &parent_sid,
+        &child_sid,
+        &task_id,
+        SubagentStatus::Running,
+    )
+    .await;
+
+    let resp = post_steer(app, &parent_sid, &task_id).await;
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    assert!(state
+        .store
+        .pending_inputs(&child_sid, Delivery::Steer)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]

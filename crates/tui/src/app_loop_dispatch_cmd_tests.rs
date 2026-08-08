@@ -9,6 +9,7 @@
 //!    control-command prompt (the original wipe/toggle behavior).
 
 use super::super::*;
+use crate::chat::ChatBlock;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
 use opencoder_store::LibsqlStore;
@@ -25,7 +26,7 @@ fn menu_for(query: &str) -> Option<CommandMenu> {
 fn menu_for_act() -> Option<CommandMenu> {
     let mut cm = CommandMenu::new();
     cm.paste("act"); // rows: [/compact, /act, /act_clear_context]
-    cm.move_down();  // select /act (2nd match)
+    cm.move_down(); // select /act (2nd match)
     Some(cm)
 }
 
@@ -222,7 +223,10 @@ async fn slash_clear_context_from_act_mode_dispatches_prompt() {
         UiCmd::Prompt(ref p, _) => assert_eq!(p, "/act_clear_context"),
         _other => panic!("expected Prompt(\"/act_clear_context\"), got unexpected variant"),
     }
-    assert!(mode_flash.is_none(), "mode_flash must NOT be set for plain wipe");
+    assert!(
+        mode_flash.is_none(),
+        "mode_flash must NOT be set for plain wipe"
+    );
 }
 
 /// `/act` from act mode must still dispatch Prompt("/act") (toggle, no-op).
@@ -280,7 +284,10 @@ async fn slash_act_from_act_mode_dispatches_prompt() {
         UiCmd::Prompt(ref p, _) => assert_eq!(p, "/act"),
         _other => panic!("expected Prompt(\"/act\"), got unexpected variant"),
     }
-    assert!(mode_flash.is_none(), "mode_flash must NOT be set for plain toggle");
+    assert!(
+        mode_flash.is_none(),
+        "mode_flash must NOT be set for plain toggle"
+    );
 }
 
 /// `/act` from plan mode WITHOUT a submitted plan must dispatch Prompt("/act")
@@ -388,7 +395,10 @@ async fn tab_fill_input_adds_trailing_space() {
     )
     .await;
 
-    assert!(input.starts_with('/'), "input must start with /, got {input:?}");
+    assert!(
+        input.starts_with('/'),
+        "input must start with /, got {input:?}"
+    );
     assert!(
         input.ends_with(' '),
         "input must end with a trailing space, got {input:?}"
@@ -455,4 +465,206 @@ async fn tab_fill_local_command_adds_trailing_space() {
     assert_eq!(cursor_idx, input.len());
     assert!(command_menu.is_none());
     assert!(matches!(flow, LoopFlow::Redraw));
+}
+
+// ----- running-gate tests (/act /plan /act_clear_context while running) -----
+
+/// `/plan` while a turn is running must NOT start a new turn: a marker is
+/// pushed, `running` stays true, and no UiCmd (in particular no Prompt) leaks
+/// to the worker. Mirrors `/compact`'s SkipRunning feedback.
+#[tokio::test]
+async fn slash_plan_while_running_is_noop() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = true;
+    let mut follow = true;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for("plan");
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        enter_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        &mut None,
+        "act",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "running must stay true (turn still active)");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while running"
+    );
+    // The busy marker must be pushed into the transcript.
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+            if lines.iter().any(|l| l.to_string().contains("busy")))),
+        "a [switch] busy marker must be pushed; blocks: {:?}",
+        chat.blocks
+    );
+}
+
+/// `/act` while a turn is running is a no-op — even from plan mode with a
+/// submitted plan, which would otherwise route through SwitchAndStart and
+/// start a NEW turn mid-flight.
+#[tokio::test]
+async fn slash_act_while_running_is_noop() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "plan".into(),
+        plan_submitted: true,
+        ..Default::default()
+    };
+    let mut running = true;
+    let mut follow = true;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = "do it".to_string();
+    let mut cursor_idx = 5usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for_act();
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        enter_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        &mut None,
+        "plan",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "running must stay true (turn still active)");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while running"
+    );
+    assert_eq!(input, "do it", "input must be untouched on the noop");
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+            if lines.iter().any(|l| l.to_string().contains("busy")))),
+        "a [switch] busy marker must be pushed; blocks: {:?}",
+        chat.blocks
+    );
+}
+
+/// `/act_clear_context` while a turn is running is a no-op (same gate).
+#[tokio::test]
+async fn slash_clear_context_while_running_is_noop() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "plan".into(),
+        plan_submitted: true,
+        ..Default::default()
+    };
+    let mut running = true;
+    let mut follow = true;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for("act_clear");
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        enter_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        &mut None,
+        "plan",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "running must stay true (turn still active)");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while running"
+    );
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+            if lines.iter().any(|l| l.to_string().contains("busy")))),
+        "a [switch] busy marker must be pushed; blocks: {:?}",
+        chat.blocks
+    );
 }

@@ -475,10 +475,10 @@ async fn compaction_header_click_toggles_collapse() {
     chat.apply(&SessionEvent::Compaction("hidden summary".into()));
     // Collapsed by default.
     assert!(
-        !chat.flatten().iter().any(|l| l
-            .spans
+        !chat
+            .flatten()
             .iter()
-            .any(|s| s.content.contains("hidden summary"))),
+            .any(|l| l.spans.iter().any(|s| s.content.contains("hidden summary"))),
         "precondition: compaction must start collapsed"
     );
 
@@ -539,10 +539,9 @@ async fn compaction_header_click_toggles_collapse() {
     .await;
     assert_eq!(outcome, MouseOutcome::None);
     assert!(
-        chat.flatten().iter().any(|l| l
-            .spans
+        chat.flatten()
             .iter()
-            .any(|s| s.content.contains("hidden summary"))),
+            .any(|l| l.spans.iter().any(|s| s.content.contains("hidden summary"))),
         "compaction must be expanded after the header click"
     );
 }

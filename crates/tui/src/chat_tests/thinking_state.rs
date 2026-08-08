@@ -121,34 +121,42 @@ fn collapse_all_collapsible_noop_without_collapsible_blocks() {
 }
 
 #[test]
-fn last_thinking_collapsed_empty_view() {
+fn last_open_thinking_collapsed_empty_view() {
     let view = ChatView::default();
-    assert!(!view.last_thinking_collapsed());
+    assert!(!view.last_open_thinking_collapsed());
 }
 
 #[test]
-fn last_thinking_collapsed_true_when_collapsed() {
+fn last_open_thinking_collapsed_true_when_collapsed() {
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
-    assert!(view.last_thinking_collapsed());
+    assert!(view.last_open_thinking_collapsed());
 }
 
 #[test]
-fn last_thinking_collapsed_false_when_expanded() {
+fn last_open_thinking_collapsed_false_when_expanded() {
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
     // Toggle expands the (only) thinking block at index 0.
     view.toggle_thinking_at(0);
-    assert!(!view.last_thinking_collapsed());
+    assert!(!view.last_open_thinking_collapsed());
 }
 
 #[test]
-fn last_thinking_collapsed_false_when_last_block_not_thinking() {
+fn last_open_thinking_collapsed_false_when_last_block_not_thinking() {
     let mut view = ChatView::default();
     view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
     // A TextDelta seals the thinking block and opens an assistant block.
     view.apply(&SessionEvent::TextDelta("answer".into()));
-    assert!(!view.last_thinking_collapsed());
+    assert!(!view.last_open_thinking_collapsed());
+}
+
+#[test]
+fn last_open_thinking_collapsed_false_when_sealed() {
+    let mut view = ChatView::default();
+    view.apply(&SessionEvent::ReasoningDelta("thinking...".into()));
+    view.apply(&SessionEvent::Done);
+    assert!(!view.last_open_thinking_collapsed());
 }
 
 /// Collapsed Thinking header shows the icon + label and the `(N lines)` count;
@@ -164,7 +172,10 @@ fn thinking_header_shows_line_count_when_collapsed() {
     let flat = v.flatten();
     let header: String = flat[0].spans.iter().map(|s| &*s.content).collect();
     assert!(header.contains("Thinking"), "collapsed header has label");
-    assert!(header.contains("4 lines"), "collapsed header shows line count");
+    assert!(
+        header.contains("4 lines"),
+        "collapsed header shows line count"
+    );
     // Content is hidden while collapsed.
     assert!(!header.contains("l1"));
 

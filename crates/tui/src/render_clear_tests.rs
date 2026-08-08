@@ -1,9 +1,6 @@
-//! Tests for the per-frame `Clear` added to `render` — see the comment at the
-//! top of `render`'s `terminal.draw` closure. Without that full-area clear,
-//! ratatui's double-buffering reuses a buffer that still holds the previous
-//! frame's glyphs; on the third draw (when that buffer becomes current again)
-//! the stale content is diffed back onto the screen as "remnants around the
-//! edges".
+//! Regression tests for stale terminal cells across redraw and process
+//! boundaries. Ratatui must blank cells vacated by a shorter frame; application
+//! startup additionally clears the real terminal grid left by an older run.
 
 use super::*;
 use crate::chat::ChatView;
@@ -81,14 +78,11 @@ fn draw_frame(
     .unwrap();
 }
 
-/// Regression: `render` blanks the whole frame with `Clear` before painting
-/// the widgets. Frame 1 paints a distinctive marker into the body; frames 2
-/// and 3 paint an empty body. On frame 3 the buffer holding frame 1's glyphs
-/// becomes current again, so without the per-frame `Clear` the marker would
-/// re-emerge via the diff. The self-check on frame 1 ensures the marker was
-/// actually painted (otherwise the regression assertion would be vacuous).
+/// Frame 1 paints a distinctive marker; frames 2 and 3 paint an empty body.
+/// This pins ratatui's two-buffer lifecycle: vacated cells remain blank when
+/// either buffer becomes current again. The self-check prevents a vacuous pass.
 #[test]
-fn per_frame_clear_wipes_stale_glyphs_across_frames() {
+fn shorter_frames_keep_vacated_cells_blank_across_buffer_swaps() {
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
     let mut scroll = 0u32;
     let mut queue_scroll: u32 = 0;
@@ -114,9 +108,7 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
          assertion below is vacuous)"
     );
 
-    // Frames 2 and 3: empty body. On frame 3 the buffer holding frame 1's
-    // glyphs becomes current again; only the per-frame Clear prevents them
-    // from re-emerging via the diff.
+    // Frames 2 and 3 exercise both sides of ratatui's diff buffer.
     let chat_b = ChatView::default();
     draw_frame(
         &mut terminal,
@@ -140,8 +132,60 @@ fn per_frame_clear_wipes_stale_glyphs_across_frames() {
     let text = buffer_text(terminal.backend().buffer());
     assert!(
         !text.contains("markerword"),
-        "per-frame Clear must wipe stale glyphs; found leftover: {text:?}"
+        "vacated cells must stay blank; found leftover: {text:?}"
     );
+}
+
+/// Thinking content frequently changes length while streaming. A shorter new
+/// snapshot must blank every cell occupied by the previous expanded block,
+/// including when ratatui rotates back to the older side of its double buffer.
+#[test]
+fn shorter_thinking_frame_never_reveals_old_lines() {
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    let mut scroll = 0u32;
+    let mut queue_scroll = 0u32;
+    let mut hits = MouseHits::default();
+    let mut viewport = None;
+
+    let mut old = ChatView::default();
+    old.apply(&SessionEvent::ReasoningDelta(
+        "old-overlap-marker\nold-tail".into(),
+    ));
+    old.toggle_thinking_at(0);
+    draw_frame(
+        &mut terminal,
+        &old,
+        &mut scroll,
+        &mut queue_scroll,
+        None,
+        &mut hits,
+        &mut viewport,
+    );
+    assert!(buffer_text(terminal.backend().buffer()).contains("old-overlap-marker"));
+
+    let mut new = ChatView::default();
+    new.apply(&SessionEvent::ReasoningDelta("new".into()));
+    new.toggle_thinking_at(0);
+    for _ in 0..2 {
+        draw_frame(
+            &mut terminal,
+            &new,
+            &mut scroll,
+            &mut queue_scroll,
+            None,
+            &mut hits,
+            &mut viewport,
+        );
+        let text = buffer_text(terminal.backend().buffer());
+        assert!(
+            text.contains("new"),
+            "new Thinking content missing: {text:?}"
+        );
+        assert!(
+            !text.contains("old-overlap-marker") && !text.contains("old-tail"),
+            "old Thinking content leaked into the new frame: {text:?}"
+        );
+    }
 }
 
 /// Regression: the startup `Terminal::clear()` added to `app_bootstrap` (after

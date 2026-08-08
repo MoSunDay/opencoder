@@ -274,6 +274,7 @@ async fn fork_does_not_mutate_parent() {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();

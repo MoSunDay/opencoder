@@ -5,6 +5,7 @@
 
 use super::mouse_helpers::*;
 use crate::app_helpers::*;
+use crossterm::event::KeyModifiers;
 use ratatui::layout::Rect;
 
 fn wheel_event(kind: MouseEventKind, row: u16) -> MouseEvent {
@@ -28,21 +29,16 @@ async fn wheel_up_in_queue_panel_scrolls_panel_only() {
     let mut scroll = 10u32;
     let mut follow = false;
     let mut queue_scroll = 2u32;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
 
     handle_mouse(
         wheel_event(MouseEventKind::ScrollUp, 1),
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -50,9 +46,6 @@ async fn wheel_up_in_queue_panel_scrolls_panel_only() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -77,21 +70,16 @@ async fn wheel_down_advances_toward_newest() {
     let mut scroll = 10u32;
     let mut follow = true;
     let mut queue_scroll = 1u32;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
 
     handle_mouse(
         wheel_event(MouseEventKind::ScrollDown, 1),
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -99,9 +87,6 @@ async fn wheel_down_advances_toward_newest() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -113,7 +98,6 @@ async fn wheel_down_advances_toward_newest() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -121,9 +105,6 @@ async fn wheel_down_advances_toward_newest() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -143,14 +124,10 @@ async fn wheel_outside_queue_panel_scrolls_body() {
     let mut scroll = 10u32;
     let mut follow = false;
     let mut queue_scroll = 1u32;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
 
     // row 6 is inside the body rect (rows 4..16), below the panel (rows 0..3).
     handle_mouse(
@@ -158,7 +135,6 @@ async fn wheel_outside_queue_panel_scrolls_body() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -166,9 +142,6 @@ async fn wheel_outside_queue_panel_scrolls_body() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -189,21 +162,16 @@ async fn wheel_with_no_queue_panel_keeps_body_behavior() {
     let mut scroll = 10u32;
     let mut follow = false;
     let mut queue_scroll = 0u32;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
 
     handle_mouse(
         wheel_event(MouseEventKind::ScrollUp, 6),
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -211,9 +179,6 @@ async fn wheel_with_no_queue_panel_keeps_body_behavior() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;

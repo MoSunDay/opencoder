@@ -190,6 +190,9 @@ pub struct SessionState {
     /// or after a plan→act handoff. When > 0, subsequent plan prompts get a
     /// read-only reminder appended so the model stays focused on planning.
     pub plan_input_count: usize,
+    /// User-edited task description text, persisted via the /requirement
+    /// slash command so it survives session resume.
+    pub requirement: Option<String>,
 }
 
 impl SessionState {
@@ -228,6 +231,7 @@ impl SessionState {
             handoff_seq: None,
             handoff_plan: None,
             plan_input_count: 0,
+            requirement: None,
         }
     }
 
@@ -351,6 +355,7 @@ impl SessionState {
                 handoff_plan: self.handoff_plan.clone(),
                 skill: self.skill_prompt_cloned(),
                 task_type: None,
+                requirement: None,
             };
             store.create_session(&meta).await?;
             self.session_created = true;

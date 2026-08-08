@@ -4,8 +4,8 @@ use libsql::{params, params_from_iter, Connection, Value};
 use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
@@ -25,6 +25,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
             meta.handoff_plan.as_deref(),
             meta.skill.as_deref(),
             meta.task_type.as_deref().unwrap_or("parent"),
+            meta.requirement.as_deref(),
         ],
     )
     .await
@@ -34,7 +35,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type FROM sessions WHERE id = ?")
+        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -169,6 +170,10 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         sets.push("updated_at = ?");
         args.push(v.into());
     }
+    if let Some(v) = &patch.requirement {
+        sets.push("requirement = ?");
+        args.push(v.clone().into());
+    }
     if sets.is_empty() {
         return Ok(());
     }
@@ -214,6 +219,7 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
         handoff_plan: r.get::<Option<String>>(11)?,
         skill: r.get::<Option<String>>(12)?,
         task_type: r.get::<Option<String>>(13)?,
+        requirement: r.get::<Option<String>>(14)?,
     })
 }
 

@@ -85,6 +85,7 @@ pub(super) async fn run_app(
     let mut child_runtime = crate::worker::ChildRuntimeHandles::from_session(&session);
     let mut skill_handle = session.skill_prompt.clone();
     let mut chat = initial_chat_view(&session, &store).await;
+    chat.requirement_text = session.requirement.clone();
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
     let mut img_asm = crate::image_chunk::Assembly::new();
@@ -127,18 +128,7 @@ pub(super) async fn run_app(
     let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
-    // Active mouse text-selection in the body (absolute content-row range), or
-    // None. Kept in absolute rows so it tracks the text while the viewport
-    // scrolls. Cleared on copy (mouse-up) and on subagent ctx-switch.
-    let mut selection: Option<crate::selection::SelRange> = None;
-    // Transient copy-feedback (~2s) after a mouse-drag copy. Uses `Instant`
-    // (not `anim_tick`, which only advances while running) so idle copies expire.
-    let mut copy_status: Option<(String, Instant)> = None;
-    // Double-click detection: timestamp of the last left-click and whether the
-    // current selection originated from a double-click (forces copy even for a
-    // single-line / lo==hi selection).
-    let mut last_click: Option<Instant> = None;
-    let (mut dbl_click, mut shift_held) = (false, false);
+    let mut shift_held = false;
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -249,8 +239,7 @@ pub(super) async fn run_app(
                     keymap_menu.as_ref(),
                     &mut hits,
                     &mut viewport,
-                    selection,
-                    &copy_status,
+                    shift_held,
                     &pending_images,
                     input_disabled,
                     tail_ms,
@@ -281,8 +270,10 @@ pub(super) async fn run_app(
                 dirty = true;
                 match ev {
                     Event::Key(k) => {
-                        if consume_modifier_or_release(&k, &mut shift_held) { continue; }
-                        copy_status = None;
+                        if consume_modifier_or_release(&k, &mut shift_held) {
+                            dirty = true;
+                            continue;
+                        }
                         // Plan edit modal: intercept all keys while active.
                         if plan_edit.is_some() {
                             match app_loop::dispatch_plan_edit_key(
@@ -370,6 +361,7 @@ pub(super) async fn run_app(
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
                                 &mut mode_flash, anim_tick, &mut sys_tokens,
+                                &mut plan_edit,
                             )
                             .await
                             {
@@ -391,7 +383,6 @@ pub(super) async fn run_app(
                             &keymap,
                             &mut subagent_focus,
                             &mut follow,
-                            &mut selection,
                             &mut last_esc,
                             &mut chat,
                             &mut input,
@@ -446,7 +437,14 @@ pub(super) async fn run_app(
                                 // to re-arm. Shift+Tab after the plan turn then keeps the plan
                                 // and starts the task instead of plain-swapping.
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
+                                // Intercept /requirement: open the editor instead of submitting
+                                if clean == "/requirement" {
+                                    crate::plan_edit::enter_requirement(
+                                        &mut plan_edit,
+                                        chat.last_requirement_text().unwrap_or_default(),
+                                    );
+                                    mode_flash = Some(("\u{2192} requirement".into(), anim_tick));
+                                } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {
@@ -700,18 +698,13 @@ pub(super) async fn run_app(
                         }
                     }
                     Event::Mouse(m) => {
-                        let mut copy_msg: Option<String> = None;
                         let outcome = handle_mouse(
-                            m, &hits, &mut scroll, &mut follow, &mut selection, &mut chat,
+                            m, &hits, &mut scroll, &mut follow, &mut chat,
                             &mut subagent_focus,
                             &mut subagent_sys, &workdir, &mut queue_items, &session_id,
-                            store.as_ref(), &mut copy_msg, &mut last_click, &mut dbl_click,
-                            &mut queue_scroll,
+                            store.as_ref(), &mut queue_scroll,
                         )
                         .await;
-                        if let Some(msg) = copy_msg {
-                            copy_status = Some((msg, Instant::now()));
-                        }
                         if outcome == MouseOutcome::SteerSubmit {
                             let outcome = steer_fire::handle_steer_submit(
                                 subagent_focus, running, &child_runtime.cancels,

@@ -32,6 +32,7 @@ fn meta(id: &str) -> SessionMeta {
         handoff_plan: Some("do-the-thing".into()),
         skill: None,
         task_type: None,
+        requirement: None,
     }
 }
 
@@ -112,6 +113,7 @@ async fn create_persists_summary_images() {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();

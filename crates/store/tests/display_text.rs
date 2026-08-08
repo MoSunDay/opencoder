@@ -35,6 +35,7 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         handoff_plan: None,
         skill: None,
         task_type: None,
+        requirement: None,
     };
     store.create_session(&meta).await.unwrap();
 }
@@ -211,7 +212,7 @@ async fn v5_to_v6_migration_adds_display_text() {
     assert_eq!(pending[1].display_text.as_deref(), Some("new $skill display"));
     assert_eq!(pending[0].display_text, None, "old row keeps NULL via pending_inputs");
 
-    // Version bumped to the latest (SCHEMA_VERSION=7 after the
+    // Version bumped to the latest (SCHEMA_VERSION=8 after the
     // summary_images_json migration), and a second reopen is idempotent.
     drop(store);
     let store2 = LibsqlStore::open(&db_path).await.unwrap();
@@ -224,7 +225,7 @@ async fn v5_to_v6_migration_adds_display_text() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 7, "schema version must be 7 (latest) after v5 migration");
+        assert_eq!(v, 8, "schema version must be 8 (latest) after v5 migration");
     }
     let again = store2.pending_inputs("s1", Delivery::Queue).await.unwrap();
     assert_eq!(again.len(), 2, "re-open keeps data intact");

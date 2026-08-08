@@ -57,7 +57,6 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
 
     let mut subagent_focus = Some(sub_idx);
     let mut follow = false;
-    let mut selection = None;
     let mut last_esc = None;
     let mut input = "hello".to_string();
     let mut cursor = 5usize;
@@ -67,7 +66,6 @@ fn ctrl_l_exits_subagent_and_returns_to_follow_mode() {
         &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
-        &mut selection,
         &mut last_esc,
         &mut chat,
         &mut input,
@@ -113,7 +111,6 @@ fn esc_exits_subagent_and_returns_to_follow_mode() {
 
     let mut subagent_focus = Some(sub_idx);
     let mut follow = false;
-    let mut selection = None;
     let mut last_esc = None;
     let mut input = "draft".to_string();
     let mut cursor = 2usize;
@@ -123,7 +120,6 @@ fn esc_exits_subagent_and_returns_to_follow_mode() {
         &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
-        &mut selection,
         &mut last_esc,
         &mut chat,
         &mut input,
@@ -155,7 +151,6 @@ fn ctrl_l_without_subagent_returns_to_follow_mode() {
 
     let mut subagent_focus = None;
     let mut follow = false;
-    let mut selection = None;
     let mut last_esc = None;
     let mut input = "draft".to_string();
     let mut cursor = 3usize;
@@ -165,7 +160,6 @@ fn ctrl_l_without_subagent_returns_to_follow_mode() {
         &KeyBindings::default(),
         &mut subagent_focus,
         &mut follow,
-        &mut selection,
         &mut last_esc,
         &mut chat,
         &mut input,

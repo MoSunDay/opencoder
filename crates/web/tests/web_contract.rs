@@ -94,6 +94,7 @@ async fn seed(
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();

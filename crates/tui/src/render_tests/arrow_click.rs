@@ -63,10 +63,10 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             &mut hits,
             &mut None,
-            None,
-            None,
+            false,
             &[],
             false,
+            None,
             None,
             0,
             0,
@@ -80,13 +80,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             .expect("render must export jump-bottom arrow when not following");
 
         let mut follow = false;
-        let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
-        let mut copy_msg: Option<String> = None;
-        let mut last_click: Option<std::time::Instant> = None;
-        let mut dbl_click = false;
         let mut queue_scroll: u32 = 0;
         let outcome = handle_mouse(
             MouseEvent {
@@ -98,7 +94,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &hits,
             &mut scroll,
             &mut follow,
-            &mut sel,
             &mut chat,
             &mut subagent_focus,
             &mut subagent_sys,
@@ -106,9 +101,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut queue_items,
             "s1",
             store.as_ref(),
-            &mut copy_msg,
-            &mut last_click,
-            &mut dbl_click,
             &mut queue_scroll,
         )
         .await;
@@ -151,10 +143,10 @@ async fn render_then_click_arrow_targets_jump_view() {
             None,
             &mut hits,
             &mut None,
-            None,
-            None,
+            false,
             &[],
             false,
+            None,
             None,
             0,
             0,
@@ -169,13 +161,9 @@ async fn render_then_click_arrow_targets_jump_view() {
             .expect("render must export jump-top arrow when scrolled");
 
         let mut follow = true;
-        let mut sel: Option<(u32, u32)> = None;
         let mut subagent_focus: Option<usize> = None;
         let mut subagent_sys = 0u64;
         let mut queue_items: Vec<(i64, String)> = Vec::new();
-        let mut copy_msg: Option<String> = None;
-        let mut last_click: Option<std::time::Instant> = None;
-        let mut dbl_click = false;
         let mut queue_scroll: u32 = 0;
         let outcome = handle_mouse(
             MouseEvent {
@@ -187,7 +175,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &hits,
             &mut scroll,
             &mut follow,
-            &mut sel,
             &mut chat,
             &mut subagent_focus,
             &mut subagent_sys,
@@ -195,9 +182,6 @@ async fn render_then_click_arrow_targets_jump_view() {
             &mut queue_items,
             "s1",
             store.as_ref(),
-            &mut copy_msg,
-            &mut last_click,
-            &mut dbl_click,
             &mut queue_scroll,
         )
         .await;

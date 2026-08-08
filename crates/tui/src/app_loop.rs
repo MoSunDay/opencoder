@@ -295,10 +295,14 @@ pub(crate) async fn fold_ui_events(
                     let agent = chat.agent.clone();
                     let saved_plan_submitted = chat.plan_submitted;
                     let saved_pending_plan_arm = chat.pending_plan_arm;
+                    let saved_requirement_text = chat.requirement_text.clone();
+                    let saved_first_prompt = chat.first_prompt.clone();
                     *chat =
                         crate::session_ui::replay_into_chat(&agent, msgs, store, session_id).await;
                     chat.plan_submitted = saved_plan_submitted;
                     chat.pending_plan_arm = saved_pending_plan_arm;
+                    chat.requirement_text = saved_requirement_text;
+                    chat.first_prompt = saved_first_prompt;
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();
@@ -475,6 +479,7 @@ pub(crate) async fn dispatch_command(
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
     sys_tokens: &mut u64,
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -624,6 +629,13 @@ pub(crate) async fn dispatch_command(
         // autopilot. Never start a turn and never reach session.messages —
         // the result is pushed as a purple marker. Work in any state
         // (idle + mid-turn).
+        CommandOutcome::Dispatch(SlashAction::Requirement) => {
+            crate::plan_edit::enter_requirement(
+                plan_edit,
+                chat.last_requirement_text().unwrap_or_default(),
+            );
+            *mode_flash = Some(("\u{2192} requirement".into(), anim_tick));
+        }
         CommandOutcome::Dispatch(SlashAction::Ps) => {
             local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
         }
@@ -670,13 +682,8 @@ pub(crate) async fn handle_quit(
     let _ = cmd_tx.send(UiCmd::Quit).await;
 }
 
-/// Handle a key while in plan-edit mode. Takes ownership of the `Option<PlanEdit>`
-/// via `take()` so there are no borrow conflicts. On `Exit`:
-/// - If the text was modified, update the `ChatView` and send `UiCmd::EditPlan`.
-/// - The `Option` stays `None` (plan editing ended).
-///
-/// On `Continue`: the `PlanEdit` is put back.
-/// Returns [`LoopFlow::Redraw`] so the caller re-renders.
+/// Handle a key in plan/requirement-edit mode. On Exit, persists iff modified.
+/// On Continue, the editor is put back. Returns Redraw.
 pub(crate) async fn handle_plan_edit_key(
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     k: crossterm::event::KeyEvent,
@@ -694,8 +701,14 @@ pub(crate) async fn handle_plan_edit_key(
     ) {
         if pe.is_modified() {
             let text = pe.text().to_string();
-            chat.update_plan_text(&text);
-            let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await;
+            match pe.kind() {
+                crate::plan_edit::EditKind::Plan => {
+                    chat.update_plan_text(&text);
+                    let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await; }
+                crate::plan_edit::EditKind::Requirement => {
+                    chat.update_requirement_text(&text);
+                    let _ = cmd_tx.send(crate::worker::UiCmd::EditRequirement(text)).await; }
+            }
         }
         // plan_edit stays None — editing ended
     } else {

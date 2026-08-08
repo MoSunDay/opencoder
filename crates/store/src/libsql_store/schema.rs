@@ -1,14 +1,15 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 const PRAGMAS: &[&str] = &[
+    "PRAGMA busy_timeout=30000",
     "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
-    "PRAGMA busy_timeout=5000",
     "PRAGMA foreign_keys=ON",
     "PRAGMA cache_size=-65536",
+    "PRAGMA wal_autocheckpoint=1000",
 ];
 
 const CREATE_SCHEMA_VERSION: &str =
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   handoff_seq  INTEGER,
   handoff_plan TEXT,
   skill        TEXT,
-  task_type    TEXT NOT NULL DEFAULT 'parent'
+  task_type    TEXT NOT NULL DEFAULT 'parent',
+  requirement  TEXT
 )";
 const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (
@@ -111,6 +113,19 @@ pub async fn apply_connection_pragmas(conn: &Connection) -> Result<()> {
         while rows.next().await?.is_some() {
             // drain
         }
+    }
+    Ok(())
+}
+
+/// Best-effort WAL checkpoint. Passively merges the WAL file back into the
+/// main database so it doesn't grow unbounded. Safe to call after schema
+/// bootstrap on open. Errors are non-fatal (WAL will auto-checkpoint via
+/// `wal_autocheckpoint` when it reaches the configured page threshold).
+pub async fn checkpoint_wal(conn: &Connection) -> Result<()> {
+    let stmt = conn.prepare("PRAGMA wal_checkpoint(PASSIVE)").await?;
+    let mut rows = stmt.query(()).await?;
+    while rows.next().await?.is_some() {
+        // drain checkpoint result rows
     }
     Ok(())
 }
@@ -230,6 +245,11 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // summary message without reloading the soft-deleted
         // compacted head. Nullable so existing rows stay valid.
         add_column_if_absent(conn, "sessions", "summary_images_json", "TEXT").await?;
+    }
+    if from < 8 {
+        // v8: requirement column on sessions, persisting the task description
+        // text edited via the /requirement slash command so it survives resume.
+        add_column_if_absent(conn, "sessions", "requirement", "TEXT").await?;
     }
     Ok(())
 }

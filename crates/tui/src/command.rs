@@ -34,6 +34,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("/act", "切换到 act 模式（不重置上下文）"),
     ("/plan", "切换到 plan 模式（不重置上下文）"),
+    ("/requirement", "记录/编辑任务需求 (requirement editor)"),
     (
         "/act_clear_context",
         "清空对话上下文并切换到 act 模式（重新开始）",
@@ -55,6 +56,7 @@ pub enum SlashAction {
     CacheSalt,
     Act,
     Plan,
+    Requirement,
     ClearContext,
     /// Display-only: list background bash (never enters model context).
     Ps,
@@ -180,6 +182,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
         "plan" => Some(SlashAction::Plan),
+        "requirement" | "req" => Some(SlashAction::Requirement),
         "act_clear_context" => Some(SlashAction::ClearContext),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
@@ -198,6 +201,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
         "/plan" => Some(SlashAction::Plan),
+        "/requirement" => Some(SlashAction::Requirement),
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
@@ -682,6 +686,21 @@ mod tests {
         assert_eq!(parse("/sk"), None);
         assert_eq!(parse("short_key"), None);
         assert_eq!(dispatch("/short_key"), None);
+    }
+
+    #[test]
+    fn parse_requirement_full() {
+        assert_eq!(parse("/requirement"), Some(SlashAction::Requirement));
+    }
+
+    #[test]
+    fn parse_requirement_alias() {
+        assert_eq!(parse("/req"), Some(SlashAction::Requirement));
+    }
+
+    #[test]
+    fn dispatch_requirement() {
+        assert_eq!(dispatch("/requirement"), Some(SlashAction::Requirement));
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

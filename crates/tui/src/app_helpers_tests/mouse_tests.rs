@@ -1,121 +1,9 @@
 use super::mouse_helpers::{empty_hits, StubStore};
 use crate::app_helpers::*;
 use crate::render::SubagentBtn;
+use crossterm::event::KeyModifiers;
 use opencoder_session::SessionEvent;
 use ratatui::layout::Rect;
-
-#[tokio::test]
-async fn dbl_click_selects_line_and_copies_on_release() {
-    // Build a chat view with 5 marker lines (abs rows 0-4).
-    let mut chat = ChatView::default();
-    for &l in &[
-        "line one",
-        "line two",
-        "line three",
-        "line four",
-        "line five",
-    ] {
-        chat.push_marker(Line::from(l.to_string()));
-    }
-
-    // Body rect: inner_y=1, inner_h=10, so screen row 5 maps to abs row 4.
-    let body = Rect::new(0, 0, 80, 12);
-    let hits = empty_hits(body);
-
-    let mut scroll = 0u32;
-    let mut follow = true;
-    let mut selection: Option<SelRange> = None;
-    let mut subagent_focus: Option<usize> = None;
-    let mut subagent_sys = 0u64;
-    let mut queue_items: Vec<(i64, String)> = vec![];
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
-    let mut queue_scroll: u32 = 0;
-    let store = StubStore;
-
-    let mk_down = |row| MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: 10,
-        row,
-        modifiers: KeyModifiers::NONE,
-    };
-
-    // First click — should NOT set dbl_click.
-    handle_mouse(
-        mk_down(5),
-        &hits,
-        &mut scroll,
-        &mut follow,
-        &mut selection,
-        &mut chat,
-        &mut subagent_focus,
-        &mut subagent_sys,
-        Path::new("."),
-        &mut queue_items,
-        "s",
-        &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
-        &mut queue_scroll,
-    )
-    .await;
-    assert!(!dbl_click, "first click should not be a double-click");
-
-    // Second click immediately — should set dbl_click and selection.
-    handle_mouse(
-        mk_down(5),
-        &hits,
-        &mut scroll,
-        &mut follow,
-        &mut selection,
-        &mut chat,
-        &mut subagent_focus,
-        &mut subagent_sys,
-        Path::new("."),
-        &mut queue_items,
-        "s",
-        &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
-        &mut queue_scroll,
-    )
-    .await;
-    assert!(dbl_click, "second click should be detected as double-click");
-    assert!(selection.is_some(), "selection should be set on dbl-click");
-
-    // Mouse up — should copy (force=true via dbl_click).
-    let up = MouseEvent {
-        kind: MouseEventKind::Up(MouseButton::Left),
-        column: 10,
-        row: 5,
-        modifiers: KeyModifiers::NONE,
-    };
-    handle_mouse(
-        up,
-        &hits,
-        &mut scroll,
-        &mut follow,
-        &mut selection,
-        &mut chat,
-        &mut subagent_focus,
-        &mut subagent_sys,
-        Path::new("."),
-        &mut queue_items,
-        "s",
-        &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
-        &mut queue_scroll,
-    )
-    .await;
-    assert!(copy_msg.is_some(), "double-click should copy on release");
-    assert!(selection.is_none(), "selection cleared after release");
-    assert!(!dbl_click, "dbl_click reset after release");
-}
 
 #[tokio::test]
 async fn submit_btn_returns_steer_submit() {
@@ -132,15 +20,11 @@ async fn submit_btn_returns_steer_submit() {
 
     let mut scroll = 0u32;
     let mut follow = true;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     chat.steer_items = vec![(10, "redirect".into())];
     let mut queue_items: Vec<(i64, String)> = vec![];
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
 
     let down = MouseEvent {
@@ -154,7 +38,6 @@ async fn submit_btn_returns_steer_submit() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -162,9 +45,6 @@ async fn submit_btn_returns_steer_submit() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -180,89 +60,6 @@ async fn submit_btn_returns_steer_submit() {
         1,
         "steer item should remain until drain"
     );
-}
-
-#[tokio::test]
-async fn single_click_does_not_copy_on_release() {
-    let mut chat = ChatView::default();
-    for &l in &[
-        "line one",
-        "line two",
-        "line three",
-        "line four",
-        "line five",
-    ] {
-        chat.push_marker(Line::from(l.to_string()));
-    }
-
-    let body = Rect::new(0, 0, 80, 12);
-    let hits = empty_hits(body);
-
-    let mut scroll = 0u32;
-    let mut follow = true;
-    let mut selection: Option<SelRange> = None;
-    let mut subagent_focus: Option<usize> = None;
-    let mut subagent_sys = 0u64;
-    let mut queue_items: Vec<(i64, String)> = vec![];
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
-    let mut queue_scroll: u32 = 0;
-    let store = StubStore;
-
-    let down = MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: 10,
-        row: 5,
-        modifiers: KeyModifiers::NONE,
-    };
-    handle_mouse(
-        down,
-        &hits,
-        &mut scroll,
-        &mut follow,
-        &mut selection,
-        &mut chat,
-        &mut subagent_focus,
-        &mut subagent_sys,
-        Path::new("."),
-        &mut queue_items,
-        "s",
-        &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
-        &mut queue_scroll,
-    )
-    .await;
-    assert!(!dbl_click);
-
-    let up = MouseEvent {
-        kind: MouseEventKind::Up(MouseButton::Left),
-        column: 10,
-        row: 5,
-        modifiers: KeyModifiers::NONE,
-    };
-    handle_mouse(
-        up,
-        &hits,
-        &mut scroll,
-        &mut follow,
-        &mut selection,
-        &mut chat,
-        &mut subagent_focus,
-        &mut subagent_sys,
-        Path::new("."),
-        &mut queue_items,
-        "s",
-        &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
-        &mut queue_scroll,
-    )
-    .await;
-    assert!(copy_msg.is_none(), "single click should not copy");
 }
 
 /// Regression: clicking the follow/jump button immediately after a body
@@ -294,13 +91,9 @@ async fn jump_btn_click_works_after_recent_body_click() {
 
     let mut scroll = 0u32;
     let mut follow = false;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = vec![];
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
@@ -316,7 +109,6 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -324,13 +116,9 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
-    assert!(last_click.is_some(), "body click should set last_click");
     assert!(!follow, "body click should not set follow");
 
     // Second click immediately after (< 400 ms): hits the jump button.
@@ -346,7 +134,6 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -354,9 +141,6 @@ async fn jump_btn_click_works_after_recent_body_click() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -413,16 +197,10 @@ async fn thinking_header_toggles_even_right_after_another_click() {
 
     let mut scroll = 0u32;
     let mut follow = false;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    // A click ~50 ms ago — squarely inside the 400 ms dbl-click window.
-    // On the buggy code this trips `is_dbl` and the toggle is skipped.
-    let mut last_click: Option<Instant> = Some(Instant::now());
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
 
     let outcome = handle_mouse(
@@ -435,7 +213,6 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -443,9 +220,6 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -457,18 +231,12 @@ async fn thinking_header_toggles_even_right_after_another_click() {
             .any(|s| s.content.contains("secret reasoning"))),
         "thinking must be expanded after the header click"
     );
-    assert!(
-        !dbl_click,
-        "a header toggle must not be flagged as a double-click"
-    );
 }
 
 /// Clicking a Compaction-block header must toggle its collapse on the first
 /// click. Mirrors `thinking_header_toggles_even_right_after_another_click`.
 #[tokio::test]
 async fn compaction_header_click_toggles_collapse() {
-    use std::time::Instant;
-
     let mut chat = crate::chat::ChatView::default();
     chat.apply(&SessionEvent::TextDelta("answer".into()));
     chat.apply(&SessionEvent::Done);
@@ -503,14 +271,10 @@ async fn compaction_header_click_toggles_collapse() {
 
     let mut scroll = 0u32;
     let mut follow = false;
-    let mut selection: Option<crate::selection::SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
     let store = StubStore;
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = Some(Instant::now());
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
 
     let outcome = handle_mouse(
@@ -523,7 +287,6 @@ async fn compaction_header_click_toggles_collapse() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -531,9 +294,6 @@ async fn compaction_header_click_toggles_collapse() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;
@@ -579,13 +339,9 @@ async fn clicking_subagent_view_enters_subagent() {
 
     let mut scroll = 0u32;
     let mut follow = true;
-    let mut selection: Option<SelRange> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut subagent_sys = 0u64;
     let mut queue_items: Vec<(i64, String)> = Vec::new();
-    let mut copy_msg: Option<String> = None;
-    let mut last_click: Option<Instant> = None;
-    let mut dbl_click = false;
     let mut queue_scroll: u32 = 0;
     let store = StubStore;
 
@@ -599,7 +355,6 @@ async fn clicking_subagent_view_enters_subagent() {
         &hits,
         &mut scroll,
         &mut follow,
-        &mut selection,
         &mut chat,
         &mut subagent_focus,
         &mut subagent_sys,
@@ -607,9 +362,6 @@ async fn clicking_subagent_view_enters_subagent() {
         &mut queue_items,
         "s",
         &store,
-        &mut copy_msg,
-        &mut last_click,
-        &mut dbl_click,
         &mut queue_scroll,
     )
     .await;

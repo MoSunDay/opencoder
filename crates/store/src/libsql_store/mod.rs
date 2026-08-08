@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -48,7 +49,9 @@ impl LibsqlStore {
             .with_context(|| format!("open libsql db at {}", path.as_ref().display()))?;
         let conn = db.connect().context("connect libsql")?;
         schema::apply_connection_pragmas(&conn).await?;
+        let _ = conn.busy_timeout(Duration::from_secs(30));
         schema::bootstrap(&conn).await?;
+        let _ = schema::checkpoint_wal(&conn).await;
         let store = LibsqlStore {
             conn,
             db_lock: Mutex::new(()),
@@ -65,6 +68,7 @@ impl LibsqlStore {
             .context("open in-memory db")?;
         let conn = db.connect().context("connect in-memory")?;
         schema::apply_connection_pragmas(&conn).await?;
+        let _ = conn.busy_timeout(Duration::from_secs(30));
         schema::bootstrap(&conn).await?;
         Ok(LibsqlStore {
             conn,

@@ -45,6 +45,12 @@ pub(super) fn replay_one(
                 .collect::<Vec<_>>()
                 .join("");
             let text = sanitize_multiline(&text).into_owned();
+            if chat.first_prompt.is_none() {
+                let t = text.trim();
+                if !t.is_empty() {
+                    chat.first_prompt = Some(t.to_string());
+                }
+            }
             let has_images = msg.blocks.iter().any(|b| b.as_image().is_some());
             if text.is_empty() && !has_images {
                 return;

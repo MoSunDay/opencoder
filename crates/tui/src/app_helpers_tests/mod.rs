@@ -3,11 +3,10 @@
 //! while a subagent perspective was focused — pinning to the bottom and
 //! making the child body un-scrollable.
 use super::*;
+use crossterm::event::KeyModifiers;
 use opencoder_store::SessionMeta;
 
 mod ctrl_l_tests;
-mod mouse_clip_tests;
-mod mouse_dbl_click_tests;
 mod mouse_helpers;
 mod mouse_scroll_tests;
 mod mouse_tests;
@@ -232,7 +231,6 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
         let mut follow = false;
-        let mut selection = None;
         let mut last_esc = None;
         let mut input = "hello world".to_string();
         let mut cursor = 5usize;
@@ -242,7 +240,6 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
             &KeyBindings::default(),
             &mut subagent_focus,
             &mut follow,
-            &mut selection,
             &mut last_esc,
             &mut chat,
             &mut input,
@@ -593,6 +590,7 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
             model: Some("m".into()),
             workdir_hash: None,
             task_type: None,
+            requirement: None,
             created_at: 0,
             updated_at: 0,
             summary: None,
@@ -666,6 +664,7 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
             model: Some("m".into()),
             workdir_hash: None,
             task_type: None,
+            requirement: None,
             created_at: 0,
             updated_at: 0,
             summary: None,

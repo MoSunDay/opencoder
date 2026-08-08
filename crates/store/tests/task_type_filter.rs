@@ -30,6 +30,7 @@ fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {
         handoff_plan: None,
         skill: None,
         task_type: task_type.map(str::to_string),
+        requirement: None,
     }
 }
 

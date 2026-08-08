@@ -13,6 +13,77 @@ mod mouse_scroll_tests;
 mod mouse_tests;
 mod mouse_wheel_tests;
 
+// ----- Input-history recording (Enter / Tab recall via arrow keys) -----
+
+/// `push_history` records a submitted/steered/queued input and resets the
+/// history cursor, so the following Up arrow starts from the newest entry.
+#[test]
+fn push_history_records_text_and_resets_hist_idx() {
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = Some(0);
+    push_history(&mut history, &mut hist_idx, "fix the bug");
+    assert_eq!(history, vec!["fix the bug".to_string()]);
+    assert_eq!(hist_idx, None, "hist_idx must reset after a new entry");
+}
+
+/// Entries accumulate newest-last (the order Up/Down browse).
+#[test]
+fn push_history_accumulates_newest_last() {
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
+    push_history(&mut history, &mut hist_idx, "first");
+    push_history(&mut history, &mut hist_idx, "second");
+    assert_eq!(history, vec!["first".to_string(), "second".to_string()]);
+}
+
+/// Empty text is still recorded (matches `push_user` semantics for skill-only
+/// submits) and never leaves a stale history cursor.
+#[test]
+fn push_history_records_empty_text_without_stale_cursor() {
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = Some(2);
+    push_history(&mut history, &mut hist_idx, "");
+    assert_eq!(history, vec![String::new()]);
+    assert_eq!(hist_idx, None);
+}
+
+/// `push_user` keeps its contract after the `push_history` refactor: it must
+/// both record the input into history AND echo a `user:` transcript marker.
+#[test]
+fn push_user_records_history_and_echoes_transcript() {
+    let mut chat = ChatView::default();
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx: Option<usize> = None;
+    push_user(&mut chat, &mut history, &mut hist_idx, "hello world");
+    assert_eq!(history, vec!["hello world".to_string()]);
+    assert_eq!(hist_idx, None);
+    let markers = marker_texts(&chat);
+    assert!(
+        markers.iter().any(|m| m.contains("user: hello world")),
+        "push_user must still echo the user marker, got: {markers:?}"
+    );
+}
+
+/// Flatten every `Marker` block of a ChatView into its span text, so a test
+/// can assert on the transcript echo.
+fn marker_texts(chat: &ChatView) -> Vec<String> {
+    use crate::chat::ChatBlock;
+    chat.blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Marker(lines) => {
+                let text: String = lines
+                    .iter()
+                    .flat_map(|l| l.spans.iter())
+                    .map(|s| s.content.to_string())
+                    .collect();
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn paste_existing_absolute_file_echoes_full_path() {
     let tmp = tempfile::NamedTempFile::new().unwrap();

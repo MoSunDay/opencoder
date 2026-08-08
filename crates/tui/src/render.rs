@@ -12,11 +12,11 @@ use ratatui::Frame;
 use ratatui::Terminal;
 
 use crate::cache_salt_menu::CacheSaltMenu;
-use crate::keymap_menu::KeymapMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
 use crate::fmt as fmtmod;
+use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::queue_panel::QueueBtn;
@@ -134,15 +134,11 @@ pub(crate) fn render<B: Backend>(
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
-        // Fully clear the frame buffer every draw. The persistent widgets
-        // (status bar, body, composer) only paint their own glyphs — never the
-        // trailing cells they leave untouched — and `Buffer::resize` keeps
-        // truncated cells when the terminal shrinks. Untouched cells can thus
-        // hold stale content that resurfaces via the per-frame diff, producing
-        // the "remnants around the edges" artifact. Clearing the whole area
-        // first guarantees a clean slate each frame — matching the Clear every
-        // popup already performs.
-        f.render_widget(Clear, area);
+        // Ratatui resets the next diff buffer after every completed draw, and
+        // the persistent widgets below cover their full rectangles. Do not
+        // clear the entire frame here: that adds an O(viewport cells) pass to
+        // the hot path without fixing terminal-side partial-frame exposure.
+        // `frame::synchronized_frame` handles that actual artifact atomically.
         let prompt_w = 2u16;
         let inner_w = area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
@@ -266,6 +262,7 @@ pub(crate) fn render<B: Backend>(
         render_status(
             f,
             chunks[ci],
+            &chat.agent,
             running,
             status,
             anim_tick,
@@ -301,15 +298,16 @@ pub(crate) fn render<B: Backend>(
             render_status_chip(f, composer_area, text, theme::ok_color());
         }
         if !input_disabled && model_menu.is_none() {
-            place_cursor(
-                f,
-                composer_area,
+            let position = composer::cursor_screen_position(
+                composer_area.x,
+                composer_area.y,
                 input,
                 cursor_idx,
                 inner_w,
                 prompt_w,
                 composer_scroll,
             );
+            f.set_cursor_position(position);
         }
     })?;
     Ok(())
@@ -400,7 +398,13 @@ fn render_body(
         chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y, tool_btns,
     );
     hit_records::record_compaction_hits(
-        chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y,
+        chat,
+        cache,
+        text_w,
+        scroll_y,
+        visible_h,
+        inner.x,
+        inner.y,
         compaction_btns,
     );
 
@@ -417,12 +421,12 @@ fn render_body(
     let n = cache.lines().len();
     let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
     let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    // Tail-duration timer on the last content line: the current round of
-    // tool calls (or the focused subagent's live elapsed). Shown only while
-    // something is running and the bottom of the transcript is in view.
+    // Live provider/model-round timer on the last content line. It is visible
+    // only while a model round is active and the transcript tail is in view;
+    // completed rounds do not leave a frozen historical timer behind.
     if tail_ms > 0 && end == n {
         let timer = Span::styled(
-            format!("[call {}]", fmtmod::format_run_duration(tail_ms)),
+            format!("[turn cost {}]", fmtmod::format_run_duration(tail_ms)),
             Style::default().fg(theme::warn_color()),
         );
         if let Some(last) = visible_lines.iter_mut().rev().find(|l| {
@@ -435,7 +439,7 @@ fn render_body(
                 last.spans.push(timer);
             } else {
                 // The content line is full: put the timer on its own line so
-                // the call duration is never dropped.
+                // the turn duration is never dropped.
                 visible_lines.push(Line::from(timer));
             }
         }
@@ -703,6 +707,7 @@ fn mode_flash_bg(is_plan: bool) -> Color {
 fn render_status(
     f: &mut Frame,
     area: Rect,
+    mode: &str,
     running: bool,
     status: &str,
     anim_tick: u32,
@@ -711,13 +716,20 @@ fn render_status(
     context_limit: u64,
     task_ms: u64,
 ) {
-    let mut spans = vec![Span::raw(" ")];
+    let mut spans = vec![
+        Span::raw(" "),
+        Span::styled("\u{25cf} ", Style::default().fg(theme::agent_chip_fg(mode))),
+        Span::styled(
+            format!("[{mode}]"),
+            Style::default().fg(theme::agent_chip_fg(mode)),
+        ),
+    ];
 
-    // The progress meter + its colour track the compaction threshold (the
-    // bar fills toward red as auto-compression nears). The trailing ctx text
-    // reports against the model full context window instead, so the user sees
-    // absolute usage over the real budget: the bar is a compression dial, the
-    // number is a budget gauge.
+    // A single 10-segment compression dial sits between the mode chip and the
+    // ctx text. It tracks the compaction threshold — it fills toward red as
+    // auto-compression nears. (The former second budget-gauge that tracked the
+    // full model window was removed per user request; the trailing ctx text
+    // still reports the absolute window usage numerically.)
     let bar_pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
     let (meter, ctx_color) = theme::context_meter(bar_pct);
     let win_pct = fmtmod::context_percent(used, context_limit, CONTEXT_BASELINE);
@@ -737,6 +749,16 @@ fn render_status(
     ));
     spans.push(Span::raw("  "));
 
+    // Task-total duration sits BEFORE the spinner/status so the eye goes
+    // time → motion; warn colour marks it as the active task clock.
+    if task_ms > 0 {
+        spans.push(Span::styled(
+            fmtmod::format_run_duration(task_ms),
+            Style::default().fg(theme::warn_color()),
+        ));
+        spans.push(Span::raw("  "));
+    }
+
     if running {
         let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
         spans.push(Span::styled(
@@ -750,39 +772,12 @@ fn render_status(
         ));
     }
 
-    // Task-total duration sits AFTER the spinner/status so the eye goes
-    // motion → time; warn colour marks it as the active task clock.
-    if task_ms > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            fmtmod::format_run_duration(task_ms),
-            Style::default().fg(theme::warn_color()),
-        ));
-    }
-
     f.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn place_cursor(
-    f: &mut Frame,
-    composer_area: Rect,
-    input: &str,
-    cursor_idx: usize,
-    inner_w: u16,
-    prompt_w: u16,
-    scroll: u16,
-) {
-    let border = 1u16;
-    let (row, col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
-    let x = composer_area.x + border + prompt_w + col as u16;
-    let y = composer_area.y + border + (row as u16).saturating_sub(scroll);
-    f.set_cursor_position((x, y));
 }
 
 #[path = "render_hits.rs"]
 mod hit_records;
 pub(crate) use hit_records::CompactionBtn;
-
 #[cfg(test)]
 #[path = "render_tests/mod.rs"]
 mod tests;

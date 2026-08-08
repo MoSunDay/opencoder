@@ -8,7 +8,10 @@ use super::super::*;
 fn steer_consumed_echoes_marker_and_drops_row() {
     let mut v = ChatView::default();
     v.steer_items.push((7, "redirect here".into()));
-    v.apply(&SessionEvent::SteerConsumed { seq: 7, text: "redirect here".into() });
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 7,
+        text: "redirect here".into(),
+    });
 
     // The consumed row is removed from the mirror.
     assert!(
@@ -28,7 +31,10 @@ fn steer_consumed_echoes_marker_and_drops_row() {
 fn steer_consumed_unknown_seq_is_noop() {
     let mut v = ChatView::default();
     v.steer_items.push((9, "keep me".into()));
-    v.apply(&SessionEvent::SteerConsumed { seq: 999, text: String::new() });
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 999,
+        text: String::new(),
+    });
 
     assert_eq!(v.steer_items.len(), 1, "unknown seq must retain the row");
     assert!(!block_text(&v).contains("user:"));

@@ -32,10 +32,11 @@ impl ChatView {
     /// Update the plan text in-place: re-render markdown on the Plan block
     /// (or the last non-empty Assistant block if no Plan block exists yet).
     pub fn update_plan_text(&mut self, text: &str) {
+        let text = crate::terminal_text::sanitize_multiline(text);
         for block in self.blocks.iter_mut() {
             if let ChatBlock::Plan { raw, rendered, .. } = block {
                 *raw = text.to_string();
-                *rendered = crate::markdown::render(text);
+                *rendered = crate::markdown::render(&text);
                 return;
             }
         }
@@ -48,7 +49,7 @@ impl ChatView {
             {
                 if !raw.trim().is_empty() {
                     *raw = text.to_string();
-                    *rendered = crate::markdown::render(text);
+                    *rendered = crate::markdown::render(&text);
                     *done = true;
                     return;
                 }

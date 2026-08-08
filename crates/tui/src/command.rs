@@ -574,9 +574,7 @@ mod tests {
         }
         // Query "ap" also matches "/config" (its description contains
         // "api_key"), which sorts before "/ap" — move down once to it.
-        menu.as_mut()
-            .expect("menu open")
-            .move_down();
+        menu.as_mut().expect("menu open").move_down();
         let (outcome, _quit) =
             handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         match outcome {
@@ -649,7 +647,9 @@ mod tests {
     fn enter_on_install_tools_dispatches() {
         let mut menu = Some(CommandMenu::new());
         for c in "install_tools".chars() {
-            if let Some(m) = menu.as_mut() { m.on_char(c); }
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
         }
         let (outcome, _quit) =
             handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
@@ -664,7 +664,9 @@ mod tests {
     fn tab_on_install_tools_fills_input() {
         let mut menu = Some(CommandMenu::new());
         for c in "install_tools".chars() {
-            if let Some(m) = menu.as_mut() { m.on_char(c); }
+            if let Some(m) = menu.as_mut() {
+                m.on_char(c);
+            }
         }
         let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
         match outcome {

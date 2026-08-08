@@ -3,10 +3,10 @@
 //! budget while retaining access to the module-private builder.
 
 use super::replay::build_subagent_block;
-use opencoder_core::Message;
-use std::sync::Arc;
-use opencoder_store::{SubagentStatus, SubagentTaskRecord};
 use crate::chat::ChatBlock;
+use opencoder_core::Message;
+use opencoder_store::{SubagentStatus, SubagentTaskRecord};
+use std::sync::Arc;
 
 // ── build_subagent_block status mapping ───────────────────────────────
 

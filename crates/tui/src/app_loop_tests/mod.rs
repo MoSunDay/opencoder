@@ -13,102 +13,6 @@ use crate::chat::ChatView;
 /// belt-and-suspenders serializer — it is no longer load-bearing for safety.
 pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-// ----- Existing route_paste tests -----
-
-/// No modal open + plain (non-file) text: the main-composer path inserts it
-/// verbatim, advances the cursor, and returns `Proceed` (caller falls
-/// through rather than `continue`).
-#[test]
-fn route_paste_into_main_composer_inserts_verbatim_text() {
-    let mut model_menu: Option<ModelMenu> = None;
-    let mut command_menu: Option<CommandMenu> = None;
-    let mut input = String::new();
-    let mut idx = 0usize;
-    let mut pending_images: Vec<(String, String)> = Vec::new();
-    let mut asm = crate::image_chunk::Assembly::new();
-    let mut chat = ChatView::default();
-    let flow = route_paste(
-        "plain text",
-        false,
-        false,
-        false,
-        &mut model_menu,
-        &mut command_menu,
-        &mut input,
-        &mut idx,
-        &mut pending_images,
-        &mut asm,
-        &mut chat,
-        Path::new("."),
-    );
-    assert!(matches!(flow, LoopFlow::Proceed));
-    assert_eq!(input, "plain text");
-    assert_eq!(idx, "plain text".chars().count());
-}
-
-/// task picker open (no text field): the paste is swallowed — `Redraw` is
-/// returned and the main composer stays untouched.
-#[test]
-fn route_paste_swallowed_when_task_picker_open() {
-    let mut model_menu: Option<ModelMenu> = None;
-    let mut command_menu: Option<CommandMenu> = None;
-    let mut input = String::new();
-    let mut idx = 0usize;
-    let mut pending_images: Vec<(String, String)> = Vec::new();
-    let mut asm = crate::image_chunk::Assembly::new();
-    let mut chat = ChatView::default();
-    let flow = route_paste(
-        "plain text",
-        true,
-        false,
-        false,
-        &mut model_menu,
-        &mut command_menu,
-        &mut input,
-        &mut idx,
-        &mut pending_images,
-        &mut asm,
-        &mut chat,
-        Path::new("."),
-    );
-    assert!(matches!(flow, LoopFlow::Redraw));
-    assert!(
-        input.is_empty(),
-        "main composer must be untouched when a modal swallows the paste"
-    );
-    assert_eq!(idx, 0);
-}
-
-/// cache-salt menu open: same modal-isolation contract — paste swallowed,
-/// existing composer contents and cursor preserved.
-#[test]
-fn route_paste_swallowed_when_cache_salt_menu_open() {
-    let mut model_menu: Option<ModelMenu> = None;
-    let mut command_menu: Option<CommandMenu> = None;
-    let mut input = String::from("kept");
-    let mut idx = 2usize;
-    let mut pending_images: Vec<(String, String)> = Vec::new();
-    let mut asm = crate::image_chunk::Assembly::new();
-    let mut chat = ChatView::default();
-    let flow = route_paste(
-        "plain text",
-        false,
-        true,
-        false,
-        &mut model_menu,
-        &mut command_menu,
-        &mut input,
-        &mut idx,
-        &mut pending_images,
-        &mut asm,
-        &mut chat,
-        Path::new("."),
-    );
-    assert!(matches!(flow, LoopFlow::Redraw));
-    assert_eq!(input, "kept");
-    assert_eq!(idx, 2);
-}
-
 // ----- plan→act handoff tests (P0 race-fix) -----
 
 fn plan_view() -> ChatView {
@@ -136,6 +40,7 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -167,7 +72,9 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 
 /// Regression for the removal of deferred handoff: plan→act Shift+Tab while
 /// the plan turn is running is now a complete no-op — no command sent, input
-/// untouched, running stays true, and a flash hint is shown.
+/// untouched, running stays true, and a flash hint is shown. The same no-op
+/// covers act→plan and plan→act without a submitted plan while a turn is
+/// running (any mode switch is deferred to the next clean idle boundary).
 #[tokio::test]
 async fn switch_plan_to_act_while_running_is_noop() {
     let mut chat = plan_view();
@@ -184,6 +91,7 @@ async fn switch_plan_to_act_while_running_is_noop() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -210,9 +118,9 @@ async fn switch_plan_to_act_while_running_is_noop() {
     assert!(
         mode_flash
             .as_ref()
-            .map(|(t, _)| t.contains("running"))
+            .map(|(t, _)| t.contains("busy"))
             .unwrap_or(false),
-        "mode flash should hint that plan is running; got {:?}",
+        "mode flash should hint that the switch is deferred while busy; got {:?}",
         mode_flash
     );
 }
@@ -238,6 +146,7 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -260,7 +169,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
         _ => panic!("expected SwitchAgent"),
     }
 }
-
 
 /// Queued requirements count as requirement submissions: a plan-mode Tab-queue
 /// arms `plan_submitted` (via `note_requirement_submitted`, called by the app
@@ -303,6 +211,7 @@ async fn compound_plan_from_act_armed_then_shift_tab_triggers_handoff() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -355,6 +264,7 @@ async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -381,7 +291,6 @@ async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
 }
 
 // ----- fold_ui_events P0/P1 tests -----
-
 
 use opencoder_core::Message;
 use opencoder_session::SessionEvent;
@@ -648,7 +557,10 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
 
     let before = crate::chat::block_text(&chat);
     let _flow = fold_ui_events(
-        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 30, text: "queued prompt X".into() })),
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 30,
+            text: "queued prompt X".into(),
+        })),
         &mut chat,
         &store,
         "test-session",
@@ -701,7 +613,10 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
 
     let before = crate::chat::block_text(&chat);
     let _flow = fold_ui_events(
-        Some(UiEvent::Session(SessionEvent::QueueConsumed { seq: 999, text: String::new() })),
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 999,
+            text: String::new(),
+        })),
         &mut chat,
         &store,
         "test-session",
@@ -787,3 +702,6 @@ mod image_paste_tests;
 #[cfg(test)]
 #[path = "../app_loop_dispatch_cmd_tests.rs"]
 mod dispatch_cmd_tests;
+
+#[cfg(test)]
+mod switch_gate_tests;

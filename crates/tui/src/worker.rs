@@ -1,13 +1,14 @@
 //! Background worker command processing — shared by the main worker and the
 //! `/task`-spawned worker to avoid duplicate match arms.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use opencoder_core::{message::now_ms, resolve_agent, Config};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
     control_cmd::persist_agent as persist_session_agent, run as run_session, run_with_images,
-    spawn_event_flusher, SessionEvent, SessionState, SharedCancel,
+    spawn_event_flusher, SessionEvent, SessionState, SharedCancel, SubagentSteerGate,
 };
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
@@ -49,13 +50,33 @@ pub enum UiEvent {
     TurnDone(String),
 }
 
+/// Session-scoped child runtime registries used by TUI controls while the
+/// worker owns the corresponding [`SessionState`]. These handles must move as
+/// one unit on `/task` switches; retaining any registry from the previous
+/// session makes child steer/cancel actions target stale runners.
+#[derive(Clone)]
+pub struct ChildRuntimeHandles {
+    pub cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    pub turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
+    pub steer_gates: Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>>,
+}
+
+impl ChildRuntimeHandles {
+    pub fn from_session(session: &SessionState) -> Self {
+        Self {
+            cancels: session.child_cancels.clone(),
+            turn_cancels: session.child_turn_cancels.clone(),
+            steer_gates: session.child_steer_gates.clone(),
+        }
+    }
+}
+
 /// Rebind the main loop's session-scoped handles to a freshly switched session.
 ///
-/// Called after `/task` picks a new/resumed session. All four handles move
-/// together: command channel, event stream, session id, AND the cancellation
-/// token. The token is load-bearing — double-Esc cancels the loop's `cancel`,
-/// so it must point at the active session's worker. Leaving it bound to the
-/// first session (regression F1) made `/task`-switched sessions uninterruptable.
+/// Called after `/task` picks a new/resumed session. Channels, parent cancel
+/// tokens and all child registries move together. Retaining any handle from the
+/// first session makes switched sessions partially uninterruptible or rejects
+/// valid child steers against the stale admission-gate map.
 #[allow(clippy::too_many_arguments)]
 pub fn rebind_session(
     cmd_tx: &mut mpsc::Sender<UiCmd>,
@@ -63,17 +84,20 @@ pub fn rebind_session(
     session_id: &mut String,
     cancel: &mut CancellationToken,
     turn_cancel: &mut SharedCancel,
+    child_runtime: &mut ChildRuntimeHandles,
     new_cmd_tx: mpsc::Sender<UiCmd>,
     new_evt_rx: mpsc::Receiver<UiEvent>,
     new_session_id: String,
     new_cancel: CancellationToken,
     new_turn_cancel: SharedCancel,
+    new_child_runtime: ChildRuntimeHandles,
 ) {
     *cmd_tx = new_cmd_tx;
     *evt_rx = new_evt_rx;
     *session_id = new_session_id;
     *cancel = new_cancel;
     *turn_cancel = new_turn_cancel;
+    *child_runtime = new_child_runtime;
 }
 
 /// `/compact` dispatch policy: only run when idle. Kept as a pure function so
@@ -111,26 +135,50 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
+/// Gate for agent-mode switch actions (Shift+Tab / `/act` / `/plan` /
+/// `/act_clear_context` / SwitchAgentNoClear). A turn in flight (`running ==
+/// true`) means the worker is mid-`run_session`; applying a mode switch then
+/// would start the *next* turn with a stale agent while the current model is
+/// still answering under the old system prompt — the mode "switch" would
+/// complete at an arbitrary partial boundary. Refuse until idle (clean turn
+/// boundary). Pure so the running-guard is unit-testable independent of the
+/// async event loop.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SwitchGate {
+    Run,
+    SkipRunning,
+}
+
+pub fn gate_switch(running: bool) -> SwitchGate {
+    if running {
+        SwitchGate::SkipRunning
+    } else {
+        SwitchGate::Run
+    }
+}
+
 /// Minimum free capacity to reserve for lifecycle events. When the channel
-/// is near-full, droppable streaming events (TextDelta, ReasoningDelta, and
-/// SubagentChild wrapping those) are dropped — their final text is always
-/// reconstructed from the store by `TurnDone → finalize_assistant()`, so no
-/// information is lost. Non-delta lifecycle events use try_send and MAY be
-/// dropped when the channel is fully saturated; the UI reconciles critical
-/// state (notably chat.agent) from the authoritative agent on TurnDone.
+/// is near-full, droppable streaming events (TextDelta, and SubagentChild
+/// wrapping TextDelta) are dropped — their final text is always reconstructed
+/// from the store by `TurnDone → finalize_assistant()`, so no information is
+/// lost. ReasoningDelta is intentionally NOT droppable: it is the only trigger
+/// for the `💭 Thinking` label, and non-tool-turn reasoning is never rebuilt
+/// from the store on TurnDone (finalize_assistant only restores text), so
+/// dropping it would permanently lose the thinking block. Non-delta lifecycle
+/// events use try_send and MAY be dropped when the channel is fully saturated;
+/// the UI reconciles critical state (notably chat.agent) from the authoritative
+/// agent on TurnDone.
 const DELTA_MIN_CAPACITY: usize = 64;
 
 /// Returns true for events whose information is fully recoverable from the
 /// store on the next `TurnDone` (i.e. streaming text deltas). These can be
 /// safely dropped when the UI channel is near capacity without data loss.
+/// ReasoningDelta is deliberately excluded — see `DELTA_MIN_CAPACITY` docs.
 fn is_droppable_delta(sev: &SessionEvent) -> bool {
     match sev {
-        SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_) => true,
+        SessionEvent::TextDelta(_) => true,
         SessionEvent::SubagentChild { ev, .. } => {
-            matches!(
-                ev.as_ref(),
-                SessionEvent::TextDelta(_) | SessionEvent::ReasoningDelta(_)
-            )
+            matches!(ev.as_ref(), SessionEvent::TextDelta(_))
         }
         _ => false,
     }
@@ -202,9 +250,18 @@ pub async fn process_cmd(
             // performs a final flush — guaranteeing zero event loss this turn.
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
+            let _ = evt_tx
+                .send(UiEvent::TurnDone(sess.agent.name.clone()))
+                .await;
         }
         UiCmd::SwitchAgent(name) => {
+            // DEFENSE-IN-DEPTH: this arm is only reachable at a clean turn
+            // boundary. The worker loop is single-threaded and `run_session`
+            // is synchronous within `process_cmd(UiCmd::Prompt)` — a switch
+            // queued during a live turn is not consumed until that `process_cmd`
+            // returns, so `sess.agent` is never flipped mid-`run_session`.
+            // The app-loop running-gate (`gate_switch` / `handle_switch_agent`)
+            // additionally refuses to SEND a switch while `running` is true.
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 // Mirror control_cmd::apply: switching to plan resets the
@@ -273,7 +330,9 @@ pub async fn process_cmd(
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
+            let _ = evt_tx
+                .send(UiEvent::TurnDone(sess.agent.name.clone()))
+                .await;
         }
         UiCmd::Compact => {
             let registry = opencoder_session::tools::registry();
@@ -307,7 +366,9 @@ pub async fn process_cmd(
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx.send(UiEvent::TurnDone(sess.agent.name.clone())).await;
+            let _ = evt_tx
+                .send(UiEvent::TurnDone(sess.agent.name.clone()))
+                .await;
         }
         UiCmd::SetSkill(body) => {
             sess.set_skill(body);

@@ -104,6 +104,7 @@ pub(super) async fn execute_call_with_timeout(
         let store = session.store.clone();
         let child_cancels = session.child_cancels.clone();
         let child_turn_cancels = session.child_turn_cancels.clone();
+        let child_steer_gates = session.child_steer_gates.clone();
         let call_id = tc.id.clone();
         // Activity channel: every event the child produces (tool calls, LLM
         // text/reasoning deltas, tool results) is signalled here and *resets*
@@ -208,8 +209,15 @@ pub(super) async fn execute_call_with_timeout(
             // so it is never stuck Running, prune the stale entries, and emit a
             // terminal SubagentEnd so the UI clears the subagent panel.
             Err(_elapsed) => {
-                force_cancel_subagent(store, child_cancels, child_turn_cancels, sink, &call_id)
-                    .await;
+                force_cancel_subagent(
+                    store,
+                    child_cancels,
+                    child_turn_cancels,
+                    child_steer_gates,
+                    sink,
+                    &call_id,
+                )
+                .await;
                 match signal {
                     TaskSignal::Timeout => ToolOutput::err(format!(
                         "subagent timed out after {} without completing",
@@ -287,6 +295,7 @@ async fn force_cancel_subagent(
     store: Option<Arc<dyn Store>>,
     child_cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
     child_turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
+    child_steer_gates: Arc<Mutex<HashMap<String, Arc<crate::SubagentSteerGate>>>>,
     sink: &Sink<'_>,
     call_id: &str,
 ) {
@@ -298,6 +307,11 @@ async fn force_cancel_subagent(
     }
     if let Ok(mut map) = child_turn_cancels.lock() {
         map.remove(call_id);
+    }
+    if let Ok(mut map) = child_steer_gates.lock() {
+        if let Some(gate) = map.remove(call_id) {
+            gate.force_close();
+        }
     }
     super::emit(
         sink,
@@ -667,6 +681,11 @@ mod tests {
             .insert(call_id.to_string(), {
                 Arc::new(Mutex::new(CancellationToken::new()))
             });
+        session
+            .child_steer_gates
+            .lock()
+            .unwrap()
+            .insert(call_id.to_string(), crate::SubagentSteerGate::new());
 
         let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
         let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
@@ -675,6 +694,7 @@ mod tests {
             session.store.clone(),
             session.child_cancels.clone(),
             session.child_turn_cancels.clone(),
+            session.child_steer_gates.clone(),
             &sink,
             call_id,
         )
@@ -719,64 +739,13 @@ mod tests {
             session.child_turn_cancels.lock().unwrap().is_empty(),
             "child_turn_cancels must be empty after force_cancel"
         );
-    }
-
-    /// Pure routing unit tests: `leaf_tool_timeout` must give read/edit/search
-    /// the bash budget, leave bash exempt, and default everything else.
-    #[test]
-    fn leaf_tool_timeout_routes_read_edit_search_to_bash_budget() {
-        let expected = Some(Duration::from_secs(crate::tools::bash::BASH_TIMEOUT_SECS));
-        assert_eq!(leaf_tool_timeout("read"), expected);
-        assert_eq!(leaf_tool_timeout("edit"), expected);
-        assert_eq!(leaf_tool_timeout("search"), expected);
-    }
-
-    #[test]
-    fn leaf_tool_timeout_exempts_bash() {
-        assert_eq!(leaf_tool_timeout("bash"), None);
-    }
-
-    #[test]
-    fn leaf_tool_timeout_defaults_unknown_tools() {
-        assert_eq!(leaf_tool_timeout("ls"), Some(DEFAULT_TOOL_TIMEOUT));
-        assert_eq!(
-            leaf_tool_timeout("not_a_real_tool"),
-            Some(DEFAULT_TOOL_TIMEOUT)
-        );
-    }
-
-    /// Integration test through `execute_call` (not the `_with_timeout`
-    /// variant): a tool registered under the key `"read"` that never resolves
-    /// must trip the routed timeout — NOT the 600 s default net — and resolve
-    /// with a "timed out" message. The outer 5 s `tokio::time::timeout` fails
-    /// the test fast if the 600 s net is mistakenly used.
-    #[tokio::test]
-    async fn read_tool_times_out_via_execute_call_routing() {
-        let session = make_session();
-        let registry: HashMap<String, ToolArc> =
-            [("read".to_string(), Arc::new(HangingTool) as ToolArc)]
-                .into_iter()
-                .collect();
-        let mut noop: Box<dyn FnMut(SessionEvent) + Send> = Box::new(|_| {});
-        let sink: Sink<'_> = Arc::new(Mutex::new(&mut *noop));
-        let tc = CompletedToolCall {
-            id: "tc-read-route".into(),
-            name: "read".into(),
-            input: json!({}),
-        };
-        // Under cfg(test) BASH_TIMEOUT_SECS == 1, so execute_call must resolve
-        // in ~1 s. Wrap in a 5 s outer guard: if the 600 s default net were
-        // used instead, this would hang and the outer timeout would fire.
-        let out = tokio::time::timeout(Duration::from_secs(5), async {
-            execute_call(&tc, &session, &registry, &sink).await
-        })
-        .await
-        .expect("read tool should trip the routed bash budget, not the 600s net");
-        assert!(out.is_error);
         assert!(
-            out.content.contains("timed out"),
-            "expected timeout message, got: {}",
-            out.content
+            session.child_steer_gates.lock().unwrap().is_empty(),
+            "child_steer_gates must be empty after force_cancel"
         );
     }
 }
+
+#[cfg(test)]
+#[path = "execute_timeout_tests.rs"]
+mod timeout_tests;

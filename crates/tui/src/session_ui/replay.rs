@@ -15,12 +15,17 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::chat::{short, summarize, ChatBlock, ChatView, TOOL_OUTPUT_LINES};
+use crate::terminal_text::{sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
 /// Replay a single persisted message into `chat`: reconstruct `Assistant` text and
 /// `Tool` blocks (header from `ToolUse`, output from matching `ToolResult`),
 /// mirroring the live `ChatView::apply` path for resumed/compacted sessions.
-pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMap<String, Vec<u8>>) {
+pub(super) fn replay_one(
+    chat: &mut ChatView,
+    msg: &Message,
+    prefetched: &HashMap<String, Vec<u8>>,
+) {
     match msg.role {
         Role::User => {
             // Synthetic user messages (plan->act handoff, compaction summaries,
@@ -39,6 +44,7 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                 })
                 .collect::<Vec<_>>()
                 .join("");
+            let text = sanitize_multiline(&text).into_owned();
             let has_images = msg.blocks.iter().any(|b| b.as_image().is_some());
             if text.is_empty() && !has_images {
                 return;
@@ -55,9 +61,9 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
             // resolved from the prefetched-bytes map (async-fetched above).
             for b in &msg.blocks {
                 if let ContentBlock::Image { url, .. } = b {
-                    let filename = crate::image_util::extract_filename(url);
-                    let rendered_img =
-                        crate::image_render::render_image_from_url(url, prefetched);
+                    let filename = sanitize_single_line(&crate::image_util::extract_filename(url))
+                        .into_owned();
+                    let rendered_img = crate::image_render::render_image_from_url(url, prefetched);
                     chat.blocks.push(ChatBlock::Image {
                         filename,
                         rendered: rendered_img,
@@ -76,6 +82,7 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                 })
                 .collect::<Vec<_>>()
                 .join("");
+            let text = sanitize_multiline(&text).into_owned();
             if !text.is_empty() {
                 let rendered = crate::markdown::render(&text);
                 chat.blocks.push(ChatBlock::Assistant {
@@ -83,6 +90,18 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                     rendered,
                     done: true,
                 });
+            }
+            // Restore reasoning blocks as collapsed Thinking blocks so the
+            // `💭 Thinking` label survives resume / compaction — mirroring the
+            // live `ChatView::apply` ReasoningDelta path.
+            for b in &msg.blocks {
+                if let ContentBlock::Reasoning { text } = b {
+                    chat.blocks.push(ChatBlock::Thinking {
+                        text: sanitize_multiline(text).into_owned(),
+                        collapsed: true,
+                        sealed: true,
+                    });
+                }
             }
             for b in &msg.blocks {
                 if let ContentBlock::ToolUse { id, name, input } = b {
@@ -93,7 +112,7 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                         id: id.clone(),
                         header: Line::from(vec![
                             Span::styled(
-                                format!("\u{25b8} {name} "),
+                                format!("\u{25b8} {} ", sanitize_single_line(name)),
                                 Style::default()
                                     .fg(theme::accent())
                                     .add_modifier(Modifier::BOLD),
@@ -123,7 +142,8 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                     } else {
                         theme::muted()
                     };
-                    let out: Vec<Line<'static>> = content
+                    let clean_content = sanitize_multiline(content);
+                    let out: Vec<Line<'static>> = clean_content
                         .lines()
                         .take(TOOL_OUTPUT_LINES)
                         .map(|l| {
@@ -160,7 +180,9 @@ pub(super) fn replay_one(chat: &mut ChatView, msg: &Message, prefetched: &HashMa
                     }
                     // Render tool-returned images inline after the text output.
                     for url in images {
-                        let filename = crate::image_util::extract_filename(url);
+                        let filename =
+                            sanitize_single_line(&crate::image_util::extract_filename(url))
+                                .into_owned();
                         let rendered_img =
                             crate::image_render::render_image_from_url(url, prefetched);
                         chat.blocks.push(ChatBlock::Image {
@@ -184,7 +206,7 @@ pub async fn replay_into_chat(
     session_id: &str,
 ) -> ChatView {
     let mut chat = ChatView {
-        agent: agent_name.into(),
+        agent: sanitize_single_line(agent_name).into_owned(),
         ..Default::default()
     };
 
@@ -197,11 +219,12 @@ pub async fn replay_into_chat(
             .as_deref()
             .filter(|p| !opencoder_session::is_clear_context_handoff(p))
         {
-            let rendered = crate::markdown::render(plan);
+            let clean_plan = sanitize_multiline(plan);
+            let rendered = crate::markdown::render(&clean_plan);
             if !rendered.is_empty() {
                 chat.blocks.push(ChatBlock::Plan {
                     rendered,
-                    raw: plan.to_string(),
+                    raw: clean_plan.into_owned(),
                 });
             }
         }
@@ -257,7 +280,10 @@ pub async fn replay_into_chat(
 
 /// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,
 /// including rebuilding the child `ChatView` from stored events.
-pub(super) async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<dyn Store>) -> ChatBlock {
+pub(super) async fn build_subagent_block(
+    task: &SubagentTaskRecord,
+    store: &Arc<dyn Store>,
+) -> ChatBlock {
     let (done, ok, cancelled, summary) = match task.status {
         SubagentStatus::Completed => (
             true,
@@ -278,13 +304,13 @@ pub(super) async fn build_subagent_block(task: &SubagentTaskRecord, store: &Arc<
     ChatBlock::Subagent {
         id: task.task_id.clone(),
         child_session_id: task.child_session_id.clone(),
-        kind: task.agent.clone(),
+        kind: sanitize_single_line(&task.agent).into_owned(),
         prompt: short(&task.prompt, 90),
         view,
         done,
         ok,
         cancelled,
-        summary,
+        summary: sanitize_multiline(&summary).into_owned(),
         started_at_ms: task.started_at,
         elapsed_ms: task
             .completed_at
@@ -306,7 +332,7 @@ pub(super) async fn reconstruct_child_view(
         .unwrap_or_default();
     if !events.is_empty() {
         let mut view = ChatView {
-            agent: agent_name.into(),
+            agent: sanitize_single_line(agent_name).into_owned(),
             ..Default::default()
         };
         for rec in &events {
@@ -394,7 +420,7 @@ pub(super) async fn prefetch_image_bytes(messages: &[Message]) -> HashMap<String
 pub fn replay_messages(agent_name: &str, messages: &[Message]) -> ChatView {
     let empty = HashMap::new();
     let mut chat = ChatView {
-        agent: agent_name.into(),
+        agent: sanitize_single_line(agent_name).into_owned(),
         ..Default::default()
     };
     for msg in messages {

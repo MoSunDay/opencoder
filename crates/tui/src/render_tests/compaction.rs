@@ -92,6 +92,9 @@ fn collapsed_header_shows_line_count() {
     let text: String = header.spans.iter().map(|s| &*s.content).collect();
     assert!(text.contains("Compaction"), "header must contain label");
     // compaction_view() body is "summary-a\nsummary-b" -> 2 lines.
-    assert!(text.contains("2 lines"), "collapsed header shows line count");
+    assert!(
+        text.contains("2 lines"),
+        "collapsed header shows line count"
+    );
     assert!(!text.contains("expand"), "no expand hint");
 }

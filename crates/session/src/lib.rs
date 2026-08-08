@@ -11,6 +11,7 @@ pub mod resume;
 pub mod runner;
 pub mod skill_resolve;
 pub mod streamline;
+pub mod subagent_steer_gate;
 pub mod tool_guard;
 pub mod tools;
 
@@ -21,6 +22,7 @@ pub use control_cmd::{
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
+pub use subagent_steer_gate::{SteerReservation, SubagentSteerGate};
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -151,6 +153,12 @@ pub struct SessionState {
     /// loop, web handler) can fire a specific child's turn interrupt without
     /// going through the worker task.
     pub child_turn_cancels: Arc<Mutex<HashMap<String, SharedCancel>>>,
+    /// Runtime admission gates for child steers, keyed by child `call_id`.
+    /// The gate makes a natural child turn completion atomic with respect to
+    /// an external Enter-style steer admission.
+    pub child_steer_gates: Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>>,
+    /// Admission gate owned by this session when it runs as a subagent.
+    pub steer_gate: Option<Arc<SubagentSteerGate>>,
     /// Registry of child subagent hard-cancel tokens, keyed by `call_id`.
     /// Each entry is a `child_token()` derived from the parent's cancel token,
     /// so a parent double-Esc cascades to children, but a parent steer
@@ -209,6 +217,8 @@ impl SessionState {
             cancel: None,
             turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
             child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
+            child_steer_gates: Arc::new(Mutex::new(HashMap::new())),
+            steer_gate: None,
             child_cancels: Arc::new(Mutex::new(HashMap::new())),
             summary: None,
             summary_seq: None,

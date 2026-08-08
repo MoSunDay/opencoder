@@ -49,7 +49,10 @@ mod tests {
 
     #[test]
     fn plain_text_passes_through_clean() {
-        assert_eq!(queued_item_display("fix the bug", "fix the bug"), "fix the bug");
+        assert_eq!(
+            queued_item_display("fix the bug", "fix the bug"),
+            "fix the bug"
+        );
     }
 
     #[test]

@@ -325,15 +325,9 @@ mod tests {
     fn ctrl_r_resets_to_defaults() {
         let mut menu = Some(make_menu());
         // Start capturing for entry 0
-        let _ = handle_keymap_key(
-            &mut menu,
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        );
+        let _ = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         // Press F1 to set a binding
-        let _ = handle_keymap_key(
-            &mut menu,
-            KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE),
-        );
+        let _ = handle_keymap_key(&mut menu, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
         assert!(menu.as_ref().unwrap().is_dirty());
         // Press Ctrl+R to reset
         let outcome = handle_keymap_key(

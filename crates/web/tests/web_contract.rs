@@ -294,6 +294,57 @@ async fn switch_agent_updates_stored_meta_and_handle() {
     );
 }
 
+/// RUNNING-GATE: POST /agent while the session's drain is actively running
+/// must be refused with 409 CONFLICT, BEFORE any store-meta / override
+/// mutation — the live turn keeps its current agent, so applying the switch
+/// now would diverge chat.agent / persisted meta from the executing mode.
+#[tokio::test]
+async fn switch_agent_refused_while_draining() {
+    let (app, state) = app().await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "m").await;
+    // Install a live handle with the draining flag set (mid-turn).
+    let handle = opencoder_web::handle::SessionHandle::new();
+    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    state.handles.lock().await.insert(sid.clone(), handle);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sid}/agent"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"value":"plan"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["ok"], false);
+    assert!(
+        v["error"].as_str().unwrap().contains("drain running"),
+        "error should mention the drain running guard; got {:?}",
+        v["error"]
+    );
+
+    // Atomicity: the store meta must be untouched (still "act").
+    let meta = state.store.get_session(&sid).await.unwrap().unwrap();
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("act"),
+        "store meta must be untouched when the switch is refused"
+    );
+    // Atomicity: the handle override must be untouched (still None).
+    let handle_map = state.handles.lock().await;
+    let h = handle_map.get(&sid).unwrap();
+    let ov = h.overrides.lock().await;
+    assert_eq!(ov.agent, None, "override must be untouched when refused");
+}
+
 #[tokio::test]
 async fn interrupt_cancels_running_drain_token() {
     let (_app, state) = app().await;
@@ -391,6 +442,50 @@ async fn post_model_switches_stored_meta() {
         meta.model.as_deref(),
         Some("new-model"),
         "model switch must persist"
+    );
+}
+
+/// RUNNING-GATE: POST /model while the session's drain is actively running
+/// must be refused with 409 CONFLICT — a model override has the identical
+/// deferred-next-drain semantics as the agent switch.
+#[tokio::test]
+async fn switch_model_refused_while_draining() {
+    let (app, state) = app().await;
+    let sid = Uuid::new_v4().to_string();
+    seed(&state, &sid, None, "act", "old-model").await;
+    let handle = opencoder_web::handle::SessionHandle::new();
+    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    state.handles.lock().await.insert(sid.clone(), handle);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{sid}/model"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"value":"new-model"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["ok"], false);
+    assert!(
+        v["error"].as_str().unwrap().contains("drain running"),
+        "error should mention the drain running guard; got {:?}",
+        v["error"]
+    );
+
+    // Atomicity: store meta untouched.
+    let meta = state.store.get_session(&sid).await.unwrap().unwrap();
+    assert_eq!(
+        meta.model.as_deref(),
+        Some("old-model"),
+        "store meta must be untouched when refused"
     );
 }
 

@@ -1,6 +1,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::terminal_text::{sanitize_line, sanitize_multiline, sanitize_single_line};
 use crate::theme;
 
 use opencoder_llm::estimate;
@@ -35,7 +36,7 @@ pub(crate) use compaction_block::render_collapsible;
 /// Append a styled duration span to the header. Running → live warn-color
 /// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
 /// NOTE: now used only by Subagent headers — the per-call Tool inline timers
-/// were removed; the body tail shows the tool-call round timer instead.
+/// were removed; the body tail shows the whole-turn `[turn cost]` timer instead.
 fn push_duration_span(
     spans: &mut Vec<Span<'static>>,
     started_at_ms: i64,
@@ -61,23 +62,29 @@ impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
         self.track_context(ev);
         match ev {
+            SessionEvent::LlmRoundStart { started_at_ms } => {
+                self.llm_round_started_at_ms = Some(*started_at_ms);
+            }
+            SessionEvent::LlmRoundEnd => {
+                self.llm_round_started_at_ms = None;
+            }
             SessionEvent::TextDelta(t) => {
                 self.ensure_assistant_open();
                 if let Some(ChatBlock::Assistant { raw, .. }) = self.blocks.last_mut() {
-                    raw.push_str(t);
+                    raw.push_str(&sanitize_multiline(t));
                 }
             }
             SessionEvent::ReasoningDelta(t) => {
                 self.ensure_thinking_open();
                 if let Some(ChatBlock::Thinking { text, .. }) = self.blocks.last_mut() {
-                    text.push_str(t);
+                    text.push_str(&sanitize_multiline(t));
                 }
             }
             // Stream the summary into an expanded block so it is visible while
             // the summarizing LLM call runs. The final `Compaction(summary)`
             // event (below) finalizes + collapses it.
             SessionEvent::CompactionDelta(t) => {
-                self.open_compaction_streaming(t);
+                self.open_compaction_streaming(&sanitize_multiline(t));
             }
             SessionEvent::ToolStart { id, name, input } => {
                 if name == "task" {
@@ -88,7 +95,7 @@ impl ChatView {
                     id: id.clone(),
                     header: Line::from(vec![
                         Span::styled(
-                            format!("\u{25b8} {name} "),
+                            format!("\u{25b8} {} ", sanitize_single_line(name)),
                             Style::default()
                                 .fg(theme::accent())
                                 .add_modifier(Modifier::BOLD),
@@ -117,7 +124,8 @@ impl ChatView {
                 } else {
                     theme::muted()
                 };
-                let out: Vec<Line<'static>> = output
+                let clean_output = sanitize_multiline(output);
+                let out: Vec<Line<'static>> = clean_output
                     .lines()
                     .take(TOOL_OUTPUT_LINES)
                     .map(|l| Line::from(Span::styled(format!("  {l}"), Style::default().fg(color))))
@@ -160,7 +168,7 @@ impl ChatView {
             }
             SessionEvent::AgentSwitch(to) => {
                 self.finalize_assistant();
-                self.agent = to.clone();
+                self.agent = sanitize_single_line(to).into_owned();
                 if to == "plan" {
                     // A compound `/plan <content>` submitted from act mode arms
                     // the handoff *deferred*: the switch event that lands here
@@ -180,14 +188,14 @@ impl ChatView {
                 let bare = m.split_once('/').map(|(_, id)| id).unwrap_or(m);
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                        format!("[model] {bare}"),
+                        format!("[model] {}", sanitize_single_line(bare)),
                         Style::default().fg(theme::local_color()),
                     ))]));
             }
             SessionEvent::Compaction(c) => {
-                self.finalize_compaction(c);
+                self.finalize_compaction(&sanitize_multiline(c));
             }
-            SessionEvent::Status(s) => self.status = s.clone(),
+            SessionEvent::Status(s) => self.status = sanitize_single_line(s).into_owned(),
             SessionEvent::SubagentStart {
                 id,
                 kind,
@@ -212,7 +220,7 @@ impl ChatView {
                 self.blocks.push(ChatBlock::Subagent {
                     id: id.clone(),
                     child_session_id: child_session_id.clone(),
-                    kind: kind.clone(),
+                    kind: sanitize_single_line(kind).into_owned(),
                     prompt: short(prompt, 90),
                     view: ChatView::default(),
                     done: false,
@@ -249,18 +257,20 @@ impl ChatView {
                 }
             }
             SessionEvent::Done => {
+                self.llm_round_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
             SessionEvent::Error(e) => {
+                self.llm_round_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.finalize_assistant();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
-                        format!("error: {e}"),
+                        format!("error: {}", sanitize_single_line(e)),
                         Style::default().fg(theme::err_color()),
                     ))]));
             }
@@ -274,22 +284,35 @@ impl ChatView {
                     return;
                 }
                 self.finalize_assistant();
-                let rendered = crate::markdown::render(plan);
+                let clean_plan = sanitize_multiline(plan);
+                let rendered = crate::markdown::render(&clean_plan);
                 if !rendered.is_empty() {
                     self.blocks.push(ChatBlock::Plan {
                         rendered,
-                        raw: plan.clone(),
+                        raw: clean_plan.into_owned(),
                     });
                 }
             }
             SessionEvent::TranscriptReset(_) => {}
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq, text } => {
-                let display = if !text.is_empty() { text.clone() }
-                    else { self.steer_items.iter().find(|(s, _)| s == seq).map(|(_, d)| d.clone()).unwrap_or_default() };
+                let display = if !text.is_empty() {
+                    sanitize_multiline(text).into_owned()
+                } else {
+                    self.steer_items
+                        .iter()
+                        .find(|(s, _)| s == seq)
+                        .map(|(_, d)| d.clone())
+                        .unwrap_or_default()
+                };
                 if !display.is_empty() {
                     self.push_marker_lines(vec![
-                        Line::from(Span::styled(format!("user: {display}"), Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD))),
+                        Line::from(Span::styled(
+                            format!("user: {display}"),
+                            Style::default()
+                                .fg(theme::accent())
+                                .add_modifier(Modifier::BOLD),
+                        )),
                         Line::from(""),
                     ]);
                 }
@@ -318,13 +341,15 @@ impl ChatView {
     /// bar of the freshly-started turn. The transcript blocks are untouched.
     pub fn begin_turn(&mut self) {
         self.status.clear();
+        self.llm_round_started_at_ms = None;
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new
     /// assistant block instead of merging into a prior one.
     pub fn push_marker(&mut self, line: Line<'static>) {
         self.finalize_assistant();
-        self.blocks.push(ChatBlock::Marker(vec![line]));
+        self.blocks
+            .push(ChatBlock::Marker(vec![sanitize_line(line)]));
     }
 
     /// Push several non-streamed lines as a single marker block and ensure the
@@ -332,7 +357,9 @@ impl ChatView {
     /// commands (e.g. `/ps`) whose multi-line echo never reaches the model.
     pub fn push_marker_lines(&mut self, lines: Vec<Line<'static>>) {
         self.finalize_assistant();
-        self.blocks.push(ChatBlock::Marker(lines));
+        self.blocks.push(ChatBlock::Marker(
+            lines.into_iter().map(sanitize_line).collect(),
+        ));
     }
 
     /// Render the current assistant block's raw text as markdown (idempotent).
@@ -475,7 +502,9 @@ impl ChatView {
                         }
                     }
                 }
-                ChatBlock::Thinking { text, collapsed, .. } => {
+                ChatBlock::Thinking {
+                    text, collapsed, ..
+                } => {
                     out.extend(render_collapsible(
                         "\u{1f4ad}",
                         "Thinking",
@@ -483,7 +512,9 @@ impl ChatView {
                         *collapsed,
                     ));
                 }
-                ChatBlock::Compaction { text, collapsed, .. } => {
+                ChatBlock::Compaction {
+                    text, collapsed, ..
+                } => {
                     out.extend(render_collapsible(
                         "\u{1f4e6}",
                         "Compaction",
@@ -671,7 +702,8 @@ impl ChatView {
             *done = true;
             *bok = ok;
             *bcan = cancelled;
-            *smry = summary.to_string();
+            *smry = sanitize_multiline(summary).into_owned();
+            view.llm_round_started_at_ms = None;
             // Leftover child steer rows (steers queued while the child was
             // running but never claimed) would otherwise sit on the pending
             // panel forever — clear them with the block.
@@ -727,13 +759,15 @@ impl ChatView {
         }
     }
 
-    /// True if the last block is a collapsed Thinking block — i.e. the active
-    /// reasoning stream is hidden, so per-delta re-renders can be skipped.
-    pub fn last_thinking_collapsed(&self) -> bool {
+    /// True if the last block is the currently-open collapsed Thinking block.
+    /// A sealed block belongs to an earlier reasoning segment and must not
+    /// suppress the first render of a newly-created Thinking block.
+    pub fn last_open_thinking_collapsed(&self) -> bool {
         matches!(
             self.blocks.last(),
             Some(ChatBlock::Thinking {
                 collapsed: true,
+                sealed: false,
                 ..
             })
         )

@@ -139,12 +139,7 @@ mod tests {
     fn to_strings(lines: &[Line<'_>]) -> Vec<String> {
         lines
             .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| &*s.content)
-                    .collect::<String>()
-            })
+            .map(|l| l.spans.iter().map(|s| &*s.content).collect::<String>())
             .collect()
     }
 

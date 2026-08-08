@@ -10,7 +10,11 @@ fn make_subagent(started_at_ms: i64, elapsed_ms: Option<u64>, done: bool) -> Cha
         done,
         ok: done,
         cancelled: false,
-        summary: if done { "found it".into() } else { String::new() },
+        summary: if done {
+            "found it".into()
+        } else {
+            String::new()
+        },
         started_at_ms,
         elapsed_ms,
     }

@@ -160,7 +160,10 @@ async fn done_with_pending_queue_arms_drain_pending() {
 
     assert!(drain_pending, "stranded queue must arm drain_pending");
     assert!(running, "must NOT go idle while drain_pending is armed");
-    assert!(!queue_items.is_empty(), "queue mirror must reflect the stranded item");
+    assert!(
+        !queue_items.is_empty(),
+        "queue mirror must reflect the stranded item"
+    );
 }
 
 /// When `SessionEvent::Done` arrives and the store has NO pending inputs,
@@ -226,7 +229,9 @@ async fn done_with_empty_store_goes_idle() {
 
 /// When the user presses Shift+Tab (plan→act) while a plan turn is still
 /// running AND the plan was already submitted, the switch is a no-op: the
-/// agent stays in plan mode and only a "plan running…" flash is shown.
+/// agent stays in plan mode and only a "busy — switch when idle" flash is
+/// shown (any mode switch while running is deferred to the next clean idle
+/// boundary).
 ///
 /// Previously `*sys_tokens` (the context-meter baseline) was overwritten with
 /// the *act*-mode system-prompt token count *before* the no-op early return,
@@ -267,6 +272,7 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -285,15 +291,18 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
     // The no-op path returns Proceed without switching.
     assert!(matches!(outcome, SwitchOutcome::Proceed));
     // The agent must remain in plan mode (no switch happened).
-    assert_eq!(chat.agent, "plan", "agent must stay in plan mode on the noop");
+    assert_eq!(
+        chat.agent, "plan",
+        "agent must stay in plan mode on the noop"
+    );
     // The running flag must be untouched (still running the plan turn).
     assert!(running, "running flag must not be cleared by the noop");
-    // The flash must announce the plan is still running.
+    // The flash must announce the switch is deferred while busy.
     assert!(
         mode_flash
             .as_ref()
-            .is_some_and(|(msg, tick)| msg.contains("plan running") && *tick == anim_tick),
-        "mode_flash must show the 'plan running' banner, got {mode_flash:?}"
+            .is_some_and(|(msg, tick)| msg.contains("busy") && *tick == anim_tick),
+        "mode_flash must show the 'busy' banner, got {mode_flash:?}"
     );
     // The key assertion: the context-meter baseline is NOT overwritten.
     assert_eq!(
@@ -306,6 +315,120 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
         cmd_rx.try_recv().is_err(),
         "no UiCmd must be sent on the plan-running noop path"
     );
+}
+
+// ----- Thinking visibility: first reasoning delta must paint the label -----
+
+#[tokio::test]
+async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
+    use opencoder_store::LibsqlStore;
+
+    let store: Arc<dyn opencoder_store::Store> =
+        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items = Vec::new();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::ReasoningDelta(
+            "first".into(),
+        ))),
+        &mut chat,
+        &store,
+        "thinking-render-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+    assert!(
+        !skip_next_render,
+        "the first delta creates the Thinking header and must render"
+    );
+
+    fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::ReasoningDelta(
+            " second".into(),
+        ))),
+        &mut chat,
+        &store,
+        "thinking-render-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+    assert!(
+        skip_next_render,
+        "later text hidden inside an existing collapsed block may skip repaint"
+    );
+}
+
+#[tokio::test]
+async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
+    use opencoder_store::LibsqlStore;
+
+    let store: Arc<dyn opencoder_store::Store> =
+        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items = Vec::new();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = false;
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, _cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+    evt_tx
+        .send(UiEvent::Session(SessionEvent::ReasoningDelta(
+            " second".into(),
+        )))
+        .await
+        .unwrap();
+
+    fold_ui_events(
+        Some(UiEvent::Session(SessionEvent::ReasoningDelta(
+            "first".into(),
+        ))),
+        &mut chat,
+        &store,
+        "thinking-batch-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+    )
+    .await;
+    assert!(
+        !skip_next_render,
+        "a later hidden delta must not mask the first delta's visible header"
+    );
+    assert_eq!(chat.thinking_headers().len(), 1);
 }
 
 // ----- Bug #8: dropped AgentSwitch leaves status chip stale -----
@@ -383,6 +506,7 @@ async fn handle_switch_agent_sets_agent_optimistically() {
 
     let outcome = handle_switch_agent(
         "act".into(),
+        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -412,9 +536,9 @@ async fn handle_switch_agent_sets_agent_optimistically() {
 
 // ----- Status-bar task clock (false→true baseline snap) -----
 
-/// A new turn starts: `running` goes `false → true`. The task clock is
-/// never reset at a turn boundary — the accumulated task time survives. The
-/// dt baseline is snapped to now so the idle gap is excluded.
+/// A new task starts: `running` goes `false → true`. The accumulated task
+/// time is not reset here; submission owns that reset. The dt baseline is
+/// snapped so the preceding idle gap is excluded.
 #[test]
 fn tick_clock_does_not_reset_task_on_turn_start() {
     let mut prev = false;
@@ -430,15 +554,12 @@ fn tick_clock_does_not_reset_task_on_turn_start() {
     assert!(prev, "prev_running tracks running after the call");
 }
 
-/// Within a single running turn, consecutive ticks accumulate real wall-clock
-/// time. Sleeps long enough that dt is deterministically positive (sub-ms
-/// noise cannot mask it).
+/// Within a running task, consecutive ticks accumulate real wall-clock time.
 #[test]
 fn tick_clock_accumulates_task_while_running() {
     let mut prev = false;
     let mut last = Instant::now();
     let mut task = 0u64;
-
     tick_clock(true, &mut prev, &mut last, &mut task);
     assert_eq!(task, 0, "baseline snap makes the first tick accumulate ~0");
 
@@ -457,34 +578,30 @@ fn tick_clock_accumulates_task_while_running() {
     );
 }
 
-/// The task clock survives turn boundaries: it freezes on `true -> false`,
-/// does not advance during idle, and keeps accumulating when a new turn
-/// starts.
+/// The task clock freezes while idle and resumes from its preserved total.
 #[test]
 fn tick_clock_preserves_task_across_turn_end_and_idle() {
     let mut prev = false;
     let mut last = Instant::now();
     let mut task = 0u64;
-
-    // Turn 1: accumulate.
     tick_clock(true, &mut prev, &mut last, &mut task);
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(true, &mut prev, &mut last, &mut task);
-    assert!(task > 0, "task time should accumulate during turn 1");
+    assert!(task > 0, "task time should accumulate while running");
     let after_turn1 = task;
 
-    // Turn 1 ends: task time must NOT reset.
     tick_clock(false, &mut prev, &mut last, &mut task);
     assert_eq!(task, after_turn1, "task time must not change on turn end");
 
-    // Idle gap: task time must not advance while idle.
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(false, &mut prev, &mut last, &mut task);
     assert_eq!(task, after_turn1, "task time must not advance while idle");
 
-    // Turn 2 starts: task time keeps accumulating from the preserved value.
     tick_clock(true, &mut prev, &mut last, &mut task);
-    assert_eq!(task, after_turn1, "task time preserved across turn boundary");
+    assert_eq!(
+        task, after_turn1,
+        "task time preserved across turn boundary"
+    );
 
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(true, &mut prev, &mut last, &mut task);
@@ -503,28 +620,21 @@ fn tick_clock_false_to_true_excludes_idle_gap() {
     let mut prev = false;
     let mut last = Instant::now();
     let mut task = 0u64;
-
-    // First turn accumulates some task time.
     tick_clock(true, &mut prev, &mut last, &mut task);
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(true, &mut prev, &mut last, &mut task);
     let after_turn1 = task;
     assert!(task > 0, "turn 1 must accumulate task time");
 
-    // Idle: a tick that advances wall-clock but not the task clock.
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(false, &mut prev, &mut last, &mut task);
     assert_eq!(task, after_turn1, "idle tick must not accumulate");
 
-    // Turn 2 starts after an idle gap: the baseline is snapped to now, so the
-    // whole idle stretch is excluded from the very first tick of turn 2.
     tick_clock(true, &mut prev, &mut last, &mut task);
     assert_eq!(
         task, after_turn1,
         "false→true must snap the baseline so the idle gap is not counted"
     );
-
-    // Only subsequent running ticks charge the clock again.
     std::thread::sleep(std::time::Duration::from_millis(20));
     tick_clock(true, &mut prev, &mut last, &mut task);
     assert!(
@@ -532,4 +642,3 @@ fn tick_clock_false_to_true_excludes_idle_gap() {
         "task time must grow after the turn-2 baseline snap"
     );
 }
-

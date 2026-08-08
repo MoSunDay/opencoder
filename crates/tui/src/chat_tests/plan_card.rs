@@ -153,7 +153,10 @@ fn steer_consumed_echoes_marker_and_drops_entry() {
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
     let before = block_text(&v);
-    v.apply(&SessionEvent::SteerConsumed { seq: 7, text: "use python".into() });
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 7,
+        text: "use python".into(),
+    });
     assert!(
         block_text(&v).contains("user: use python"),
         "SteerConsumed must echo the marker at consume time"
@@ -176,7 +179,10 @@ fn steer_consumed_unknown_seq_is_noop() {
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
     let before = block_text(&v);
-    v.apply(&SessionEvent::SteerConsumed { seq: 999, text: String::new() });
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 999,
+        text: String::new(),
+    });
     assert_eq!(block_text(&v), before, "unknown seq must not push a marker");
     assert_eq!(
         v.steer_items.len(),

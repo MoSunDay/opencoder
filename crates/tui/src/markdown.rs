@@ -12,8 +12,9 @@ use crate::theme;
 
 /// Render a markdown string into styled ratatui lines.
 pub fn render(text: &str) -> Vec<Line<'static>> {
+    let text = crate::terminal_text::sanitize_multiline(text);
     let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
-    let parser = Parser::new_ext(text, opts);
+    let parser = Parser::new_ext(&text, opts);
     let mut r = MdRenderer::new();
     r.process(parser);
     r.finish()
@@ -77,8 +78,10 @@ impl MdRenderer {
                     }
                 }
                 Event::Code(c) => {
-                    self.spans
-                        .push(Span::styled(format!("`{c}`"), self.style().fg(theme::accent())));
+                    self.spans.push(Span::styled(
+                        format!("`{c}`"),
+                        self.style().fg(theme::accent()),
+                    ));
                 }
                 Event::SoftBreak | Event::HardBreak => self.flush(),
                 Event::Rule => {

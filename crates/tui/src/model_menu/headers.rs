@@ -192,11 +192,17 @@ mod tests {
     fn ctrl_clear_raw_control_char_forms_match() {
         let mut ed = HeadersEditor::new(vec![("X-Foo".into(), "bar".into())]);
         ed.handle_key(ctrl_raw('\u{c}')); // raw Ctrl+L
-        assert_eq!(ed.pairs[0].0, "", "raw control-char Ctrl+L must clear the name");
+        assert_eq!(
+            ed.pairs[0].0, "",
+            "raw control-char Ctrl+L must clear the name"
+        );
         ed.pairs[0].0 = "X-Foo".into();
         ed.editing_value = true;
         ed.handle_key(ctrl_raw('\u{15}')); // raw Ctrl+U
-        assert_eq!(ed.pairs[0].1, "", "raw control-char Ctrl+U must clear the value");
+        assert_eq!(
+            ed.pairs[0].1, "",
+            "raw control-char Ctrl+U must clear the value"
+        );
     }
 
     #[test]

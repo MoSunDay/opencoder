@@ -194,6 +194,8 @@ pub async fn resume(
         cancel: None,
         turn_cancel: Some(Arc::new(Mutex::new(CancellationToken::new()))),
         child_turn_cancels: Arc::new(Mutex::new(HashMap::new())),
+        child_steer_gates: Arc::new(Mutex::new(HashMap::new())),
+        steer_gate: None,
         child_cancels: Arc::new(Mutex::new(HashMap::new())),
         summary,
         summary_seq,

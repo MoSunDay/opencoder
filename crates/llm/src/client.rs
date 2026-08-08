@@ -234,6 +234,9 @@ async fn run_stream_once(
     let mut usage: Option<Usage> = None;
     let mut finished = false;
     let mut text_buf = String::new();
+    // Cross-frame guard: set once any frame streamed reasoning via delta (or
+    // the `choice.message` fallback). Suppresses duplicate fallback emission.
+    let mut streamed_reasoning = false;
     // Event-level idle watchdog: reset whenever at least one SSE data frame is
     // decoded. A keep-alive-only connection delivers bytes (so the HTTP
     // read_timeout never trips) but no data frames, so this elapsed check —
@@ -314,6 +317,7 @@ async fn run_stream_once(
                     &mut usage,
                     &mut finished,
                     &mut text_buf,
+                    &mut streamed_reasoning,
                     tx,
                 )
                 .await;
@@ -356,6 +360,7 @@ async fn run_stream_once(
                 &mut usage,
                 &mut finished,
                 &mut text_buf,
+                &mut streamed_reasoning,
                 tx,
             )
             .await;
@@ -495,6 +500,7 @@ async fn handle_event(
     usage: &mut Option<Usage>,
     finished: &mut bool,
     text_buf: &mut String,
+    streamed_reasoning: &mut bool,
     tx: &mpsc::Sender<LlmEvent>,
 ) -> Result<()> {
     if let Some(u) = parsed.get("usage") {
@@ -506,7 +512,9 @@ async fn handle_event(
     };
     for choice in choices {
         if let Some(delta) = choice.get("delta") {
-            emit_delta(delta, tools, text_buf, tx).await?;
+            if emit_delta(delta, tools, text_buf, tx).await? {
+                *streamed_reasoning = true;
+            }
         }
         if let Some(fr) = choice.get("finish_reason").and_then(|v| v.as_str()) {
             *finished = true;
@@ -518,8 +526,98 @@ async fn handle_event(
                 debug!(finish_reason = fr, "stream finished early");
             }
         }
+        // Non-streaming fallback: some providers (notably at max/xhigh
+        // reasoning effort) deliver the full reasoning only on the last frame
+        // under `choice.message.reasoning_content` (and aliases / structured
+        // `content` blocks) rather than as per-delta `delta.reasoning_content`.
+        // Emit it as a single ReasoningDelta so the Thinking label still shows.
+        //
+        // Cross-frame guard: only fire when NO reasoning has been streamed as
+        // deltas earlier in this turn. Providers that both stream reasoning via
+        // `delta.reasoning_content` AND repeat it wholesale in the final
+        // `choice.message` would otherwise double-emit — duplicating the UI
+        // Thinking block and, on tool turns, double-persisting the reasoning
+        // that is resent to the API.
+        if !*streamed_reasoning {
+            if let Some(msg) = choice.get("message") {
+                let reasoning = extract_reasoning(msg);
+                if let Some(r) = reasoning {
+                    if !r.is_empty() {
+                        *streamed_reasoning = true;
+                        let _ = tx.send(LlmEvent::ReasoningDelta(r)).await;
+                    }
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Extract reasoning text from a `delta` or `message` object, accepting the
+/// many provider-specific shapes seen at higher reasoning effort levels
+/// (max / xhigh / high):
+///
+/// 1. A plain-string field under any of the alias keys below.
+/// 2. A JSON array under one of those keys, whose string elements are joined.
+/// 3. A structured `content` array with `{type: "thinking"|"reasoning", ...}`
+///    blocks (OpenAI-style reasoning content blocks; the text lives under
+///    `text` or `content`).
+///
+/// Returns `None` when no reasoning is present. Aliases are checked in
+/// priority order; the first non-empty match wins.
+fn extract_reasoning(obj: &Value) -> Option<String> {
+    // 1 + 2: string or array-of-strings under an alias key.
+    const REASONING_KEYS: &[&str] = &[
+        "reasoning_content",
+        "reasoning",
+        "thinking",
+        "reasoning_summary",
+        "chain_of_thought",
+        "analysis",
+        "thoughts",
+    ];
+    for key in REASONING_KEYS {
+        if let Some(v) = obj.get(key) {
+            if let Some(s) = v.as_str() {
+                if !s.is_empty() {
+                    return Some(s.to_string());
+                }
+            } else if let Some(arr) = v.as_array() {
+                let mut joined = String::new();
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        joined.push_str(s);
+                    }
+                }
+                if !joined.is_empty() {
+                    return Some(joined);
+                }
+            }
+        }
+    }
+    // 3: structured `content` array with thinking/reasoning blocks.
+    if let Some(content) = obj.get("content").and_then(|v| v.as_array()) {
+        let mut joined = String::new();
+        for item in content {
+            let is_reasoning = matches!(
+                item.get("type").and_then(|v| v.as_str()),
+                Some("thinking") | Some("reasoning")
+            );
+            if !is_reasoning {
+                continue;
+            }
+            let text = item
+                .get("text")
+                .and_then(|v| v.as_str())
+                .or_else(|| item.get("content").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            joined.push_str(text);
+        }
+        if !joined.is_empty() {
+            return Some(joined);
+        }
+    }
+    None
 }
 
 async fn emit_delta(
@@ -527,18 +625,54 @@ async fn emit_delta(
     tools: &mut ToolAccumulator,
     text_buf: &mut String,
     tx: &mpsc::Sender<LlmEvent>,
-) -> Result<()> {
+) -> Result<bool> {
+    // Tracks whether this frame's delta carried reasoning text. The caller
+    // (`handle_event`) uses it as a cross-frame guard: the non-streaming
+    // `choice.message` fallback must not re-emit reasoning that was already
+    // delivered as `delta.reasoning_content`/thinking blocks.
+    let mut emitted_reasoning = false;
+    // Plain-string content (the common shape).
     if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
         if !content.is_empty() {
             text_buf.push_str(content);
             let _ = tx.send(LlmEvent::TextDelta(content.to_string())).await;
         }
     }
-    if let Some(reasoning) = delta.get("reasoning_content").and_then(|v| v.as_str()) {
+    // Structured `content` array: some providers (notably at max/xhigh)
+    // deliver content as `[{type:"text",text:..},{type:"thinking",text:..}]`
+    // blocks. Iterate IN ORDER so text/thinking keep their stream ordering.
+    if let Some(content) = delta.get("content").and_then(|v| v.as_array()) {
+        for item in content {
+            match item.get("type").and_then(|v| v.as_str()) {
+                Some("text") => {
+                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                        if !t.is_empty() {
+                            text_buf.push_str(t);
+                            let _ = tx.send(LlmEvent::TextDelta(t.to_string())).await;
+                        }
+                    }
+                }
+                Some("thinking") | Some("reasoning") => {
+                    let t = item
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| item.get("content").and_then(|v| v.as_str()))
+                        .unwrap_or("");
+                    if !t.is_empty() {
+                        emitted_reasoning = true;
+                        let _ = tx.send(LlmEvent::ReasoningDelta(t.to_string())).await;
+                    }
+                }
+                _ => {}
+            }
+        }
+    } else if let Some(reasoning) = extract_reasoning(delta) {
+        // No structured content array — fall back to alias/string reasoning
+        // fields (reasoning_content etc.). Skipped when a structured array is
+        // present to avoid double-emitting the same thinking blocks.
         if !reasoning.is_empty() {
-            let _ = tx
-                .send(LlmEvent::ReasoningDelta(reasoning.to_string()))
-                .await;
+            emitted_reasoning = true;
+            let _ = tx.send(LlmEvent::ReasoningDelta(reasoning)).await;
         }
     }
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
@@ -558,7 +692,7 @@ async fn emit_delta(
             }
         }
     }
-    Ok(())
+    Ok(emitted_reasoning)
 }
 
 fn parse_usage(u: &Value) -> Usage {
@@ -641,96 +775,5 @@ pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Regression guard: the default read timeout must stay at 600 s (10 min).
-    #[test]
-    fn default_read_timeout_is_600s() {
-        assert_eq!(DEFAULT_READ_TIMEOUT, Duration::from_secs(600));
-    }
-
-    // ---- parse_usage: base fields + cache-token normalization ----
-
-    fn usage_json(s: &str) -> Value {
-        serde_json::from_str(s).expect("valid usage json")
-    }
-
-    #[test]
-    fn parse_usage_reads_openai_base_fields() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":100,"completion_tokens":40,"total_tokens":140}"#,
-        ));
-        assert_eq!(u.input_tokens, 100);
-        assert_eq!(u.output_tokens, 40);
-        assert_eq!(u.total_tokens, 140);
-        assert_eq!(u.cache_read_tokens, 0);
-        assert_eq!(u.cache_creation_tokens, 0);
-    }
-
-    #[test]
-    fn parse_usage_reads_anthropic_cache_fields() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,
-               "cache_read_input_tokens":42,"cache_creation_input_tokens":7}"#,
-        ));
-        assert_eq!(u.cache_read_tokens, 42);
-        assert_eq!(u.cache_creation_tokens, 7);
-    }
-
-    #[test]
-    fn parse_usage_reads_short_aliases() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,
-               "cache_read":8,"cache_write":3}"#,
-        ));
-        assert_eq!(u.cache_read_tokens, 8);
-        assert_eq!(u.cache_creation_tokens, 3);
-    }
-
-    #[test]
-    fn parse_usage_reads_openai_cached_tokens() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":300,"completion_tokens":20,"total_tokens":320,
-               "prompt_tokens_details":{"cached_tokens":9000}}"#,
-        ));
-        assert_eq!(u.cache_read_tokens, 9000);
-        assert_eq!(u.cache_creation_tokens, 0);
-    }
-
-    #[test]
-    fn parse_usage_prefers_explicit_anthropic_key_over_alias() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2,
-               "cache_read_input_tokens":7,"cache_read":9}"#,
-        ));
-        assert_eq!(u.cache_read_tokens, 7);
-    }
-
-    #[test]
-    fn parse_usage_missing_cache_fields_default_to_zero() {
-        let u = parse_usage(&usage_json(
-            r#"{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}"#,
-        ));
-        assert_eq!(u.cache_read_tokens, 0);
-        assert_eq!(u.cache_creation_tokens, 0);
-    }
-
-    #[test]
-    fn parse_usage_empty_object_is_all_zeros() {
-        let u = parse_usage(&usage_json("{}"));
-        assert_eq!(u.input_tokens, 0);
-        assert_eq!(u.output_tokens, 0);
-        assert_eq!(u.total_tokens, 0);
-        assert_eq!(u.cache_read_tokens, 0);
-        assert_eq!(u.cache_creation_tokens, 0);
-    }
-
-    #[test]
-    fn first_u64_returns_first_present_key() {
-        let obj = usage_json(r#"{"a":10,"b":20}"#);
-        assert_eq!(first_u64(&obj, &["a", "b"]), Some(10));
-        assert_eq!(first_u64(&obj, &["b", "a"]), Some(20));
-        assert_eq!(first_u64(&obj, &["missing"]), None);
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;

@@ -107,7 +107,10 @@ mod tests {
             Some("parent"),
             "fork resets task_type to the fresh-session default, not the parent's"
         );
-        assert!(child.summary_images.is_empty(), "fork resets summary_images");
+        assert!(
+            child.summary_images.is_empty(),
+            "fork resets summary_images"
+        );
         assert_eq!(child.model.as_deref(), Some("m"), "model carried over");
     }
 

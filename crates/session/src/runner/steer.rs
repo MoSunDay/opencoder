@@ -230,6 +230,7 @@ pub(super) enum IdleAction {
 pub(super) async fn idle_drain(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    steer_epoch: Option<u64>,
 ) -> Result<IdleAction> {
     match drain_one_queued(session, on_event).await? {
         DrainOutcome::Prompt => Ok(IdleAction::Continue),
@@ -239,6 +240,11 @@ pub(super) async fn idle_drain(
             let late_queue = !late_steer && has_pending_queues(session).await;
             if late_steer || late_queue {
                 Ok(IdleAction::Continue)
+            } else if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
+                match gate.settle_idle(epoch).await {
+                    crate::subagent_steer_gate::IdleDecision::Continue => Ok(IdleAction::Continue),
+                    crate::subagent_steer_gate::IdleDecision::Close => Ok(IdleAction::Done),
+                }
             } else {
                 Ok(IdleAction::Done)
             }
@@ -263,6 +269,7 @@ pub(super) enum DrainModeAction {
 pub(super) async fn drain_mode_step(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    steer_epoch: Option<u64>,
 ) -> Result<DrainModeAction> {
     match drain_one_queued(session, on_event).await? {
         DrainOutcome::Prompt => Ok(DrainModeAction::Proceed),
@@ -285,6 +292,13 @@ pub(super) async fn drain_mode_step(
             // Late-check: a steer/queue may have been admitted after the pop.
             if has_pending_steers(session).await || has_pending_queues(session).await {
                 Ok(DrainModeAction::ConsumeNext)
+            } else if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
+                match gate.settle_idle(epoch).await {
+                    crate::subagent_steer_gate::IdleDecision::Continue => {
+                        Ok(DrainModeAction::ConsumeNext)
+                    }
+                    crate::subagent_steer_gate::IdleDecision::Close => Ok(DrainModeAction::Idle),
+                }
             } else {
                 Ok(DrainModeAction::Idle)
             }

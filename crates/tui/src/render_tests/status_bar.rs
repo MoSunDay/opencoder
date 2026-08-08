@@ -2,7 +2,7 @@ use super::*;
 
 /// The status bar keeps ctx / timer / spinner but must NOT contain the brand
 /// name "opencoder" anywhere (regression guard for the de-branding), nor the
-/// model name / `[mode]` chip — those moved up into the top body title.
+/// model name. The mode chip is anchored at the bottom-left.
 #[test]
 fn status_bar_omits_branding_and_top_moved_info() {
     let backend = TestBackend::new(120, 3);
@@ -10,7 +10,7 @@ fn status_bar_omits_branding_and_top_moved_info() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", 0, 0, 200000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
         })
         .unwrap();
 
@@ -24,12 +24,81 @@ fn status_bar_omits_branding_and_top_moved_info() {
         "model must be gone from the status bar (moved to top title); got: {row}"
     );
     assert!(
-        !row.contains("[act]"),
-        "mode chip must be gone from the status bar (moved to top title); got: {row}"
+        row.starts_with(" \u{25cf} [act]"),
+        "a status dot must precede the mode chip at the bottom-left; got: {row}"
     );
     assert!(
         row.contains("ctx"),
         "status bar should still show ctx; got: {row}"
+    );
+}
+
+/// Helper: extract the `String` of display chars strictly between the mode
+/// chip's `] · ` and the `ctx` text. The two 10-segment meters live there.
+fn meters_between_chip_and_ctx(row: &str) -> String {
+    let start = row
+        .find("] \u{00b7} ")
+        .map(|i| i + "] \u{00b7} ".len())
+        .expect("mode chip + separator must be present");
+    let end = row.find("ctx").expect("ctx text must be present");
+    row[start..end].to_string()
+}
+
+/// A single 10-segment compression dial sits between the mode chip and the
+/// ctx text (the second budget-gauge was removed per user request). With
+/// used=0 the single dial is all empty — exactly 10 empty cells.
+#[test]
+fn status_bar_has_single_meter_before_ctx() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    let meters = meters_between_chip_and_ctx(&row);
+    assert_eq!(
+        meters.matches('\u{25b0}').count(),
+        0,
+        "used=0 → no filled cells; got: {meters:?}"
+    );
+    assert_eq!(
+        meters.matches('\u{25b1}').count(),
+        10,
+        "single all-empty meter (10 cells); got: {meters:?}"
+    );
+}
+
+/// The single remaining dial tracks the compaction threshold, not the model
+/// window: with used (180K) above the threshold (80K) but below the window
+/// (200K) the dial is fully filled (10/10) — and no second gauge exists to
+/// fill only ~90%.
+#[test]
+fn status_bar_single_dial_tracks_threshold_not_window() {
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, "act", false, "", 0, 180000, 80000, 200000, 0);
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    let meters = meters_between_chip_and_ctx(&row);
+    assert_eq!(
+        meters.matches('\u{25b0}').count(),
+        10,
+        "dial is full once used exceeds the threshold; got: {meters:?}"
+    );
+    assert_eq!(
+        meters.matches('\u{25b1}').count(),
+        0,
+        "no second meter remains (budget gauge removed); got: {meters:?}"
     );
 }
 
@@ -42,13 +111,24 @@ fn status_bar_running_shows_spinner_and_status() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", 0, 0, 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                true,
+                "compacting\u{2026}",
+                0,
+                0,
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
     let row = row_text(terminal.backend().buffer(), 0, 120);
     assert!(
-        row.contains("thinking"),
+        row.contains("compacting\u{2026}"),
         "status text should appear; got: {row}"
     );
     assert!(
@@ -73,7 +153,7 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, false, "", 0, 0, 200000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
         })
         .unwrap();
 
@@ -96,7 +176,18 @@ fn status_bar_has_no_steer_queue_or_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", 0, 0, 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                true,
+                "compacting\u{2026}",
+                0,
+                0,
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -115,9 +206,8 @@ fn status_bar_has_no_steer_queue_or_ctx() {
     );
 }
 
-
 /// When `task_ms > 0`, the status bar shows the cumulative task duration
-/// AFTER the running spinner (motion → time), styled in warn colour.
+/// BEFORE the running spinner (time → motion), styled in warn colour.
 #[test]
 fn status_bar_shows_task_time() {
     let backend = TestBackend::new(120, 3);
@@ -126,7 +216,18 @@ fn status_bar_shows_task_time() {
         .draw(|f| {
             let area = f.area();
             // 90s = 1m30s
-            render_status(f, area, true, "thinking", 0, 0, 200000, 200000, 90000);
+            render_status(
+                f,
+                area,
+                "act",
+                true,
+                "compacting\u{2026}",
+                0,
+                0,
+                200000,
+                200000,
+                90000,
+            );
         })
         .unwrap();
 
@@ -135,12 +236,10 @@ fn status_bar_shows_task_time() {
     let time_pos = row
         .find("1m30s")
         .expect("status bar should show cumulative task time");
-    let spin_pos = row
-        .find('\u{280b}')
-        .expect("running spinner should render");
+    let spin_pos = row.find('\u{280b}').expect("running spinner should render");
     assert!(
-        time_pos > spin_pos,
-        "task time must sit AFTER the spinner; spin_pos={spin_pos}, time_pos={time_pos}; got: {row}"
+        time_pos < spin_pos,
+        "task time must sit BEFORE the spinner; time_pos={time_pos}, spin_pos={spin_pos}; got: {row}"
     );
     // find() yields a BYTE offset; the row has multi-byte chars (·, ▱, ⠋)
     // so convert to a char index before addressing the buffer.
@@ -162,7 +261,18 @@ fn status_bar_hides_task_time_when_zero() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, true, "thinking", 0, 0, 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                true,
+                "compacting\u{2026}",
+                0,
+                0,
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 

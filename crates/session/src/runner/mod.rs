@@ -177,8 +177,20 @@ pub(crate) async fn run_loop(
 
         // Safe Provider-Turn Boundary: promote any steers admitted since the
         // last turn. A steer is absorbed into history HERE.
+        // Snapshot the child admission epoch before polling the store. A
+        // commit racing this poll advances the epoch, so the final idle gate
+        // cannot close until another boundary has observed the new input.
+        let mut steer_epoch = session.steer_gate.as_ref().map(|gate| gate.epoch());
         let mut steer_recorded = false;
         let steer_prompts = claim_steers(session).await;
+        // Admissions committed while the store poll was running are either
+        // already in `steer_prompts` or remain durable pending rows that the
+        // idle late-peek below will see. Advancing the observed epoch here
+        // avoids an unnecessary empty provider turn when the poll did claim
+        // the racing input.
+        if let Some(gate) = &session.steer_gate {
+            steer_epoch = Some(gate.epoch());
+        }
         if !steer_prompts.is_empty() {
             // Track whether the last steer was a sentinel ClearContext so we
             // can go idle without an LM call.
@@ -220,7 +232,7 @@ pub(crate) async fn run_loop(
         // Drain-mode pre-consume: process queue before the first LLM call
         // (web drain_to_completion). Bare commands loop via continue.
         if drain_mode && steer_prompts.is_empty() {
-            match drain_mode_step(session, &mut *on_event).await? {
+            match drain_mode_step(session, &mut *on_event, steer_epoch).await? {
                 DrainModeAction::Proceed => drain_mode = false,
                 DrainModeAction::ConsumeNext => continue,
                 DrainModeAction::Idle => {
@@ -232,7 +244,7 @@ pub(crate) async fn run_loop(
 
         // Skip LLM: a bare control command was drained last idle boundary.
         if skip && !steer_recorded {
-            match idle_drain(session, &mut *on_event).await? {
+            match idle_drain(session, &mut *on_event, steer_epoch).await? {
                 IdleAction::Continue => continue,
                 IdleAction::SkipLlm => {
                     skip_llm = true;
@@ -288,9 +300,13 @@ pub(crate) async fn run_loop(
             bash_timeout_first = None;
         }
 
+        on_event(SessionEvent::LlmRoundStart {
+            started_at_ms: now_ms(),
+        });
         let turn = match run_one_llm_call(session, registry, on_event).await {
             Ok(t) => t,
             Err(e) => {
+                on_event(SessionEvent::LlmRoundEnd);
                 on_event(SessionEvent::Error(format!("{e:#}")));
                 return Err(e);
             }
@@ -299,10 +315,12 @@ pub(crate) async fn run_loop(
         // hard-cancel (web /stop) → break without persisting the empty turn
         // ("interrupted" status was already emitted by run_one_llm_call).
         if is_turn_cancelled(session) {
+            on_event(SessionEvent::LlmRoundEnd);
             reset_turn_cancel(session);
             continue;
         }
         if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            on_event(SessionEvent::LlmRoundEnd);
             break;
         }
         let (text, reasoning, tool_calls, usage) = turn;
@@ -343,6 +361,7 @@ pub(crate) async fn run_loop(
         session.record(assistant).await;
 
         if tool_calls.is_empty() {
+            on_event(SessionEvent::LlmRoundEnd);
             // Late turn-cancel: capture an interrupt fired during
             // record().await above so it does not strand a queued input
             // via the biased select in idle_drain → claim_one_queued.
@@ -353,7 +372,7 @@ pub(crate) async fn run_loop(
             // Idle boundary: pop exactly one queued follow-up. Bare control
             // commands set skip_llm for the next iteration; a real prompt
             // continues the outer loop for an LLM turn.
-            match idle_drain(session, &mut *on_event).await? {
+            match idle_drain(session, &mut *on_event, steer_epoch).await? {
                 IdleAction::Continue => continue,
                 IdleAction::SkipLlm => {
                     skip_llm = true;
@@ -416,6 +435,7 @@ pub(crate) async fn run_loop(
                         synthetic: false,
                     };
                     session.record(doom_msg).await;
+                    emit(&sink, SessionEvent::LlmRoundEnd);
                     return Err(anyhow!("doom-loop: same tool repeated {}x", DOOM_THRESHOLD));
                 }
             }
@@ -559,6 +579,7 @@ pub(crate) async fn run_loop(
                 };
                 session.record(tool_msg).await;
             }
+            on_event(SessionEvent::LlmRoundEnd);
             on_event(SessionEvent::Status("interrupted".into()));
             break;
         }
@@ -573,6 +594,7 @@ pub(crate) async fn run_loop(
             synthetic: false,
         };
         session.record(tool_msg).await;
+        on_event(SessionEvent::LlmRoundEnd);
 
         if turn_was_interrupted {
             continue;

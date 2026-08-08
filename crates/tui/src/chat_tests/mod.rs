@@ -1,17 +1,45 @@
 use super::*;
 use crate::composer;
 
-mod compaction_state;
-mod steer_echo;
 mod agent_switch;
+mod compaction_state;
 mod image_render;
 mod line_accounting;
 mod plan_card;
 mod requirement_submit;
+mod steer_echo;
 mod subagent;
+mod terminal_safety;
 mod thinking_state;
-mod tool_collapse;
 mod timer;
+mod tool_collapse;
+
+#[test]
+fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1000,
+    });
+    v.apply(&SessionEvent::TextDelta("working".into()));
+    assert_eq!(v.llm_round_started_at_ms, Some(1000));
+    let before = block_text(&v);
+    assert!(before.contains("working"));
+    assert!(!before.contains("turn cost"));
+
+    v.apply(&SessionEvent::LlmRoundEnd);
+    assert_eq!(v.llm_round_started_at_ms, None);
+    assert_eq!(block_text(&v), before, "timer data is not message text");
+}
+
+#[test]
+fn terminal_event_clears_an_unfinished_round() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1000,
+    });
+    v.apply(&SessionEvent::Done);
+    assert_eq!(v.llm_round_started_at_ms, None);
+}
 
 #[test]
 fn text_delta_appends_to_assistant_block() {

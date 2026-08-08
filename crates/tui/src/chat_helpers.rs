@@ -1,5 +1,6 @@
 use crate::chat::ChatView;
 use crate::composer;
+use crate::terminal_text::sanitize_single_line;
 
 pub(crate) fn summarize(input: &serde_json::Value) -> String {
     // The full value is returned verbatim (trimmed); the transcript body
@@ -10,18 +11,13 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
         serde_json::Value::Object(m) => {
             for k in ["command", "path", "description", "pattern", "prompt"] {
                 if let Some(s) = m.get(k).and_then(|v| v.as_str()) {
-                    return s.trim().to_string();
+                    return sanitize_single_line(s.trim()).into_owned();
                 }
             }
-            serde_json::to_string(input)
-                .unwrap_or_default()
-                .trim()
-                .to_string()
+            sanitize_single_line(serde_json::to_string(input).unwrap_or_default().trim())
+                .into_owned()
         }
-        o => serde_json::to_string(o)
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
+        o => sanitize_single_line(serde_json::to_string(o).unwrap_or_default().trim()).into_owned(),
     }
 }
 
@@ -29,7 +25,7 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
 /// an ellipsis when trimmed. Uses composer's width-aware truncation so CJK /
 /// emoji text no longer overflows its visual budget.
 pub(crate) fn short(s: &str, n: usize) -> String {
-    composer::truncate_to_width(s.trim(), n)
+    composer::truncate_to_width(&sanitize_single_line(s.trim()), n)
 }
 
 /// Read the concatenated text content of all blocks (for testing).

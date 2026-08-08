@@ -59,10 +59,7 @@ pub(crate) async fn run(
 
 /// Whether `text` (trimmed, optional leading `/`) names a local command.
 pub(crate) fn is_local(text: &str) -> bool {
-    matches!(
-        text.trim().trim_start_matches('/'),
-        "ps" | "stop" | "ap"
-    )
+    matches!(text.trim().trim_start_matches('/'), "ps" | "stop" | "ap")
 }
 
 /// Flip `autopilot.enabled` on disk, reload, and re-broadcast the config to
@@ -80,7 +77,11 @@ async fn toggle_ap(
     match Config::save(workdir, &patch).and_then(|_| Config::load(workdir)) {
         Ok(reloaded) => {
             *config = reloaded.clone();
-            if cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await.is_err() {
+            if cmd_tx
+                .send(UiCmd::ReloadConfig(Box::new(reloaded)))
+                .await
+                .is_err()
+            {
                 chat.push_marker(Line::from(Span::styled(
                     "[ap] worker channel closed — config saved but not applied",
                     Style::default().fg(theme::err_color()),
@@ -241,7 +242,10 @@ mod tests {
 
         // Second toggle: on -> off.
         toggle_ap(&mut chat, &mut config, &cmd_tx, workdir).await;
-        assert!(!config.autopilot.enabled, "in-memory config flipped back to off");
+        assert!(
+            !config.autopilot.enabled,
+            "in-memory config flipped back to off"
+        );
         assert_eq!(ap_marker_text(false), marker_text(&chat));
         let cmd = cmd_rx.try_recv().expect("second ReloadConfig dispatched");
         assert!(matches!(cmd, UiCmd::ReloadConfig(_)));

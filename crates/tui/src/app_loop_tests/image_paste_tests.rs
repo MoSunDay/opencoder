@@ -2,6 +2,93 @@
 
 use super::*;
 
+/// Plain text is inserted verbatim when no modal owns the paste.
+#[test]
+fn route_paste_into_main_composer_inserts_verbatim_text() {
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let flow = route_paste(
+        "plain text",
+        false,
+        false,
+        false,
+        &mut model_menu,
+        &mut command_menu,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert_eq!(input, "plain text");
+    assert_eq!(idx, "plain text".chars().count());
+}
+
+/// A picker without a text field owns and swallows the paste.
+#[test]
+fn route_paste_swallowed_when_task_picker_open() {
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::new();
+    let mut idx = 0usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let flow = route_paste(
+        "plain text",
+        true,
+        false,
+        false,
+        &mut model_menu,
+        &mut command_menu,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw));
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
+}
+
+/// Cache-salt modal isolation preserves existing composer state.
+#[test]
+fn route_paste_swallowed_when_cache_salt_menu_open() {
+    let mut model_menu: Option<ModelMenu> = None;
+    let mut command_menu: Option<CommandMenu> = None;
+    let mut input = String::from("kept");
+    let mut idx = 2usize;
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut asm = crate::image_chunk::Assembly::new();
+    let mut chat = ChatView::default();
+    let flow = route_paste(
+        "plain text",
+        false,
+        true,
+        false,
+        &mut model_menu,
+        &mut command_menu,
+        &mut input,
+        &mut idx,
+        &mut pending_images,
+        &mut asm,
+        &mut chat,
+        Path::new("."),
+    );
+    assert!(matches!(flow, LoopFlow::Redraw));
+    assert_eq!(input, "kept");
+    assert_eq!(idx, 2);
+}
+
 /// Drive one paste through `route_paste` with no modal open, mirroring the
 /// main-composer path in `app.rs`.
 fn paste(
@@ -334,7 +421,11 @@ fn marker_texts(chat: &ChatView) -> Vec<String> {
         .iter()
         .filter_map(|b| match b {
             ChatBlock::Marker(lines) => {
-                let text: String = lines.iter().flat_map(|l| l.spans.iter()).map(|s| s.content.to_string()).collect();
+                let text: String = lines
+                    .iter()
+                    .flat_map(|l| l.spans.iter())
+                    .map(|s| s.content.to_string())
+                    .collect();
                 Some(text)
             }
             _ => None,
@@ -411,7 +502,9 @@ fn paste_file_path_emits_attach_marker() {
     );
     let markers = marker_texts(&chat);
     assert!(
-        markers.iter().any(|m| m.contains('\u{1f4ce}') && m.contains(".png")),
+        markers
+            .iter()
+            .any(|m| m.contains('\u{1f4ce}') && m.contains(".png")),
         "expected a clip marker with .png, got: {:?}",
         markers
     );

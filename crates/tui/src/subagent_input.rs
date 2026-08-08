@@ -14,14 +14,66 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use opencoder_session::SharedCancel;
+use opencoder_session::{SharedCancel, SubagentSteerGate};
 use opencoder_store::{Delivery, Store};
 
 use crate::app_helpers::{mk_input_with_images, snapshot_image_uris};
 use crate::chat::{ChatBlock, ChatView};
 
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum AdmitOutcome {
+    Admitted,
+    NotRunning,
+    StoreError(String),
+}
+
+/// Apply the local composer/status consequence of an admission result. Keeping
+/// this presentation policy beside admission prevents the main event loop from
+/// duplicating the restore-on-reject invariant.
+pub(crate) fn apply_admit_outcome(
+    outcome: AdmitOutcome,
+    text: String,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    chat: &mut ChatView,
+) {
+    let status = match outcome {
+        AdmitOutcome::Admitted => return,
+        AdmitOutcome::NotRunning => "subagent already finished — steer not submitted".into(),
+        AdmitOutcome::StoreError(error) => error,
+    };
+    *input = text;
+    *cursor_idx = input.chars().count();
+    chat.status = status;
+}
+
+// Adapter at the event-loop boundary: these borrows are independent UI/store
+// state slots and grouping them would only create a second state container.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_subagent_steer(
+    store: &Arc<dyn Store>,
+    child_steer_gates: &Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>>,
+    chat: &mut ChatView,
+    subagent_focus: Option<usize>,
+    text: String,
+    pending_images: &mut Vec<(String, String)>,
+    input: &mut String,
+    cursor_idx: &mut usize,
+) {
+    let outcome = admit_subagent_steer(
+        store,
+        child_steer_gates,
+        chat,
+        subagent_focus,
+        &text,
+        pending_images,
+    )
+    .await;
+    apply_admit_outcome(outcome, text, input, cursor_idx, chat);
+}
+
 /// Admit a steer to the focused subagent's child session and push it to the
-/// child view's `steer_items` for display. Returns `true` on success.
+/// child view's `steer_items` for display.
 ///
 /// Snapshot-and-consume convention matches `steer_fire::admit_keyboard_steer`:
 /// the pending images are only cleared after a successful store write, so an
@@ -29,28 +81,39 @@ use crate::chat::{ChatBlock, ChatView};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn admit_subagent_steer(
     store: &Arc<dyn Store>,
+    child_steer_gates: &Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>>,
     chat: &mut ChatView,
     subagent_focus: Option<usize>,
     text: &str,
     pending_images: &mut Vec<(String, String)>,
-) -> bool {
+) -> AdmitOutcome {
     let idx = match subagent_focus {
         Some(i) => i,
-        None => return false,
+        None => return AdmitOutcome::NotRunning,
     };
-    // Extract child_session_id; only allow when the subagent is still running.
-    let child_session_id = match chat.blocks.get(idx) {
+    // Extract runtime identity; the UI done flag is only a display hint. The
+    // gate is the authoritative lifecycle check that closes atomically with
+    // the child runner.
+    let (child_session_id, task_id) = match chat.blocks.get(idx) {
         Some(ChatBlock::Subagent {
             child_session_id,
+            id,
             done: false,
             ..
-        }) => child_session_id.clone(),
-        _ => return false,
+        }) => (child_session_id.clone(), id.clone()),
+        _ => return AdmitOutcome::NotRunning,
     };
     let clean = text.trim();
     if clean.is_empty() {
-        return false;
+        return AdmitOutcome::NotRunning;
     }
+    let gate = child_steer_gates
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&task_id).cloned());
+    let Some(reservation) = gate.and_then(|gate| gate.reserve()) else {
+        return AdmitOutcome::NotRunning;
+    };
     let image_uris = snapshot_image_uris(pending_images);
     let input = mk_input_with_images(
         &child_session_id,
@@ -61,13 +124,21 @@ pub(crate) async fn admit_subagent_steer(
     );
     match store.admit_input(&input).await {
         Ok(seq) => {
+            if !reservation.commit() {
+                return match store.delete_input(seq).await {
+                    Ok(()) => AdmitOutcome::NotRunning,
+                    Err(e) => AdmitOutcome::StoreError(format!(
+                        "subagent ended and steer rollback failed: {e:#}"
+                    )),
+                };
+            }
             if let Some(ChatBlock::Subagent { view, .. }) = chat.blocks.get_mut(idx) {
                 view.steer_items.push((seq, clean.to_string()));
             }
             pending_images.clear();
-            true
+            AdmitOutcome::Admitted
         }
-        Err(_) => false,
+        Err(e) => AdmitOutcome::StoreError(format!("subagent steer admit failed: {e:#}")),
     }
 }
 
@@ -121,6 +192,15 @@ mod tests {
         Arc::new(LibsqlStore::open_memory().await.unwrap())
     }
 
+    fn gates(task_id: &str) -> Arc<Mutex<HashMap<String, Arc<SubagentSteerGate>>>> {
+        let gates = Arc::new(Mutex::new(HashMap::new()));
+        gates
+            .lock()
+            .unwrap()
+            .insert(task_id.to_string(), SubagentSteerGate::new());
+        gates
+    }
+
     #[tokio::test]
     async fn admit_steer_to_running_subagent() {
         let store = memory_store().await;
@@ -139,9 +219,11 @@ mod tests {
         chat.blocks
             .push(make_subagent_block(false, child_sid, "task-1"));
         let mut pending_images = vec![("img.png".to_string(), "data".to_string())];
+        let gates = gates("task-1");
 
-        let ok = admit_subagent_steer(
+        let outcome = admit_subagent_steer(
             &store,
+            &gates,
             &mut chat,
             Some(0),
             "change direction",
@@ -149,7 +231,7 @@ mod tests {
         )
         .await;
 
-        assert!(ok);
+        assert_eq!(outcome, AdmitOutcome::Admitted);
 
         // Verify steer was admitted to CHILD session (not the parent).
         let pending = store
@@ -180,8 +262,9 @@ mod tests {
             .push(make_subagent_block(true, "sub-done", "task-2"));
         let mut pending_images = vec![("img.png".to_string(), "data".to_string())];
 
-        let ok = admit_subagent_steer(
+        let outcome = admit_subagent_steer(
             &store,
+            &gates("task-2"),
             &mut chat,
             Some(0),
             "should be rejected",
@@ -189,7 +272,7 @@ mod tests {
         )
         .await;
 
-        assert!(!ok);
+        assert_eq!(outcome, AdmitOutcome::NotRunning);
         // Rejected without consuming images.
         assert_eq!(pending_images.len(), 1);
     }
@@ -199,9 +282,17 @@ mod tests {
         let store = memory_store().await;
         let mut chat = ChatView::default();
 
-        let ok = admit_subagent_steer(&store, &mut chat, None, "no focus", &mut Vec::new()).await;
+        let outcome = admit_subagent_steer(
+            &store,
+            &gates("unused"),
+            &mut chat,
+            None,
+            "no focus",
+            &mut Vec::new(),
+        )
+        .await;
 
-        assert!(!ok);
+        assert_eq!(outcome, AdmitOutcome::NotRunning);
     }
 
     #[tokio::test]
@@ -211,9 +302,17 @@ mod tests {
         chat.blocks
             .push(make_subagent_block(false, "sub-test-2", "task-3"));
 
-        let ok = admit_subagent_steer(&store, &mut chat, Some(0), "   ", &mut Vec::new()).await;
+        let outcome = admit_subagent_steer(
+            &store,
+            &gates("task-3"),
+            &mut chat,
+            Some(0),
+            "   ",
+            &mut Vec::new(),
+        )
+        .await;
 
-        assert!(!ok);
+        assert_eq!(outcome, AdmitOutcome::NotRunning);
     }
 
     #[tokio::test]
@@ -223,11 +322,13 @@ mod tests {
         chat.blocks
             .push(make_subagent_block(false, "sub-no-row", "task-fk"));
         let mut pending_images = vec![("img.png".to_string(), "data".to_string())];
+        let gates = gates("task-fk");
 
         // No child session row exists -> admit_input hits the FK constraint
         // and fails. The steer must be rejected WITHOUT dropping the images.
-        let ok = admit_subagent_steer(
+        let outcome = admit_subagent_steer(
             &store,
+            &gates,
             &mut chat,
             Some(0),
             "lost steer",
@@ -235,7 +336,7 @@ mod tests {
         )
         .await;
 
-        assert!(!ok, "FK violation must reject the steer");
+        assert!(matches!(outcome, AdmitOutcome::StoreError(_)));
         assert_eq!(
             pending_images.len(),
             1,
@@ -247,6 +348,41 @@ mod tests {
                 "child steer panel must not be mutated on store failure"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn closed_gate_rejects_without_writing_or_consuming_images() {
+        let store = memory_store().await;
+        let child_sid = "sub-closed";
+        store
+            .create_session(&SessionMeta {
+                id: child_sid.to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let gates = gates("task-closed");
+        gates
+            .lock()
+            .unwrap()
+            .get("task-closed")
+            .unwrap()
+            .force_close();
+        let mut chat = ChatView::default();
+        chat.blocks
+            .push(make_subagent_block(false, child_sid, "task-closed"));
+        let mut images = vec![("img.png".into(), "data".into())];
+
+        let outcome =
+            admit_subagent_steer(&store, &gates, &mut chat, Some(0), "too late", &mut images).await;
+
+        assert_eq!(outcome, AdmitOutcome::NotRunning);
+        assert_eq!(images.len(), 1);
+        assert!(store
+            .pending_inputs(child_sid, Delivery::Steer)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

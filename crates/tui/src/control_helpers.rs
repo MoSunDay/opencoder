@@ -42,9 +42,7 @@ pub(crate) fn is_pure_control_cmd(clean: &str) -> bool {
 /// bare command (`rest == None`) and is correctly treated as a toggle.
 pub(crate) fn plan_compound_for_submit(input: &str) -> Option<String> {
     match opencoder_session::split_control_prefix(input) {
-        Some((opencoder_session::ControlCmd::SwitchAgent(mode), Some(_rest)))
-            if mode == "plan" =>
-        {
+        Some((opencoder_session::ControlCmd::SwitchAgent(mode), Some(_rest))) if mode == "plan" => {
             Some(input.trim().to_string())
         }
         _ => None,

@@ -59,6 +59,10 @@ pub(super) async fn run_subagent(
         }
     };
     let child_session_id = format!("sub-{}", new_id());
+    let steer_gate = crate::SubagentSteerGate::new();
+    if let Ok(mut map) = parent.child_steer_gates.lock() {
+        map.insert(call_id.clone(), steer_gate.clone());
+    }
     let preview: String = prompt.chars().take(80).collect();
     emit(
         sink,
@@ -77,6 +81,7 @@ pub(super) async fn run_subagent(
         parent.client.clone(),
         parent.working_dir.clone(),
     );
+    child.steer_gate = Some(steer_gate.clone());
     // Derive a child token from the parent's hard-cancel token. A parent
     // double-Esc (parent cancelled) cascades to the child via the parent-child
     // link; but the child can also be independently cancelled through
@@ -239,6 +244,13 @@ pub(super) async fn run_subagent(
     // durably persisted.
     let _ = tokio::time::timeout(std::time::Duration::from_secs(30), flusher).await;
 
+    // Close admission before removing the runtime registries. A store write
+    // that reserved before a forced close will fail commit and roll itself
+    // back instead of leaving a permanently pending child steer.
+    steer_gate.force_close();
+    if let Ok(mut map) = parent.child_steer_gates.lock() {
+        map.remove(&call_id);
+    }
     // Remove the turn-cancel and cancel tokens from the parent's registries
     // now that the child has finished.
     if let Ok(mut map) = parent.child_turn_cancels.lock() {

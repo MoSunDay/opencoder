@@ -114,7 +114,7 @@ pub async fn delete_session(
             // DELETE and keeps making LLM requests on a gone session).
             if let Some(h) = state.handles.lock().await.remove(&id) {
                 h.cancel.lock().await.cancel();
-            opencoder_session::fire_child_cancels(&h.child_cancels);
+                opencoder_session::fire_child_cancels(&h.child_cancels);
             }
             Json(json!({ "ok": true, "id": id })).into_response()
         }
@@ -287,6 +287,22 @@ pub async fn post_agent(
     Path(id): Path<String>,
     Json(body): Json<SwitchBody>,
 ) -> Response {
+    // get-or-create the handle so the override is never dropped, even right
+    // after create_session when no drain has started yet.
+    let handle = {
+        let mut map = state.handles.lock().await;
+        map.entry(id.clone())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+    // RUNNING-GATE: an actively draining session must not be mode-switched —
+    // the live turn keeps its current agent, so applying the switch now would
+    // leave chat.agent / persisted meta diverging from the executing mode.
+    // Refuse BEFORE any store-meta or override mutation (atomicity). Mirrors
+    // `post_interrupt`'s draining gate.
+    if handle.draining.load(Ordering::SeqCst) {
+        return error_409("agent switch refused while drain running");
+    }
     if let Err(e) = state
         .store
         .update_session(
@@ -301,14 +317,6 @@ pub async fn post_agent(
     {
         return error_500(format!("update_session: {e:#}"));
     }
-    // get-or-create the handle so the override is never dropped, even right
-    // after create_session when no drain has started yet.
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
     handle.overrides.lock().await.agent = Some(body.value.clone());
     Json(json!({ "ok": true, "agent": body.value })).into_response()
 }
@@ -330,6 +338,21 @@ pub async fn post_model(
     Path(id): Path<String>,
     Json(body): Json<ModelBody>,
 ) -> Response {
+    // get-or-create the handle so the override is never dropped, even right
+    // after create_session when no drain has started yet.
+    let handle = {
+        let mut map = state.handles.lock().await;
+        map.entry(id.clone())
+            .or_insert_with(SessionHandle::new)
+            .clone()
+    };
+    // RUNNING-GATE: a model override has the identical deferred-next-drain
+    // semantics as the agent switch — a mid-turn model switch would diverge
+    // from the model actually executing the live turn. Refuse BEFORE any
+    // config / store-meta / override mutation (atomicity).
+    if handle.draining.load(Ordering::SeqCst) {
+        return error_409("model switch refused while drain running");
+    }
     // Persist to global config FIRST, before mutating session meta or runtime
     // overrides, so a save failure leaves session state untouched.
     if body.persist_default {
@@ -352,14 +375,6 @@ pub async fn post_model(
     {
         return error_500(format!("update_session: {e:#}"));
     }
-    // get-or-create the handle so the override is never dropped, even right
-    // after create_session when no drain has started yet.
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
     handle.overrides.lock().await.model = Some(body.value.clone());
     Json(json!({ "ok": true, "model": body.value })).into_response()
 }
@@ -418,6 +433,27 @@ pub async fn post_subagent_steer(
             .into_response();
     }
 
+    // Reserve admission against the live child runner before the async store
+    // write. A stale `Running` DB row alone is not sufficient: once the gate
+    // closes, no runner exists that could consume another steer.
+    let handle = state.handles.lock().await.get(&id).cloned();
+    let gate = handle.as_ref().and_then(|h| {
+        h.child_steer_gates
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&task_id).cloned())
+    });
+    let Some(reservation) = gate.and_then(|gate| gate.reserve()) else {
+        return (
+            axum::http::StatusCode::CONFLICT,
+            Json(json!({
+                "ok": false,
+                "error": "subagent is no longer accepting steers"
+            })),
+        )
+            .into_response();
+    };
+
     // Admit the steer to the child session (no drain — the child's run_loop
     // is already running inside the parent's tool execution).
     let input = SessionInput {
@@ -436,9 +472,23 @@ pub async fn post_subagent_steer(
         Err(e) => return error_500(format!("admit: {e:#}")),
     };
 
+    if !reservation.commit() {
+        if let Err(e) = state.store.delete_input(seq).await {
+            return error_500(format!("subagent steer rollback: {e:#}"));
+        }
+        return (
+            axum::http::StatusCode::CONFLICT,
+            Json(json!({
+                "ok": false,
+                "error": "subagent is no longer accepting steers"
+            })),
+        )
+            .into_response();
+    }
+
     // Fire the child's turn-cancel token to interrupt the current turn,
     // forcing the steer to be absorbed at the next turn boundary.
-    if let Some(h) = state.handles.lock().await.get(&id).cloned() {
+    if let Some(h) = handle {
         if let Ok(g) = h.child_turn_cancels.lock() {
             if let Some(token) = g.get(&task_id).cloned() {
                 if let Ok(t) = token.lock() {
@@ -524,14 +574,12 @@ pub async fn get_events(
     //      here because the live copy has no seq to compare; tier (1) removes
     //      the collision risk whenever a seq is available.
     let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
-    let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(
-        std::sync::Mutex::new(
-            persisted
-                .iter()
-                .map(|e| (e.kind.clone(), e.data.to_string()))
-                .collect(),
-        ),
-    );
+    let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(std::sync::Mutex::new(
+        persisted
+            .iter()
+            .map(|e| (e.kind.clone(), e.data.to_string()))
+            .collect(),
+    ));
 
     let replay = futures::stream::iter(persisted);
     let live = tokio_stream::wrappers::BroadcastStream::new(rx)
@@ -588,6 +636,13 @@ pub async fn get_event_seq(
     Json(json!({ "id": id, "seq": seq }))
 }
 
+fn error_409(msg: &str) -> Response {
+    (
+        axum::http::StatusCode::CONFLICT,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
+}
 fn error_404(msg: &str) -> Response {
     (
         axum::http::StatusCode::NOT_FOUND,

@@ -54,8 +54,9 @@ pub struct SessionHandle {
     /// Receiver for drain commands. `Option` so the drain task can `take()` it
     /// for exclusive access, then put it back. Panic-safe via `CmdRxGuard`.
     pub cmd_rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<DrainCmd>>>,
-    pub child_turn_cancels:
-        Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
+    pub child_turn_cancels: Arc<std::sync::Mutex<HashMap<String, opencoder_session::SharedCancel>>>,
+    pub child_steer_gates:
+        Arc<std::sync::Mutex<HashMap<String, Arc<opencoder_session::SubagentSteerGate>>>>,
     pub child_cancels: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
     /// Parent turn-level cancel token. When a steer is admitted while a drain
     /// is running, this fires so the current LLM turn / tool execution is
@@ -80,6 +81,7 @@ impl SessionHandle {
             cmd_tx,
             cmd_rx: std::sync::Mutex::new(Some(cmd_rx)),
             child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            child_steer_gates: Arc::new(std::sync::Mutex::new(HashMap::new())),
             child_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             turn_cancel: Arc::new(std::sync::Mutex::new(CancellationToken::new())),
         })
@@ -176,7 +178,13 @@ pub async fn admit_and_drain(
         let handle_clone = handle.clone();
         tokio::spawn(async move {
             drain_to_completion(
-                handles_clone, store_clone, &sid, client_clone, wd, cfg, handle_clone,
+                handles_clone,
+                store_clone,
+                &sid,
+                client_clone,
+                wd,
+                cfg,
+                handle_clone,
             )
             .await;
         });
@@ -270,7 +278,13 @@ pub async fn ensure_drain(
         let handle_clone = handle.clone();
         tokio::spawn(async move {
             drain_to_completion(
-                handles_clone, store_clone, &sid, client_clone, wd, cfg, handle_clone,
+                handles_clone,
+                store_clone,
+                &sid,
+                client_clone,
+                wd,
+                cfg,
+                handle_clone,
             )
             .await;
         });
@@ -335,9 +349,7 @@ async fn apply_drain_cmd(
                 broadcast(SessionEvent::PlanHandoff(plan));
                 broadcast(SessionEvent::Done);
             } else {
-                broadcast(SessionEvent::Error(
-                    "no plan to hand off".into(),
-                ));
+                broadcast(SessionEvent::Error("no plan to hand off".into()));
             }
         }
         DrainCmd::SetSkill(body) => {
@@ -354,8 +366,9 @@ async fn apply_drain_cmd(
                         new_cfg.stream_idle_timeout(),
                         new_cfg.network.proxy.as_deref(),
                     ) {
-                        Ok(c) => session
-                            .apply_config_reload(new_cfg, Arc::new(c) as Arc<dyn ChatStream>),
+                        Ok(c) => {
+                            session.apply_config_reload(new_cfg, Arc::new(c) as Arc<dyn ChatStream>)
+                        }
                         Err(_) => session.apply_config_reload_keep_client(new_cfg),
                     },
                     Err(_) => session.apply_config_reload_keep_client(new_cfg),
@@ -432,6 +445,7 @@ async fn drain_to_completion(
     };
     session.cancel = Some(handle.cancel.lock().await.clone());
     session.child_turn_cancels = handle.child_turn_cancels.clone();
+    session.child_steer_gates = handle.child_steer_gates.clone();
     session.child_cancels = handle.child_cancels.clone();
     session.turn_cancel = Some(handle.turn_cancel.clone());
 

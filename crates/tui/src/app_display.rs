@@ -1,6 +1,48 @@
 //! Display-state helpers extracted from `app.rs` to keep the event loop concise.
+//!
+//! Besides the steer/queue/timer helpers this module owns the top body-title
+//! *composition* (pure, terminal-free): `workdir · model · effort`.
+
+use std::path::Path;
+
+use ratatui::text::{Line, Span};
 
 use crate::chat::{ChatBlock, ChatView};
+
+/// Display width (terminal columns) of the jump-to-top `⬆` arrow label on the
+/// body's top-border row: `"    ⬆    "` (4 spaces + wide ⬆ + 4 spaces). Must
+/// stay in sync with the literal rendered in `render.rs` (guarded by a test).
+pub(super) const TOP_ARROW_W: u16 = 10;
+
+/// Compose the top-level body title `Line` for the non-subagent view.
+///
+/// Model name and optional thinking effort use the same unstyled text as the
+/// workdir. The mode is rendered at the bottom-left in the status bar.
+pub(super) fn compose_top_title(
+    workdir: &Path,
+    model_bare: &str,
+    effort: Option<&str>,
+) -> Line<'static> {
+    let workdir =
+        crate::terminal_text::sanitize_single_line(&workdir.display().to_string()).into_owned();
+    let model_bare = crate::terminal_text::sanitize_single_line(model_bare).into_owned();
+    let effort = effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(crate::terminal_text::sanitize_single_line)
+        .map(|value| value.into_owned());
+
+    let mut spans = vec![
+        Span::raw(workdir),
+        Span::raw(" \u{00b7} "),
+        Span::raw(model_bare),
+    ];
+    if let Some(effort) = effort {
+        spans.push(Span::raw(" \u{00b7} "));
+        spans.push(Span::raw(effort));
+    }
+    Line::from(spans)
+}
 
 /// Decide which steer/queue sources the queue panel should show.
 ///
@@ -34,137 +76,124 @@ pub(super) fn is_input_disabled(chat: &ChatView, subagent_focus: Option<usize>) 
     })
 }
 
-/// Tail-duration timer value shown at the tail of the body content.
+/// Live provider/model-round timer shown after the latest body message.
 ///
-/// - Running subagent focused → its live elapsed (`now - started_at_ms`).
-/// - No subagent focused → elapsed of the current run of consecutive tool
-///   calls (a "round"), measured from the first call's start (see
-///   [`call_round_ms`]). Disappears as soon as the last tool finishes.
-/// - Done/finished subagent focused, or invalid index → 0.
-pub(super) fn display_tail_ms(chat: &ChatView, subagent_focus: Option<usize>, now: i64) -> u64 {
+/// A round begins before the model call and ends only after every function call
+/// requested by that assistant message. Terminal/idle views return zero, so
+/// historical messages never retain a frozen timer.
+pub(super) fn display_tail_ms(
+    chat: &ChatView,
+    subagent_focus: Option<usize>,
+    now: i64,
+    running: bool,
+) -> u64 {
     if let Some(idx) = subagent_focus {
         match chat.blocks.get(idx) {
             Some(ChatBlock::Subagent {
-                started_at_ms,
-                done: false,
-                ..
-            }) => ((now - *started_at_ms).max(0)) as u64,
+                view, done: false, ..
+            }) => live_round_ms(view, now),
             _ => 0,
         }
+    } else if running {
+        live_round_ms(chat, now)
     } else {
-        call_round_ms(chat, now)
+        0
     }
 }
 
-/// Milliseconds since the first call of the current round of tool calls
-/// started; 0 when no tool is currently running.
-///
-/// A round is the contiguous tail run of `Tool` blocks ending in a *running*
-/// one (`elapsed_ms == None`). Its start is the first block of that segment,
-/// so a burst of consecutive calls is timed as one unit from its beginning.
-/// Any non-Tool block (text, marker, …) or a finished round truncates it.
-fn call_round_ms(chat: &ChatView, now: i64) -> u64 {
-    let Some(last_running) = chat.blocks.iter().rposition(|b| {
-        matches!(b, ChatBlock::Tool { elapsed_ms: None, .. })
-    }) else {
-        return 0;
-    };
-    let mut start = last_running;
-    while start > 0 && matches!(chat.blocks[start - 1], ChatBlock::Tool { .. }) {
-        start -= 1;
-    }
-    let started_at_ms = match &chat.blocks[start] {
-        ChatBlock::Tool { started_at_ms, .. } => *started_at_ms,
-        _ => unreachable!("blocks[start] is a Tool by construction"),
-    };
-    ((now - started_at_ms).max(0)) as u64
+fn live_round_ms(chat: &ChatView, now: i64) -> u64 {
+    chat.llm_round_started_at_ms
+        .map_or(0, |started| ((now - started).max(0)) as u64)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::text::Line;
 
-    fn subagent_block(started_at_ms: i64, done: bool) -> ChatBlock {
+    fn subagent_block(round_started_at_ms: Option<i64>, done: bool) -> ChatBlock {
+        let view = ChatView {
+            llm_round_started_at_ms: round_started_at_ms,
+            ..Default::default()
+        };
         ChatBlock::Subagent {
             id: "sub-1".to_string(),
             child_session_id: "child-1".to_string(),
             kind: "explore".to_string(),
             prompt: "test".to_string(),
-            view: ChatView::default(),
+            view,
             done,
             ok: false,
             cancelled: false,
             summary: String::new(),
-            started_at_ms,
+            started_at_ms: 500,
             elapsed_ms: None,
-        }
-    }
-
-    fn tool_block(started_at_ms: i64, elapsed_ms: Option<u64>) -> ChatBlock {
-        ChatBlock::Tool {
-            id: "t1".to_string(),
-            header: Line::from("bash ls"),
-            output: Vec::new(),
-            collapsed: true,
-            started_at_ms,
-            elapsed_ms,
         }
     }
 
     #[test]
     fn running_subagent_shows_live_elapsed() {
         let mut chat = ChatView::default();
-        chat.blocks.push(subagent_block(1000, false));
+        chat.blocks.push(subagent_block(Some(1000), false));
         // now=5000, started_at_ms=1000 -> 4000
-        assert_eq!(display_tail_ms(&chat, Some(0), 5000), 4000);
+        assert_eq!(display_tail_ms(&chat, Some(0), 5000, true), 4000);
     }
 
     #[test]
     fn done_subagent_returns_zero() {
         let mut chat = ChatView::default();
-        chat.blocks.push(subagent_block(1000, true));
-        assert_eq!(display_tail_ms(&chat, Some(0), 5000), 0);
+        chat.blocks.push(subagent_block(Some(1000), true));
+        assert_eq!(display_tail_ms(&chat, Some(0), 5000, true), 0);
     }
 
     #[test]
-    fn no_running_tool_returns_zero() {
-        // Empty chat: nothing running.
+    fn top_level_uses_only_the_live_llm_round() {
+        let chat = ChatView {
+            llm_round_started_at_ms: Some(1000),
+            ..Default::default()
+        };
+        assert_eq!(display_tail_ms(&chat, None, 5000, true), 4000);
+        assert_eq!(display_tail_ms(&chat, None, 5000, false), 0);
+    }
+
+    #[test]
+    fn between_rounds_has_no_timer() {
         let chat = ChatView::default();
-        assert_eq!(display_tail_ms(&chat, None, 5000), 0);
-        // Only finished tools: the round is over, tail timer must vanish.
-        let mut chat = ChatView::default();
-        chat.blocks.push(tool_block(1000, Some(3000)));
-        assert_eq!(display_tail_ms(&chat, None, 5000), 0);
+        assert_eq!(display_tail_ms(&chat, None, 5000, true), 0);
+    }
+
+    // ----- compose_top_title layout edge cases (pure, terminal-free) -----
+
+    fn title_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     #[test]
-    fn running_tool_round_shows_elapsed() {
-        let mut chat = ChatView::default();
-        chat.blocks.push(tool_block(1000, None));
-        // now=5000, started_at_ms=1000 -> 4000
-        assert_eq!(display_tail_ms(&chat, None, 5000), 4000);
+    fn compose_title_uses_the_workdir_style_for_model_and_effort() {
+        let line = compose_top_title(Path::new("/root/opencoder"), "glm-5.2", Some("high"));
+        let t = title_text(&line);
+        assert_eq!(t, "/root/opencoder \u{00b7} glm-5.2 \u{00b7} high");
+        assert!(
+            line.spans
+                .iter()
+                .all(|span| span.style == Default::default()),
+            "workdir, separators, model, and effort must share the raw style"
+        );
     }
 
     #[test]
-    fn round_spans_consecutive_tools_from_first_start() {
-        let mut chat = ChatView::default();
-        // A burst: first call finished, second finished, third still running.
-        chat.blocks.push(tool_block(1000, Some(2000)));
-        chat.blocks.push(tool_block(2000, Some(3000)));
-        chat.blocks.push(tool_block(3000, None));
-        // The round is timed from the FIRST call of the burst (1000) to now.
-        assert_eq!(display_tail_ms(&chat, None, 6000), 5000);
+    fn compose_title_omits_blank_effort_and_sanitizes_values() {
+        let line = compose_top_title(Path::new("/root/op\nencoder"), "glm\n5.2", Some("  "));
+        assert_eq!(title_text(&line), "/root/op encoder \u{00b7} glm 5.2");
     }
 
+    /// `TOP_ARROW_W` must match the literal rendered in `render.rs` so the
+    /// `compose_top_title` padding reserves exactly the arrow's display width.
+    /// The label is `"    ⬆    "` (4 spaces + wide ⬆ + 4 spaces).
     #[test]
-    fn non_tool_block_breaks_the_round() {
-        let mut chat = ChatView::default();
-        chat.blocks.push(tool_block(1000, None));
-        chat.blocks.push(ChatBlock::Marker(Vec::new()));
-        chat.blocks.push(tool_block(4000, None));
-        // The earlier tool is separated by a non-Tool block: the round only
-        // spans the tail segment, starting at the last tool (4000).
-        assert_eq!(display_tail_ms(&chat, None, 6000), 2000);
+    fn top_arrow_width_matches_label() {
+        assert_eq!(
+            TOP_ARROW_W as usize,
+            crate::composer::str_width("    \u{2b06}    ")
+        );
     }
 }

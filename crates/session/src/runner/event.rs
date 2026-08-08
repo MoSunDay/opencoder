@@ -10,6 +10,14 @@ use opencoder_store::EventKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionEvent {
+    /// One provider/model round started. This is display-only lifecycle data:
+    /// it never enters [`Message`] content or the next model request context.
+    LlmRoundStart {
+        started_at_ms: i64,
+    },
+    /// The current provider/model round finished, including every tool call
+    /// requested by its assistant message.
+    LlmRoundEnd,
     TextDelta(String),
     ReasoningDelta(String),
     ToolStart {
@@ -106,6 +114,8 @@ impl SessionEvent {
     /// surface replays identically.
     pub fn sse_kind(&self) -> &'static str {
         match self {
+            SessionEvent::LlmRoundStart { .. } => "llm_round_start",
+            SessionEvent::LlmRoundEnd => "llm_round_end",
             SessionEvent::TextDelta(_) => "text_delta",
             SessionEvent::ReasoningDelta(_) => "reasoning_delta",
             SessionEvent::ToolStart { .. } => "tool_start",
@@ -133,6 +143,10 @@ impl SessionEvent {
     /// payload shape is identical to the live broadcast.
     pub fn sse_data(&self) -> serde_json::Value {
         match self {
+            SessionEvent::LlmRoundStart { started_at_ms } => {
+                serde_json::json!({ "started_at_ms": started_at_ms })
+            }
+            SessionEvent::LlmRoundEnd => serde_json::json!({}),
             SessionEvent::TextDelta(t) => serde_json::json!({ "text": t }),
             SessionEvent::ReasoningDelta(r) => serde_json::json!({ "text": r }),
             SessionEvent::ToolStart { id, name, input } => {
@@ -199,6 +213,10 @@ impl SessionEvent {
     /// (not the SSE form), matching how `sse_data` serializes it.
     pub fn from_sse(kind: &str, data: serde_json::Value) -> Option<Self> {
         Some(match kind {
+            "llm_round_start" => SessionEvent::LlmRoundStart {
+                started_at_ms: data.get("started_at_ms")?.as_i64()?,
+            },
+            "llm_round_end" => SessionEvent::LlmRoundEnd,
             "text_delta" => SessionEvent::TextDelta(data.get("text")?.as_str()?.to_string()),
             "reasoning_delta" => {
                 SessionEvent::ReasoningDelta(data.get("text")?.as_str()?.to_string())
@@ -280,6 +298,7 @@ impl SessionEvent {
     /// Coarse [`EventKind`] for backward-compatible DB `type` column.
     pub fn coarse_kind(&self) -> EventKind {
         match self {
+            SessionEvent::LlmRoundStart { .. } | SessionEvent::LlmRoundEnd => EventKind::Step,
             SessionEvent::TextDelta(_) => EventKind::TextDelta,
             SessionEvent::ReasoningDelta(_) => EventKind::TextDelta,
             SessionEvent::ToolStart { .. } => EventKind::ToolStart,
@@ -324,6 +343,10 @@ mod from_sse_tests {
     #[test]
     fn from_sse_roundtrips_all_variants() {
         let cases: Vec<SessionEvent> = vec![
+            SessionEvent::LlmRoundStart {
+                started_at_ms: 1234,
+            },
+            SessionEvent::LlmRoundEnd,
             SessionEvent::TextDelta("hi".into()),
             SessionEvent::ReasoningDelta("think".into()),
             SessionEvent::ToolStart {
@@ -388,8 +411,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            19,
-            "expected all 19 unique kinds, got {kinds:?}"
+            21,
+            "expected all 21 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {

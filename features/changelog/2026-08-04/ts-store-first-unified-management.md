@@ -23,11 +23,14 @@ session，裸 `ts` 复用最近 live session，新增 `-c` 清理 stopped sessio
   才新建。`--new`（`force_new=true`）跳过复用，恒新建。
 - **`ts_list(cli)`**：Store-first 统一面。从 Store `list_sessions` 拉全部
   session，与 tmux `list_managed` 交叉标注存活状态。列：`marker id8
-  created-ago workdir task-head`（`*`=attached、`·`=detached、空=stopped）。
+  created-ago workdir task-head`（`*`=attached、`·`=live(detached)、`-`=stopped）。
   排序：非 stopped 优先 → workdir 路径升序 → 创建时间降序（同路径组内最新
   在前）。
 - **`ts_resume(cli, target)`**：存活则 attach；stopped 则从 Store 历史冷启动
   （`spawn_session` 重新拉起 tmux）。Store 中不存在才报错。
+- 注：ts 归属的持久标记是 `model IS NULL`——mode-switched ts 会话
+  （`persist_agent` 只 patch `agent`）仍保持 model NULL，stopped 行显示 `-`；
+  普通 `tui`/`run` 首条消息必落库 model，故被排除。
 - **`ts_cleanup(cli)`**（新）：删除 Store 中存在但 tmux 中已不存活的 session。
 - **内部纯函数**：
   - `classify(id, tmux_map) -> TmuxState`（Attached / Detached / Dead 三态）

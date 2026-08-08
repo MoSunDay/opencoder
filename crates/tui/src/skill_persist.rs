@@ -54,7 +54,6 @@ pub(crate) async fn persist_skill(
         .await;
 }
 
-
 /// Resolve `$skill` tokens in `text` (activating the skill in-memory) **and**
 /// persist the result to the store when it changed — the single composition
 /// `run_app` relies on for every Submit / Steer / Queue. Extracted so the
@@ -226,7 +225,13 @@ mod tests {
         // The clean text is what a queue row would store; the skill lives on the
         // session row — exactly what resume reads back via meta.skill.
         assert_eq!(
-            store.get_session("s").await.unwrap().unwrap().skill.as_deref(),
+            store
+                .get_session("s")
+                .await
+                .unwrap()
+                .unwrap()
+                .skill
+                .as_deref(),
             Some("the repo-memory skill body"),
             "queued combined skill+text must persist the skill for resume"
         );
@@ -292,10 +297,7 @@ mod tests {
         assert!(unresolved.is_empty());
         assert_eq!(active_skill.as_deref(), Some("alpha"));
         assert_eq!(
-            skill_handle
-                .lock()
-                .unwrap()
-                .as_deref(),
+            skill_handle.lock().unwrap().as_deref(),
             Some("the alpha body"),
             "skill_prompt (in-memory) must carry the resolved body"
         );

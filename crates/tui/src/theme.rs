@@ -135,15 +135,33 @@ pub fn current_theme() -> ThemeKind {
 // Each returns the matching field of the active palette; see the `const`
 // block above for the meaning of each slot (the dark values).
 
-pub fn accent() -> Color { palette(current_theme()).accent }
-pub fn text() -> Color { palette(current_theme()).text }
-pub fn muted() -> Color { palette(current_theme()).muted }
-pub fn subtle() -> Color { palette(current_theme()).subtle }
-pub fn warn_color() -> Color { palette(current_theme()).warn }
-pub fn ok_color() -> Color { palette(current_theme()).ok }
-pub fn err_color() -> Color { palette(current_theme()).err }
-pub fn info_color() -> Color { palette(current_theme()).info }
-pub fn local_color() -> Color { palette(current_theme()).local }
+pub fn accent() -> Color {
+    palette(current_theme()).accent
+}
+pub fn text() -> Color {
+    palette(current_theme()).text
+}
+pub fn muted() -> Color {
+    palette(current_theme()).muted
+}
+pub fn subtle() -> Color {
+    palette(current_theme()).subtle
+}
+pub fn warn_color() -> Color {
+    palette(current_theme()).warn
+}
+pub fn ok_color() -> Color {
+    palette(current_theme()).ok
+}
+pub fn err_color() -> Color {
+    palette(current_theme()).err
+}
+pub fn info_color() -> Color {
+    palette(current_theme()).info
+}
+pub fn local_color() -> Color {
+    palette(current_theme()).local
+}
 
 /// Selection-row background. Dark uses 256-colour index 238, light uses the
 /// softer 252 for white-background terminals.
@@ -258,8 +276,14 @@ mod tests {
 
     #[test]
     fn theme_kind_label_roundtrip() {
-        assert_eq!(ThemeKind::from_label(ThemeKind::Dark.label()), ThemeKind::Dark);
-        assert_eq!(ThemeKind::from_label(ThemeKind::Light.label()), ThemeKind::Light);
+        assert_eq!(
+            ThemeKind::from_label(ThemeKind::Dark.label()),
+            ThemeKind::Dark
+        );
+        assert_eq!(
+            ThemeKind::from_label(ThemeKind::Light.label()),
+            ThemeKind::Light
+        );
         assert_eq!(ThemeKind::from_label("light"), ThemeKind::Light);
         assert_eq!(ThemeKind::from_label("Light"), ThemeKind::Light);
         assert_eq!(ThemeKind::from_label(" LIGHT "), ThemeKind::Light);
@@ -320,7 +344,10 @@ mod tests {
         let (bar, c) = context_meter(pct);
         assert_eq!(bar.chars().count(), 10);
         assert_eq!(bar.chars().filter(|&ch| ch == '\u{25b0}').count(), filled);
-        assert_eq!(bar.chars().filter(|&ch| ch == '\u{25b1}').count(), 10 - filled);
+        assert_eq!(
+            bar.chars().filter(|&ch| ch == '\u{25b1}').count(),
+            10 - filled
+        );
         assert_eq!(c, color);
     }
 
@@ -430,9 +457,7 @@ mod tests {
         let top_row = |block: Block<'static>| {
             let mut terminal =
                 ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
-            terminal
-                .draw(|f| f.render_widget(block, f.area()))
-                .unwrap();
+            terminal.draw(|f| f.render_widget(block, f.area())).unwrap();
             let buf = terminal.backend().buffer();
             let mut s = String::new();
             for x in 0..40 {

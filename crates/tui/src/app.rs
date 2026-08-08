@@ -1,15 +1,19 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use anyhow::Result;
 use crossterm::event::Event;
 use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::{
+    style::Style,
+    text::{Line, Span},
+};
+use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -17,31 +21,32 @@ use crate::cache_salt_menu::{handle_cache_salt_key, CacheSaltMenu, CacheSaltOutc
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::input::spawn_input_pump;
-use crate::terminal::consume_modifier_or_release;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::render::{MouseHits, Term};
 use crate::skill_persist::resolve_persist;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
+use crate::terminal::consume_modifier_or_release;
 use crate::theme;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 #[path = "app_loop.rs"]
 pub(crate) mod app_loop;
 
-#[path = "app_task.rs"]
-mod app_task;
 #[path = "app_bootstrap.rs"]
 mod app_bootstrap;
 #[path = "app_display.rs"]
 mod app_display;
+#[path = "app_task.rs"]
+mod app_task;
 
 #[path = "steer_dispatch.rs"]
 mod steer_dispatch;
 #[path = "steer_fire.rs"]
 mod steer_fire;
-#[path = "subagent_input.rs"] mod subagent_input;
+#[path = "subagent_input.rs"]
+mod subagent_input;
 
 /// Animation tick rate for the running spinner (10 FPS).
 const ANIM_TICK_MS: u64 = 100;
@@ -77,8 +82,7 @@ pub(super) async fn run_app(
         .turn_cancel
         .clone()
         .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
-    let child_cancels = session.child_cancels.clone();
-    let child_turn_cancels = session.child_turn_cancels.clone();
+    let mut child_runtime = crate::worker::ChildRuntimeHandles::from_session(&session);
     let mut skill_handle = session.skill_prompt.clone();
     let mut chat = initial_chat_view(&session, &store).await;
     let mut input = String::new();
@@ -90,8 +94,7 @@ pub(super) async fn run_app(
     let mut running = false;
     let mut prev_running = false;
     let mut task_elapsed_ms: u64 = 0;
-    let mut last_clock = Instant::now();
-    let mut cancelled = false;
+    let (mut last_clock, mut cancelled) = (Instant::now(), false);
     let mut drain_pending = false;
     let mut undo_state = crate::undo::init(&input, cursor_idx);
     let mut scroll: u32 = 0;
@@ -136,7 +139,6 @@ pub(super) async fn run_app(
     // single-line / lo==hi selection).
     let mut last_click: Option<Instant> = None;
     let (mut dbl_click, mut shift_held) = (false, false);
-    // Per-session UI state snapshots — saved on `/task` switch, restored on return.
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -171,23 +173,21 @@ pub(super) async fn run_app(
     body_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut quitting = false; // render "shutting down…" frame before worker-shutdown wait
     let mut skip_next_render = false;
-    // `dirty` = state changed since last render; `render_pending` = a frame tick
-    // authorized it. Redraw needs BOTH, capping refresh at `/config` fps (default 10).
     let mut dirty = true;
     let mut render_pending = true;
-    // Body cache: a cloned snapshot of the active ChatView, rebuilt at 3 FPS.
-    // The spinner (driven by real-time anim_tick) still animates at full frame
-    // rate; only the text layout in render_body is throttled.
     let mut body_refresh_pending = true;
     let mut display_chat_cached: Option<ChatView> = None;
     let mut viewport: Option<crate::render_viewport::ViewportCache> = None;
-    // `hits` persists outside `loop {}` — resetting inside drops idle clicks.
     let mut hits = MouseHits::default();
 
-    // Idle-resize safety net: on kernel-size mismatch (lost Resize — tmux/fast drag) force autoresize + redraw.
     let mut last_size: Option<(u16, u16)> = terminal.size().ok().map(|r| (r.width, r.height));
     loop {
-        app_loop::tick_clock(running, &mut prev_running, &mut last_clock, &mut task_elapsed_ms);
+        app_loop::tick_clock(
+            running,
+            &mut prev_running,
+            &mut last_clock,
+            &mut task_elapsed_ms,
+        );
         let app_loop::DisplayState {
             agent_name,
             status,
@@ -202,6 +202,8 @@ pub(super) async fn run_app(
             sys_tokens,
             &config,
             &workdir,
+            last_size.map_or(0, |(w, _)| w),
+            u16::from(scroll > 0) * app_display::TOP_ARROW_W,
         );
         if dirty && (body_refresh_pending || display_chat_cached.is_none()) {
             display_chat_cached = Some(display_chat.clone());
@@ -213,7 +215,7 @@ pub(super) async fn run_app(
             app_display::steer_queue_sources(&chat, subagent_focus, &queue_items);
         let input_disabled = app_display::is_input_disabled(&chat, subagent_focus);
         let now = opencoder_core::message::now_ms();
-        let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now);
+        let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now, running);
 
         if dirty && render_pending {
             if !skip_next_render {
@@ -322,6 +324,7 @@ pub(super) async fn run_app(
                                         &mut hist_idx,
                                         &mut cancel,
                                         &mut turn_cancel,
+                                        &mut child_runtime,
                                         &mut skill_handle,
                                     )
                                     .await?;
@@ -515,11 +518,7 @@ pub(super) async fn run_app(
                                 }
                             }
                             KeyAction::SubagentSteer(text) => {
-                                // Steer goes to the CHILD session; stay in the subagent view.
-                                subagent_input::admit_subagent_steer(
-                                    &store, &mut chat, subagent_focus, &text, &mut pending_images,
-                                )
-                                .await;
+                                subagent_input::handle_subagent_steer(&store, &child_runtime.steer_gates, &mut chat, subagent_focus, text, &mut pending_images, &mut input, &mut cursor_idx).await;
                                 follow = true;
                             }
                             KeyAction::Steer(text) => {
@@ -549,6 +548,7 @@ pub(super) async fn run_app(
                                     )
                                     .await;
                                 }
+                                push_history(&mut history, &mut hist_idx, &text);
                                 // Enter admits without interrupting (`>` interrupts instead).
                                 follow = true;
                             }
@@ -580,6 +580,7 @@ pub(super) async fn run_app(
                                         chat.note_requirement_submitted();
                                     }
                                 }
+                                push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
                             }
                             KeyAction::QueueUnsupported => {
@@ -594,24 +595,28 @@ pub(super) async fn run_app(
                             KeyAction::SwitchAgent(name) => {
                                 if matches!(
                                     app_loop::handle_switch_agent(
-                                        name, &mut chat, &mut running, &mut follow, &mut input,
-                                        &mut cursor_idx, &mut mode_flash,
-                                        anim_tick, &cmd_tx, &mut cancel, &mut sys_tokens,
-                                        &workdir, &active_skill_body,
+                                        name, false, &mut chat, &mut running, &mut follow, &mut input,
+                                        &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
+                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body,
                                     )
                                     .await,
                                     app_loop::SwitchOutcome::Quit
-                                ) {
-                                    break;
-                                }
+                                ) { break; }
                             }
                             KeyAction::SwitchAgentNoClear(name) => {
-                                // t+Tab chord: switch agent mode but skip the plan->act handoff /
-                                // TranscriptReset — transcript preserved in full (Shift+Tab collapses it).
-                                mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-                                sys_tokens =
-                                    sys_tokens_for(&name, &workdir, active_skill_body.as_deref());
-                                let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+                                // t+Tab chord: skip the plan->act handoff / TranscriptReset —
+                                // transcript preserved in full. Same running-gated handler as
+                                // Shift+Tab so a mode switch mid-turn defers to the next idle
+                                // boundary (no direct UiCmd::SwitchAgent leak).
+                                if matches!(
+                                    app_loop::handle_switch_agent(
+                                        name, true, &mut chat, &mut running, &mut follow, &mut input,
+                                        &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
+                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body,
+                                    )
+                                    .await,
+                                    app_loop::SwitchOutcome::Quit
+                                ) { break; }
                             }
                             KeyAction::SetSkill(opt) => {
                                 let skill_body = opt.as_ref().map(|(_, body)| body.clone());
@@ -647,7 +652,7 @@ pub(super) async fn run_app(
                                 // AgentSwitch, so drop the deferred arming it left behind.
                                 chat.pending_plan_arm = false;
                                 cancel.cancel();
-                                opencoder_session::fire_child_cancels(&child_cancels);
+                                opencoder_session::fire_child_cancels(&child_runtime.cancels);
                                 // Double-Esc hard-abort: also drop any pending
                                 // steer/queue inputs so they don't resurface on
                                 // resume. delete_input is idempotent.
@@ -708,8 +713,8 @@ pub(super) async fn run_app(
                         }
                         if outcome == MouseOutcome::SteerSubmit {
                             let outcome = steer_fire::handle_steer_submit(
-                                subagent_focus, running, &child_cancels,
-                                &child_turn_cancels, &turn_cancel, &chat,
+                                subagent_focus, running, &child_runtime.cancels,
+                                &child_runtime.turn_cancels, &turn_cancel, &chat,
                             );
                             if outcome == steer_fire::SteerSubmitOutcome::StartTurn {
                                 start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
@@ -784,8 +789,8 @@ pub(super) async fn run_app(
 
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, clear_pending_inputs, handle_mouse, initial_chat_view,
-    mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_user,
-    snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_history,
+    push_user, snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::{queued_item_display, skill_token_display, skill_trigger};
 

@@ -44,7 +44,13 @@ pub(crate) enum QueueEffect {
 /// integration test can pin the exact mapping `run_app`/`app_task` use.
 pub fn pending_mirror(rows: Vec<opencoder_store::SessionInput>) -> Vec<(i64, String)> {
     rows.into_iter()
-        .map(|si| (si.seq.unwrap_or(0), si.display_text.unwrap_or(si.prompt)))
+        .map(|si| {
+            let display = si.display_text.unwrap_or(si.prompt);
+            (
+                si.seq.unwrap_or(0),
+                crate::terminal_text::sanitize_single_line(&display).into_owned(),
+            )
+        })
         .collect()
 }
 
@@ -156,16 +162,11 @@ pub(crate) fn visible_window(total: usize, height: usize, scroll: u32) -> (usize
 /// Thin scrollbar drawn in the rightmost panel column when entries overflow
 /// the viewport. Same manual thumb-ratio approach as `render::draw_scrollbar`
 /// (which stays private to `render.rs`): track `\u{250a}`, thumb `\u{2588}`.
-fn draw_queue_scrollbar(
-    f: &mut Frame,
-    area: Rect,
-    max_scroll: usize,
-    scroll: u32,
-    visible_h: u16,
-) {
+fn draw_queue_scrollbar(f: &mut Frame, area: Rect, max_scroll: usize, scroll: u32, visible_h: u16) {
     let scroll = (scroll as usize).min(max_scroll) as u32;
     let track_h = area.height as u64;
-    let thumb_h = ((visible_h as u64 * track_h) / (visible_h as u64 + max_scroll as u64)).max(1) as u16;
+    let thumb_h =
+        ((visible_h as u64 * track_h) / (visible_h as u64 + max_scroll as u64)).max(1) as u16;
     let max_off = area.height.saturating_sub(thumb_h);
     let thumb_off = if max_scroll == 0 {
         0u16

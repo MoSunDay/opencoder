@@ -19,7 +19,9 @@ fn replayed_tool_block_omits_duration_span() {
         id: "a1".into(),
         role: Role::Assistant,
         blocks: vec![
-            ContentBlock::Text { text: "running bash".into() },
+            ContentBlock::Text {
+                text: "running bash".into(),
+            },
             ContentBlock::ToolUse {
                 id: "t1".into(),
                 name: "bash".into(),
@@ -101,4 +103,58 @@ fn replayed_orphan_tool_result_omits_duration_span() {
         }
         _ => unreachable!(),
     }
+}
+
+/// Replaying an assistant message carrying Reasoning blocks must restore them
+/// as collapsed `ChatBlock::Thinking` blocks — so the `💭 Thinking` label
+/// survives resume / compaction (mirrors the live ReasoningDelta path).
+#[test]
+fn replayed_reasoning_restored_as_thinking_block() {
+    let msg = Message {
+        id: "r1".into(),
+        role: Role::Assistant,
+        blocks: vec![
+            ContentBlock::Reasoning {
+                text: "think hard".into(),
+            },
+            ContentBlock::Text {
+                text: "final answer".into(),
+            },
+        ],
+        model: None,
+        agent: None,
+        usage: MessageUsage::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+
+    let mut chat = ChatView::default();
+    replay_one(&mut chat, &msg, &HashMap::new());
+
+    let thinking = chat
+        .blocks
+        .iter()
+        .find(|b| matches!(b, ChatBlock::Thinking { .. }))
+        .expect("Reasoning block must be restored as a Thinking block");
+
+    match thinking {
+        ChatBlock::Thinking {
+            text,
+            collapsed,
+            sealed,
+        } => {
+            assert_eq!(text, "think hard");
+            assert!(*collapsed, "replayed thinking starts collapsed");
+            assert!(*sealed, "replayed thinking is sealed (not streaming)");
+        }
+        _ => unreachable!(),
+    }
+
+    // The assistant text must still be present after the thinking block.
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Assistant { .. })),
+        "assistant text block must still be replayed"
+    );
 }

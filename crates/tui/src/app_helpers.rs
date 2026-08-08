@@ -104,7 +104,7 @@ pub(crate) async fn initial_chat_view(
         .await
     } else {
         crate::chat::ChatView {
-            agent: session.agent.name.clone(),
+            agent: crate::terminal_text::sanitize_single_line(&session.agent.name).into_owned(),
             ..Default::default()
         }
     }
@@ -408,8 +408,7 @@ pub(crate) fn apply_skill_tokens_with(
     // Rebuild `clean` so that ONLY resolved tokens are stripped — unresolved
     // `$name` bytes are preserved verbatim as literal text, preventing content
     // loss (e.g. a glued `$review1) task` keeps the `1)` instead of vanishing).
-    let resolved_set: std::collections::HashSet<String> =
-        resolved_names.iter().cloned().collect();
+    let resolved_set: std::collections::HashSet<String> = resolved_names.iter().cloned().collect();
     let clean = crate::skill_token::strip_resolved_skill_tokens(text, &resolved_set);
     (clean, unresolved)
 }
@@ -450,14 +449,21 @@ pub(crate) fn resolve_and_warn_with(
     (clean, unresolved)
 }
 
+/// Record a submitted/steered/queued input so Up/Down arrow can recall it,
+/// WITHOUT echoing a transcript marker (the steer/queue panels already
+/// display the text).
+pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {
+    history.push(text.to_string());
+    *hist_idx = None;
+}
+
 pub(crate) fn push_user(
     chat: &mut ChatView,
     history: &mut Vec<String>,
     hist_idx: &mut Option<usize>,
     text: &str,
 ) {
-    history.push(text.to_string());
-    *hist_idx = None;
+    push_history(history, hist_idx, text);
     chat.push_marker(Line::from(Span::styled(
         format!("user: {text}"),
         Style::default().add_modifier(Modifier::BOLD),
@@ -769,7 +775,6 @@ pub(crate) fn apply_force_redraw<B: ratatui::backend::Backend>(
         *skip_next_render = false;
     }
 }
-
 
 #[cfg(test)]
 #[path = "app_helpers_tests/mod.rs"]

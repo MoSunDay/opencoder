@@ -358,10 +358,10 @@ fn sanitize_strips_c0_controls() {
 }
 
 #[test]
-fn sanitize_keeps_tab_and_newline() {
-    assert_eq!(sanitize("a\tb"), "a\tb");
+fn sanitize_expands_tab_and_keeps_newline() {
+    assert_eq!(sanitize("a\tb"), "a    b");
     assert_eq!(sanitize("a\nb"), "a\nb");
-    assert_eq!(sanitize("a\t\n\tb"), "a\t\n\tb");
+    assert_eq!(sanitize("a\t\n\tb"), "a    \n    b");
 }
 
 #[test]
@@ -416,4 +416,9 @@ fn insert_char_skips_control_chars() {
     let (text, idx) = insert_char("abc", 1, 'X');
     assert_eq!(text, "aXbc");
     assert_eq!(idx, 2);
+}
+
+#[test]
+fn insert_char_expands_tab_to_match_terminal_width() {
+    assert_eq!(insert_char("ab", 1, '\t'), ("a    b".to_string(), 5));
 }

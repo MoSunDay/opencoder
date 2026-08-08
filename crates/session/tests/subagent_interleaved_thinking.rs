@@ -127,6 +127,7 @@ async fn seed_parent(store: &Arc<dyn Store>, id: &str) {
             handoff_plan: None,
             skill: None,
             task_type: None,
+            requirement: None,
         })
         .await
         .unwrap();

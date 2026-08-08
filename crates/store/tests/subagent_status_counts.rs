@@ -39,6 +39,7 @@ fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {
         handoff_plan: None,
         skill: None,
         task_type: task_type.map(str::to_string),
+        requirement: None,
     }
 }
 
@@ -177,6 +178,7 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         handoff_plan: None,
         skill: None,
         task_type: None,
+        requirement: None,
     };
     store.create_session(&meta).await.unwrap();
 }

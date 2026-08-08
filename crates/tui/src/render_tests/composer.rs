@@ -19,6 +19,7 @@ fn composer_renders_prompt_and_multiline_text() {
                 &[], // no pending images
                 false,
                 None,
+                None,
             );
         })
         .unwrap();

@@ -3,7 +3,6 @@
 //! and delegates to `crate::render::render`.
 
 use std::io::Write;
-use std::time::{Duration, Instant};
 
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::text::Line;
@@ -24,13 +23,6 @@ fn flash_status_text(mode_flash: &Option<(String, u32)>, anim_tick: u32) -> Opti
     mode_flash
         .as_ref()
         .and_then(|(t, s)| flash_visible(*s, anim_tick, MODE_FLASH_TICKS).then_some(t.as_str()))
-}
-
-/// Transient copy-status text if still within 2s of firing.
-fn copy_status_text(copy_status: &Option<(String, Instant)>) -> Option<&str> {
-    copy_status
-        .as_ref()
-        .and_then(|(m, t)| (t.elapsed() < Duration::from_secs(2)).then_some(m.as_str()))
 }
 
 /// Run one complete frame as a synchronized terminal update. Supporting
@@ -109,8 +101,7 @@ pub(crate) fn render_frame(
     keymap_menu: Option<&crate::keymap_menu::KeymapMenu>,
     hits: &mut crate::render::MouseHits,
     viewport: &mut Option<crate::render_viewport::ViewportCache>,
-    selection: Option<crate::selection::SelRange>,
-    copy_status: &Option<(String, Instant)>,
+    shift_held: bool,
     pending_images: &[(String, String)],
     input_disabled: bool,
     tail_ms: u64,
@@ -125,6 +116,7 @@ pub(crate) fn render_frame(
         None => (input, cursor_idx),
     };
     let plan_mode: Option<&str> = plan_label.as_deref();
+    let edit_title: Option<&str> = plan_edit.as_ref().map(|pe| pe.title());
     synchronized_frame(
         terminal,
         |terminal| begin_synchronized_update(terminal.backend_mut()),
@@ -157,11 +149,11 @@ pub(crate) fn render_frame(
                 keymap_menu,
                 hits,
                 viewport,
-                selection,
-                copy_status_text(copy_status),
+                shift_held,
                 pending_images,
                 input_disabled,
                 plan_mode,
+                edit_title,
                 tail_ms,
                 task_ms,
                 is_top_level,

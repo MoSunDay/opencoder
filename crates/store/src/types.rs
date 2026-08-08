@@ -42,6 +42,10 @@ pub struct SessionMeta {
     /// NOT NULL column in the DB so it can be indexed and filtered cheaply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_type: Option<String>,
+    /// User-edited task description text, persisted via the /requirement
+    /// slash command so it survives session resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -81,6 +85,8 @@ pub struct SessionPatch {
     pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirement: Option<String>,
 }
 
 fn is_false(b: &bool) -> bool {

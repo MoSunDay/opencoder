@@ -8,6 +8,11 @@ const INSERT_MESSAGE: &str = "\
 INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, mode, summary)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)";
 
+/// Maximum number of messages inserted per transaction in batch operations.
+/// Keeping transactions bounded prevents WAL bloat and reduces lock
+/// contention under concurrent access.
+const BATCH_CHUNK: usize = 200;
+
 pub async fn append(conn: &Connection, session_id: &str, msg: &Message) -> Result<i64> {
     // Delegate to `append_many` so the INSERT + seq read happen inside a single
     // transaction (same `run_tx` + `last_seq_in_tx` pattern). The autocommit +
@@ -17,6 +22,19 @@ pub async fn append(conn: &Connection, session_id: &str, msg: &Message) -> Resul
 }
 
 pub async fn append_many(
+    conn: &Connection,
+    session_id: &str,
+    msgs: &[Message],
+) -> Result<Vec<i64>> {
+    let mut all_seqs = Vec::with_capacity(msgs.len());
+    for chunk in msgs.chunks(BATCH_CHUNK) {
+        let seqs = append_chunk_in_tx(conn, session_id, chunk).await?;
+        all_seqs.extend(seqs);
+    }
+    Ok(all_seqs)
+}
+
+async fn append_chunk_in_tx(
     conn: &Connection,
     session_id: &str,
     msgs: &[Message],
@@ -113,6 +131,22 @@ pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Re
     if msgs.is_empty() {
         return Ok(ImportReport::default());
     }
+    let mut count = 0u32;
+    for chunk in msgs.chunks(BATCH_CHUNK) {
+        count += import_chunk_in_tx(conn, session_id, chunk).await?;
+    }
+    Ok(ImportReport {
+        sessions: 1,
+        messages: count,
+        skipped: 0,
+    })
+}
+
+async fn import_chunk_in_tx(
+    conn: &Connection,
+    session_id: &str,
+    msgs: &[Message],
+) -> Result<u32> {
     super::tx::run_tx(conn, "BEGIN", || async move {
         let mut count = 0u32;
         for m in msgs {
@@ -135,11 +169,7 @@ pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Re
             .await?;
             count += 1;
         }
-        Ok(ImportReport {
-            sessions: 1,
-            messages: count,
-            skipped: 0,
-        })
+        Ok(count)
     })
     .await
 }

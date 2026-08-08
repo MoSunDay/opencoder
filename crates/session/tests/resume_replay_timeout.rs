@@ -59,6 +59,7 @@ fn session_meta(id: &str, agent: &str) -> SessionMeta {
         handoff_plan: None,
         skill: None,
         task_type: None,
+        requirement: None,
     }
 }
 

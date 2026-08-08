@@ -204,6 +204,7 @@ pub async fn resume(
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         plan_input_count: 0,
+        requirement: meta.requirement.clone(),
     };
     Ok(s)
 }

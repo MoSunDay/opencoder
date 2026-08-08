@@ -95,7 +95,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
     let input = "ab cdefgh";
     terminal
         .draw(|f| {
-            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2, &[], false, None);
+            render_composer(f, Rect::new(0, 0, 12, 6), input, 0, 8, 2, &[], false, None, None);
         })
         .unwrap();
     let buf = terminal.backend().buffer();

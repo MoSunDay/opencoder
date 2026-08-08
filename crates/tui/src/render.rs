@@ -122,11 +122,11 @@ pub(crate) fn render<B: Backend>(
     keymap_menu: Option<&KeymapMenu>,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
-    selection: Option<crate::selection::SelRange>,
-    copy_status: Option<&str>,
+    shift_held: bool,
     pending_images: &[(String, String)],
     input_disabled: bool,
     plan_mode: Option<&str>,
+    edit_title: Option<&str>,
     tail_ms: u64,
     task_ms: u64,
     is_top_level: bool,
@@ -209,7 +209,6 @@ pub(crate) fn render<B: Backend>(
                 &mut hits.subagent_btns,
                 &mut hits.tool_btns,
                 &mut hits.compaction_btns,
-                selection,
                 viewport,
                 is_top_level,
                 tail_ms,
@@ -257,6 +256,7 @@ pub(crate) fn render<B: Backend>(
             },
             input_disabled,
             plan_mode,
+            edit_title,
         );
         let composer_area = chunks[ci];
         ci += 1;
@@ -295,8 +295,8 @@ pub(crate) fn render<B: Backend>(
             let is_plan = text.contains("plan");
             render_status_chip(f, composer_area, text, mode_flash_bg(is_plan));
         }
-        if let Some(text) = copy_status {
-            render_status_chip(f, composer_area, text, theme::ok_color());
+        if shift_held {
+            render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
         }
         if !input_disabled && model_menu.is_none() {
             let position = composer::cursor_screen_position(
@@ -331,7 +331,6 @@ fn render_body(
     subagent_btns: &mut Vec<SubagentBtn>,
     tool_btns: &mut Vec<ToolBtn>,
     compaction_btns: &mut Vec<CompactionBtn>,
-    selection: Option<crate::selection::SelRange>,
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
     tail_ms: u64,
@@ -445,9 +444,6 @@ fn render_body(
         draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
     }
 
-    // Selection highlight — drawn last so it sits on top of the text.
-    crate::selection::render_overlay(f, text_area, *scroll, selection);
-
     // Follow indicator on the body's bottom-border row, right-aligned.
     let (label, style) = if follow {
         (
@@ -544,6 +540,7 @@ fn render_composer(
     pending_images: &[(String, String)],
     disabled: bool,
     plan_mode: Option<&str>,
+    edit_title: Option<&str>,
 ) {
     if disabled {
         let dim = Style::default()
@@ -566,11 +563,17 @@ fn render_composer(
         return;
     }
     let block = if let Some(label) = plan_mode {
+        let border_fg = if edit_title == Some("edit requirement") {
+            theme::ok_color()
+        } else {
+            theme::warn_color()
+        };
+        let title_text = edit_title.unwrap_or("edit plan");
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme::warn_color()))
-            .title(" edit plan ")
+            .border_style(Style::default().fg(border_fg))
+            .title(format!(" {title_text} "))
             .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left))
     } else {
         Block::default()
@@ -620,7 +623,11 @@ fn render_composer(
         let mut spans: Vec<Span> = Vec::new();
         if ri == 0 {
             let prompt_color = if plan_mode.is_some() {
-                theme::warn_color()
+                if edit_title == Some("edit requirement") {
+                    theme::ok_color()
+                } else {
+                    theme::warn_color()
+                }
             } else {
                 theme::accent()
             };

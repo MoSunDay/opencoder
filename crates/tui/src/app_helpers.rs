@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use opencoder_core::{resolve_agent, Config, Endpoint};
@@ -25,19 +25,12 @@ use crate::worker::UiCmd;
 
 use crate::queue_panel;
 use crate::render::{in_rect, MouseHits};
-use crate::selection::SelRange;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
+#[cfg(test)]
 #[cfg(test)]
 pub(crate) use crate::resize::size_changed;
 pub(crate) use crate::resize::{on_resize_event, poll_idle_resize};
-
-/// Maximum interval (ms) between two left-clicks to count as a double-click.
-const DBL_CLICK_MS: u64 = 500;
-
-pub(crate) fn is_within_dbl_click_window(prev: Instant, now: Instant) -> bool {
-    now.duration_since(prev) < Duration::from_millis(DBL_CLICK_MS)
-}
 
 /// Copy-paste-ready command to resume a session by id.
 pub(crate) fn resume_hint(id: &str) -> String {
@@ -126,7 +119,6 @@ pub(crate) fn pre_key_intercept(
     bindings: &KeyBindings,
     subagent_focus: &mut Option<usize>,
     follow: &mut bool,
-    selection: &mut Option<SelRange>,
     last_esc: &mut Option<Instant>,
     chat: &mut ChatView,
     input: &mut String,
@@ -138,7 +130,6 @@ pub(crate) fn pre_key_intercept(
     if subagent_focus.is_some() && k.code == KeyCode::Esc {
         *subagent_focus = None;
         *follow = true; // follow mode: render clamps scroll to bottom (render.rs)
-        *selection = None;
         *last_esc = None;
         return true;
     }
@@ -150,7 +141,6 @@ pub(crate) fn pre_key_intercept(
                 view.collapse_all_collapsible();
             }
             *subagent_focus = None;
-            *selection = None;
             *last_esc = None;
         }
         chat.collapse_all_collapsible();
@@ -463,6 +453,12 @@ pub(crate) fn push_user(
     hist_idx: &mut Option<usize>,
     text: &str,
 ) {
+    if chat.first_prompt.is_none() {
+        let t = text.trim();
+        if !t.is_empty() && !t.starts_with('/') {
+            chat.first_prompt = Some(t.to_string());
+        }
+    }
     push_history(history, hist_idx, text);
     chat.push_marker(Line::from(Span::styled(
         format!("user: {text}"),
@@ -509,7 +505,6 @@ pub(crate) async fn handle_mouse(
     hits: &MouseHits,
     scroll: &mut u32,
     follow: &mut bool,
-    selection: &mut Option<SelRange>,
     chat: &mut ChatView,
     subagent_focus: &mut Option<usize>,
     subagent_sys: &mut u64,
@@ -517,50 +512,32 @@ pub(crate) async fn handle_mouse(
     queue_items: &mut Vec<(i64, String)>,
     session_id: &str,
     store: &dyn Store,
-    copy_msg: &mut Option<String>,
-    last_click: &mut Option<Instant>,
-    dbl_click: &mut bool,
     queue_scroll: &mut u32,
 ) -> MouseOutcome {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            // Follow button: highest-priority check — MUST precede double-click
-            // detection so a quick succession of body-click + arrow-click does
-            // not have the arrow-click swallowed by the 400 ms dbl-click guard.
+            // Follow button: highest-priority check so a quick succession of
+            // body-click + arrow-click does not have the arrow-click swallowed.
             if let Some(r) = hits.jump_btn {
                 if in_rect(r, m.column, m.row) {
                     *follow = true;
-                    *selection = None;
-                    *dbl_click = false;
-                    *last_click = Some(Instant::now());
                     return MouseOutcome::None; // deterministic jump to bottom
                 }
             }
 
             // Top-jump button: scroll back to the very first row. Sits next to
-            // the jump_btn check and likewise precedes dbl-click detection.
+            // the jump_btn check.
             if let Some(r) = hits.top_btn {
                 if in_rect(r, m.column, m.row) {
                     *scroll = 0;
                     *follow = false;
-                    *selection = None;
-                    *dbl_click = false;
-                    *last_click = Some(Instant::now());
                     return MouseOutcome::None; // jump to top
                 }
             }
 
-            // ── Button-hit detection (BEFORE the dbl-click guard) ──
+            // ── Button-hit detection ──
             // Queue / Thinking / Subagent affordances must respond on the
-            // FIRST click. The 400 ms double-click window further down is meant
-            // ONLY for selecting a line of body text, so it must NOT swallow a
-            // header/button click that lands within 400 ms of a previous click.
-            // That was the bug that made Thinking expansion probabilistic: the
-            // second of two quick clicks — or any click soon after a body click
-            // — hit the dbl-click early-return and never reached the toggle
-            // loop. jump_btn/top_btn already precede the guard for the same
-            // reason; queue/thinking/subagent now do too.
-            let now = Instant::now();
+            // FIRST click (no early-return guard before the toggle loop).
             let mut consumed = false;
             for btn in &hits.queue_btns {
                 if !in_rect(btn.rect, m.column, m.row) {
@@ -628,7 +605,6 @@ pub(crate) async fn handle_mouse(
                     *scroll = 0;
                     *follow = true;
                     *subagent_focus = Some(btn.block_idx);
-                    *selection = None;
                     // Cache subagent's system-prompt
                     // token estimate once on entry.
                     if let Some(crate::chat::ChatBlock::Subagent { kind, .. }) =
@@ -641,67 +617,8 @@ pub(crate) async fn handle_mouse(
                 }
             }
             if consumed {
-                // A button/header consumed this click: finalize exactly like
-                // jump_btn does so the next click's dbl-click window starts
-                // fresh from here (a toggle click must not count as the first
-                // half of a body-text double-click).
-                *last_click = Some(now);
-                *dbl_click = false;
                 return MouseOutcome::None;
             }
-
-            // Double-click within DBL_CLICK_MS: select current line & copy it.
-            let is_dbl = last_click
-                .map(|t| is_within_dbl_click_window(t, now))
-                .unwrap_or(false);
-            *last_click = Some(now);
-
-            if is_dbl {
-                *dbl_click = true;
-                if let Some(r) = hits.body {
-                    if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
-                        *selection = Some((abs, abs));
-                    }
-                }
-                return MouseOutcome::None; // go straight to selection mode
-            }
-            *dbl_click = false;
-
-            // No button hit and not a double-click: begin a text-selection
-            // drag inside the body. Stored as an absolute content row so it
-            // stays anchored while scrolling.
-            if let Some(r) = hits.body {
-                if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
-                    *selection = Some((abs, abs));
-                }
-            }
-        }
-        MouseEventKind::Drag(MouseButton::Left) => {
-            if let (Some((anchor, _)), Some(r)) = (*selection, hits.body) {
-                if let Some(abs) = crate::selection::abs_row_at(r, m.row, *scroll) {
-                    *selection = Some((anchor, abs));
-                }
-            }
-        }
-        MouseEventKind::Up(MouseButton::Left) => {
-            if let Some(sel) = *selection {
-                let viewed: &ChatView = match (*subagent_focus).and_then(|idx| chat.blocks.get(idx))
-                {
-                    Some(crate::chat::ChatBlock::Subagent { view, .. }) => view,
-                    _ => &*chat,
-                };
-                let shift = m.modifiers.contains(KeyModifiers::SHIFT);
-                if let Some(report) =
-                    crate::selection::finish_copy(viewed, hits.body, sel, *dbl_click || shift)
-                {
-                    *copy_msg = Some(report.status_message());
-                // Real drag/dbl-click/shift-click that found nothing; bare click stays silent.
-                } else if sel.0 != sel.1 || *dbl_click || shift {
-                    *copy_msg = Some("Nothing to copy at this position".to_string());
-                }
-                *selection = None;
-            }
-            *dbl_click = false;
         }
         MouseEventKind::ScrollUp => {
             // Wheel-up over the queue/steer panel looks at older entries (toward the top; rects never overlap the body).

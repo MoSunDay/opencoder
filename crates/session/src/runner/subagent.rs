@@ -125,6 +125,7 @@ pub(super) async fn run_subagent(
                 handoff_plan: None,
                 skill: None,
                 task_type: Some(opencoder_store::TASK_TYPE_SUBAGENT.to_string()),
+                requirement: None,
             })
             .await;
         // Mark the child session as already created so persist() doesn't

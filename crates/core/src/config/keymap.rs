@@ -27,9 +27,10 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("force_redraw", "Force full-screen redraw"),
     ("toggle_focus", "Toggle focus between notepad and chat input"),
     ("copy_mode", "Toggle copy/selection mode"),
+    ("hide_composer", "Toggle bottom input"),
 ];
 
-/// Configuration for all 18 re-bindable global keyboard shortcuts. Each field
+/// Configuration for all 21 re-bindable global keyboard shortcuts. Each field
 /// holds a key-spec string parsed by the TUI's `parse_key_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeymapConfig {
@@ -53,6 +54,7 @@ pub struct KeymapConfig {
     pub force_redraw: String,
     pub toggle_focus: String,
     pub copy_mode: String,
+    pub hide_composer: String,
 }
 
 impl Default for KeymapConfig {
@@ -78,6 +80,7 @@ impl Default for KeymapConfig {
             force_redraw: "ctrl+f".into(),
             toggle_focus: "ctrl+o".into(),
             copy_mode: "ctrl+g".into(),
+            hide_composer: "ctrl+shift+t".into(),
         }
     }
 }
@@ -106,6 +109,7 @@ impl KeymapConfig {
             "force_redraw" => &self.force_redraw,
             "toggle_focus" => &self.toggle_focus,
             "copy_mode" => &self.copy_mode,
+            "hide_composer" => &self.hide_composer,
             _ => return None,
         })
     }
@@ -133,6 +137,7 @@ impl KeymapConfig {
             "force_redraw" => self.force_redraw = value,
             "toggle_focus" => self.toggle_focus = value,
             "copy_mode" => self.copy_mode = value,
+            "hide_composer" => self.hide_composer = value,
             _ => return false,
         }
         true
@@ -165,6 +170,7 @@ mod tests {
         assert_eq!(d.collapse_blocks, "ctrl+l");
         assert_eq!(d.force_redraw, "ctrl+f");
         assert_eq!(d.copy_mode, "ctrl+g");
+        assert_eq!(d.hide_composer, "ctrl+shift+t");
     }
 
     #[test]
@@ -185,6 +191,6 @@ mod tests {
 
     #[test]
     fn keymap_info_count_matches_fields() {
-        assert_eq!(KEYMAP_INFO.len(), 20);
+        assert_eq!(KEYMAP_INFO.len(), 21);
     }
 }

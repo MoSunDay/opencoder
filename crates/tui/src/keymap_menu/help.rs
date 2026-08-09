@@ -14,22 +14,25 @@ use crate::theme;
 pub const HELP: &str = "\
 快捷键列表：
 
-  Shift+Tab        切换模式 act <--> plan（plan→act 清空上下文；Alt+Tab 同效）
-                   /plan + 内容 提交后算需求输入，Shift+Tab 保留计划开始执行任务
+  Ctrl+T          切换模式 act <--> plan（保留上下文，主键）
+  Alt+Tab         切换模式（清空上下文；Shift+Tab 同效）
+                   /plan + 内容 提交后算需求输入，切换后开始执行任务
+  Ctrl+Shift+Tab  切换模式（保留上下文；当 Ctrl+T 被终端拦截时使用）
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
-  Ctrl+Shift+Tab  切换模式（保留上下文，不重置）
-  Ctrl+T          仅切换状态，保留上下文（当 Ctrl+Shift+Tab 被拦截时使用）
   Ctrl+V          粘贴剪贴板图片（截图）
   Alt+回车            插入换行（多行输入）
   $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
+  Ctrl+G          进入复制/选择模式，用方向键移动光标选中并复制文本
+  Ctrl+O          在 notepad 与输入框之间切换焦点（查看/编辑笔记时使用）
+  Ctrl+Shift+T    折叠/展开底部输入框（扩大或恢复输出区域）
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务
   Ctrl+C          中断运行中的任务（同 Esc Esc）
   Ctrl+D           退出
-  Ctrl+H           快捷键设置面板（查看 / 重绑快捷键，含「帮助」按钮）
+  Ctrl+H           快捷键设置面板（查看 / 重绑快捷键，含「恢复默认」与「帮助」按钮）
   Ctrl+W           删除光标前的单词
   Alt+F / Alt+B    光标向前/向后移动一个单词（readline 风格）
   Ctrl+U           清空整个输入行（可被 Ctrl+Z 撤销）

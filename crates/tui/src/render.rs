@@ -26,14 +26,9 @@ use crate::theme;
 
 pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 
-/// Context baseline subtracted from used/window so small sessions read ~0%.
-const CONTEXT_BASELINE: u64 = 4_000;
-
-/// Braille spinner frames shown while a task is running.
-const SPINNER: [&str; 10] = [
-    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
-    "\u{2807}", "\u{280f}",
-];
+#[path = "render_status.rs"]
+mod status_bar;
+use status_bar::render_status;
 
 /// Mouse hit-targets exported by `render` for the event loop to test clicks
 /// and wheel scrolls against. Recomputed every frame.
@@ -63,6 +58,8 @@ pub(crate) struct MouseHits {
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
     pub total_rows: usize,
+    /// Draggable notepad divider rect (Some when notepad is open).
+    pub divider: Option<Rect>,
 }
 
 /// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
@@ -133,16 +130,28 @@ pub(crate) fn render<B: Backend>(
     is_top_level: bool,
     ap_enabled: bool,
     display_mode: &str,
+    notepad: Option<&crate::notepad::NotepadView>,
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
+        // When notepad is open, split into top (tree+editor) / divider / bottom (chat).
+        let draw_area = if let Some(np) = notepad {
+            let (top, div, bot) = crate::notepad::layout_split(area, np.height);
+            crate::notepad::render_top(f, top, np);
+            crate::notepad::render_divider(f, div);
+            hits.divider = Some(div);
+            bot
+        } else {
+            hits.divider = None;
+            area
+        };
         // Ratatui resets the next diff buffer after every completed draw, and
         // the persistent widgets below cover their full rectangles. Do not
         // clear the entire frame here: that adds an O(viewport cells) pass to
         // the hot path without fixing terminal-side partial-frame exposure.
         // `frame::synchronized_frame` handles that actual artifact atomically.
         let prompt_w = 2u16;
-        let inner_w = area.width.saturating_sub(2);
+        let inner_w = draw_area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
         let plan_active = plan_mode.is_some();
         let pending = steer_items.len() + queue_items.len();
@@ -161,9 +170,9 @@ pub(crate) fn render<B: Backend>(
             0
         };
         let composer_h = if plan_active {
-            area.height.saturating_sub(queue_h + skill_h + 1)
+            draw_area.height.saturating_sub(queue_h + skill_h + 1)
         } else {
-            (input_rows + 2).min(area.height / 3)
+            (input_rows + 2).min(draw_area.height / 3)
         };
         let composer_inner_h = composer_h.saturating_sub(2).max(1);
         let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
@@ -185,7 +194,7 @@ pub(crate) fn render<B: Backend>(
                 Constraint::Length(composer_h),
                 Constraint::Length(1),
             ])
-            .split(area);
+            .split(draw_area);
 
         let mut ci = 0;
         hits.queue_btns.clear();
@@ -713,78 +722,6 @@ fn mode_flash_bg(is_plan: bool) -> Color {
     } else {
         theme::accent()
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn render_status(
-    f: &mut Frame,
-    area: Rect,
-    mode: &str,
-    running: bool,
-    status: &str,
-    anim_tick: u32,
-    used: u64,
-    compaction_threshold: u64,
-    context_limit: u64,
-    task_ms: u64,
-) {
-    let mut spans = vec![
-        Span::raw(" "),
-        Span::styled("\u{25cf} ", Style::default().fg(theme::agent_chip_fg(mode))),
-        Span::styled(
-            format!("[{mode}]"),
-            Style::default().fg(theme::agent_chip_fg(mode)),
-        ),
-    ];
-
-    // A single 10-segment compression dial sits between the mode chip and the
-    // ctx text. It tracks the compaction threshold — it fills toward red as
-    // auto-compression nears. (The former second budget-gauge that tracked the
-    // full model window was removed per user request; the trailing ctx text
-    // still reports the absolute window usage numerically.)
-    let bar_pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
-    let (meter, ctx_color) = theme::context_meter(bar_pct);
-    let win_pct = fmtmod::context_percent(used, context_limit, CONTEXT_BASELINE);
-    spans.push(Span::raw(" \u{00b7} "));
-    spans.push(Span::styled(
-        format!("{meter} "),
-        Style::default().fg(ctx_color),
-    ));
-    spans.push(Span::styled(
-        format!(
-            "ctx {}% ({}/{})",
-            win_pct,
-            fmtmod::format_tokens_compact(used),
-            fmtmod::format_tokens_compact(context_limit)
-        ),
-        Style::default().fg(ctx_color),
-    ));
-    spans.push(Span::raw("  "));
-
-    // Task-total duration sits BEFORE the spinner/status so the eye goes
-    // time → motion; warn colour marks it as the active task clock.
-    if task_ms > 0 {
-        spans.push(Span::styled(
-            fmtmod::format_run_duration(task_ms),
-            Style::default().fg(theme::warn_color()),
-        ));
-        spans.push(Span::raw("  "));
-    }
-
-    if running {
-        let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
-        spans.push(Span::styled(
-            format!("{spin} {status}"),
-            Style::default().fg(theme::warn_color()),
-        ));
-    } else if !status.is_empty() {
-        spans.push(Span::styled(
-            format!("\u{00b7} {status}"),
-            Style::default().fg(theme::muted()),
-        ));
-    }
-
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 #[path = "render_hits.rs"]

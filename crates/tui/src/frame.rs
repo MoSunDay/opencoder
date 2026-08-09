@@ -110,6 +110,7 @@ pub(crate) fn render_frame(
     is_top_level: bool,
     ap_enabled: bool,
     display_mode: &str,
+    notepad: Option<&crate::notepad::NotepadView>,
 ) -> anyhow::Result<()> {
     let plan_label = plan_edit.as_ref().map(|pe| pe.mode_label());
     let (render_input, render_cursor) = match plan_edit {
@@ -161,6 +162,7 @@ pub(crate) fn render_frame(
                 is_top_level,
                 ap_enabled,
                 display_mode,
+                notepad,
             )
         },
         |terminal| end_synchronized_update(terminal.backend_mut()),

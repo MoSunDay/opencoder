@@ -111,6 +111,7 @@ pub fn empty_hits(body: Rect) -> MouseHits {
         tool_btns: Vec::new(),
         compaction_btns: Vec::new(),
         total_rows: 0,
+        divider: None,
     }
 }
 

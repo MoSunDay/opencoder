@@ -102,18 +102,14 @@ async fn unmodified_quit_keeps_file() {
 }
 
 #[tokio::test]
-async fn focus_cycle_three_panels() {
+async fn focus_cycle_two_panels() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("a.txt"), "y").unwrap();
     let mut v = NotepadView::new(d.path().to_path_buf());
     // Open file so the editor is in Normal mode (Tab cycling needs Normal).
     press(&mut v, KeyCode::Enter).await;
     assert_eq!(v.focus, Focus::Editor);
-    // Editor -> Console -> Tree -> Editor.
-    // Console starts in Insert mode; Esc to Normal lets Tab cycle out.
-    press(&mut v, KeyCode::Tab).await;
-    assert_eq!(v.focus, Focus::Console);
-    press(&mut v, KeyCode::Esc).await;
+    // Editor -> Tree -> Editor (two-panel cycle, no console).
     press(&mut v, KeyCode::Tab).await;
     assert_eq!(v.focus, Focus::Tree);
     press(&mut v, KeyCode::Tab).await;

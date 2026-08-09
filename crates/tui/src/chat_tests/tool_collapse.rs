@@ -451,3 +451,117 @@ fn expanded_tool_header_prefix_arrow_flips_down() {
         "re-collapsed tool header must start with ▸ (U+25B8) again"
     );
 }
+
+#[test]
+fn push_bash_tool_creates_expanded_tool_block() {
+    // `push_bash_tool` opens a fresh tool block for a running bash command:
+    // expanded (so the user sees output stream in), no output yet, and no
+    // elapsed time recorded. Mirrors how `app_notepad` seeds a shell block.
+    use crate::chat::{ChatBlock, ChatView};
+    let mut v = ChatView::default();
+    v.push_bash_tool("ls -la");
+
+    match v.blocks.last() {
+        Some(ChatBlock::Tool {
+            id,
+            header,
+            output,
+            collapsed,
+            elapsed_ms,
+            ..
+        }) => {
+            assert!(
+                id.starts_with("bash-"),
+                "id must start with 'bash-', got {id:?}"
+            );
+            let header_text: String =
+                header.spans.iter().map(|s| s.content.clone()).collect();
+            assert!(
+                header_text.contains("ls -la"),
+                "header must contain the command; got {header_text:?}"
+            );
+            assert!(
+                output.is_empty(),
+                "output must be empty before the command finishes"
+            );
+            assert!(
+                !*collapsed,
+                "a freshly-pushed tool block must be expanded (collapsed == false)"
+            );
+            assert_eq!(
+                *elapsed_ms,
+                None,
+                "elapsed_ms must be None until finish_bash_tool is called"
+            );
+        }
+        other => panic!("expected ChatBlock::Tool as last block, got {other:?}"),
+    }
+}
+
+#[test]
+fn finish_bash_tool_fills_output_and_collapses() {
+    // After the command resolves, `finish_bash_tool` writes the captured
+    // output lines, collapses the block, and stamps the elapsed time.
+    use crate::chat::{ChatBlock, ChatView};
+    let mut v = ChatView::default();
+    v.push_bash_tool("echo hi");
+    v.finish_bash_tool("hello\nworld");
+
+    match v.blocks.last() {
+        Some(ChatBlock::Tool {
+            output,
+            collapsed,
+            elapsed_ms,
+            ..
+        }) => {
+            assert!(
+                !output.is_empty(),
+                "output must contain lines after finish_bash_tool"
+            );
+            let joined: String = output
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.clone())
+                .collect();
+            assert!(
+                joined.contains("hello") && joined.contains("world"),
+                "output must preserve both lines; got {joined:?}"
+            );
+            assert!(
+                *collapsed,
+                "tool block must collapse once the command finishes"
+            );
+            assert!(
+                elapsed_ms.is_some(),
+                "elapsed_ms must be recorded after finish_bash_tool"
+            );
+        }
+        other => panic!("expected ChatBlock::Tool as last block, got {other:?}"),
+    }
+}
+
+#[test]
+fn finish_bash_tool_aborted_message() {
+    // When a command is aborted (e.g. user interrupt), the notepad layer
+    // passes "(command aborted)" as the output. The block must surface that
+    // text so the transcript explains why there is no real result.
+    use crate::chat::{ChatBlock, ChatView};
+    let mut v = ChatView::default();
+    v.push_bash_tool("sleep 999");
+    v.finish_bash_tool("(command aborted)");
+
+    match v.blocks.last() {
+        Some(ChatBlock::Tool { output, .. }) => {
+            let joined: String = output
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .map(|s| s.content.clone())
+                .collect();
+            assert!(
+                joined.contains("aborted"),
+                "aborted output must be visible in the block; got {joined:?}"
+            );
+        }
+        other => panic!("expected ChatBlock::Tool as last block, got {other:?}"),
+    }
+}

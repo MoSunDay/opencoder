@@ -513,7 +513,7 @@ impl ChatView {
                         "Compaction",
                         text,
                         *collapsed,
-                        Style::default(),
+                        Style::default().fg(theme::local_color()).add_modifier(Modifier::BOLD),
                         Style::default(),
                     ));
                 }

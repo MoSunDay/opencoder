@@ -565,8 +565,8 @@ fn render_composer(
         return;
     }
     let block = if let Some(label) = plan_mode {
-        let is_requirement = edit_title == Some("edit requirement");
-        let border_fg = if is_requirement {
+        let is_annotation = edit_title == Some("edit annotation");
+        let border_fg = if is_annotation {
             theme::ok_color()
         } else {
             theme::warn_color()
@@ -578,7 +578,7 @@ fn render_composer(
             .border_style(Style::default().fg(border_fg))
             .title(format!(" {title_text} "))
             .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left));
-        if is_requirement {
+        if is_annotation {
             block = block.title(
                 theme::title_spans_colored(top_title, theme::ok_color())
                     .alignment(Alignment::Right),
@@ -633,7 +633,7 @@ fn render_composer(
         let mut spans: Vec<Span> = Vec::new();
         if ri == 0 {
             let prompt_color = if plan_mode.is_some() {
-                if edit_title == Some("edit requirement") {
+                if edit_title == Some("edit annotation") {
                     theme::ok_color()
                 } else {
                     theme::warn_color()

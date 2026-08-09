@@ -1,7 +1,7 @@
 //! Collapsible compaction-summary block: shared rendering + state helpers.
 //! Extracted from `chat.rs` to keep that file under the size limit. Mirrors
 //! the Thinking block — default collapsed, click-to-expand — with per-call
-//! style (Thinking mirrors the bash-tool accent+muted palette, Compaction
+//! style (Thinking uses a dedicated pink header, Compaction
 //! stays unstyled).
 
 use crate::chat::{ChatBlock, ChatView, CompactionHeader};
@@ -14,7 +14,7 @@ use ratatui::text::{Line, Span};
 /// `(N lines)` count summarizing how many lines are hidden.
 /// When expanded: the header followed by each line indented 2 spaces.
 /// `header_style` / `body_style` let callers pick their own palette —
-/// Thinking mirrors the bash-tool accent+BOLD / muted scheme, Compaction
+/// Thinking uses a dedicated pink+BOLD header / muted body, Compaction
 /// passes `Style::default()` for plain output. Click-to-expand is wired
 /// separately via the hit-rect pipeline.
 pub(crate) fn render_collapsible(

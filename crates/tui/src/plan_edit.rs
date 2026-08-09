@@ -25,7 +25,7 @@ use crate::vim::{self, VimMode, VimState};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditKind {
     Plan,
-    Requirement,
+    Annotation,
 }
 
 /// Plan editor — a thin adapter over [`VimState`] exposing the contract the app
@@ -49,11 +49,11 @@ impl PlanEdit {
         pe
     }
 
-    /// Create an editor for the requirement text (Normal mode, cursor at top).
-    pub fn new_requirement(text: String) -> Self {
+    /// Create an editor for the annotation text (Normal mode, cursor at top).
+    pub fn new_annotation(text: String) -> Self {
         let mut pe = Self {
             vim: VimState::new(text),
-            kind: EditKind::Requirement,
+            kind: EditKind::Annotation,
         };
         pe.vim.mode = VimMode::Normal;
         pe.vim.cursor = 0;
@@ -90,15 +90,15 @@ impl PlanEdit {
     pub fn title(&self) -> &'static str {
         match self.kind {
             EditKind::Plan => "edit plan",
-            EditKind::Requirement => "edit requirement",
+            EditKind::Annotation => "edit annotation",
         }
     }
 
-    /// Border color for the editor (yellow for plan, green for requirement).
+    /// Border color for the editor (yellow for plan, green for annotation).
     pub fn border_color(&self) -> ratatui::style::Color {
         match self.kind {
             EditKind::Plan => crate::theme::warn_color(),
-            EditKind::Requirement => crate::theme::ok_color(),
+            EditKind::Annotation => crate::theme::ok_color(),
         }
     }
 }
@@ -124,9 +124,9 @@ pub fn handle_plan_edit_key(
     }
 }
 
-/// Open the editor for requirement text. The caller sets the mode_flash.
-pub fn enter_requirement(plan_edit: &mut Option<PlanEdit>, text: String) {
-    *plan_edit = Some(PlanEdit::new_requirement(text));
+/// Open the editor for annotation text. The caller sets the mode_flash.
+pub fn enter_annotation(plan_edit: &mut Option<PlanEdit>, text: String) {
+    *plan_edit = Some(PlanEdit::new_annotation(text));
 }
 
 #[cfg(test)]
@@ -269,10 +269,10 @@ mod tests {
     }
 
     #[test]
-    fn new_requirement_starts_normal_with_requirement_kind() {
-        let pe = PlanEdit::new_requirement("do something".into());
-        assert_eq!(pe.kind(), EditKind::Requirement);
-        assert_eq!(pe.title(), "edit requirement");
+    fn new_annotation_starts_normal_with_annotation_kind() {
+        let pe = PlanEdit::new_annotation("do something".into());
+        assert_eq!(pe.kind(), EditKind::Annotation);
+        assert_eq!(pe.title(), "edit annotation");
         assert!(!pe.is_modified());
     }
 
@@ -284,12 +284,12 @@ mod tests {
     }
 
     #[test]
-    fn enter_requirement_sets_editor() {
+    fn enter_annotation_sets_editor() {
         let mut pe: Option<PlanEdit> = None;
-        enter_requirement(&mut pe, "initial text".into());
+        enter_annotation(&mut pe, "initial text".into());
         assert!(pe.is_some());
         let pe = pe.unwrap();
-        assert_eq!(pe.kind(), EditKind::Requirement);
+        assert_eq!(pe.kind(), EditKind::Annotation);
         assert_eq!(pe.text(), "initial text");
     }
 }

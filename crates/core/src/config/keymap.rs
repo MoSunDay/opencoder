@@ -26,6 +26,7 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("collapse_blocks", "Collapse blocks + exit subagent"),
     ("force_redraw", "Force full-screen redraw"),
     ("toggle_console", "Toggle console panel in notepad"),
+    ("copy_mode", "Toggle copy/selection mode"),
 ];
 
 /// Configuration for all 18 re-bindable global keyboard shortcuts. Each field
@@ -51,6 +52,7 @@ pub struct KeymapConfig {
     pub collapse_blocks: String,
     pub force_redraw: String,
     pub toggle_console: String,
+    pub copy_mode: String,
 }
 
 impl Default for KeymapConfig {
@@ -75,6 +77,7 @@ impl Default for KeymapConfig {
             collapse_blocks: "ctrl+l".into(),
             force_redraw: "ctrl+f".into(),
             toggle_console: "ctrl+shift+t".into(),
+            copy_mode: "ctrl+g".into(),
         }
     }
 }
@@ -102,6 +105,7 @@ impl KeymapConfig {
             "collapse_blocks" => &self.collapse_blocks,
             "force_redraw" => &self.force_redraw,
             "toggle_console" => &self.toggle_console,
+            "copy_mode" => &self.copy_mode,
             _ => return None,
         })
     }
@@ -128,6 +132,7 @@ impl KeymapConfig {
             "collapse_blocks" => self.collapse_blocks = value,
             "force_redraw" => self.force_redraw = value,
             "toggle_console" => self.toggle_console = value,
+            "copy_mode" => self.copy_mode = value,
             _ => return false,
         }
         true
@@ -159,6 +164,7 @@ mod tests {
         assert_eq!(d.switch_mode_keep, "ctrl+shift+tab");
         assert_eq!(d.collapse_blocks, "ctrl+l");
         assert_eq!(d.force_redraw, "ctrl+f");
+        assert_eq!(d.copy_mode, "ctrl+g");
     }
 
     #[test]
@@ -179,6 +185,6 @@ mod tests {
 
     #[test]
     fn keymap_info_count_matches_fields() {
-        assert_eq!(KEYMAP_INFO.len(), 19);
+        assert_eq!(KEYMAP_INFO.len(), 20);
     }
 }

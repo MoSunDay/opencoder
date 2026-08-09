@@ -324,9 +324,9 @@ mod tests {
     }
 
     #[test]
-    fn new_menu_has_19_entries() {
+    fn new_menu_has_20_entries() {
         let m = make_menu();
-        assert_eq!(m.len(), 19);
+        assert_eq!(m.len(), 20);
         assert_eq!(m.selected, 0);
         assert!(!m.capturing);
         assert!(!m.is_dirty());
@@ -341,7 +341,7 @@ mod tests {
         m.move_down();
         assert_eq!(m.selected, 1);
         // Wrap to 0 from last
-        m.selected = 18;
+        m.selected = 19;
         m.move_down();
         assert_eq!(m.selected, 0);
     }
@@ -349,8 +349,8 @@ mod tests {
     #[test]
     fn navigate_up_wraps() {
         let mut m = make_menu();
-        m.move_up(); // from 0 → 17
-        assert_eq!(m.selected, 18);
+        m.move_up(); // from 0 -> last index
+        assert_eq!(m.selected, 19);
     }
 
     #[test]

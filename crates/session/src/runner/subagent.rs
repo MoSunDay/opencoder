@@ -177,7 +177,14 @@ pub(super) async fn run_subagent(
     // Batched, lossless drain shared with the TUI/web surfaces: deltas are
     // coalesced into one transactional append_events; non-delta events flush
     // pending deltas first; channel close triggers a final flush.
-    let flusher = tokio::spawn(crate::event_sink::run_flusher(flush_store, ev_rx));
+    // The flusher JoinHandle is held in an abort-on-drop guard: a force cancel of
+    // the parent drops this future mid-`run_with_registry`, which would drop
+    // `flusher` without aborting the task — leaving a detached task holding
+    // `Arc<Store>`. The guard aborts on drop unless the normal completion path
+    // takes the handle out to await it.
+    let mut flusher_guard = FlushAbortOnDrop::new(tokio::spawn(
+        crate::event_sink::run_flusher(flush_store, ev_rx),
+    ));
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
@@ -243,7 +250,14 @@ pub(super) async fn run_subagent(
     // is dropped, closing the channel so the flusher drains remaining events
     // and exits. Await it so this function returns only after every event is
     // durably persisted.
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), flusher).await;
+    // Normal completion: take the handle out of the guard (so it is NOT aborted
+    // on drop) and await it with the existing bounded timeout. The channel is
+    // already closed here (the callback that owns `ev_tx` dropped when
+    // `run_with_registry` returned), so the flusher drains remaining events and
+    // exits; the timeout is a safety net for a pathologically slow final flush.
+    if let Some(flusher) = flusher_guard.take() {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(30), flusher).await;
+    }
 
     // Close admission before removing the runtime registries. A store write
     // that reserved before a forced close will fail commit and roll itself
@@ -399,5 +413,91 @@ pub(super) async fn run_subagent(
             }
         };
         ToolOutput::err(detail)
+    }
+}
+
+/// RAII guard that aborts a spawned flusher task on drop. The subagent runner
+/// stores its event-flusher `JoinHandle` here; on the normal completion path
+/// the handle is `take()`n out and awaited, so the guard drops empty. If the
+/// owning future is cancelled first, the guard still holds the handle and
+/// aborts the detached task instead of leaking it (it would otherwise hold an
+/// `Arc<Store>` until it noticed its channel had closed).
+struct FlushAbortOnDrop {
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl FlushAbortOnDrop {
+    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+    /// Remove and return the inner handle, disarming the guard.
+    fn take(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        self.handle.take()
+    }
+}
+
+impl Drop for FlushAbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(h) = self.handle.take() {
+            h.abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Dropping a `FlushAbortOnDrop` that still holds its handle must abort
+    /// the wrapped task — a force-cancel drops the guard mid-flight.
+    #[tokio::test]
+    async fn flush_guard_aborts_task_on_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+
+        {
+            let _guard = FlushAbortOnDrop::new(handle);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            assert!(
+                counter.load(Ordering::SeqCst) > 0,
+                "task should be incrementing before drop"
+            );
+        } // guard dropped → abort()
+
+        // Give the runtime a moment to process the abort.
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        let baseline = counter.load(Ordering::SeqCst);
+        // An un-aborted task would increment ~6x in this window.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let after = counter.load(Ordering::SeqCst);
+        assert_eq!(
+            baseline, after,
+            "task must stop incrementing after abort-on-drop (was {baseline}, now {after})"
+        );
+    }
+
+    /// `take()` disarms the guard so dropping it does NOT abort. The handle
+    /// is returned and can be awaited to completion.
+    #[tokio::test]
+    async fn flush_guard_take_disarms_and_task_completes() {
+        let handle = tokio::spawn(async {});
+        let mut guard = FlushAbortOnDrop::new(handle);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let taken = guard.take().expect("handle must be present after construction");
+        drop(guard); // disarmed — must NOT abort
+        // Awaiting must succeed — if take() had failed and drop(guard) had
+        // aborted the task, this would panic with a JoinError.
+        taken.await.unwrap();
     }
 }

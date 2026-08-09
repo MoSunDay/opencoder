@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
+use futures::FutureExt;
+use std::panic::AssertUnwindSafe;
 use opencoder_core::{
     message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc,
     ToolOutput,
@@ -39,6 +41,19 @@ fn emit(sink: &Sink<'_>, ev: SessionEvent) {
         // g: MutexGuard<&mut (dyn FnMut + Send)>; deref to the inner closure
         // reference and call it.
         (**g)(ev);
+    }
+}
+
+/// Extract a human-readable message from a caught panic payload
+/// (`Box<dyn Any + Send>`). Panics are typically constructed from `&str` or
+/// `String`; anything else degrades to a generic note.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(m) = payload.downcast_ref::<&'static str>() {
+        (*m).to_string()
+    } else if let Some(m) = payload.downcast_ref::<String>() {
+        m.clone()
+    } else {
+        "non-string panic payload".to_string()
     }
 }
 
@@ -310,7 +325,15 @@ pub(crate) async fn run_loop(
                         break;
                     }
                     Ok(None) => {
-                        last_err = None;
+                        // Over budget (should_compact was true) yet nothing
+                        // could be summarized away (single oversized message /
+                        // empty head). Falling through to run_one_llm_call
+                        // would send an oversized request → guaranteed
+                        // context-length 400 that kills the session. Surface
+                        // the error instead.
+                        last_err = Some(anyhow!(
+                            "transcript exceeds context window but compaction found nothing to summarize"
+                        ));
                         break;
                     }
                     Err(e) => {
@@ -493,7 +516,28 @@ pub(crate) async fn run_loop(
                 let sink = Arc::clone(&sink);
                 futs.push(async move {
                     tokio::task::yield_now().await;
-                    let out = execute_call(tc, session_ref, registry, &sink).await;
+                    // A panic inside a tool's `execute` must not propagate out
+                    // of FuturesUnordered and abort the whole run_loop (it
+                    // would strand in-flight subagent futures and leave DB
+                    // tasks in `Running`). Catch it and convert to an error
+                    // ToolResult, matching how execute_call itself reports
+                    // failures (is_error: true).
+                    let out = match AssertUnwindSafe(execute_call(
+                        tc,
+                        session_ref,
+                        registry,
+                        &sink,
+                    ))
+                    .catch_unwind()
+                    .await
+                    {
+                        Ok(o) => o,
+                        Err(payload) => ToolOutput::err(format!(
+                            "tool `{}` panicked: {}",
+                            tc.name,
+                            panic_message(&payload)
+                        )),
+                    };
                     (i, out)
                 });
             }

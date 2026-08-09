@@ -4,7 +4,7 @@ use opencoder_llm::build_header_map;
 
 #[test]
 fn built_in_headers_are_present() {
-    let map = build_header_map("sk-secret", &[]);
+    let map = build_header_map("sk-secret", &[]).unwrap();
     assert_eq!(
         map.get("authorization").unwrap().to_str().unwrap(),
         "Bearer sk-secret"
@@ -21,7 +21,7 @@ fn built_in_headers_are_present() {
 
 #[test]
 fn empty_custom_keeps_only_three_built_ins() {
-    let map = build_header_map("k", &[]);
+    let map = build_header_map("k", &[]).unwrap();
     assert_eq!(map.len(), 3);
     assert!(map.contains_key("authorization"));
     assert!(map.contains_key("content-type"));
@@ -34,7 +34,7 @@ fn custom_headers_are_appended() {
         ("X-Foo".to_string(), "bar".to_string()),
         ("X-Baz".to_string(), "qux".to_string()),
     ];
-    let map = build_header_map("k", &custom);
+    let map = build_header_map("k", &custom).unwrap();
     assert_eq!(map.get("x-foo").unwrap().to_str().unwrap(), "bar");
     assert_eq!(map.get("x-baz").unwrap().to_str().unwrap(), "qux");
     // built-ins still present
@@ -48,7 +48,7 @@ fn custom_headers_are_appended() {
 fn custom_header_overrides_built_in_by_name() {
     // A custom "accept" must replace the built-in text/event-stream.
     let custom = vec![("accept".to_string(), "application/x-ndjson".to_string())];
-    let map = build_header_map("k", &custom);
+    let map = build_header_map("k", &custom).unwrap();
     assert_eq!(
         map.get("accept").unwrap().to_str().unwrap(),
         "application/x-ndjson"
@@ -57,7 +57,7 @@ fn custom_header_overrides_built_in_by_name() {
 
     // authorization can also be overridden (e.g. non-Bearer schemes).
     let custom = vec![("authorization".to_string(), "Key k-xyz".to_string())];
-    let map = build_header_map("ignored", &custom);
+    let map = build_header_map("ignored", &custom).unwrap();
     assert_eq!(
         map.get("authorization").unwrap().to_str().unwrap(),
         "Key k-xyz"
@@ -70,7 +70,7 @@ fn custom_override_is_case_insensitive() {
         "Content-Type".to_string(),
         "application/x-custom".to_string(),
     )];
-    let map = build_header_map("k", &custom);
+    let map = build_header_map("k", &custom).unwrap();
     assert_eq!(
         map.get("content-type").unwrap().to_str().unwrap(),
         "application/x-custom"
@@ -84,7 +84,22 @@ fn malformed_custom_entries_are_skipped() {
         ("Bad Name".to_string(), "v".to_string()),
         ("X-Ok".to_string(), "good".to_string()),
     ];
-    let map = build_header_map("k", &custom);
+    let map = build_header_map("k", &custom).unwrap();
     assert!(map.get("bad name").is_none());
     assert_eq!(map.get("x-ok").unwrap().to_str().unwrap(), "good");
+}
+
+
+#[test]
+fn invalid_key_bytes_are_reported_not_silently_dropped() {
+    // A raw newline is invalid in an HTTP header value. Previously the
+    // Authorization header was silently omitted; now it must error so a
+    // misconfigured key surfaces immediately instead of causing a 401.
+    let res = build_header_map("bad\nkey", &[]);
+    assert!(res.is_err());
+    let msg = format!("{}", res.unwrap_err());
+    assert!(
+        msg.contains("invalid in an HTTP header value"),
+        "unexpected error message: {msg}"
+    );
 }

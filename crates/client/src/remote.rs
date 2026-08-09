@@ -286,7 +286,20 @@ async fn run_stream(
     }
     let mut stream = resp.bytes_stream();
     let mut dec = SseFrameDecoder::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        // Exit promptly when the caller (the events `Receiver`) is dropped,
+        // even while the server is sending only keep-alive frames. Without
+        // this the spawned task + HTTP connection would linger until the
+        // server closes the stream. `tx.closed()` resolves once ALL receivers
+        // are gone (extra senders do not keep it open).
+        let chunk = tokio::select! {
+            biased;
+            _ = tx.closed() => return Ok(()),
+            next = stream.next() => match next {
+                None => break,
+                Some(c) => c,
+            },
+        };
         let bytes = chunk.context("read events chunk")?;
         dec.push(&bytes);
         for frame in dec.drain() {

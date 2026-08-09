@@ -16,10 +16,10 @@ pub(crate) async fn await_cancel(session: &SessionState) {
 
 /// A future that resolves when the given token fires, or never resolves when
 /// the token is `None`. Used as a cancel-guard arm in `select!` so a
-/// contended db_lock cannot block cancel/turn_cancel indefinitely: if the
-/// token fires while a DB read is blocked on the store's serializing Mutex,
-/// the read is abandoned (returns its default) and the run loop picks up the
-/// cancel at its next boundary.
+/// contended db_lock cannot block the session (hard) cancel indefinitely: if
+/// the token fires while a DB read is blocked on the store's serializing
+/// Mutex, the read is abandoned (returns its default) and the run loop picks
+/// up the cancel at its next boundary.
 async fn cancel_guard(token: Option<CancellationToken>) {
     match token {
         Some(t) => t.cancelled().await,
@@ -41,17 +41,12 @@ pub(super) async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String
         return Vec::new();
     };
     let sid = session.id.clone();
-    // Snapshot cancel tokens so we can race the DB op without holding a
+    // Snapshot the hard cancel token so we can race the DB op without holding a
     // borrow on `session` across the `select!`.
     let hard = session.cancel.clone();
-    let turn = session
-        .turn_cancel
-        .as_ref()
-        .and_then(|t| t.lock().ok().map(|g| g.clone()));
     tokio::select! {
         biased;
         _ = cancel_guard(hard) => Vec::new(),
-        _ = cancel_guard(turn) => Vec::new(),
         v = async {
             let pending = match store.pending_inputs(&sid, Delivery::Steer).await {
                 Ok(v) => v,
@@ -106,14 +101,9 @@ pub(super) async fn claim_one_queued(
     let store = session.store.clone()?;
     let sid = session.id.clone();
     let hard = session.cancel.clone();
-    let turn = session
-        .turn_cancel
-        .as_ref()
-        .and_then(|t| t.lock().ok().map(|g| g.clone()));
     tokio::select! {
         biased;
         _ = cancel_guard(hard) => None,
-        _ = cancel_guard(turn) => None,
         v = async {
             match store.claim_next_queue(&sid).await {
                 Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
@@ -533,16 +523,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_steers_returns_empty_when_turn_cancel_pre_fired() {
+    async fn claim_steers_claims_even_when_turn_cancel_fired() {
         let (mut session, _store, token) = session_with_pending().await;
-        // Pre-fire turn_cancel
+        // Pre-fire turn_cancel: claim_* must NOT observe turn_cancel (only the
+        // hard cancel). A fired turn_cancel with no active turn is either stale
+        // or signals new input was just admitted -- both must claim normally.
         token.lock().unwrap().cancel();
 
         let steers = claim_steers(&mut session).await;
-        assert!(
-            steers.is_empty(),
-            "pre-fired turn_cancel must short-circuit claim_steers"
+        assert_eq!(
+            steers.len(),
+            1,
+            "claim_steers must promote pending steer even when turn_cancel is fired"
         );
+        assert_eq!(steers[0].1, "interrupt!");
     }
 
     #[tokio::test]
@@ -573,16 +567,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_one_queued_returns_none_when_turn_cancel_pre_fired() {
+    async fn claim_one_queued_claims_even_when_turn_cancel_fired() {
         let (mut session, _store, token) = session_with_pending().await;
-        // Pre-fire turn_cancel
+        // Pre-fire turn_cancel: claim_one_queued must still pop the queue.
         token.lock().unwrap().cancel();
 
         let result = claim_one_queued(&mut session).await;
-        assert!(
-            result.is_none(),
-            "pre-fired turn_cancel must short-circuit claim_one_queued"
+        let (seq, prompt, _imgs) = result.expect(
+            "claim_one_queued must pop the pending queue even when turn_cancel is fired"
         );
+        assert_eq!(prompt, "queued");
+        assert!(seq > 0);
     }
 
     // ---- drain_one_queued: single-pop semantics ----
@@ -695,20 +690,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn claim_steers_returns_data_after_turn_cancel_reset() {
+    async fn claim_steers_ignores_turn_cancel_and_is_idempotent() {
         let (mut session, _store, token) = session_with_pending().await;
 
-        // First: pre-fired → empty
+        // Fire turn_cancel then claim: must still promote (turn_cancel is
+        // invisible to claim_*).
         token.lock().unwrap().cancel();
         let steers = claim_steers(&mut session).await;
-        assert!(steers.is_empty());
-
-        // Reset token
-        *token.lock().unwrap() = CancellationToken::new();
-
-        // Now claim_steers should find the pending steer
-        let steers = claim_steers(&mut session).await;
         assert_eq!(steers.len(), 1);
-        assert_eq!(steers[0].1, "interrupt!");
+
+        // Replace the token with a fresh (un-fired) one -- claim must now find
+        // nothing left, because the steer was already promoted (idempotent).
+        *token.lock().unwrap() = CancellationToken::new();
+        let steers = claim_steers(&mut session).await;
+        assert!(
+            steers.is_empty(),
+            "already-promoted steer must not be re-claimed"
+        );
     }
 }

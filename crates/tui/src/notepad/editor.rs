@@ -90,6 +90,48 @@ impl EditorState {
         Ok(())
     }
 
+    /// If in Command mode, parse `:e {path}` / `:edit {path}` and return the
+    /// path argument. Returns `Some("")` for bare `:e` / `:edit` (reopen
+    /// current file). Returns `None` if not an edit command.
+    pub fn edit_cmd_path(&self) -> Option<String> {
+        if self.vim.mode != VimMode::Command {
+            return None;
+        }
+        let trimmed = self.vim.cmdline.trim();
+        let (cmd, arg) = match trimmed.split_once(char::is_whitespace) {
+            Some((c, a)) => (c, a.trim()),
+            None => (trimmed, ""),
+        };
+        match cmd {
+            "e" | "edit" => Some(arg.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Execute `:e {path}`: resolve `arg` relative to `workdir` and load
+    /// the file into the editor.
+    pub fn do_edit(&mut self, workdir: &Path, arg: &str) {
+        let path = if arg.is_empty() {
+            match &self.file_path {
+                Some(p) => p.clone(),
+                None => {
+                    self.vim.status = "no file name".to_string();
+                    self.vim.mode = VimMode::Normal;
+                    self.vim.cmdline.clear();
+                    return;
+                }
+            }
+        } else {
+            let p = Path::new(arg);
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                workdir.join(arg)
+            }
+        };
+        self.load(&path);
+    }
+
     pub fn title(&self) -> String {
         match &self.file_path {
             Some(p) => p
@@ -109,17 +151,15 @@ impl EditorState {
         self.vim.text.lines().count().max(1)
     }
 
-    /// Adjust scroll so the cursor's visual row stays visible.
+    /// Adjust scroll so the cursor's logical line stays visible. Mirrors
+    /// vim's "cursor follows" behavior: moving down sticks the cursor to
+    /// the last visible row; moving up sticks it to the first visible row.
     pub fn ensure_cursor_visible(&mut self, inner_h: u16) {
         if inner_h <= 2 {
             return;
         }
         let vis_h = inner_h as usize;
-        // Determine the cursor's logical line.
-        let before: usize = self.vim.text[..self.char_byte_offset()]
-            .matches('\n')
-            .count();
-        let cur_row = before;
+        let cur_row = self.cursor_line();
         let scroll = self.scroll as usize;
         let h = vis_h.saturating_sub(1);
         if cur_row < scroll {
@@ -127,19 +167,53 @@ impl EditorState {
         } else if cur_row > scroll + h {
             self.scroll = (cur_row - h) as u16;
         }
+        // Clamp: never scroll past the last page.
+        let total = self.line_count();
+        if total > vis_h {
+            let max_scroll = total - vis_h;
+            if self.scroll as usize > max_scroll {
+                self.scroll = max_scroll as u16;
+            }
+        } else {
+            self.scroll = 0;
+        }
     }
 
-    /// Byte offset of the char-index cursor (for line counting).
-    fn char_byte_offset(&self) -> usize {
-        let mut off = 0;
-        for (i, (b, _)) in self.vim.text.char_indices().enumerate() {
-            if i == self.vim.cursor {
-                return b;
+    /// Current cursor line number (0-indexed).
+    pub fn cursor_line(&self) -> usize {
+        let byte_off = char_byte_offset(&self.vim.text, self.vim.cursor);
+        self.vim.text[..byte_off].matches('\n').count()
+    }
+
+    /// Move the cursor to the start of the given logical line (0-indexed,
+    /// clamped to the last line).
+    pub fn move_to_line(&mut self, line: usize) {
+        let total = self.line_count();
+        let target = line.min(total.saturating_sub(1));
+        let mut current_line = 0usize;
+        let mut char_idx = 0usize;
+        for ch in self.vim.text.chars() {
+            if current_line == target {
+                break;
             }
-            off = b;
+            char_idx += 1;
+            if ch == '\n' {
+                current_line += 1;
+            }
         }
-        // cursor at end
-        off
+        self.vim.cursor = char_idx;
+    }
+
+    /// Move the cursor down by `n` logical lines (clamped to last line).
+    pub fn page_down(&mut self, n: usize) {
+        let target = self.cursor_line().saturating_add(n);
+        self.move_to_line(target);
+    }
+
+    /// Move the cursor up by `n` logical lines (clamped to line 0).
+    pub fn page_up(&mut self, n: usize) {
+        let target = self.cursor_line().saturating_sub(n);
+        self.move_to_line(target);
     }
 }
 
@@ -386,5 +460,147 @@ mod tests {
         ed.load(Path::new("/nonexistent/path/file.txt"));
         assert!(ed.vim.text.contains("cannot read"));
         assert!(ed.file_path.is_some());
+    }
+
+    fn make_tall_editor(lines: usize) -> EditorState {
+        let text: String = (1..=lines)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut ed = EditorState::empty();
+        ed.vim = VimState::new(text);
+        ed.vim.mode = VimMode::Normal;
+        ed.vim.cursor = 0;
+        ed
+    }
+
+    #[test]
+    fn ensure_cursor_no_change_when_visible() {
+        let mut ed = make_tall_editor(20);
+        ed.scroll = 0;
+        ed.ensure_cursor_visible(10);
+        assert_eq!(ed.scroll, 0);
+    }
+
+    #[test]
+    fn ensure_cursor_scrolls_down_when_past_bottom() {
+        let mut ed = make_tall_editor(20);
+        ed.move_to_line(15);
+        ed.scroll = 0;
+        ed.ensure_cursor_visible(10);
+        // vis_h=10, h=9, cur_row=15 → scroll = 15-9 = 6
+        assert_eq!(ed.scroll, 6);
+    }
+
+    #[test]
+    fn ensure_cursor_scrolls_up_when_above_top() {
+        let mut ed = make_tall_editor(20);
+        ed.move_to_line(3);
+        ed.scroll = 8;
+        ed.ensure_cursor_visible(10);
+        assert_eq!(ed.scroll, 3);
+    }
+
+    #[test]
+    fn ensure_cursor_clamps_to_last_page() {
+        let mut ed = make_tall_editor(20);
+        ed.move_to_line(19);
+        ed.scroll = 0;
+        ed.ensure_cursor_visible(10);
+        // cur_row=19, h=9 → raw scroll=10, but max_scroll=20-10=10, so 10
+        assert_eq!(ed.scroll, 10);
+    }
+
+    #[test]
+    fn cursor_line_correct_at_end_of_text() {
+        let mut ed = EditorState::empty();
+        ed.vim = VimState::new("a\nb\nc\n".to_string());
+        ed.vim.cursor = 4; // at 'c'
+        assert_eq!(ed.cursor_line(), 2);
+        ed.vim.cursor = 6; // past trailing newline (end of buffer)
+        assert_eq!(ed.cursor_line(), 3);
+    }
+
+    #[test]
+    fn move_to_line_clamps() {
+        let mut ed = make_tall_editor(5);
+        ed.move_to_line(100);
+        assert_eq!(ed.cursor_line(), 4); // clamped to last line
+    }
+
+    #[test]
+    fn page_down_moves_half() {
+        let mut ed = make_tall_editor(30);
+        assert_eq!(ed.cursor_line(), 0);
+        ed.page_down(5);
+        assert_eq!(ed.cursor_line(), 5);
+    }
+
+    #[test]
+    fn page_up_clamps_to_zero() {
+        let mut ed = make_tall_editor(30);
+        ed.move_to_line(2);
+        ed.page_up(10);
+        assert_eq!(ed.cursor_line(), 0);
+    }
+
+    #[test]
+    fn edit_cmd_path_parses_e_with_arg() {
+        let mut ed = EditorState::empty();
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "e foo.txt".to_string();
+        assert_eq!(ed.edit_cmd_path(), Some("foo.txt".to_string()));
+    }
+
+    #[test]
+    fn edit_cmd_path_parses_edit_with_arg() {
+        let mut ed = EditorState::empty();
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "edit bar/baz.rs".to_string();
+        assert_eq!(ed.edit_cmd_path(), Some("bar/baz.rs".to_string()));
+    }
+
+    #[test]
+    fn edit_cmd_path_bare_e_returns_empty() {
+        let mut ed = EditorState::empty();
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "e".to_string();
+        assert_eq!(ed.edit_cmd_path(), Some("".to_string()));
+    }
+
+    #[test]
+    fn edit_cmd_path_rejects_non_edit() {
+        let mut ed = EditorState::empty();
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "w".to_string();
+        assert_eq!(ed.edit_cmd_path(), None);
+        ed.vim.cmdline = "echo hi".to_string();
+        assert_eq!(ed.edit_cmd_path(), None);
+    }
+
+    #[test]
+    fn do_edit_loads_relative_path() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("target.txt"), "target content").unwrap();
+        let mut ed = EditorState::empty();
+        ed.do_edit(d.path(), "target.txt");
+        assert_eq!(ed.vim.text, "target content");
+        assert_eq!(ed.vim.mode, VimMode::Normal);
+    }
+
+    #[test]
+    fn do_edit_reopens_current_file_when_no_arg() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("cur.txt");
+        std::fs::write(&p, "v1").unwrap();
+        let mut ed = EditorState::empty();
+        ed.load(&p);
+        ed.vim.text = "modified".to_string();
+        // Reopen
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "e".to_string();
+        let arg = ed.edit_cmd_path().unwrap();
+        ed.do_edit(d.path(), &arg);
+        assert_eq!(ed.vim.text, "v1"); // reloaded from disk
     }
 }

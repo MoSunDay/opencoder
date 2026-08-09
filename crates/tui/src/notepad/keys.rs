@@ -147,6 +147,7 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
 
 fn handle_editor_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
     let inner_w = editor_inner_width(view);
+    let inner_h = editor_inner_height(view);
 
     // Tab in Normal mode cycles back to Tree.
     if should_cycle_focus(&view.editor.vim, &k) {
@@ -169,7 +170,24 @@ fn handle_editor_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
         return NotepadOutcome::Consumed;
     }
 
+    // Intercept :e / :edit {path} to open a file.
+    if k.code == KeyCode::Enter {
+        if let Some(arg) = view.editor.edit_cmd_path() {
+            view.editor.do_edit(&view.workdir, &arg);
+            view.editor.ensure_cursor_visible(inner_h);
+            return NotepadOutcome::Consumed;
+        }
+    }
+
+    // Page-scroll keys in Normal mode (vim-style Ctrl-D/U/F/B, PageDown/PageUp).
+    if view.editor.vim.mode == VimMode::Normal
+        && try_page_scroll(view, &k, inner_h)
+    {
+        return NotepadOutcome::Consumed;
+    }
+
     let action = vim::handle_vim_key(&mut view.editor.vim, k, inner_w, 2);
+    view.editor.ensure_cursor_visible(inner_h);
     if action == VimAction::Exit {
         if view.editor.is_modified() {
             let _ = view.editor.do_writequit();
@@ -180,10 +198,58 @@ fn handle_editor_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
     NotepadOutcome::Consumed
 }
 
+/// Handle vim-style page-scroll keys in Normal mode. Returns `true` if handled.
+fn try_page_scroll(view: &mut NotepadView, k: &KeyEvent, inner_h: u16) -> bool {
+    let h = inner_h as usize;
+    if h == 0 {
+        return false;
+    }
+    let half = (h / 2).max(1);
+    let full = h;
+    let handled = match (k.code, k.modifiers) {
+        (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) => {
+            view.editor.page_down(half);
+            true
+        }
+        (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
+            view.editor.page_up(half);
+            true
+        }
+        (KeyCode::Char('f'), m) if m.contains(KeyModifiers::CONTROL) => {
+            view.editor.page_down(full);
+            true
+        }
+        (KeyCode::Char('b'), m) if m.contains(KeyModifiers::CONTROL) => {
+            view.editor.page_up(full);
+            true
+        }
+        (KeyCode::PageDown, _) => {
+            view.editor.page_down(full);
+            true
+        }
+        (KeyCode::PageUp, _) => {
+            view.editor.page_up(full);
+            true
+        }
+        _ => false,
+    };
+    if handled {
+        view.editor.ensure_cursor_visible(inner_h);
+    }
+    handled
+}
+
 fn editor_inner_width(view: &NotepadView) -> u16 {
     let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let tree_w: u16 = if view.tree_hidden { 0 } else { 30 };
     tw.saturating_sub(tree_w + 4 + 2)
+}
+
+fn editor_inner_height(view: &NotepadView) -> u16 {
+    let (_, th) = crossterm::terminal::size().unwrap_or((80, 24));
+    let max_height = th.saturating_sub(super::MIN_BOTTOM + 1);
+    let clamped = view.height.clamp(5, max_height.max(5));
+    clamped.saturating_sub(2)
 }
 
 // ── Search ───────────────────────────────────────────────────────────────

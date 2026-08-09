@@ -603,4 +603,35 @@ mod tests {
         ed.do_edit(d.path(), &arg);
         assert_eq!(ed.vim.text, "v1"); // reloaded from disk
     }
+
+    #[test]
+    fn do_edit_sets_no_file_name_when_no_arg_and_no_path() {
+        let d = tempfile::tempdir().unwrap();
+        let mut ed = EditorState::empty();
+        ed.vim.mode = VimMode::Command;
+        ed.vim.cmdline = "e".to_string();
+        ed.do_edit(d.path(), "");
+        assert_eq!(ed.vim.status, "no file name");
+        assert_eq!(ed.vim.mode, VimMode::Normal);
+        assert!(ed.vim.cmdline.is_empty());
+    }
+
+    #[test]
+    fn do_edit_loads_absolute_path() {
+        let d = tempfile::tempdir().unwrap();
+        let abs = d.path().join("abs.txt");
+        fs::write(&abs, "abs content").unwrap();
+        let mut ed = EditorState::empty();
+        ed.do_edit(d.path(), abs.to_str().unwrap());
+        assert_eq!(ed.vim.text, "abs content");
+    }
+
+    #[test]
+    fn move_to_line_lands_on_exact_middle_line() {
+        let mut ed = make_tall_editor(10);
+        ed.move_to_line(4);
+        assert_eq!(ed.cursor_line(), 4);
+        // cursor sits at the start of the 5th logical line ("line 5")
+        assert!(ed.vim.text[ed.vim.cursor..].starts_with("line 5"));
+    }
 }

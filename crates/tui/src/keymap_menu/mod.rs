@@ -1,9 +1,10 @@
-//! Keymap modal (Ctrl+H): view and re-bind all 18 global keyboard shortcuts.
+//! Keymap modal (Ctrl+H): view and re-bind all 21 global keyboard shortcuts.
 //! Changes are saved as a JSON patch to `opencoder.json` and take effect
 //! immediately after the menu closes.
 //!
-//! The modal also has a bottom button bar with **退出** (Exit) and
-//! **帮助** (Help). The Help button opens a static shortcut-reference overlay.
+//! The modal also has a bottom button bar with **退出** (Exit),
+//! **恢复默认** (Reset), and **帮助** (Help). The Reset button opens a
+//! confirmation dialog; the Help button opens a shortcut-reference overlay.
 
 pub mod help;
 pub mod state;

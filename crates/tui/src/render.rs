@@ -257,6 +257,7 @@ pub(crate) fn render<B: Backend>(
             input_disabled,
             plan_mode,
             edit_title,
+            title,
         );
         let composer_area = chunks[ci];
         ci += 1;
@@ -541,6 +542,7 @@ fn render_composer(
     disabled: bool,
     plan_mode: Option<&str>,
     edit_title: Option<&str>,
+    top_title: &Line<'static>,
 ) {
     if disabled {
         let dim = Style::default()
@@ -563,18 +565,26 @@ fn render_composer(
         return;
     }
     let block = if let Some(label) = plan_mode {
-        let border_fg = if edit_title == Some("edit requirement") {
+        let is_requirement = edit_title == Some("edit requirement");
+        let border_fg = if is_requirement {
             theme::ok_color()
         } else {
             theme::warn_color()
         };
         let title_text = edit_title.unwrap_or("edit plan");
-        Block::default()
+        let mut block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_fg))
             .title(format!(" {title_text} "))
-            .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left))
+            .title_bottom(Line::from(format!(" {label} ")).alignment(Alignment::Left));
+        if is_requirement {
+            block = block.title(
+                theme::title_spans_colored(top_title, theme::ok_color())
+                    .alignment(Alignment::Right),
+            );
+        }
+        block
     } else {
         Block::default()
             .borders(Borders::ALL)

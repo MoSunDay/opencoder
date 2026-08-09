@@ -497,7 +497,12 @@ pub(super) async fn run_app(
                                     // (/plan $review, /plan fix the bug) carry user content and
                                     // must be echoed before execution.
                                     let is_pure_control = crate::control_helpers::is_pure_control_cmd(&clean);
-                                    if !is_pure_control {
+                                    if is_pure_control {
+                                        // Record in Up/Down history but suppress transcript echo and
+                                        // context accounting — pure control commands are mode switches,
+                                        // not conversation.
+                                        push_history(&mut history, &mut hist_idx, &text);
+                                    } else {
                                         push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                         chat.context_used += estimate(&clean) as u64;
                                     }

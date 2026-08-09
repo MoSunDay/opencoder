@@ -511,7 +511,7 @@ impl ChatView {
                         text,
                         *collapsed,
                         Style::default()
-                            .fg(theme::accent())
+                            .fg(theme::pink())
                             .add_modifier(Modifier::BOLD),
                         Style::default().fg(theme::muted()),
                     ));

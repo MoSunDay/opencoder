@@ -133,10 +133,10 @@ pub struct ChatView {
     /// hit-rects stay aligned. Cleared once all subagents finish (the content
     /// then appears in one shot).
     pub hidden_assistant_idx: Option<usize>,
-    /// Explicitly saved requirement text (from /requirement editor).
-    pub requirement_text: Option<String>,
+    /// Explicitly saved annotation text (from /annotation editor).
+    pub annotation_text: Option<String>,
     /// First non-empty, non-slash user prompt — used to prefill the
-    /// requirement editor when no explicit requirement has been saved.
+    /// annotation editor when no explicit annotation has been saved.
     pub first_prompt: Option<String>,
 }
 

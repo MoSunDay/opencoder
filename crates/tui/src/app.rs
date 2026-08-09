@@ -85,7 +85,7 @@ pub(super) async fn run_app(
     let mut child_runtime = crate::worker::ChildRuntimeHandles::from_session(&session);
     let mut skill_handle = session.skill_prompt.clone();
     let mut chat = initial_chat_view(&session, &store).await;
-    chat.requirement_text = session.requirement.clone();
+    chat.annotation_text = session.requirement.clone();
     let mut input = String::new();
     let mut pending_images: Vec<(String, String)> = Vec::new();
     let mut img_asm = crate::image_chunk::Assembly::new();
@@ -435,13 +435,13 @@ pub(super) async fn run_app(
                                 // to re-arm. Shift+Tab after the plan turn then keeps the plan
                                 // and starts the task instead of plain-swapping.
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                // Intercept /requirement: open the editor instead of submitting
-                                if clean == "/requirement" {
-                                    crate::plan_edit::enter_requirement(
+                                // Intercept /annotation: open the editor instead of submitting
+                                if clean == "/annotation" {
+                                    crate::plan_edit::enter_annotation(
                                         &mut plan_edit,
-                                        chat.last_requirement_text().unwrap_or_default(),
+                                        chat.last_annotation_text().unwrap_or_default(),
                                     );
-                                    mode_flash = Some(("\u{2192} requirement".into(), anim_tick));
+                                    mode_flash = Some(("\u{2192} annotation".into(), anim_tick));
                                 } else if clean == "/notepad" {
                                     notepad = Some(crate::notepad::NotepadView::new(workdir.clone()));
                                 } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap

@@ -44,12 +44,12 @@ fn composer_renders_prompt_and_multiline_text() {
     );
 }
 
-/// The `/requirement` editor (`plan_mode` active, `edit_title == "edit
-/// requirement"`) mirrors the body top-title (`workdir · model · effort`) on
+/// The `/annotation` editor (`plan_mode` active, `edit_title == "edit
+/// annotation"`) mirrors the body top-title (`workdir · model · effort`) on
 /// its top border, right-aligned and coloured green — alongside the left
-/// ` edit requirement ` label.
+/// ` edit annotation ` label.
 #[test]
-fn requirement_editor_shows_green_top_title() {
+fn annotation_editor_shows_green_top_title() {
     let backend = TestBackend::new(80, 8);
     let mut terminal = Terminal::new(backend).unwrap();
     let green = crate::theme::ok_color();
@@ -72,7 +72,7 @@ fn requirement_editor_shows_green_top_title() {
                 &[],
                 false,
                 Some("PLAN"),
-                Some("edit requirement"),
+                Some("edit annotation"),
                 &top_title,
             );
         })
@@ -81,7 +81,7 @@ fn requirement_editor_shows_green_top_title() {
     let buf = terminal.backend().buffer();
     let top = row_text(buf, 0, 80);
     // Left label present.
-    assert!(top.contains("edit requirement"), "left label; got: {top}");
+    assert!(top.contains("edit annotation"), "left label; got: {top}");
     // Right-aligned info title present on the same top border row.
     assert!(top.contains("glm-5.2"), "model in info title; got: {top}");
     // The model text must be green. Locate its cell x via char offset.
@@ -93,7 +93,7 @@ fn requirement_editor_shows_green_top_title() {
     assert_eq!(
         cell.style().fg,
         Some(green),
-        "model must be green (requirement accent); got: {:?}; row: {top}",
+        "model must be green (annotation accent); got: {:?}; row: {top}",
         cell.style().fg
     );
 }

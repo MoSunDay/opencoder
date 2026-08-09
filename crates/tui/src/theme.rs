@@ -32,6 +32,9 @@ pub const TEXT: Color = Color::White;
 /// Local / non-context information shown to the user that never enters the
 /// model context (e.g. `/ps` / `/stop` echoes). Mirrors the `[model]` marker.
 pub const LOCAL: Color = Color::Magenta;
+/// Pink — dedicated to the Thinking (reasoning) block header so it stays
+/// visually distinct from the cyan-accented bash tool header.
+pub const PINK: Color = Color::LightMagenta;
 
 // ── Theme selection ─────────────────────────────────────────────────────────
 
@@ -81,6 +84,7 @@ pub struct Palette {
     pub err: Color,
     pub info: Color,
     pub local: Color,
+    pub pink: Color,
 }
 
 /// Pure lookup: the palette for the given theme. Dark mirrors the `const`
@@ -97,6 +101,7 @@ pub fn palette(kind: ThemeKind) -> Palette {
             err: Color::Red,
             info: Color::Blue,
             local: Color::Magenta,
+            pink: Color::LightMagenta,
         },
         ThemeKind::Light => Palette {
             accent: Color::Blue,
@@ -108,6 +113,7 @@ pub fn palette(kind: ThemeKind) -> Palette {
             err: Color::Red,
             info: Color::Blue,
             local: Color::Magenta,
+            pink: Color::Magenta,
         },
     }
 }
@@ -162,6 +168,9 @@ pub fn info_color() -> Color {
 pub fn local_color() -> Color {
     palette(current_theme()).local
 }
+pub fn pink() -> Color {
+    palette(current_theme()).pink
+}
 
 /// Selection-row background. Dark uses 256-colour index 238, light uses the
 /// softer 252 for white-background terminals.
@@ -200,8 +209,8 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
 /// Pad a title [`Line`]'s spans with one leading/trailing space (mirroring
 /// [`rounded_block_line`]) and recolour every span to `fg`. Returns an owned
 /// line intended for a *right-aligned* top-border title, e.g. the
-/// `/requirement` editor shows the body `workdir · model · effort` title in
-/// the requirement accent colour alongside the left ` edit requirement ` label.
+/// `/annotation` editor shows the body `workdir · model · effort` title in
+/// the annotation accent colour alongside the left ` edit annotation ` label.
 pub fn title_spans_colored(line: &Line<'_>, fg: Color) -> Line<'static> {
     let style = Style::default().fg(fg);
     let mut spans = vec![Span::styled(" ", style)];

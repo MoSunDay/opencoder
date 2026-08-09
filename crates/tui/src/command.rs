@@ -34,7 +34,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     ("/act", "切换到 act 模式（不重置上下文）"),
     ("/plan", "切换到 plan 模式（不重置上下文）"),
-    ("/requirement", "记录/编辑任务需求 (requirement editor)"),
+    ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     ("/notepad", "IDE 式查看/编辑视图 (notepad: 文件树 + vim 编辑器 + 终端)"),
     (
         "/act_clear_context",
@@ -57,7 +57,7 @@ pub enum SlashAction {
     CacheSalt,
     Act,
     Plan,
-    Requirement,
+    Annotation,
     Notepad,
     ClearContext,
     /// Display-only: list background bash (never enters model context).
@@ -184,7 +184,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
         "plan" => Some(SlashAction::Plan),
-        "requirement" | "req" => Some(SlashAction::Requirement),
+        "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" => Some(SlashAction::ClearContext),
         "ps" => Some(SlashAction::Ps),
@@ -204,7 +204,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
         "/plan" => Some(SlashAction::Plan),
-        "/requirement" => Some(SlashAction::Requirement),
+        "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/ps" => Some(SlashAction::Ps),
@@ -693,18 +693,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_requirement_full() {
-        assert_eq!(parse("/requirement"), Some(SlashAction::Requirement));
+    fn parse_annotation_full() {
+        assert_eq!(parse("/annotation"), Some(SlashAction::Annotation));
     }
 
     #[test]
-    fn parse_requirement_alias() {
-        assert_eq!(parse("/req"), Some(SlashAction::Requirement));
+    fn parse_annotation_alias() {
+        assert_eq!(parse("/ann"), Some(SlashAction::Annotation));
     }
 
     #[test]
-    fn dispatch_requirement() {
-        assert_eq!(dispatch("/requirement"), Some(SlashAction::Requirement));
+    fn dispatch_annotation() {
+        assert_eq!(dispatch("/annotation"), Some(SlashAction::Annotation));
     }
 
     #[test]

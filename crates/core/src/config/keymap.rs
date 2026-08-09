@@ -25,7 +25,7 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("switch_mode_keep", "Switch mode (keep context)"),
     ("collapse_blocks", "Collapse blocks + exit subagent"),
     ("force_redraw", "Force full-screen redraw"),
-    ("toggle_console", "Toggle console panel in notepad"),
+    ("toggle_focus", "Toggle focus between notepad and chat input"),
     ("copy_mode", "Toggle copy/selection mode"),
 ];
 
@@ -51,7 +51,7 @@ pub struct KeymapConfig {
     pub switch_mode_keep: String,
     pub collapse_blocks: String,
     pub force_redraw: String,
-    pub toggle_console: String,
+    pub toggle_focus: String,
     pub copy_mode: String,
 }
 
@@ -76,7 +76,7 @@ impl Default for KeymapConfig {
             switch_mode_keep: "ctrl+shift+tab".into(),
             collapse_blocks: "ctrl+l".into(),
             force_redraw: "ctrl+f".into(),
-            toggle_console: "ctrl+shift+t".into(),
+            toggle_focus: "ctrl+o".into(),
             copy_mode: "ctrl+g".into(),
         }
     }
@@ -104,7 +104,7 @@ impl KeymapConfig {
             "switch_mode_keep" => &self.switch_mode_keep,
             "collapse_blocks" => &self.collapse_blocks,
             "force_redraw" => &self.force_redraw,
-            "toggle_console" => &self.toggle_console,
+            "toggle_focus" => &self.toggle_focus,
             "copy_mode" => &self.copy_mode,
             _ => return None,
         })
@@ -131,7 +131,7 @@ impl KeymapConfig {
             "switch_mode_keep" => self.switch_mode_keep = value,
             "collapse_blocks" => self.collapse_blocks = value,
             "force_redraw" => self.force_redraw = value,
-            "toggle_console" => self.toggle_console = value,
+            "toggle_focus" => self.toggle_focus = value,
             "copy_mode" => self.copy_mode = value,
             _ => return false,
         }

@@ -28,14 +28,12 @@ use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 #[path = "app_loop.rs"]
 pub(crate) mod app_loop;
-
 #[path = "app_bootstrap.rs"]
 mod app_bootstrap;
 #[path = "app_display.rs"]
 mod app_display;
 #[path = "app_task.rs"]
 mod app_task;
-
 #[path = "app_notepad.rs"]
 mod app_notepad;
 #[path = "steer_dispatch.rs"]
@@ -101,7 +99,8 @@ pub(super) async fn run_app(
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut notepad: Option<crate::notepad::NotepadView> = None;
-    let mut bash_rx: Option<tokio::sync::oneshot::Receiver<String>> = None;
+    let mut np_chat_focus = false;
+    let mut bash_rx: Option<tokio::sync::oneshot::Receiver<String>> = None; let mut np_drag: Option<(u16, u16)> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
     let mut sys_tokens: u64 = sys_tokens_for(
         session.agent.name.as_str(),
@@ -209,7 +208,7 @@ pub(super) async fn run_app(
         let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now, running);
 
         if dirty && render_pending {
-            if !skip_next_render && !app_notepad::try_render(terminal, &notepad)? {
+            if !skip_next_render {
                 app_loop::render_frame(
                     terminal,
                     render_chat,
@@ -248,6 +247,7 @@ pub(super) async fn run_app(
                     subagent_focus.is_none(),
                     config.autopilot.enabled,
                     &display_mode,
+                    notepad.as_ref(),
                 )?;
             }
             dirty = false;
@@ -281,12 +281,8 @@ pub(super) async fn run_app(
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
                         }
-                        let r = app_notepad::key(&mut notepad, &mut bash_rx, k, &keymap).await;
+                        let r = app_notepad::key(&mut notepad, k, &keymap, &mut np_chat_focus).await;
                         if r.handled {
-                            if let Some(t) = r.prompt {
-                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(t, vec![])).await;
-                                running = true; chat.begin_turn();
-                            }
                             dirty = true; continue;
                         }
                         // Task picker modal: intercept all keys while open.
@@ -367,6 +363,7 @@ pub(super) async fn run_app(
                                 &mut mode_flash, anim_tick, &mut sys_tokens,
                                 &mut plan_edit,
                                 &mut notepad,
+                                &mut np_chat_focus,
                             )
                             .await
                             {
@@ -451,6 +448,7 @@ pub(super) async fn run_app(
                                     mode_flash = Some(("\u{2192} annotation".into(), anim_tick));
                                 } else if clean == "/notepad" {
                                     notepad = Some(crate::notepad::NotepadView::new(workdir.clone()));
+                                    np_chat_focus = false;
                                 } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
@@ -706,11 +704,15 @@ pub(super) async fn run_app(
                                 .await;
                                 dirty = true;
                             }
+                            KeyAction::Bash(cmd) => { app_notepad::handle_bash(&cmd, &mut chat, &mut bash_rx, &workdir, &mut history, &mut hist_idx); dirty = true; }
                             KeyAction::None => {}
                         }
                     }
                     Event::Mouse(m) => {
                         if crate::copy_mode::is_active(copy_mode, shift_held) { dirty = true; continue; }
+                        if app_notepad::handle_notepad_drag(&m, &hits, &mut notepad, &mut np_drag) {
+                            dirty = true; continue;
+                        }
                         let outcome = handle_mouse(
                             m, &hits, &mut scroll, &mut follow, &mut chat,
                             &mut subagent_focus,
@@ -733,9 +735,6 @@ pub(super) async fn run_app(
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size)?,
                     Event::Paste(pasted) => {
-                        if app_notepad::paste(&mut notepad, &pasted) {
-                            dirty = true; continue;
-                        }
                         if pasted.trim().is_empty() {
                             app_loop::paste_clipboard_image_silent(&mut chat, &mut pending_images).await;
                             dirty = true;
@@ -773,7 +772,7 @@ pub(super) async fn run_app(
                     anim_tick = anim_tick.wrapping_add(1);
                     dirty = true;
                 }
-                if app_notepad::poll_bash(&mut notepad, &mut bash_rx) { dirty = true; }
+                if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;

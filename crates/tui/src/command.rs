@@ -37,7 +37,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     (
         "/notepad",
-        "IDE 式查看/编辑视图 (notepad: 文件树 + vim 编辑器 + 终端)",
+        "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)",
     ),
     (
         "/act_clear_context",

@@ -46,6 +46,8 @@ pub(crate) enum KeyAction {
     OpenKeymap,
     Clip,
     OpenCommand,
+    /// Execute a local `!cmd` — run a non-interactive shell command.
+    Bash(String),
     Quit,
 }
 
@@ -263,6 +265,14 @@ pub(crate) fn handle_key(
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
+            // `!cmd` prefix → local non-interactive command execution.
+            if let Some(cmd) = text.strip_prefix('!') {
+                let cmd = cmd.trim();
+                if !cmd.is_empty() {
+                    return KeyAction::Bash(cmd.to_string());
+                }
+                return KeyAction::None;
+            }
             // Enter = steer the focused CHILD session when a running subagent
             // is focused; steer the parent when it is running; Submit when idle.
             if subagent_focused {

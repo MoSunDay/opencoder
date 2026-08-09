@@ -188,6 +188,7 @@ fn ap_chip_visible_only_when_autopilot_enabled() {
             true,
             false,
             "act",
+            None,
         )
         .unwrap();
         assert!(!find_ap(&mut terminal), "no AP chip when autopilot is off");
@@ -235,6 +236,7 @@ fn ap_chip_visible_only_when_autopilot_enabled() {
             true,
             true,
             "act",
+            None,
         )
         .unwrap();
         assert!(find_ap(&mut terminal), "AP chip must render when enabled");

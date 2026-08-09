@@ -1,34 +1,33 @@
 //! `/notepad` — IDE-style file viewer/editor for the workdir.
 //!
-//! Full-screen takeover with three panels: file-tree explorer (left), vim
-//! editor (right), and a vim-style console (bottom). File-content search
-//! via `rg`/`grep` is available from the tree panel.
+//! Renders in a split layout: the top area shows the file-tree explorer and
+//! vim editor; the bottom area shows the normal chat body + composer. A
+//! draggable divider separates the two regions.
 //!
 //! Layout:
 //! ```text
 //! ┌──────────┬─────────────────────┐
-//! │ Explorer │  Editor (vim)       │
-//! ├──────────┴─────────────────────┤
-//! │ Console (echo + composer)      │
+//! │ Explorer │  Editor (vim)       │  ← top (height adjustable)
+//! ╞════════════════════════════════╡  ← draggable divider
+//! │  Chat body + composer          │  ← bottom
 //! └────────────────────────────────┘
 //! ```
 
-pub mod console;
 pub mod editor;
 pub mod keys;
 #[cfg(test)]
 mod render_tests;
 pub mod search;
-pub mod terminal;
 pub mod tree;
 
 use std::path::PathBuf;
 
 use crossterm::event::KeyEvent;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::notepad::console::ConsoleState;
 use crate::notepad::editor::EditorState;
 use crate::notepad::search::SearchState;
 use crate::notepad::tree::TreeState;
@@ -38,7 +37,6 @@ use crate::notepad::tree::TreeState;
 pub enum Focus {
     Tree,
     Editor,
-    Console,
 }
 
 /// Result of a key press in the notepad.
@@ -48,11 +46,13 @@ pub enum NotepadOutcome {
     Exit,
     /// Key was consumed (may or may not have changed state).
     Consumed,
-    /// Submit `text` as a prompt to the agent session.
-    SubmitPrompt(String),
-    /// Run `cmd` as a background bash command.
-    RunBash(String),
+    /// User pressed the focus-toggle key — switch focus to the chat composer.
+    FocusChat,
 }
+
+/// Minimum bottom-area height (body + composer + status must fit).
+const MIN_BOTTOM: u16 = 8;
+const TREE_WIDTH: u16 = 30;
 
 /// Top-level notepad view state.
 #[derive(Clone, Debug)]
@@ -60,31 +60,32 @@ pub struct NotepadView {
     pub workdir: PathBuf,
     pub focus: Focus,
     pub tree_hidden: bool,
-    pub console_hidden: bool,
+    /// Height of the top region (tree + editor) in terminal rows.
+    /// Clamped by [`layout_split`] at render time.
+    pub height: u16,
     pub tree: TreeState,
     pub editor: EditorState,
-    pub console: ConsoleState,
     pub search: Option<SearchState>,
 }
 
 impl NotepadView {
     pub fn new(workdir: PathBuf) -> Self {
-        Self {
-            tree: TreeState::new(&workdir),
-            editor: EditorState::empty(),
-            console: ConsoleState::new(),
-            search: None,
-            workdir,
+        let (_, th) = crossterm::terminal::size().unwrap_or((80, 24));
+        let height = (th * 3 / 5).max(5);
+        NotepadView {
+            workdir: workdir.clone(),
             focus: Focus::Tree,
             tree_hidden: false,
-            console_hidden: false,
+            height,
+            tree: TreeState::new(&workdir),
+            editor: EditorState::empty(),
+            search: None,
         }
     }
 }
 
 /// Async wrapper called from `app.rs`. Handles one key, sets `*notepad = None`
-/// when the user exits. Returns the outcome so the caller can act on
-/// prompt submissions or bash commands.
+/// when the user exits.
 pub async fn dispatch_key(notepad: &mut Option<NotepadView>, k: KeyEvent) -> NotepadOutcome {
     if let Some(view) = notepad.as_mut() {
         let outcome = keys::handle_key(view, k).await;
@@ -97,123 +98,115 @@ pub async fn dispatch_key(notepad: &mut Option<NotepadView>, k: KeyEvent) -> Not
     }
 }
 
-const TREE_WIDTH: u16 = 30;
-const CONSOLE_MIN_H: u16 = 8;
+// ── Rendering ──────────────────────────────────────────────────────────────
 
-/// Full-screen render entry point.
-pub fn render_frame(terminal: &mut crate::render::Term, view: &NotepadView) -> anyhow::Result<()> {
-    terminal.draw(|f| {
-        let area = f.area();
-        let term_h = area.height;
-
-        let (top_area, bottom_area) = if view.console_hidden {
-            (area, Rect::ZERO)
-        } else {
-            let bottom_h = (term_h / 3)
-                .max(CONSOLE_MIN_H)
-                .min(term_h.saturating_sub(6));
-            let vchunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(3), Constraint::Length(bottom_h)])
-                .split(area);
-            (vchunks[0], vchunks[1])
-        };
-
-        // Search overlay takes over the top area.
-        if let Some(s) = &view.search {
-            search::render_search(f, top_area, s, true);
-        } else if view.tree_hidden {
-            editor::render_editor(f, top_area, &view.editor, view.focus == Focus::Editor);
-        } else {
-            let hchunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(TREE_WIDTH), Constraint::Min(3)])
-                .split(top_area);
-            tree::render_tree(f, hchunks[0], &view.tree, view.focus == Focus::Tree);
-            editor::render_editor(f, hchunks[1], &view.editor, view.focus == Focus::Editor);
-        }
-
-        // Console panel (bottom).
-        if !view.console_hidden {
-            console::render::render_console(
-                f,
-                bottom_area,
-                &view.console,
-                view.focus == Focus::Console,
-            );
-        }
-
-        place_cursor(f, view, top_area, bottom_area);
-    })?;
-    Ok(())
+/// Render tree + editor into the given rect (the top region of the split).
+pub fn render_top(f: &mut Frame, area: Rect, view: &NotepadView) {
+    if let Some(s) = &view.search {
+        search::render_search(f, area, s, true);
+        return;
+    }
+    if view.tree_hidden {
+        editor::render_editor(f, area, &view.editor, view.focus == Focus::Editor);
+    } else {
+        let hchunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(TREE_WIDTH), Constraint::Min(3)])
+            .split(area);
+        tree::render_tree(f, hchunks[0], &view.tree, view.focus == Focus::Tree);
+        editor::render_editor(
+            f,
+            hchunks[1],
+            &view.editor,
+            view.focus == Focus::Editor,
+        );
+    }
 }
 
-fn place_cursor(_f: &mut Frame, view: &NotepadView, top: Rect, bottom: Rect) {
-    match view.focus {
-        Focus::Console => {
-            // Cursor is set inside render_composer via set_cursor_position.
-            let _ = (top, bottom);
-        }
-        Focus::Editor => {
-            // Cursor is set inside render_editor via set_editor_cursor.
-            let _ = top;
-        }
-        Focus::Tree => {
-            // Hide cursor in tree panel.
-        }
-    }
+/// Split `area` into (top, divider, bottom) rects based on the desired
+/// top `height`. The divider always occupies exactly 1 row.
+pub fn layout_split(area: Rect, height: u16) -> (Rect, Rect, Rect) {
+    let max_height = area.height.saturating_sub(MIN_BOTTOM + 1); // +1 for divider
+    let clamped = height.clamp(5, max_height.max(5));
+    let vchunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(clamped),
+            Constraint::Length(1),
+            Constraint::Min(MIN_BOTTOM),
+        ])
+        .split(area);
+    (vchunks[0], vchunks[1], vchunks[2])
+}
+
+/// Draw the draggable divider line.
+pub fn render_divider(f: &mut Frame, area: Rect) {
+    f.render_widget(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(crate::theme::muted())),
+        area,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn make_view() -> NotepadView {
-        let d = tempfile::tempdir().unwrap();
-        std::fs::write(d.path().join("a.txt"), "hello\nworld").unwrap();
-        NotepadView::new(d.path().to_path_buf())
+    fn make_view(dir: &std::path::Path) -> NotepadView {
+        NotepadView::new(dir.to_path_buf())
     }
 
     #[test]
     fn new_starts_in_tree_focus() {
-        let v = make_view();
+        let d = tempfile::tempdir().unwrap();
+        let v = make_view(d.path());
         assert_eq!(v.focus, Focus::Tree);
-        assert!(!v.tree.flat.is_empty());
     }
 
     #[test]
-    fn new_has_empty_editor_and_console() {
-        let v = make_view();
-        assert!(v.editor.file_path.is_none());
-        assert!(v.console.echo.is_empty());
-        assert!(v.search.is_none());
-        assert!(!v.console_hidden);
+    fn new_has_nonzero_height() {
+        let d = tempfile::tempdir().unwrap();
+        let v = make_view(d.path());
+        assert!(v.height >= 5);
     }
 
     #[tokio::test]
     async fn dispatch_exit_clears_view() {
-        let mut np: Option<NotepadView> = Some(make_view());
+        let d = tempfile::tempdir().unwrap();
+        let mut np: Option<NotepadView> = Some(make_view(d.path()));
         let outcome = dispatch_key(
             &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Esc,
-                crossterm::event::KeyModifiers::NONE,
-            ),
+            KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE),
         )
         .await;
-        assert!(np.is_none());
         assert_eq!(outcome, NotepadOutcome::Exit);
+        assert!(np.is_none());
     }
 
     #[tokio::test]
     async fn dispatch_tab_cycles_focus() {
-        let mut np: Option<NotepadView> = Some(make_view());
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "hello").unwrap();
+        let mut np: Option<NotepadView> = Some(make_view(d.path()));
+        // Tree -> Editor (open file to put editor in Normal mode).
         dispatch_key(
             &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Tab,
-                crossterm::event::KeyModifiers::NONE,
-            ),
+            KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+        )
+        .await;
+        assert_eq!(np.as_ref().unwrap().focus, Focus::Editor);
+        // Editor -> Tree (Tab in Normal mode cycles).
+        dispatch_key(
+            &mut np,
+            KeyEvent::new(crossterm::event::KeyCode::Tab, crossterm::event::KeyModifiers::NONE),
+        )
+        .await;
+        assert_eq!(np.as_ref().unwrap().focus, Focus::Tree);
+        // Tree -> Editor.
+        dispatch_key(
+            &mut np,
+            KeyEvent::new(crossterm::event::KeyCode::Tab, crossterm::event::KeyModifiers::NONE),
         )
         .await;
         assert_eq!(np.as_ref().unwrap().focus, Focus::Editor);
@@ -221,13 +214,12 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_enter_opens_file() {
-        let mut np: Option<NotepadView> = Some(make_view());
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "hello").unwrap();
+        let mut np: Option<NotepadView> = Some(make_view(d.path()));
         dispatch_key(
             &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            ),
+            KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
         )
         .await;
         let v = np.as_ref().unwrap();
@@ -235,57 +227,49 @@ mod tests {
         assert!(v.editor.file_path.is_some());
     }
 
-    #[tokio::test]
-    async fn console_submit_prompt_outcome() {
-        let mut np: Option<NotepadView> = Some(make_view());
-        np.as_mut().unwrap().focus = Focus::Console;
-        np.as_mut().unwrap().console.vim.text = "hello agent".into();
-        np.as_mut().unwrap().console.vim.mode = crate::vim::VimMode::Normal;
-        let outcome = dispatch_key(
-            &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            ),
-        )
-        .await;
-        assert_eq!(outcome, NotepadOutcome::SubmitPrompt("hello agent".into()));
-        // Composer should be cleared after submit.
-        let v = np.as_ref().unwrap();
-        assert!(v.console.vim.text.is_empty());
-        assert!(!v.console.echo.is_empty());
+    // ── layout_split ───────────────────────────────────────────────────────
+
+    #[test]
+    fn layout_split_normal() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (top, div, bot) = layout_split(area, 15);
+        assert_eq!(top.height, 15);
+        assert_eq!(div.height, 1);
+        assert_eq!(top.y, 0);
+        assert_eq!(div.y, 15);
+        assert_eq!(bot.y, 16);
+        assert_eq!(bot.height, 8);
     }
 
-    #[tokio::test]
-    async fn console_submit_bash_outcome() {
-        let mut np: Option<NotepadView> = Some(make_view());
-        np.as_mut().unwrap().focus = Focus::Console;
-        np.as_mut().unwrap().console.vim.text = "!ls".into();
-        np.as_mut().unwrap().console.vim.mode = crate::vim::VimMode::Normal;
-        let outcome = dispatch_key(
-            &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            ),
-        )
-        .await;
-        assert_eq!(outcome, NotepadOutcome::RunBash("ls".into()));
+    #[test]
+    fn layout_split_clamps_too_large() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (top, _, bot) = layout_split(area, 100);
+        assert!(top.height < 100);
+        assert!(bot.height >= MIN_BOTTOM);
     }
 
-    #[tokio::test]
-    async fn console_empty_submit_is_consumed() {
-        let mut np: Option<NotepadView> = Some(make_view());
-        np.as_mut().unwrap().focus = Focus::Console;
-        np.as_mut().unwrap().console.vim.mode = crate::vim::VimMode::Normal;
-        let outcome = dispatch_key(
-            &mut np,
-            KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            ),
-        )
-        .await;
-        assert_eq!(outcome, NotepadOutcome::Consumed);
+    #[test]
+    fn layout_split_clamps_too_small() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (top, _, _) = layout_split(area, 0);
+        assert_eq!(top.height, 5);
+    }
+
+    #[test]
+    fn layout_split_tiny_terminal() {
+        let area = Rect::new(0, 0, 80, 12);
+        let (top, div, bot) = layout_split(area, 10);
+        // On a tiny terminal the function must not panic and the divider
+        // is always exactly 1 row.
+        assert_eq!(div.height, 1);
+        let _ = (top, bot);
+    }
+
+    #[test]
+    fn layout_split_divider_is_one_row() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (_, div, _) = layout_split(area, 10);
+        assert_eq!(div.height, 1);
     }
 }

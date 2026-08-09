@@ -275,7 +275,7 @@ pub(crate) async fn fold_ui_events(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
-    notepad: &mut Option<crate::notepad::NotepadView>,
+    _notepad: &mut Option<crate::notepad::NotepadView>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
         Some(ev) => ev,
@@ -433,9 +433,6 @@ pub(crate) async fn fold_ui_events(
         batch_needs_render |= !hidden_reasoning_append;
         *skip_next_render = !batch_needs_render;
     }
-    if let Some(np) = notepad.as_mut() {
-        np.console.set_running(*running);
-    }
     LoopFlow::Proceed
 }
 
@@ -470,6 +467,7 @@ pub(crate) async fn dispatch_command(
     sys_tokens: &mut u64,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
+    np_chat_focus: &mut bool,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -628,6 +626,7 @@ pub(crate) async fn dispatch_command(
         }
         CommandOutcome::Dispatch(SlashAction::Notepad) => {
             *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
+            *np_chat_focus = false;
         }
         CommandOutcome::Dispatch(SlashAction::Ps) => {
             local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;

@@ -103,6 +103,7 @@ pub(super) async fn run_app(
     // Queue/steer panel scroll offset (0 = pinned to top (oldest)); snapshot/restored per-session.
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
     let mut sys_tokens: u64 = sys_tokens_for(
         session.agent.name.as_str(),
@@ -210,6 +211,7 @@ pub(super) async fn run_app(
 
         if dirty && render_pending {
             if !skip_next_render {
+                if let Some(np) = &notepad { crate::notepad::render_frame(terminal, np, &input, cursor_idx)?; } else {
                 app_loop::render_frame(
                     terminal,
                     render_chat,
@@ -247,6 +249,7 @@ pub(super) async fn run_app(
                     subagent_focus.is_none(),
                     config.autopilot.enabled, &display_mode,
                 )?;
+                }
             }
             dirty = false;
         }
@@ -274,17 +277,11 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
-                        // Plan edit modal: intercept all keys while active.
                         if plan_edit.is_some() {
-                            match app_loop::dispatch_plan_edit_key(
-                                &mut plan_edit, k, &mut chat, &cmd_tx, terminal,
-                            )
-                            .await
-                            {
-                                app_loop::LoopFlow::Quit => break,
-                                _ => continue,
-                            }
+                            let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
+                            if f == app_loop::LoopFlow::Quit { break; } continue;
                         }
+                        if notepad.is_some() { crate::notepad::dispatch_key(&mut notepad, k, &mut input, &mut cursor_idx).await; dirty = true; continue; }
                         // Task picker modal: intercept all keys while open.
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
@@ -362,6 +359,7 @@ pub(super) async fn run_app(
                                 &mut config, &workdir,
                                 &mut mode_flash, anim_tick, &mut sys_tokens,
                                 &mut plan_edit,
+                                &mut notepad,
                             )
                             .await
                             {
@@ -444,6 +442,8 @@ pub(super) async fn run_app(
                                         chat.last_requirement_text().unwrap_or_default(),
                                     );
                                     mode_flash = Some(("\u{2192} requirement".into(), anim_tick));
+                                } else if clean == "/notepad" {
+                                    notepad = Some(crate::notepad::NotepadView::new(workdir.clone()));
                                 } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {

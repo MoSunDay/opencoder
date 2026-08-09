@@ -100,7 +100,7 @@
 ## 回归
 
 - `cargo clippy --workspace --all-targets -- -D warnings` → 零警告
-- `cargo test --workspace` → **2283 passed / 0 failed**
+- `cargo test --workspace` → **2287 passed / 0 failed**
 - `cargo build --workspace` → 零错误
 - 行数 gate：所有新增文件 ≤ 400 行；迭代中文件 ≤ 800 行（api.rs 791、client.rs 787、mod.rs 717）
 

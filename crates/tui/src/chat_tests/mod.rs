@@ -268,6 +268,41 @@ fn ctx_counts_reasoning_once_at_finalize() {
 }
 
 #[test]
+fn ctx_counts_queue_consumed_prompt() {
+    let mut v = ChatView::default();
+    let before = v.context_used;
+    v.apply(&SessionEvent::QueueConsumed {
+        seq: 5,
+        text: "a queued user message".into(),
+    });
+    // Queued prompts are real user messages the model sees in context;
+    // they must be counted so the ctx% meter matches the compaction budget.
+    assert_eq!(
+        v.context_used,
+        before + estimate("a queued user message") as u64,
+        "QueueConsumed must add its prompt text to context_used"
+    );
+}
+
+#[test]
+fn ctx_counts_steer_consumed_prompt() {
+    let mut v = ChatView::default();
+    let before = v.context_used;
+    v.apply(&SessionEvent::SteerConsumed {
+        seq: 7,
+        text: "a steered redirection".into(),
+    });
+    // Steered prompts are real user messages the model sees in context;
+    // they must be counted so the ctx% meter matches the compaction budget.
+    assert_eq!(
+        v.context_used,
+        before + estimate("a steered redirection") as u64,
+        "SteerConsumed must add its prompt text to context_used"
+    );
+}
+
+
+#[test]
 fn paragraph_scroll_uses_wrapped_rows_and_pins_tail() {
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;

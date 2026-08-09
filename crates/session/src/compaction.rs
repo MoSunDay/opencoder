@@ -28,10 +28,16 @@ pub fn should_compact(session: &SessionState) -> bool {
     let budget = cfg.context_threshold.min(usable_input);
 
     let estimated = estimated_tokens(session);
+    let reported = reported_tokens(session);
+    tracing::debug!(
+        estimated,
+        reported,
+        budget,
+        "should_compact: estimated vs reported vs budget"
+    );
     if estimated >= budget {
         return true;
     }
-    let reported = reported_tokens(session);
     reported != 0 && reported >= budget
 }
 
@@ -41,12 +47,20 @@ pub fn should_compact(session: &SessionState) -> bool {
 /// `build_system`), so its tokens count toward the compaction budget exactly
 /// like any other context the model actually consumes.
 fn estimated_tokens(session: &SessionState) -> u64 {
+    let skill = session.skill_prompt_cloned();
     let system = build_system(
         &session.agent,
         &session.working_dir,
-        session.skill_prompt_cloned().as_deref(),
+        skill.as_deref(),
     );
-    estimate_messages(&session.messages).saturating_add(estimate(&system.text())) as u64
+    let base = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
+    let registry = crate::tools::registry();
+    let tool_tokens = crate::tools::estimate_tool_schema_tokens(
+        &session.agent,
+        skill.as_deref(),
+        &registry,
+    );
+    base.saturating_add(tool_tokens) as u64
 }
 
 fn estimate(s: &str) -> usize {

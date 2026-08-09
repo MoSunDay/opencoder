@@ -10,8 +10,10 @@ use ratatui::Frame;
 use crate::fmt as fmtmod;
 use crate::theme;
 
-/// Context baseline subtracted from used/window so small sessions read ~0%.
-pub(crate) const CONTEXT_BASELINE: u64 = 4_000;
+/// Baseline subtracted from used/window for the `thr` percentage. Now that
+/// tool-schema tokens are counted in `used` (via `sys_tokens_for`), keeping
+/// this at 0 means the meter shows the true percentage of budget consumed.
+pub(crate) const CONTEXT_BASELINE: u64 = 0;
 
 /// Braille spinner frames shown while a task is running.
 pub(crate) const SPINNER: [&str; 10] = [

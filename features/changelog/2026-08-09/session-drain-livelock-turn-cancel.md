@@ -59,3 +59,14 @@ drain，断言 Done 终止、LLM 至少被调一次）：
 
 ## Related Docs
 - [agents/session](../../agents/session/index.md)
+
+## Supersedes
+- 反转 [2026-08-05/drain-idle-boundary-fixes](../2026-08-05/drain-idle-boundary-fixes.md)
+  的 claim_* turn_cancel guard 设计：该条目在 claim_steers / claim_one_queued 中新增
+  turn_cancel cancel-guard 分支（turn-cancel fired 时短路返回空），本修复移除了该 guard。
+  旧条目测试覆盖表中以下 3 个测试名已失效（被翻转重命名）：
+  - `claim_steers_returns_empty_when_turn_cancel_pre_fired` → `claim_steers_claims_even_when_turn_cancel_fired`
+  - `claim_one_queued_returns_none_when_turn_cancel_pre_fired` → `claim_one_queued_claims_even_when_turn_cancel_fired`
+  - `claim_steers_returns_data_after_turn_cancel_reset` → `claim_steers_ignores_turn_cancel_and_is_idempotent`
+  has_pending_* 不受 turn_cancel 影响的设计（2026-08-05 修复 #2）仍然正确且保留——本次
+  修复使 claim_* 与 has_pending_* 语义对齐，而非改回旧行为。

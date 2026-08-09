@@ -79,16 +79,28 @@
 
 | 修复 | 测试名 | 位置 |
 |------|--------|------|
-| Lagged → error 不丢事件 | `lagged_is_surfaced_as_error_not_dropped` | `crates/web/tests/broadcast_lag_handling.rs` |
-| Ok 事件原样通过 | `ok_event_passes_through_unchanged` | `crates/web/tests/broadcast_lag_handling.rs` |
-| tool panic 不击穿 session | `panicking_tool_does_not_crash_run_loop` | `crates/session/tests/tool_panic_isolation.rs` |
-| Ok(None) 超限返回错误不发请求 | `over_budget_with_nothing_to_compact_errors_before_llm_call` | `crates/session/tests/compact_none_over_budget.rs` |
-| 非法 key 报错非静默 | `invalid_key_bytes_are_reported_not_silently_dropped` | `crates/llm/tests/headers.rs` |
+| Bug 1 双重前缀（守护） | `retry_exhaustion_emits_single_non_doubled_error` | `crates/llm/tests/stream_retry.rs` |
+| Bug 2 Lagged → error | `lagged_is_surfaced_as_error_not_dropped` | `crates/web/tests/broadcast_lag_handling.rs` |
+| Bug 2 Ok 事件原样通过 | `ok_event_passes_through_unchanged` | `crates/web/tests/broadcast_lag_handling.rs` |
+| Bug 3 tool panic 隔离 | `panicking_tool_does_not_crash_run_loop` | `crates/session/tests/tool_panic_isolation.rs` |
+| Bug 4 Ok(None) 超限报错 | `over_budget_with_nothing_to_compact_errors_before_llm_call` | `crates/session/tests/compact_none_over_budget.rs` |
+| Bug 5 创建者离开清理 | `release_subscriber_evicts_creator_handle_when_last_and_idle` | `crates/web/src/handle.rs` (in-crate) |
+| Bug 5 drain 中保留 | `release_subscriber_keeps_handle_while_draining` | `crates/web/src/handle.rs` (in-crate) |
+| Bug 5 非创建者保留 | `release_subscriber_keeps_handle_for_non_creator` | `crates/web/src/handle.rs` (in-crate) |
+| Bug 6 drop 时 abort | `flush_guard_aborts_task_on_drop` | `crates/session/src/runner/subagent.rs` (in-crate) |
+| Bug 6 take 后正常完成 | `flush_guard_take_disarms_and_task_completes` | `crates/session/src/runner/subagent.rs` (in-crate) |
+| Bug 7 存储错误→500 | `post_skill_store_error_returns_500_not_404` | `crates/web/tests/store_error_surfacing.rs` |
+| Bug 7 不存在→404 | `post_skill_nonexistent_returns_404` | `crates/web/tests/store_error_surfacing.rs` |
+| Bug 8 skill 持久化→500 | `post_prompt_skill_persist_error_returns_500` | `crates/web/tests/store_error_surfacing.rs` |
+| Bug 9 re-absorb 检查 queue | `reabsorb_tail_picks_up_queued_input_missed_by_in_loop_poll` | `crates/session/tests/reabsorb_checks_queues.rs` |
+| Bug 10 非法 key 报错 | `invalid_key_bytes_are_reported_not_silently_dropped` | `crates/llm/tests/headers.rs` |
+| Bug 11 深度限制 | `deeply_nested_bundle_exceeding_max_depth_is_rejected` | `crates/store/src/bundle.rs` (in-crate) |
+| Bug 12 drop→task 退出 | `dropping_receiver_prompts_stream_task_exit` | `crates/client/tests/events_drop_exits.rs` |
 
 ## 回归
 
 - `cargo clippy --workspace --all-targets -- -D warnings` → 零警告
-- `cargo test --workspace` → **2250 passed / 0 failed**
+- `cargo test --workspace` → **2283 passed / 0 failed**
 - `cargo build --workspace` → 零错误
 - 行数 gate：所有新增文件 ≤ 400 行；迭代中文件 ≤ 800 行（api.rs 791、client.rs 787、mod.rs 717）
 

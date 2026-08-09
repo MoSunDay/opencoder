@@ -69,6 +69,34 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
     entries.into_iter().map(|(_, v)| v).collect()
 }
 
+/// Estimate the token cost of the tool-definition JSON that would be sent in a
+/// `ChatRequest` for the given agent + skill. This closes the gap between the
+/// local estimate (used by compaction + TUI display) and the real
+/// `prompt_tokens` reported by the provider, which includes the full tool
+/// schema array.
+///
+/// The filtering logic mirrors `runner::llm_call::run_one_llm_call` exactly
+/// (agent allowlist ∧ latent-gating), so the estimate matches what the
+/// provider actually receives.
+pub fn estimate_tool_schema_tokens(
+    agent: &opencoder_core::Agent,
+    skill_body: Option<&str>,
+    registry: &HashMap<String, ToolArc>,
+) -> usize {
+    let unlocked = latent::unlocked_from_body(skill_body);
+    let allowed: HashMap<String, ToolArc> = registry
+        .iter()
+        .filter(|(name, _)| {
+            agent.tools.allows(name)
+                && (!latent::is_latent_tool(name.as_str()) || unlocked.contains(name.as_str()))
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let schemas = schema_for(&allowed, agent.kind);
+    let json = serde_json::to_string(&schemas).unwrap_or_default();
+    opencoder_llm::estimate(&json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +210,34 @@ mod tests {
                 "tool schemas must be sorted by name for deterministic requests ({kind:?}); got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn estimate_tool_schema_tokens_is_nontrivial() {
+        let agent = opencoder_core::resolve_agent("act").expect("act agent");
+        let reg = registry();
+        let tokens = estimate_tool_schema_tokens(&agent, None, &reg);
+        // The `act` agent allowlist exposes only `task` + `bash` to the model,
+        // so the schema JSON (~1.4k chars) serialises to ~340 tokens. That is
+        // a meaningful, non-negligible cost that must be counted (>200 guards
+        // against an accidental empty/zero schema while tolerating the real
+        // allowlist surface).
+        assert!(
+            tokens > 200,
+            "act agent tool schemas should cost >200 tokens, got {tokens}"
+        );
+    }
+
+    #[test]
+    fn estimate_tool_schema_tokens_plan_excludes_build_hint() {
+        // Plan mode rewrites the task tool description (no 'build' mention),
+        // so the estimate may differ slightly — but both must be non-trivial.
+        let act_agent = opencoder_core::resolve_agent("act").expect("act agent");
+        let plan_agent = opencoder_core::resolve_agent("plan").expect("plan agent");
+        let reg = registry();
+        let act_tokens = estimate_tool_schema_tokens(&act_agent, None, &reg);
+        let plan_tokens = estimate_tool_schema_tokens(&plan_agent, None, &reg);
+        assert!(act_tokens > 200, "act tokens: {act_tokens}");
+        assert!(plan_tokens > 200, "plan tokens: {plan_tokens}");
     }
 }

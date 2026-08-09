@@ -433,6 +433,18 @@ impl ChatView {
             SessionEvent::PlanHandoff(plan) => {
                 self.context_used += estimate(plan) as u64;
             }
+            // Queue-consumed and steer-consumed prompts are real user messages
+            // the model sees in context. Previously they were echoed as
+            // ChatBlock::User but silently absent from context_used, causing
+            // the ctx meter to under-report by the full token size of every
+            // queued/steered prompt — the main source of "displayed 70k but
+            // compaction triggered at 128k" confusion.
+            SessionEvent::QueueConsumed { text, .. } => {
+                self.context_used += estimate(text) as u64;
+            }
+            SessionEvent::SteerConsumed { text, .. } => {
+                self.context_used += estimate(text) as u64;
+            }
             _ => {}
         }
     }

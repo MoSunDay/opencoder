@@ -108,24 +108,25 @@ async fn reserved_budget_actually_shrinks_usable_window() {
     let _home = ScopedHome::new();
     fn mk(reserved: u64) -> bool {
         let mut config = base_config();
-        config.context_limit = Some(2_000);
-        config.compaction.context_threshold = 10_000; // usable binds
+        config.context_limit = Some(10_000);
+        config.compaction.context_threshold = 100_000; // larger than usable, so usable binds
         config.compaction.reserved = reserved;
         // build synchronously: should_compact is sync
         let dir = tempfile::tempdir().unwrap();
         let agent = resolve_agent("act").unwrap();
         let client: Arc<dyn ChatStream> = client_with_default_done("ok");
         let mut s = SessionState::new("x", agent, config, client, dir.path().to_path_buf());
-        // ~1125 estimated transcript tokens. With the act system-prompt
-        // footprint (~425 tokens) the total sits under usable=1800 but well
-        // over usable=900, so reserved is the sole discriminant.
-        s.messages.push(big_user_message("u1", 4_500));
+        // ~5000 estimated transcript tokens. With system prompt (~400) and
+        // tool schemas (~340, counted since the token-estimation fix) the
+        // total (~5.7k) sits under usable=9800 but well over usable=5000,
+        // so reserved is the sole discriminant.
+        s.messages.push(big_user_message("u1", 20_000));
         should_compact(&s)
     }
-    // reserved=200 → usable=1800 → 1400 < 1800 → no compact
-    assert!(!mk(200), "with small reserved, 1400 tokens should NOT trip");
-    // reserved=1100 → usable=900 → 1400 >= 900 → compact
-    assert!(mk(1_100), "with large reserved, 1400 tokens MUST trip");
+    // reserved=200 → usable=9800 → ~5.7k < 9800 → no compact
+    assert!(!mk(200), "with small reserved, ~5.7k tokens should NOT trip");
+    // reserved=5000 → usable=5000 → ~5.7k >= 5000 → compact
+    assert!(mk(5_000), "with large reserved, ~5.7k tokens MUST trip");
 }
 
 #[tokio::test]
@@ -551,9 +552,9 @@ fn global_agents_md_counts_toward_compaction_budget() {
     .unwrap();
 
     let mut config = base_config();
-    config.context_limit = Some(2_000);
+    config.context_limit = Some(10_000);
     config.compaction.reserved = 200;
-    config.compaction.context_threshold = 10_000; // usable(1800) binds as budget
+    config.compaction.context_threshold = 100_000; // usable(9800) binds as budget
 
     let global_path = home.path().join(".opencoder").join("AGENTS.md");
 
@@ -562,11 +563,12 @@ fn global_agents_md_counts_toward_compaction_budget() {
         let agent = resolve_agent("act").unwrap();
         let client: Arc<dyn ChatStream> = client_with_default_done("ok");
         let mut s = SessionState::new("g", agent, config.clone(), client, dir.path().to_path_buf());
-        // ~1125 estimated transcript tokens — comfortably under the 1800 budget
-        // together with the (act) system prompt, so the session does NOT trip
-        // without the global file. The 100k-char global (~25k tokens) pushes
-        // the estimate far over the budget.
-        s.messages.push(big_user_message("u1", 4_500));
+        // ~5000 estimated transcript tokens — comfortably under the 9800
+        // budget together with the (act) system prompt and counted tool
+        // schemas (~5.7k total), so the session does NOT trip without the
+        // global file. The 100k-char global (~25k tokens) pushes the estimate
+        // far over the budget.
+        s.messages.push(big_user_message("u1", 20_000));
 
         // With the global file present: counted → must trip.
         let with_global = should_compact(&s);

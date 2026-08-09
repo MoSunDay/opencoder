@@ -260,6 +260,7 @@ impl ChatView {
             }
             SessionEvent::Done => {
                 self.llm_round_started_at_ms = None;
+                self.turn_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
@@ -268,6 +269,7 @@ impl ChatView {
             }
             SessionEvent::Error(e) => {
                 self.llm_round_started_at_ms = None;
+                self.turn_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
@@ -341,6 +343,7 @@ impl ChatView {
     pub fn begin_turn(&mut self) {
         self.status.clear();
         self.llm_round_started_at_ms = None;
+        self.turn_started_at_ms = Some(opencoder_core::message::now_ms());
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new

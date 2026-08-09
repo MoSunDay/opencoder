@@ -157,3 +157,26 @@ fn subagent_child_delta_self_heals_child_view() {
         "SubagentChild(TextDelta) must self-heal the child view's round anchor; still None"
     );
 }
+
+/// The turn timer anchor must survive LlmRoundEnd so [turn cost] does not
+/// disappear in the gap between rounds.
+#[test]
+fn turn_anchor_survives_round_end() {
+    let mut v = ChatView::default();
+    v.begin_turn();
+    assert!(
+        v.turn_started_at_ms.is_some(),
+        "begin_turn must set the turn anchor"
+    );
+    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 });
+    v.apply(&SessionEvent::LlmRoundEnd);
+    assert!(
+        v.turn_started_at_ms.is_some(),
+        "turn anchor must survive LlmRoundEnd"
+    );
+    v.apply(&SessionEvent::Done);
+    assert!(
+        v.turn_started_at_ms.is_none(),
+        "Done must clear the turn anchor"
+    );
+}

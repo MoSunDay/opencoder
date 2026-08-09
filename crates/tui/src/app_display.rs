@@ -76,11 +76,11 @@ pub(super) fn is_input_disabled(chat: &ChatView, subagent_focus: Option<usize>) 
     })
 }
 
-/// Live provider/model-round timer shown after the latest body message.
+/// Live whole-turn timer shown after the latest body message.
 ///
-/// A round begins before the model call and ends only after every function call
-/// requested by that assistant message. Terminal/idle views return zero, so
-/// historical messages never retain a frozen timer.
+/// A turn spans all rounds (model calls + function calls) from prompt submit
+/// to Done. The timer persists across round boundaries so it never disappears
+/// between rounds. Terminal/idle views return zero.
 pub(super) fn display_tail_ms(
     chat: &ChatView,
     subagent_focus: Option<usize>,
@@ -95,10 +95,18 @@ pub(super) fn display_tail_ms(
             _ => 0,
         }
     } else if running {
-        live_round_ms(chat, now)
+        live_turn_ms(chat, now)
     } else {
         0
     }
+}
+
+/// Whole-turn elapsed: time since the turn anchor was set by `begin_turn`.
+/// Unlike `live_round_ms`, this is NOT cleared on `LlmRoundEnd`, so the timer
+/// keeps running in the gap between rounds.
+fn live_turn_ms(chat: &ChatView, now: i64) -> u64 {
+    chat.turn_started_at_ms
+        .map_or(0, |started| ((now - started).max(0)) as u64)
 }
 
 fn live_round_ms(chat: &ChatView, now: i64) -> u64 {
@@ -146,9 +154,9 @@ mod tests {
     }
 
     #[test]
-    fn top_level_uses_only_the_live_llm_round() {
+    fn top_level_uses_turn_anchor() {
         let chat = ChatView {
-            llm_round_started_at_ms: Some(1000),
+            turn_started_at_ms: Some(1000),
             ..Default::default()
         };
         assert_eq!(display_tail_ms(&chat, None, 5000, true), 4000);
@@ -156,7 +164,19 @@ mod tests {
     }
 
     #[test]
-    fn between_rounds_has_no_timer() {
+    fn between_rounds_keeps_turn_timer() {
+        // Between LLM rounds: llm_round anchor is None but turn anchor is
+        // still set, so the timer keeps running.
+        let chat = ChatView {
+            turn_started_at_ms: Some(1000),
+            llm_round_started_at_ms: None,
+            ..Default::default()
+        };
+        assert_eq!(display_tail_ms(&chat, None, 5000, true), 4000);
+    }
+
+    #[test]
+    fn no_turn_started_has_no_timer() {
         let chat = ChatView::default();
         assert_eq!(display_tail_ms(&chat, None, 5000, true), 0);
     }

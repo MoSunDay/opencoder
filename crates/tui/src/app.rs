@@ -128,6 +128,7 @@ pub(super) async fn run_app(
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut shift_held = false;
+    let mut copy_mode = false;
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -239,6 +240,7 @@ pub(super) async fn run_app(
                     &mut hits,
                     &mut viewport,
                     shift_held,
+                    copy_mode,
                     &pending_images,
                     input_disabled,
                     tail_ms,
@@ -274,6 +276,7 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
+                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -707,6 +710,7 @@ pub(super) async fn run_app(
                         }
                     }
                     Event::Mouse(m) => {
+                        if crate::copy_mode::is_active(copy_mode, shift_held) { dirty = true; continue; }
                         let outcome = handle_mouse(
                             m, &hits, &mut scroll, &mut follow, &mut chat,
                             &mut subagent_focus,
@@ -782,18 +786,15 @@ pub(super) async fn run_app(
             }
         }
     }
-
     app_bootstrap::finish(&supervisor_active, cmd_tx, worker).await;
     Ok(session_id)
 }
-
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, clear_pending_inputs, handle_mouse, initial_chat_view,
     mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_history,
     push_user, snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::{queued_item_display, skill_token_display, skill_trigger};
-
 #[cfg(test)]
 #[path = "app_tests/mod.rs"]
 mod tests;

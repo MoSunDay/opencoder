@@ -66,6 +66,7 @@ fn draw_frame(
         hits,
         viewport,
         false,
+        false,
         &[],
         false,
         None,

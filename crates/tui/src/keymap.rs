@@ -266,6 +266,7 @@ pub(crate) struct KeyBindings {
     pub collapse_blocks: KeyCombo,
     pub force_redraw: KeyCombo,
     pub toggle_console: KeyCombo,
+    pub copy_mode: KeyCombo,
 }
 
 impl KeyBindings {
@@ -294,6 +295,7 @@ impl KeyBindings {
             collapse_blocks: parse_or_default(&km.collapse_blocks, &d.collapse_blocks),
             force_redraw: parse_or_default(&km.force_redraw, &d.force_redraw),
             toggle_console: parse_or_default(&km.toggle_console, &d.toggle_console),
+            copy_mode: parse_or_default(&km.copy_mode, &d.copy_mode),
         }
     }
 }

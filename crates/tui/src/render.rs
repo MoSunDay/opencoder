@@ -123,6 +123,7 @@ pub(crate) fn render<B: Backend>(
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
     shift_held: bool,
+    copy_mode: bool,
     pending_images: &[(String, String)],
     input_disabled: bool,
     plan_mode: Option<&str>,
@@ -212,6 +213,7 @@ pub(crate) fn render<B: Backend>(
                 viewport,
                 is_top_level,
                 tail_ms,
+                copy_mode,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -299,6 +301,7 @@ pub(crate) fn render<B: Backend>(
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
         }
+        if copy_mode { render_status_chip(f, composer_area, "COPY MODE: Ctrl+G/Esc", theme::warn_color()); }
         if !input_disabled && model_menu.is_none() {
             let position = composer::cursor_screen_position(
                 composer_area.x,
@@ -335,9 +338,11 @@ fn render_body(
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
     tail_ms: u64,
+    copy_mode: bool,
 ) {
     *body_out = Some(area);
-    let block = theme::rounded_block_line(title);
+    let mut block = theme::rounded_block_line(title);
+    if copy_mode { block = block.border_style(Style::default().fg(theme::warn_color())); }
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -422,9 +427,9 @@ fn render_body(
     let n = cache.lines().len();
     let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
     let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    // Live provider/model-round timer at the body tail, on its own dedicated
-    // line. It is visible only while a model round is active and the transcript
-    // tail is in view; completed rounds leave no frozen historical timer behind.
+    // Live whole-turn timer at the body tail, on its own dedicated line. It
+    // spans all rounds (model calls + function calls) and never disappears
+    // between rounds while the turn is running and the tail is in view.
     if tail_ms > 0 && end == n {
         let timer = Span::styled(
             format!("[turn cost {}]", fmtmod::format_run_duration(tail_ms)),

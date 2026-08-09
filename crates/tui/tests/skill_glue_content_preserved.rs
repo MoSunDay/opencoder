@@ -64,12 +64,7 @@ async fn glued_skill_token_preserves_numbered_list() {
     // greedy scanner reads `review1`, which resolves to no real skill, so the
     // entire `$review1` must survive as literal text.
     let prompt = "$review1) \u{4fee}\u{767b}\u{5f55}bug\n2) \u{52a0}\u{6d4b}\u{8bd5}";
-    let quit = process_cmd(
-        UiCmd::Prompt(prompt.into(), Vec::new()),
-        &mut sess,
-        &tx,
-    )
-    .await;
+    let quit = process_cmd(UiCmd::Prompt(prompt.into(), Vec::new()), &mut sess, &tx).await;
     assert!(!quit);
 
     let requests = mock.requests();

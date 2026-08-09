@@ -3,28 +3,22 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::composer;
-use crate::vim::{self, VimAction, VimMode};
+use crate::notepad::console::submit;
 use crate::notepad::editor::should_cycle_focus;
 use crate::notepad::search;
-use crate::notepad::terminal;
 use crate::notepad::tree::TreeInput;
 use crate::notepad::{Focus, NotepadOutcome, NotepadView};
+use crate::vim::{self, VimAction, VimMode};
 
 /// Top-level key handler — delegates to the focused panel.
-pub async fn handle_key(
-    view: &mut NotepadView,
-    k: KeyEvent,
-    input: &mut String,
-    cursor_idx: &mut usize,
-) -> NotepadOutcome {
+pub async fn handle_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
     if view.search.is_some() {
         return handle_search_key(view, k).await;
     }
     match view.focus {
         Focus::Tree => handle_tree_key(view, k),
         Focus::Editor => handle_editor_key(view, k),
-        Focus::Terminal => handle_terminal_key(view, k, input, cursor_idx).await,
+        Focus::Console => handle_console_key(view, k),
     }
 }
 
@@ -37,48 +31,77 @@ fn handle_tree_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
     }
     match k.code {
         KeyCode::Esc => NotepadOutcome::Exit,
-        KeyCode::Tab => { view.focus = Focus::Editor; NotepadOutcome::Consumed }
-        KeyCode::Char('j') | KeyCode::Down => { view.tree.move_cursor(1); NotepadOutcome::Consumed }
-        KeyCode::Char('k') | KeyCode::Up => { view.tree.move_cursor(-1); NotepadOutcome::Consumed }
-        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => { open_or_expand(view); NotepadOutcome::Consumed }
-        KeyCode::Left | KeyCode::Char('h') => { view.tree.collapse_dir(); NotepadOutcome::Consumed }
-        KeyCode::Char('n') => { start_create(view); NotepadOutcome::Consumed }
-        KeyCode::Char('d') => { start_delete(view); NotepadOutcome::Consumed }
-        KeyCode::Char('H') => {
-            view.tree_hidden = !view.tree_hidden;
-            view.focus = if view.tree_hidden { Focus::Editor } else { Focus::Tree };
+        KeyCode::Tab => {
+            view.focus = Focus::Editor;
             NotepadOutcome::Consumed
         }
-        KeyCode::Char('/') => { view.search = Some(search::SearchState::new()); NotepadOutcome::Consumed }
+        KeyCode::Char('j') | KeyCode::Down => {
+            view.tree.move_cursor(1);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            view.tree.move_cursor(-1);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+            open_or_expand(view);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            view.tree.collapse_dir();
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('n') => {
+            start_create(view);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('d') => {
+            start_delete(view);
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('H') => {
+            view.tree_hidden = !view.tree_hidden;
+            if view.tree_hidden {
+                view.focus = Focus::Editor;
+            }
+            NotepadOutcome::Consumed
+        }
+        KeyCode::Char('/') => {
+            view.search = Some(search::SearchState::new());
+            NotepadOutcome::Consumed
+        }
         _ => NotepadOutcome::Consumed,
     }
 }
 
 fn open_or_expand(view: &mut NotepadView) {
-    let node = match view.tree.selected_node() {
-        Some(n) => n.clone(),
-        None => return,
-    };
-    if node.is_dir {
-        view.tree.toggle_collapse();
-    } else {
-        view.editor.load(&node.path);
-        view.focus = Focus::Editor;
+    if let Some(node) = view.tree.selected_node() {
+        if node.is_dir {
+            view.tree.toggle_collapse();
+        } else {
+            view.editor.load(&node.path);
+            view.focus = Focus::Editor;
+        }
     }
 }
 
 fn start_create(view: &mut NotepadView) {
-    let parent = match view.tree.selected_node() {
-        Some(n) if n.is_dir => n.path.clone(),
-        Some(n) => n.path.parent().unwrap_or(&view.workdir).to_path_buf(),
-        None => view.workdir.clone(),
-    };
-    view.tree.input = Some(TreeInput::Create { buf: String::new(), parent });
+    if let Some(node) = view.tree.selected_node().cloned() {
+        let parent = if node.is_dir && !node.collapsed {
+            node.path.clone()
+        } else {
+            node.path.parent().unwrap_or(&view.workdir).to_path_buf()
+        };
+        view.tree.input = Some(TreeInput::Create {
+            buf: String::new(),
+            parent,
+        });
+    }
 }
 
 fn start_delete(view: &mut NotepadView) {
-    if let Some(n) = view.tree.selected_node() {
-        view.tree.input = Some(TreeInput::DeleteConfirm { path: n.path.clone() });
+    if let Some(node) = view.tree.selected_node().cloned() {
+        view.tree.input = Some(TreeInput::DeleteConfirm { path: node.path });
     }
 }
 
@@ -86,21 +109,36 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
     match inp {
         TreeInput::Create { mut buf, parent } => match k.code {
             KeyCode::Esc => {}
-            KeyCode::Enter if !buf.trim().is_empty() => {
-                let _ = std::fs::write(parent.join(buf.trim()), "");
-                view.tree.rebuild(&view.workdir);
+            KeyCode::Enter => {
+                if !buf.trim().is_empty() {
+                    let p = parent.join(&buf);
+                    if let Some(par) = p.parent() {
+                        let _ = std::fs::create_dir_all(par);
+                    }
+                    let _ = std::fs::write(&p, "");
+                    view.tree.rebuild(&view.workdir);
+                }
             }
-            KeyCode::Backspace => { buf.pop(); view.tree.input = Some(TreeInput::Create { buf, parent }); }
-            KeyCode::Char(c) => { buf.push(c); view.tree.input = Some(TreeInput::Create { buf, parent }); }
-            _ => { view.tree.input = Some(TreeInput::Create { buf, parent }); }
+            KeyCode::Backspace => {
+                buf.pop();
+                view.tree.input = Some(TreeInput::Create { buf, parent });
+            }
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                buf.push(c);
+                view.tree.input = Some(TreeInput::Create { buf, parent });
+            }
+            _ => {}
         },
         TreeInput::DeleteConfirm { path } => match k.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+                if path.is_dir() {
+                    let _ = std::fs::remove_dir_all(&path);
+                } else {
+                    let _ = std::fs::remove_file(&path);
+                }
                 view.tree.rebuild(&view.workdir);
             }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {}
-            _ => { view.tree.input = Some(TreeInput::DeleteConfirm { path }); }
+            _ => {}
         },
     }
 }
@@ -109,23 +147,35 @@ fn handle_tree_input(view: &mut NotepadView, inp: TreeInput, k: KeyEvent) {
 
 fn handle_editor_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
     let inner_w = editor_inner_width(view);
+
+    // Tab in Normal mode cycles to Console.
     if should_cycle_focus(&view.editor.vim, &k) {
-        view.focus = Focus::Terminal;
+        view.focus = Focus::Console;
         return NotepadOutcome::Consumed;
     }
+
     if view.editor.vim.mode == VimMode::Normal && k.code == KeyCode::Esc {
         return NotepadOutcome::Exit;
     }
-    if view.editor.is_write_cmd() && k.code == KeyCode::Enter {
+
+    // Intercept :w / :wq / :x before the vim engine treats them as unknown.
+    if k.code == KeyCode::Enter && view.editor.is_write_cmd() {
         let _ = view.editor.do_write();
         return NotepadOutcome::Consumed;
     }
+    if k.code == KeyCode::Enter && view.editor.is_writequit_cmd() {
+        let _ = view.editor.do_writequit();
+        view.focus = Focus::Tree;
+        return NotepadOutcome::Consumed;
+    }
+
     let action = vim::handle_vim_key(&mut view.editor.vim, k, inner_w, 2);
     if action == VimAction::Exit {
         if view.editor.is_modified() {
             let _ = view.editor.do_writequit();
         }
         view.focus = Focus::Tree;
+        return NotepadOutcome::Consumed;
     }
     NotepadOutcome::Consumed
 }
@@ -136,184 +186,354 @@ fn editor_inner_width(view: &NotepadView) -> u16 {
     tw.saturating_sub(tree_w + 4 + 2)
 }
 
-// ── Terminal ───────────────────────────────────────────────────────────────
+// ── Console ────────────────────────────────────────────────────────────────
 
-async fn handle_terminal_key(
-    view: &mut NotepadView,
-    k: KeyEvent,
-    input: &mut String,
-    cursor_idx: &mut usize,
-) -> NotepadOutcome {
-    match k.code {
-        KeyCode::Esc => NotepadOutcome::Exit,
-        KeyCode::Tab => { view.focus = Focus::Tree; NotepadOutcome::Consumed }
-        KeyCode::Up => { view.terminal.scroll_up(); NotepadOutcome::Consumed }
-        KeyCode::Down => { view.terminal.scroll_down(); NotepadOutcome::Consumed }
-        KeyCode::Enter => {
-            let cmd = input.clone();
-            input.clear();
-            *cursor_idx = 0;
-            if !cmd.trim().is_empty() {
-                view.terminal.push_command(&cmd);
-                let out = terminal::run_command(&cmd, &view.workdir).await;
-                view.terminal.push_output(&out);
+fn handle_console_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
+    let inner_w = console_inner_width();
+
+    // Esc in Normal mode exits the notepad.
+    if view.console.vim.mode == VimMode::Normal && k.code == KeyCode::Esc {
+        return NotepadOutcome::Exit;
+    }
+
+    // Tab in Normal mode cycles to Tree.
+    if view.console.vim.mode == VimMode::Normal && k.code == KeyCode::Tab {
+        view.focus = Focus::Tree;
+        return NotepadOutcome::Consumed;
+    }
+
+    // Alt+Enter in Insert mode submits.
+    if view.console.vim.mode == VimMode::Insert && is_alt_enter(&k) {
+        return try_submit(view);
+    }
+
+    // Enter in Normal mode submits.
+    if view.console.vim.mode == VimMode::Normal && k.code == KeyCode::Enter {
+        return try_submit(view);
+    }
+
+    // Command-mode intercepts (:send, :clear) before the vim engine.
+    if view.console.vim.mode == VimMode::Command && k.code == KeyCode::Enter {
+        let cmd = view.console.vim.cmdline.trim().to_string();
+        match cmd.as_str() {
+            "send" | "" => {
+                view.console.vim.cmdline.clear();
+                view.console.vim.mode = VimMode::Normal;
+                view.console.vim.reset_pending();
+                return try_submit(view);
             }
-            NotepadOutcome::Consumed
-        }
-        KeyCode::Backspace => {
-            if let Some((t, c)) = composer::backspace(input, *cursor_idx) {
-                *input = t;
-                *cursor_idx = c;
+            "clear" => {
+                view.console.echo.clear();
+                view.console.vim.cmdline.clear();
+                view.console.vim.mode = VimMode::Normal;
+                view.console.vim.reset_pending();
+                return NotepadOutcome::Consumed;
             }
-            NotepadOutcome::Consumed
+            _ => { /* fall through to engine for :q, :wq, unknown */ }
         }
-        KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
-            let (t, c) = composer::insert_char(input, *cursor_idx, c);
-            *input = t;
-            *cursor_idx = c;
-            NotepadOutcome::Consumed
+    }
+
+    // Delegate to the vim engine.
+    let action = vim::handle_vim_key(&mut view.console.vim, k, inner_w, 2);
+    if action == VimAction::Exit {
+        return NotepadOutcome::Exit;
+    }
+    NotepadOutcome::Consumed
+}
+
+/// Parse the composer text and return the appropriate outcome.
+fn try_submit(view: &mut NotepadView) -> NotepadOutcome {
+    let text = view.console.vim.text.clone();
+    match submit::parse_submit(&text) {
+        submit::SubmitKind::Prompt(p) => {
+            view.console.echo.push_user(&p);
+            view.console.reset_composer();
+            NotepadOutcome::SubmitPrompt(p)
         }
-        _ => NotepadOutcome::Consumed,
+        submit::SubmitKind::Bash(cmd) => {
+            view.console.echo.push_bash_cmd(&cmd);
+            view.console.reset_composer();
+            NotepadOutcome::RunBash(cmd)
+        }
+        submit::SubmitKind::None => NotepadOutcome::Consumed,
     }
 }
 
-// ── Search ─────────────────────────────────────────────────────────────────
+fn console_inner_width() -> u16 {
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    tw.saturating_sub(4)
+}
+
+fn is_alt_enter(k: &KeyEvent) -> bool {
+    k.code == KeyCode::Enter && k.modifiers.contains(KeyModifiers::ALT)
+}
+
+// ── Search ───────────────────────────────────────────────────────────────
 
 async fn handle_search_key(view: &mut NotepadView, k: KeyEvent) -> NotepadOutcome {
-    let s = match view.search.as_mut() {
-        Some(s) => s,
-        None => return NotepadOutcome::Consumed,
-    };
+    let s = view.search.as_mut().unwrap();
     if s.editing {
         match k.code {
-            KeyCode::Esc => { view.search = None; }
-            KeyCode::Enter => {
-                let q = s.query.clone();
-                s.status.clear();
-                match search::search(&q, &view.workdir).await {
-                    Ok(hits) => { s.results = hits; s.editing = false; s.selected = 0; s.scroll = 0; }
-                    Err(e) => s.status = e,
-                }
+            KeyCode::Esc => {
+                view.search = None;
             }
-            KeyCode::Backspace => { s.query.pop(); }
-            KeyCode::Char(c) => { s.query.push(c); }
+            KeyCode::Enter => {
+                s.editing = false;
+                let q = s.query.clone();
+                let wd = view.workdir.clone();
+                s.results = search::search(&q, &wd).await.unwrap_or_default();
+                s.status = format!("{} results", s.results.len());
+                s.selected = 0;
+            }
+            KeyCode::Backspace => {
+                s.query.pop();
+            }
+            KeyCode::Char(c) if !k.modifiers.contains(KeyModifiers::CONTROL) => {
+                s.query.push(c);
+            }
             _ => {}
         }
         return NotepadOutcome::Consumed;
     }
     match k.code {
-        KeyCode::Esc => { view.search = None; }
-        KeyCode::Char('j') | KeyCode::Down => { s.move_cursor(1); }
-        KeyCode::Char('k') | KeyCode::Up => { s.move_cursor(-1); }
-        KeyCode::Enter => {
-            if let Some(hit) = s.selected_hit().cloned() {
-                open_search_hit(view, hit);
-            }
+        KeyCode::Esc => {
+            view.search = None;
         }
-        KeyCode::Char('/') => { s.editing = true; s.query.clear(); s.results.clear(); }
+        KeyCode::Char('j') | KeyCode::Down => {
+            view.search.as_mut().unwrap().move_cursor(1);
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            view.search.as_mut().unwrap().move_cursor(-1);
+        }
+        KeyCode::Enter => {
+            open_search_hit(view);
+        }
+        KeyCode::Char('/') => {
+            view.search.as_mut().unwrap().editing = true;
+        }
         _ => {}
     }
     NotepadOutcome::Consumed
 }
 
-fn open_search_hit(view: &mut NotepadView, hit: search::SearchHit) {
-    view.editor.load(&hit.path);
-    let target = hit.line_no.saturating_sub(1);
-    let mut char_idx = 0usize;
-    let mut line = 0usize;
-    for ch in view.editor.vim.text.chars() {
-        if line == target {
-            break;
+fn open_search_hit(view: &mut NotepadView) {
+    let hit = view.search.as_ref().and_then(|s| s.selected_hit()).cloned();
+    if let Some(hit) = hit {
+        view.editor.load(&hit.path);
+        let target = hit.line_no.saturating_sub(1) as u16;
+        view.editor.vim.mode = VimMode::Normal;
+        // Walk chars to find cursor position at the target line.
+        let mut line = 0usize;
+        let mut char_idx = 0usize;
+        for ch in view.editor.vim.text.chars() {
+            if line == target as usize {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+            }
+            char_idx += 1;
         }
-        if ch == '\n' {
-            line += 1;
-        }
-        char_idx += 1;
+        view.editor.vim.cursor = char_idx;
+        view.editor.scroll = target;
+        view.focus = Focus::Editor;
+        view.search = None;
     }
-    view.editor.vim.cursor = char_idx;
-    view.editor.vim.mode = VimMode::Normal;
-    view.editor.scroll = target as u16;
-    view.focus = Focus::Editor;
-    view.search = None;
 }
+
+// ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notepad::NotepadView;
 
-    fn key(code: KeyCode) -> KeyEvent { KeyEvent::new(code, KeyModifiers::NONE) }
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
 
-    fn make_view(dir: &std::path::Path) -> NotepadView {
-        std::fs::write(dir.join("a.txt"), "hello\nworld").unwrap();
-        NotepadView::new(dir.to_path_buf())
+    fn make_view(workdir: &std::path::Path) -> NotepadView {
+        std::fs::write(workdir.join("a.txt"), "hello\nworld").unwrap();
+        NotepadView::new(workdir.to_path_buf())
     }
 
     #[test]
     fn tree_tab_cycles_to_editor() {
         let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
-        v.focus = Focus::Tree;
-        assert_eq!(handle_tree_key(&mut v, key(KeyCode::Tab)), NotepadOutcome::Consumed);
+        let mut v = make_view(d.path());
+        assert_eq!(
+            handle_tree_key(&mut v, key(KeyCode::Tab)),
+            NotepadOutcome::Consumed
+        );
         assert_eq!(v.focus, Focus::Editor);
     }
 
     #[test]
     fn tree_esc_exits() {
         let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
-        assert_eq!(handle_tree_key(&mut v, key(KeyCode::Esc)), NotepadOutcome::Exit);
+        let mut v = make_view(d.path());
+        assert_eq!(
+            handle_tree_key(&mut v, key(KeyCode::Esc)),
+            NotepadOutcome::Exit
+        );
     }
 
     #[test]
     fn editor_esc_normal_exits() {
         let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
+        let mut v = make_view(d.path());
         v.focus = Focus::Editor;
         v.editor.vim.mode = VimMode::Normal;
-        assert_eq!(handle_editor_key(&mut v, key(KeyCode::Esc)), NotepadOutcome::Exit);
-    }
-
-    #[tokio::test]
-    async fn terminal_esc_exits() {
-        let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
-        v.focus = Focus::Terminal;
-        let mut input = String::new();
-        let mut cur = 0;
         assert_eq!(
-            handle_terminal_key(&mut v, key(KeyCode::Esc), &mut input, &mut cur).await,
+            handle_editor_key(&mut v, key(KeyCode::Esc)),
             NotepadOutcome::Exit
         );
     }
 
-    #[tokio::test]
-    async fn terminal_runs_command() {
+    #[test]
+    fn editor_tab_cycles_to_console() {
         let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
-        v.focus = Focus::Terminal;
-        let mut input = String::from("echo hi");
-        let mut cur = 7;
-        handle_terminal_key(&mut v, key(KeyCode::Enter), &mut input, &mut cur).await;
-        assert!(v.terminal.lines.iter().any(|l| l.text.contains("hi")));
-        assert!(input.is_empty());
+        let mut v = make_view(d.path());
+        v.focus = Focus::Editor;
+        v.editor.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_editor_key(&mut v, key(KeyCode::Tab)),
+            NotepadOutcome::Consumed
+        );
+        assert_eq!(v.focus, Focus::Console);
+    }
+
+    #[test]
+    fn console_esc_exits() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Esc)),
+            NotepadOutcome::Exit
+        );
+    }
+
+    #[test]
+    fn console_tab_cycles_to_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Tab)),
+            NotepadOutcome::Consumed
+        );
+        assert_eq!(v.focus, Focus::Tree);
+    }
+
+    #[test]
+    fn console_normal_enter_submits_prompt() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.text = "hello agent".into();
+        v.console.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Enter)),
+            NotepadOutcome::SubmitPrompt("hello agent".into())
+        );
+        assert!(v.console.vim.text.is_empty());
+    }
+
+    #[test]
+    fn console_normal_enter_bash_prefix() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.text = "!ls -la".into();
+        v.console.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Enter)),
+            NotepadOutcome::RunBash("ls -la".into())
+        );
+    }
+
+    #[test]
+    fn console_insert_alt_enter_submits() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.text = "prompt".into();
+        v.console.vim.mode = VimMode::Insert;
+        let k = KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT);
+        assert_eq!(
+            handle_console_key(&mut v, k),
+            NotepadOutcome::SubmitPrompt("prompt".into())
+        );
+    }
+
+    #[test]
+    fn console_insert_enter_inserts_newline() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.text = "ab".into();
+        v.console.vim.cursor = 1;
+        v.console.vim.mode = VimMode::Insert;
+        handle_console_key(&mut v, key(KeyCode::Enter));
+        assert!(v.console.vim.text.contains('\n'));
+    }
+
+    #[test]
+    fn console_command_send_submits() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.text = "hello".into();
+        v.console.vim.mode = VimMode::Command;
+        v.console.vim.cmdline = "send".into();
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Enter)),
+            NotepadOutcome::SubmitPrompt("hello".into())
+        );
+    }
+
+    #[test]
+    fn console_command_clear_empties_echo() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.mode = VimMode::Command;
+        v.console.vim.cmdline = "clear".into();
+        v.console.echo.push_user("old line");
+        assert!(!v.console.echo.is_empty());
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Enter)),
+            NotepadOutcome::Consumed
+        );
+        assert!(v.console.echo.is_empty());
+    }
+
+    #[test]
+    fn console_empty_submit_is_noop() {
+        let d = tempfile::tempdir().unwrap();
+        let mut v = make_view(d.path());
+        v.focus = Focus::Console;
+        v.console.vim.mode = VimMode::Normal;
+        assert_eq!(
+            handle_console_key(&mut v, key(KeyCode::Enter)),
+            NotepadOutcome::Consumed
+        );
     }
 
     #[tokio::test]
     async fn search_finds_and_opens() {
         let d = tempfile::tempdir().unwrap();
-    let mut v = make_view(d.path());
+        let mut v = make_view(d.path());
         v.search = Some(search::SearchState::new());
-        // type query
         for c in "hello".chars() {
             handle_search_key(&mut v, key(KeyCode::Char(c))).await;
         }
-        // execute search
         handle_search_key(&mut v, key(KeyCode::Enter)).await;
         let s = v.search.as_ref().unwrap();
         assert!(!s.results.is_empty());
         assert!(!s.editing);
-        // open first result
         handle_search_key(&mut v, key(KeyCode::Enter)).await;
         assert_eq!(v.focus, Focus::Editor);
         assert!(v.search.is_none());

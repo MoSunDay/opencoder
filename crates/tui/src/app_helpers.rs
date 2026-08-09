@@ -12,7 +12,7 @@ use opencoder_core::{resolve_agent, Config, Endpoint};
 use opencoder_llm::estimate;
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionPatch, Store};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
 use tokio::sync::mpsc;
@@ -460,10 +460,9 @@ pub(crate) fn push_user(
         }
     }
     push_history(history, hist_idx, text);
-    chat.push_marker(Line::from(Span::styled(
-        format!("user: {text}"),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
+    chat.blocks.push(crate::chat::ChatBlock::User {
+        rendered: crate::markdown::render(text),
+    });
     chat.push_marker(Line::from(""));
 }
 

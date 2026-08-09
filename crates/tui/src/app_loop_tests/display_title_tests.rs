@@ -50,7 +50,10 @@ fn compute_display_title_uses_workdir_style_for_model_and_effort() {
             .all(|span| span.style == Style::default()),
         "model and thinking effort must use the same raw style as workdir"
     );
-    assert_eq!(ds.display_mode, "act", "top-level display_mode mirrors agent_name");
+    assert_eq!(
+        ds.display_mode, "act",
+        "top-level display_mode mirrors agent_name"
+    );
 }
 
 /// A blank `reasoning_effort` is omitted without leaving a separator.
@@ -128,5 +131,8 @@ fn compute_display_subagent_title_keeps_navigation() {
         t.contains("investigate"),
         "subagent prompt stays in the navigation title; got: {t}"
     );
-    assert_eq!(ds.display_mode, "explore", "subagent display_mode mirrors subagent kind");
+    assert_eq!(
+        ds.display_mode, "explore",
+        "subagent display_mode mirrors subagent kind"
+    );
 }

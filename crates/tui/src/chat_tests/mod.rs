@@ -13,6 +13,7 @@ mod terminal_safety;
 mod thinking_state;
 mod timer;
 mod tool_collapse;
+mod user_block;
 
 #[test]
 fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {

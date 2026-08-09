@@ -114,7 +114,6 @@ pub fn empty_hits(body: Rect) -> MouseHits {
     }
 }
 
-
 /// Parent whose own content is short but wraps a long, unfinalized subagent
 /// child. The child view owns rows that do not exist in the parent, so
 /// selecting those rows proves which view the interaction reads from.

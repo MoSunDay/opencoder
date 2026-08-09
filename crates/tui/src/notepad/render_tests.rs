@@ -115,7 +115,10 @@ fn render_editor_long_line_cursor_no_overflow() {
 fn render_editor_many_lines_cursor_no_overflow() {
     // Many lines — cursor row math must not overflow u16.
     let mut ed = EditorState::empty();
-    let text: String = (0..500).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+    let text: String = (0..500)
+        .map(|i| format!("line {}", i))
+        .collect::<Vec<_>>()
+        .join("\n");
     ed.vim = VimState::new(text);
     // Move cursor to a deep line.
     ed.vim.cursor = 2000;
@@ -152,9 +155,7 @@ fn render_editor_empty_buffer_no_panic() {
     // a "1" cell within the gutter region.
     let buf = term.backend().buffer();
     let row = 1u16;
-    let has_line_one = (0..6u16).any(|x| {
-        buf.cell((x, row)).map(|c| c.symbol()) == Some("1")
-    });
+    let has_line_one = (0..6u16).any(|x| buf.cell((x, row)).map(|c| c.symbol()) == Some("1"));
     assert!(has_line_one, "empty editor should show line-1 gutter");
 }
 
@@ -173,7 +174,12 @@ fn notepad_view_extreme_small_terminal() {
     term.draw(|f| {
         let area = f.area();
         // Just exercise tree + editor at tiny sizes.
-        render_tree(f, Rect::new(0, 0, area.width, area.height), &view.tree, true);
+        render_tree(
+            f,
+            Rect::new(0, 0, area.width, area.height),
+            &view.tree,
+            true,
+        );
     })
     .unwrap();
 }

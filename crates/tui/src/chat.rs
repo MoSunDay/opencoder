@@ -69,12 +69,14 @@ impl ChatView {
                 self.llm_round_started_at_ms = None;
             }
             SessionEvent::TextDelta(t) => {
+                self.recover_round_anchor_if_missing();
                 self.ensure_assistant_open();
                 if let Some(ChatBlock::Assistant { raw, .. }) = self.blocks.last_mut() {
                     raw.push_str(&sanitize_multiline(t));
                 }
             }
             SessionEvent::ReasoningDelta(t) => {
+                self.recover_round_anchor_if_missing();
                 self.ensure_thinking_open();
                 if let Some(ChatBlock::Thinking { text, .. }) = self.blocks.last_mut() {
                     text.push_str(&sanitize_multiline(t));
@@ -260,6 +262,7 @@ impl ChatView {
                 self.llm_round_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
+                self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
                 self.blocks.push(ChatBlock::Marker(vec![Line::from("")]));
             }
@@ -267,6 +270,7 @@ impl ChatView {
                 self.llm_round_started_at_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
+                self.reconcile_orphaned_subagents();
                 self.finalize_assistant();
                 self.blocks
                     .push(ChatBlock::Marker(vec![Line::from(Span::styled(
@@ -306,15 +310,10 @@ impl ChatView {
                         .unwrap_or_default()
                 };
                 if !display.is_empty() {
-                    self.push_marker_lines(vec![
-                        Line::from(Span::styled(
-                            format!("user: {display}"),
-                            Style::default()
-                                .fg(theme::accent())
-                                .add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from(""),
-                    ]);
+                    self.blocks.push(ChatBlock::User {
+                        rendered: crate::markdown::render(&display),
+                    });
+                    self.push_marker(Line::from(""));
                 }
                 self.steer_items.retain(|(s, _)| s != seq);
             }
@@ -463,6 +462,15 @@ impl ChatView {
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
+                ChatBlock::User { rendered } => {
+                    out.push(Line::from(Span::styled(
+                        "\u{276f} User:",
+                        Style::default()
+                            .fg(theme::user_color())
+                            .add_modifier(Modifier::BOLD),
+                    )));
+                    out.extend(types::indented(rendered, 4));
+                }
                 ChatBlock::Assistant {
                     raw,
                     rendered,
@@ -476,18 +484,14 @@ impl ChatView {
                     // Visual header so assistant output has its own labelled region,
                     // mirroring the `user:` marker on user prompts.
                     out.push(Line::from(Span::styled(
-                        "\u{276f} say:",
+                        "\u{276f} Say:",
                         Style::default()
                             .fg(theme::ok_color())
                             .add_modifier(Modifier::BOLD),
                     )));
                     let indent = Span::raw("    ");
                     if *done {
-                        for l in rendered.iter() {
-                            let mut spans = vec![indent.clone()];
-                            spans.extend(l.spans.iter().cloned());
-                            out.push(Line::from(spans));
-                        }
+                        out.extend(types::indented(rendered, 4));
                     } else {
                         // Mirrors `flush_code` (markdown.rs): split the raw
                         // stream on `\n` and drop only the single trailing
@@ -576,12 +580,7 @@ impl ChatView {
                             Style::default().fg(theme::muted()),
                         )));
                     } else {
-                        let indent = Span::raw("    ");
-                        for l in rendered.iter() {
-                            let mut spans = vec![indent.clone()];
-                            spans.extend(l.spans.iter().cloned());
-                            out.push(Line::from(spans));
-                        }
+                        out.extend(types::indented(rendered, 4));
                     }
                     out.push(Line::from(""));
                 }
@@ -592,12 +591,7 @@ impl ChatView {
                             .fg(theme::warn_color())
                             .add_modifier(Modifier::BOLD),
                     )));
-                    let indent = Span::raw("  ");
-                    for l in rendered.iter() {
-                        let mut spans = vec![indent.clone()];
-                        spans.extend(l.spans.iter().cloned());
-                        out.push(Line::from(spans));
-                    }
+                    out.extend(types::indented(rendered, 2));
                     out.push(Line::from(""));
                 }
                 ChatBlock::Subagent {
@@ -762,6 +756,15 @@ impl ChatView {
                 collapsed: true,
                 sealed: false,
             });
+        }
+    }
+
+    /// Self-heal a missing round anchor: if `LlmRoundStart` was dropped by the
+    /// saturated `forward_event` channel, the first `TextDelta`/`ReasoningDelta`
+    /// re-anchors it (only when `None`; recursive for child views too).
+    fn recover_round_anchor_if_missing(&mut self) {
+        if self.llm_round_started_at_ms.is_none() {
+            self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
         }
     }
 

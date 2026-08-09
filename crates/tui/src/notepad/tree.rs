@@ -80,8 +80,7 @@ impl TreeState {
     /// for paths that still exist.
     pub fn rebuild(&mut self, workdir: &Path) {
         // Collect expanded dirs (lazy: dirs start collapsed by default).
-        let mut expanded: std::collections::HashSet<PathBuf> =
-            std::collections::HashSet::new();
+        let mut expanded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         for n in &self.flat {
             if n.is_dir && !n.collapsed {
                 expanded.insert(n.path.clone());
@@ -235,7 +234,11 @@ pub fn render_tree(f: &mut Frame, area: Rect, state: &TreeState, focused: bool) 
         let abs_idx = start + i;
         let indent = "  ".repeat(node.depth);
         let glyph = if node.is_dir {
-            if node.collapsed { "▸ " } else { "▾ " }
+            if node.collapsed {
+                "▸ "
+            } else {
+                "▾ "
+            }
         } else {
             "  "
         };

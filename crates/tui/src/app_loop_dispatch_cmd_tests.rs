@@ -688,3 +688,80 @@ async fn slash_clear_context_while_running_is_noop() {
         chat.blocks
     );
 }
+
+/// `/act` while a subagent is live is a no-op — running=false but
+/// subagents_running>0 (the dropped-SubagentEnd window: Done/TurnDone clear
+/// `running` and zero the counter in `apply`, but a forwarded SubagentEnd can
+/// be dropped under channel saturation). The gate must still refuse a mode
+/// switch while a tracked subagent exists. Uses plan_submitted=true so it
+/// WOULD route to SwitchAndStart (start a NEW turn) if not gated.
+#[tokio::test]
+async fn slash_act_while_subagent_running_is_noop() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView {
+        agent: "plan".into(),
+        plan_submitted: true,
+        subagents_running: 1,
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = true;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut cache_salt_menu = None;
+    let mut input = "do it".to_string();
+    let mut cursor_idx = 5usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut command_menu = menu_for_act();
+
+    let flow = dispatch_command(
+        &mut command_menu,
+        enter_key(),
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut cache_salt_menu,
+        &mut None,
+        "plan",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+        &mut None,
+        &mut None,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(
+        !running,
+        "running must stay false (no turn started while a subagent is live)"
+    );
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while a subagent is live"
+    );
+    assert_eq!(input, "do it", "input must be untouched on the noop");
+    assert!(
+        chat.blocks
+            .iter()
+            .any(|b| matches!(b, ChatBlock::Marker(lines)
+            if lines.iter().any(|l| l.to_string().contains("busy")))),
+        "a [switch] busy marker must be pushed; blocks: {:?}",
+        chat.blocks
+    );
+}

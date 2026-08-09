@@ -82,7 +82,10 @@ fn body_turn_cost_timer_on_own_line() {
             found_timer = true;
         }
     }
-    assert!(found_content, "content row not found in body output:\n{full}");
+    assert!(
+        found_content,
+        "content row not found in body output:\n{full}"
+    );
     assert!(found_timer, "timer not found in body output:\n{full}");
 }
 
@@ -166,8 +169,7 @@ fn body_turn_cost_timer_not_mixed_into_tool_output() {
     );
     // No single row may contain BOTH bash output content AND the timer.
     for row in full.lines() {
-        let has_bash_output =
-            row.contains("line one") || row.contains("line two");
+        let has_bash_output = row.contains("line one") || row.contains("line two");
         let has_timer = row.contains("[turn cost");
         assert!(
             !(has_bash_output && has_timer),

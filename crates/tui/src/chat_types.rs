@@ -1,4 +1,4 @@
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 /// Braille spinner frames shown next to a running subagent header. Matches the
 /// status-bar spinner in `render.rs` so the UI has one consistent motion.
@@ -25,6 +25,11 @@ pub(crate) const TOOL_OUTPUT_LINES: usize = 200;
 pub enum ChatBlock {
     /// User prompt, queued/steer marker, system notice — plain styled lines.
     Marker(Vec<Line<'static>>),
+    /// User-submitted message. Non-streaming: the markdown body is
+    /// pre-rendered at submit time and held in `rendered`. Mirrors the
+    /// `Assistant` block's structure so both share the `❯ label:` +
+    /// 4-space-indented body layout.
+    User { rendered: Vec<Line<'static>> },
     /// Assistant text output. While streaming (`done == false`) the raw text is
     /// shown as plain lines for low latency. On turn completion the text is
     /// rendered as markdown exactly once, then `done` flips to `true`.
@@ -169,4 +174,20 @@ pub struct ToolHeader {
 pub struct CompactionHeader {
     pub block_idx: usize,
     pub header_line_idx: usize,
+}
+
+/// Prepend a fixed-width indent to each line's existing spans, producing a
+/// new owned `Vec<Line>` suitable for `flatten_with`. Used by the
+/// `Assistant`, `User`, and `Image` flatten arms so they share one
+/// indented-body implementation.
+pub(super) fn indented(rendered: &[Line<'static>], width: usize) -> Vec<Line<'static>> {
+    let indent = Span::raw(" ".repeat(width));
+    rendered
+        .iter()
+        .map(|l| {
+            let mut spans = vec![indent.clone()];
+            spans.extend(l.spans.iter().cloned());
+            Line::from(spans)
+        })
+        .collect()
 }

@@ -4,15 +4,10 @@ use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::{
-    style::Style,
-    text::{Line, Span},
-};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use std::path::PathBuf;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -41,6 +36,8 @@ mod app_display;
 #[path = "app_task.rs"]
 mod app_task;
 
+#[path = "app_notepad.rs"]
+mod app_notepad;
 #[path = "steer_dispatch.rs"]
 mod steer_dispatch;
 #[path = "steer_fire.rs"]
@@ -104,6 +101,7 @@ pub(super) async fn run_app(
     let mut queue_scroll: u32 = 0;
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let mut bash_rx: Option<tokio::sync::oneshot::Receiver<String>> = None;
     let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
     let mut sys_tokens: u64 = sys_tokens_for(
         session.agent.name.as_str(),
@@ -210,8 +208,7 @@ pub(super) async fn run_app(
         let tail_ms = app_display::display_tail_ms(&chat, subagent_focus, now, running);
 
         if dirty && render_pending {
-            if !skip_next_render {
-                if let Some(np) = &notepad { crate::notepad::render_frame(terminal, np, &input, cursor_idx)?; } else {
+            if !skip_next_render && !app_notepad::try_render(terminal, &notepad)? {
                 app_loop::render_frame(
                     terminal,
                     render_chat,
@@ -247,9 +244,9 @@ pub(super) async fn run_app(
                     tail_ms,
                     task_elapsed_ms,
                     subagent_focus.is_none(),
-                    config.autopilot.enabled, &display_mode,
+                    config.autopilot.enabled,
+                    &display_mode,
                 )?;
-                }
             }
             dirty = false;
         }
@@ -281,7 +278,14 @@ pub(super) async fn run_app(
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
                         }
-                        if notepad.is_some() { crate::notepad::dispatch_key(&mut notepad, k, &mut input, &mut cursor_idx).await; dirty = true; continue; }
+                        let r = app_notepad::key(&mut notepad, &mut bash_rx, k, &keymap).await;
+                        if r.handled {
+                            if let Some(t) = r.prompt {
+                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(t, vec![])).await;
+                                running = true; chat.begin_turn();
+                            }
+                            dirty = true; continue;
+                        }
                         // Task picker modal: intercept all keys while open.
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
@@ -717,8 +721,7 @@ pub(super) async fn run_app(
                             );
                             if outcome == steer_fire::SteerSubmitOutcome::StartTurn {
                                 start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
-                                running = true;
-                                chat.begin_turn();
+                                running = true; chat.begin_turn();
                             }
                             follow = true;
                         }
@@ -726,6 +729,9 @@ pub(super) async fn run_app(
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size)?,
                     Event::Paste(pasted) => {
+                        if app_notepad::paste(&mut notepad, &pasted) {
+                            dirty = true; continue;
+                        }
                         if pasted.trim().is_empty() {
                             app_loop::paste_clipboard_image_silent(&mut chat, &mut pending_images).await;
                             dirty = true;
@@ -745,13 +751,13 @@ pub(super) async fn run_app(
                 }
             }
             maybe_ev = evt_rx.recv() => {
-                match app_loop::fold_ui_events(
+                let np_flow = app_loop::fold_ui_events(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
-                    &cmd_tx, &mut cancel, &mut evt_rx,
+                    &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
                 )
-                .await
-                {
+                .await;
+                match np_flow {
                     app_loop::LoopFlow::Quit => break,
                     app_loop::LoopFlow::Proceed => dirty = true,
                     app_loop::LoopFlow::InstallTools => dirty = true,
@@ -763,6 +769,7 @@ pub(super) async fn run_app(
                     anim_tick = anim_tick.wrapping_add(1);
                     dirty = true;
                 }
+                if app_notepad::poll_bash(&mut notepad, &mut bash_rx) { dirty = true; }
             }
             _ = frame_ticker.tick() => {
                 render_pending = true;
@@ -776,13 +783,7 @@ pub(super) async fn run_app(
         }
     }
 
-    // Disarm the liveness supervisor: once we drop the input pump its heartbeat
-    // stops advancing, which is expected during shutdown — not a wedge.
-    supervisor_active.store(false, Ordering::Relaxed);
-    drop(cmd_tx);
-    // Last-resort guard against a tool/subagent ignoring the Quit cancel: bound
-    // the worker wait so the terminal is restored instead of freezing on a blocked worker.
-    let _ = tokio::time::timeout(Duration::from_secs(5), worker).await;
+    app_bootstrap::finish(&supervisor_active, cmd_tx, worker).await;
     Ok(session_id)
 }
 

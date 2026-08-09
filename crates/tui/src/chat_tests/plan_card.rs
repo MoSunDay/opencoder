@@ -147,8 +147,8 @@ fn begin_turn_preserves_transcript() {
 
 #[test]
 fn steer_consumed_echoes_marker_and_drops_entry() {
-    // SteerConsumed echoes the `user:` marker at consume time (turn boundary)
-    // and drops the consumed entry by seq from steer_items. The marker is NOT
+    // SteerConsumed echoes a ChatBlock::User at consume time (turn boundary)
+    // and drops the consumed entry by seq from steer_items. The block is NOT
     // pushed at admit time — it only appears when the steer executes.
     let mut v = ChatView::default();
     v.steer_items.push((7, "use python".into()));
@@ -158,8 +158,12 @@ fn steer_consumed_echoes_marker_and_drops_entry() {
         text: "use python".into(),
     });
     assert!(
-        block_text(&v).contains("user: use python"),
-        "SteerConsumed must echo the marker at consume time"
+        block_text(&v).contains("User:"),
+        "SteerConsumed must echo the User tag at consume time"
+    );
+    assert!(
+        block_text(&v).contains("use python"),
+        "SteerConsumed must echo the consumed prompt body"
     );
     assert_ne!(
         block_text(&v),

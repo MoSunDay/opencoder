@@ -32,7 +32,7 @@ pub struct KeymapMenu {
     /// When `true`, the next key event is captured as the new binding for
     /// `selected` instead of navigating.
     pub capturing: bool,
-    /// `(config_key, human_label, current_spec)` for all 18 entries.
+    /// `(config_key, human_label, current_spec)` for all 19 entries.
     entries: Vec<(String, String, String)>,
     /// Original specs at construction time, for dirty detection.
     original_specs: Vec<String>,
@@ -324,9 +324,9 @@ mod tests {
     }
 
     #[test]
-    fn new_menu_has_18_entries() {
+    fn new_menu_has_19_entries() {
         let m = make_menu();
-        assert_eq!(m.len(), 18);
+        assert_eq!(m.len(), 19);
         assert_eq!(m.selected, 0);
         assert!(!m.capturing);
         assert!(!m.is_dirty());
@@ -341,7 +341,7 @@ mod tests {
         m.move_down();
         assert_eq!(m.selected, 1);
         // Wrap to 0 from last
-        m.selected = 17;
+        m.selected = 18;
         m.move_down();
         assert_eq!(m.selected, 0);
     }
@@ -350,7 +350,7 @@ mod tests {
     fn navigate_up_wraps() {
         let mut m = make_menu();
         m.move_up(); // from 0 → 17
-        assert_eq!(m.selected, 17);
+        assert_eq!(m.selected, 18);
     }
 
     #[test]
@@ -448,8 +448,7 @@ mod tests {
         let _ = handle_keymap_key(&mut menu, key(KeyCode::F(1), KeyModifiers::NONE));
         assert!(menu.as_ref().unwrap().is_dirty());
         // Press Ctrl+R to reset
-        let outcome =
-            handle_keymap_key(&mut menu, key(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        let outcome = handle_keymap_key(&mut menu, key(KeyCode::Char('r'), KeyModifiers::CONTROL));
         assert_eq!(outcome, KeymapOutcome::Idle);
         assert!(!menu.as_ref().unwrap().is_dirty());
     }
@@ -526,10 +525,7 @@ mod tests {
         let out = handle_keymap_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
         match out {
             KeymapOutcome::Save(v) => {
-                assert_eq!(
-                    v.get("keymap").unwrap().get("help").unwrap(),
-                    "f1"
-                );
+                assert_eq!(v.get("keymap").unwrap().get("help").unwrap(), "f1");
             }
             _ => panic!("expected Save, got {:?}", out),
         }

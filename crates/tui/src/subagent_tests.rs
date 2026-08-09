@@ -323,3 +323,58 @@ fn subagent_end_clears_leftover_child_steer_rows() {
         "completed subagent must not retain leftover steer rows"
     );
 }
+
+/// A subagent whose `SubagentEnd` was dropped under channel saturation must
+/// be reconciled (marked interrupted) when `Done` arrives, so no phantom
+/// spinning block outlives the turn - otherwise the mode-switch running-gate
+/// would let a Shift+Tab switch slip through while a dead block still looks
+/// "running".
+#[test]
+fn done_reconciles_orphaned_subagent_blocks() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::SubagentStart {
+        id: "a".into(),
+        kind: "explore".into(),
+        prompt: "p".into(),
+        child_session_id: "ca".into(),
+    });
+    // NOTE: deliberately NO SubagentEnd - simulates a dropped event.
+    assert_eq!(v.subagents_running, 1);
+    v.apply(&SessionEvent::Done);
+    assert_eq!(v.subagents_running, 0, "Done zeroes the running counter");
+    let block = v.blocks.iter().rev().find(|b| {
+        matches!(b, ChatBlock::Subagent { id, .. } if id == "a")
+    });
+    let sb = block.expect("subagent block must still exist");
+    match sb {
+        ChatBlock::Subagent { done, ok, cancelled, summary, .. } => {
+            assert!(*done, "orphaned subagent must be marked done on Done");
+            assert!(!*ok, "orphaned subagent must be marked failed (not ok)");
+            assert!(!*cancelled, "orphaned subagent is interrupted, not user-cancelled");
+            assert!(summary.contains("interrupted"), "summary should mention interrupted; got {:?}", summary);
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// Error also reconciles orphaned subagent blocks (same lossy-channel risk).
+#[test]
+fn error_reconciles_orphaned_subagent_blocks() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::SubagentStart {
+        id: "b".into(),
+        kind: "build".into(),
+        prompt: "p".into(),
+        child_session_id: "cb".into(),
+    });
+    v.apply(&SessionEvent::Error("boom".into()));
+    assert_eq!(v.subagents_running, 0);
+    let sb = v.blocks.iter().rev().find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "b")).unwrap();
+    match sb {
+        ChatBlock::Subagent { done, summary, .. } => {
+            assert!(*done);
+            assert!(summary.contains("interrupted"));
+        }
+        _ => unreachable!(),
+    }
+}

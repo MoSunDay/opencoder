@@ -68,6 +68,7 @@ fn assert_line_accounting_matches(view: &ChatView) {
     for (block_idx, block) in view.blocks.iter().enumerate() {
         match block {
             ChatBlock::Marker(lines) => expected += lines.len(),
+            ChatBlock::User { rendered } => expected += 1 + rendered.len(),
             ChatBlock::Assistant {
                 raw,
                 rendered,

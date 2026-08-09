@@ -34,9 +34,7 @@ impl EditorState {
     /// Load `path` into the editor, resetting vim state to Normal mode.
     pub fn load(&mut self, path: &Path) {
         let text = std::fs::read_to_string(path)
-            .unwrap_or_else(|_| {
-                format!("# (cannot read {})\n", path.display())
-            });
+            .unwrap_or_else(|_| format!("# (cannot read {})\n", path.display()));
         self.vim = VimState::new(text);
         self.vim.mode = VimMode::Normal;
         self.vim.cursor = 0;
@@ -60,8 +58,7 @@ impl EditorState {
 
     /// Returns `true` if Enter in Command mode is `:wq`.
     pub fn is_writequit_cmd(&self) -> bool {
-        self.vim.mode == VimMode::Command
-            && matches!(self.vim.cmdline.trim(), "wq" | "x")
+        self.vim.mode == VimMode::Command && matches!(self.vim.cmdline.trim(), "wq" | "x")
     }
 
     /// Execute a `:w` command locally (write + reset modified state + return to
@@ -119,7 +116,9 @@ impl EditorState {
         }
         let vis_h = inner_h as usize;
         // Determine the cursor's logical line.
-        let before: usize = self.vim.text[..self.char_byte_offset()].matches('\n').count();
+        let before: usize = self.vim.text[..self.char_byte_offset()]
+            .matches('\n')
+            .count();
         let cur_row = before;
         let scroll = self.scroll as usize;
         let h = vis_h.saturating_sub(1);
@@ -202,13 +201,7 @@ pub fn render_editor(f: &mut Frame, area: Rect, state: &EditorState, focused: bo
 }
 
 /// Compute the cursor's terminal position and place it.
-fn set_editor_cursor(
-    f: &mut Frame,
-    inner: Rect,
-    state: &EditorState,
-    gutter_w: u16,
-    _text_w: u16,
-) {
+fn set_editor_cursor(f: &mut Frame, inner: Rect, state: &EditorState, gutter_w: u16, _text_w: u16) {
     if state.vim.mode == VimMode::Command || state.vim.mode == VimMode::Search {
         // Don't fight the cmdline — just show the cursor at the end of the
         // status line. It's approximate but avoids double-cursor artifacts.
@@ -268,8 +261,7 @@ fn truncate_for_width(s: &str, max_w: usize) -> String {
 /// should NOT be sent to the vim engine.
 pub fn is_focus_cycle_key(k: &crossterm::event::KeyEvent) -> bool {
     use crossterm::event::KeyCode;
-    k.code == KeyCode::Tab
-        && state_normal_or(k)
+    k.code == KeyCode::Tab && state_normal_or(k)
 }
 
 fn state_normal_or(_k: &crossterm::event::KeyEvent) -> bool {

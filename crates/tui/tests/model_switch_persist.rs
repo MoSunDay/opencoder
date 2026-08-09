@@ -36,7 +36,6 @@ fn switched_config() -> Config {
 
 #[tokio::test]
 async fn reload_config_persists_model_and_emits_model_switch_event() {
-
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {

@@ -151,3 +151,19 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     eprintln!("\n\x1b[2m{}\x1b[0m", resume_hint(&final_id));
     Ok(())
 }
+
+/// Disarm the liveness supervisor and bound the worker shutdown wait.
+///
+/// Called after the main event loop exits. The `cmd_tx` drop signals the
+/// worker to stop; the 5-second timeout prevents a frozen terminal if a
+/// tool or subagent ignores the cancellation.
+pub(super) async fn finish(
+    supervisor_active: &std::sync::atomic::AtomicBool,
+    cmd_tx: tokio::sync::mpsc::Sender<crate::worker::UiCmd>,
+    worker: tokio::task::JoinHandle<()>,
+) {
+    use std::sync::atomic::Ordering;
+    supervisor_active.store(false, Ordering::Relaxed);
+    drop(cmd_tx);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), worker).await;
+}

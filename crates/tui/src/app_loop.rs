@@ -17,7 +17,7 @@ use crossterm::event::KeyEvent;
 use opencoder_core::Config;
 use opencoder_session::SessionEvent;
 use opencoder_store::Store;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -89,36 +89,42 @@ pub(crate) fn compute_display<'a>(
     // When viewing a subagent's perspective, swap in its child ChatView,
     // back-title, and its own context stats (instead of the parent's).
     // The body title keeps the "Ctrl+L back" hint.
-    let (display_chat, display_title, display_ctx, display_sys, display_mode) = if let Some(idx) = subagent_focus
-    {
-        match chat.blocks.get(idx) {
-            Some(crate::chat::ChatBlock::Subagent {
-                view, kind, prompt, ..
-            }) => (
-                view as &crate::chat::ChatView,
-                Line::from(format!(
-                    "\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"
-                )),
-                view.context_used,
-                subagent_sys,
-                kind.clone(),
-            ),
-            _ => (
+    let (display_chat, display_title, display_ctx, display_sys, display_mode) =
+        if let Some(idx) = subagent_focus {
+            match chat.blocks.get(idx) {
+                Some(crate::chat::ChatBlock::Subagent {
+                    view, kind, prompt, ..
+                }) => (
+                    view as &crate::chat::ChatView,
+                    Line::from(format!(
+                        "\u{2190} [Ctrl+L] back | \u{2937}sub [{kind}] {prompt}"
+                    )),
+                    view.context_used,
+                    subagent_sys,
+                    kind.clone(),
+                ),
+                _ => (
+                    chat,
+                    Line::from(agent_name.clone()),
+                    chat.context_used,
+                    sys_tokens,
+                    agent_name.clone(),
+                ),
+            }
+        } else {
+            let title = super::app_display::compose_top_title(
+                workdir,
+                config.model_id(),
+                config.reasoning_effort.as_deref(),
+            );
+            (
                 chat,
-                Line::from(agent_name.clone()),
+                title,
                 chat.context_used,
                 sys_tokens,
                 agent_name.clone(),
-            ),
-        }
-    } else {
-        let title = super::app_display::compose_top_title(
-            workdir,
-            config.model_id(),
-            config.reasoning_effort.as_deref(),
-        );
-        (chat, title, chat.context_used, sys_tokens, agent_name.clone())
-    };
+            )
+        };
     DisplayState {
         agent_name,
         display_mode,
@@ -187,16 +193,18 @@ pub(crate) async fn handle_switch_agent(
     active_skill_body: &Option<String>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
-    if *running {
-        // A turn is in flight — any mode switch is a no-op. The worker is
-        // mid-`run_session`; applying the switch now would start the next turn
-        // with a stale agent at an arbitrary partial boundary. sys_tokens is NOT
-        // updated here: the agent stays in its current mode, so the context
-        // meter must keep the current-mode baseline. (Updating it to the target
-        // mode's count would corrupt the meter for the remainder of the running
-        // turn.) The same rule covers plan→act with a submitted plan, act→plan,
-        // and plan→act without a submitted plan — all deferred to the next
-        // clean idle boundary.
+    if *running || chat.subagents_running > 0 {
+        // A turn is in flight OR a subagent task is live — any mode switch is
+        // a no-op. A dropped SubagentEnd (lossy try_send) can leave
+        // subagents_running > 0 after the turn's Done, so we gate on it too.
+        // The worker is mid-`run_session`; applying the switch now would start
+        // the next turn with a stale agent at an arbitrary partial boundary.
+        // sys_tokens is NOT updated here: the agent stays in its current mode,
+        // so the context meter must keep the current-mode baseline. (Updating
+        // it to the target mode's count would corrupt the meter for the
+        // remainder of the running turn.) The same rule covers plan→act with a
+        // submitted plan, act→plan, and plan→act without a submitted plan —
+        // all deferred to the next clean idle boundary.
         *mode_flash = Some(("\u{23f3} busy \u{2014} switch when idle".into(), anim_tick));
         return SwitchOutcome::Proceed;
     }
@@ -267,6 +275,7 @@ pub(crate) async fn fold_ui_events(
     cmd_tx: &mpsc::Sender<UiCmd>,
     cancel: &mut CancellationToken,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
         Some(ev) => ev,
@@ -324,12 +333,9 @@ pub(crate) async fn fold_ui_events(
                             .unwrap_or_default()
                     };
                     if !display.is_empty() {
-                        chat.push_marker(Line::from(Span::styled(
-                            format!("user: {display}"),
-                            Style::default()
-                                .fg(theme::warn_color())
-                                .add_modifier(Modifier::BOLD),
-                        )));
+                        chat.blocks.push(crate::chat::ChatBlock::User {
+                            rendered: crate::markdown::render(&display),
+                        });
                         chat.push_marker(Line::from(""));
                     }
                     queue_items.retain(|(s, _)| s != seq);
@@ -403,6 +409,11 @@ pub(crate) async fn fold_ui_events(
                 // (the `!*done` guard), so re-calling when Done was
                 // already processed is a no-op.
                 chat.finalize_assistant();
+                // Reconcile any subagent whose SubagentEnd was dropped under
+                // channel saturation (try_send) - Done is also lossy, but
+                // TurnDone always lands (blocking send), so this is the
+                // authoritative idle boundary for orphan reconciliation.
+                chat.reconcile_orphaned_subagents();
                 if *drain_pending {
                     // The cancelled turn has finished draining — restart
                     // the drain loop to promote pending steers.
@@ -421,6 +432,9 @@ pub(crate) async fn fold_ui_events(
         }
         batch_needs_render |= !hidden_reasoning_append;
         *skip_next_render = !batch_needs_render;
+    }
+    if let Some(np) = notepad.as_mut() {
+        np.console.set_running(*running);
     }
     LoopFlow::Proceed
 }
@@ -524,7 +538,7 @@ pub(crate) async fn dispatch_command(
         // refused with a `[switch] busy — retry when idle` marker — a mode
         // switch mid-turn would start the next turn with a stale agent at an
         // arbitrary partial boundary (mirrors `/compact`'s SkipRunning).
-        CommandOutcome::Dispatch(SlashAction::Act) => match gate_switch(*running) {
+        CommandOutcome::Dispatch(SlashAction::Act) => match gate_switch(*running || chat.subagents_running > 0) {
             SwitchGate::Run => {
                 if chat.agent == "plan" && chat.plan_submitted {
                     let extra = prep_plan_to_act(
@@ -552,7 +566,7 @@ pub(crate) async fn dispatch_command(
                 )));
             }
         },
-        CommandOutcome::Dispatch(SlashAction::Plan) => match gate_switch(*running) {
+        CommandOutcome::Dispatch(SlashAction::Plan) => match gate_switch(*running || chat.subagents_running > 0) {
             SwitchGate::Run => {
                 if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/plan".into(), Vec::new())).await {
                     worker_dead(chat);
@@ -569,7 +583,7 @@ pub(crate) async fn dispatch_command(
                 )));
             }
         },
-        CommandOutcome::Dispatch(SlashAction::ClearContext) => match gate_switch(*running) {
+        CommandOutcome::Dispatch(SlashAction::ClearContext) => match gate_switch(*running || chat.subagents_running > 0) {
             SwitchGate::Run => {
                 if chat.agent == "plan" && chat.plan_submitted {
                     let extra = prep_plan_to_act(
@@ -683,10 +697,14 @@ pub(crate) async fn handle_plan_edit_key(
             match pe.kind() {
                 crate::plan_edit::EditKind::Plan => {
                     chat.update_plan_text(&text);
-                    let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await; }
+                    let _ = cmd_tx.send(crate::worker::UiCmd::EditPlan(text)).await;
+                }
                 crate::plan_edit::EditKind::Annotation => {
                     chat.update_annotation_text(&text);
-                    let _ = cmd_tx.send(crate::worker::UiCmd::EditAnnotation(text)).await; }
+                    let _ = cmd_tx
+                        .send(crate::worker::UiCmd::EditAnnotation(text))
+                        .await;
+                }
             }
         }
         // plan_edit stays None — editing ended
@@ -739,9 +757,9 @@ mod bugfix_tests;
 #[path = "app_loop_model.rs"]
 mod app_loop_model;
 
-pub(crate) use app_loop_model::handle_model_outcome;
 #[cfg(test)]
 pub(crate) use app_loop_model::env_model_override;
+pub(crate) use app_loop_model::handle_model_outcome;
 
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;

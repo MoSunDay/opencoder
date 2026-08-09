@@ -33,7 +33,10 @@ pub(crate) fn render_collapsible(
             header_style,
         )));
     } else {
-        out.push(Line::from(Span::styled(format!("{icon} {label}"), header_style)));
+        out.push(Line::from(Span::styled(
+            format!("{icon} {label}"),
+            header_style,
+        )));
         for l in text.lines() {
             out.push(Line::from(Span::styled(format!("  {l}"), body_style)));
         }

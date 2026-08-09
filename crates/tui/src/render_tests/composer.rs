@@ -87,9 +87,7 @@ fn annotation_editor_shows_green_top_title() {
     // The model text must be green. Locate its cell x via char offset.
     let pos = top.find("glm-5.2").expect("model substring present");
     let cell_x = top[..pos].chars().count() as u16;
-    let cell = buf
-        .cell((cell_x, 0))
-        .expect("model cell on top border row");
+    let cell = buf.cell((cell_x, 0)).expect("model cell on top border row");
     assert_eq!(
         cell.style().fg,
         Some(green),

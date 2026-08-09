@@ -20,6 +20,7 @@ fn composer_renders_prompt_and_multiline_text() {
                 false,
                 None,
                 None,
+                &Line::raw("ignored"),
             );
         })
         .unwrap();
@@ -40,5 +41,97 @@ fn composer_renders_prompt_and_multiline_text() {
     assert!(
         row2.contains("world"),
         "world should appear on row 2; got: {row2}"
+    );
+}
+
+/// The `/requirement` editor (`plan_mode` active, `edit_title == "edit
+/// requirement"`) mirrors the body top-title (`workdir · model · effort`) on
+/// its top border, right-aligned and coloured green — alongside the left
+/// ` edit requirement ` label.
+#[test]
+fn requirement_editor_shows_green_top_title() {
+    let backend = TestBackend::new(80, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let green = crate::theme::ok_color();
+    let top_title = Line::from(vec![
+        Span::raw("/root/proj"),
+        Span::raw(" \u{00b7} "),
+        Span::raw("glm-5.2"),
+        Span::raw(" \u{00b7} "),
+        Span::raw("high"),
+    ]);
+    terminal
+        .draw(|f| {
+            render_composer(
+                f,
+                Rect::new(0, 0, 80, 6),
+                "",
+                0,
+                78, // inner_w
+                2,  // prompt_w
+                &[],
+                false,
+                Some("PLAN"),
+                Some("edit requirement"),
+                &top_title,
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let top = row_text(buf, 0, 80);
+    // Left label present.
+    assert!(top.contains("edit requirement"), "left label; got: {top}");
+    // Right-aligned info title present on the same top border row.
+    assert!(top.contains("glm-5.2"), "model in info title; got: {top}");
+    // The model text must be green. Locate its cell x via char offset.
+    let pos = top.find("glm-5.2").expect("model substring present");
+    let cell_x = top[..pos].chars().count() as u16;
+    let cell = buf
+        .cell((cell_x, 0))
+        .expect("model cell on top border row");
+    assert_eq!(
+        cell.style().fg,
+        Some(green),
+        "model must be green (requirement accent); got: {:?}; row: {top}",
+        cell.style().fg
+    );
+}
+
+/// The `/plan` editor must NOT receive the right-aligned info title, even when
+/// a body top-title is in scope.
+#[test]
+fn plan_editor_has_no_info_top_title() {
+    let backend = TestBackend::new(80, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let top_title = Line::from(vec![
+        Span::raw("/root/proj"),
+        Span::raw(" \u{00b7} "),
+        Span::raw("glm-5.2"),
+    ]);
+    terminal
+        .draw(|f| {
+            render_composer(
+                f,
+                Rect::new(0, 0, 80, 6),
+                "",
+                0,
+                78,
+                2,
+                &[],
+                false,
+                Some("PLAN"),
+                None, // edit_title None -> "edit plan", warn-coloured, NO info title
+                &top_title,
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let top = row_text(buf, 0, 80);
+    assert!(top.contains("edit plan"), "plan label; got: {top}");
+    assert!(
+        !top.contains("glm-5.2"),
+        "plan editor must not show info title; got: {top}"
     );
 }

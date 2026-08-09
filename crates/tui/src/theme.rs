@@ -197,6 +197,21 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
     rounded_block_plain().title(Line::from(spans))
 }
 
+/// Pad a title [`Line`]'s spans with one leading/trailing space (mirroring
+/// [`rounded_block_line`]) and recolour every span to `fg`. Returns an owned
+/// line intended for a *right-aligned* top-border title, e.g. the
+/// `/requirement` editor shows the body `workdir · model · effort` title in
+/// the requirement accent colour alongside the left ` edit requirement ` label.
+pub fn title_spans_colored(line: &Line<'_>, fg: Color) -> Line<'static> {
+    let style = Style::default().fg(fg);
+    let mut spans = vec![Span::styled(" ", style)];
+    for span in &line.spans {
+        spans.push(Span::styled(span.content.as_ref().to_string(), style));
+    }
+    spans.push(Span::styled(" ", style));
+    Line::from(spans)
+}
+
 /// Rounded block with an accent-coloured border and title.
 pub fn rounded_block_focus(title: &str) -> Block<'static> {
     rounded_block_plain()
@@ -479,5 +494,33 @@ mod tests {
             line_row.contains(" workdir \u{00b7} [act] "),
             "title must carry one padding space on each side; got: {line_row}"
         );
+    }
+
+    // ── title_spans_colored ───────────────────────────────────────────────
+
+    #[test]
+    fn title_spans_colored_pads_and_recolors_all_spans() {
+        set_theme(ThemeKind::Dark);
+        let green = ok_color();
+        let line = Line::from(vec![
+            Span::raw("workdir"),
+            Span::raw(" \u{00b7} "),
+            Span::raw("glm-5.2"),
+        ]);
+        let out = title_spans_colored(&line, green);
+
+        // 3 content spans + 1 leading + 1 trailing padding span.
+        assert_eq!(out.spans.len(), 5, "expected 3 content + 2 padding spans");
+        assert_eq!(out.spans.first().unwrap().content.as_ref(), " ");
+        assert_eq!(out.spans.last().unwrap().content.as_ref(), " ");
+
+        // Content preserved in order with separators and outer padding.
+        let joined: String = out.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(joined, " workdir \u{00b7} glm-5.2 ");
+
+        // Every span recoloured to `fg`, overriding the original raw spans.
+        for span in &out.spans {
+            assert_eq!(span.style.fg, Some(green), "span not green: {joined}");
+        }
     }
 }

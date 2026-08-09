@@ -38,6 +38,7 @@ use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd, U
 /// body (the block did neither `continue` nor `break`); `Redraw` was a
 /// `continue` (jump to the next turn, re-render); `Quit` was a `break`
 /// (exit the loop).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoopFlow {
     Proceed,
     /// Used by extracted blocks that previously did `continue` (re-render).
@@ -454,6 +455,7 @@ pub(crate) async fn dispatch_command(
     anim_tick: u32,
     sys_tokens: &mut u64,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -609,6 +611,9 @@ pub(crate) async fn dispatch_command(
                 chat.last_requirement_text().unwrap_or_default(),
             );
             *mode_flash = Some(("\u{2192} requirement".into(), anim_tick));
+        }
+        CommandOutcome::Dispatch(SlashAction::Notepad) => {
+            *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
         }
         CommandOutcome::Dispatch(SlashAction::Ps) => {
             local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;

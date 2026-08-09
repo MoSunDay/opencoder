@@ -3,6 +3,7 @@
 //! Split out of `app_loop_tests.rs` to keep that file under the 800-line cap.
 //! Mirrors the `#[path]` convention used by `app_loop_bugfix_tests.rs`.
 
+#[allow(unused_imports)]
 use super::super::*;
 use super::*;
 

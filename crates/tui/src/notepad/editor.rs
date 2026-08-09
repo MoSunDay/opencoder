@@ -172,7 +172,7 @@ pub fn render_editor(f: &mut Frame, area: Rect, state: &EditorState, focused: bo
     let lines: Vec<&str> = state.vim.text.lines().collect();
     let vis_h = inner.height as usize;
     let scroll = state.scroll as usize;
-    let total = lines.len().max(1);
+    let total = lines.len();
 
     let start = scroll.min(total);
     let end = (start + vis_h).min(total);
@@ -229,8 +229,13 @@ fn set_editor_cursor(
     if row < scroll {
         return;
     }
-    let y = inner.y + (row - scroll) as u16;
-    let x = inner.x + gutter_w + col as u16;
+    let rel_row = (row - scroll).min(u16::MAX as usize) as u16;
+    let col_u16 = col.min(u16::MAX as usize) as u16;
+    let y = inner.y.saturating_add(rel_row);
+    let x = inner.x.saturating_add(gutter_w).saturating_add(col_u16);
+    // Clamp to inner area to avoid cursor escaping the panel.
+    let x = x.min(inner.right().saturating_sub(1));
+    let y = y.min(inner.bottom().saturating_sub(1));
     f.set_cursor_position((x, y));
 }
 

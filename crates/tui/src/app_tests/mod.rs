@@ -233,4 +233,5 @@ fn up_arrow_recalls_recorded_steer_or_queue_text() {
 }
 
 mod key_tests;
+mod key_tests_quit;
 mod skill_tests;

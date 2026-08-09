@@ -17,6 +17,8 @@ pub mod editor;
 pub mod keys;
 pub mod search;
 pub mod terminal;
+#[cfg(test)]
+mod render_tests;
 pub mod tree;
 
 use std::path::PathBuf;
@@ -154,8 +156,12 @@ fn place_cursor(
     match view.focus {
         Focus::Terminal => {
             // Position after "❯ " + input.
-            let col = crate::composer::str_width(input) as u16;
-            let x = bottom.x + 1 + 2 + col; // border + "❯ " prefix
+            let col = crate::composer::str_width(input).min(u16::MAX as usize) as u16;
+            // border (1) + "❯ " prefix (2) + input width
+            let x = bottom.x.saturating_add(1).saturating_add(2).saturating_add(col);
+            // Clamp x to stay within the terminal area.
+            let max_x = bottom.right().saturating_sub(1);
+            let x = x.min(max_x);
             let y = bottom.y + bottom.height.saturating_sub(2);
             f.set_cursor_position((x, y));
         }

@@ -27,6 +27,11 @@ const SKIP_DIRS: &[&str] = &[
     ".opencode",
 ];
 
+/// Maximum recursion depth — safety net against pathological deep trees.
+const MAX_DEPTH: usize = 32;
+/// Maximum total entries in the flat list — safety net against huge dirs.
+const MAX_TOTAL_ENTRIES: usize = 5000;
+
 /// A single visible row in the flattened tree.
 #[derive(Clone, Debug)]
 pub struct FlatNode {
@@ -74,16 +79,16 @@ impl TreeState {
     /// Rescan the workdir and rebuild the flat list, preserving collapse state
     /// for paths that still exist.
     pub fn rebuild(&mut self, workdir: &Path) {
-        // Remember which dirs were collapsed.
-        let mut collapsed: std::collections::HashSet<PathBuf> =
+        // Collect expanded dirs (lazy: dirs start collapsed by default).
+        let mut expanded: std::collections::HashSet<PathBuf> =
             std::collections::HashSet::new();
         for n in &self.flat {
-            if n.collapsed {
-                collapsed.insert(n.path.clone());
+            if n.is_dir && !n.collapsed {
+                expanded.insert(n.path.clone());
             }
         }
         let mut flat = Vec::new();
-        build_recursive(workdir, 0, &collapsed, &mut flat);
+        build_recursive(workdir, 0, &expanded, &mut flat);
         self.flat = flat;
         if self.selected >= self.flat.len() {
             self.selected = self.flat.len().saturating_sub(1);
@@ -142,9 +147,12 @@ impl TreeState {
 fn build_recursive(
     dir: &Path,
     depth: usize,
-    collapsed: &std::collections::HashSet<PathBuf>,
+    expanded: &std::collections::HashSet<PathBuf>,
     out: &mut Vec<FlatNode>,
 ) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
     let mut entries: Vec<(String, PathBuf, bool)> = match std::fs::read_dir(dir) {
         Ok(rd) => rd
             .filter_map(|e| e.ok())
@@ -173,7 +181,17 @@ fn build_recursive(
     });
 
     for (name, path, is_dir) in entries {
-        let is_collapsed = collapsed.contains(&path);
+        if out.len() >= MAX_TOTAL_ENTRIES {
+            out.push(FlatNode {
+                name: "\u{2026} (truncated)".to_string(),
+                path: dir.to_path_buf(),
+                depth,
+                is_dir: false,
+                collapsed: false,
+            });
+            return;
+        }
+        let is_collapsed = !expanded.contains(&path);
         out.push(FlatNode {
             name: name.clone(),
             path: path.clone(),
@@ -182,7 +200,7 @@ fn build_recursive(
             collapsed: is_collapsed,
         });
         if is_dir && !is_collapsed {
-            build_recursive(&path, depth + 1, collapsed, out);
+            build_recursive(&path, depth + 1, expanded, out);
         }
     }
 }
@@ -280,26 +298,30 @@ mod tests {
         fs::write(d.path().join("src/main.rs"), "fn main(){}").unwrap();
         fs::write(d.path().join("src/lib.rs"), "").unwrap();
         fs::write(d.path().join("README.md"), "# hi").unwrap();
-        fs::create_dir_all(d.path().join(".git")).unwrap();
-        fs::create_dir_all(d.path().join("target")).unwrap();
+        fs::create_dir_all(d.path().join("tests")).unwrap();
+        fs::write(d.path().join("tests/integration.rs"), "test").unwrap();
         d
     }
 
     #[test]
-    fn build_tree_hierarchy_and_filter() {
+    fn basic_structure() {
         let d = mk_tmp();
         let st = TreeState::new(d.path());
+        // Lazy: dirs start collapsed, children not yet loaded.
         let names: Vec<&str> = st.flat.iter().map(|n| n.name.as_str()).collect();
         assert!(names.contains(&"src"));
-        assert!(names.contains(&"main.rs"));
-        assert!(names.contains(&"lib.rs"));
         assert!(names.contains(&"README.md"));
         // noise dirs filtered
         assert!(!names.contains(&".git"));
         assert!(!names.contains(&"target"));
-        // depth correct
-        let main = st.flat.iter().find(|n| n.name == "main.rs").unwrap();
-        assert_eq!(main.depth, 1);
+        // children not visible until expanded
+        assert!(!names.contains(&"main.rs"));
+        assert!(!names.contains(&"lib.rs"));
+        // depth of top-level entries is 0
+        let src = st.flat.iter().find(|n| n.name == "src").unwrap();
+        assert_eq!(src.depth, 0);
+        assert!(src.is_dir);
+        assert!(src.collapsed);
     }
 
     #[test]
@@ -312,15 +334,35 @@ mod tests {
     }
 
     #[test]
+    fn expand_shows_children() {
+        let d = mk_tmp();
+        let mut st = TreeState::new(d.path());
+        // src starts collapsed at index 0
+        assert!(st.flat[0].collapsed);
+        assert!(!st.flat.iter().any(|n| n.name == "main.rs"));
+        // expand src
+        st.selected = 0;
+        st.toggle_collapse();
+        assert!(!st.flat[0].collapsed);
+        let names: Vec<&str> = st.flat.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&"main.rs"));
+        assert!(names.contains(&"lib.rs"));
+        let main = st.flat.iter().find(|n| n.name == "main.rs").unwrap();
+        assert_eq!(main.depth, 1);
+    }
+
+    #[test]
     fn collapse_hides_children() {
         let d = mk_tmp();
         let mut st = TreeState::new(d.path());
-        // select src (index 0) and collapse
+        // expand src first
         st.selected = 0;
+        st.toggle_collapse();
+        assert!(!st.flat[0].collapsed);
+        // now collapse
         st.toggle_collapse();
         assert!(st.flat[0].collapsed);
         let names: Vec<&str> = st.flat.iter().map(|n| n.name.as_str()).collect();
-        // children of src should be gone after collapse
         assert!(!names.contains(&"main.rs"));
     }
 
@@ -336,14 +378,15 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_preserves_collapse() {
+    fn rebuild_preserves_expansion() {
         let d = mk_tmp();
         let mut st = TreeState::new(d.path());
+        // src starts collapsed; expand it
         st.selected = 0;
         st.toggle_collapse();
-        assert!(st.flat[0].collapsed);
+        assert!(!st.flat[0].collapsed);
         st.rebuild(d.path());
-        assert!(st.flat[0].collapsed);
+        assert!(!st.flat[0].collapsed);
     }
 
     #[test]
@@ -354,5 +397,41 @@ mod tests {
         st.scroll = 0;
         st.ensure_visible(3);
         assert!(st.scroll > 0);
+    }
+
+    #[test]
+    fn depth_limit_truncates() {
+        let d = tempfile::tempdir().unwrap();
+        // Create a tree deeper than MAX_DEPTH (32).
+        let mut p = d.path().to_path_buf();
+        for i in 0..40 {
+            p = p.join(format!("d{}", i));
+            fs::create_dir_all(&p).unwrap();
+        }
+        let mut st = TreeState::new(d.path());
+        // Expand all levels until we hit the limit — no panic.
+        for _ in 0..40 {
+            if let Some(n) = st.selected_node() {
+                if n.is_dir && n.collapsed {
+                    st.toggle_collapse();
+                    continue;
+                }
+            }
+            break;
+        }
+        // Should not have crashed.
+        assert!(!st.flat.is_empty());
+    }
+
+    #[test]
+    fn entry_limit_truncates() {
+        let d = tempfile::tempdir().unwrap();
+        // Create more files than MAX_TOTAL_ENTRIES.
+        for i in 0..6000 {
+            fs::write(d.path().join(format!("file_{:04}.txt", i)), "").unwrap();
+        }
+        let st = TreeState::new(d.path());
+        assert!(st.flat.len() <= MAX_TOTAL_ENTRIES + 1);
+        assert!(st.flat.iter().any(|n| n.name.contains("truncated")));
     }
 }

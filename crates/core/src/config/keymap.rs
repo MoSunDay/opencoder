@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("help", "Open shortcut settings"),
     ("quit", "Quit"),
-    ("cancel", "Cancel running task"),
+    ("cancel", "Cancel running task / Quit when idle"),
     ("newline", "Insert newline"),
     ("cursor_home", "Cursor to line start"),
     ("cursor_end", "Cursor to line end"),

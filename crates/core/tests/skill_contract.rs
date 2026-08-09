@@ -196,9 +196,17 @@ fn dep_gated_skills_do_not_clobber_existing() {
     std::fs::create_dir_all(root.join("ssh-pty")).unwrap();
     std::fs::write(root.join("ssh-pty/SKILL.md"), "my custom skill").unwrap();
 
+    // Pre-write a user-modified chrome-headless skill too.
+    std::fs::create_dir_all(root.join("chrome-headless")).unwrap();
+    std::fs::write(root.join("chrome-headless/SKILL.md"), "my custom chrome skill").unwrap();
+
     seed_dep_gated_skills_in(root).unwrap();
 
     // User file preserved.
     let body = std::fs::read_to_string(root.join("ssh-pty/SKILL.md")).unwrap();
     assert_eq!(body, "my custom skill");
+
+    // chrome-headless user file also preserved.
+    let chrome_body = std::fs::read_to_string(root.join("chrome-headless/SKILL.md")).unwrap();
+    assert_eq!(chrome_body, "my custom chrome skill");
 }

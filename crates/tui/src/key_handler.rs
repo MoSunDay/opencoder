@@ -120,10 +120,11 @@ pub(crate) fn handle_key(
             return KeyAction::Quit;
         }
         if bindings.cancel.matches(&k) {
+            // Idle: quit like Ctrl+D. Running: cancel the in-flight turn.
             return if running {
                 KeyAction::Cancel
             } else {
-                KeyAction::None
+                KeyAction::Quit
             };
         }
         if bindings.help.matches(&k) {
@@ -202,10 +203,11 @@ pub(crate) fn handle_key(
         return KeyAction::Clip;
     }
     if bindings.cancel.matches(&k) {
+        // Idle: quit like Ctrl+D. Running: cancel the in-flight turn.
         return if running {
             KeyAction::Cancel
         } else {
-            KeyAction::None
+            KeyAction::Quit
         };
     }
     if bindings.undo.matches(&k) {

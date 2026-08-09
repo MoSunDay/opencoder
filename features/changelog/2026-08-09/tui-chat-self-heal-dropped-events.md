@@ -41,6 +41,10 @@ lossy `try_send`。当 UI 渲染跟不上、通道饱和时，关键 lifecycle �
   扩展为「busy」。调用方（`app_loop.rs` 的 `/act` / `/plan` / `/clear-context` 三处）
   传入 `*running || chat.subagents_running > 0`，使存活的子 agent 也阻止切模式。
   doc-comment 同步更新说明 busy 的构成。
+- `handle_switch_agent`（Shift+Tab / Alt+Tab / Ctrl+Shift+Tab / t+Tab 入口，`app_loop.rs`）
+  的内联门控 `if *running` 同步扩展为 `if *running || chat.subagents_running > 0`，
+  覆盖快捷键切模式路径：斜杠命令走 `gate_switch`、快捷键走内联判断，两者一致，
+  无任一入口可在存活子 agent 期间静默切模式。
 
 ## 测试覆盖
 

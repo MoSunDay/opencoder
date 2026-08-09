@@ -40,11 +40,18 @@ Commit: (working-tree, uncommitted)
 | User 块行数与 `collect_headers` 计数一致（1 标签 + rendered.len()） | `user_block_line_count_matches_collect_headers` | `crates/tui/src/chat_tests/user_block.rs` |
 | `push_user` 生成含 markdown 正文体的 `ChatBlock::User` | `push_user_creates_user_block_with_markdown` | `crates/tui/src/chat_tests/user_block.rs` |
 | SteerConsumed 消耗时回显 `ChatBlock::User` 块并清行 | `steer_consumed_echoes_marker_and_drops_row` | `crates/tui/src/chat_tests/steer_echo.rs` |
-| 混合序列（含 User）行数对齐 | `mixed_sequence_alignment` | `crates/tui/src/chat_tests/line_accounting.rs` |
+| 混合序列行数对齐 harness（含 User 计数分支 `line_accounting.rs:71`） | `mixed_sequence_alignment` | `crates/tui/src/chat_tests/line_accounting.rs` |
 | plan 卡片中 SteerConsumed 回显 User 块 | `steer_consumed_echoes_marker_and_drops_entry` | `crates/tui/src/chat_tests/plan_card.rs` |
 | `push_user` 记录历史并回显 transcript | `push_user_records_history_and_echoes_transcript` | `crates/tui/src/app_helpers_tests/mod.rs` |
 | user_color 暗主题为金色（纯函数，确定性） | `user_color_is_gold_in_dark_theme` | `crates/tui/src/theme.rs` |
 | user_color 亮主题为暗金色（纯函数，确定性） | `user_color_is_dark_gold_in_light_theme` | `crates/tui/src/theme.rs` |
+
+## Gate
+
+- 全量回归：`cargo test --workspace` → 2220 passed / 0 failed
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
+- build：`cargo build --workspace` → Finished
+- 行数：`theme.rs` 553 ≤ 800；`chat.rs` 790 ≤ 800；`chat_types.rs` 193 ≤ 400；`user_block.rs` 87 ≤ 400
 
 ## 备注
 

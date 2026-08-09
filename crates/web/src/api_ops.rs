@@ -8,6 +8,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
+use tracing::warn;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
@@ -24,8 +25,10 @@ pub async fn fork_session(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    if state.store.get_session(&id).await.ok().flatten().is_none() {
-        return error_404(&format!("session not found: {id}"));
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     match opencoder_session::fork::fork_session(state.store.as_ref(), &id).await {
         Ok(new_id) => Json(json!({ "id": new_id })).into_response(),
@@ -40,8 +43,10 @@ pub async fn post_compact(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
-    if state.store.get_session(&id).await.ok().flatten().is_none() {
-        return error_404(&format!("session not found: {id}"));
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let config = match load_config(&state) {
         Ok(c) => c,
@@ -59,7 +64,9 @@ pub async fn post_compact(
             .or_insert_with(SessionHandle::new)
             .clone()
     };
-    let _ = handle.cmd_tx.send(DrainCmd::Compact);
+    if let Err(e) = handle.cmd_tx.send(DrainCmd::Compact) {
+        warn!(error = %e, session_id = %id, "post_compact: drain command not delivered");
+    }
     ensure_drain(
         state.handles.clone(),
         state.store.clone(),
@@ -86,8 +93,10 @@ pub async fn post_handoff(
     Path(id): Path<String>,
     body: Option<Json<HandoffBody>>,
 ) -> Response {
-    if state.store.get_session(&id).await.ok().flatten().is_none() {
-        return error_404(&format!("session not found: {id}"));
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let extra = body.map(|b| b.extra.clone()).unwrap_or_default();
     let config = match load_config(&state) {
@@ -104,7 +113,9 @@ pub async fn post_handoff(
             .or_insert_with(SessionHandle::new)
             .clone()
     };
-    let _ = handle.cmd_tx.send(DrainCmd::Handoff { extra });
+    if let Err(e) = handle.cmd_tx.send(DrainCmd::Handoff { extra }) {
+        warn!(error = %e, session_id = %id, "post_handoff: drain command not delivered");
+    }
     ensure_drain(
         state.handles.clone(),
         state.store.clone(),

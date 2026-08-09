@@ -7,7 +7,7 @@
 //! broadcast — so any process (or browser tab) sees a consistent stream.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -49,6 +49,11 @@ pub struct SessionHandle {
     pub cancel: Mutex<CancellationToken>,
     pub overrides: Mutex<RuntimeOverrides>,
     pub draining: AtomicBool,
+    /// Count of active SSE `/events` subscribers. Used by the events endpoint
+    /// to evict a handle it created once the last subscriber disconnects (and
+    /// no drain is running), so the handle map cannot grow without bound on a
+    /// long-running server.
+    pub subscribers: AtomicUsize,
     /// Sender for drain commands (compact, handoff, skill, config reload).
     pub cmd_tx: mpsc::UnboundedSender<DrainCmd>,
     /// Receiver for drain commands. `Option` so the drain task can `take()` it
@@ -78,6 +83,7 @@ impl SessionHandle {
             cancel: Mutex::new(CancellationToken::new()),
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
+            subscribers: AtomicUsize::new(0),
             cmd_tx,
             cmd_rx: std::sync::Mutex::new(Some(cmd_rx)),
             child_turn_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -124,6 +130,69 @@ impl Drop for CmdRxGuard {
                 *g = Some(rx);
             }
         }
+    }
+}
+
+/// Stream wrapper that runs `on_drop` exactly once when the stream is dropped
+/// (client disconnect OR natural end). The `/events` SSE endpoint uses it to
+/// release its subscriber slot and evict a now-unused session handle, closing
+/// the leak where `GET /events` created a handle that was never removed.
+#[allow(dead_code)]
+pub(crate) struct DropGuardStream<S> {
+    inner: std::pin::Pin<Box<S>>,
+    on_drop: Option<Box<dyn FnOnce() + Send + Sync>>,
+}
+
+impl<S: futures::Stream> DropGuardStream<S> {
+    /// Wrap `stream` so `on_drop` runs once when the stream is dropped.
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        stream: S,
+        on_drop: impl FnOnce() + Send + Sync + 'static,
+    ) -> Self {
+        DropGuardStream {
+            inner: Box::pin(stream),
+            on_drop: Some(Box::new(on_drop)),
+        }
+    }
+}
+
+impl<S: futures::Stream> futures::Stream for DropGuardStream<S> {
+    type Item = S::Item;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl<S> Drop for DropGuardStream<S> {
+    fn drop(&mut self) {
+        if let Some(f) = self.on_drop.take() {
+            f();
+        }
+    }
+}
+
+/// Decrement an events subscriber and, when THIS request *created* the handle,
+/// evict it once the last subscriber is gone and no drain is running. Spawned
+/// (async work can't run in `Drop`); all subscribe+increment happen under the
+/// same `HandleMap` lock this holds, so the "last subscriber" check is
+/// authoritative w.r.t. concurrent subscribers — evicting only when nobody else
+/// is listening means dropping the broadcast Sender breaks no live Receiver.
+#[allow(dead_code)]
+pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created: bool) {
+    if let Ok(rt) = tokio::runtime::Handle::try_current() {
+        rt.spawn(async move {
+            let mut map = handles.lock().await;
+            if let Some(h) = map.get(&id) {
+                let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+                if created && prev == 1 && !h.draining.load(Ordering::SeqCst) {
+                    map.remove(&id);
+                }
+            }
+        });
     }
 }
 
@@ -295,7 +364,9 @@ pub async fn ensure_drain(
 pub async fn send_cmd(handles: &HandleMap, session_id: &str, cmd: DrainCmd) -> bool {
     let map = handles.lock().await;
     if let Some(h) = map.get(session_id) {
-        let _ = h.cmd_tx.send(cmd);
+        if let Err(e) = h.cmd_tx.send(cmd) {
+            warn!(error = %e, session_id = %session_id, "send_cmd: drain command not delivered (drain exited?)");
+        }
         true
     } else {
         false
@@ -471,5 +542,69 @@ async fn drain_to_completion(
     drop(rx_guard);
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn release_subscriber_evicts_creator_handle_when_last_and_idle() {
+        let handles = new_handle_map();
+        let id = "sess-evict".to_string();
+        let h = SessionHandle::new();
+        h.subscribers.store(1, Ordering::SeqCst);
+        h.draining.store(false, Ordering::SeqCst);
+        handles.lock().await.insert(id.clone(), h);
+
+        release_events_subscriber(handles.clone(), id.clone(), true);
+
+        // The eviction runs in a spawned task; poll until it settles.
+        for _ in 0..200 {
+            if !handles.lock().await.contains_key(&id) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        assert!(
+            !handles.lock().await.contains_key(&id),
+            "creator handle should be evicted when last subscriber leaves and idle"
+        );
+    }
+
+    #[tokio::test]
+    async fn release_subscriber_keeps_handle_while_draining() {
+        let handles = new_handle_map();
+        let id = "sess-drain".to_string();
+        let h = SessionHandle::new();
+        h.subscribers.store(1, Ordering::SeqCst);
+        h.draining.store(true, Ordering::SeqCst);
+        handles.lock().await.insert(id.clone(), h);
+
+        release_events_subscriber(handles.clone(), id.clone(), true);
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert!(
+            handles.lock().await.contains_key(&id),
+            "handle must survive while a drain is running"
+        );
+    }
+
+    #[tokio::test]
+    async fn release_subscriber_keeps_handle_for_non_creator() {
+        let handles = new_handle_map();
+        let id = "sess-guest".to_string();
+        let h = SessionHandle::new();
+        h.subscribers.store(1, Ordering::SeqCst);
+        h.draining.store(false, Ordering::SeqCst);
+        handles.lock().await.insert(id.clone(), h);
+
+        release_events_subscriber(handles.clone(), id.clone(), false);
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        assert!(
+            handles.lock().await.contains_key(&id),
+            "handle must survive when released by a non-creator"
+        );
     }
 }

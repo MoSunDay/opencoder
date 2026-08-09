@@ -400,7 +400,7 @@ async fn send_request(
     headers: &[(String, String)],
     body: &Value,
 ) -> Result<reqwest::Response> {
-    let header_map = build_header_map(key, headers);
+    let header_map = build_header_map(key, headers)?;
     client
         .post(url)
         .headers(header_map)
@@ -760,11 +760,15 @@ fn truncate(s: &str, n: usize) -> String {
 /// Malformed custom entries (invalid header name or value bytes) are silently
 /// skipped so one bad entry can't break the whole stream. Pure and
 /// side-effect-free so the override/merge behavior is unit-testable.
-pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
+pub fn build_header_map(key: &str, custom: &[(String, String)]) -> Result<HeaderMap> {
     let mut map = HeaderMap::new();
-    if let Ok(v) = HeaderValue::from_str(&format!("Bearer {key}")) {
-        map.insert(AUTHORIZATION, v);
-    }
+    // The Authorization header is mandatory. A key whose bytes are invalid in
+    // an HTTP header value (e.g. a stray newline copied from env config) used
+    // to be silently skipped, leaving the request unauthenticated and yielding
+    // a confusing provider 401. Surface it as an explicit error instead.
+    let auth = HeaderValue::from_str(&format!("Bearer {key}"))
+        .map_err(|_| anyhow!("api key contains bytes invalid in an HTTP header value"))?;
+    map.insert(AUTHORIZATION, auth);
     map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     map.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
     for (name, value) in custom {
@@ -775,7 +779,7 @@ pub fn build_header_map(key: &str, custom: &[(String, String)]) -> HeaderMap {
             map.insert(n, v);
         }
     }
-    map
+    Ok(map)
 }
 
 #[cfg(test)]

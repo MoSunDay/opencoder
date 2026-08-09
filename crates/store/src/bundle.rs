@@ -129,6 +129,15 @@ async fn import_bundle_inner(
     workdir_hash: Option<&str>,
     depth: usize,
 ) -> Result<String> {
+    // Guard against maliciously/deeply nested bundles that could overflow the
+    // stack via unbounded recursion through `subagents`. 32 is far beyond any
+    // legitimate nesting (real subagent trees are < 5 deep).
+    const MAX_BUNDLE_DEPTH: usize = 32;
+    if depth > MAX_BUNDLE_DEPTH {
+        return Err(anyhow::anyhow!(
+            "bundle import exceeded max recursion depth {MAX_BUNDLE_DEPTH} (cyclic nesting?)"
+        ));
+    }
     let session_id = bundle.meta.id.clone();
 
     // Skip if session already exists (idempotent).
@@ -528,5 +537,51 @@ mod tests {
             inputs: vec![],
             subagents: vec![],
         }
+    }
+
+    /// A bundle nested deeper than MAX_BUNDLE_DEPTH (32) must be rejected
+    /// rather than recursing unboundedly (stack-overflow risk via crafted
+    /// cyclic nesting). The guard fires at depth 33.
+    #[tokio::test]
+    async fn deeply_nested_bundle_exceeding_max_depth_is_rejected() {
+        let store = LibsqlStore::open_memory().await.unwrap();
+        // Build a chain 34 levels deep (root at depth 0, deepest child at
+        // depth 33) by repeatedly wrapping in a single SubagentBundle.
+        let mut bundle = sample_bundle();
+        for i in 0..33u32 {
+            let parent_id = format!("nest-{i}");
+            bundle = SessionBundle {
+                meta: SessionMeta {
+                    id: parent_id.clone(),
+                    ..sample_bundle().meta
+                },
+                messages: vec![],
+                events: vec![],
+                inputs: vec![],
+                subagents: vec![SubagentBundle {
+                    task: SubagentTaskRecord {
+                        task_id: format!("task-{i}"),
+                        parent_session_id: parent_id,
+                        child_session_id: format!("nest-{}", i.wrapping_sub(1)),
+                        parent_message_id: None,
+                        agent: "explore".into(),
+                        prompt: "go".into(),
+                        result: None,
+                        status: SubagentStatus::Completed,
+                        ok: None,
+                        started_at: 1,
+                        completed_at: None,
+                    },
+                    child: bundle,
+                }],
+            };
+        }
+        let result = import_bundle(&store, &bundle, None).await;
+        assert!(result.is_err(), "deeply nested bundle should be rejected");
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("max recursion depth"),
+            "error should mention 'max recursion depth', got: {msg}"
+        );
     }
 }

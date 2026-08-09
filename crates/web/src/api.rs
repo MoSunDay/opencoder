@@ -13,6 +13,7 @@ use axum::Json;
 use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
+use tracing::warn;
 
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
@@ -100,7 +101,12 @@ pub async fn delete_session(
     Path(id): Path<String>,
 ) -> Response {
     // Distinguish "did not exist" from "deleted" so callers get a real 404.
-    let existed = state.store.get_session(&id).await.unwrap_or(None);
+    // Distinguish "did not exist" (404) from a genuine DB error (500); the old
+    // `unwrap_or(None)` masked storage failures as "session not found".
+    let existed = match state.store.get_session(&id).await {
+        Ok(m) => m,
+        Err(e) => return error_500(format!("get_session: {e:#}")),
+    };
     if existed.is_none() {
         return (
             axum::http::StatusCode::NOT_FOUND,
@@ -214,7 +220,7 @@ pub async fn post_prompt(
     }
     // Persist skill if provided (resume will restore it on the next drain).
     if let Some(skill) = &body.skill {
-        let _ = state
+        if let Err(e) = state
             .store
             .update_session(
                 &id,
@@ -224,7 +230,10 @@ pub async fn post_prompt(
                     ..Default::default()
                 },
             )
-            .await;
+            .await
+        {
+            return error_500(format!("persist skill: {e:#}"));
+        }
     }
     match admit_and_drain(
         state.handles.clone(),
@@ -307,7 +316,13 @@ pub async fn post_agent(
     }
     // P1-5: Capture old meta for TOCTOU rollback. A drain may start between
     // the draining check above and the update_session write below.
-    let old_agent = state.store.get_session(&id).await.ok().flatten();
+    let old_agent = match state.store.get_session(&id).await {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, session_id = %id, "post_agent: get_session for rollback failed");
+            None
+        }
+    };
     if let Err(e) = state
         .store
         .update_session(
@@ -385,7 +400,13 @@ pub async fn post_model(
         }
     }
     // P1-5: Capture old meta for TOCTOU rollback.
-    let old_model = state.store.get_session(&id).await.ok().flatten();
+    let old_model = match state.store.get_session(&id).await {
+        Ok(m) => m,
+        Err(e) => {
+            warn!(error = %e, session_id = %id, "post_model: get_session for rollback failed");
+            None
+        }
+    };
     if let Err(e) = state
         .store
         .update_session(
@@ -572,10 +593,14 @@ pub async fn get_events(
     // persisted at query time, not received via broadcast). With subscribe-first
     // every post-subscribe broadcast is captured by the live stream; any overlap
     // with the replay window is deduplicated below.
-    let rx = {
+    let (rx, created) = {
         let mut map = state.handles.lock().await;
+        let created = !map.contains_key(&id);
         let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
-        handle.tx.subscribe()
+        // Track this subscriber so the handle this request may have created is
+        // evicted (see `release_events_subscriber`) once everyone disconnects.
+        handle.subscribers.fetch_add(1, Ordering::SeqCst);
+        (handle.tx.subscribe(), created)
     };
 
     // P0-1: Capture the persisted-seq baseline BEFORE querying `events_after`.
@@ -645,7 +670,7 @@ pub async fn get_events(
 
     let replay = futures::stream::iter(persisted);
     let live = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|r| async move { r.ok() })
+        .filter_map(|r| async move { map_broadcast_result(r) })
         .filter_map({
             let seen = Arc::clone(&seen);
             move |evt| {
@@ -674,7 +699,15 @@ pub async fn get_events(
         Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
     });
 
-    Sse::new(merged)
+    // Wrap in a drop guard so that when the client disconnects (or the stream
+    // ends) this request's subscriber slot is released and, if it created the
+    // handle and nothing remains, the handle is evicted — preventing unbounded
+    // handle-map growth on a long-running server.
+    let guarded = crate::handle::DropGuardStream::new(merged, move || {
+        crate::handle::release_events_subscriber(state.handles.clone(), id, created)
+    });
+
+    Sse::new(guarded)
         .keep_alive(KeepAlive::default())
         .into_response()
 }
@@ -735,5 +768,24 @@ fn event_kind_str(k: EventKind) -> &'static str {
         EventKind::Interrupted => "interrupted",
         EventKind::Done => "done",
         EventKind::Error => "error",
+    }
+}
+
+/// Map a `BroadcastStream` item (Ok event / Err lag) to an `SseEvt`. A lag used
+/// to be silently dropped (`r.ok()`), which could swallow a terminal
+/// `done`/`error` event and freeze the UI (busy never resets). Now it is
+/// surfaced as a synthetic `error` event so the client knows it must re-sync.
+/// Pure so the lag handling is directly unit-testable.
+pub fn map_broadcast_result(
+    r: Result<SseEvt, tokio_stream::wrappers::errors::BroadcastStreamRecvError>,
+) -> Option<SseEvt> {
+    match r {
+        Ok(evt) => Some(evt),
+        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => Some(SseEvt {
+            kind: "error".into(),
+            data: json!({ "error": format!("event lag: {n} events dropped") }),
+            ts: opencoder_core::message::now_ms(),
+            seq: None,
+        }),
     }
 }

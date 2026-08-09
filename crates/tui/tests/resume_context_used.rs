@@ -100,10 +100,7 @@ async fn resume_context_used_grows_with_more_messages() {
     make_session(&store, "s3").await;
     let store_arc: Arc<dyn Store> = store.clone();
 
-    let short = vec![
-        Message::user("u1", "hi"),
-        assistant("a1", "hello there"),
-    ];
+    let short = vec![Message::user("u1", "hi"), assistant("a1", "hello there")];
     let long = vec![
         Message::user("u1", "hi"),
         assistant("a1", "hello there"),
@@ -132,7 +129,9 @@ fn assistant_with_task(id: &str, task_id: &str) -> Message {
         id: id.into(),
         role: Role::Assistant,
         blocks: vec![
-            ContentBlock::Text { text: "delegating".into() },
+            ContentBlock::Text {
+                text: "delegating".into(),
+            },
             ContentBlock::ToolUse {
                 id: task_id.into(),
                 name: "task".into(),

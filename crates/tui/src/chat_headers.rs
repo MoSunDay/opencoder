@@ -51,6 +51,7 @@ impl ChatView {
         for (block_idx, block) in self.blocks.iter().enumerate() {
             match block {
                 ChatBlock::Marker(lines) => line_idx += lines.len(),
+                ChatBlock::User { rendered } => line_idx += 1 + rendered.len(),
                 ChatBlock::Assistant {
                     raw,
                     rendered,

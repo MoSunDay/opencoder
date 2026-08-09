@@ -35,11 +35,7 @@ pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
     let list_focused = menu.focus() == Focus::List;
     // When buttons have focus, dim the list marker so the highlight reads
     // as "on the buttons" rather than "on a row".
-    let marker_sel_st = if list_focused {
-        sel_st
-    } else {
-        dim_st
-    };
+    let marker_sel_st = if list_focused { sel_st } else { dim_st };
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, (key, label, spec)) in menu.entries().iter().enumerate() {

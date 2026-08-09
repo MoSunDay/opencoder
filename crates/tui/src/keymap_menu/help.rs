@@ -97,7 +97,9 @@ pub(crate) fn wrap_line(text: &str, max_w: usize) -> Vec<String> {
 /// Build the wrapped help lines from the HELP constant, fitting `max_w`
 /// display columns per line.
 fn build_wrapped_lines(max_w: usize) -> Vec<String> {
-    HELP.lines().flat_map(|line| wrap_line(line, max_w)).collect()
+    HELP.lines()
+        .flat_map(|line| wrap_line(line, max_w))
+        .collect()
 }
 
 /// Render the help popup centered on `area`, scrolled by `scroll` lines.
@@ -114,11 +116,19 @@ pub fn render_help_overlay(f: &mut Frame, area: Rect, scroll: u16) {
     let wrapped = build_wrapped_lines(inner_w);
     let lines: Vec<Line> = wrapped
         .iter()
-        .map(|s| Line::from(Span::styled(s.as_str(), Style::default().fg(theme::subtle()))))
+        .map(|s| {
+            Line::from(Span::styled(
+                s.as_str(),
+                Style::default().fg(theme::subtle()),
+            ))
+        })
         .collect();
 
     let block = crate::theme::rounded_block_focus("帮助 (Esc 关闭, ↑↓ 滚动)");
-    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(block), popup);
+    f.render_widget(
+        Paragraph::new(lines).scroll((scroll, 0)).block(block),
+        popup,
+    );
 }
 
 #[cfg(test)]

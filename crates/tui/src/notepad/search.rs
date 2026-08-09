@@ -170,12 +170,12 @@ fn parse_hits_grep(raw: &[u8], workdir: &Path) -> Vec<SearchHit> {
     for line in text.lines() {
         if let Some(mut hit) = parse_rg_line(line) {
             // Strip leading "./" and resolve relative to workdir.
-            let p = hit.path.strip_prefix(".").unwrap_or(&hit.path).to_path_buf();
-            hit.path = if p.is_absolute() {
-                p
-            } else {
-                workdir.join(p)
-            };
+            let p = hit
+                .path
+                .strip_prefix(".")
+                .unwrap_or(&hit.path)
+                .to_path_buf();
+            hit.path = if p.is_absolute() { p } else { workdir.join(p) };
             hits.push(hit);
             if hits.len() >= MAX_RESULTS {
                 break;
@@ -346,8 +346,16 @@ mod tests {
         let mut s = SearchState::new();
         s.editing = false;
         s.results = vec![
-            SearchHit { path: PathBuf::from("a"), line_no: 1, text: "t".into() },
-            SearchHit { path: PathBuf::from("b"), line_no: 2, text: "t".into() },
+            SearchHit {
+                path: PathBuf::from("a"),
+                line_no: 1,
+                text: "t".into(),
+            },
+            SearchHit {
+                path: PathBuf::from("b"),
+                line_no: 2,
+                text: "t".into(),
+            },
         ];
         s.move_cursor(100);
         assert_eq!(s.selected, 1);

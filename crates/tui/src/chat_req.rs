@@ -33,10 +33,7 @@ mod tests {
     fn returns_explicit_annotation_when_set() {
         let mut chat = ChatView::default();
         chat.annotation_text = Some("my task".into());
-        assert_eq!(
-            chat.last_annotation_text().as_deref(),
-            Some("my task")
-        );
+        assert_eq!(chat.last_annotation_text().as_deref(), Some("my task"));
     }
 
     #[test]
@@ -60,19 +57,13 @@ mod tests {
         let mut chat = ChatView::default();
         chat.annotation_text = Some("   ".into());
         chat.first_prompt = Some("real prompt".into());
-        assert_eq!(
-            chat.last_annotation_text().as_deref(),
-            Some("real prompt")
-        );
+        assert_eq!(chat.last_annotation_text().as_deref(), Some("real prompt"));
     }
 
     #[test]
     fn update_annotation_text_sanitizes() {
         let mut chat = ChatView::default();
         chat.update_annotation_text("hello\r\nworld");
-        assert_eq!(
-            chat.annotation_text.as_deref(),
-            Some("hello\nworld")
-        );
+        assert_eq!(chat.annotation_text.as_deref(), Some("hello\nworld"));
     }
 }

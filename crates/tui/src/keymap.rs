@@ -265,6 +265,7 @@ pub(crate) struct KeyBindings {
     pub switch_mode_keep: KeyCombo,
     pub collapse_blocks: KeyCombo,
     pub force_redraw: KeyCombo,
+    pub toggle_console: KeyCombo,
 }
 
 impl KeyBindings {
@@ -292,6 +293,7 @@ impl KeyBindings {
             switch_mode_keep: parse_or_default(&km.switch_mode_keep, &d.switch_mode_keep),
             collapse_blocks: parse_or_default(&km.collapse_blocks, &d.collapse_blocks),
             force_redraw: parse_or_default(&km.force_redraw, &d.force_redraw),
+            toggle_console: parse_or_default(&km.toggle_console, &d.toggle_console),
         }
     }
 }

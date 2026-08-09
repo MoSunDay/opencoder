@@ -139,21 +139,21 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 }
 
 /// Gate for agent-mode switch actions (Shift+Tab / `/act` / `/plan` /
-/// `/act_clear_context` / SwitchAgentNoClear). A turn in flight (`running ==
-/// true`) means the worker is mid-`run_session`; applying a mode switch then
-/// would start the *next* turn with a stale agent while the current model is
-/// still answering under the old system prompt — the mode "switch" would
-/// complete at an arbitrary partial boundary. Refuse until idle (clean turn
-/// boundary). Pure so the running-guard is unit-testable independent of the
-/// async event loop.
+/// `/act_clear_context` / SwitchAgentNoClear). Busy (`running` or a live
+/// subagent — callers precompute `running || subagents_running > 0`) means the
+/// worker is mid-`run_session`; applying a mode switch then would start the
+/// *next* turn with a stale agent while the current model is still answering
+/// under the old system prompt — the mode "switch" would complete at an
+/// arbitrary partial boundary. Refuse until idle (clean turn boundary). Pure
+/// so the running-guard is unit-testable independent of the async event loop.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,
     SkipRunning,
 }
 
-pub fn gate_switch(running: bool) -> SwitchGate {
-    if running {
+pub fn gate_switch(busy: bool) -> SwitchGate {
+    if busy {
         SwitchGate::SkipRunning
     } else {
         SwitchGate::Run

@@ -85,6 +85,7 @@ pub struct Palette {
     pub info: Color,
     pub local: Color,
     pub pink: Color,
+    pub user: Color,
 }
 
 /// Pure lookup: the palette for the given theme. Dark mirrors the `const`
@@ -92,6 +93,7 @@ pub struct Palette {
 pub fn palette(kind: ThemeKind) -> Palette {
     match kind {
         ThemeKind::Dark => Palette {
+            user: Color::Indexed(220),
             accent: Color::Cyan,
             text: Color::White,
             muted: Color::DarkGray,
@@ -104,6 +106,7 @@ pub fn palette(kind: ThemeKind) -> Palette {
             pink: Color::LightMagenta,
         },
         ThemeKind::Light => Palette {
+            user: Color::Indexed(94),
             accent: Color::Blue,
             text: Color::Black,
             muted: Color::Gray,
@@ -170,6 +173,9 @@ pub fn local_color() -> Color {
 }
 pub fn pink() -> Color {
     palette(current_theme()).pink
+}
+pub fn user_color() -> Color {
+    palette(current_theme()).user
 }
 
 /// Selection-row background. Dark uses 256-colour index 238, light uses the
@@ -426,6 +432,18 @@ mod tests {
         set_theme(ThemeKind::Dark);
         assert_eq!(agent_chip_fg("act"), ACCENT);
         assert_eq!(agent_chip_fg(""), ACCENT);
+    }
+
+    // ── user_color ────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_color_is_gold_in_dark_theme() {
+        assert_eq!(palette(ThemeKind::Dark).user, Color::Indexed(220));
+    }
+
+    #[test]
+    fn user_color_is_dark_gold_in_light_theme() {
+        assert_eq!(palette(ThemeKind::Light).user, Color::Indexed(94));
     }
 
     // ── list_highlight ───────────────────────────────────────────────────

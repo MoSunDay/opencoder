@@ -25,6 +25,7 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("switch_mode_keep", "Switch mode (keep context)"),
     ("collapse_blocks", "Collapse blocks + exit subagent"),
     ("force_redraw", "Force full-screen redraw"),
+    ("toggle_console", "Toggle console panel in notepad"),
 ];
 
 /// Configuration for all 18 re-bindable global keyboard shortcuts. Each field
@@ -49,6 +50,7 @@ pub struct KeymapConfig {
     pub switch_mode_keep: String,
     pub collapse_blocks: String,
     pub force_redraw: String,
+    pub toggle_console: String,
 }
 
 impl Default for KeymapConfig {
@@ -72,6 +74,7 @@ impl Default for KeymapConfig {
             switch_mode_keep: "ctrl+shift+tab".into(),
             collapse_blocks: "ctrl+l".into(),
             force_redraw: "ctrl+f".into(),
+            toggle_console: "ctrl+shift+t".into(),
         }
     }
 }
@@ -98,6 +101,7 @@ impl KeymapConfig {
             "switch_mode_keep" => &self.switch_mode_keep,
             "collapse_blocks" => &self.collapse_blocks,
             "force_redraw" => &self.force_redraw,
+            "toggle_console" => &self.toggle_console,
             _ => return None,
         })
     }
@@ -123,6 +127,7 @@ impl KeymapConfig {
             "switch_mode_keep" => self.switch_mode_keep = value,
             "collapse_blocks" => self.collapse_blocks = value,
             "force_redraw" => self.force_redraw = value,
+            "toggle_console" => self.toggle_console = value,
             _ => return false,
         }
         true
@@ -174,6 +179,6 @@ mod tests {
 
     #[test]
     fn keymap_info_count_matches_fields() {
-        assert_eq!(KEYMAP_INFO.len(), 18);
+        assert_eq!(KEYMAP_INFO.len(), 19);
     }
 }

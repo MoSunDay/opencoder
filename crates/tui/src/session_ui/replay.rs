@@ -55,13 +55,9 @@ pub(super) fn replay_one(
             if text.is_empty() && !has_images {
                 return;
             }
-            chat.push_marker(Line::from(Span::styled(
-                "user:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
             let rendered = crate::markdown::render(&text);
             if !rendered.is_empty() {
-                chat.blocks.push(ChatBlock::Marker(rendered));
+                chat.blocks.push(ChatBlock::User { rendered });
             }
             // Render any Image blocks inline after the text. Remote URLs are
             // resolved from the prefetched-bytes map (async-fetched above).

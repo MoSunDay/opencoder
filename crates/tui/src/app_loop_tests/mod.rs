@@ -326,6 +326,7 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::TranscriptReset(messages))),
         &mut chat,
@@ -340,6 +341,7 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -387,6 +389,7 @@ async fn fold_turn_done_plan_consumes_stale_pending_arm() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("plan".into())),
         &mut chat,
@@ -401,6 +404,7 @@ async fn fold_turn_done_plan_consumes_stale_pending_arm() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -449,6 +453,7 @@ async fn fold_error_does_not_clear_queue_items() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error(
             "llm api failure".into(),
@@ -465,6 +470,7 @@ async fn fold_error_does_not_clear_queue_items() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -506,6 +512,7 @@ async fn fold_done_clears_queue_items() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -520,6 +527,7 @@ async fn fold_done_clears_queue_items() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -535,8 +543,8 @@ async fn fold_done_clears_queue_items() {
 }
 
 /// When a queued follow-up is consumed at the idle boundary, the handler
-/// echoes a `queued:` marker into the transcript and drops the consumed
-/// entry by seq from the pending mirror. The marker is NOT pushed at admit
+/// echoes a `ChatBlock::User` block into the transcript and drops the consumed
+/// entry by seq from the pending mirror. The block is NOT pushed at admit
 /// time — it only appears when the queued prompt actually starts executing.
 #[tokio::test]
 async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
@@ -556,6 +564,7 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let before = crate::chat::block_text(&chat);
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 30,
@@ -573,13 +582,18 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
-    // A `user:` marker is pushed into the transcript at consume time.
+    // A ChatBlock::User with the consumed prompt is pushed at consume time.
     assert!(
-        crate::chat::block_text(&chat).contains("user: queued prompt X"),
-        "QueueConsumed must echo the marker at consume time"
+        crate::chat::block_text(&chat).contains("User:"),
+        "QueueConsumed must echo the User tag at consume time"
+    );
+    assert!(
+        crate::chat::block_text(&chat).contains("queued prompt X"),
+        "QueueConsumed must echo the consumed prompt body"
     );
     assert_ne!(
         crate::chat::block_text(&chat),
@@ -612,6 +626,7 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
     let before = crate::chat::block_text(&chat);
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::QueueConsumed {
             seq: 999,
@@ -629,6 +644,7 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -657,6 +673,7 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Error("stale".into()))),
         &mut chat,
@@ -671,6 +688,7 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 

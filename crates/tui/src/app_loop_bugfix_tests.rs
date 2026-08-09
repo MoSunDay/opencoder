@@ -64,6 +64,7 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into())),
         &mut chat,
@@ -78,6 +79,7 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -142,6 +144,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -156,6 +159,7 @@ async fn done_with_pending_queue_arms_drain_pending() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -206,6 +210,7 @@ async fn done_with_empty_store_goes_idle() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::Session(SessionEvent::Done)),
         &mut chat,
@@ -220,6 +225,7 @@ async fn done_with_empty_store_goes_idle() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 
@@ -338,6 +344,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -354,6 +361,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
     assert!(
@@ -361,6 +369,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         "the first delta creates the Thinking header and must render"
     );
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             " second".into(),
@@ -377,6 +386,7 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
     assert!(
@@ -408,6 +418,7 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
         .await
         .unwrap();
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     fold_ui_events(
         Some(UiEvent::Session(SessionEvent::ReasoningDelta(
             "first".into(),
@@ -424,6 +435,7 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
     assert!(
@@ -462,6 +474,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     let mut cancel = CancellationToken::new();
     let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
 
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
     let _flow = fold_ui_events(
         Some(UiEvent::TurnDone("act".into())),
         &mut chat,
@@ -476,6 +489,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
         &cmd_tx,
         &mut cancel,
         &mut evt_rx,
+        &mut notepad,
     )
     .await;
 

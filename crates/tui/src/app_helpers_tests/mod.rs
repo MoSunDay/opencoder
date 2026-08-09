@@ -56,31 +56,17 @@ fn push_user_records_history_and_echoes_transcript() {
     push_user(&mut chat, &mut history, &mut hist_idx, "hello world");
     assert_eq!(history, vec!["hello world".to_string()]);
     assert_eq!(hist_idx, None);
-    let markers = marker_texts(&chat);
+    // push_user now creates a ChatBlock::User with markdown-rendered body.
+    let has_user = chat.blocks.iter().any(|b| {
+        matches!(b, crate::chat::ChatBlock::User { rendered } if rendered
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .any(|s| s.content.contains("hello world")))
+    });
     assert!(
-        markers.iter().any(|m| m.contains("user: hello world")),
-        "push_user must still echo the user marker, got: {markers:?}"
+        has_user,
+        "push_user must create a User block whose rendered body contains the text"
     );
-}
-
-/// Flatten every `Marker` block of a ChatView into its span text, so a test
-/// can assert on the transcript echo.
-fn marker_texts(chat: &ChatView) -> Vec<String> {
-    use crate::chat::ChatBlock;
-    chat.blocks
-        .iter()
-        .filter_map(|b| match b {
-            ChatBlock::Marker(lines) => {
-                let text: String = lines
-                    .iter()
-                    .flat_map(|l| l.spans.iter())
-                    .map(|s| s.content.to_string())
-                    .collect();
-                Some(text)
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 #[test]

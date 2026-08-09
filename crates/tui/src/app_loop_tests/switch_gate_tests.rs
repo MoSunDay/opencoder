@@ -226,3 +226,45 @@ async fn switch_no_clear_idle_skips_handoff() {
         _other => panic!("expected SwitchAgent"),
     }
 }
+
+/// A subagent task is live (subagents_running > 0) but the loop `running`
+/// flag is false - this happens when a SubagentEnd was dropped under channel
+/// saturation and Done/TurnDone already cleared `running`. The gate must
+/// STILL block the mode switch (no silent mode change while a tracked
+/// subagent exists).
+#[tokio::test]
+async fn switch_while_subagent_running_is_noop_even_when_running_false() {
+    let mut chat = ChatView {
+        agent: "plan".into(),
+        subagents_running: 1,
+        plan_submitted: false,
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = true;
+    let mut input = "keep me".to_string();
+    let mut cursor_idx = 7;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 42u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let outcome = handle_switch_agent(
+        "act".into(), false, &mut chat, &mut running, &mut follow,
+        &mut input, &mut cursor_idx, &mut mode_flash, 0,
+        &cmd_tx, &mut cancel, &mut sys_tokens, workdir, &active_skill_body,
+    ).await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    assert!(cmd_rx.try_recv().is_err(), "no command should be sent while a subagent is live");
+    assert!(!running, "running must stay false (no turn started)");
+    assert_eq!(input, "keep me", "input must be untouched on the noop");
+    assert_eq!(sys_tokens, 42, "sys_tokens must be untouched on the noop");
+    assert_eq!(chat.agent, "plan", "agent must stay plan while a subagent is live");
+    assert!(
+        mode_flash.as_ref().map(|(t, _)| t.contains("busy")).unwrap_or(false),
+        "mode flash should hint the switch is deferred; got {:?}", mode_flash
+    );
+}

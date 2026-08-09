@@ -28,8 +28,8 @@ use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
 use steer::{
-    claim_steers, drain_mode_step, has_pending_steers, idle_drain, is_turn_cancelled, reset_turn_cancel,
-    DrainModeAction, IdleAction,
+    claim_steers, drain_mode_step, has_pending_queues, has_pending_steers, idle_drain,
+    is_turn_cancelled, reset_turn_cancel, DrainModeAction, IdleAction,
 };
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
@@ -148,7 +148,12 @@ pub async fn run_with_registry(
     // submit. Max 3 re-checks to bound latency.
     let mut rechecks = 0u32;
     const MAX_RECHECKS: u32 = 3;
-    while rechecks < MAX_RECHECKS && has_pending_steers(session).await {
+    // Check BOTH steers and queued inputs: a queue follow-up admitted
+    // during the idle window (TUI has no web-style reaper) would otherwise be
+    // stranded until the next manual submit, exactly like a bare steer.
+    while rechecks < MAX_RECHECKS
+        && (has_pending_steers(session).await || has_pending_queues(session).await)
+    {
         rechecks += 1;
         run_loop(session, registry, &mut on_event, true).await?;
     }
@@ -245,6 +250,17 @@ pub(crate) async fn run_loop(
             }
             // Sentinel ClearContext: go idle without an LM call.
             if clear_sentinel {
+                on_event(SessionEvent::Done);
+                break;
+            }
+            // Bare control command(s) only (e.g. a bare "/plan" steer with no
+            // accompanying text): the mode/skill switch is the whole intent
+            // and no new user message was recorded. Avoid a wasteful LLM call
+            // on the existing transcript — go idle, mirroring the initial-
+            // prompt short-circuit in `run_with_registry`. Only fires when
+            // steers were actually claimed this turn (an empty steer batch
+            // with a pending `skip` is handled by the idle-drain block below).
+            if !steer_prompts.is_empty() && !steer_recorded {
                 on_event(SessionEvent::Done);
                 break;
             }

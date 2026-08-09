@@ -354,7 +354,7 @@ fn user_embedded_tool_result_image_rehomes_to_user_message() {
     ));
 }
 
-// --- assistant message lowering (Fix 3: content null → empty string) ---
+// --- assistant message lowering (tool-call-only content -> null) ---
 
 fn assistant_with_tool_calls(tool_id: &str) -> Message {
     Message {
@@ -374,17 +374,21 @@ fn assistant_with_tool_calls(tool_id: &str) -> Message {
 }
 
 #[test]
-fn assistant_tool_only_content_is_empty_string_not_null() {
+fn assistant_tool_only_content_is_null() {
+    // A tool-call-only assistant turn (no text) must lower its `content` to
+    // JSON null, NOT an empty string: strict OpenAI-compatible backends (some
+    // vLLM/LiteLLM/gateways) reject "content": "" on tool-use history replay
+    // with HTTP 400.
     let out = lower_messages(&[assistant_with_tool_calls("c1")]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0]["role"], "assistant");
-    // content must be a string (empty), NOT null — some providers reject null.
     assert!(
-        out[0]["content"].is_string(),
-        "assistant content must be a string, got: {:?}",
+        out[0]["content"].is_null(),
+        "tool-call-only assistant content must be null, got: {:?}",
         out[0]["content"]
     );
-    assert_eq!(out[0]["content"].as_str().unwrap(), "");
+    // tool_calls are still emitted alongside the null content.
+    assert_eq!(out[0]["tool_calls"][0]["function"]["name"], "bash");
 }
 
 #[test]
@@ -407,9 +411,9 @@ fn assistant_text_content_is_preserved() {
 }
 
 #[test]
-fn multi_turn_tool_only_messages_all_have_string_content() {
-    // Regression: multiple consecutive tool-call-only assistant turns must
-    // all emit content as a string, never null.
+fn multi_turn_tool_only_messages_all_have_null_content() {
+    // Regression: multiple consecutive tool-call-only assistant turns must all
+    // emit `content` as null.
     let msgs = vec![
         assistant_with_tool_calls("c1"),
         tool_msg("c1", "output1", false),
@@ -423,10 +427,38 @@ fn multi_turn_tool_only_messages_all_have_string_content() {
     assert_eq!(assistant_msgs.len(), 3);
     for (i, m) in assistant_msgs.iter().enumerate() {
         assert!(
-            m["content"].is_string(),
-            "assistant #{} content must be string, got: {:?}",
+            m["content"].is_null(),
+            "assistant #{} content must be null, got: {:?}",
             i,
             m["content"]
         );
     }
+}
+
+#[test]
+fn assistant_with_both_text_and_tool_calls_keeps_string_content() {
+    // When an assistant turn has BOTH text and tool calls, `content` stays a
+    // string (the null path only applies to tool-call-only turns).
+    let msg = Message {
+        id: "m1".into(),
+        role: Role::Assistant,
+        blocks: vec![
+            ContentBlock::Text {
+                text: "running it".into(),
+            },
+            ContentBlock::ToolUse {
+                id: "c1".into(),
+                name: "bash".into(),
+                input: serde_json::json!({"cmd": "ls"}),
+            },
+        ],
+        model: None,
+        agent: None,
+        usage: Default::default(),
+        created_at: 0,
+        synthetic: false,
+    };
+    let out = lower_messages(&[msg]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0]["content"].as_str().unwrap(), "running it");
 }

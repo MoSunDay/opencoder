@@ -434,3 +434,43 @@ fn strip_wrappers_unwraps_delegating_prefixes() {
     // Read-only command passes through unwrapped.
     assert_eq!(strip_wrappers("ls -la"), "ls -la");
 }
+
+// ---------------------------------------------------------------------------
+// Plan-mode write-guard: separator coverage.
+//
+// `split_segments` must treat the shell background operator `&` and a literal
+// newline `\n` as command separators, otherwise a mutating command hidden
+// behind a read-only prefix (`echo ok & rm -rf /tmp/x`,
+// `echo ok\nrm -rf /tmp/x`) collapses into a single read-only-looking segment
+// and silently bypasses plan-mode write protection.
+// ---------------------------------------------------------------------------
+
+/// A mutating command after a bare `&` (shell background operator) is now
+/// split into its own segment and detected as a write.
+#[test]
+fn classify_detects_write_after_bare_ampersand() {
+    assert!(matches!(
+        classify("echo ok & rm -rf /tmp/build"),
+        BashVerdict::WriteBlocked(_)
+    ));
+}
+
+/// A mutating command after a literal newline is now split into its own
+/// segment and detected as a write.
+#[test]
+fn classify_detects_write_after_newline() {
+    assert!(matches!(
+        classify("echo ok\nrm -rf /tmp/build"),
+        BashVerdict::WriteBlocked(_)
+    ));
+}
+
+/// Two read-only commands joined by a bare `&` stay read-only — the fix
+/// splits on `&` but neither segment mutates, so plan mode must NOT over-block.
+#[test]
+fn classify_bare_ampersand_between_readonly_stays_readonly() {
+    assert_eq!(
+        classify("echo a & echo b"),
+        BashVerdict::ReadOnly
+    );
+}

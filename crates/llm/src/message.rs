@@ -130,8 +130,12 @@ fn push_assistant(out: &mut Vec<OpenAIMessage>, msg: &Message) {
     m.insert("role".to_string(), Value::String("assistant".into()));
     m.insert(
         "content".to_string(),
-        if text.is_empty() {
-            Value::String(String::new())
+        if text.is_empty() && !tool_calls.is_empty() {
+            // Tool-call-only assistant turn: strict OpenAI-compatible backends
+            // (some vLLM/LiteLLM/gateways) reject "content": "" on tool-use
+            // history replay with HTTP 400 — emit null instead. Text-bearing
+            // turns keep a string content.
+            Value::Null
         } else {
             Value::String(text)
         },

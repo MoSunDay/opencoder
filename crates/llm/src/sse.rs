@@ -20,6 +20,27 @@ impl SseDecoder {
     }
 
     pub fn drain(&mut self) -> Vec<String> {
+        // Strip leading invalid UTF-8 bytes so decoding advances instead of
+        // stalling forever (Bug 7). A genuinely invalid byte
+        // (`error_len == Some`) is dropped; an incomplete multi-byte *trailing*
+        // sequence (`error_len == None`) is retained to await more bytes.
+        //
+        // The mutation (`self.buf.drain`) runs in its own statement AFTER the
+        // borrow from `std::str::from_utf8(&self.buf)` is released — mutating
+        // inside the match arm would conflict with the scrutinee's shared
+        // borrow of `self.buf`.
+        loop {
+            let drop = match std::str::from_utf8(&self.buf) {
+                Ok(_) => break,
+                Err(e) if e.valid_up_to() == 0 => match e.error_len() {
+                    Some(n) => n,
+                    None => break,
+                },
+                Err(_) => break,
+            };
+            self.buf.drain(..drop.min(self.buf.len()));
+        }
+
         // Decode as much valid UTF-8 as possible. If the tail is an
         // incomplete multi-byte sequence (a char split across TCP reads),
         // process only the valid prefix and retain the partial bytes.
@@ -28,6 +49,8 @@ impl SseDecoder {
             Err(e) => {
                 let valid = e.valid_up_to();
                 if valid == 0 {
+                    // Pure incomplete trailing sequence (all leading invalid
+                    // bytes were stripped above) — retain and wait for bytes.
                     return Vec::new();
                 }
                 valid
@@ -226,6 +249,33 @@ mod tests {
         dec.push(b"\xa9\n\n");
         // \xc3\xa9 = é, but there's no data: prefix so nothing is extracted —
         // verify the buffer doesn't panic or corrupt
+        assert!(dec.drain().is_empty());
+    }
+
+    #[test]
+    fn drain_skips_invalid_leading_byte() {
+        // Regression: an invalid byte at the head of the buffer used to make
+        // `drain` return an empty `Vec` WITHOUT advancing, stalling the
+        // decoder so every subsequent valid SSE frame was lost. The decoder
+        // must instead drop the offending byte span and recover the valid
+        // frame that follows.
+        let mut dec = SseDecoder::new();
+        // 0xFF is never a valid UTF-8 leading/continuation byte; it must be
+        // skipped, leaving the valid `data: hello\n\n` frame to be decoded.
+        dec.push(b"\xffdata: hello\n\n");
+        let out = dec.drain();
+        assert_eq!(out, vec!["hello"], "valid frame after bad byte must decode");
+        // The bad byte is consumed (not retained), so the buffer is empty.
+        assert!(dec.drain().is_empty(), "no stale bytes should remain");
+    }
+
+    #[test]
+    fn drain_skips_run_of_invalid_leading_bytes() {
+        // A contiguous run of invalid bytes at the head must all be skipped
+        // before the valid frame decodes.
+        let mut dec = SseDecoder::new();
+        dec.push(b"\xff\xfe\xfddata: ok\n\n");
+        assert_eq!(dec.drain(), vec!["ok"]);
         assert!(dec.drain().is_empty());
     }
 

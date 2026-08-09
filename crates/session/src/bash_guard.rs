@@ -257,7 +257,7 @@ fn split_segments(cmd: &str) -> Vec<String> {
                 continue;
             }
         }
-        if c == ';' || c == '|' {
+        if c == ';' || c == '|' || c == '&' || c == '\n' {
             if !current.trim().is_empty() {
                 segments.push(current.trim().to_string());
             }

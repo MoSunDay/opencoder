@@ -187,12 +187,26 @@ impl EscGuard {
     /// Commit any held Esc whose window expired — called whenever we wake up
     /// (poll timeout or an event) and find the deadline passed while blocked.
     fn flush_expired(&mut self) -> Option<Event> {
-        if self.state == EscGuardState::Holding && self.expired() {
-            self.state = EscGuardState::Idle;
-            self.deadline = None;
-            Some(esc_event())
-        } else {
-            None
+        if !self.expired() {
+            return None;
+        }
+        match self.state {
+            EscGuardState::Holding => {
+                // Window elapsed: commit the held Esc.
+                self.state = EscGuardState::Idle;
+                self.deadline = None;
+                Some(esc_event())
+            }
+            EscGuardState::SwallowTail => {
+                // The held Esc was consumed reassembling a CSI tail that never
+                // arrived within the window. Nothing to commit — just return
+                // to Idle and clear the deadline so poll_timeout stops
+                // returning Duration::ZERO (which would busy-loop the pump).
+                self.state = EscGuardState::Idle;
+                self.deadline = None;
+                None
+            }
+            EscGuardState::Idle => None,
         }
     }
 
@@ -408,5 +422,54 @@ mod tests {
         // first, then the event passes through.
         let out = run(&[(false, esc()), (false, Event::Paste("x".into()))]);
         assert_eq!(out, vec![esc(), Event::Paste("x".into())]);
+    }
+
+    // ── flush_expired (deadline-boundary transitions on the live EscGuard) ──
+
+    #[test]
+    fn flush_expired_clears_swallow_tail_when_window_passes() {
+        // Regression for the 100% CPU busy-loop: a guard stuck in SwallowTail
+        // (held Esc consumed while reassembling a CSI tail) whose window
+        // passes must return to Idle and clear its deadline. Otherwise
+        // poll_timeout keeps returning Duration::ZERO and the input pump
+        // spins forever.
+        let mut g = EscGuard::new();
+        g.state = EscGuardState::SwallowTail;
+        g.deadline = Some(Instant::now() - Duration::from_millis(1));
+        // An expired SwallowTail yields no event (the Esc was consumed) ...
+        assert_eq!(g.flush_expired(), None);
+        // ... but it MUST transition to Idle and clear the deadline.
+        assert_eq!(g.state, EscGuardState::Idle);
+        assert_eq!(g.deadline, None);
+    }
+
+    #[test]
+    fn flush_expired_commits_holding_when_expired() {
+        // Regression guard for the pre-existing behaviour: an expired Holding
+        // guard still commits the held Esc as a real key event.
+        let mut g = EscGuard::new();
+        g.state = EscGuardState::Holding;
+        g.deadline = Some(Instant::now() - Duration::from_millis(1));
+        assert_eq!(g.flush_expired(), Some(esc_event()));
+        assert_eq!(g.state, EscGuardState::Idle);
+        assert_eq!(g.deadline, None);
+    }
+
+    #[test]
+    fn flush_expired_returns_none_when_not_expired() {
+        // A guard whose window has not yet passed yields nothing and leaves
+        // its state/deadline untouched.
+        let mut g = EscGuard::new();
+        g.state = EscGuardState::Holding;
+        let dl = Instant::now() + Duration::from_secs(1);
+        g.deadline = Some(dl);
+        assert_eq!(g.flush_expired(), None);
+        assert_eq!(g.state, EscGuardState::Holding);
+        assert_eq!(g.deadline, Some(dl));
+
+        // Likewise for a SwallowTail guard still within the window.
+        g.state = EscGuardState::SwallowTail;
+        assert_eq!(g.flush_expired(), None);
+        assert_eq!(g.state, EscGuardState::SwallowTail);
     }
 }

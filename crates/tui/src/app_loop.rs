@@ -419,7 +419,10 @@ pub(crate) async fn fold_ui_events(
                     // the drain loop to promote pending steers.
                     *drain_pending = false;
                     *cancelled = false;
-                    start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
+                    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new())).await {
+                        worker_dead(chat);
+                        return LoopFlow::Quit;
+                    }
                     *running = true;
                     *follow = true;
                     chat.begin_turn();

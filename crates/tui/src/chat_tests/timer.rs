@@ -158,25 +158,34 @@ fn subagent_child_delta_self_heals_child_view() {
     );
 }
 
-/// The turn timer anchor must survive LlmRoundEnd so [turn cost] does not
-/// disappear in the gap between rounds.
+/// LlmRoundEnd freezes the round cost so [turn cost] stays visible between
+/// rounds; the next LlmRoundStart resets it to None (new round). Done clears
+/// both the live anchor and the frozen value.
 #[test]
-fn turn_anchor_survives_round_end() {
+fn frozen_round_persists_after_round_end() {
     let mut v = ChatView::default();
     v.begin_turn();
+    assert_eq!(v.frozen_round_ms, None, "begin_turn clears frozen");
     assert!(
-        v.turn_started_at_ms.is_some(),
-        "begin_turn must set the turn anchor"
+        v.llm_round_started_at_ms.is_some(),
+        "begin_turn starts the round timer"
     );
     v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 });
+    assert_eq!(v.frozen_round_ms, None, "round start clears frozen");
     v.apply(&SessionEvent::LlmRoundEnd);
     assert!(
-        v.turn_started_at_ms.is_some(),
-        "turn anchor must survive LlmRoundEnd"
+        v.frozen_round_ms.is_some(),
+        "LlmRoundEnd must freeze the round cost"
+    );
+    assert_eq!(
+        v.llm_round_started_at_ms, None,
+        "LlmRoundEnd clears the live anchor"
+    );
+    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 2000 });
+    assert_eq!(
+        v.frozen_round_ms, None,
+        "next LlmRoundStart resets the frozen value"
     );
     v.apply(&SessionEvent::Done);
-    assert!(
-        v.turn_started_at_ms.is_none(),
-        "Done must clear the turn anchor"
-    );
+    assert_eq!(v.frozen_round_ms, None, "Done clears frozen");
 }

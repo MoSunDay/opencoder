@@ -29,6 +29,10 @@ fn llm_round_lifecycle_is_display_only_and_resets_at_boundary() {
 
     v.apply(&SessionEvent::LlmRoundEnd);
     assert_eq!(v.llm_round_started_at_ms, None);
+    assert!(
+        v.frozen_round_ms.is_some(),
+        "LlmRoundEnd must freeze the round cost"
+    );
     assert_eq!(block_text(&v), before, "timer data is not message text");
 }
 

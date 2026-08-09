@@ -76,11 +76,13 @@ pub(super) fn is_input_disabled(chat: &ChatView, subagent_focus: Option<usize>) 
     })
 }
 
-/// Live whole-turn timer shown after the latest body message.
+/// Timer value shown after the latest body message.
 ///
-/// A turn spans all rounds (model calls + function calls) from prompt submit
-/// to Done. The timer persists across round boundaries so it never disappears
-/// between rounds. Terminal/idle views return zero.
+/// While an LLM round is streaming (llm_round_started_at_ms is Some) the
+/// value counts up live. Between rounds (anchor cleared, frozen_round_ms
+/// set) the value holds the frozen final cost of the last round so the timer
+/// stays visible during inter-round tool execution. Terminal/idle views return
+/// zero.
 pub(super) fn display_tail_ms(
     chat: &ChatView,
     subagent_focus: Option<usize>,
@@ -91,27 +93,24 @@ pub(super) fn display_tail_ms(
         match chat.blocks.get(idx) {
             Some(ChatBlock::Subagent {
                 view, done: false, ..
-            }) => live_round_ms(view, now),
+            }) => round_or_frozen(view, now),
             _ => 0,
         }
     } else if running {
-        live_turn_ms(chat, now)
+        round_or_frozen(chat, now)
     } else {
         0
     }
 }
 
-/// Whole-turn elapsed: time since the turn anchor was set by `begin_turn`.
-/// Unlike `live_round_ms`, this is NOT cleared on `LlmRoundEnd`, so the timer
-/// keeps running in the gap between rounds.
-fn live_turn_ms(chat: &ChatView, now: i64) -> u64 {
-    chat.turn_started_at_ms
-        .map_or(0, |started| ((now - started).max(0)) as u64)
-}
-
-fn live_round_ms(chat: &ChatView, now: i64) -> u64 {
-    chat.llm_round_started_at_ms
-        .map_or(0, |started| ((now - started).max(0)) as u64)
+/// Live round elapsed when streaming, otherwise the frozen cost of the last
+/// completed round (zero if none).
+fn round_or_frozen(chat: &ChatView, now: i64) -> u64 {
+    if let Some(started) = chat.llm_round_started_at_ms {
+        ((now - started).max(0)) as u64
+    } else {
+        chat.frozen_round_ms.unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -153,10 +152,12 @@ mod tests {
         assert_eq!(display_tail_ms(&chat, Some(0), 5000, true), 0);
     }
 
+
     #[test]
-    fn top_level_uses_turn_anchor() {
+    fn top_level_live_round_counts_up() {
+        // Active round: llm_round anchor is set, live elapsed.
         let chat = ChatView {
-            turn_started_at_ms: Some(1000),
+            llm_round_started_at_ms: Some(1000),
             ..Default::default()
         };
         assert_eq!(display_tail_ms(&chat, None, 5000, true), 4000);
@@ -164,19 +165,20 @@ mod tests {
     }
 
     #[test]
-    fn between_rounds_keeps_turn_timer() {
-        // Between LLM rounds: llm_round anchor is None but turn anchor is
-        // still set, so the timer keeps running.
+    fn between_rounds_freezes_last_round_cost() {
+        // Between LLM rounds: round anchor cleared, frozen cost carried over
+        // so the timer holds the last round final value (not zero, not gone).
         let chat = ChatView {
-            turn_started_at_ms: Some(1000),
             llm_round_started_at_ms: None,
+            frozen_round_ms: Some(4000),
             ..Default::default()
         };
         assert_eq!(display_tail_ms(&chat, None, 5000, true), 4000);
     }
 
     #[test]
-    fn no_turn_started_has_no_timer() {
+    fn no_round_and_no_frozen_has_no_timer() {
+        // Default view: no anchor, no frozen, zero.
         let chat = ChatView::default();
         assert_eq!(display_tail_ms(&chat, None, 5000, true), 0);
     }

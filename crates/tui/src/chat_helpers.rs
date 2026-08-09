@@ -39,6 +39,33 @@ pub fn block_text(view: &ChatView) -> String {
         .collect()
 }
 
+/// Append a styled duration span to the header. Running → live warn-color
+/// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
+/// NOTE: now used only by Subagent headers — the per-call Tool inline timers
+/// were removed; the body tail shows the whole-turn `[turn cost]` timer instead.
+pub(crate) fn push_duration_span(
+    spans: &mut Vec<ratatui::text::Span<'static>>,
+    started_at_ms: i64,
+    elapsed_ms: Option<u64>,
+    now_ms: i64,
+) {
+    use ratatui::style::Style;
+    use ratatui::text::Span;
+    let (dur_ms, color) = match elapsed_ms {
+        Some(e) if e >= 1000 => (e, crate::theme::muted()),
+        Some(_) => return,
+        None => {
+            let live = ((now_ms - started_at_ms).max(0)) as u64;
+            (live, crate::theme::warn_color())
+        }
+    };
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(
+        crate::fmt::format_run_duration(dur_ms),
+        Style::default().fg(color),
+    ));
+}
+
 /// Reconcile any subagent block left spinning because its `SubagentEnd` was
 /// dropped under UI-channel saturation (`forward_event` uses lossy `try_send`
 /// for non-delta lifecycle events). Marks such blocks interrupted so no
@@ -69,6 +96,7 @@ impl ChatView {
                         *summary = "(interrupted)".to_string();
                     }
                     view.llm_round_started_at_ms = None;
+                    view.frozen_round_ms = None;
                     view.steer_items.clear();
                     *elapsed_ms = Some(((now_ms() - *started_at_ms).max(0)) as u64);
                 }

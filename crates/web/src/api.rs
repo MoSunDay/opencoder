@@ -578,6 +578,16 @@ pub async fn get_events(
         handle.tx.subscribe()
     };
 
+    // P0-1: Capture the persisted-seq baseline BEFORE querying `events_after`.
+    // `last_event_seq` returns the current max persisted seq; reading it AFTER
+    // `events_after` (as the original code did) guarantees `baseline >=
+    // max(seq)`, so the `seq > baseline` filter below is ALWAYS false and `seen`
+    // (the tier-(2) content-dedup set) stays permanently empty. Snapshotting it
+    // here — immediately after subscribing — means any event persisted in the
+    // window between this snapshot and the `events_after` query (seq > baseline)
+    // is a genuine subscribe/query overlap-window event that must seed `seen`.
+    let baseline = state.store.last_event_seq(&id).await.unwrap_or(-1);
+
     let persisted: Vec<SseEvt> = state
         .store
         .events_after(&id, after)
@@ -617,18 +627,14 @@ pub async fn get_events(
     //      here because the live copy has no seq to compare; tier (1) removes
     //      the collision risk whenever a seq is available.
     let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
-    // P0-1: Seed `seen` only from events persisted AFTER the subscription
-    // baseline, not from the entire replay window. The old code pre-filled
-    // `seen` with every replayed event's fingerprint. A live `done` (always
-    // `{}`, seq: None) colliding with ANY historical `done` fingerprint was
-    // silently dropped, freezing the UI (busy never resets, send disabled).
-    // By seeding only from seq > baseline (the true subscribe->query overlap
-    // window), historical `done` events can no longer suppress live ones.
-    let baseline = state
-        .store
-        .last_event_seq(&id)
-        .await
-        .unwrap_or(-1);
+    // P0-1: Seed `seen` only from overlap-window events (seq > baseline,
+    // captured above before the `events_after` query), not from the entire
+    // replay window. The old code pre-filled `seen` with every replayed
+    // event's fingerprint. A live `done` (always `{}`, seq: None) colliding
+    // with ANY historical `done` fingerprint was silently dropped, freezing
+    // the UI (busy never resets, send disabled). By seeding only from the true
+    // subscribe->query overlap window, historical `done` events can no longer
+    // suppress live ones.
     let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(std::sync::Mutex::new(
         persisted
             .iter()

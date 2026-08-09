@@ -162,6 +162,11 @@ pub async fn post_skill(
     Path(id): Path<String>,
     Json(body): Json<SkillBody>,
 ) -> Response {
+    match state.store.get_session(&id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_404(&format!("session not found: {id}")),
+        Err(e) => return error_500(format!("get_session: {e:#}")),
+    }
     let mut patch = SessionPatch {
         updated_at: Some(opencoder_core::message::now_ms()),
         ..Default::default()

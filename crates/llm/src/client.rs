@@ -187,9 +187,12 @@ async fn run_stream(
                                 StreamInterruption::IdleTimeout => "idle timeout",
                                 StreamInterruption::Truncated => unreachable!(),
                             };
-                            let msg = format!("stream failed: {kind} after {attempt} attempts");
-                            let _ = tx.send(LlmEvent::Error(msg.clone())).await;
-                            return Err(anyhow!("{msg}"));
+                            // Return Err only; the `chat_stream` spawn wrapper emits
+                            // exactly one `LlmEvent::Error` with the "stream failed: "
+                            // prefix (same idiom as the `Connect` error path above).
+                            // Doing a `tx.send` here too would duplicate the error and
+                            // double the prefix ("stream failed: stream failed: ...").
+                            return Err(anyhow!("{kind} after {attempt} attempts"));
                         }
                     }
                 }
@@ -707,7 +710,8 @@ fn parse_usage(u: &Value) -> Usage {
     let total_tokens = u
         .get("total_tokens")
         .and_then(|v| v.as_u64())
-        .unwrap_or_default();
+        .filter(|&t| t != 0)
+        .unwrap_or(input_tokens + output_tokens);
 
     // Prompt-caching accounting. Provider naming is inconsistent, so accept
     // every known variant and normalize into two fields (see `Usage` docs):

@@ -90,6 +90,10 @@ pub async fn load_after(
     session_id: &str,
     skip_count: i64,
 ) -> Result<Vec<Message>> {
+    // Mirror the Store trait default's clamp: a negative offset must never
+    // reach SQL OFFSET (behavior is SQLite-version-dependent). `<= 0` returns
+    // all rows, matching the trait-default semantics.
+    let skip_count = skip_count.max(0);
     let stmt = conn
         .prepare("SELECT id, role, agent, model, blocks_json, usage_json, created_at, synthetic FROM messages WHERE session_id = ? ORDER BY seq ASC LIMIT -1 OFFSET ?")
         .await?;

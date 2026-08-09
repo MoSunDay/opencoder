@@ -233,6 +233,67 @@ async fn done_with_empty_store_goes_idle() {
     assert!(!running, "must go idle when nothing is pending");
 }
 
+
+// ----- Bug #2: drain_pending restart must check start_turn return value -----
+
+/// When `drain_pending` is armed (a cancelled turn left stranded inputs) and
+/// the subsequent `TurnDone` triggers the drain-restart path, but the worker
+/// task has already died (its `cmd_rx` receiver is dropped), `start_turn`
+/// returns `false`. Without the fix, this `false` was silently discarded,
+/// leaving the UI in a permanent "running" spinner state. With the fix, the
+/// drain-restart branch calls `worker_dead(chat)` and returns `LoopFlow::Quit`
+/// — matching every other `start_turn` call site.
+#[tokio::test]
+async fn drain_pending_restart_with_dead_worker_quits() {
+    use opencoder_store::LibsqlStore;
+
+    let store: Arc<dyn opencoder_store::Store> =
+        Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut running = true;
+    let mut cancelled = false;
+    let mut drain_pending = true; // armed: a cancelled turn left stranded inputs
+    let mut skip_next_render = false;
+    let mut follow = true;
+    let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let (_evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(64);
+
+    // Simulate worker death: drop the receiver so every send() fails.
+    drop(cmd_rx);
+
+    let mut notepad: Option<crate::notepad::NotepadView> = None;
+    let flow = fold_ui_events(
+        Some(UiEvent::TurnDone("act".into())),
+        &mut chat,
+        &store,
+        "dead-worker-test",
+        &mut queue_items,
+        &mut running,
+        &mut cancelled,
+        &mut drain_pending,
+        &mut skip_next_render,
+        &mut follow,
+        &cmd_tx,
+        &mut cancel,
+        &mut evt_rx,
+        &mut notepad,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Quit), "dead worker must return Quit");
+    assert!(
+        crate::chat::block_text(&chat).contains("worker stopped"),
+        "worker_dead marker must be pushed to chat"
+    );
+    assert!(
+        !drain_pending,
+        "drain_pending must be cleared before the start_turn attempt"
+    );
+}
+
+
 // ----- Bug #7: sys_tokens updated before plan→act noop early return -----
 
 /// When the user presses Shift+Tab (plan→act) while a plan turn is still

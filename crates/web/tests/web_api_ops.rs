@@ -181,6 +181,26 @@ async fn skill_clear_with_null() {
 }
 
 #[tokio::test]
+async fn skill_nonexistent_returns_404() {
+    let state = state().await;
+    let app = app(state.clone());
+    let resp = app.oneshot(Request::builder()
+        .method("POST").uri("/api/sessions/nope/skill")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"skill":"repo-local-memory"}"#)).unwrap()).await.unwrap();
+    // post_skill must reject unknown sessions the same way post_compact /
+    // post_handoff do — previously it returned a false `{ok:true}` success.
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], serde_json::Value::Bool(false));
+    assert!(
+        v["error"].as_str().unwrap().contains("session not found"),
+        "expected 'session not found' error, got: {v}"
+    );
+}
+
+#[tokio::test]
 async fn get_config_returns_json() {
     let state = state().await;
     // Isolate config discovery so this test never reads the real

@@ -66,3 +66,26 @@ async fn load_messages_after_skip_semantics() {
     assert_eq!(all.len(), full.len());
     assert_eq!(all.last().map(|m| m.id.as_str()), full.last().map(|m| m.id.as_str()));
 }
+
+#[tokio::test]
+async fn load_messages_after_negative_offset_returns_all() {
+    let (_dir, store) = fresh().await;
+    let inserted = msgs("neg", 4);
+    store.append_messages("s1", &inserted).await.unwrap();
+
+    // A negative skip_count must be clamped to 0 (mirroring the Store trait
+    // default's clamp) — never reach SQL `OFFSET` with a negative value
+    // (whose behavior is SQLite-version-dependent). It should return ALL
+    // rows, not error, not be empty.
+    let got = store.load_messages_after("s1", -5).await.unwrap();
+    assert_eq!(got.len(), inserted.len(), "negative offset clamps to 0 -> all rows");
+    assert_eq!(
+        got.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+        inserted.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+        "order preserved, no rows dropped",
+    );
+
+    // The trait default clamps -1 too; ensure parity with a plain skip=0.
+    let zero = store.load_messages_after("s1", 0).await.unwrap();
+    assert_eq!(got.len(), zero.len());
+}

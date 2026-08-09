@@ -83,6 +83,37 @@ fn parse_usage_empty_object_is_all_zeros() {
 }
 
 #[test]
+fn parse_usage_derives_total_when_omitted() {
+    // Regression (Bug 11): when `total_tokens` is absent, the sum of
+    // `prompt_tokens + completion_tokens` must be used instead of silently
+    // reporting 0 (some providers omit total_tokens entirely).
+    let u = parse_usage(&usage_json(r#"{"prompt_tokens":100,"completion_tokens":50}"#));
+    assert_eq!(u.input_tokens, 100);
+    assert_eq!(u.output_tokens, 50);
+    assert_eq!(u.total_tokens, 150, "missing total must fall back to input+output");
+}
+
+#[test]
+fn parse_usage_preserves_explicit_total() {
+    // An explicit `total_tokens` is authoritative and must be preserved
+    // even when it differs from input+output.
+    let u = parse_usage(&usage_json(
+        r#"{"prompt_tokens":100,"completion_tokens":50,"total_tokens":999}"#,
+    ));
+    assert_eq!(u.total_tokens, 999);
+}
+
+#[test]
+fn parse_usage_derives_total_when_explicit_zero() {
+    // A present-but-zero `total_tokens` is treated as absent (some providers
+    // send 0 as a placeholder) and falls back to input+output.
+    let u = parse_usage(&usage_json(
+        r#"{"prompt_tokens":7,"completion_tokens":3,"total_tokens":0}"#,
+    ));
+    assert_eq!(u.total_tokens, 10, "explicit 0 total must fall back to input+output");
+}
+
+#[test]
 fn first_u64_returns_first_present_key() {
     let obj = usage_json(r#"{"a":10,"b":20}"#);
     assert_eq!(first_u64(&obj, &["a", "b"]), Some(10));

@@ -281,3 +281,63 @@ async fn retry_exhaustion_emits_error() {
     // 3 stalls (~300ms each) + backoffs (0.5s + 1s).
     assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
 }
+
+/// Regression (Bug 4): on the exhaustion path the consumer must receive
+/// EXACTLY ONE `LlmEvent::Error`. Previously the `ChunkError`/`IdleTimeout`
+/// arm both sent an `LlmEvent::Error` via `tx` *and* returned `Err`, and the
+/// `chat_stream` spawn wrapper re-wrapped the `Err` into a second
+/// `LlmEvent::Error` — so consumers saw two errors, the second with a doubled
+/// `"stream failed: stream failed: ..."` prefix.
+#[tokio::test]
+async fn retry_exhaustion_emits_single_non_doubled_error() {
+    let url = start_server(vec![
+        Conn::Stall {
+            delta: "a".into(),
+            hold: Duration::from_millis(800),
+        },
+        Conn::Stall {
+            delta: "b".into(),
+            hold: Duration::from_millis(800),
+        },
+        Conn::Stall {
+            delta: "c".into(),
+            hold: Duration::from_millis(800),
+        },
+    ])
+    .await;
+    let mut rx = make_client(&url).chat_stream(make_request()).unwrap();
+    let events = drain(&mut rx).await;
+
+    let errors: Vec<&String> = events
+        .iter()
+        .filter_map(|e| match e {
+            LlmEvent::Error(msg) => Some(msg),
+            _ => None,
+        })
+        .collect();
+
+    // Exactly one terminal error — never two.
+    assert_eq!(
+        errors.len(),
+        1,
+        "exhaustion must emit exactly one Error, got {errors:?} (events: {events:?})"
+    );
+
+    let msg = errors[0];
+    // The wrapper adds a single "stream failed: " prefix; the inner Err no
+    // longer carries its own prefix, so the text must not be doubled.
+    assert!(
+        msg.contains("stream failed"),
+        "single error must carry the wrapper prefix: {msg:?}"
+    );
+    assert!(
+        !msg.contains("stream failed: stream failed"),
+        "error message must NOT be double-prefixed: {msg:?}"
+    );
+    // The kind label and attempt count survive the single-prefix path.
+    assert!(
+        msg.contains("chunk read error"),
+        "error must name the interruption kind: {msg:?}"
+    );
+    assert!(msg.contains("after 3 attempts"), "error must report attempts: {msg:?}");
+}

@@ -381,7 +381,12 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    let max_rows = total_rows.saturating_sub(visible_h);
+    // Reserve a row for the [turn cost] timer line when it is visible so the
+    // content window never grows large enough to clip it.
+    let show_timer = tail_ms > 0;
+    let content_h = visible_h.saturating_sub(if show_timer { 1 } else { 0 });
+
+    let max_rows = total_rows.saturating_sub(content_h);
     if follow {
         *scroll = max_rows as u32;
     }
@@ -394,7 +399,7 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_h,
         inner.x,
         inner.y,
         thinking_btns,
@@ -404,28 +409,28 @@ fn render_body(
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_h,
         inner.x,
         inner.y,
         subagent_btns,
     );
     hit_records::record_tool_hits(
-        chat, cache, text_w, scroll_y, visible_h, inner.x, inner.y, tool_btns,
+        chat, cache, text_w, scroll_y, content_h, inner.x, inner.y, tool_btns,
     );
     hit_records::record_compaction_hits(
         chat,
         cache,
         text_w,
         scroll_y,
-        visible_h,
+        content_h,
         inner.x,
         inner.y,
         compaction_btns,
     );
 
     f.render_widget(block, area);
-    let text_area = Rect {
-        height: visible_h as u16,
+    let content_area = Rect {
+        height: content_h as u16,
         width: text_w,
         ..inner
     };
@@ -433,30 +438,32 @@ fn render_body(
     // A1: Virtualization — slice only the visible window from cached lines
     // instead of passing the entire transcript to Paragraph. This avoids
     // ratatui internally processing all lines for wrapping/rendering.
-    let n = cache.lines().len();
-    let (start, end, top_skip) = cache.visible_window(scroll_y, visible_h);
-    let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    // Live whole-turn timer at the body tail, on its own dedicated line. It
-    // spans all rounds (model calls + function calls) and never disappears
-    // between rounds while the turn is running and the tail is in view.
-    if tail_ms > 0 && end == n {
+    let (start, end, top_skip) = cache.visible_window(scroll_y, content_h);
+    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+    f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
+
+    // Per-round [turn cost] timer on a dedicated bottom row.
+    if show_timer {
+        let timer_area = Rect {
+            y: inner.y + content_h as u16,
+            height: 1,
+            width: text_w,
+            x: inner.x,
+        };
         let timer = Span::styled(
             format!("[turn cost {}]", fmtmod::format_run_duration(tail_ms)),
             Style::default().fg(theme::warn_color()),
         );
-        // Always render the timer on its own dedicated line so the turn
-        // duration never blends into content or tool-output lines.
-        visible_lines.push(Line::from(timer));
+        f.render_widget(Paragraph::new(Line::from(timer)), timer_area);
     }
-    let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
-    f.render_widget(para.scroll((top_skip as u16, 0)), text_area);
 
     if total_rows > visible_h {
         let scroll_area = Rect {
             height: visible_h as u16,
             ..inner
         };
-        draw_scrollbar(f, scroll_area, total_rows, visible_h, scroll_y);
+        draw_scrollbar(f, scroll_area, total_rows, content_h, scroll_y);
     }
 
     // Follow indicator on the body's bottom-border row, right-aligned.

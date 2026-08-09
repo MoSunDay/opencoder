@@ -25,7 +25,7 @@ pub use types::*;
 #[path = "chat_helpers.rs"]
 mod helpers;
 pub use helpers::block_text;
-pub(crate) use helpers::{short, summarize};
+pub(crate) use helpers::{push_duration_span, short, summarize};
 
 #[path = "compaction_block.rs"]
 mod compaction_block;
@@ -33,40 +33,19 @@ mod compaction_block;
 mod headers;
 pub(crate) use compaction_block::render_collapsible;
 
-/// Append a styled duration span to the header. Running → live warn-color
-/// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
-/// NOTE: now used only by Subagent headers — the per-call Tool inline timers
-/// were removed; the body tail shows the whole-turn `[turn cost]` timer instead.
-fn push_duration_span(
-    spans: &mut Vec<Span<'static>>,
-    started_at_ms: i64,
-    elapsed_ms: Option<u64>,
-    now_ms: i64,
-) {
-    let (dur_ms, color) = match elapsed_ms {
-        Some(e) if e >= 1000 => (e, theme::muted()),
-        Some(_) => return,
-        None => {
-            let live = ((now_ms - started_at_ms).max(0)) as u64;
-            (live, theme::warn_color())
-        }
-    };
-    spans.push(Span::raw(" "));
-    spans.push(Span::styled(
-        crate::fmt::format_run_duration(dur_ms),
-        Style::default().fg(color),
-    ));
-}
-
 impl ChatView {
     pub fn apply(&mut self, ev: &SessionEvent) {
         self.track_context(ev);
         match ev {
             SessionEvent::LlmRoundStart { started_at_ms } => {
                 self.llm_round_started_at_ms = Some(*started_at_ms);
+                self.frozen_round_ms = None;
             }
             SessionEvent::LlmRoundEnd => {
-                self.llm_round_started_at_ms = None;
+                if let Some(anchor) = self.llm_round_started_at_ms.take() {
+                    self.frozen_round_ms =
+                        Some(((opencoder_core::message::now_ms() - anchor).max(0)) as u64);
+                }
             }
             SessionEvent::TextDelta(t) => {
                 self.recover_round_anchor_if_missing();
@@ -224,7 +203,10 @@ impl ChatView {
                     child_session_id: child_session_id.clone(),
                     kind: sanitize_single_line(kind).into_owned(),
                     prompt: short(prompt, 90),
-                    view: ChatView::default(),
+                    view: ChatView {
+                        llm_round_started_at_ms: Some(opencoder_core::message::now_ms()),
+                        ..Default::default()
+                    },
                     done: false,
                     ok: false,
                     cancelled: false,
@@ -260,7 +242,7 @@ impl ChatView {
             }
             SessionEvent::Done => {
                 self.llm_round_started_at_ms = None;
-                self.turn_started_at_ms = None;
+                self.frozen_round_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
@@ -269,7 +251,7 @@ impl ChatView {
             }
             SessionEvent::Error(e) => {
                 self.llm_round_started_at_ms = None;
-                self.turn_started_at_ms = None;
+                self.frozen_round_ms = None;
                 self.subagents_running = 0;
                 self.hidden_assistant_idx = None;
                 self.reconcile_orphaned_subagents();
@@ -342,8 +324,8 @@ impl ChatView {
     /// bar of the freshly-started turn. The transcript blocks are untouched.
     pub fn begin_turn(&mut self) {
         self.status.clear();
-        self.llm_round_started_at_ms = None;
-        self.turn_started_at_ms = Some(opencoder_core::message::now_ms());
+        self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
+        self.frozen_round_ms = None;
     }
 
     /// Push a non-streamed line and ensure the next TextDelta starts a new
@@ -707,6 +689,7 @@ impl ChatView {
             *bcan = cancelled;
             *smry = sanitize_multiline(summary).into_owned();
             view.llm_round_started_at_ms = None;
+            view.frozen_round_ms = None;
             // Leftover child steer rows (steers queued while the child was
             // running but never claimed) would otherwise sit on the pending
             // panel forever — clear them with the block.
@@ -768,6 +751,7 @@ impl ChatView {
     fn recover_round_anchor_if_missing(&mut self) {
         if self.llm_round_started_at_ms.is_none() {
             self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
+            self.frozen_round_ms = None;
         }
     }
 

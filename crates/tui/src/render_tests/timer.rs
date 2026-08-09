@@ -179,3 +179,42 @@ fn body_turn_cost_timer_not_mixed_into_tool_output() {
         );
     }
 }
+
+/// The timer stays visible even when the viewport is scrolled away from the
+/// tail (regression: the old `end == n` gate hid it whenever content
+/// overflowed or the user scrolled up).
+#[test]
+fn body_timer_visible_when_scrolled_away_from_tail() {
+    let mut v = ChatView::default();
+    // Enough content to overflow a small viewport.
+    for i in 0..20 {
+        v.apply(&SessionEvent::TextDelta(format!("content line number {}\n", i)));
+    }
+    v.apply(&SessionEvent::Done);
+
+    let backend = TestBackend::new(60, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut scroll = 0u32; // pinned to top, NOT following
+    terminal
+        .draw(|f| {
+            render_body(
+                f, f.area(), &v, &Line::raw("test"),
+                &mut scroll, false, 0, 0,
+                &mut None, &mut None, &mut None,
+                &mut Vec::new(), &mut Vec::new(),
+                &mut Vec::new(), &mut Vec::new(),
+                &mut None, true, 30000, false,
+            );
+        })
+        .unwrap();
+
+    let full: String = (0..8)
+        .map(|y| row_text(terminal.backend().buffer(), y, 60))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        full.contains("[turn cost"),
+        "timer must be visible even when scrolled away from tail; got:\n{full}"
+    );
+}

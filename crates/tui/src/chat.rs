@@ -495,8 +495,8 @@ impl ChatView {
                         "Compaction",
                         text,
                         *collapsed,
-                        Style::default().fg(theme::local_color()),
-                        Style::default().fg(theme::local_color()),
+                        Style::default().fg(theme::compaction_color()),
+                        Style::default().fg(theme::compaction_color()),
                     ));
                 }
                 ChatBlock::Tool {

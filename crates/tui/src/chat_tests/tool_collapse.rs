@@ -474,8 +474,7 @@ fn push_bash_tool_creates_expanded_tool_block() {
                 id.starts_with("bash-"),
                 "id must start with 'bash-', got {id:?}"
             );
-            let header_text: String =
-                header.spans.iter().map(|s| s.content.clone()).collect();
+            let header_text: String = header.spans.iter().map(|s| s.content.clone()).collect();
             assert!(
                 header_text.contains("ls -la"),
                 "header must contain the command; got {header_text:?}"
@@ -489,8 +488,7 @@ fn push_bash_tool_creates_expanded_tool_block() {
                 "a freshly-pushed tool block must be expanded (collapsed == false)"
             );
             assert_eq!(
-                *elapsed_ms,
-                None,
+                *elapsed_ms, None,
                 "elapsed_ms must be None until finish_bash_tool is called"
             );
         }

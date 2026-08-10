@@ -262,6 +262,17 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
             }
             CommandOutcome::Idle
         }
+        // A command token cannot contain spaces. Complete the highlighted
+        // command before requirement text reaches the filter query, so
+        // natural compound input such as `/plan <requirement>` works.
+        KeyCode::Char(' ') if k.modifiers.is_empty() => match m.selected_name() {
+            Some(name) => {
+                let name = name.to_string();
+                *menu = None;
+                CommandOutcome::FillInput(name)
+            }
+            None => CommandOutcome::Idle,
+        },
         KeyCode::Char(c) => {
             m.on_char(c);
             CommandOutcome::Idle
@@ -310,7 +321,7 @@ pub fn render_command_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: 
     f.render_widget(Clear, popup);
 
     let block = crate::theme::rounded_block(
-        "/commands (\u{2191}/\u{2193} move, type to filter, Enter=confirm, Esc=cancel)",
+        "/commands (\u{2191}/\u{2193} move, type to filter, Space/Tab=fill, Enter=confirm, Esc=cancel)",
     );
 
     let items: Vec<ListItem> = menu
@@ -476,6 +487,37 @@ mod tests {
             other => panic!("expected FillInput, got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Tab-fill");
+    }
+
+    #[test]
+    fn space_fills_selected_command_for_compound_input() {
+        let mut menu = Some(CommandMenu::new());
+        for c in "plan".chars() {
+            menu.as_mut().expect("menu open").on_char(c);
+        }
+
+        let (outcome, quit) =
+            handle_command_key(&mut menu, key(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert!(!quit);
+        assert!(matches!(outcome, CommandOutcome::FillInput(ref s) if s == "/plan"));
+        assert!(menu.is_none(), "popup must close after Space-fill");
+    }
+
+    #[test]
+    fn space_with_no_matching_command_keeps_popup_open() {
+        let mut menu = Some(CommandMenu::new());
+        menu.as_mut().expect("menu open").paste("no-such-command");
+
+        let (outcome, quit) =
+            handle_command_key(&mut menu, key(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert!(!quit);
+        assert!(matches!(outcome, CommandOutcome::Idle));
+        assert_eq!(
+            menu.as_ref().expect("popup stays open").query(),
+            "no-such-command"
+        );
     }
 
     #[test]

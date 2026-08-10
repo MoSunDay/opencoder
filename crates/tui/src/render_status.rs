@@ -21,6 +21,23 @@ pub(crate) const SPINNER: [&str; 10] = [
     "\u{2807}", "\u{280f}",
 ];
 
+/// Number of 100ms animation ticks in each visible/hidden status-dot phase.
+/// A 500ms phase is noticeable without the urgent flicker of a 100ms phase.
+const STATUS_DOT_PHASE_TICKS: u32 = 5;
+
+/// Span for the leading status dot that precedes the mode chip. While running
+/// the dot alternates every 500ms. Hidden phases use two spaces so the
+/// `[act]`/`[plan]` chip never shifts horizontally. Idle (non-running) keeps
+/// the dot steady in the mode colour.
+fn status_dot(running: bool, anim_tick: u32, mode: &str) -> Span<'static> {
+    let hidden_phase = (anim_tick / STATUS_DOT_PHASE_TICKS) % 2 == 1;
+    if running && hidden_phase {
+        Span::raw("  ")
+    } else {
+        Span::styled("\u{25cf} ", Style::default().fg(theme::agent_chip_fg(mode)))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_status(
     f: &mut Frame,
@@ -36,7 +53,7 @@ pub(crate) fn render_status(
 ) {
     let mut spans = vec![
         Span::raw(" "),
-        Span::styled("\u{25cf} ", Style::default().fg(theme::agent_chip_fg(mode))),
+        status_dot(running, anim_tick, mode),
         Span::styled(
             format!("[{mode}]"),
             Style::default().fg(theme::agent_chip_fg(mode)),

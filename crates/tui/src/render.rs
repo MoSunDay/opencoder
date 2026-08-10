@@ -58,8 +58,6 @@ pub(crate) struct MouseHits {
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
     pub total_rows: usize,
-    /// Draggable notepad divider rect (Some when notepad is open).
-    pub divider: Option<Rect>,
 }
 
 /// A clickable Thinking-block header. `block_idx` indexes `ChatView::blocks`;
@@ -134,22 +132,33 @@ pub(crate) fn render<B: Backend>(
 ) -> Result<()> {
     terminal.draw(|f| {
         let area = f.area();
-        // When notepad is open, split into top (tree+editor) / divider / bottom (chat).
-        let draw_area = if let Some(np) = notepad {
-            let (top, div, bot) = crate::notepad::layout_split(area, np.height);
-            crate::notepad::render_top(f, top, np);
-            crate::notepad::render_divider(f, div);
-            hits.divider = Some(div);
-            bot
-        } else {
-            hits.divider = None;
-            area
-        };
+        // When notepad is open it takes the whole terminal (fullscreen file
+        // viewer/editor): render tree+editor over the entire frame, clear
+        // every chat hit-target so no stale rect survives from the previous
+        // chat frame, and skip all chat rendering below (body/composer/status).
+        if let Some(np) = notepad {
+            hits.body = None;
+            hits.jump_btn = None;
+            hits.top_btn = None;
+            hits.queue_panel = None;
+            hits.queue_total = 0;
+            hits.total_rows = 0;
+            hits.queue_btns.clear();
+            hits.thinking_btns.clear();
+            hits.subagent_btns.clear();
+            hits.tool_btns.clear();
+            hits.compaction_btns.clear();
+            crate::notepad::render_top(f, area, np);
+            return;
+        }
+        let draw_area = area;
         // Ratatui resets the next diff buffer after every completed draw, and
         // the persistent widgets below cover their full rectangles. Do not
         // clear the entire frame here: that adds an O(viewport cells) pass to
         // the hot path without fixing terminal-side partial-frame exposure.
-        // `frame::synchronized_frame` handles that actual artifact atomically.
+        // The normal ratatui diff overwrites every changed or vacated cell.
+        // Steady-state frames never clear; lifecycle transitions and the
+        // explicit force-redraw command own isolated physical clears.
         let prompt_w = 2u16;
         let inner_w = draw_area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
@@ -310,7 +319,14 @@ pub(crate) fn render<B: Backend>(
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
         }
-        if copy_mode { render_status_chip(f, composer_area, "COPY MODE: Ctrl+G/Esc", theme::warn_color()); }
+        if copy_mode {
+            render_status_chip(
+                f,
+                composer_area,
+                "COPY MODE: Ctrl+G/Esc",
+                theme::warn_color(),
+            );
+        }
         if !input_disabled && model_menu.is_none() {
             let position = composer::cursor_screen_position(
                 composer_area.x,
@@ -351,7 +367,9 @@ fn render_body(
 ) {
     *body_out = Some(area);
     let mut block = theme::rounded_block_line(title);
-    if copy_mode { block = block.border_style(Style::default().fg(theme::warn_color())); }
+    if copy_mode {
+        block = block.border_style(Style::default().fg(theme::warn_color()));
+    }
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -528,27 +546,15 @@ fn draw_scrollbar(
     visible_h: usize,
     scroll_y: usize,
 ) {
-    let max_scroll = total_rows.saturating_sub(visible_h);
-    let track_h = inner.height as u64;
-    let thumb_h = (visible_h as u64 * track_h / total_rows as u64).max(1) as u16;
-    let max_off = inner.height.saturating_sub(thumb_h);
-    let thumb_off = if max_scroll == 0 {
-        0u16
-    } else {
-        ((scroll_y as u64 * max_off as u64) / max_scroll as u64) as u16
-    };
-    let sb_x = inner.right().saturating_sub(1);
-    let buf = f.buffer_mut();
-    for y in 0..inner.height {
-        let cell = &mut buf[(sb_x, inner.y + y)];
-        if y >= thumb_off && y < thumb_off + thumb_h {
-            cell.set_char('\u{2588}');
-            cell.set_style(Style::default().fg(theme::subtle()));
-        } else {
-            cell.set_char('\u{250a}');
-            cell.set_style(Style::default().fg(theme::muted()));
-        }
-    }
+    crate::scrollbar::draw(
+        f,
+        inner,
+        total_rows,
+        visible_h,
+        scroll_y,
+        theme::muted(),
+        theme::subtle(),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

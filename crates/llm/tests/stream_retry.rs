@@ -14,8 +14,10 @@ use opencoder_llm::{ChatClient, ChatRequest, LlmEvent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Short timeout used across these tests so stalls resolve quickly.
-const READ_TIMEOUT: Duration = Duration::from_millis(300);
+/// Keep enough scheduling margin for a full-workspace test run while remaining
+/// short enough for the retry scenarios to finish promptly.
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
+const STALL_HOLD: Duration = Duration::from_secs(2);
 
 /// What one accepted connection does before it is abandoned/finished.
 enum Conn {
@@ -37,51 +39,51 @@ enum Conn {
 /// the `behaviors` queue; each gets its own task so a stalling connection never
 /// blocks the next retry's accept.
 fn spawn_server(listener: TcpListener, behaviors: Vec<Conn>) {
-        let bq = Arc::new(Mutex::new(VecDeque::<Conn>::from(behaviors)));
-        tokio::spawn(async move {
-            loop {
-                let (mut stream, _) = match listener.accept().await {
-                    Ok(s) => s,
-                    Err(_) => break,
-                };
-                let beh = bq.lock().unwrap().pop_front();
-                let beh = match beh {
-                    Some(b) => b,
-                    None => break,
-                };
-                tokio::spawn(async move {
-                    let _ = stream.set_nodelay(true);
-                    consume_http_request(&mut stream).await;
-                    let _ = write_sse_header(&mut stream).await;
-                    match beh {
-                        Conn::Stall { delta, hold } => {
-                            let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
+    let bq = Arc::new(Mutex::new(VecDeque::<Conn>::from(behaviors)));
+    tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = match listener.accept().await {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            let beh = bq.lock().unwrap().pop_front();
+            let beh = match beh {
+                Some(b) => b,
+                None => break,
+            };
+            tokio::spawn(async move {
+                let _ = stream.set_nodelay(true);
+                consume_http_request(&mut stream).await;
+                let _ = write_sse_header(&mut stream).await;
+                match beh {
+                    Conn::Stall { delta, hold } => {
+                        let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
+                        let _ = stream.flush().await;
+                        tokio::time::sleep(hold).await;
+                    }
+                    Conn::Truncate { delta } => {
+                        let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
+                        let _ = stream.flush().await;
+                        // Drop -> clean EOF, no finish_reason.
+                    }
+                    Conn::Heartbeat { hold } => {
+                        let end = Instant::now() + hold;
+                        while Instant::now() < end {
+                            let _ = stream.write_all(b": ping\n\n").await;
                             let _ = stream.flush().await;
-                            tokio::time::sleep(hold).await;
-                        }
-                        Conn::Truncate { delta } => {
-                            let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
-                            let _ = stream.flush().await;
-                            // Drop -> clean EOF, no finish_reason.
-                        }
-                        Conn::Heartbeat { hold } => {
-                            let end = Instant::now() + hold;
-                            while Instant::now() < end {
-                                let _ = stream.write_all(b": ping\n\n").await;
-                                let _ = stream.flush().await;
-                                tokio::time::sleep(Duration::from_millis(40)).await;
-                            }
-                        }
-                        Conn::Full { text } => {
-                            let _ = stream.write_all(sse_text(&text).as_bytes()).await;
-                            let _ = stream.flush().await;
-                            let _ = stream.write_all(sse_done().as_bytes()).await;
-                            let _ = stream.flush().await;
+                            tokio::time::sleep(Duration::from_millis(100)).await;
                         }
                     }
-                });
-            }
-        });
+                    Conn::Full { text } => {
+                        let _ = stream.write_all(sse_text(&text).as_bytes()).await;
+                        let _ = stream.flush().await;
+                        let _ = stream.write_all(sse_done().as_bytes()).await;
+                        let _ = stream.flush().await;
+                    }
+                }
+            });
+        }
+    });
 }
 
 /// Bind a server with the given scripted connections, returning its base URL.
@@ -147,7 +149,7 @@ fn sse_done() -> &'static str {
 /// A stream truncated mid-way (clean EOF, no finish_reason) is retried; the
 /// retried attempt delivers a complete frame and the persisted text is the
 /// FINAL frame's text alone.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn truncated_stream_retries_then_completes() {
     let url = start_server(vec![
         Conn::Truncate {
@@ -175,12 +177,12 @@ async fn truncated_stream_retries_then_completes() {
 
 /// A connection reset/stall mid-stream (per-read timeout -> chunk error) is
 /// retried and recovers on the second attempt.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chunk_error_retries_then_completes() {
     let url = start_server(vec![
         Conn::Stall {
             delta: "partial".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
         Conn::Full {
             text: "recovered".into(),
@@ -201,18 +203,20 @@ async fn chunk_error_retries_then_completes() {
         Some(LlmEvent::Completed { text, .. }) => assert_eq!(text, "recovered"),
         other => panic!("expected Completed, got {other:?}"),
     }
-    // First attempt stalls ~300ms, backoff ~0.5s, second attempt fast.
-    assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
+    // First attempt stalls ~1s, backoff ~0.5s, second attempt is immediate.
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        start.elapsed()
+    );
 }
 
 /// A connection that dribbles keep-alive heartbeats but no content triggers
 /// the event-level idle watchdog, is retried, and recovers.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idle_heartbeat_retries_then_completes() {
     let url = start_server(vec![
-        Conn::Heartbeat {
-            hold: Duration::from_millis(900),
-        },
+        Conn::Heartbeat { hold: STALL_HOLD },
         Conn::Full {
             text: "after-idle".into(),
         },
@@ -236,20 +240,20 @@ async fn idle_heartbeat_retries_then_completes() {
 /// When every attempt is interrupted, the budget is exhausted and a terminal
 /// `Error` is emitted (no `Completed`). The `Retrying` events carry the right
 /// attempt/max sequence.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_exhaustion_emits_error() {
     let url = start_server(vec![
         Conn::Stall {
             delta: "a".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
         Conn::Stall {
             delta: "b".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
         Conn::Stall {
             delta: "c".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
     ])
     .await;
@@ -278,8 +282,12 @@ async fn retry_exhaustion_emits_error() {
             .any(|e| matches!(e, LlmEvent::Completed { .. })),
         "exhausted stream must not Completed: {events:?}"
     );
-    // 3 stalls (~300ms each) + backoffs (0.5s + 1s).
-    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+    // 3 stalls (~1s each) + backoffs (0.5s + 1s).
+    assert!(
+        start.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        start.elapsed()
+    );
 }
 
 /// Regression (Bug 4): on the exhaustion path the consumer must receive
@@ -288,20 +296,20 @@ async fn retry_exhaustion_emits_error() {
 /// `chat_stream` spawn wrapper re-wrapped the `Err` into a second
 /// `LlmEvent::Error` — so consumers saw two errors, the second with a doubled
 /// `"stream failed: stream failed: ..."` prefix.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_exhaustion_emits_single_non_doubled_error() {
     let url = start_server(vec![
         Conn::Stall {
             delta: "a".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
         Conn::Stall {
             delta: "b".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
         Conn::Stall {
             delta: "c".into(),
-            hold: Duration::from_millis(800),
+            hold: STALL_HOLD,
         },
     ])
     .await;
@@ -339,5 +347,8 @@ async fn retry_exhaustion_emits_single_non_doubled_error() {
         msg.contains("chunk read error"),
         "error must name the interruption kind: {msg:?}"
     );
-    assert!(msg.contains("after 3 attempts"), "error must report attempts: {msg:?}");
+    assert!(
+        msg.contains("after 3 attempts"),
+        "error must report attempts: {msg:?}"
+    );
 }

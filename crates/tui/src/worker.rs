@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use opencoder_core::{message::now_ms, resolve_agent, Config};
+use opencoder_core::{message::now_ms, resolve_agent, Config, Role};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
     control_cmd::persist_agent as persist_session_agent, run as run_session, run_with_images,
@@ -50,8 +50,14 @@ pub enum UiCmd {
 #[derive(Debug)]
 pub enum UiEvent {
     Session(SessionEvent),
+    /// Reliable completed parent answer for repairing TextDelta chunks shed
+    /// by the bounded UI channel. Ordered bridge delivery precedes TurnDone.
+    AssistantFinal(String),
     TurnDone(String),
 }
+
+/// Bounded worker-to-UI channel capacity shared by initial and switched tasks.
+pub(crate) const UI_EVENT_CAPACITY: usize = 512;
 
 /// Session-scoped child runtime registries used by TUI controls while the
 /// worker owns the corresponding [`SessionState`]. These handles must move as
@@ -160,44 +166,62 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
     }
 }
 
-/// Minimum free capacity to reserve for lifecycle events. When the channel
-/// is near-full, droppable streaming events (TextDelta, and SubagentChild
-/// wrapping TextDelta) are dropped — their final text is always reconstructed
-/// from the store by `TurnDone → finalize_assistant()`, so no information is
-/// lost. ReasoningDelta is intentionally NOT droppable: it is the only trigger
-/// for the `💭 Thinking` label, and non-tool-turn reasoning is never rebuilt
-/// from the store on TurnDone (finalize_assistant only restores text), so
-/// dropping it would permanently lose the thinking block. Non-delta lifecycle
-/// events use try_send and MAY be dropped when the channel is fully saturated;
-/// the UI reconciles critical state (notably chat.agent) from the authoritative
-/// agent on TurnDone.
+/// Minimum free capacity reserved by the ordered UI forwarder. Parent
+/// TextDelta may be shed below this threshold because `AssistantFinal` repairs
+/// it. Every other event is delivered with async backpressure in original
+/// order, including child deltas, reasoning, transcript resets and lifecycle.
 const DELTA_MIN_CAPACITY: usize = 64;
 
-/// Returns true for events whose information is fully recoverable from the
-/// store on the next `TurnDone` (i.e. streaming text deltas). These can be
-/// safely dropped when the UI channel is near capacity without data loss.
+/// Returns true for parent streaming text whose completed value is repaired by
+/// the reliable `AssistantFinal` event. Child deltas are not recoverable here.
 /// ReasoningDelta is deliberately excluded — see `DELTA_MIN_CAPACITY` docs.
 fn is_droppable_delta(sev: &SessionEvent) -> bool {
-    match sev {
-        SessionEvent::TextDelta(_) => true,
-        SessionEvent::SubagentChild { ev, .. } => {
-            matches!(ev.as_ref(), SessionEvent::TextDelta(_))
-        }
-        _ => false,
-    }
+    matches!(sev, SessionEvent::TextDelta(_))
 }
 
-/// Forward a SessionEvent to the UI channel with backpressure-aware dropping.
-/// Droppable streaming deltas are discarded when the channel has <=
-/// DELTA_MIN_CAPACITY free slots (final text is always rebuilt from the store
-/// on TurnDone). Non-delta lifecycle events use try_send: on a fully saturated
-/// channel they can be dropped. The only lossless consequence is a stale status
-/// chip, reconciled on the next TurnDone (see TurnDone(agent)).
-fn forward_event(tx: &mpsc::Sender<UiEvent>, sev: SessionEvent) {
-    if is_droppable_delta(&sev) && tx.capacity() <= DELTA_MIN_CAPACITY {
-        return; // drop delta — final text rebuilt from store on TurnDone
+/// Enqueue a session event into the per-command ordered bridge. The sync LLM
+/// callback never writes directly to the bounded UI channel; the bridge task
+/// owns that operation so reliable events can await capacity without blocking
+/// or reordering the callback.
+fn forward_event(tx: &mpsc::UnboundedSender<UiEvent>, sev: SessionEvent) {
+    let _ = tx.send(UiEvent::Session(sev));
+}
+
+fn spawn_ui_event_forwarder(
+    tx: mpsc::Sender<UiEvent>,
+) -> (mpsc::UnboundedSender<UiEvent>, tokio::task::JoinHandle<()>) {
+    let (pending_tx, mut pending_rx) = mpsc::unbounded_channel::<UiEvent>();
+    let handle = tokio::spawn(async move {
+        while let Some(event) = pending_rx.recv().await {
+            let droppable = matches!(&event, UiEvent::Session(sev) if is_droppable_delta(sev));
+            if droppable && tx.capacity() <= DELTA_MIN_CAPACITY {
+                continue;
+            }
+            if tx.send(event).await.is_err() {
+                break;
+            }
+        }
+    });
+    (pending_tx, handle)
+}
+
+fn completed_assistant_text(sess: &SessionState, message_floor: usize) -> Option<String> {
+    sess.messages
+        .get(message_floor..)?
+        .iter()
+        .rev()
+        .find(|message| message.role == Role::Assistant && !message.text().is_empty())
+        .map(|message| message.text())
+}
+
+fn send_completed_assistant(
+    tx: &mpsc::UnboundedSender<UiEvent>,
+    sess: &SessionState,
+    message_floor: usize,
+) {
+    if let Some(text) = completed_assistant_text(sess, message_floor) {
+        let _ = tx.send(UiEvent::AssistantFinal(text));
     }
-    let _ = tx.try_send(UiEvent::Session(sev));
 }
 
 /// Fire-and-forget persist a parent-session event to the store so web/SSE
@@ -226,9 +250,11 @@ pub async fn process_cmd(
     sess: &mut SessionState,
     evt_tx: &mpsc::Sender<UiEvent>,
 ) -> bool {
-    match cmd {
+    let (ui_tx, ui_forwarder) = spawn_ui_event_forwarder(evt_tx.clone());
+    let quit = match cmd {
         UiCmd::Prompt(prompt, images) => {
-            let tx = evt_tx.clone();
+            let message_floor = sess.messages.len();
+            let tx = ui_tx.clone();
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
             let sink_for_run = sink.clone();
             let res = if images.is_empty() {
@@ -247,15 +273,15 @@ pub async fn process_cmd(
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
                 let _ = sink.push(&ev);
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
             }
             // Drop every sender clone so the flusher's channel closes and it
             // performs a final flush — guaranteeing zero event loss this turn.
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx
-                .send(UiEvent::TurnDone(sess.agent.name.clone()))
-                .await;
+            send_completed_assistant(&ui_tx, sess, message_floor);
+            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
+            false
         }
         UiCmd::SwitchAgent(name) => {
             // DEFENSE-IN-DEPTH: this arm is only reachable at a clean turn
@@ -277,11 +303,12 @@ pub async fn process_cmd(
                 }
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 persist_event(&sess.store, &sess.id, &ev).await;
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
                 if let Err(e) = persist_session_agent(sess, &name).await {
                     tracing::warn!(error = %e, "persist_session_agent failed");
                 }
             }
+            false
         }
         UiCmd::SwitchAndStart(name, extra) => {
             let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
@@ -289,7 +316,7 @@ pub async fn process_cmd(
                 sess.agent = a;
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 let _ = sink.push(&ev);
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
                 if let Err(e) = persist_session_agent(sess, &name).await {
                     tracing::warn!(error = %e, "persist_session_agent failed");
                 }
@@ -317,13 +344,14 @@ pub async fn process_cmd(
                 }
                 let ev = SessionEvent::TranscriptReset(sess.messages.clone());
                 let _ = sink.push(&ev);
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
                 let ev2 = SessionEvent::PlanHandoff(plan_display);
                 let _ = sink.push(&ev2);
-                forward_event(evt_tx, ev2);
+                forward_event(&ui_tx, ev2);
             }
             sess.set_skill(None);
-            let tx = evt_tx.clone();
+            let message_floor = sess.messages.len();
+            let tx = ui_tx.clone();
             let sink_for_run = sink.clone();
             let res = run_session(sess, String::new(), move |sev| {
                 let _ = sink_for_run.push(&sev);
@@ -333,13 +361,13 @@ pub async fn process_cmd(
             if let Err(e) = res {
                 let ev = SessionEvent::Error(format!("{e:#}"));
                 let _ = sink.push(&ev);
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx
-                .send(UiEvent::TurnDone(sess.agent.name.clone()))
-                .await;
+            send_completed_assistant(&ui_tx, sess, message_floor);
+            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
+            false
         }
         UiCmd::Compact => {
             let registry = opencoder_session::tools::registry();
@@ -347,7 +375,7 @@ pub async fn process_cmd(
             // Scope the emit closure so its sender clone is dropped before we
             // drop the last sender + await the flusher (final flush).
             let outcome = {
-                let tx = evt_tx.clone();
+                let tx = ui_tx.clone();
                 let sink_for_emit = sink.clone();
                 let mut emit = move |sev: SessionEvent| {
                     let _ = sink_for_emit.push(&sev);
@@ -359,26 +387,26 @@ pub async fn process_cmd(
                 Ok(Some(summary)) => {
                     let ev = SessionEvent::TranscriptReset(sess.messages.clone());
                     let _ = sink.push(&ev);
-                    forward_event(evt_tx, ev);
+                    forward_event(&ui_tx, ev);
                     let ev2 = SessionEvent::Compaction(summary);
                     let _ = sink.push(&ev2);
-                    forward_event(evt_tx, ev2);
+                    forward_event(&ui_tx, ev2);
                 }
                 Ok(None) => {}
                 Err(e) => {
                     let ev = SessionEvent::Error(format!("compaction failed: {e:#}"));
                     let _ = sink.push(&ev);
-                    forward_event(evt_tx, ev);
+                    forward_event(&ui_tx, ev);
                 }
             }
             drop(sink);
             let _ = flusher.await;
-            let _ = evt_tx
-                .send(UiEvent::TurnDone(sess.agent.name.clone()))
-                .await;
+            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
+            false
         }
         UiCmd::SetSkill(body) => {
             sess.set_skill(body);
+            false
         }
         UiCmd::ReloadConfig(new_cfg) => {
             let applied_model;
@@ -403,7 +431,7 @@ pub async fn process_cmd(
                              ({e:#}); keeping previous client"
                         );
                         let ev = SessionEvent::Error(msg);
-                        forward_event(evt_tx, ev);
+                        forward_event(&ui_tx, ev);
                         applied_model = true;
                     }
                 },
@@ -415,7 +443,7 @@ pub async fn process_cmd(
                          ({e:#}); keeping previous client"
                     );
                     let ev = SessionEvent::Error(msg);
-                    forward_event(evt_tx, ev);
+                    forward_event(&ui_tx, ev);
                     applied_model = true;
                 }
             }
@@ -444,8 +472,9 @@ pub async fn process_cmd(
                 }
                 let ev = SessionEvent::ModelSwitch(sess.config.model_id().to_string());
                 persist_event(&sess.store, &sess.id, &ev).await;
-                forward_event(evt_tx, ev);
+                forward_event(&ui_tx, ev);
             }
+            false
         }
         UiCmd::EditPlan(new_text) => {
             // Find the last Assistant message whose `text()` is non-empty and
@@ -470,6 +499,7 @@ pub async fn process_cmd(
                 msg.blocks = new_blocks;
                 break;
             }
+            false
         }
         UiCmd::EditAnnotation(text) => {
             sess.requirement = Some(text.clone());
@@ -484,13 +514,17 @@ pub async fn process_cmd(
                     )
                     .await;
             }
+            false
         }
         UiCmd::ResetCancel(c) => {
             sess.cancel = Some(c);
+            false
         }
-        UiCmd::Quit => return true,
-    }
-    false
+        UiCmd::Quit => true,
+    };
+    drop(ui_tx);
+    let _ = ui_forwarder.await;
+    quit
 }
 
 #[cfg(test)]

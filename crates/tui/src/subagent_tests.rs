@@ -342,16 +342,31 @@ fn done_reconciles_orphaned_subagent_blocks() {
     assert_eq!(v.subagents_running, 1);
     v.apply(&SessionEvent::Done);
     assert_eq!(v.subagents_running, 0, "Done zeroes the running counter");
-    let block = v.blocks.iter().rev().find(|b| {
-        matches!(b, ChatBlock::Subagent { id, .. } if id == "a")
-    });
+    let block = v
+        .blocks
+        .iter()
+        .rev()
+        .find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "a"));
     let sb = block.expect("subagent block must still exist");
     match sb {
-        ChatBlock::Subagent { done, ok, cancelled, summary, .. } => {
+        ChatBlock::Subagent {
+            done,
+            ok,
+            cancelled,
+            summary,
+            ..
+        } => {
             assert!(*done, "orphaned subagent must be marked done on Done");
             assert!(!*ok, "orphaned subagent must be marked failed (not ok)");
-            assert!(!*cancelled, "orphaned subagent is interrupted, not user-cancelled");
-            assert!(summary.contains("interrupted"), "summary should mention interrupted; got {:?}", summary);
+            assert!(
+                !*cancelled,
+                "orphaned subagent is interrupted, not user-cancelled"
+            );
+            assert!(
+                summary.contains("interrupted"),
+                "summary should mention interrupted; got {:?}",
+                summary
+            );
         }
         _ => unreachable!(),
     }
@@ -369,7 +384,12 @@ fn error_reconciles_orphaned_subagent_blocks() {
     });
     v.apply(&SessionEvent::Error("boom".into()));
     assert_eq!(v.subagents_running, 0);
-    let sb = v.blocks.iter().rev().find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "b")).unwrap();
+    let sb = v
+        .blocks
+        .iter()
+        .rev()
+        .find(|b| matches!(b, ChatBlock::Subagent { id, .. } if id == "b"))
+        .unwrap();
     match sb {
         ChatBlock::Subagent { done, summary, .. } => {
             assert!(*done);

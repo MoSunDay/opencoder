@@ -84,7 +84,7 @@ fn sse_done() -> &'static str {
 /// `read_timeout`. Under the old absolute `.timeout()` the stream would be
 /// killed at 1.0 s; under per-read `read_timeout` each chunk resets the
 /// timer and the stream completes normally.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn continuous_stream_not_interrupted_by_read_timeout() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -156,14 +156,16 @@ async fn continuous_stream_not_interrupted_by_read_timeout() {
 /// This regression-tests the idle-timeout watchdog (`last_event_at`) plus the
 /// `tokio::time::timeout(idle_timeout, stream.next())` wrapper: a
 /// keep-alive-only upstream can never hold the consumer hostage.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stalled_stream_interrupted_by_idle_timeout() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let base_url = format!("http://{addr}");
 
-    // Very short read_timeout so the test completes quickly.
-    let read_timeout = Duration::from_millis(300);
+    // Match the healthy-stream test's stable scheduling margin. The heartbeat
+    // cadence remains well inside this window, so this still isolates the
+    // event-level idle watchdog from reqwest's byte-level read timeout.
+    let read_timeout = Duration::from_secs(1);
 
     tokio::spawn(async move {
         // The stream retry loop reconnects up to MAX_STREAM_ATTEMPTS (3) times
@@ -189,16 +191,16 @@ async fn stalled_stream_interrupted_by_idle_timeout() {
                 // reqwest's byte-level read_timeout satisfied. With no decoded
                 // data event arriving, the event-level idle watchdog in
                 // `run_stream_once` trips (IdleTimeout), not the byte-level
-                // timeout (ChunkError). Heartbeats every 40 ms — well inside
-                // the 300 ms read window — mirror a real keep-alive-only
-                // stall; ~3 s comfortably outlasts one attempt's idle window.
-                for _ in 0..75 {
+                // timeout (ChunkError). Heartbeats every 100 ms — well inside
+                // the 1 s read window — mirror a real keep-alive-only stall;
+                // ~3 s comfortably outlasts one attempt's idle window.
+                for _ in 0..30 {
                     // `let _ =`: the client drops this connection when it
                     // retries after the idle timeout, so later writes hit a
                     // broken pipe — ignore them and let the loop wind down.
                     let _ = stream.write_all(b": keep-alive\n\n").await;
                     let _ = stream.flush().await;
-                    tokio::time::sleep(Duration::from_millis(40)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             });
         }

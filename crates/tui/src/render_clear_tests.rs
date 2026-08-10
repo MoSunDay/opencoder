@@ -34,8 +34,7 @@ fn draw_frame(
     viewport: &mut Option<ViewportCache>,
 ) {
     // Force the body viewport to rebuild for THIS chat each frame, so the
-    // only thing that can leave stale glyphs is ratatui's buffer reuse —
-    // which is exactly what the per-frame Clear exists to defeat.
+    // only thing that can leave stale glyphs is ratatui's buffer reuse.
     *viewport = None;
     render(
         terminal,
@@ -273,5 +272,99 @@ fn startup_clear_wipes_glyphs_persisted_by_previous_run() {
         !text.contains("markerword"),
         "startup clear must wipe glyphs persisted by the previous run; \
          leftover: {text:?}"
+    );
+}
+
+/// Notepad is a fullscreen file viewer/editor: while open the chat body,
+/// composer and status bar are not rendered and every chat hit-target is
+/// cleared so no stale rect survives from the previous chat frame.
+#[tokio::test]
+async fn notepad_fullscreen_hides_chat_and_clears_hits() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.txt"), "hello world").unwrap();
+    let mut np: Option<crate::notepad::NotepadView> =
+        Some(crate::notepad::NotepadView::new(d.path().to_path_buf()));
+    // Open a.txt so the editor renders its content.
+    crate::notepad::dispatch_key(&mut np, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)).await;
+    let view = np.as_ref().unwrap();
+
+    // Chat state that must NOT appear on screen while notepad is open.
+    let mut chat = ChatView::default();
+    chat.apply(&SessionEvent::TextDelta("CHATBODYMARKER\n".into()));
+    chat.apply(&SessionEvent::Done);
+
+    let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+    let mut scroll = 0u32;
+    let mut queue_scroll: u32 = 0;
+    let mut hits = MouseHits::default();
+    let mut viewport: Option<ViewportCache> = None;
+    render(
+        &mut terminal,
+        &chat,
+        "",
+        0,
+        &Line::raw("title"),
+        false,
+        0,
+        0,
+        200_000,
+        200_000,
+        "idle",
+        &[],
+        &[],
+        &mut scroll,
+        true,
+        &mut queue_scroll,
+        0,
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &mut hits,
+        &mut viewport,
+        false,
+        false,
+        &[],
+        false,
+        None,
+        None,
+        0,
+        0,
+        true,
+        false,
+        "act",
+        Some(view),
+    )
+    .unwrap();
+
+    // Chat hit-targets must be cleared (fullscreen: nothing rendered below).
+    assert!(
+        hits.body.is_none(),
+        "no chat body rect in fullscreen notepad"
+    );
+    assert!(hits.jump_btn.is_none());
+    assert!(hits.top_btn.is_none());
+    assert!(hits.queue_panel.is_none());
+    assert_eq!(hits.total_rows, 0);
+    assert!(hits.queue_btns.is_empty());
+    assert!(hits.thinking_btns.is_empty());
+    assert!(hits.subagent_btns.is_empty());
+    assert!(hits.tool_btns.is_empty());
+    assert!(hits.compaction_btns.is_empty());
+
+    let text = buffer_text(terminal.backend().buffer());
+    assert!(
+        text.contains("hello world"),
+        "editor content must render fullscreen"
+    );
+    assert!(
+        !text.contains("CHATBODYMARKER"),
+        "chat body must be hidden while notepad is open"
     );
 }

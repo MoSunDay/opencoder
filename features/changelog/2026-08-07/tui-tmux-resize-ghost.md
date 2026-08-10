@@ -1,4 +1,4 @@
-Commit: 339e7326ea9598c3813782549ae3c34854a379d6
+Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
 
 # TUI tmux resize 残影修复
 

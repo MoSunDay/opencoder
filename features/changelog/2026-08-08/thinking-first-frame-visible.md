@@ -1,4 +1,4 @@
-Commit: 2f03c7e58debe3ba40bd3819b60f5a4b49a16ced
+Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
 
 # fix(tui): Thinking 标签在首个推理帧立即可见
 

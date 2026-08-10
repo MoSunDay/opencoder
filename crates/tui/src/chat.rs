@@ -31,6 +31,8 @@ pub(crate) use helpers::{push_duration_span, short, summarize};
 mod compaction_block;
 #[path = "chat_headers.rs"]
 mod headers;
+#[path = "chat_stream.rs"]
+mod stream;
 pub(crate) use compaction_block::render_collapsible;
 
 impl ChatView {
@@ -46,20 +48,15 @@ impl ChatView {
                     self.frozen_round_ms =
                         Some(((opencoder_core::message::now_ms() - anchor).max(0)) as u64);
                 }
+                self.finalize_assistant();
             }
             SessionEvent::TextDelta(t) => {
                 self.recover_round_anchor_if_missing();
-                self.ensure_assistant_open();
-                if let Some(ChatBlock::Assistant { raw, .. }) = self.blocks.last_mut() {
-                    raw.push_str(&sanitize_multiline(t));
-                }
+                self.append_text_delta(&sanitize_multiline(t));
             }
             SessionEvent::ReasoningDelta(t) => {
                 self.recover_round_anchor_if_missing();
-                self.ensure_thinking_open();
-                if let Some(ChatBlock::Thinking { text, .. }) = self.blocks.last_mut() {
-                    text.push_str(&sanitize_multiline(t));
-                }
+                self.append_reasoning_delta(&sanitize_multiline(t));
             }
             // Stream the summary into an expanded block so it is visible while
             // the summarizing LLM call runs. The final `Compaction(summary)`
@@ -324,6 +321,7 @@ impl ChatView {
     /// bar of the freshly-started turn. The transcript blocks are untouched.
     pub fn begin_turn(&mut self) {
         self.status.clear();
+        self.turn_block_start = self.blocks.len();
         self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
         self.frozen_round_ms = None;
     }
@@ -344,34 +342,6 @@ impl ChatView {
         self.blocks.push(ChatBlock::Marker(
             lines.into_iter().map(sanitize_line).collect(),
         ));
-    }
-
-    /// Render the current assistant block's raw text as markdown (idempotent).
-    /// Also seals a trailing unsealed Thinking block so its tokens are counted
-    /// exactly once at the turn boundary (covers reasoning-only turns).
-    pub fn finalize_assistant(&mut self) {
-        // Reasoning → non-text transition: count a trailing unsealed Thinking
-        // block once. Mutually exclusive with the Assistant branch below since
-        // `last_mut()` is either a Thinking or an Assistant.
-        if let Some(ChatBlock::Thinking { text, sealed, .. }) = self.blocks.last_mut() {
-            if !*sealed {
-                self.context_used += estimate(text) as u64;
-                *sealed = true;
-            }
-        }
-        // Assistant text finalization: render markdown + count once.
-        if let Some(ChatBlock::Assistant {
-            raw,
-            rendered,
-            done,
-        }) = self.blocks.last_mut()
-        {
-            if !*done {
-                self.context_used += estimate(raw) as u64;
-                *rendered = crate::markdown::render(raw);
-                *done = true;
-            }
-        }
     }
 
     /// Toggle collapse on the thinking block at `block_idx` (mouse click
@@ -413,8 +383,8 @@ impl ChatView {
         // Note: TextDelta/ReasoningDelta are intentionally NOT counted here.
         // Counting per-delta made the status bar's ctx% indicator jump on
         // every token.
-        // Instead they are counted once at turn boundaries via
-        // `finalize_assistant` (and `ensure_assistant_open` for the
+        // Instead they are counted once at round boundaries via
+        // `finalize_assistant` (and `append_text_delta` for the
         // reasoning → text transition). The discrete events below are kept
         // immediate since they are low-frequency and not part of streaming.
         match ev {
@@ -525,8 +495,8 @@ impl ChatView {
                         "Compaction",
                         text,
                         *collapsed,
-                        Style::default().fg(theme::local_color()).add_modifier(Modifier::BOLD),
-                        Style::default(),
+                        Style::default().fg(theme::local_color()),
+                        Style::default().fg(theme::local_color()),
                     ));
                 }
                 ChatBlock::Tool {
@@ -723,40 +693,6 @@ impl ChatView {
         }
     }
 
-    fn ensure_assistant_open(&mut self) {
-        if !matches!(
-            self.blocks.last(),
-            Some(ChatBlock::Assistant { done: false, .. })
-        ) {
-            // Seal a trailing unsealed Thinking block so its tokens are counted
-            // exactly once before it stops being the last block.
-            if let Some(ChatBlock::Thinking { text, sealed, .. }) = self.blocks.last_mut() {
-                if !*sealed {
-                    self.context_used += estimate(text) as u64;
-                    *sealed = true;
-                }
-            }
-            self.blocks.push(ChatBlock::Assistant {
-                raw: String::new(),
-                rendered: Vec::new(),
-                done: false,
-            });
-        }
-    }
-
-    fn ensure_thinking_open(&mut self) {
-        if !matches!(
-            self.blocks.last(),
-            Some(ChatBlock::Thinking { sealed: false, .. })
-        ) {
-            self.blocks.push(ChatBlock::Thinking {
-                text: String::new(),
-                collapsed: true,
-                sealed: false,
-            });
-        }
-    }
-
     /// Self-heal a missing round anchor: if `LlmRoundStart` was dropped by the
     /// saturated `forward_event` channel, the first `TextDelta`/`ReasoningDelta`
     /// re-anchors it (only when `None`; recursive for child views too).
@@ -765,20 +701,6 @@ impl ChatView {
             self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());
             self.frozen_round_ms = None;
         }
-    }
-
-    /// True if the last block is the currently-open collapsed Thinking block.
-    /// A sealed block belongs to an earlier reasoning segment and must not
-    /// suppress the first render of a newly-created Thinking block.
-    pub fn last_open_thinking_collapsed(&self) -> bool {
-        matches!(
-            self.blocks.last(),
-            Some(ChatBlock::Thinking {
-                collapsed: true,
-                sealed: false,
-                ..
-            })
-        )
     }
 }
 

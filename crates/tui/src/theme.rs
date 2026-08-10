@@ -35,6 +35,10 @@ pub const LOCAL: Color = Color::Magenta;
 /// Pink — dedicated to the Thinking (reasoning) block header so it stays
 /// visually distinct from the cyan-accented bash tool header.
 pub const PINK: Color = Color::LightMagenta;
+/// Dark purple — the Compaction (context-summary) block tag + text, darker
+/// than `LOCAL` so the collapsed summary reads as secondary. ANSI 256
+/// index 90 is (135,0,135): a dark purple, darker than plain Magenta.
+pub const COMPACTION: Color = Color::Indexed(90);
 
 // ── Theme selection ─────────────────────────────────────────────────────────
 
@@ -85,6 +89,7 @@ pub struct Palette {
     pub info: Color,
     pub local: Color,
     pub pink: Color,
+    pub compaction: Color,
     pub user: Color,
 }
 
@@ -104,6 +109,7 @@ pub fn palette(kind: ThemeKind) -> Palette {
             info: Color::Blue,
             local: Color::Magenta,
             pink: Color::LightMagenta,
+            compaction: Color::Indexed(90),
         },
         ThemeKind::Light => Palette {
             user: Color::Indexed(94),
@@ -117,6 +123,7 @@ pub fn palette(kind: ThemeKind) -> Palette {
             info: Color::Blue,
             local: Color::Magenta,
             pink: Color::Magenta,
+            compaction: Color::Indexed(90),
         },
     }
 }
@@ -173,6 +180,9 @@ pub fn local_color() -> Color {
 }
 pub fn pink() -> Color {
     palette(current_theme()).pink
+}
+pub fn compaction_color() -> Color {
+    palette(current_theme()).compaction
 }
 pub fn user_color() -> Color {
     palette(current_theme()).user

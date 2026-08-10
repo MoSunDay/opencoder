@@ -20,6 +20,10 @@ async fn press(view: &mut NotepadView, code: KeyCode) {
     handle_key(view, key(code)).await;
 }
 
+async fn press_ctrl(view: &mut NotepadView, code: KeyCode) {
+    handle_key(view, KeyEvent::new(code, KeyModifiers::CONTROL)).await;
+}
+
 async fn type_str(view: &mut NotepadView, s: &str) {
     for c in s.chars() {
         handle_key(view, key(KeyCode::Char(c))).await;
@@ -114,4 +118,36 @@ async fn focus_cycle_two_panels() {
     assert_eq!(v.focus, Focus::Tree);
     press(&mut v, KeyCode::Tab).await;
     assert_eq!(v.focus, Focus::Editor);
+}
+
+#[tokio::test]
+async fn insert_session_undo_redo_restores_text() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "hello").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Enter).await; // open file (Normal, cursor 0)
+    press(&mut v, KeyCode::Char('i')).await;
+    type_str(&mut v, "XY").await;
+    press(&mut v, KeyCode::Esc).await;
+    assert_eq!(v.editor.vim.text, "XYhello");
+    // One `u` reverts the whole insert session.
+    press(&mut v, KeyCode::Char('u')).await;
+    assert_eq!(v.editor.vim.text, "hello");
+    // Ctrl+R redoes it.
+    press_ctrl(&mut v, KeyCode::Char('r')).await;
+    assert_eq!(v.editor.vim.text, "XYhello");
+}
+
+#[tokio::test]
+async fn normal_mode_x_undo_redo() {
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("a.txt"), "hello").unwrap();
+    let mut v = NotepadView::new(d.path().to_path_buf());
+    press(&mut v, KeyCode::Enter).await;
+    press(&mut v, KeyCode::Char('x')).await;
+    assert_eq!(v.editor.vim.text, "ello");
+    press(&mut v, KeyCode::Char('u')).await;
+    assert_eq!(v.editor.vim.text, "hello");
+    press_ctrl(&mut v, KeyCode::Char('r')).await;
+    assert_eq!(v.editor.vim.text, "ello");
 }

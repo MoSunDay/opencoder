@@ -56,6 +56,8 @@ OpenCoder is a fully independent, Rust-native coding agent implemented from scra
 
 ## 🚀 Quick Start
 
+> 👉 New to OpenCoder? See the [**Quick Start guide**](docs/quickstart.en.md) — TUI keys, browsing/editing files with notepad, attaching notes to tasks, and more.
+
 ### Installation
 
 Build from source (requires a Rust toolchain):

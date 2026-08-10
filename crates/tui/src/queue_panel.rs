@@ -159,32 +159,17 @@ pub(crate) fn visible_window(total: usize, height: usize, scroll: u32) -> (usize
     (s, max_scroll, overflow)
 }
 
-/// Thin scrollbar drawn in the rightmost panel column when entries overflow
-/// the viewport. Same manual thumb-ratio approach as `render::draw_scrollbar`
-/// (which stays private to `render.rs`): track `\u{250a}`, thumb `\u{2588}`.
+/// Thin scrollbar drawn in the rightmost panel column when entries overflow.
 fn draw_queue_scrollbar(f: &mut Frame, area: Rect, max_scroll: usize, scroll: u32, visible_h: u16) {
-    let scroll = (scroll as usize).min(max_scroll) as u32;
-    let track_h = area.height as u64;
-    let thumb_h =
-        ((visible_h as u64 * track_h) / (visible_h as u64 + max_scroll as u64)).max(1) as u16;
-    let max_off = area.height.saturating_sub(thumb_h);
-    let thumb_off = if max_scroll == 0 {
-        0u16
-    } else {
-        ((scroll as u64 * max_off as u64) / max_scroll as u64) as u16
-    };
-    let sb_x = area.right().saturating_sub(1);
-    let buf = f.buffer_mut();
-    for y in 0..area.height {
-        let cell = &mut buf[(sb_x, area.y + y)];
-        if y >= thumb_off && y < thumb_off + thumb_h {
-            cell.set_char('\u{2588}');
-            cell.set_style(Style::default().fg(theme::subtle()));
-        } else {
-            cell.set_char('\u{250a}');
-            cell.set_style(Style::default().fg(theme::muted()));
-        }
-    }
+    crate::scrollbar::draw(
+        f,
+        area,
+        visible_h as usize + max_scroll,
+        visible_h as usize,
+        scroll as usize,
+        theme::muted(),
+        theme::subtle(),
+    );
 }
 
 pub(crate) fn render_queue_panel(

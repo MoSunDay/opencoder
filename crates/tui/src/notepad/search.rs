@@ -119,7 +119,20 @@ async fn try_rg(query: &str, workdir: &Path) -> Result<Vec<SearchHit>, String> {
         }
         return Err(String::from_utf8_lossy(&out.stderr).to_string());
     }
-    Ok(parse_hits(&out.stdout))
+    Ok(resolve_hit_paths(parse_hits(&out.stdout), workdir))
+}
+
+/// Resolve command output paths against the directory in which the search ran.
+/// `rg` emits paths relative to its current directory by default; keeping that
+/// detail out of the editor prevents callers from accidentally resolving hits
+/// against the opencoder process directory instead.
+fn resolve_hit_paths(mut hits: Vec<SearchHit>, workdir: &Path) -> Vec<SearchHit> {
+    for hit in &mut hits {
+        if hit.path.is_relative() {
+            hit.path = workdir.join(&hit.path);
+        }
+    }
+    hits
 }
 
 async fn try_grep(query: &str, workdir: &Path) -> Result<Vec<SearchHit>, String> {
@@ -339,6 +352,20 @@ mod tests {
     fn parse_rg_line_invalid() {
         assert!(parse_rg_line("nocolons").is_none());
         assert!(parse_rg_line("only:two").is_none());
+    }
+
+    #[test]
+    fn resolve_hit_paths_anchors_relative_paths_to_workdir() {
+        let workdir = Path::new("/tmp/project");
+        let hits = vec![SearchHit {
+            path: PathBuf::from("src/main.rs"),
+            line_no: 1,
+            text: "match".into(),
+        }];
+
+        let resolved = resolve_hit_paths(hits, workdir);
+
+        assert_eq!(resolved[0].path, workdir.join("src/main.rs"));
     }
 
     #[test]

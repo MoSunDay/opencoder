@@ -150,11 +150,18 @@ fn replayed_reasoning_restored_as_thinking_block() {
         _ => unreachable!(),
     }
 
-    // The assistant text must still be present after the thinking block.
+    let thinking_idx = chat
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::Thinking { .. }))
+        .expect("thinking index");
+    let assistant_idx = chat
+        .blocks
+        .iter()
+        .position(|b| matches!(b, ChatBlock::Assistant { .. }))
+        .expect("assistant text block must still be replayed");
     assert!(
-        chat.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Assistant { .. })),
-        "assistant text block must still be replayed"
+        thinking_idx < assistant_idx,
+        "replay must preserve the live Thinking-before-Say order"
     );
 }

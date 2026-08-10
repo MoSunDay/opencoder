@@ -87,7 +87,6 @@ async fn jump_btn_click_works_after_recent_body_click() {
         tool_btns: Vec::new(),
         compaction_btns: Vec::new(),
         total_rows: 0,
-        divider: None,
     };
 
     let mut scroll = 0u32;
@@ -194,7 +193,6 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         tool_btns: Vec::new(),
         compaction_btns: Vec::new(),
         total_rows: 0,
-        divider: None,
     };
 
     let mut scroll = 0u32;
@@ -269,7 +267,6 @@ async fn compaction_header_click_toggles_collapse() {
             rect: header_rect,
         }],
         total_rows: 0,
-        divider: None,
     };
 
     let mut scroll = 0u32;

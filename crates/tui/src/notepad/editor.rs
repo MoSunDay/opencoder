@@ -12,13 +12,32 @@ use ratatui::Frame;
 use crate::theme;
 use crate::vim::{VimMode, VimState};
 
+use super::editor_layout::EditorLayout;
+
+/// Screen dimensions available to editor text after borders and line numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorViewport {
+    pub text_width: u16,
+    pub height: u16,
+}
+
+impl EditorViewport {
+    pub fn for_area(area: Rect, line_count: usize) -> Self {
+        let inner_width = area.width.saturating_sub(2);
+        Self {
+            text_width: inner_width.saturating_sub(gutter_width(line_count)),
+            height: area.height.saturating_sub(2),
+        }
+    }
+}
+
 /// Editor state wrapping the shared vim engine.
 #[derive(Clone, Debug)]
 pub struct EditorState {
     pub vim: VimState,
     pub file_path: Option<PathBuf>,
     /// Vertical scroll offset (visual rows).
-    pub scroll: u16,
+    pub scroll: usize,
 }
 
 impl EditorState {
@@ -146,37 +165,35 @@ impl EditorState {
         self.vim.is_modified()
     }
 
-    /// Number of logical lines (counting a trailing newline as one extra).
+    /// Number of logical lines, including the empty line after a trailing
+    /// newline, matching Vim's buffer model.
     pub fn line_count(&self) -> usize {
-        self.vim.text.lines().count().max(1)
+        self.vim.text.bytes().filter(|byte| *byte == b'\n').count() + 1
     }
 
-    /// Adjust scroll so the cursor's logical line stays visible. Mirrors
-    /// vim's "cursor follows" behavior: moving down sticks the cursor to
-    /// the last visible row; moving up sticks it to the first visible row.
-    pub fn ensure_cursor_visible(&mut self, inner_h: u16) {
-        if inner_h <= 2 {
+    /// Adjust visual-row scroll so the cursor stays inside the viewport.
+    pub fn ensure_cursor_visible(&mut self, viewport: EditorViewport) {
+        if viewport.height == 0 {
             return;
         }
-        let vis_h = inner_h as usize;
-        let cur_row = self.cursor_line();
-        let scroll = self.scroll as usize;
+        let layout = EditorLayout::new(&self.vim.text, viewport.text_width);
+        let vis_h = viewport.height as usize;
+        let cur_row = layout.cursor_position(self.vim.cursor).0;
+        let scroll = self.scroll;
         let h = vis_h.saturating_sub(1);
         if cur_row < scroll {
-            self.scroll = cur_row as u16;
+            self.scroll = cur_row;
         } else if cur_row > scroll + h {
-            self.scroll = (cur_row - h) as u16;
+            self.scroll = cur_row - h;
         }
-        // Clamp: never scroll past the last page.
-        let total = self.line_count();
-        if total > vis_h {
-            let max_scroll = total - vis_h;
-            if self.scroll as usize > max_scroll {
-                self.scroll = max_scroll as u16;
-            }
-        } else {
-            self.scroll = 0;
-        }
+        self.scroll = layout.clamp_scroll(self.scroll, vis_h);
+    }
+
+    /// Put the cursor's visual row at the top, clamped at the final page.
+    pub fn scroll_cursor_to_top(&mut self, viewport: EditorViewport) {
+        let layout = EditorLayout::new(&self.vim.text, viewport.text_width);
+        let cursor_row = layout.cursor_position(self.vim.cursor).0;
+        self.scroll = layout.clamp_scroll(cursor_row, viewport.height as usize);
     }
 
     /// Current cursor line number (0-indexed).
@@ -204,16 +221,16 @@ impl EditorState {
         self.vim.cursor = char_idx;
     }
 
-    /// Move the cursor down by `n` logical lines (clamped to last line).
-    pub fn page_down(&mut self, n: usize) {
-        let target = self.cursor_line().saturating_add(n);
-        self.move_to_line(target);
+    /// Move the cursor down by `n` visual rows, preserving display column.
+    pub fn page_down(&mut self, n: usize, text_width: u16) {
+        let layout = EditorLayout::new(&self.vim.text, text_width);
+        self.vim.cursor = layout.move_cursor_rows(self.vim.cursor, n as isize);
     }
 
-    /// Move the cursor up by `n` logical lines (clamped to line 0).
-    pub fn page_up(&mut self, n: usize) {
-        let target = self.cursor_line().saturating_sub(n);
-        self.move_to_line(target);
+    /// Move the cursor up by `n` visual rows, preserving display column.
+    pub fn page_up(&mut self, n: usize, text_width: u16) {
+        let layout = EditorLayout::new(&self.vim.text, text_width);
+        self.vim.cursor = layout.move_cursor_rows(self.vim.cursor, -(n as isize));
     }
 }
 
@@ -239,60 +256,53 @@ pub fn render_editor(f: &mut Frame, area: Rect, state: &EditorState, focused: bo
         return;
     }
 
-    let gutter_w = (state.line_count().to_string().len() + 2) as u16;
+    let gutter_w = gutter_width(state.line_count());
     let text_w = inner.width.saturating_sub(gutter_w);
-
-    let lines: Vec<&str> = state.vim.text.lines().collect();
+    let layout = EditorLayout::new(&state.vim.text, text_w);
     let vis_h = inner.height as usize;
-    let scroll = state.scroll as usize;
-    let total = lines.len();
+    let scroll = layout.clamp_scroll(state.scroll, vis_h);
+    let total = layout.rows().len();
 
     let start = scroll.min(total);
     let end = (start + vis_h).min(total);
 
     let mut row_lines: Vec<Line> = Vec::new();
-    for (i, raw) in lines[start..end].iter().enumerate() {
-        let line_no = start + i + 1;
-        let num_str = format!("{:>width$} ", line_no, width = (gutter_w - 2) as usize);
+    for row in &layout.rows()[start..end] {
+        let num_str = match row.line_number {
+            Some(line_no) => format!(
+                "{:>width$}  ",
+                line_no,
+                width = gutter_w.saturating_sub(2) as usize
+            ),
+            None => " ".repeat(gutter_w as usize),
+        };
         let num_span = Span::styled(num_str, Style::default().fg(theme::subtle()));
-        let content = truncate_for_width(raw, text_w as usize);
-        let content_span = Span::raw(content);
+        let content_span = Span::raw(layout.row_text(*row));
         row_lines.push(Line::from(vec![num_span, content_span]));
-    }
-    // Handle empty buffer.
-    if row_lines.is_empty() {
-        row_lines.push(Line::from(vec![
-            Span::styled(" 1 ", Style::default().fg(theme::subtle())),
-            Span::raw(""),
-        ]));
     }
 
     let para = Paragraph::new(row_lines).scroll((0, 0));
     f.render_widget(para, inner);
 
     // Position hardware cursor inside the editor.
-    set_editor_cursor(f, inner, state, gutter_w, text_w);
+    set_editor_cursor(f, inner, state, &layout, scroll, gutter_w);
 }
 
 /// Compute the cursor's terminal position and place it.
-fn set_editor_cursor(f: &mut Frame, inner: Rect, state: &EditorState, gutter_w: u16, _text_w: u16) {
+fn set_editor_cursor(
+    f: &mut Frame,
+    inner: Rect,
+    state: &EditorState,
+    layout: &EditorLayout,
+    scroll: usize,
+    gutter_w: u16,
+) {
     if state.vim.mode == VimMode::Command || state.vim.mode == VimMode::Search {
         // Don't fight the cmdline — just show the cursor at the end of the
         // status line. It's approximate but avoids double-cursor artifacts.
         return;
     }
-    let text = &state.vim.text;
-    let cursor = state.vim.cursor;
-
-    // Logical row.
-    let before_bytes = char_byte_offset(text, cursor);
-    let row = text[..before_bytes].matches('\n').count();
-    // Column within the logical line.
-    let line_start = text[..before_bytes].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let col_str = &text[line_start..before_bytes];
-    let col = crate::composer::str_width(col_str);
-
-    let scroll = state.scroll as usize;
+    let (row, col) = layout.cursor_position(state.vim.cursor);
     if row < scroll {
         return;
     }
@@ -313,22 +323,8 @@ fn char_byte_offset(text: &str, char_idx: usize) -> usize {
         .unwrap_or(text.len())
 }
 
-fn truncate_for_width(s: &str, max_w: usize) -> String {
-    let w = crate::composer::str_width(s);
-    if w <= max_w {
-        return s.to_string();
-    }
-    let mut out = String::new();
-    let mut cur = 0usize;
-    for ch in s.chars() {
-        let cw = crate::composer::char_width(ch);
-        if cur + cw > max_w {
-            break;
-        }
-        out.push(ch);
-        cur += cw;
-    }
-    out
+pub(crate) fn gutter_width(line_count: usize) -> u16 {
+    line_count.to_string().len().saturating_add(2) as u16
 }
 
 /// Check if this key, when in Normal mode, is a plain focus-cycle key that
@@ -434,6 +430,21 @@ mod tests {
     }
 
     #[test]
+    fn line_count_includes_empty_line_after_trailing_newline() {
+        let mut ed = EditorState::empty();
+        ed.vim.text = "a\nb\n".to_string();
+        assert_eq!(ed.line_count(), 3);
+    }
+
+    #[test]
+    fn viewport_accounts_for_dynamic_gutter_width() {
+        let two_digit = EditorViewport::for_area(Rect::new(0, 0, 50, 20), 99);
+        let three_digit = EditorViewport::for_area(Rect::new(0, 0, 50, 20), 100);
+        assert_eq!(two_digit, viewport(44, 18));
+        assert_eq!(three_digit, viewport(43, 18));
+    }
+
+    #[test]
     fn title_shows_filename() {
         let mut ed = EditorState::empty();
         ed.file_path = Some(PathBuf::from("/tmp/foo/bar.rs"));
@@ -474,11 +485,18 @@ mod tests {
         ed
     }
 
+    fn viewport(width: u16, height: u16) -> EditorViewport {
+        EditorViewport {
+            text_width: width,
+            height,
+        }
+    }
+
     #[test]
     fn ensure_cursor_no_change_when_visible() {
         let mut ed = make_tall_editor(20);
         ed.scroll = 0;
-        ed.ensure_cursor_visible(10);
+        ed.ensure_cursor_visible(viewport(40, 10));
         assert_eq!(ed.scroll, 0);
     }
 
@@ -487,7 +505,7 @@ mod tests {
         let mut ed = make_tall_editor(20);
         ed.move_to_line(15);
         ed.scroll = 0;
-        ed.ensure_cursor_visible(10);
+        ed.ensure_cursor_visible(viewport(40, 10));
         // vis_h=10, h=9, cur_row=15 → scroll = 15-9 = 6
         assert_eq!(ed.scroll, 6);
     }
@@ -497,7 +515,7 @@ mod tests {
         let mut ed = make_tall_editor(20);
         ed.move_to_line(3);
         ed.scroll = 8;
-        ed.ensure_cursor_visible(10);
+        ed.ensure_cursor_visible(viewport(40, 10));
         assert_eq!(ed.scroll, 3);
     }
 
@@ -506,7 +524,7 @@ mod tests {
         let mut ed = make_tall_editor(20);
         ed.move_to_line(19);
         ed.scroll = 0;
-        ed.ensure_cursor_visible(10);
+        ed.ensure_cursor_visible(viewport(40, 10));
         // cur_row=19, h=9 → raw scroll=10, but max_scroll=20-10=10, so 10
         assert_eq!(ed.scroll, 10);
     }
@@ -532,7 +550,7 @@ mod tests {
     fn page_down_moves_half() {
         let mut ed = make_tall_editor(30);
         assert_eq!(ed.cursor_line(), 0);
-        ed.page_down(5);
+        ed.page_down(5, 40);
         assert_eq!(ed.cursor_line(), 5);
     }
 
@@ -540,7 +558,7 @@ mod tests {
     fn page_up_clamps_to_zero() {
         let mut ed = make_tall_editor(30);
         ed.move_to_line(2);
-        ed.page_up(10);
+        ed.page_up(10, 40);
         assert_eq!(ed.cursor_line(), 0);
     }
 

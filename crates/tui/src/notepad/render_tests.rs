@@ -112,6 +112,53 @@ fn render_editor_long_line_cursor_no_overflow() {
 }
 
 #[test]
+fn render_editor_soft_wraps_long_line_without_truncation() {
+    let mut ed = EditorState::empty();
+    ed.vim = VimState::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string());
+    ed.vim.mode = VimMode::Normal;
+
+    // area width 20 -> inner width 18 -> 3-cell gutter -> 15 text cells.
+    let mut term = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    term.draw(|f| render_editor(f, f.area(), &ed, true))
+        .unwrap();
+
+    let buf = term.backend().buffer();
+    let row_text = |y| {
+        (1..19)
+            .filter_map(|x| buf.cell((x, y)))
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    };
+    let first = row_text(1);
+    let continuation = row_text(2);
+    assert!(first.contains("ABCDEFGHIJKLMNO"), "first row: {first:?}");
+    assert!(
+        continuation.contains("PQRSTUVWXYZ"),
+        "continuation row: {continuation:?}"
+    );
+    assert!(first.starts_with("1  "), "first row shows line number");
+    assert!(
+        continuation.starts_with("   "),
+        "continuation row keeps a blank gutter"
+    );
+}
+
+#[test]
+fn render_editor_cursor_uses_next_row_at_soft_wrap_boundary() {
+    let mut ed = EditorState::empty();
+    ed.vim = VimState::new("ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_string());
+    ed.vim.mode = VimMode::Normal;
+    // area width 20 -> 15 text cells after borders and the 3-cell gutter.
+    // Cursor 15 is the `P` at the continuation row's first column.
+    ed.vim.cursor = 15;
+
+    let mut term = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    term.draw(|f| render_editor(f, f.area(), &ed, true))
+        .unwrap();
+    term.backend_mut().assert_cursor_position((4, 2));
+}
+
+#[test]
 fn render_editor_many_lines_cursor_no_overflow() {
     // Many lines — cursor row math must not overflow u16.
     let mut ed = EditorState::empty();

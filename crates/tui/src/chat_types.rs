@@ -114,6 +114,11 @@ pub struct ChatView {
     /// `[turn cost]` holds the frozen value so the timer stays visible during
     /// inter-round tool execution instead of disappearing.
     pub frozen_round_ms: Option<u64>,
+    /// First block belonging to the currently admitted top-level turn. A
+    /// reliable completed-text event uses this floor to repair any parent
+    /// `TextDelta` chunks dropped by the bounded worker channel without ever
+    /// overwriting an Assistant block from an earlier turn.
+    pub turn_block_start: usize,
     /// Whether the user submitted a prompt while in plan mode since the last
     /// plan-mode entry. Reset to `false` on every `AgentSwitch` *to* plan.
     /// Drives the plan→act handoff decision: only hand off when the user

@@ -301,7 +301,6 @@ fn ctx_counts_steer_consumed_prompt() {
     );
 }
 
-
 #[test]
 fn paragraph_scroll_uses_wrapped_rows_and_pins_tail() {
     use ratatui::buffer::Buffer;

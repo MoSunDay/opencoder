@@ -25,12 +25,11 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("switch_mode_keep", "Switch mode (keep context)"),
     ("collapse_blocks", "Collapse blocks + exit subagent"),
     ("force_redraw", "Force full-screen redraw"),
-    ("toggle_focus", "Toggle focus between notepad and chat input"),
     ("copy_mode", "Toggle copy/selection mode"),
     ("hide_composer", "Toggle bottom input"),
 ];
 
-/// Configuration for all 21 re-bindable global keyboard shortcuts. Each field
+/// Configuration for all 20 re-bindable global keyboard shortcuts. Each field
 /// holds a key-spec string parsed by the TUI's `parse_key_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeymapConfig {
@@ -52,7 +51,6 @@ pub struct KeymapConfig {
     pub switch_mode_keep: String,
     pub collapse_blocks: String,
     pub force_redraw: String,
-    pub toggle_focus: String,
     pub copy_mode: String,
     pub hide_composer: String,
 }
@@ -78,7 +76,6 @@ impl Default for KeymapConfig {
             switch_mode_keep: "ctrl+shift+tab".into(),
             collapse_blocks: "ctrl+l".into(),
             force_redraw: "ctrl+f".into(),
-            toggle_focus: "ctrl+o".into(),
             copy_mode: "ctrl+g".into(),
             hide_composer: "ctrl+shift+t".into(),
         }
@@ -107,7 +104,6 @@ impl KeymapConfig {
             "switch_mode_keep" => &self.switch_mode_keep,
             "collapse_blocks" => &self.collapse_blocks,
             "force_redraw" => &self.force_redraw,
-            "toggle_focus" => &self.toggle_focus,
             "copy_mode" => &self.copy_mode,
             "hide_composer" => &self.hide_composer,
             _ => return None,
@@ -135,7 +131,6 @@ impl KeymapConfig {
             "switch_mode_keep" => self.switch_mode_keep = value,
             "collapse_blocks" => self.collapse_blocks = value,
             "force_redraw" => self.force_redraw = value,
-            "toggle_focus" => self.toggle_focus = value,
             "copy_mode" => self.copy_mode = value,
             "hide_composer" => self.hide_composer = value,
             _ => return false,
@@ -191,6 +186,6 @@ mod tests {
 
     #[test]
     fn keymap_info_count_matches_fields() {
-        assert_eq!(KEYMAP_INFO.len(), 21);
+        assert_eq!(KEYMAP_INFO.len(), 20);
     }
 }

@@ -28,11 +28,14 @@ fn main() {
     println!("cargo:rustc-env=OPENCODER_VERSION_LONG={}", assemble(&pkg, &short, dirty));
 }
 
-/// Re-run the build script when the git HEAD or packed refs move, so the
-/// captured commit stays fresh across commits/branch switches.
+/// Re-run the build script when HEAD, loose refs, or packed refs move, so the
+/// captured commit stays fresh across commits and branch switches. On a
+/// normal branch HEAD only contains `ref: refs/heads/<name>` and does not
+/// itself change when a new commit advances that ref.
 fn rerun_for_git(manifest_dir: &str) {
     let git_dir = format!("{manifest_dir}/../../.git");
     println!("cargo:rerun-if-changed={git_dir}/HEAD");
+    println!("cargo:rerun-if-changed={git_dir}/refs");
     println!("cargo:rerun-if-changed={git_dir}/packed-refs");
 }
 

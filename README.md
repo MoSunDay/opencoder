@@ -284,6 +284,15 @@ opencoder/
 └── src/main.rs    # 二进制入口
 ```
 
+## 🙏 致谢
+
+感谢以下开源项目的支持：
+
+- [ripgrep](https://github.com/BurntSushi/ripgrep) — notepad 文件内容搜索后端（不可用时回退 `grep -rn`）
+- [tmux](https://github.com/tmux/tmux) — `opencoder ts` 受管会话（SSH 断线后会话存活，重连自动 reattach）
+
+两者均为独立的外部开源项目，opencoder 仅在使用时调用，不随二进制捆绑分发。
+
 ## 📄 License
 
 [MIT](LICENSE)

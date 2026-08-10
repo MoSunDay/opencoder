@@ -16,7 +16,7 @@ use crate::types::{
 mod events;
 mod inputs;
 mod messages;
-mod schema;
+pub(crate) mod schema;
 mod sessions;
 mod subagent_tasks;
 mod tx;

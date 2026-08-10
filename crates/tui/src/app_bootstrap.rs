@@ -40,6 +40,9 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     )?);
 
     let store: Arc<dyn Store> = open_store(&workdir).await?;
+    // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)
+    // when one exists; a pure tui/run with no ts usage is unaffected.
+    let store: Arc<dyn Store> = crate::ts_mirror::maybe_wrap(store, &workdir).await;
 
     // Resume an existing session if --session was given, otherwise start fresh.
     let replay_cancel = CancellationToken::new();

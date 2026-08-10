@@ -243,11 +243,11 @@ pub fn render_editor(f: &mut Frame, area: Rect, state: &EditorState, focused: bo
         theme::rounded_block(&title)
     };
 
-    // Add mode label at bottom-right of the border.
+    // Add mode label at bottom-left of the border.
     let mode_label = state.vim.mode_label();
     let block = block.title_bottom(
         ratatui::text::Line::from(format!(" {} ", mode_label))
-            .alignment(ratatui::layout::Alignment::Right),
+            .alignment(ratatui::layout::Alignment::Left),
     );
 
     let inner = block.inner(area);

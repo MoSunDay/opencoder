@@ -159,6 +159,34 @@ fn render_editor_cursor_uses_next_row_at_soft_wrap_boundary() {
 }
 
 #[test]
+fn render_editor_mode_label_at_bottom_left() {
+    // The vim mode label renders in the bottom border. Regression: the
+    // label must sit at the bottom-LEFT of the border.
+    let mut ed = EditorState::empty();
+    ed.vim = VimState::new("hello".to_string());
+    ed.vim.mode = VimMode::Normal;
+
+    let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    term.draw(|f| render_editor(f, f.area(), &ed, true))
+        .unwrap();
+
+    let buf = term.backend().buffer();
+    let y = 9u16; // bottom border row
+    let left: String = (1..9)
+        .filter_map(|x| buf.cell((x, y)))
+        .map(|c| c.symbol())
+        .collect();
+    assert_eq!(left, " NORMAL ", "mode label at bottom-left, got {left:?}");
+
+    // And it must not appear at the bottom-right (old alignment).
+    let right: String = (32..40)
+        .filter_map(|x| buf.cell((x, y)))
+        .map(|c| c.symbol())
+        .collect();
+    assert!(!right.contains("NORMAL"), "no mode label at bottom-right: {right:?}");
+}
+
+#[test]
 fn render_editor_many_lines_cursor_no_overflow() {
     // Many lines — cursor row math must not overflow u16.
     let mut ed = EditorState::empty();

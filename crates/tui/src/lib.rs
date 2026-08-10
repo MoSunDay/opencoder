@@ -38,6 +38,7 @@ pub mod skill_persist;
 pub mod skill_token;
 pub mod supervisor;
 pub mod task;
+pub mod ts_mirror;
 pub mod terminal;
 pub mod terminal_text;
 pub mod theme;

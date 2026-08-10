@@ -15,6 +15,7 @@ pub mod motion;
 pub mod normal;
 pub mod search;
 pub mod state;
+pub mod undo;
 
 mod actions;
 mod ops;
@@ -28,12 +29,22 @@ use crossterm::event::KeyEvent;
 /// whether to persist). On a discard exit the engine has already restored
 /// `text` to `original`, so `is_modified` will be `false`.
 pub fn handle_vim_key(state: &mut VimState, k: KeyEvent, inner_w: u16, prompt_w: u16) -> VimAction {
-    match state.mode {
+    // Normal-mode `u` / `Ctrl+R` (undo/redo) are intercepted before dispatch.
+    if let Some(action) = undo::maybe_handle_key(state, &k) {
+        return action;
+    }
+    let before_text = state.text.clone();
+    let before_cursor = state.cursor;
+    let action = match state.mode {
         VimMode::Insert => insert::handle_insert(state, k),
         VimMode::Normal => normal::handle_normal(state, k, inner_w, prompt_w),
         VimMode::Command => command::handle_command(state, k),
         VimMode::Search => search::handle_search(state, k),
-    }
+    };
+    // Snapshot diff: record the pre-key state when the text changed and keep
+    // insert-session boundaries so an entire session undoes as one step.
+    undo::after_dispatch(state, &before_text, before_cursor, action);
+    action
 }
 
 #[cfg(test)]

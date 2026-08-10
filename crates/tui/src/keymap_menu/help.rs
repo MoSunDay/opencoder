@@ -26,7 +26,6 @@ pub const HELP: &str = "\
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Ctrl+G          进入复制/选择模式，用方向键移动光标选中并复制文本
-  Ctrl+O          在 notepad 与输入框之间切换焦点（查看/编辑笔记时使用）
   Ctrl+Shift+T    折叠/展开底部输入框（扩大或恢复输出区域）
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务

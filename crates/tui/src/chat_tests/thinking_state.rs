@@ -189,3 +189,146 @@ fn thinking_header_shows_line_count_when_collapsed() {
         "expanded header must not carry line count"
     );
 }
+
+#[test]
+fn interleaved_reasoning_keeps_one_losslessly_joined_assistant() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1 });
+    v.apply(&SessionEvent::ReasoningDelta("plan regression".into()));
+    v.apply(&SessionEvent::TextDelta("全量回归".into()));
+    v.apply(&SessionEvent::ReasoningDelta("record totals".into()));
+    v.apply(&SessionEvent::TextDelta(
+        "通过，无失败。统计总数并写 changelog。".into(),
+    ));
+
+    assert!(matches!(v.blocks[0], ChatBlock::Thinking { .. }));
+    assert!(matches!(v.blocks[1], ChatBlock::Thinking { .. }));
+    let assistants: Vec<_> = v
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ChatBlock::Assistant { raw, .. } => Some(raw.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        assistants,
+        ["全量回归通过，无失败。统计总数并写 changelog。"]
+    );
+
+    let say_headers = v
+        .flatten()
+        .iter()
+        .filter(|line| line.spans.iter().any(|span| span.content.contains("Say:")))
+        .count();
+    assert_eq!(say_headers, 1, "one LLM round must render one Say header");
+}
+
+#[test]
+fn interleaved_open_thinking_still_uses_collapsed_render_gate() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("first".into()));
+    v.apply(&SessionEvent::TextDelta("answer".into()));
+    v.apply(&SessionEvent::ReasoningDelta("second".into()));
+
+    assert!(
+        v.last_open_thinking_collapsed(),
+        "open Thinking immediately before Assistant must remain detectable"
+    );
+    v.toggle_thinking_at(1);
+    assert!(!v.last_open_thinking_collapsed());
+}
+
+#[test]
+fn interleaved_round_finalization_counts_once_and_hard_bounds_next_round() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::ReasoningDelta("think-a".into()));
+    v.apply(&SessionEvent::TextDelta("answer-a".into()));
+    v.apply(&SessionEvent::ReasoningDelta("think-b".into()));
+    v.apply(&SessionEvent::LlmRoundEnd);
+
+    let expected =
+        estimate("think-a") as u64 + estimate("think-b") as u64 + estimate("answer-a") as u64;
+    assert_eq!(v.context_used, expected);
+    assert!(matches!(
+        v.blocks.last(),
+        Some(ChatBlock::Assistant { done: true, .. })
+    ));
+
+    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 2 });
+    v.apply(&SessionEvent::TextDelta("answer-b".into()));
+    assert_eq!(
+        v.blocks
+            .iter()
+            .filter(|block| matches!(block, ChatBlock::Assistant { .. }))
+            .count(),
+        2,
+        "a new LLM round is a hard Assistant merge boundary"
+    );
+
+    v.apply(&SessionEvent::Done);
+    assert_eq!(
+        v.context_used,
+        expected + estimate("answer-b") as u64,
+        "finalizing again must not double-count the first round"
+    );
+}
+
+#[test]
+fn completed_answer_repairs_dropped_chunks_without_touching_previous_turn() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("old answer".into()));
+    v.apply(&SessionEvent::Done);
+
+    v.begin_turn();
+    v.apply(&SessionEvent::ReasoningDelta("new thinking".into()));
+    v.apply(&SessionEvent::TextDelta("全量回归".into()));
+    v.apply(&SessionEvent::LlmRoundEnd);
+    v.apply(&SessionEvent::Done);
+    v.reconcile_completed_assistant("全量回归通过，无失败。");
+
+    let assistants: Vec<_> = v
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ChatBlock::Assistant { raw, .. } => Some(raw.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(assistants, ["old answer", "全量回归通过，无失败。"]);
+    assert_eq!(
+        v.flatten()
+            .iter()
+            .filter(|line| line.spans.iter().any(|span| span.content.contains("Say:")))
+            .count(),
+        2,
+        "one Say per turn remains after completed-text repair"
+    );
+}
+
+#[test]
+fn completed_answer_creates_say_when_every_text_delta_was_dropped() {
+    let mut v = ChatView::default();
+    v.begin_turn();
+    v.apply(&SessionEvent::ReasoningDelta("thinking".into()));
+    v.apply(&SessionEvent::Done);
+    v.reconcile_completed_assistant("recovered answer");
+
+    assert!(matches!(
+        v.blocks[0],
+        ChatBlock::Thinking { sealed: true, .. }
+    ));
+    assert!(matches!(
+        v.blocks[1],
+        ChatBlock::Assistant {
+            ref raw,
+            done: true,
+            ..
+        } if raw == "recovered answer"
+    ));
+    assert!(matches!(v.blocks[2], ChatBlock::Marker(_)));
+    assert_eq!(
+        v.context_used,
+        estimate("thinking") as u64 + estimate("recovered answer") as u64
+    );
+}

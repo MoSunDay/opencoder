@@ -1,4 +1,4 @@
-Commit: ffbf6d273d13b76097b4395729a4f88361d577b4
+Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
 
 # feat(tui): 顶部标题三项统一 workdir 无着色样式 + 底部状态栏去掉第二根进度条
 

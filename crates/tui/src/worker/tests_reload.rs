@@ -194,6 +194,7 @@ async fn reload_config_missing_api_key_keeps_client_and_emits_error() {
 fn variant_name(ev: &UiEvent) -> &'static str {
     match ev {
         UiEvent::Session(_) => "Session",
+        UiEvent::AssistantFinal(_) => "AssistantFinal",
         UiEvent::TurnDone(_) => "TurnDone",
     }
 }

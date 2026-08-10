@@ -1,4 +1,4 @@
-Commit: 05d4bdf110cd7bfa75492f8ea7eebbb7cdb4c662
+Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
 
 # feat(tui): 底部状态栏 running 动效与运行时间互换位置
 

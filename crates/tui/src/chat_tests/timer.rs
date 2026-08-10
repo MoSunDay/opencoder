@@ -170,7 +170,9 @@ fn frozen_round_persists_after_round_end() {
         v.llm_round_started_at_ms.is_some(),
         "begin_turn starts the round timer"
     );
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 1000 });
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 1000,
+    });
     assert_eq!(v.frozen_round_ms, None, "round start clears frozen");
     v.apply(&SessionEvent::LlmRoundEnd);
     assert!(
@@ -181,7 +183,9 @@ fn frozen_round_persists_after_round_end() {
         v.llm_round_started_at_ms, None,
         "LlmRoundEnd clears the live anchor"
     );
-    v.apply(&SessionEvent::LlmRoundStart { started_at_ms: 2000 });
+    v.apply(&SessionEvent::LlmRoundStart {
+        started_at_ms: 2000,
+    });
     assert_eq!(
         v.frozen_round_ms, None,
         "next LlmRoundStart resets the frozen value"

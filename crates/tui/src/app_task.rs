@@ -142,7 +142,7 @@ pub(crate) async fn switch_session(
         }
         crate::task::TaskPick::New => Vec::new(),
     };
-    let (ntx, nrx) = mpsc::channel::<UiEvent>(512);
+    let (ntx, nrx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
     let (n_cmd_tx, mut n_cmd_rx) = mpsc::channel::<UiCmd>(64);
     let session_for_worker = new_session;
     let agent_name_for_tokens = session_for_worker.agent.name.clone();

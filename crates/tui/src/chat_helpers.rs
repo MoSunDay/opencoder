@@ -111,9 +111,9 @@ impl ChatView {
     /// The block is expanded (not collapsed) so the user sees the command
     /// running. Call [`finish_bash_tool`] to fill in the output.
     pub(crate) fn push_bash_tool(&mut self, cmd: &str) {
+        use crate::theme;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::{Line, Span};
-        use crate::theme;
         self.finalize_assistant();
         self.blocks.push(crate::chat::ChatBlock::Tool {
             id: format!("bash-{}", now_ms()),
@@ -133,11 +133,11 @@ impl ChatView {
     /// Fill the output of the most recent unfinished `bash-` tool block,
     /// collapse it, and record elapsed time.
     pub(crate) fn finish_bash_tool(&mut self, output: &str) {
-        use ratatui::style::Style;
-        use ratatui::text::{Line, Span};
+        use crate::chat::TOOL_OUTPUT_LINES;
         use crate::terminal_text::sanitize_multiline;
         use crate::theme;
-        use crate::chat::TOOL_OUTPUT_LINES;
+        use ratatui::style::Style;
+        use ratatui::text::{Line, Span};
         let ts = now_ms();
         let clean = sanitize_multiline(output);
         let out: Vec<Line<'static>> = clean
@@ -156,17 +156,13 @@ impl ChatView {
             elapsed_ms,
             collapsed,
             ..
-        }) = self
-            .blocks
-            .iter_mut()
-            .rev()
-            .find(|b| {
-                matches!(
-                    b,
-                    crate::chat::ChatBlock::Tool { id, elapsed_ms, .. }
-                        if id.starts_with("bash-") && elapsed_ms.is_none()
-                )
-            }) {
+        }) = self.blocks.iter_mut().rev().find(|b| {
+            matches!(
+                b,
+                crate::chat::ChatBlock::Tool { id, elapsed_ms, .. }
+                    if id.starts_with("bash-") && elapsed_ms.is_none()
+            )
+        }) {
             *o = out;
             *elapsed_ms = Some(((ts - *started_at_ms).max(0)) as u64);
             *collapsed = true;

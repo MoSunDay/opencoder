@@ -98,7 +98,6 @@ async fn slash_act_from_plan_with_plan_routes_handoff() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -160,7 +159,6 @@ async fn slash_clear_context_from_plan_with_plan_routes_handoff() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -222,7 +220,6 @@ async fn slash_clear_context_from_act_mode_dispatches_prompt() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -286,7 +283,6 @@ async fn slash_act_from_act_mode_dispatches_prompt() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -351,7 +347,6 @@ async fn slash_act_from_plan_without_plan_dispatches_prompt() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -409,7 +404,6 @@ async fn tab_fill_input_adds_trailing_space() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -477,7 +471,6 @@ async fn tab_fill_local_command_adds_trailing_space() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -539,7 +532,6 @@ async fn slash_plan_while_running_is_noop() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -610,7 +602,6 @@ async fn slash_act_while_running_is_noop() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -679,7 +670,6 @@ async fn slash_clear_context_while_running_is_noop() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 
@@ -753,7 +743,6 @@ async fn slash_act_while_subagent_running_is_noop() {
         &mut sys_tokens,
         &mut None,
         &mut None,
-        &mut false,
     )
     .await;
 

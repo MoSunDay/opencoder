@@ -98,7 +98,7 @@ fn queue_panel_registers_correct_btns_for_steer_and_queue() {
 }
 
 /// Overflowing panels (more entries than the 3-row viewport) draw a scrollbar
-/// in the rightmost column (track `│` / thumb `█`) and window by `scroll`:
+/// in the rightmost column and window by `scroll`:
 /// `scroll == 0` pins to the oldest (top) entries, `scroll == max_scroll`
 /// shows the newest. The thumb tracks `scroll`, so it sits at the top when
 /// pinned and at the bottom when scrolled to the end.
@@ -133,8 +133,9 @@ fn queue_panel_overflow_windows_and_scrollbar() {
         "newer entries must be hidden at scroll=0: {row0}"
     );
     // Scrollbar: thumb sits at the top when pinned to the oldest window.
-    assert_eq!(row0.chars().last(), Some('\u{2588}'), "thumb at top");
-    assert_eq!(row2.chars().last(), Some('\u{250a}'), "track below thumb");
+    assert_eq!(buf[(79, 0)].symbol(), " ", "thumb is a grid-stable blank");
+    assert_eq!(buf[(79, 0)].bg, crate::theme::subtle(), "thumb at top");
+    assert_eq!(buf[(79, 2)].bg, crate::theme::muted(), "track below thumb");
     // Hit rects stay aligned with the (shifted-left) control strip.
     let del = btns
         .iter()
@@ -157,8 +158,9 @@ fn queue_panel_overflow_windows_and_scrollbar() {
     let row2 = row_text(buf, 2, 80);
     assert!(row0.contains("middle"), "scrolled window: {row0}");
     assert!(row2.contains("newest"), "scrolled window: {row2}");
-    assert_eq!(row0.chars().last(), Some('\u{250a}'), "track above thumb");
-    assert_eq!(row2.chars().last(), Some('\u{2588}'), "thumb at bottom");
+    assert_eq!(buf[(79, 0)].symbol(), " ", "track is a grid-stable blank");
+    assert_eq!(buf[(79, 0)].bg, crate::theme::muted(), "track above thumb");
+    assert_eq!(buf[(79, 2)].bg, crate::theme::subtle(), "thumb at bottom");
 }
 
 /// With the scrollbar taking the rightmost column, every queue-row control

@@ -56,7 +56,7 @@ impl ChatView {
     /// Append a streaming compaction delta. If the last block is a still-
     /// streaming Compaction block, append to its text; otherwise finalize any
     /// in-progress assistant block and open a fresh expanded streaming block.
-    /// This mirrors `ensure_assistant_open`/`TextDelta` so the summary is
+    /// This mirrors `append_text_delta`/`TextDelta` so the summary is
     /// visible while the summarizing LLM call runs, not only after it finishes.
     pub(crate) fn open_compaction_streaming(&mut self, t: &str) {
         self.finalize_assistant();

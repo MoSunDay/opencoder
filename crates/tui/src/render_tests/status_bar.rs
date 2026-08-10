@@ -285,3 +285,95 @@ fn status_bar_hides_task_time_when_zero() {
         "zero task_ms should not show task time; got: {row}"
     );
 }
+
+// ----- Blinking status dot while running -----
+
+/// The running dot stays visible for the full first 500ms phase.
+#[test]
+fn status_dot_stays_visible_through_first_phase() {
+    for tick in [0u32, 1, 2, 3, 4, 10] {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_status(
+                    f,
+                    area,
+                    "act",
+                    true,
+                    "working\u{2026}",
+                    tick,
+                    0,
+                    200000,
+                    200000,
+                    0,
+                );
+            })
+            .unwrap();
+
+        let row = row_text(terminal.backend().buffer(), 0, 120);
+        assert!(
+            row.starts_with(" \u{25cf} [act]"),
+            "visible phases must show the dot at tick={tick}; got: {row}"
+        );
+    }
+}
+
+/// From 500ms through 900ms the running dot stays hidden while preserving
+/// width; tick 10 is covered above as the next visible-phase boundary.
+#[test]
+fn status_dot_stays_hidden_through_second_phase() {
+    for tick in 5u32..=9 {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_status(
+                    f,
+                    area,
+                    "plan",
+                    true,
+                    "working\u{2026}",
+                    tick,
+                    0,
+                    200000,
+                    200000,
+                    0,
+                );
+            })
+            .unwrap();
+
+        let row = row_text(terminal.backend().buffer(), 0, 120);
+        assert!(
+            !row.starts_with(" \u{25cf}"),
+            "hidden phase must hide the dot at tick={tick}; got: {row}"
+        );
+        assert!(
+            row.starts_with("   [plan]"),
+            "mode chip must stay at the same column at tick={tick}; got: {row}"
+        );
+    }
+}
+
+/// Idle (running=false) never blinks: the dot stays visible for any anim_tick.
+#[test]
+fn status_dot_stays_steady_when_idle() {
+    for tick in [0u32, 1, 2, 999] {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_status(f, area, "act", false, "", tick, 0, 200000, 200000, 0);
+            })
+            .unwrap();
+
+        let row = row_text(terminal.backend().buffer(), 0, 120);
+        assert!(
+            row.starts_with(" \u{25cf} [act]"),
+            "idle dot must stay visible for tick={tick}; got: {row}"
+        );
+    }
+}

@@ -136,3 +136,29 @@ fn header_text_shows_line_count() {
         "expanded header has no line count"
     );
 }
+
+/// The capitalized header and expanded summary share one exact purple style.
+/// BOLD is absent because 16-color terminals may promote it to bright magenta.
+#[test]
+fn compaction_header_and_text_are_uniform_purple() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::Compaction("summary".into()));
+
+    let collapsed = v.flatten();
+    let header: String = collapsed[0]
+        .spans
+        .iter()
+        .map(|span| &*span.content)
+        .collect();
+    assert!(header.contains("Compaction"));
+    assert_eq!(collapsed[0].spans[0].style.fg, Some(theme::local_color()));
+    assert!(!collapsed[0].spans[0]
+        .style
+        .add_modifier
+        .contains(Modifier::BOLD));
+
+    v.toggle_compaction_at(0);
+    let expanded = v.flatten();
+    assert_eq!(expanded[0].spans[0].style.fg, Some(theme::local_color()));
+    assert_eq!(expanded[1].spans[0].style.fg, Some(theme::local_color()));
+}

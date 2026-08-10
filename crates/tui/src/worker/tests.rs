@@ -237,48 +237,137 @@ async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
     );
 }
 
-#[test]
-fn forward_event_throttles_delta_preserves_lifecycle() {
-    // Channel with small capacity so we can fill it easily.
-    let (tx, _rx) = mpsc::channel::<UiEvent>(2 * DELTA_MIN_CAPACITY + 1);
+#[tokio::test]
+async fn ordered_forwarder_drops_only_repairable_parent_text() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 1);
+    tx.send(UiEvent::TurnDone("sentinel".into())).await.unwrap();
+    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY);
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
 
-    // Fill the channel to near-capacity (leave <= DELTA_MIN_CAPACITY free).
-    for _ in 0..DELTA_MIN_CAPACITY + 1 {
-        tx.try_send(UiEvent::TurnDone("act".into())).unwrap();
-    }
-    // Now capacity() <= DELTA_MIN_CAPACITY — deltas should be dropped.
-    assert!(tx.capacity() <= DELTA_MIN_CAPACITY);
-
-    // TextDelta is droppable — forward_event should silently drop it.
-    forward_event(&tx, SessionEvent::TextDelta("x".into()));
-    // Capacity unchanged (event was dropped, not enqueued).
-    assert!(tx.capacity() <= DELTA_MIN_CAPACITY);
-
-    // SubagentChild wrapping TextDelta is also droppable.
+    forward_event(&pending, SessionEvent::TextDelta("droppable".into()));
     forward_event(
-        &tx,
+        &pending,
         SessionEvent::SubagentChild {
             id: "s1".into(),
-            ev: Box::new(SessionEvent::TextDelta("y".into())),
+            ev: Box::new(SessionEvent::TextDelta("child text".into())),
         },
     );
+    forward_event(&pending, SessionEvent::ReasoningDelta("thinking".into()));
+    forward_event(&pending, SessionEvent::TranscriptReset(Vec::new()));
+    drop(pending);
+    forwarder.await.unwrap();
 
-    // SubagentStart is a lifecycle event — must always get through.
+    assert!(matches!(rx.recv().await, Some(UiEvent::TurnDone(agent)) if agent == "sentinel"));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::SubagentChild { ev, .. }))
+            if matches!(*ev, SessionEvent::TextDelta(ref text) if text == "child text")
+    ));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::ReasoningDelta(text))) if text == "thinking"
+    ));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::TranscriptReset(messages))) if messages.is_empty()
+    ));
+    assert!(rx.try_recv().is_err(), "parent TextDelta must be shed");
+}
+
+#[test]
+fn completed_assistant_text_is_scoped_to_messages_added_by_current_turn() {
+    let mut sess = test_session("completed-text");
+    sess.messages
+        .push(opencoder_core::Message::assistant("old"));
+    sess.messages.last_mut().unwrap().blocks = vec![opencoder_core::ContentBlock::Text {
+        text: "old answer".into(),
+    }];
+    let floor = sess.messages.len();
+    assert_eq!(completed_assistant_text(&sess, floor), None);
+
+    sess.messages
+        .push(opencoder_core::Message::user("u", "next"));
+    sess.messages
+        .push(opencoder_core::Message::assistant("new"));
+    sess.messages.last_mut().unwrap().blocks = vec![opencoder_core::ContentBlock::Text {
+        text: "complete new answer".into(),
+    }];
+    assert_eq!(
+        completed_assistant_text(&sess, floor).as_deref(),
+        Some("complete new answer")
+    );
+}
+
+#[tokio::test]
+async fn prompt_sends_reliable_completed_answer_before_turn_done() {
+    use opencoder_llm::{LlmEvent, MockChatClient};
+
+    let mock = MockChatClient::new().push_script(vec![
+        LlmEvent::TextDelta("partial".into()),
+        LlmEvent::Completed {
+            text: "complete answer".into(),
+            tool_calls: Vec::new(),
+            usage: None,
+        },
+    ]);
+    let mut sess = SessionState::new(
+        "assistant-final",
+        opencoder_core::resolve_agent("act").unwrap(),
+        opencoder_core::Config::default(),
+        Arc::new(mock),
+        std::env::temp_dir(),
+    );
+    let (evt_tx, mut evt_rx) = mpsc::channel::<UiEvent>(32);
+
+    assert!(
+        !process_cmd(
+            UiCmd::Prompt("question".into(), Vec::new()),
+            &mut sess,
+            &evt_tx
+        )
+        .await
+    );
+    let mut events = Vec::new();
+    while let Ok(event) = evt_rx.try_recv() {
+        events.push(event);
+    }
+    let final_idx = events
+        .iter()
+        .position(
+            |event| matches!(event, UiEvent::AssistantFinal(text) if text == "complete answer"),
+        )
+        .expect("prompt must emit the reliable completed answer");
+    let done_idx = events
+        .iter()
+        .position(|event| matches!(event, UiEvent::TurnDone(_)))
+        .expect("prompt must emit TurnDone");
+    assert!(
+        final_idx < done_idx,
+        "completion repair must precede TurnDone"
+    );
+}
+
+#[tokio::test]
+async fn ordered_forwarder_backpressures_without_losing_reliable_events() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(UI_EVENT_CAPACITY);
+    for index in 0..UI_EVENT_CAPACITY {
+        tx.try_send(UiEvent::TurnDone(format!("sentinel-{index}")))
+            .unwrap();
+    }
+    let (pending, forwarder) = spawn_ui_event_forwarder(tx);
     forward_event(
-        &tx,
-        SessionEvent::SubagentStart {
+        &pending,
+        SessionEvent::ReasoningDelta("parent think".into()),
+    );
+    forward_event(
+        &pending,
+        SessionEvent::SubagentChild {
             id: "s1".into(),
-            kind: "explore".into(),
-            prompt: "p".into(),
-            child_session_id: "c1".into(),
+            ev: Box::new(SessionEvent::ReasoningDelta("child think".into())),
         },
     );
-    // The SubagentStart should have been enqueued (capacity decreased by 1).
-    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 1);
-
-    // SubagentEnd is a lifecycle event — must always get through.
     forward_event(
-        &tx,
+        &pending,
         SessionEvent::SubagentEnd {
             id: "s1".into(),
             ok: true,
@@ -286,34 +375,26 @@ fn forward_event_throttles_delta_preserves_lifecycle() {
             summary: "done".into(),
         },
     );
-    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 2);
-}
+    drop(pending);
 
-#[test]
-fn forward_event_never_drops_reasoning_delta() {
-    // ReasoningDelta drives the `💭 Thinking` label and is NOT rebuilt from
-    // the store on TurnDone (finalize_assistant only restores text), so it
-    // must never be silently dropped even when the channel is saturated.
-    let (tx, _rx) = mpsc::channel::<UiEvent>(2 * DELTA_MIN_CAPACITY + 1);
-
-    // Fill the channel to near-capacity (leave <= DELTA_MIN_CAPACITY free).
-    for _ in 0..DELTA_MIN_CAPACITY + 1 {
-        tx.try_send(UiEvent::TurnDone("act".into())).unwrap();
+    for index in 0..UI_EVENT_CAPACITY {
+        assert!(matches!(
+            rx.recv().await,
+            Some(UiEvent::TurnDone(agent)) if agent == format!("sentinel-{index}")
+        ));
     }
-    assert!(tx.capacity() <= DELTA_MIN_CAPACITY);
-
-    // ReasoningDelta is not droppable — must still be enqueued.
-    forward_event(&tx, SessionEvent::ReasoningDelta("think".into()));
-    // Capacity decreased by 1 because the event was enqueued, not dropped.
-    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 1);
-
-    // SubagentChild wrapping ReasoningDelta is also not droppable.
-    forward_event(
-        &tx,
-        SessionEvent::SubagentChild {
-            id: "s1".into(),
-            ev: Box::new(SessionEvent::ReasoningDelta("child think".into())),
-        },
-    );
-    assert_eq!(tx.capacity(), DELTA_MIN_CAPACITY - 2);
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::ReasoningDelta(text))) if text == "parent think"
+    ));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::SubagentChild { ev, .. }))
+            if matches!(*ev, SessionEvent::ReasoningDelta(ref text) if text == "child think")
+    ));
+    assert!(matches!(
+        rx.recv().await,
+        Some(UiEvent::Session(SessionEvent::SubagentEnd { summary, .. })) if summary == "done"
+    ));
+    forwarder.await.unwrap();
 }

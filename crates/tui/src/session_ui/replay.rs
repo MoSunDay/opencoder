@@ -75,6 +75,18 @@ pub(super) fn replay_one(
             chat.push_marker(Line::from(""));
         }
         Role::Assistant => {
+            // Live streaming groups every reasoning segment before the round's
+            // sole Assistant block. Rebuild in the same order so resume never
+            // flips `Thinking -> Say` into `Say -> Thinking`.
+            for b in &msg.blocks {
+                if let ContentBlock::Reasoning { text } = b {
+                    chat.blocks.push(ChatBlock::Thinking {
+                        text: sanitize_multiline(text).into_owned(),
+                        collapsed: true,
+                        sealed: true,
+                    });
+                }
+            }
             let text: String = msg
                 .blocks
                 .iter()
@@ -92,18 +104,6 @@ pub(super) fn replay_one(
                     rendered,
                     done: true,
                 });
-            }
-            // Restore reasoning blocks as collapsed Thinking blocks so the
-            // `💭 Thinking` label survives resume / compaction — mirroring the
-            // live `ChatView::apply` ReasoningDelta path.
-            for b in &msg.blocks {
-                if let ContentBlock::Reasoning { text } = b {
-                    chat.blocks.push(ChatBlock::Thinking {
-                        text: sanitize_multiline(text).into_owned(),
-                        collapsed: true,
-                        sealed: true,
-                    });
-                }
             }
             for b in &msg.blocks {
                 if let ContentBlock::ToolUse { id, name, input } = b {

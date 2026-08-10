@@ -31,7 +31,7 @@ use crate::local_cmd;
 use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd, UiEvent};
+use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
@@ -195,8 +195,8 @@ pub(crate) async fn handle_switch_agent(
     let plan_to_act = chat.agent == "plan" && name == "act";
     if *running || chat.subagents_running > 0 {
         // A turn is in flight OR a subagent task is live — any mode switch is
-        // a no-op. A dropped SubagentEnd (lossy try_send) can leave
-        // subagents_running > 0 after the turn's Done, so we gate on it too.
+        // a no-op. A stale/replayed session can retain subagents_running > 0
+        // after its parent turn, so we gate on it too.
         // The worker is mid-`run_session`; applying the switch now would start
         // the next turn with a stale agent at an arbitrary partial boundary.
         // sys_tokens is NOT updated here: the agent stays in its current mode,
@@ -313,6 +313,9 @@ pub(crate) async fn fold_ui_events(
                     chat.pending_plan_arm = saved_pending_plan_arm;
                     chat.annotation_text = saved_annotation_text;
                     chat.first_prompt = saved_first_prompt;
+                    // The reset happened inside the admitted turn; reliable
+                    // completion repair must never target pre-reset blocks.
+                    chat.turn_block_start = chat.blocks.len();
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();
@@ -385,12 +388,15 @@ pub(crate) async fn fold_ui_events(
                     }
                 }
             }
+            UiEvent::AssistantFinal(text) => {
+                chat.reconcile_completed_assistant(&text);
+            }
             UiEvent::TurnDone(agent) => {
                 // Reconcile the status chip from the authoritative agent.
-                // AgentSwitch (the only other writer of chat.agent) is delivered
-                // via try_send and may be dropped when the UI channel saturates.
-                // TurnDone uses send().await (always lands).
-                // A dropped AgentSwitch("plan") would leave a stale
+                // The ordered forwarder reliably delivers AgentSwitch before
+                // TurnDone. Keep this authoritative assignment for compatibility
+                // with older producers and restored UI state. A missing older
+                // AgentSwitch("plan") would leave a stale
                 // pending_plan_arm behind, spuriously re-arming plan_submitted
                 // on a *later* plan-mode entry. The event channel is FIFO, so
                 // an unconsumed arm at TurnDone(plan) means exactly that the
@@ -401,18 +407,16 @@ pub(crate) async fn fold_ui_events(
                     chat.pending_plan_arm = false;
                 }
                 chat.agent = crate::terminal_text::sanitize_single_line(&agent).into_owned();
-                // Safety net: SessionEvent::Done (which triggers
-                // finalize_assistant -> markdown::render) is sent via
-                // try_send and may be dropped during token bursts.
-                // TurnDone is sent via blocking send().await so it
-                // always arrives. finalize_assistant is idempotent
+                // Safety net for older producers that could omit
+                // SessionEvent::Done during token bursts. Current TurnDone is
+                // reliably delivered by the ordered forwarder, and
+                // finalize_assistant is idempotent
                 // (the `!*done` guard), so re-calling when Done was
                 // already processed is a no-op.
                 chat.finalize_assistant();
-                // Reconcile any subagent whose SubagentEnd was dropped under
-                // channel saturation (try_send) - Done is also lossy, but
-                // TurnDone always lands (blocking send), so this is the
-                // authoritative idle boundary for orphan reconciliation.
+                // Reconcile orphaned subagents from cancellation, restored old
+                // state, or older lossy producers. TurnDone is the authoritative
+                // idle boundary for this compatibility repair.
                 chat.reconcile_orphaned_subagents();
                 if *drain_pending {
                     // The cancelled turn has finished draining — restart
@@ -470,7 +474,6 @@ pub(crate) async fn dispatch_command(
     sys_tokens: &mut u64,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
-    np_chat_focus: &mut bool,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -539,87 +542,57 @@ pub(crate) async fn dispatch_command(
         // refused with a `[switch] busy — retry when idle` marker — a mode
         // switch mid-turn would start the next turn with a stale agent at an
         // arbitrary partial boundary (mirrors `/compact`'s SkipRunning).
-        CommandOutcome::Dispatch(SlashAction::Act) => match gate_switch(*running || chat.subagents_running > 0) {
-            SwitchGate::Run => {
-                if chat.agent == "plan" && chat.plan_submitted {
-                    let extra = prep_plan_to_act(
-                        input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-                    );
-                    if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await
-                    {
-                        worker_dead(chat);
-                        return LoopFlow::Quit;
-                    }
-                } else if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/act".into(), Vec::new()))
-                    .await
-                {
-                    worker_dead(chat);
-                    return LoopFlow::Quit;
-                }
-                *running = true;
-                *follow = true;
-                chat.begin_turn();
-            }
-            SwitchGate::SkipRunning => {
-                chat.push_marker(Line::from(Span::styled(
-                    "[switch] busy \u{2014} retry when idle",
-                    Style::default().fg(theme::warn_color()),
-                )));
-            }
-        },
-        CommandOutcome::Dispatch(SlashAction::Plan) => match gate_switch(*running || chat.subagents_running > 0) {
-            SwitchGate::Run => {
-                if !start_turn(cmd_tx, cancel, UiCmd::Prompt("/plan".into(), Vec::new())).await {
-                    worker_dead(chat);
-                    return LoopFlow::Quit;
-                }
-                *running = true;
-                *follow = true;
-                chat.begin_turn();
-            }
-            SwitchGate::SkipRunning => {
-                chat.push_marker(Line::from(Span::styled(
-                    "[switch] busy \u{2014} retry when idle",
-                    Style::default().fg(theme::warn_color()),
-                )));
-            }
-        },
-        CommandOutcome::Dispatch(SlashAction::ClearContext) => match gate_switch(*running || chat.subagents_running > 0) {
-            SwitchGate::Run => {
-                if chat.agent == "plan" && chat.plan_submitted {
-                    let extra = prep_plan_to_act(
-                        input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-                    );
-                    if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await
-                    {
-                        worker_dead(chat);
-                        return LoopFlow::Quit;
-                    }
-                } else if !start_turn(
-                    cmd_tx,
-                    cancel,
-                    UiCmd::Prompt("/act_clear_context".into(), Vec::new()),
-                )
-                .await
-                {
-                    worker_dead(chat);
-                    return LoopFlow::Quit;
-                }
-                *running = true;
-                *follow = true;
-                chat.begin_turn();
-            }
-            SwitchGate::SkipRunning => {
-                chat.push_marker(Line::from(Span::styled(
-                    "[switch] busy \u{2014} retry when idle",
-                    Style::default().fg(theme::warn_color()),
-                )));
-            }
-        },
-        // Display-only commands: inspect / kill background bash, toggle
-        // autopilot. Never start a turn and never reach session.messages —
-        // the result is pushed as a purple marker. Work in any state
-        // (idle + mid-turn).
+        CommandOutcome::Dispatch(SlashAction::Act) => {
+            return dispatch_mode_switch(
+                ModeSwitch::Act,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
+        }
+        CommandOutcome::Dispatch(SlashAction::Plan) => {
+            return dispatch_mode_switch(
+                ModeSwitch::Plan,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
+        }
+        CommandOutcome::Dispatch(SlashAction::ClearContext) => {
+            return dispatch_mode_switch(
+                ModeSwitch::ClearContext,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
+        }
         CommandOutcome::Dispatch(SlashAction::Annotation) => {
             crate::plan_edit::enter_annotation(
                 plan_edit,
@@ -629,7 +602,6 @@ pub(crate) async fn dispatch_command(
         }
         CommandOutcome::Dispatch(SlashAction::Notepad) => {
             *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
-            *np_chat_focus = false;
         }
         CommandOutcome::Dispatch(SlashAction::Ps) => {
             local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
@@ -767,6 +739,11 @@ pub(crate) use app_loop_model::handle_model_outcome;
 mod app_loop_paste;
 
 pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_silent, route_paste};
+
+#[path = "app_loop_actions.rs"]
+mod app_loop_actions;
+
+pub(crate) use app_loop_actions::{dispatch_mode_switch, ModeSwitch};
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds

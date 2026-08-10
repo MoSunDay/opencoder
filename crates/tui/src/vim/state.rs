@@ -5,6 +5,7 @@
 //! (count, operator, `g`-sequence). It also retains the `original` text so a
 //! discard exit (`:q!` / Ctrl+C) can restore the pre-edit content.
 
+use super::undo::UndoHistory;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub struct VimState {
     pub register: String,                    // last yanked/deleted text
     pub register_linewise: bool,             // whether `register` was a linewise op
     pub status: String,                      // transient status message (e.g. search wrap)
+    pub history: UndoHistory,              // vim undo/redo stacks (u / Ctrl+R)
 }
 
 impl VimState {
@@ -39,6 +41,7 @@ impl VimState {
     pub fn new(text: String) -> Self {
         let cursor = text.chars().count();
         let original = text.clone();
+        let history = super::undo::init(&text, cursor);
         Self {
             text,
             cursor,
@@ -54,6 +57,7 @@ impl VimState {
             register: String::new(),
             register_linewise: false,
             status: String::new(),
+            history,
         }
     }
 

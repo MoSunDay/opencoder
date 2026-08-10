@@ -73,7 +73,7 @@ pub enum Command {
     /// Run the TUI inside a tmux session that survives SSH disconnect.
     /// `ts` has the short alias `rs`: `rs -l`/`rs --list` lists managed tmux
     /// sessions **globally** (every workdir, each with its live workdir path)
-    /// plus stopped sessions that were registered via ts across all stores,
+    /// plus stopped sessions registered in the central ts registry (`ts.db`),
     /// `rs -r <id>` globally reattaches or cold-starts a stopped one in its
     /// recorded workdir, `rs -c` globally
     /// cleans stopped ts-owned sessions across all workdirs, and `rs -d <id>`
@@ -82,7 +82,7 @@ pub enum Command {
     #[command(alias = "rs")]
     Ts {
         /// List all sessions: live managed tmux sessions from every workdir
-        /// (path from tmux) plus ts-registered stopped sessions from all stores.
+        /// (path from tmux) plus ts-registered stopped sessions from the registry.
         #[arg(short, long, conflicts_with_all = ["resume", "clean", "delete"])]
         list: bool,
         /// Globally resume/attach by id (live: attach; stopped: cold-start in

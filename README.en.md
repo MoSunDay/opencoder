@@ -276,6 +276,15 @@ opencoder/
 └── src/main.rs    # Binary entry point
 ```
 
+## 🙏 Acknowledgements
+
+Thanks to the following open-source projects:
+
+- [ripgrep](https://github.com/BurntSushi/ripgrep) — content search backend in notepad (falls back to `grep -rn` when unavailable)
+- [tmux](https://github.com/tmux/tmux) — managed sessions for `opencoder ts` (sessions survive SSH disconnects and reattach on reconnect)
+
+Both are independent external projects: opencoder only invokes them at runtime and does not bundle or redistribute them.
+
 ## 📄 License
 
 [MIT](LICENSE)

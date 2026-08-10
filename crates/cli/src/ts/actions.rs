@@ -7,14 +7,14 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 
-use opencoder_store::{LibsqlStore, SessionListItem, Store};
+use opencoder_store::{LibsqlStore, Store, TsRecord, TsRegistry};
 
 use crate::Cli;
 
-use super::display::{abbreviate_path, format_ts, id8, ms_to_secs, preview_of, task_head};
+use super::display::{abbreviate_path, format_ts, id8, preview_of, task_head};
 use super::env::tmux_available;
 use super::naming::{fresh_id, id_from_name, resolve_target, session_name};
-use super::registry::{record_workdir, scan_best_effort, scan_required, StoredSession};
+use super::registry::{open_registry, register};
 use super::tmux::{
     attach, current_session_name, kill_session, list_managed, session_exists, tmux_bin,
     ManagedSession,
@@ -48,18 +48,18 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
     if let Some(name) = attach_name {
         return attach(&name);
     }
+
+    let registry = open_registry().await?;
+    // `--session <id>` naming a globally registered stopped session cold-starts
+    // it in its recorded workdir instead of seeding a fresh one here.
     if let Some(id) = &cli.session {
-        let globally_known = scan_required(&opencoder_core::data_root())
-            .await?
-            .iter()
-            .any(|stored| stored.item.id == *id && is_ts_owned(&stored.item));
-        if globally_known {
+        if registry.get(id).await?.is_some() {
             return ts_resume(cli, id).await;
         }
     }
     let workdir = current_workdir(cli)?;
     let id = cli.session.clone().unwrap_or_else(fresh_id);
-    record_workdir(&workdir).await?;
+    register(&registry, &id, &workdir).await?;
     spawn_session(&workdir, &id)
 }
 
@@ -120,7 +120,7 @@ fn spawn_args(exe: &Path, workdir: &Path, id: &str, inside: bool) -> Vec<OsStrin
     args
 }
 
-/// Three-way tmux liveness for a Store session.
+/// Three-way tmux liveness for a registry session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TmuxState {
     Attached,
@@ -128,9 +128,7 @@ pub(crate) enum TmuxState {
     Dead,
 }
 
-/// True when `path` is the stopped-sentinel, so stopped rows sort after live
-/// ones regardless of ASCII ordering (`(` would otherwise precede `~`).
-/// Classify a Store session's tmux state given the live tmux id map.
+/// Classify a session's tmux state given the live tmux id map.
 fn classify(id: &str, tmux_by_id: &HashMap<String, &ManagedSession>) -> TmuxState {
     match tmux_by_id.get(id) {
         Some(m) if m.attached != 0 => TmuxState::Attached,
@@ -150,21 +148,20 @@ const LIST_LEGEND: &str =
 /// The list is **tmux-first and global**: every live managed tmux session
 /// (`opencode-*`, from `tmux list-sessions`) is shown with the tmux pane's
 /// actual workdir (`pane_current_path`, `$HOME` abbreviated to `~`), enriched
-/// with `/task`-style info from any store that knows the session id. Stopped
-/// sessions are taken from **all** per-workdir stores under the data root —
-/// not just the current workdir — but only when they were registered by the
-/// ts flow (seeded without agent/model) *and* actually started (preview or
-/// title present). Plain `tui`/`run` sessions and never-started empty seeds
-/// are never listed.
+/// with registry info for the session id. Stopped sessions come from the
+/// central ts registry (`<data_root>/ts.db`, one indexed query) — rows are ts
+/// sessions by construction — but only once actually started (preview or title
+/// present). Never-started empty seeds are not listed.
 ///
 /// Columns: `marker id8 created-ago workdir task-head`.
 /// Sorting: non-stopped first, then by workdir path ascending, then by
 /// creation time descending (newest first within each path group).
 pub(crate) async fn ts_list(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
-    sync_live_workdirs(&tmux).await;
-    let store_items = scan_best_effort(&opencoder_core::data_root()).await;
-    let mut rows = build_rows(&store_items, &tmux);
+    let registry = open_registry().await?;
+    sync_live_workdirs(&registry, &tmux).await;
+    let records = registry.list().await?;
+    let mut rows = build_rows(&records, &tmux);
     sort_rows(&mut rows);
 
     if rows.is_empty() {
@@ -178,10 +175,9 @@ pub(crate) async fn ts_list(_cli: &Cli) -> Result<()> {
             TmuxState::Dead => "-",
         };
         println!(
-            "{} {:<10} {:<9} {:<16} {}",
-            marker,
+            "{marker} {:<10} {:<9} {:<16} {}",
             id8(&row.id),
-            format_ts(ms_to_secs(row.created_at)),
+            format_ts(row.created_at),
             row.path,
             row.task
         );
@@ -203,36 +199,31 @@ pub(crate) struct GlobalRow {
     pub task: String,
 }
 
-/// Read every session from every *existing* per-workdir store under the data
-/// root. A missing `opencoder.db`, an unreadable entry, or a failing
-/// query is skipped with a `tracing::warn` — a display command must never die
-/// because of one bad store dir.
-/// Merge store sessions + live managed tmux sessions into the global panel.
+/// Merge registry sessions + live managed tmux sessions into the global panel.
 ///
 /// Live tmux sessions always appear, carrying the tmux pane's real workdir;
-/// store rows only *enrich* them (task preview, creation time). A store
+/// registry rows only *enrich* them (task preview, creation time). A registry
 /// session with no live tmux twin is listed as `(stopped)` only when it was
-/// registered by the ts flow: its seeded row persists no agent/model (a plain
-/// `tui`/`run` session always writes both at creation) **and** it was actually
-/// started (has a preview or title). Never-started empty seeds and plain
-/// non-tmux sessions are skipped — registration into the panel is explicit.
-fn build_rows(store_items: &[StoredSession], tmux: &[ManagedSession]) -> Vec<GlobalRow> {
-    let by_id: HashMap<String, &SessionListItem> = store_items
+/// actually started (has a preview or title); never-started empty seeds are
+/// skipped. Registry rows are ts sessions by construction — the old
+/// `model IS NULL` ownership filter lived in this function and is gone.
+fn build_rows(records: &[TsRecord], tmux: &[ManagedSession]) -> Vec<GlobalRow> {
+    let by_id: HashMap<String, &TsRecord> = records
         .iter()
-        .map(|stored| (stored.item.id.clone(), &stored.item))
+        .map(|record| (record.id.clone(), record))
         .collect();
     let tmux_by_id: HashMap<String, &ManagedSession> = tmux
         .iter()
         .filter_map(|m| m.id().map(|i| (i.to_string(), m)))
         .collect();
 
-    let mut rows: Vec<GlobalRow> = Vec::with_capacity(tmux.len() + store_items.len());
+    let mut rows: Vec<GlobalRow> = Vec::with_capacity(tmux.len() + records.len());
     for m in tmux {
         let Some(id) = m.id() else { continue };
-        // Prefer the store's creation time (ms); tmux gives unix seconds.
+        // Prefer the registry's creation time (ms); tmux gives unix seconds.
         let tmux_created_ms = m.created.saturating_mul(1000);
         let (created_at, task) = match by_id.get(id) {
-            Some(s) => (s.created_at, task_text(s)),
+            Some(record) => (record.created_at, task_text(record)),
             None => (tmux_created_ms, "(no task yet)".to_string()),
         };
         rows.push(GlobalRow {
@@ -244,55 +235,39 @@ fn build_rows(store_items: &[StoredSession], tmux: &[ManagedSession]) -> Vec<Glo
         });
     }
 
-    for stored in store_items {
-        let s = &stored.item;
-        if tmux_by_id.contains_key(&s.id) {
+    for record in records {
+        if tmux_by_id.contains_key(&record.id) {
             continue; // live row already emitted above
         }
-        if !is_registered(s) {
-            continue; // plain tui/run session or never-started seed
+        if !has_content(record) {
+            continue; // never-started registration-time seed
         }
         rows.push(GlobalRow {
-            id: s.id.clone(),
-            path: stored
+            id: record.id.clone(),
+            path: record
                 .workdir
                 .as_deref()
                 .map(|path| abbreviate_path(&path.to_string_lossy()))
                 .unwrap_or_else(|| "(unknown)".into()),
-            created_at: s.created_at,
+            created_at: record.created_at,
             state: TmuxState::Dead,
-            task: task_text(s),
+            task: task_text(record),
         });
     }
     rows
 }
 
-/// Was this store session registered by the ts flow?
-///
-/// Registration happens at `ts` seed time, which writes a row with `model`
-/// left NULL — a plain `tui`/`run` session always persists the model at first
-/// message. A registered row additionally counts only once it was actually
-/// started: the empty seed (no preview, no title) is not a session worth
-/// listing.
-fn is_registered(s: &SessionListItem) -> bool {
-    let has_content = !s.preview.trim().is_empty()
-        || s.title.as_deref().is_some_and(|t| !t.trim().is_empty());
-    is_ts_owned(s) && has_content
+/// A stopped registry row counts as a real session only once it was started:
+/// the registration-time seed has neither preview nor title.
+fn has_content(record: &TsRecord) -> bool {
+    !record.preview.trim().is_empty()
+        || record.title.as_deref().is_some_and(|t| !t.trim().is_empty())
 }
 
-/// A session row owned by the ts flow. The seed is inserted before the TUI
-/// starts with `model` left NULL; plain `tui`/`run` rows always persist the
-/// model at first message. The durable ts marker is therefore `model IS NULL`:
-/// mode switches (`/act`, `/plan`, `SwitchAgent`) patch only `agent`, so a
-/// used ts session keeps `model` NULL even after `persist_agent` set one.
-fn is_ts_owned(s: &SessionListItem) -> bool {
-    s.model.is_none()
-}
-
-/// Task head for a store session: preview (fallback title) truncated to 20
+/// Task head for a registry session: preview (fallback title) truncated to 20
 /// chars, or the `(no task yet)` placeholder when empty.
-fn task_text(s: &SessionListItem) -> String {
-    let raw = preview_of(&s.preview, s.title.as_deref());
+fn task_text(record: &TsRecord) -> String {
+    let raw = preview_of(&record.preview, record.title.as_deref());
     if raw.trim().is_empty() {
         "(no task yet)".to_string()
     } else {
@@ -312,10 +287,11 @@ fn sort_rows(rows: &mut [GlobalRow]) {
 }
 
 /// `opencode ts -r <id>` -- resume/attach a live session, or cold-start a
-/// stopped one from Store history.
+/// stopped one from its registry record.
 pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     let tmux = list_managed()?;
-    let records = scan_required(&opencoder_core::data_root()).await?;
+    let registry = open_registry().await?;
+    let records = registry.list().await?;
     let id = resolve_managed_id(target, &tmux, &records)?;
     if let Some(managed) = tmux
         .iter()
@@ -323,25 +299,17 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     {
         return attach(&managed.name);
     }
-    // Dead: resolve its durable workdir from the global registry.
-    let matches: Vec<&StoredSession> = records
-        .iter()
-        .filter(|stored| stored.item.id == id && is_ts_owned(&stored.item))
-        .collect();
-    if matches.is_empty() {
+    // Dead: resolve its durable workdir from the registry.
+    let Some(record) = registry.get(&id).await? else {
         bail!(
             "no global tmux session matching `{}`. Run `opencode ts -l` to list.",
             target
         );
-    }
-    if matches.len() > 1 {
-        bail!("ambiguous global tmux session `{id}` exists in multiple stores");
-    }
-    let stored = matches[0];
-    let workdir = match (&cli.workdir, &stored.workdir) {
+    };
+    let workdir = match (&cli.workdir, &record.workdir) {
         (Some(explicit), _) => {
             let explicit_dir = opencoder_core::data_dir_for(explicit);
-            if explicit_dir != stored.store_dir {
+            if record.store_dir.as_deref() != Some(explicit_dir.as_path()) {
                 bail!("--workdir does not own global tmux session `{id}`");
             }
             tokio::fs::canonicalize(explicit)
@@ -353,19 +321,18 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
             "global tmux session `{id}` predates workdir tracking; resume once with --workdir <original-path>"
         ),
     };
-    record_workdir(&workdir).await?;
+    register(&registry, &id, &workdir).await?;
     spawn_session(&workdir, &id)
 }
 
-/// `opencode ts -c` -- delete stopped ts-owned sessions from every workdir
-/// store. Live tmux ids are protected globally, including the caller's own
-/// attached session. Plain tui/run history is outside this command's scope.
+/// `opencode ts -c` -- delete stopped ts sessions from every workdir.
 pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
     let tmux = list_managed()?;
-    sync_live_workdirs(&tmux).await;
-    let store_items = scan_required(&opencoder_core::data_root()).await?;
+    let registry = open_registry().await?;
+    sync_live_workdirs(&registry, &tmux).await;
+    let records = registry.list().await?;
     let live_ids: HashSet<&str> = tmux.iter().filter_map(|m| m.id()).collect();
-    let targets = cleanup_targets(&store_items, &live_ids);
+    let targets = cleanup_targets(&records, &live_ids);
 
     let mut removed = 0u32;
     for (dir, ids) in targets {
@@ -373,11 +340,20 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
         let store = LibsqlStore::open(&db)
             .await
             .with_context(|| format!("open store for cleanup: {}", db.display()))?;
-        for id in ids {
+        for id in &ids {
             store
-                .delete_session(&id)
+                .delete_session(id)
                 .await
                 .with_context(|| format!("delete stopped ts session {id} from {}", db.display()))?;
+            registry.delete(id).await?;
+            removed += 1;
+        }
+    }
+    // Rows without an owning store dir have no content to purge; unregister
+    // them so cleanup still converges (defensive: no producer creates these).
+    for record in &records {
+        if record.store_dir.is_none() && !live_ids.contains(record.id.as_str()) {
+            registry.delete(&record.id).await?;
             removed += 1;
         }
     }
@@ -390,24 +366,20 @@ pub(crate) async fn ts_cleanup(_cli: &Cli) -> Result<()> {
 }
 
 /// `opencode ts -d <id>` -- remove one exact global managed session.
-/// A live tmux instance is terminated first, then its unique ts-owned Store
-/// record is deleted. Deleting the caller's current tmux session is refused
-/// because killing its pane would interrupt the Store deletion halfway.
+/// A live tmux instance is terminated first, then its registry record is
+/// deleted and its Store content removed. Deleting the caller's current tmux
+/// session is refused because killing its pane would interrupt the Store
+/// deletion halfway.
 pub(crate) async fn ts_delete(target: &str) -> Result<()> {
     let tmux = list_managed()?;
-    let records = scan_required(&opencoder_core::data_root()).await?;
+    let registry = open_registry().await?;
+    let records = registry.list().await?;
     let id = resolve_managed_id(target, &tmux, &records)?;
     let live = tmux
         .iter()
         .find(|managed| managed.id() == Some(id.as_str()));
-    let stored: Vec<&StoredSession> = records
-        .iter()
-        .filter(|record| record.item.id == id && is_ts_owned(&record.item))
-        .collect();
-    if stored.len() > 1 {
-        bail!("ambiguous global tmux session `{id}` exists in multiple stores");
-    }
-    if live.is_none() && stored.is_empty() {
+    let record = records.iter().find(|record| record.id == id);
+    if live.is_none() && record.is_none() {
         bail!("no global tmux session matching `{target}`");
     }
     if let Some(managed) = live {
@@ -416,15 +388,18 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
         }
         kill_session(&managed.name)?;
     }
-    if let Some(record) = stored.first() {
-        let db = record.store_dir.join("opencoder.db");
-        let store = LibsqlStore::open(&db)
-            .await
-            .with_context(|| format!("open session store for delete: {}", db.display()))?;
-        store
-            .delete_session(&id)
-            .await
-            .with_context(|| format!("delete global tmux session {id} from {}", db.display()))?;
+    if let Some(record) = record {
+        if let Some(dir) = &record.store_dir {
+            let db = dir.join("opencoder.db");
+            let store = LibsqlStore::open(&db)
+                .await
+                .with_context(|| format!("open session store for delete: {}", db.display()))?;
+            store
+                .delete_session(&record.id)
+                .await
+                .with_context(|| format!("delete global tmux session {id} from {}", db.display()))?;
+        }
+        registry.delete(&record.id).await?;
     }
     println!("removed global tmux session {id}");
     Ok(())
@@ -432,11 +407,11 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
 
 /// Resolve exactly what `ts -l` displays: its eight-character id prefix, a
 /// full bare/prefixed id, or a live tmux `$index`. Prefixes must identify one
-/// global id; duplicate Store rows for that id are checked by the caller.
+/// global id; registry rows are unique per id, so no duplicate handling.
 fn resolve_managed_id(
     target: &str,
     tmux: &[ManagedSession],
-    records: &[StoredSession],
+    records: &[TsRecord],
 ) -> Result<String> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
@@ -465,8 +440,7 @@ fn resolve_managed_id(
     matches.extend(
         records
             .iter()
-            .filter(|stored| is_ts_owned(&stored.item))
-            .map(|stored| stored.item.id.as_str())
+            .map(|record| record.id.as_str())
             .filter(|id| id.starts_with(query)),
     );
     if matches.contains(query) {
@@ -482,31 +456,48 @@ fn resolve_managed_id(
     }
 }
 
-/// Pure target selection shared by the cleanup implementation and tests.
+/// Pure target selection shared by the cleanup implementation and tests: dead
+/// ts rows grouped by the store dir that owns their content.
 fn cleanup_targets(
-    store_items: &[StoredSession],
+    records: &[TsRecord],
     live_ids: &HashSet<&str>,
 ) -> BTreeMap<PathBuf, Vec<String>> {
     let mut targets = BTreeMap::<PathBuf, Vec<String>>::new();
-    for stored in store_items {
-        let session = &stored.item;
-        if is_ts_owned(session) && !live_ids.contains(session.id.as_str()) {
+    for record in records {
+        if live_ids.contains(record.id.as_str()) {
+            continue;
+        }
+        if let Some(dir) = &record.store_dir {
             targets
-                .entry(stored.store_dir.clone())
+                .entry(dir.clone())
                 .or_default()
-                .push(session.id.clone());
+                .push(record.id.clone());
         }
     }
     targets
 }
 
-async fn sync_live_workdirs(tmux: &[ManagedSession]) {
+/// Steady state: register a live session's pane workdir only when its registry
+/// row is missing or has no durable workdir yet, so `ts -l` does not write on
+/// every invocation.
+async fn sync_live_workdirs(registry: &TsRegistry, tmux: &[ManagedSession]) {
     for managed in tmux {
+        let Some(id) = managed.id() else { continue };
         if managed.pane_path.is_empty() {
             continue;
         }
-        if let Err(error) = record_workdir(Path::new(&managed.pane_path)).await {
-            tracing::warn!(session = %managed.name, %error, "ts: cannot record live workdir");
+        let needs_register = match registry.get(id).await {
+            Ok(Some(record)) => record.workdir.is_none(),
+            Ok(None) => true,
+            Err(error) => {
+                tracing::warn!(session = %managed.name, %error, "ts: cannot read registry for live workdir");
+                false
+            }
+        };
+        if needs_register {
+            if let Err(error) = register(registry, id, Path::new(&managed.pane_path)).await {
+                tracing::warn!(session = %managed.name, %error, "ts: cannot record live workdir");
+            }
         }
     }
 }
@@ -521,7 +512,6 @@ fn current_workdir(cli: &Cli) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opencoder_store::SessionMeta;
 
     #[test]
     fn explicit_attach_target_bare_ts_returns_none() {
@@ -586,13 +576,9 @@ mod tests {
     }
 
     #[test]
-    fn managed_target_resolves_stopped_store_prefix() {
+    fn managed_target_resolves_stopped_registry_prefix() {
         let full_id = "01STORE0ABCDEFGHJKMNPQRSTV";
-        let records = vec![mk_stored(
-            "/data/store",
-            Some("/work/project"),
-            mk_item(full_id, None, None, "task", None, 1),
-        )];
+        let records = vec![mk_record(full_id, Some("/work/project"), "task", None, 1)];
         assert_eq!(
             resolve_managed_id("01STORE0", &[], &records).unwrap(),
             full_id
@@ -627,35 +613,24 @@ mod tests {
         mk_managed_at(id, attached, "/root/proj", 0)
     }
 
-    /// A store `SessionListItem` for build_rows tests. `agent`/`model` mirror
-    /// the seeded (None) vs plain-tui/run (Some) distinction.
-    fn mk_item(
+    /// A registry row for build_rows/cleanup tests. Registry rows are ts
+    /// sessions by construction — the old `agent`/`model` seed distinction
+    /// lives in the producers (ts_start register + tui mirror), not here.
+    fn mk_record(
         id: &str,
-        agent: Option<&str>,
-        model: Option<&str>,
+        workdir: Option<&str>,
         preview: &str,
         title: Option<&str>,
         created: i64,
-    ) -> SessionListItem {
-        SessionListItem {
+    ) -> TsRecord {
+        TsRecord {
             id: id.to_string(),
-            title: title.map(String::from),
-            agent: agent.map(String::from),
-            skill: None,
-            model: model.map(String::from),
+            workdir: workdir.map(PathBuf::from),
+            store_dir: Some(PathBuf::from("/data/store")),
             created_at: created,
             updated_at: created,
+            title: title.map(String::from),
             preview: preview.to_string(),
-            subagent_running: 0,
-            subagent_cancelled: 0,
-        }
-    }
-
-    fn mk_stored(dir: &str, workdir: Option<&str>, item: SessionListItem) -> StoredSession {
-        StoredSession {
-            store_dir: PathBuf::from(dir),
-            workdir: workdir.map(PathBuf::from),
-            item,
         }
     }
 
@@ -701,150 +676,80 @@ mod tests {
     }
 
     #[test]
-    fn build_rows_unions_global_tmux_and_registered_stopped() {
-        let store_items = vec![
-            // Registered ts session (seeded: no agent/model), used, currently
-            // live in tmux -> enriched live row with the tmux path.
-            mk_stored("/data/a", Some("/work/projY"), mk_item("AA1", None, None, "build the api", Some("t"), 200)),
+    fn build_rows_unions_live_tmux_and_registered_stopped() {
+        let records = vec![
+            // Registered ts session, used, currently live in tmux -> enriched
+            // live row with the tmux path.
+            mk_record("AA1", Some("/work/projY"), "build the api", Some("t"), 200),
             // Registered ts session, used, tmux dead -> stopped row.
-            mk_stored("/data/a", Some("/work/projY"), mk_item("EE5", None, None, "refactor module", None, 150)),
-            // Plain tui/run session (agent+model persisted) -> never listed.
-            mk_stored("/data/b", Some("/work/projB"), mk_item("BB2", Some("act"), Some("m"), "plain tui", None, 100)),
-            // Never-started empty seed (no preview/title) -> never listed.
-            mk_stored("/data/c", None, mk_item("CC3", None, None, "", None, 50)),
+            mk_record("EE5", Some("/work/projY"), "refactor module", None, 150),
+            // Title-only row (mode-switched session without a preview) -> still
+            // counts as started and is listed.
+            mk_record("TT4", Some("/work/projY"), "", Some("titled task"), 120),
+            // Never-started registration-time seed (no preview/title) -> never
+            // listed. Plain tui/run sessions cannot appear in the registry.
+            mk_record("CC3", None, "", None, 50),
         ];
         let tmux = vec![
             mk_managed_at("AA1", 1, "/work/projY", 2),
             mk_managed_at("DD1", 0, "/work/projX", 1),
         ];
 
-        let rows = build_rows(&store_items, &tmux);
+        let rows = build_rows(&records, &tmux);
 
-        assert_eq!(rows.len(), 3, "AA1 live + DD1 live + EE5 stopped; BB2/CC3 excluded");
+        assert_eq!(rows.len(), 4, "AA1 live + DD1 live + EE5/TT4 stopped; CC3 excluded");
         let aa = rows.iter().find(|r| r.id == "AA1").expect("live enriched row");
         assert_eq!(aa.state, TmuxState::Attached);
         assert_eq!(aa.path, "/work/projY", "live path comes from tmux pane_current_path");
-        assert_eq!(aa.task, "build the api", "task enriched from the store row");
-        assert_eq!(aa.created_at, 200, "creation time taken from the store (ms)");
+        assert_eq!(aa.task, "build the api", "task enriched from the registry row");
+        assert_eq!(aa.created_at, 200, "creation time taken from the registry (ms)");
         // Dedupe: AA1 appears exactly once (tmux row wins over a stopped row).
         assert_eq!(rows.iter().filter(|r| r.id == "AA1").count(), 1);
 
         let dd = rows.iter().find(|r| r.id == "DD1").expect("tmux-only row");
         assert_eq!(dd.state, TmuxState::Detached);
         assert_eq!(dd.path, "/work/projX");
-        assert_eq!(dd.task, "(no task yet)", "no store row -> placeholder");
-        assert_eq!(dd.created_at, 1000, "tmux created (seconds) converted to ms");
+        assert_eq!(dd.created_at, 1000, "tmux created (unix seconds) scaled to ms");
+        assert_eq!(dd.task, "(no task yet)", "no registry row -> placeholder");
 
-        let ee = rows.iter().find(|r| r.id == "EE5").expect("registered stopped row");
+        let ee = rows.iter().find(|r| r.id == "EE5").expect("stopped row");
         assert_eq!(ee.state, TmuxState::Dead);
-        assert_eq!(ee.path, "/work/projY");
+        assert_eq!(ee.path, "/work/projY", "stopped path from the recorded workdir");
         assert_eq!(ee.task, "refactor module");
 
-        assert!(
-            !rows.iter().any(|r| r.id == "BB2"),
-            "plain tui session must not appear as stopped"
-        );
-        assert!(
-            !rows.iter().any(|r| r.id == "CC3"),
-            "never-started seed must not appear as stopped"
-        );
+        let tt = rows.iter().find(|r| r.id == "TT4").expect("title-only row");
+        assert_eq!(tt.state, TmuxState::Dead);
+        assert_eq!(tt.task, "titled task", "title-only sessions still get a task head");
+        assert!(rows.iter().all(|r| r.id != "CC3"), "empty seed never listed");
     }
 
     #[test]
-    fn build_rows_skips_never_started_seed_and_unregistered() {
-        // Seeded-and-used rows survive; never-started empty seeds and plain
-        // tui/run rows (model persisted) are skipped. A mode-switched ts
-        // session keeps `model` NULL (only `agent` is patched), so it MUST
-        // still count as ts-owned — the regression this guards.
-        let store_items = vec![
-            mk_stored("/a", Some("/work/a"), mk_item("S1", None, None, "started", Some("t"), 1)),
-            mk_stored("/a", Some("/work/a"), mk_item("S2", None, None, "", None, 2)),
-            // Used ts session after a mode switch: agent persisted, model still NULL.
-            mk_stored("/b", Some("/work/b"), mk_item("S3", Some("act"), None, "switched mode", Some("t"), 3)),
-            // Plain tui/run session: model persisted -> never listed.
-            mk_stored("/b", Some("/work/b"), mk_item("S4", None, Some("m"), "plain", None, 4)),
-        ];
-        let rows = build_rows(&store_items, &[]);
-        assert_eq!(rows.len(), 2);
-        let s1 = rows.iter().find(|r| r.id == "S1").expect("used seed listed");
-        assert_eq!(s1.state, TmuxState::Dead);
-        assert_eq!(s1.path, "/work/a");
-        let s3 = rows.iter().find(|r| r.id == "S3").expect("mode-switched ts row listed");
-        assert_eq!(s3.state, TmuxState::Dead);
-        assert_eq!(s3.path, "/work/b");
-    }
-
-    #[test]
-    fn cleanup_targets_are_global_ts_seeds_and_never_live_or_plain() {
-        let store_items = vec![
-            mk_stored("/store/a", Some("/work/a"), mk_item("DEAD_A", None, None, "used", None, 4)),
-            // Empty seeds are ts-owned too and must not leak forever merely
-            // because the list intentionally hides them.
-            mk_stored("/store/b", Some("/work/b"), mk_item("EMPTY_B", None, None, "", None, 3)),
-            mk_stored("/store/c", Some("/work/c"), mk_item("LIVE_C", None, None, "live", None, 2)),
-            mk_stored("/store/d", Some("/work/d"), mk_item("PLAIN_D", Some("act"), Some("m"), "plain", None, 1)),
+    fn cleanup_targets_are_dead_registry_rows_grouped_by_store() {
+        let records = vec![
+            // Dead used session -> targeted.
+            mk_record("DEAD_A", Some("/work/a"), "used", None, 4),
+            // Dead empty seed: the list hides it, but cleanup still removes it
+            // (the store row exists and would otherwise leak forever).
+            mk_record("EMPTY_B", Some("/work/b"), "", None, 3),
+            // Live session -> never targeted.
+            mk_record("LIVE_C", Some("/work/c"), "live", None, 2),
         ];
         let live_ids = HashSet::from(["LIVE_C"]);
+        // No owning store dir -> cannot be grouped (unregistered separately
+        // by ts_cleanup).
+        let mut no_dir = mk_record("NO_DIR_D", None, "content", None, 1);
+        no_dir.store_dir = None;
+        let records = [records, vec![no_dir]].concat();
 
-        let targets = cleanup_targets(&store_items, &live_ids);
+        let targets = cleanup_targets(&records, &live_ids);
 
         assert_eq!(
             targets,
             BTreeMap::from([
-                (PathBuf::from("/store/a"), vec!["DEAD_A".to_string()]),
-                (PathBuf::from("/store/b"), vec!["EMPTY_B".to_string()]),
-            ])
+                (PathBuf::from("/data/store"), vec!["DEAD_A".to_string(), "EMPTY_B".to_string()]),
+            ]),
+            "both records share the mk_record store dir"
         );
-    }
-
-    #[tokio::test]
-    async fn scan_all_stores_skips_dirs_without_db_and_non_dirs() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Real store with one session, in <root>/<h1>/opencoder.db.
-        let h1 = tmp.path().join("aaaa");
-        std::fs::create_dir_all(&h1).unwrap();
-        let store = LibsqlStore::open(h1.join("opencoder.db")).await.unwrap();
-        let now = opencoder_core::message::now_ms();
-        store
-            .create_session(&SessionMeta {
-                id: "SCAN1".into(),
-                title: None,
-                agent: None,
-                model: None,
-                workdir_hash: None,
-                created_at: now,
-                updated_at: now,
-                summary: None,
-                summary_seq: None,
-                summary_images: vec![],
-                handoff_seq: None,
-                handoff_plan: None,
-                skill: None,
-                task_type: None,
-                requirement: None,
-            })
-            .await
-            .unwrap();
-        drop(store);
-
-        // A directory without a db file, and a plain file entry: both skipped.
-        std::fs::create_dir_all(tmp.path().join("bbbb")).unwrap();
-        std::fs::write(tmp.path().join("not-a-dir"), "x").unwrap();
-
-        let items = scan_best_effort(tmp.path()).await;
-        assert_eq!(items.len(), 1, "only the real store contributes sessions");
-        assert_eq!(items[0].store_dir, h1, "store dir reported alongside its sessions");
-        assert_eq!(items[0].item.id, "SCAN1");
-
-        let required = scan_required(tmp.path()).await.unwrap();
-        assert_eq!(required.len(), 1, "strict cleanup scan sees every real store");
-        assert_eq!(required[0].store_dir, h1);
-        assert_eq!(required[0].item.id, "SCAN1");
-
-        let missing = scan_required(&tmp.path().join("missing"))
-            .await
-            .unwrap();
-        assert!(missing.is_empty(), "a fresh data root has nothing to clean");
     }
 
     #[test]

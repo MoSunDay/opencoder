@@ -5,11 +5,11 @@
 //!
 //! `ts -l` is tmux-first and global: every live managed tmux session from
 //! every workdir is listed with its real workdir path (`pane_current_path`,
-//! `$HOME` abbreviated to `~`), enriched with `/task` info from any store;
-//! stopped sessions come from **all** per-workdir stores (not just the current
-//! workdir), but only when they were registered by the ts flow (seeded without
-//! agent/model) and actually started — plain `tui`/`run` sessions and
-//! never-started empty seeds are never listed.
+//! `$HOME` abbreviated to `~`), enriched with `/task` info from the central ts
+//! registry (`<data_root>/ts.db`); stopped sessions come from that registry
+//! (one indexed query — no per-store scan), but only when they were actually
+//! started — plain `tui`/`run` sessions and never-started empty seeds are
+//! never listed.
 //!
 //! tmux is engaged ONLY when `opencode ts`/`rs` is used. Plain `tui`, `run`,
 //! headless and server commands are completely unaffected.

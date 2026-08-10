@@ -52,12 +52,6 @@ pub(crate) fn id8(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-/// Convert a millisecond epoch timestamp (as stored in the session store) to
-/// seconds for `format_ts`, which expects unix seconds.
-pub(crate) fn ms_to_secs(ms: i64) -> i64 {
-    ms / 1000
-}
-
 /// Prefer the `/task` preview; fall back to the stored title when the preview
 /// is empty/whitespace. Returns a reference into one of the inputs.
 pub(crate) fn preview_of<'a>(preview: &'a str, title: Option<&'a str>) -> &'a str {
@@ -105,13 +99,6 @@ mod tests {
         assert_eq!(id8("01HZABCDEFGH1234"), "01HZABCD");
         assert_eq!(id8("short"), "short");
         assert_eq!(id8(""), "");
-    }
-
-    #[test]
-    fn ms_to_secs_divides_by_1000() {
-        assert_eq!(ms_to_secs(1_700_000_000_000), 1_700_000_000);
-        assert_eq!(ms_to_secs(0), 0);
-        assert_eq!(ms_to_secs(1500), 1);
     }
 
     #[test]

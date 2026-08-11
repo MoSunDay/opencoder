@@ -392,6 +392,7 @@ pub fn cursor_row_col(input: &str, char_idx: usize, inner_w: u16, prompt_w: u16)
 
 /// Translate the logical composer cursor into terminal coordinates. Kept
 /// pure so rendering only applies the returned position to the frame.
+#[allow(clippy::too_many_arguments)]
 pub fn cursor_screen_position(
     area_x: u16,
     area_y: u16,
@@ -400,10 +401,11 @@ pub fn cursor_screen_position(
     inner_w: u16,
     prompt_w: u16,
     scroll: u16,
+    badge_h: u16,
 ) -> (u16, u16) {
     let (row, col) = cursor_row_col(input, char_idx, inner_w, prompt_w);
     let x = area_x + 1 + prompt_w + col as u16;
-    let y = area_y + 1 + (row as u16).saturating_sub(scroll);
+    let y = area_y + 1 + badge_h + (row as u16).saturating_sub(scroll);
     (x, y)
 }
 

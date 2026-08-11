@@ -51,3 +51,8 @@ fn whitespace_padded_bare_plan_is_pure() {
 fn empty_string_is_not_pure() {
     assert!(!is_pure_control_cmd(""));
 }
+
+#[test]
+fn clear_context_with_args_is_not_pure() {
+    assert!(!is_pure_control_cmd("/act_clear_context review"));
+}

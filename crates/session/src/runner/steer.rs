@@ -183,19 +183,19 @@ pub(super) async fn drain_one_queued(
             }
             return Err(e);
         }
-            // ClearContext with a preserved result breaks to execute it;
+            // Compound (/plan review, /act_clear_context review): rest is a
+            // real prompt in the new mode — record it and break.
+            if let Some(rest) = rest {
+                crate::skill_resolve::record_compound(session, &rest, &imgs).await;
+                return Ok(DrainOutcome::Prompt);
+            }
+            // Bare ClearContext with a preserved result breaks to execute it;
             // sentinel path (no result) forces an outer iteration.
             if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
                 && !crate::control_cmd::is_clear_context_handoff(
                     session.handoff_plan.as_deref().unwrap_or(""),
                 )
             {
-                return Ok(DrainOutcome::Prompt);
-            }
-            // Compound (/plan review): rest is a real prompt in the new
-            // mode — record it and break.
-            if let Some(rest) = rest {
-                crate::skill_resolve::record_compound(session, &rest, &imgs).await;
                 return Ok(DrainOutcome::Prompt);
             }
             // Bare command: applied, no LLM turn needed.
@@ -372,7 +372,7 @@ mod tests {
     };
     use crate::SessionState;
     use crate::SharedCancel;
-    use opencoder_core::{resolve_agent, Config};
+    use opencoder_core::{resolve_agent, Config, Role};
     use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
     use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
     use std::sync::Arc;
@@ -707,5 +707,25 @@ mod tests {
             steers.is_empty(),
             "already-promoted steer must not be re-claimed"
         );
+    }
+
+    #[tokio::test]
+    async fn drain_one_queued_compound_clear_context_returns_prompt() {
+        // `/act_clear_context review` queued: the clear is applied and "review"
+        // is recorded as a real prompt so the LLM runs it in the fresh context.
+        let (mut session, _store, _token) = session_with_queue(&["/act_clear_context review"]).await;
+        let outcome = drain_one_queued(&mut session, &mut |_| {}).await.unwrap();
+        assert!(
+            matches!(outcome, DrainOutcome::Prompt),
+            "compound clear_context should return Prompt, got {outcome:?}"
+        );
+        // "review" was recorded as a user message (not the raw command).
+        let has_review = session
+            .messages
+            .iter()
+            .any(|m| m.role == Role::User && m.text().contains("review"));
+        assert!(has_review, "'review' recorded as a user prompt");
+        // Agent switched to act.
+        assert_eq!(session.agent.name, "act");
     }
 }

@@ -408,3 +408,57 @@ fn body_title_row_shows_full_top_composition() {
         "body title row must show workdir · model · effort; got: {row}"
     );
 }
+
+/// When `submitted` is true (user has interacted), the in-body tutorial
+/// must NOT render even if the transcript is empty — e.g. after submitting a
+/// bare control command like `/plan` that adds no transcript block.
+#[test]
+fn submitted_hides_tutorial_even_with_empty_blocks() {
+    let backend = TestBackend::new(60, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let area = terminal.backend().buffer().area;
+
+    let v = ChatView {
+        submitted: true,
+        ..Default::default()
+    };
+
+    let mut scroll = 0u32;
+    let mut body_out = None;
+    let mut jump_btn = None;
+    let mut top_btn = None;
+    terminal
+        .draw(|f| {
+            render_body(
+                f,
+                f.area(),
+                &v,
+                &Line::raw("test"),
+                &mut scroll,
+                false,
+                0,
+                0,
+                &mut body_out,
+                &mut jump_btn,
+                &mut top_btn,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut None,
+                true,
+                0,
+                false,
+            );
+        })
+        .unwrap();
+
+    let full: String = (0..area.height)
+        .map(|y| row_text(terminal.backend().buffer(), y, area.width))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !full.contains("OpenCoder"),
+        "tutorial must NOT render when submitted=true, even with empty blocks; got:\n{full}"
+    );
+}

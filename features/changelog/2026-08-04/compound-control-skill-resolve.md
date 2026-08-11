@@ -15,6 +15,9 @@ Commit: (working-tree, pre-initial-commit)
   `split_control_prefix(prompt) -> Option<(ControlCmd, Option<String>)`，
   将控制前缀与剩余文本拆分；`parse` 委托给它保持向后兼容。
   `/act_clear_context` 为 sentinel，仅精确匹配、不接受参数。
+  > **更新（2026-08-11）**：`/act_clear_context` 已改为 head 匹配，支持复合
+  > 输入如 `/act_clear_context review`，rest 在新上下文中作为 prompt 运行。
+  > 见 `features/changelog/2026-08-11/tui-clear-context-compound-and-help-hide.md`。
 
 ### `$skill` token 解析（skill_resolve 模块）
 - **`crates/session/src/skill_resolve.rs`**（新建，225 行）：

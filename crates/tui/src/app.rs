@@ -469,6 +469,7 @@ pub(super) async fn run_app(
                                             follow = true;
                                             chat.note_requirement_submitted();
                                             chat.begin_turn();
+                                            body_refresh_pending = true;
                                         } else {
                                             // Skill-only submit while running: admit the trigger as a queued input and
                                             // drain pending images so they don't leak into a later unrelated submit.
@@ -521,6 +522,7 @@ pub(super) async fn run_app(
                                     follow = true;
                                     chat.note_requirement_submitted();
                                     chat.begin_turn();
+                                    body_refresh_pending = true;
                                 }
                             }
                             KeyAction::SubagentSteer(text) => {

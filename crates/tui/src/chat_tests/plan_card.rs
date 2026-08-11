@@ -126,6 +126,7 @@ fn begin_turn_clears_status() {
         v.status.is_empty(),
         "begin_turn must clear transient status"
     );
+    assert!(v.submitted, "begin_turn must set submitted to true");
 }
 
 #[test]

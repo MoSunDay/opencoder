@@ -124,6 +124,11 @@ pub struct ChatView {
     /// Drives the plan→act handoff decision: only hand off when the user
     /// actually interacted with the plan agent, otherwise plain-swap.
     pub plan_submitted: bool,
+    /// Whether the user has submitted at least one prompt since session start
+    /// (or last TranscriptReset). Gates the in-body tutorial: the welcome text
+    /// hides once the user has interacted, even if the first submission was a
+    /// bare control command that does not add a transcript block.
+    pub submitted: bool,
     /// Deferred arming of `plan_submitted` for a compound `/plan <content>`
     /// submitted while the agent was still `act` (the mode switch lands
     /// asynchronously via `AgentSwitch("plan")`, which otherwise resets the

@@ -1004,3 +1004,63 @@ async fn steer_plain_skill_prompt_resolves() {
         user_msgs
     );
 }
+
+/// `/act_clear_context review` submitted as the idle prompt: clears context
+/// AND runs "review" as a real prompt in the fresh act-mode context. The
+/// trailing argument is recorded as a user message, not leaked as the raw
+/// command string.
+#[tokio::test]
+async fn clear_context_compound_runs_rest_as_prompt() {
+    let store = mem_store().await;
+    seed(&store, "clear-compound", "act").await;
+
+    // Pre-populate some messages so there is history to clear.
+    let msgs = vec![Message::user("u1", "old question")];
+    store.append_messages("clear-compound", &msgs).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("fresh reply")]))
+        as Arc<dyn ChatStream>;
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "clear-compound",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+
+    run(&mut session, "/act_clear_context review".into(), |_| {})
+        .await
+        .unwrap();
+
+    // Context was cleared and "review" recorded + executed.
+    assert_eq!(session.agent.name, "act", "switched to act");
+    // "review" was recorded as a real user prompt.
+    let has_review = session
+        .messages
+        .iter()
+        .any(|m| m.role == Role::User && m.text().contains("review") && !m.synthetic);
+    assert!(has_review, "trailing arg 'review' recorded as a real user prompt");
+    // The raw command must not leak as user text.
+    let user_texts: Vec<String> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::User)
+        .map(|m| m.text())
+        .collect();
+    assert!(
+        !user_texts.iter().any(|t| t.contains("/act_clear_context")),
+        "raw command must not leak as user text: {:?}",
+        user_texts
+    );
+    // Exactly one assistant turn (the "review" prompt execution).
+    let assistant_turns = session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::Assistant)
+        .count();
+    assert_eq!(assistant_turns, 1, "one assistant turn for 'review'");
+}

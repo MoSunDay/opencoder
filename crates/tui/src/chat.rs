@@ -320,6 +320,7 @@ impl ChatView {
     /// the previous turn) must be cleared so it does not leak into the status
     /// bar of the freshly-started turn. The transcript blocks are untouched.
     pub fn begin_turn(&mut self) {
+        self.submitted = true;
         self.status.clear();
         self.turn_block_start = self.blocks.len();
         self.llm_round_started_at_ms = Some(opencoder_core::message::now_ms());

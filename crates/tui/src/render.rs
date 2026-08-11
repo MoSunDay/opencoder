@@ -69,7 +69,6 @@ pub(crate) struct ThinkingBtn {
 }
 
 /// A clickable Subagent-block header.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SubagentBtn {
     pub block_idx: usize,
@@ -77,7 +76,6 @@ pub(crate) struct SubagentBtn {
 }
 
 /// A clickable Tool-block header.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ToolBtn {
     pub block_idx: usize,
@@ -163,6 +161,13 @@ pub(crate) fn render<B: Backend>(
         let inner_w = draw_area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
         let plan_active = plan_mode.is_some();
+        // The attachment badge consumes one inner line; must mirror the
+        // plan-mode filter applied at the render_composer call site below.
+        let badge_h: u16 = if !plan_active && !pending_images.is_empty() {
+            1
+        } else {
+            0
+        };
         let pending = steer_items.len() + queue_items.len();
         let queue_h = if plan_active {
             0
@@ -181,13 +186,16 @@ pub(crate) fn render<B: Backend>(
         let composer_h = if plan_active {
             draw_area.height.saturating_sub(queue_h + skill_h + 1)
         } else {
-            (input_rows + 2).min(draw_area.height / 3)
+            (input_rows + 2 + badge_h).min(draw_area.height / 3)
         };
         let composer_inner_h = composer_h.saturating_sub(2).max(1);
         let (cur_row, _cur_col) = composer::cursor_row_col(input, cursor_idx, inner_w, prompt_w);
-        let max_scroll = input_rows.saturating_sub(composer_inner_h);
+        // The badge steals one visible inner line, so subtract it from the
+        // usable text height for both scroll bounds.
+        let text_h = composer_inner_h.saturating_sub(badge_h).max(1);
+        let max_scroll = input_rows.saturating_sub(text_h);
         let composer_scroll = (cur_row as u16)
-            .saturating_sub(composer_inner_h.saturating_sub(1))
+            .saturating_sub(text_h.saturating_sub(1))
             .min(max_scroll);
 
         let chunks = Layout::default()
@@ -336,6 +344,7 @@ pub(crate) fn render<B: Backend>(
                 inner_w,
                 prompt_w,
                 composer_scroll,
+                badge_h,
             );
             f.set_cursor_position(position);
         }
@@ -383,7 +392,7 @@ fn render_body(
 
     // Empty session: show the in-body tutorial instead of a blank transcript.
     // It vanishes automatically once the first block appears.
-    if is_top_level && chat.blocks.is_empty() {
+    if is_top_level && chat.blocks.is_empty() && !chat.submitted {
         f.render_widget(block, area);
         crate::welcome::render_tutorial_in_body(f, inner);
         return;

@@ -58,8 +58,8 @@ pub enum ControlCmd {
 /// submission like `/plan review` switches mode *and* runs the rest as a
 /// prompt in the new mode.
 ///
-/// `/act_clear_context` is a sentinel that accepts NO arguments — it matches
-/// only on its own (trailing text must not be absorbed as a prompt).
+/// `/act_clear_context` supports compound inputs like `/act_clear_context
+/// review` where the trailing text runs as a prompt in the fresh context.
 ///
 /// Returns `None` for anything that is not a control command. The rest text is
 /// the trimmed remainder after the command token, or `None` when the input was
@@ -67,15 +67,12 @@ pub enum ControlCmd {
 /// tokens in the rest are preserved verbatim for downstream resolution.
 pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)> {
     let trimmed = prompt.trim();
-    // Sentinel: exact match only — never takes an argument.
-    if trimmed == "/act_clear_context" {
-        return Some((ControlCmd::ClearContext, None));
-    }
     let mut parts = trimmed.split_whitespace();
     let head = parts.next()?;
     let cmd = match head {
         "/act" => ControlCmd::SwitchAgent("act".into()),
         "/plan" => ControlCmd::SwitchAgent("plan".into()),
+        "/act_clear_context" => ControlCmd::ClearContext,
         _ => return None,
     };
     let rest: String = parts.collect::<Vec<_>>().join(" ");
@@ -84,7 +81,7 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
 }
 
 /// Parse a user prompt into a control command. Returns `None` for anything that
-/// is not `/act`, `/plan`, or `/act_clear_context` (the first two accept an
+/// is not `/act`, `/plan`, or `/act_clear_context` (all three accept an
 /// optional trailing argument). Compound inputs like `/plan review` are now
 /// recognized as a control command; use [`split_control_prefix`] to also
 /// recover the trailing argument.
@@ -299,10 +296,12 @@ mod tests {
     }
 
     #[test]
-    fn split_clear_context_with_args_not_recognized() {
-        // A compound "/act_clear_context review" is NOT a control command —
-        // the sentinel does not take arguments — so it is treated as text.
-        assert_eq!(split_control_prefix("/act_clear_context review"), None);
+    fn split_clear_context_compound_returns_rest() {
+        // `/act_clear_context review` is now a compound command: ClearContext
+        // with "review" as the trailing prompt to run in the fresh context.
+        let (cmd, rest) = split_control_prefix("/act_clear_context review").unwrap();
+        assert_eq!(cmd, ControlCmd::ClearContext);
+        assert_eq!(rest.as_deref(), Some("review"));
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use opencoder_core::{
-    message::now_ms, resolve_agent, Agent, Config, ContentBlock, Message, MessageUsage, Role,
+    message::now_ms, resolve_agent, Config, ContentBlock, Message, MessageUsage, Role,
 };
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{
@@ -673,9 +673,6 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
         .await?;
     Ok(())
 }
-
-#[allow(dead_code)]
-fn _ensure_agent_used(_a: &Agent) {}
 
 /// Infer active skill names from a skill prompt body by matching known
 /// skill body prefixes. Used on resume to restore latent tool unlocking.

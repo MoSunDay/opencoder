@@ -225,6 +225,28 @@ async fn emit_delta_emits_reasoning_for_structured_thinking() {
 }
 
 #[tokio::test]
+async fn emit_delta_emits_flat_reasoning_before_flat_text() {
+    // Some providers put the last reasoning token and first answer token in
+    // one flat delta. The channels have semantic order even though JSON object
+    // fields do not: reasoning must close before answer text starts.
+    let (tx, mut rx) = mpsc::channel::<LlmEvent>(16);
+    let mut tools = ToolAccumulator::default();
+    let mut text = String::new();
+    let delta = obj(r#"{"content":"Now","reasoning_content":"."}"#);
+    emit_delta(&delta, &mut tools, &mut text, &tx)
+        .await
+        .unwrap();
+    drop(tx);
+
+    let first = rx.recv().await.unwrap();
+    assert!(matches!(first, LlmEvent::ReasoningDelta(ref s) if s == "."));
+    let second = rx.recv().await.unwrap();
+    assert!(matches!(second, LlmEvent::TextDelta(ref s) if s == "Now"));
+    assert_eq!(text, "Now");
+    assert!(rx.recv().await.is_none());
+}
+
+#[tokio::test]
 async fn handle_event_emits_reasoning_from_message_fallback() {
     let (tx, mut rx) = mpsc::channel::<LlmEvent>(16);
     let mut tools = ToolAccumulator::default();

@@ -80,6 +80,11 @@ fn registry() -> &'static Mutex<HashMap<u32, BgEntry>> {
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn task_handles() -> &'static Mutex<Vec<tokio::task::JoinHandle<()>>> {
+    static HANDLES: OnceLock<Mutex<Vec<tokio::task::JoinHandle<()>>>> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
 /// Hand a timed-out command to a detached background supervisor.
 ///
 /// Opens/truncates the output file, flushes the already-captured stdout/stderr
@@ -146,7 +151,7 @@ pub fn handoff(
     }
 
     // Detached supervisor — owns `child` so kill_on_drop won't fire early.
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let exit_status = child.wait().await;
 
         // Kill the entire process group NOW (before awaiting drain tasks) so
@@ -180,6 +185,7 @@ pub fn handoff(
         let mut reg = registry().lock().unwrap();
         reg.remove(&pid);
     });
+    task_handles().lock().unwrap().push(handle);
 }
 
 /// Public snapshot of one registered background process, for display-only
@@ -265,6 +271,10 @@ pub fn kill_all() -> usize {
 /// Called at program shutdown.
 pub fn cleanup_all() {
     let _ = kill_all();
+    let handles: Vec<_> = task_handles().lock().unwrap().drain(..).collect();
+    for h in handles {
+        h.abort();
+    }
 }
 
 /// Serialize all tests that touch the process-global registry.
@@ -278,6 +288,11 @@ pub(crate) fn test_registry_mutex() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
+#[cfg(test)]
+pub(crate) fn all_task_handles_len_for_test() -> usize {
+    task_handles().lock().unwrap().len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +424,48 @@ mod tests {
         assert_eq!(&st.stdout_buf, b"hello");
         assert_eq!(&st.stderr_buf, b"world");
         assert!(st.file.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn handoff_tracks_supervisor_handle_for_cleanup() {
+        let _guard = test_registry_mutex().lock().await;
+
+        let child = tokio::process::Command::new("setsid")
+            .args(["sleep", "300"])
+            .spawn()
+            .expect("spawn setsid sleep");
+        let pid = child.id().expect("pid");
+        let pgid = pid as libc::pid_t;
+
+        let state = std::sync::Arc::new(std::sync::Mutex::new(BgState::new()));
+        let stdout_task = tokio::spawn(async {});
+        let stderr_task = tokio::spawn(async {});
+
+        handoff(
+            pid,
+            pgid,
+            "test-session".to_string(),
+            child,
+            stdout_task,
+            stderr_task,
+            state,
+        );
+
+        let initial = all_task_handles_len_for_test();
+        assert!(initial > 0, "supervisor handle tracked after handoff");
+
+        let drained: Vec<_> = task_handles().lock().unwrap().drain(..).collect();
+        assert_eq!(drained.len(), initial);
+        for h in drained {
+            h.abort();
+        }
+        assert_eq!(all_task_handles_len_for_test(), 0);
+
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+        unregister(pid);
     }
 }

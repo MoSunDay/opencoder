@@ -176,3 +176,54 @@ pub(super) async fn finish(
         worker.abort();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::finish;
+
+    /// Normal exit path: `finish` disarms the supervisor flag and drops the
+    /// command sender so the cooperative worker drains its channel and exits.
+    #[tokio::test]
+    async fn finish_disarms_supervisor_and_closes_channel_on_prompt_exit() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::sync::mpsc;
+
+        let supervisor_active = AtomicBool::new(true);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<crate::worker::UiCmd>(4);
+        // Cooperative worker: loops until the sender half is dropped.
+        let worker = tokio::spawn(async move {
+            while cmd_rx.recv().await.is_some() {}
+        });
+
+        finish(&supervisor_active, cmd_tx, worker).await;
+
+        assert!(!supervisor_active.load(Ordering::Relaxed));
+    }
+
+    /// Stalled exit path: if the worker ignores cancellation, `finish` aborts
+    /// it within its bounded 5 s timeout instead of hanging forever.
+    #[tokio::test]
+    async fn finish_aborts_stalled_worker_within_bound() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        use tokio::sync::mpsc;
+
+        let supervisor_active = AtomicBool::new(true);
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<crate::worker::UiCmd>(4);
+        // A worker that never completes on its own.
+        let worker = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+
+        let start = Instant::now();
+        finish(&supervisor_active, cmd_tx, worker).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(8),
+            "finish should abort stalled worker within bound, took {:?}",
+            elapsed
+        );
+        assert!(!supervisor_active.load(Ordering::Relaxed));
+    }
+}

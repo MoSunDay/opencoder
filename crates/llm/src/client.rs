@@ -205,7 +205,11 @@ async fn run_stream(
                         max: MAX_STREAM_ATTEMPTS,
                     })
                     .await;
-                backoff_delay(attempt).await;
+                tokio::select! {
+                    biased;
+                    _ = tx.closed() => return Ok(()),
+                    _ = backoff_delay(attempt) => {}
+                }
             }
         }
     }
@@ -248,19 +252,14 @@ async fn run_stream_once(
 
     use futures::StreamExt;
     loop {
-        // Cooperative shutdown: if the consumer dropped the receiver (e.g.
-        // the session runner returned after a cancel), stop immediately
-        // instead of lingering for up to `idle_timeout`.
-        if tx.is_closed() {
-            return Ok(());
-        }
-        let chunk = match tokio::time::timeout(idle_timeout, stream.next()).await {
-            Ok(Some(chunk)) => chunk,
-            Ok(None) => break,
-            Err(_) => {
-                // No chunk received within idle_timeout — the upstream is
-                // silent (not even sending keep-alive bytes). Treat as idle
-                // timeout.
+        let chunk = tokio::select! {
+            biased;
+            _ = tx.closed() => return Ok(()),
+            chunk_opt = stream.next() => match chunk_opt {
+                Some(chunk) => chunk,
+                None => break,
+            },
+            _ = tokio::time::sleep(idle_timeout) => {
                 if finished {
                     let tool_calls = tools.finish_all().unwrap_or_default();
                     let _ = tx
@@ -432,7 +431,12 @@ async fn connect_with_retry(
             return Ok(None);
         }
         attempt = attempt.saturating_add(1);
-        match send_request(client, url, key, headers, body).await {
+        let send_result = tokio::select! {
+            biased;
+            _ = tx.closed() => return Ok(None),
+            r = send_request(client, url, key, headers, body) => r,
+        };
+        match send_result {
             Ok(resp) => {
                 let status = resp.status();
                 if status.is_success() {
@@ -473,7 +477,11 @@ async fn connect_with_retry(
                     Some(secs) => computed.max(Duration::from_secs(secs.max(1))),
                     None => computed,
                 };
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    biased;
+                    _ = tx.closed() => return Ok(None),
+                    _ = tokio::time::sleep(delay) => {}
+                }
             }
             Err(e) => {
                 // Network/transport error — treat as transient.
@@ -491,7 +499,11 @@ async fn connect_with_retry(
                         max: MAX_ATTEMPTS,
                     })
                     .await;
-                backoff_delay(attempt).await;
+                tokio::select! {
+                    biased;
+                    _ = tx.closed() => return Ok(None),
+                    _ = backoff_delay(attempt) => {}
+                }
             }
         }
     }

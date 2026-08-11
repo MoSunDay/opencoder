@@ -168,5 +168,11 @@ pub(super) async fn finish(
     use std::sync::atomic::Ordering;
     supervisor_active.store(false, Ordering::Relaxed);
     drop(cmd_tx);
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), worker).await;
+    let mut worker = worker;
+    if tokio::time::timeout(std::time::Duration::from_secs(5), &mut worker)
+        .await
+        .is_err()
+    {
+        worker.abort();
+    }
 }

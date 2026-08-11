@@ -387,3 +387,59 @@ async fn message_fallback_fires_when_no_delta_reasoning_streamed() {
     assert!(matches!(ev, LlmEvent::ReasoningDelta(ref s) if s == "only message think"));
     assert!(rx.recv().await.is_none());
 }
+
+#[tokio::test]
+async fn stream_task_exits_promptly_after_rx_drop() {
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0u8; 8192];
+        let _ = sock.read(&mut buf).await;
+        sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
+            .await
+            .unwrap();
+        sock.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+            .await
+            .unwrap();
+        let _ = sock.read(&mut buf).await;
+        let _ = closed_tx.send(());
+    });
+
+    let client = ChatClient::new(
+        &format!("http://127.0.0.1:{port}"),
+        "test-key",
+        &[],
+        None,
+    )
+    .unwrap();
+
+    let req = ChatRequest {
+        model: "test-model".to_string(),
+        messages: vec![],
+        tools: vec![],
+        tool_choice: None,
+        temperature: None,
+        max_tokens: None,
+        reasoning_effort: None,
+        cache_salt: None,
+    };
+
+    let mut rx = client.chat_stream(req).unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    drop(rx);
+
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), closed_rx)
+            .await
+            .is_ok(),
+        "stream task did not close the connection within 5s after rx drop"
+    );
+}

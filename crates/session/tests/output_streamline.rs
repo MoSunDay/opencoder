@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use opencoder_core::{resolve_agent, Config, ContentBlock, Message, OutputStreamlineConfig, Role};
+use opencoder_core::{resolve_agent, Config, ContentBlock, OutputStreamlineConfig, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionState};
 
@@ -116,7 +116,3 @@ async fn disabled_keeps_verbatim() {
     let text = first_assistant_text(&s);
     assert_eq!(text, RAW, "disabled streamlining must be verbatim");
 }
-
-// Quiet unused-import guard for `Message` if future edits drop its use.
-#[allow(dead_code)]
-fn _types(_m: &Message) {}

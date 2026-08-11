@@ -231,7 +231,6 @@ fn decode_cursor(c: &str) -> Option<(i64, String)> {
     Some((ts, id))
 }
 
-#[allow(dead_code)]
 fn extract_preview(blocks_json: &Option<String>) -> String {
     let raw = match blocks_json {
         Some(s) => s,

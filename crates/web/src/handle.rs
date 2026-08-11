@@ -137,7 +137,6 @@ impl Drop for CmdRxGuard {
 /// (client disconnect OR natural end). The `/events` SSE endpoint uses it to
 /// release its subscriber slot and evict a now-unused session handle, closing
 /// the leak where `GET /events` created a handle that was never removed.
-#[allow(dead_code)]
 pub(crate) struct DropGuardStream<S> {
     inner: std::pin::Pin<Box<S>>,
     on_drop: Option<Box<dyn FnOnce() + Send + Sync>>,
@@ -145,7 +144,6 @@ pub(crate) struct DropGuardStream<S> {
 
 impl<S: futures::Stream> DropGuardStream<S> {
     /// Wrap `stream` so `on_drop` runs once when the stream is dropped.
-    #[allow(dead_code)]
     pub(crate) fn new(
         stream: S,
         on_drop: impl FnOnce() + Send + Sync + 'static,
@@ -181,7 +179,6 @@ impl<S> Drop for DropGuardStream<S> {
 /// same `HandleMap` lock this holds, so the "last subscriber" check is
 /// authoritative w.r.t. concurrent subscribers — evicting only when nobody else
 /// is listening means dropping the broadcast Sender breaks no live Receiver.
-#[allow(dead_code)]
 pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created: bool) {
     if let Ok(rt) = tokio::runtime::Handle::try_current() {
         rt.spawn(async move {

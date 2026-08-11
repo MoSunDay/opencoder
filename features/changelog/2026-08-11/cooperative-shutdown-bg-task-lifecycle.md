@@ -38,6 +38,7 @@
 ### TUI worker 超时中止
 - **`crates/tui/src/app_bootstrap.rs`**：`finish` 改为持有可变 `worker`；`timeout` 超时后
   显式 `worker.abort()`，而非仅让 timeout 自然结束丢弃 future。
+  新增 2 个单元测试覆盖正常退出（解除标志 + 关闭通道）与停滞退出（超时中止）两条路径。
 
 全部改动局限于各 crate 内部生命周期，无 trait、store 数据形状、CLI、HTTP、prompt 契约变化。
 
@@ -45,7 +46,7 @@
 
 - `cargo build --workspace` → Finished，零错误零警告。
 - `cargo clippy --workspace --all-targets -- -D warnings` → Finished，零警告。
-- `cargo test --workspace` → `total passed=2347 failed=0`（全二进制汇总，0 failed）。
+- `cargo test --workspace` → `total passed=2349 failed=0`（全二进制汇总，0 failed）。
 
 ## 测试覆盖
 
@@ -53,6 +54,8 @@
 |------|--------|------|
 | rx drop 后流式任务在 5s 内关闭上游连接 | `stream_task_exits_promptly_after_rx_drop` | `crates/llm/src/client_tests.rs` |
 | handoff 追踪 supervisor 句柄，cleanup_all drain+abort 后归零 | `handoff_tracks_supervisor_handle_for_cleanup` | `crates/session/src/tools/bg.rs` |
+| finish 正常路径：解除 supervisor 标志 + drop sender 关闭通道 | `finish_disarms_supervisor_and_closes_channel_on_prompt_exit` | `crates/tui/src/app_bootstrap.rs` |
+| finish 停滞路径：超时内 `worker.abort()` 中止卡住的 worker | `finish_aborts_stalled_worker_within_bound` | `crates/tui/src/app_bootstrap.rs` |
 
 ## Related Docs
 

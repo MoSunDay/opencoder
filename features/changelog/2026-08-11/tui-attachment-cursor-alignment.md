@@ -29,7 +29,7 @@ plan 模式下附件被显式过滤（`plan_mode.is_some() → &[]`），不受�
 
 ## Validation
 
-- `cargo test --workspace` → `TOTAL passed=2340 failed=0` (全二进制汇总，0 failed)
+- `cargo test --workspace` → `TOTAL passed=2345 failed=0` (全二进制汇总，0 failed)
 - `cargo clippy --workspace --all-targets -- -D warnings` → Finished，零警告
 - `cargo build --workspace` → Finished
 

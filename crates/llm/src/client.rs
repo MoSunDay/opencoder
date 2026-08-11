@@ -634,13 +634,6 @@ async fn emit_delta(
     // `choice.message` fallback must not re-emit reasoning that was already
     // delivered as `delta.reasoning_content`/thinking blocks.
     let mut emitted_reasoning = false;
-    // Plain-string content (the common shape).
-    if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
-        if !content.is_empty() {
-            text_buf.push_str(content);
-            let _ = tx.send(LlmEvent::TextDelta(content.to_string())).await;
-        }
-    }
     // Structured `content` array: some providers (notably at max/xhigh)
     // deliver content as `[{type:"text",text:..},{type:"thinking",text:..}]`
     // blocks. Iterate IN ORDER so text/thinking keep their stream ordering.
@@ -669,13 +662,21 @@ async fn emit_delta(
                 _ => {}
             }
         }
-    } else if let Some(reasoning) = extract_reasoning(delta) {
-        // No structured content array — fall back to alias/string reasoning
-        // fields (reasoning_content etc.). Skipped when a structured array is
-        // present to avoid double-emitting the same thinking blocks.
-        if !reasoning.is_empty() {
-            emitted_reasoning = true;
-            let _ = tx.send(LlmEvent::ReasoningDelta(reasoning)).await;
+    } else {
+        // Flat OpenAI-compatible deltas may carry the final reasoning token
+        // and the first answer token together. Reasoning semantically precedes
+        // content in that shape, regardless of JSON object field order.
+        if let Some(reasoning) = extract_reasoning(delta) {
+            if !reasoning.is_empty() {
+                emitted_reasoning = true;
+                let _ = tx.send(LlmEvent::ReasoningDelta(reasoning)).await;
+            }
+        }
+        if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
+            if !content.is_empty() {
+                text_buf.push_str(content);
+                let _ = tx.send(LlmEvent::TextDelta(content.to_string())).await;
+            }
         }
     }
     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {

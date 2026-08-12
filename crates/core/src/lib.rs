@@ -18,7 +18,8 @@ pub use agent::{
 };
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig,
-    CompactionConfig, Config, Endpoint, HttpHeader, NetworkConfig, OutputStreamlineConfig,
+    CompactionConfig, Config, Endpoint, HttpHeader, McpServerConfig,
+    NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, KeymapConfig, KEYMAP_INFO, DEFAULT_CONTEXT_LIMIT,
 };
 pub use data_dir::{data_dir_for, data_root};

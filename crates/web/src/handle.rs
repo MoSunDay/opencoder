@@ -190,6 +190,14 @@ pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created:
                 }
             }
         });
+    } else {
+        let mut map = handles.blocking_lock();
+        if let Some(h) = map.get(&id) {
+            let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+            if created && prev == 1 && !h.draining.load(Ordering::SeqCst) {
+                map.remove(&id);
+            }
+        }
     }
 }
 
@@ -539,10 +547,10 @@ async fn drain_to_completion(
     process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
 
     drop(sink);
+    drop(guard);
     if let Err(e) = flusher.await {
         warn!(session_id, error = %e, "final event flush failed");
     }
-    drop(guard);
     drop(rx_guard);
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");

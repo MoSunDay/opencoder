@@ -18,18 +18,6 @@ pub(crate) fn forward_skill_if_compound(raw: &str, clean: &str) -> String {
     }
 }
 
-/// True when `clean` is a **bare** control command (`/plan`, `/act`,
-/// `/act_clear_context`) with no trailing argument. Pure control commands
-/// switch mode without recording a user message, so their text is NOT echoed
-/// into the transcript. Compound inputs (`/plan $review`, `/plan fix it`)
-/// carry user content and MUST be echoed before execution.
-pub(crate) fn is_pure_control_cmd(clean: &str) -> bool {
-    matches!(
-        opencoder_session::split_control_prefix(clean),
-        Some((_, None))
-    )
-}
-
 /// When the input is a **compound** `/plan <content>` submission (i.e. `/plan`
 /// followed by substantive text or a `$skill` token), return the trimmed input
 /// so the caller submits it as a plan-mode prompt instead of merely toggling
@@ -56,4 +44,13 @@ pub(crate) fn plan_compound_for_submit(input: &str) -> Option<String> {
 /// `AgentSwitch("plan")` event consumes to re-arm `plan_submitted`.
 pub(crate) fn is_compound_plan_cmd(clean: &str) -> bool {
     plan_compound_for_submit(clean).is_some()
+}
+
+/// True when `clean` is a **bare** control command with no trailing content
+/// (e.g. `/plan`, `/act`), as opposed to a compound `/plan <content>` prompt.
+/// Uses `split_control_prefix` (single source of truth) so whitespace-padded
+/// bare commands like `/plan   ` also resolve here.
+#[allow(dead_code)]
+pub(crate) fn is_pure_control_cmd(clean: &str) -> bool {
+    matches!(opencoder_session::split_control_prefix(clean), Some((_, None)))
 }

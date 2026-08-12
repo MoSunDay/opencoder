@@ -114,6 +114,18 @@ fn parse_usage_derives_total_when_explicit_zero() {
 }
 
 #[test]
+fn parse_usage_total_saturates_on_overflow() {
+    // Bug 4: input+output must saturate instead of wrapping on overflow.
+    let u = parse_usage(&usage_json(
+        r#"{"prompt_tokens":18446744073709551615,"completion_tokens":1}"#,
+    ));
+    assert_eq!(
+        u.total_tokens, u64::MAX,
+        "overflow on input+output must saturate, not wrap"
+    );
+}
+
+#[test]
 fn first_u64_returns_first_present_key() {
     let obj = usage_json(r#"{"a":10,"b":20}"#);
     assert_eq!(first_u64(&obj, &["a", "b"]), Some(10));

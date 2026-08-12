@@ -25,13 +25,12 @@ use tokio_util::sync::CancellationToken;
 use crate::app_helpers::{start_turn, sys_tokens_for, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
-use crate::command::{handle_command_key, CommandMenu, CommandOutcome, SlashAction};
+use crate::command::{handle_command_key, CommandMenu, CommandOutcome};
 use crate::keymap_menu::KeymapMenu;
-use crate::local_cmd;
-use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
+use crate::model_menu::ModelMenu;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{gate_compact, CompactGate, UiCmd, UiEvent};
+use crate::worker::{UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
@@ -464,6 +463,7 @@ pub(crate) async fn dispatch_command(
     session_id: &str,
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
+    mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     _keymap_menu: &mut Option<KeymapMenu>,
     agent_name: &str,
@@ -483,141 +483,15 @@ pub(crate) async fn dispatch_command(
         return LoopFlow::Quit;
     }
     match outcome {
-        CommandOutcome::Dispatch(SlashAction::Task) => {
-            // Parent sessions only: `/task` switches back to a parent
-            // conversation, subagent children are not listed here.
-            let sessions = store
-                .list_sessions(&opencoder_store::SessionFilter::default())
-                .await
-                .unwrap_or_default();
-            *task_picker = Some(TaskPicker::new(sessions, session_id.to_string()));
-        }
-        CommandOutcome::Dispatch(SlashAction::Fork) => {
-            // Same parent-session list, but in fork mode: Enter clones the
-            // highlighted session's context into a brand-new session.
-            let sessions = store
-                .list_sessions(&opencoder_store::SessionFilter::default())
-                .await
-                .unwrap_or_default();
-            *task_picker = Some(TaskPicker::new_fork(sessions, session_id.to_string()));
-        }
-        CommandOutcome::Dispatch(SlashAction::Model) => {
-            *model_menu = Some(ModelMenu::List(ProviderList::new(config)));
-        }
-        CommandOutcome::Dispatch(SlashAction::Config) => {
-            *model_menu = Some(ModelMenu::Config(ConfigForm::new(config)));
-        }
-        CommandOutcome::Dispatch(SlashAction::Compact) => match gate_compact(*running) {
-            CompactGate::Run => {
-                if !start_turn(cmd_tx, cancel, UiCmd::Compact).await {
-                    worker_dead(chat);
-                    return LoopFlow::Quit;
-                }
-                *running = true;
-                *follow = true;
-                chat.begin_turn();
-            }
-            CompactGate::SkipRunning => {
-                chat.push_marker(Line::from(Span::styled(
-                    "[compact] busy \u{2014} retry when idle",
-                    Style::default().fg(theme::warn_color()),
-                )));
-            }
-        },
-        CommandOutcome::Dispatch(SlashAction::CacheSalt) => {
-            let enabled = config.cache_salt == Some(true);
-            *cache_salt_menu = Some(
-                match CacheSaltMenu::build(store.as_ref(), session_id, agent_name, enabled).await {
-                    Ok(m) => m,
-                    Err(_) => CacheSaltMenu::parent_only(agent_name, session_id, enabled),
-                },
-            );
-        }
-        // Control commands (/act, /plan, /act_clear_context): dispatch as a
-        // prompt via the worker. run_with_registry short-circuits them (no LLM
-        // call) and emits AgentSwitch / TranscriptReset + Done. No user echo —
-        // the popup path never calls push_user.  EXCEPTION: /act and
-        // /act_clear_context from plan mode with a submitted plan route through
-        // SwitchAndStart (plan→act handoff) — same as Shift+Tab — preserving
-        // the plan and starting execution instead of wiping the transcript.
-        // RUNNING-GATE: while a turn is in flight (`running`), all three are
-        // refused with a `[switch] busy — retry when idle` marker — a mode
-        // switch mid-turn would start the next turn with a stale agent at an
-        // arbitrary partial boundary (mirrors `/compact`'s SkipRunning).
-        CommandOutcome::Dispatch(SlashAction::Act) => {
-            return dispatch_mode_switch(
-                ModeSwitch::Act,
-                cmd_tx,
-                cancel,
-                running,
-                follow,
-                chat,
-                input,
-                cursor_idx,
-                sys_tokens,
-                mode_flash,
-                anim_tick,
-                workdir,
+        CommandOutcome::Dispatch(action) => {
+            return dispatch_slash_action(
+                action, cmd_tx, cancel, chat, running, follow, store,
+                session_id, task_picker, model_menu, mcp_menu,
+                cache_salt_menu, agent_name, input, cursor_idx,
+                config, workdir, mode_flash, anim_tick, sys_tokens,
+                plan_edit, notepad,
             )
             .await;
-        }
-        CommandOutcome::Dispatch(SlashAction::Plan) => {
-            return dispatch_mode_switch(
-                ModeSwitch::Plan,
-                cmd_tx,
-                cancel,
-                running,
-                follow,
-                chat,
-                input,
-                cursor_idx,
-                sys_tokens,
-                mode_flash,
-                anim_tick,
-                workdir,
-            )
-            .await;
-        }
-        CommandOutcome::Dispatch(SlashAction::ClearContext) => {
-            return dispatch_mode_switch(
-                ModeSwitch::ClearContext,
-                cmd_tx,
-                cancel,
-                running,
-                follow,
-                chat,
-                input,
-                cursor_idx,
-                sys_tokens,
-                mode_flash,
-                anim_tick,
-                workdir,
-            )
-            .await;
-        }
-        CommandOutcome::Dispatch(SlashAction::Annotation) => {
-            crate::plan_edit::enter_annotation(
-                plan_edit,
-                chat.last_annotation_text().unwrap_or_default(),
-            );
-            *mode_flash = Some(("\u{2192} annotation".into(), anim_tick));
-        }
-        CommandOutcome::Dispatch(SlashAction::Notepad) => {
-            *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
-        }
-        CommandOutcome::Dispatch(SlashAction::Ps) => {
-            local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
-        }
-        CommandOutcome::Dispatch(SlashAction::Stop) => {
-            local_cmd::run("/stop", chat, config, cmd_tx, workdir).await;
-        }
-        CommandOutcome::Dispatch(SlashAction::Ap) => {
-            local_cmd::run("/ap", chat, config, cmd_tx, workdir).await;
-        }
-        // `/install_tools`: handled one frame up in `run_app` (needs the
-        // terminal handle to suspend/resume the screen). Decision only.
-        CommandOutcome::Dispatch(SlashAction::InstallTools) => {
-            return LoopFlow::InstallTools;
         }
         CommandOutcome::FillInput(s) => {
             input.clear();
@@ -737,6 +611,11 @@ mod app_loop_model;
 pub(crate) use app_loop_model::env_model_override;
 pub(crate) use app_loop_model::handle_model_outcome;
 
+#[path = "app_loop_mcp.rs"]
+mod app_loop_mcp;
+
+pub(crate) use app_loop_mcp::handle_mcp_outcome;
+
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;
 
@@ -745,7 +624,7 @@ pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_sil
 #[path = "app_loop_actions.rs"]
 mod app_loop_actions;
 
-pub(crate) use app_loop_actions::{dispatch_mode_switch, ModeSwitch};
+pub(crate) use app_loop_actions::dispatch_slash_action;
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds

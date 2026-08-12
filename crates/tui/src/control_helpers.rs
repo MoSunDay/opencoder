@@ -1,5 +1,5 @@
 //! TUI helpers for control-command (`/plan`, `/act`, `/act_clear_context`)
-//! input handling. Both functions are consumed by the idle/steer/queue submit
+//! input handling. Functions are consumed by the idle/steer/queue submit
 //! paths in `app.rs`.
 
 #[cfg(test)]
@@ -46,11 +46,3 @@ pub(crate) fn is_compound_plan_cmd(clean: &str) -> bool {
     plan_compound_for_submit(clean).is_some()
 }
 
-/// True when `clean` is a **bare** control command with no trailing content
-/// (e.g. `/plan`, `/act`), as opposed to a compound `/plan <content>` prompt.
-/// Uses `split_control_prefix` (single source of truth) so whitespace-padded
-/// bare commands like `/plan   ` also resolve here.
-#[allow(dead_code)]
-pub(crate) fn is_pure_control_cmd(clean: &str) -> bool {
-    matches!(opencoder_session::split_control_prefix(clean), Some((_, None)))
-}

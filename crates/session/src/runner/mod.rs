@@ -41,6 +41,8 @@ fn emit(sink: &Sink<'_>, ev: SessionEvent) {
         // g: MutexGuard<&mut (dyn FnMut + Send)>; deref to the inner closure
         // reference and call it.
         (**g)(ev);
+    } else {
+        tracing::warn!(event = ?ev, "emit: sink mutex poisoned, event dropped");
     }
 }
 
@@ -377,6 +379,13 @@ pub(crate) async fn run_loop(
         if is_turn_cancelled(session) {
             on_event(SessionEvent::LlmRoundEnd);
             reset_turn_cancel(session);
+            // A cancelled turn discards partial work the same way compaction
+            // does: clear stale doom-loop signatures, tool-failure counts,
+            // and bash-timeout dedup streaks so they don't false-trip after
+            // the next steer resumes.
+            doom.clear();
+            tool_failures.clear();
+            bash_timeout_first = None;
             continue;
         }
         if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
@@ -427,6 +436,13 @@ pub(crate) async fn run_loop(
             // via the biased select in idle_drain → claim_one_queued.
             if is_turn_cancelled(session) {
                 reset_turn_cancel(session);
+                // A cancelled turn discards partial work the same way
+                // compaction does: clear stale doom-loop signatures,
+                // tool-failure counts, and bash-timeout dedup streaks so
+                // they don't false-trip after the next steer resumes.
+                doom.clear();
+                tool_failures.clear();
+                bash_timeout_first = None;
                 continue;
             }
             // Idle boundary: pop exactly one queued follow-up. Bare control
@@ -590,7 +606,10 @@ pub(crate) async fn run_loop(
                         }
                     }
                     if !max_delay.is_zero() {
-                        tokio::time::sleep(max_delay).await;
+                        tokio::select! {
+                            _ = tokio::time::sleep(max_delay) => {}
+                            _ = await_cancel(session) => {}
+                        }
                     }
                 }
             }

@@ -187,8 +187,8 @@ fn client_subcommand_parses() {
         _ => panic!("expected Client"),
     }
 
-    // --session + --continue are accepted too
-    let cli2 = parse(&[
+    // Bug 12: --session + --continue are mutually exclusive in Client
+    let cli2 = Cli::try_parse_from([
         "opencoder",
         "client",
         "--remote",
@@ -198,15 +198,22 @@ fn client_subcommand_parses() {
         "--continue",
         "hi",
     ]);
-    match cli2.command {
-        Some(Command::Client {
-            session, continue_, ..
-        }) => {
-            assert_eq!(session.as_deref(), Some("01ABC"));
-            assert!(continue_);
-        }
-        _ => panic!("expected Client"),
-    }
+    assert!(
+        cli2.is_err(),
+        "--session and --continue must conflict in Client"
+    );
+
+    // Bug 12: --session + --continue are mutually exclusive in top-level Cli
+    let cli3 = Cli::try_parse_from([
+        "opencoder",
+        "--session",
+        "01ABC",
+        "--continue",
+    ]);
+    assert!(
+        cli3.is_err(),
+        "--session and --continue must conflict in top-level Cli"
+    );
 }
 
 #[test]

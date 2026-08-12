@@ -391,14 +391,6 @@ pub async fn post_model(
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("model switch refused while drain running");
     }
-    // Persist to global config FIRST, before mutating session meta or runtime
-    // overrides, so a save failure leaves session state untouched.
-    if body.persist_default {
-        let patch = serde_json::json!({ "model": &body.value });
-        if let Err(e) = Config::save(&state.workdir, &patch) {
-            return error_500(format!("persist_default failed: {e:#}"));
-        }
-    }
     // P1-5: Capture old meta for TOCTOU rollback.
     let old_model = match state.store.get_session(&id).await {
         Ok(m) => m,
@@ -438,6 +430,21 @@ pub async fn post_model(
                 .await;
         }
         return error_409("model switch refused: drain started during write");
+    }
+    // Persist global config only after all drain checks pass (Bug 6): a refused
+    // request never mutates the global default. Save failure rolls back meta.
+    if body.persist_default {
+        let patch = serde_json::json!({ "model": &body.value });
+        if let Err(e) = Config::save(&state.workdir, &patch) {
+            if let Some(old) = &old_model {
+                let _ = state.store.update_session(&id, &SessionPatch {
+                    model: old.model.clone(),
+                    updated_at: Some(opencoder_core::message::now_ms()),
+                    ..Default::default()
+                }).await;
+            }
+            return error_500(format!("persist_default failed: {e:#}"));
+        }
     }
     handle.overrides.lock().await.model = Some(body.value.clone());
     Json(json!({ "ok": true, "model": body.value })).into_response()
@@ -537,6 +544,7 @@ pub async fn post_subagent_steer(
     };
 
     if !reservation.commit() {
+        // Best-effort cleanup (Bug 9): if already promoted, delete is a no-op.
         if let Err(e) = state.store.delete_input(seq).await {
             return error_500(format!("subagent steer rollback: {e:#}"));
         }

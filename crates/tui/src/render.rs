@@ -111,6 +111,7 @@ pub(crate) fn render<B: Backend>(
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
+    mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     hits: &mut MouseHits,
@@ -310,6 +311,9 @@ pub(crate) fn render<B: Backend>(
         }
         if let Some(mm) = model_menu {
             crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
+        }
+        if let Some(mcp) = mcp_menu {
+            crate::mcp_menu::render_mcp_popup(f, area, composer_area.y, mcp);
         }
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);

@@ -724,7 +724,7 @@ fn parse_usage(u: &Value) -> Usage {
         .get("total_tokens")
         .and_then(|v| v.as_u64())
         .filter(|&t| t != 0)
-        .unwrap_or(input_tokens + output_tokens);
+        .unwrap_or(input_tokens.saturating_add(output_tokens));
 
     // Prompt-caching accounting. Provider naming is inconsistent, so accept
     // every known variant and normalize into two fields (see `Usage` docs):

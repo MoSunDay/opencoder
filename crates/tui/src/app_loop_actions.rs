@@ -18,7 +18,16 @@ use super::{prep_plan_to_act, LoopFlow};
 use crate::app_helpers::{start_turn, worker_dead};
 use crate::chat::ChatView;
 use crate::theme;
-use crate::worker::{gate_switch, SwitchGate, UiCmd};
+use std::sync::Arc;
+
+use opencoder_core::Config;
+use opencoder_store::Store;
+
+use crate::cache_salt_menu::CacheSaltMenu;
+use crate::command::SlashAction;
+use crate::local_cmd;
+use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
+use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
 
 /// Which mode-switch command triggered the dispatch. Parameterizes the plain
 /// prompt text and whether the plan→act handoff applies.
@@ -100,6 +109,142 @@ pub(crate) async fn dispatch_mode_switch(
                 "[switch] busy \u{2014} retry when idle",
                 Style::default().fg(theme::warn_color()),
             )));
+        }
+    }
+    LoopFlow::Proceed
+}
+
+
+/// Unified slash-command dispatch shared by both the `/` popup picker
+/// (`dispatch_command`) and free-text composer submit (`app.rs` Submit).
+/// Every recognized `/cmd` routes through here so the behavior is identical
+/// regardless of entry path. Takes a [`SlashAction`] directly (the popup
+/// extracts it from [`CommandOutcome`]; free-text uses [`command::parse`]).
+///
+/// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
+/// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
+/// Notepad, Ps, Stop, Ap). Returns [`LoopFlow::InstallTools`] for
+/// `/install_tools` (handled one frame up). For mode-switch commands
+/// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
+/// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn dispatch_slash_action(
+    action: SlashAction,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    chat: &mut ChatView,
+    running: &mut bool,
+    follow: &mut bool,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+    task_picker: &mut Option<crate::task::TaskPicker>,
+    model_menu: &mut Option<ModelMenu>,
+    mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    cache_salt_menu: &mut Option<CacheSaltMenu>,
+    agent_name: &str,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    config: &mut Config,
+    workdir: &Path,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    sys_tokens: &mut u64,
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
+) -> LoopFlow {
+    match action {
+        SlashAction::Task => {
+            let sessions = store
+                .list_sessions(&opencoder_store::SessionFilter::default())
+                .await
+                .unwrap_or_default();
+            *task_picker = Some(crate::task::TaskPicker::new(sessions, session_id.to_string()));
+        }
+        SlashAction::Fork => {
+            let sessions = store
+                .list_sessions(&opencoder_store::SessionFilter::default())
+                .await
+                .unwrap_or_default();
+            *task_picker = Some(crate::task::TaskPicker::new_fork(sessions, session_id.to_string()));
+        }
+        SlashAction::Model => {
+            *model_menu = Some(ModelMenu::List(ProviderList::new(config)));
+        }
+        SlashAction::Config => {
+            *model_menu = Some(ModelMenu::Config(ConfigForm::new(config)));
+        }
+        SlashAction::Mcp => {
+            *mcp_menu = Some(crate::mcp_menu::McpMenu::List(
+                crate::mcp_menu::McpList::new(config),
+            ));
+        }
+        SlashAction::Compact => match gate_compact(*running) {
+            CompactGate::Run => {
+                if !start_turn(cmd_tx, cancel, UiCmd::Compact).await {
+                    worker_dead(chat);
+                    return LoopFlow::Quit;
+                }
+                *running = true;
+                *follow = true;
+                chat.begin_turn();
+            }
+            CompactGate::SkipRunning => {
+                chat.push_marker(Line::from(Span::styled(
+                    "[compact] busy \u{2014} retry when idle",
+                    Style::default().fg(theme::warn_color()),
+                )));
+            }
+        },
+        SlashAction::CacheSalt => {
+            let enabled = config.cache_salt == Some(true);
+            *cache_salt_menu = Some(
+                match CacheSaltMenu::build(store.as_ref(), session_id, agent_name, enabled).await {
+                    Ok(m) => m,
+                    Err(_) => CacheSaltMenu::parent_only(agent_name, session_id, enabled),
+                },
+            );
+        }
+        SlashAction::Act => {
+            return dispatch_mode_switch(
+                ModeSwitch::Act, cmd_tx, cancel, running, follow, chat,
+                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+            ).await;
+        }
+        SlashAction::Plan => {
+            return dispatch_mode_switch(
+                ModeSwitch::Plan, cmd_tx, cancel, running, follow, chat,
+                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+            ).await;
+        }
+        SlashAction::ClearContext => {
+            return dispatch_mode_switch(
+                ModeSwitch::ClearContext, cmd_tx, cancel, running, follow, chat,
+                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
+            ).await;
+        }
+        SlashAction::Annotation => {
+            crate::plan_edit::enter_annotation(
+                plan_edit,
+                chat.last_annotation_text().unwrap_or_default(),
+            );
+            *mode_flash = Some(("\u{2192} annotation".into(), anim_tick));
+        }
+        SlashAction::Notepad => {
+            *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
+        }
+        SlashAction::Ps => {
+            local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
+        }
+        SlashAction::Stop => {
+            local_cmd::run("/stop", chat, config, cmd_tx, workdir).await;
+        }
+        SlashAction::Ap => {
+            local_cmd::run("/ap", chat, config, cmd_tx, workdir).await;
+        }
+        // `/install_tools`: handled one frame up in `run_app` (needs the
+        // terminal handle to suspend/resume the screen). Decision only.
+        SlashAction::InstallTools => {
+            return LoopFlow::InstallTools;
         }
     }
     LoopFlow::Proceed

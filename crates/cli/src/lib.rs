@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub prompt_file: Option<PathBuf>,
     /// Resume a specific session by id.
-    #[arg(short, long, global = true)]
+    #[arg(short, long, global = true, conflicts_with = "continue_")]
     pub session: Option<String>,
     /// Override the model for this run, as "{provider}/{model_id}"
     /// (e.g. "anthropic/claude-3"). Bound to the session: new sessions
@@ -44,7 +44,7 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "AGENT")]
     pub agent: Option<String>,
     /// Resume the most recent session for this workdir.
-    #[arg(long, global = true, default_value_t = false)]
+    #[arg(long, global = true, default_value_t = false, conflicts_with = "session")]
     pub continue_: bool,
     /// Fork (copy) the resumed session before continuing, leaving the original untouched.
     #[arg(long, global = true, default_value_t = false)]
@@ -123,10 +123,10 @@ pub enum Command {
         #[arg(long)]
         token: Option<String>,
         /// Resume a specific remote session by id.
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "continue_")]
         session: Option<String>,
         /// Resume the most recent remote session.
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, conflicts_with = "session")]
         continue_: bool,
         /// Interrupt (cancel) the running drain on the resolved session, then
         /// exit. Requires --session <id> or --continue; no prompt needed.

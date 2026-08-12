@@ -17,10 +17,12 @@ pub(super) async fn run_one_llm_call(
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<(String, String, Vec<CompletedToolCall>, Option<Usage>)> {
+    let mcp = crate::prompt::mcp_section(&session.config.enabled_mcp_servers());
     let system = build_system(
         &session.agent,
         &session.working_dir,
         session.skill_prompt_cloned().as_deref(),
+        mcp.as_deref(),
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());

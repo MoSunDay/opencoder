@@ -22,6 +22,7 @@ pub mod keymap;
 pub mod keymap_menu;
 pub mod local_cmd;
 pub mod markdown;
+pub mod mcp_menu;
 pub mod menu;
 pub mod model_menu;
 pub mod model_session_switch;

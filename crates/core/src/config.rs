@@ -7,12 +7,14 @@ use std::path::{Path, PathBuf};
 mod autopilot;
 mod env;
 mod keymap;
+mod mcp;
 mod merge;
 
 pub use autopilot::AutoPilotConfig;
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
+pub use mcp::McpServerConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -23,6 +25,9 @@ pub struct Config {
     /// Empty by default; populate via config file. No built-in presets.
     #[serde(default)]
     pub providers: HashMap<String, ProviderConfig>,
+    /// Named MCP servers. Only entries with `enabled == true` are surfaced.
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, McpServerConfig>,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -328,6 +333,7 @@ impl Default for Config {
                 ..Default::default()
             },
             providers: HashMap::new(),
+            mcp_servers: HashMap::new(),
             model: default_model(),
             small_model: None,
             agent: AgentDefaults::default(),
@@ -452,6 +458,18 @@ impl Config {
     /// Look up a named provider in the `providers` registry.
     pub fn provider_for(&self, name: &str) -> Option<&ProviderConfig> {
         self.providers.get(name)
+    }
+
+    /// Returns enabled MCP servers sorted by name: `(name, config)` pairs.
+    pub fn enabled_mcp_servers(&self) -> Vec<(String, &McpServerConfig)> {
+        let mut out: Vec<(String, &McpServerConfig)> = self
+            .mcp_servers
+            .iter()
+            .filter(|(_, c)| c.enabled)
+            .map(|(n, c)| (n.clone(), c))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     }
 
     /// Resolve the base_url for a provider name: `providers[name].base_url`

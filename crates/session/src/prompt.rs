@@ -1,10 +1,11 @@
-use opencoder_core::{message::now_ms, AgentKind, Message};
+use opencoder_core::{config::McpServerConfig, message::now_ms, AgentKind, Message};
 use std::path::{Path, PathBuf};
 
 pub fn build_system(
     agent: &opencoder_core::Agent,
     working_dir: &Path,
     skill_prompt: Option<&str>,
+    mcp_block: Option<&str>,
 ) -> Message {
     let mut text = agent.prompt.clone();
 
@@ -27,7 +28,61 @@ pub fn build_system(
         }
     }
 
+    if let Some(mcp) = mcp_block {
+        let trimmed = mcp.trim();
+        if !trimmed.is_empty() {
+            text.push_str("\n\n");
+            text.push_str(trimmed);
+        }
+    }
+
     Message::system("system", text)
+}
+
+/// Build the `## MCP Servers` system-prompt section.
+///
+/// Returns `None` when there are no enabled servers (zero behaviour change
+/// for sessions without MCP). The section lists each enabled server with its
+/// transport (stdio `command args` or SSE `url`) so the model is aware of
+/// the available MCP servers.
+pub fn mcp_section(servers: &[(String, &McpServerConfig)]) -> Option<String> {
+    if servers.is_empty() {
+        return None;
+    }
+    let mut lines = String::from("## MCP Servers\n");
+    lines.push_str(
+        "The following MCP (Model Context Protocol) servers are enabled. \
+         They provide additional tools and resources.",
+    );
+    for (name, cfg) in servers {
+        lines.push_str("\n\n### ");
+        lines.push_str(name);
+        match (&cfg.command, &cfg.url) {
+            (Some(cmd), _) => {
+                lines.push_str(" (stdio)");
+                lines.push_str("\n- command: `");
+                lines.push_str(cmd);
+                for a in &cfg.args {
+                    lines.push(' ');
+                    lines.push_str(a);
+                }
+                lines.push('`');
+            }
+            (None, Some(url)) => {
+                lines.push_str(" (sse)");
+                lines.push_str("\n- url: `");
+                lines.push_str(url);
+                lines.push('`');
+            }
+            (None, None) => {
+                lines.push_str("\n- (no transport configured)");
+            }
+        }
+        if !cfg.env.is_empty() {
+            lines.push_str(&format!("\n- env: {} key(s) configured", cfg.env.len()));
+        }
+    }
+    Some(lines)
 }
 
 /// Load and concatenate project instruction files (AGENTS.md) from up to
@@ -192,4 +247,58 @@ pub fn compaction_user_prompt(previous_summary: Option<&str>) -> String {
 
 pub fn _ts() -> i64 {
     now_ms()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mcp_section;
+    use opencoder_core::config::McpServerConfig;
+
+    #[test]
+    fn mcp_section_empty_returns_none() {
+        assert!(mcp_section(&[]).is_none());
+    }
+
+    #[test]
+    fn mcp_section_disabled_not_included() {
+        // enabled_mcp_servers already filters; but verify the helper works with
+        // whatever it's given (it trusts the caller filtered).
+        let cfg = McpServerConfig {
+            enabled: true,
+            command: Some("npx".to_string()),
+            args: vec!["-y".to_string(), "@mcp/server".to_string()],
+            ..Default::default()
+        };
+        let servers = vec![("active".to_string(), &cfg)];
+        let s = mcp_section(&servers).unwrap();
+        assert!(s.contains("## MCP Servers"));
+        assert!(s.contains("active"));
+        assert!(s.contains("stdio"));
+        assert!(s.contains("npx"));
+        assert!(s.contains("@mcp/server"));
+    }
+
+    #[test]
+    fn mcp_section_sse_transport() {
+        let cfg = McpServerConfig {
+            enabled: true,
+            url: Some("https://example.com/sse".to_string()),
+            ..Default::default()
+        };
+        let servers = vec![("remote".to_string(), &cfg)];
+        let s = mcp_section(&servers).unwrap();
+        assert!(s.contains("(sse)"));
+        assert!(s.contains("https://example.com/sse"));
+    }
+
+    #[test]
+    fn mcp_section_no_transport() {
+        let cfg = McpServerConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let servers = vec![("bare".to_string(), &cfg)];
+        let s = mcp_section(&servers).unwrap();
+        assert!(s.contains("no transport configured"));
+    }
 }

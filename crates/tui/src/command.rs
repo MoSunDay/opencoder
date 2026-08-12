@@ -24,6 +24,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/task", "切换 / 新建 / 恢复会话 (task picker)"),
     ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
+    ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
     (
         "/config",
         "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",
@@ -63,6 +64,8 @@ pub enum SlashAction {
     Annotation,
     Notepad,
     ClearContext,
+    /// `/mcp` — manage MCP servers (enable/disable/add/edit/delete).
+    Mcp,
     /// Display-only: list background bash (never enters model context).
     Ps,
     /// Display-only: kill all background bash (never enters model context).
@@ -190,6 +193,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" => Some(SlashAction::ClearContext),
+        "mcp" | "mc" => Some(SlashAction::Mcp),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
@@ -210,6 +214,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" => Some(SlashAction::ClearContext),
+        "/mcp" => Some(SlashAction::Mcp),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/ap" => Some(SlashAction::Ap),
@@ -765,6 +770,27 @@ mod tests {
     #[test]
     fn dispatch_notepad() {
         assert_eq!(dispatch("/notepad"), Some(SlashAction::Notepad));
+    }
+
+    #[test]
+    fn parse_mcp_full() {
+        assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
+    }
+
+    #[test]
+    fn parse_mcp_alias() {
+        assert_eq!(parse("/mc"), Some(SlashAction::Mcp));
+    }
+
+    #[test]
+    fn parse_model_and_alias() {
+        assert_eq!(parse("/model"), Some(SlashAction::Model));
+        assert_eq!(parse("/mdl"), Some(SlashAction::Model));
+    }
+
+    #[test]
+    fn dispatch_mcp() {
+        assert_eq!(dispatch("/mcp"), Some(SlashAction::Mcp));
     }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {

@@ -41,6 +41,20 @@ impl SseFrameDecoder {
     }
 
     pub fn drain(&mut self) -> Vec<SseFrame> {
+        // Strip leading invalid UTF-8 bytes so decoding advances instead of
+        // stalling forever (mirrors the fix in llm/src/sse.rs).
+        loop {
+            let drop_n = match std::str::from_utf8(&self.buf) {
+                Ok(_) => break,
+                Err(e) if e.valid_up_to() == 0 => match e.error_len() {
+                    Some(n) => n,
+                    None => break,
+                },
+                Err(_) => break,
+            };
+            self.buf.drain(..drop_n.min(self.buf.len()));
+        }
+
         // Process only the valid UTF-8 prefix; retain any incomplete multi-byte
         // tail (a char split across TCP reads) for the next chunk.
         let valid_len = match std::str::from_utf8(&self.buf) {
@@ -180,5 +194,18 @@ mod tests {
         let mut d = SseFrameDecoder::new();
         d.push(b"\n\n");
         assert!(d.drain().is_empty());
+    }
+
+    #[test]
+    fn strips_leading_invalid_utf8_and_advances() {
+        // Bug 3: invalid UTF-8 at the buffer head must be stripped so that
+        // decode advances instead of stalling forever on the same byte.
+        let mut d = SseFrameDecoder::new();
+        d.push(&[0xFF, 0xFE]);
+        d.push(b"event: ok\ndata: hello\n\n");
+        let frames = d.drain();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].event.as_deref(), Some("ok"));
+        assert_eq!(frames[0].data, "hello");
     }
 }

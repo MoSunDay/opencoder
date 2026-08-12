@@ -8,7 +8,7 @@ agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → �
 ## 边界与非目标
 - 不做 HTTP / 终端 IO（由 web/cli/tui 负责）。
 - 不直接连数据库驱动——经 `Store` trait 抽象。
-- 非目标：MCP / 权限确认（当前未实现）。
+- MCP server 配置 + 条件性 system prompt 注入已实现（`build_system` 经 `mcp_section` 将 enabled server 信息注入）；MCP 客户端连接/工具发现/工具调用仍为非目标。权限确认（当前未实现）。
 - skills 仅承接「可选的系统提示注入」：`SessionState.skill_prompt`（`Arc<Mutex<Option<String>>>`）是共享可变状态——TUI 持有 `Arc` 克隆并直接写入（绕过 cmd channel），`run_one_llm_call` 每 turn 经 `skill_prompt_cloned()` 读取最新值。每轮 `build_system` 把它作为 `## Active skill` 段追加到系统提示末尾（最高优先级）。skill 的发现/解析/选择 UI 不在本模块（见 core 的 `skill` 模块与 tui 的 `menu` 模块）。
 
 ## 关键抽象

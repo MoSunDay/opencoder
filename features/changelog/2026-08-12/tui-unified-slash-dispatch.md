@@ -28,10 +28,11 @@ TUI 的 Submit 路径（输入框输入 `/command` + Enter）只拦截了 `/anno
 | 功能 | 测试名 | 文件 |
 |------|--------|------|
 | `/model` + `/mdl` 别名解析 | `parse_model_and_alias` | `command.rs` |
-| slash 命令分发（全变体） | `dispatch_slash_action` 间接覆盖 | `app_loop_dispatch_cmd_tests.rs` |
+| slash 命令分发（全变体） | `dispatch_command` → `dispatch_slash_action` 间接覆盖 | `app_loop_dispatch_cmd_tests.rs` |
+| `dispatch_slash_action` 直达路径（idle/running 门控） | `slash_action_compact_idle_starts_turn`、`slash_action_compact_running_pushes_busy_marker` | `app_loop_slash_action_tests.rs` |
 | 模式切换门控 | `dispatch_mode_switch` 现有测试 | `app_loop_actions.rs` |
 
-- 全量回归：`cargo test -p opencoder-tui --lib` → 1236 passed; 0 failed
+- 全量回归：`cargo test -p opencoder-tui --lib` → 1238 passed; 0 failed
 - clippy：`cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 零警告
 - 行数：`app.rs` 798 ≤ 800, `app_loop.rs` 658 ≤ 800, `app_loop_actions.rs` 250 ≤ 400
 

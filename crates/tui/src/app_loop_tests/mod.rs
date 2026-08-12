@@ -722,4 +722,8 @@ mod image_paste_tests;
 mod dispatch_cmd_tests;
 
 #[cfg(test)]
+#[path = "../app_loop_slash_action_tests.rs"]
+mod slash_action_tests;
+
+#[cfg(test)]
 mod switch_gate_tests;

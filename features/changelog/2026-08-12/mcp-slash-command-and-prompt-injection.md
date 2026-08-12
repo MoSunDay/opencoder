@@ -45,7 +45,7 @@ OpenCoder 此前完全没有 MCP（Model Context Protocol）相关代码（`agen
 | 合并空 command 清除字段 | merge_empty_command_clears_field | config/mcp.rs |
 | 合并 args 替换非空 | merge_args_replaces_nonempty | config/mcp.rs |
 | mcp_section 空列表返回 None | mcp_section_empty_returns_none | prompt.rs |
-| mcp_section stdio transport | mcp_section_disabled_not_included | prompt.rs |
+| mcp_section stdio transport | mcp_section_includes_enabled_server | prompt.rs |
 | mcp_section SSE transport | mcp_section_sse_transport | prompt.rs |
 | mcp_section 无 transport | mcp_section_no_transport | prompt.rs |
 | save_mcp_json 含全部字段 | save_includes_all_fields | mcp_menu/patch.rs |
@@ -67,8 +67,11 @@ OpenCoder 此前完全没有 MCP（Model Context Protocol）相关代码（`agen
 | parse("/mcp") | parse_mcp_full | command.rs |
 | parse("/mc") 别名 | parse_mcp_alias | command.rs |
 | dispatch("/mcp") | dispatch_mcp | command.rs |
+| MCP 保存成功+reload | handle_mcp_outcome_success_saves_and_reloads | mcp_outcome_tests.rs |
+| MCP 保存失败 | handle_mcp_outcome_save_failure_pushes_error_marker | mcp_outcome_tests.rs |
+| MCP reload 失败 | handle_mcp_outcome_reload_failure_pushes_error_marker | mcp_outcome_tests.rs |
 
-- 全量回归：`cargo test --workspace` → 2379 passed, 0 failed
+- 全量回归：`cargo test --workspace` → 2386 passed, 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 0 警告
 - build：`cargo build --workspace` → Finished
 - 行数：config/mcp.rs 152 ≤ 400；mcp_menu/*.rs ≤ 275 ≤ 400；app_loop_mcp.rs 61 ≤ 400；app.rs 798 ≤ 800

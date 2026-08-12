@@ -48,12 +48,11 @@ pub fn should_compact(session: &SessionState) -> bool {
 /// like any other context the model actually consumes.
 fn estimated_tokens(session: &SessionState) -> u64 {
     let skill = session.skill_prompt_cloned();
-    let mcp = crate::prompt::mcp_section(&session.config.enabled_mcp_servers());
     let system = build_system(
         &session.agent,
         &session.working_dir,
         skill.as_deref(),
-        mcp.as_deref(),
+        crate::prompt::mcp_section(&session.config.enabled_mcp_servers()).as_deref(),
     );
     let base = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
     let registry = crate::tools::registry();

@@ -420,6 +420,7 @@ async fn fold_turn_done_plan_consumes_stale_pending_arm() {
 }
 
 mod model_outcome_tests;
+mod mcp_outcome_tests;
 
 // ----- Done/Error queue_items clear tests -----
 //

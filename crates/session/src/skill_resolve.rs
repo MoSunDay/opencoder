@@ -15,7 +15,7 @@
 
 use std::collections::HashSet;
 
-use opencoder_core::{discover_skills, extract_skill_tokens, Message, Skill};
+use opencoder_core::{body_with_source, discover_skills, extract_skill_tokens, Message, Skill};
 
 use crate::runner::new_id;
 use crate::SessionState;
@@ -58,7 +58,7 @@ pub fn resolve_inline_skills_with(
         }
         match skills.iter().find(|s| &s.name == name) {
             Some(sk) => {
-                bodies.push(sk.body.clone());
+                bodies.push(body_with_source(sk));
                 resolved_names.insert(name.clone());
             }
             None => unresolved.push(name.clone()),
@@ -131,7 +131,7 @@ mod tests {
             name: name.into(),
             description: String::new(),
             body: body.into(),
-            source: PathBuf::new(),
+            source: PathBuf::from(format!("/skills/{name}/SKILL.md")),
         }
     }
 
@@ -151,7 +151,7 @@ mod tests {
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$review do it", &skills);
         assert_eq!(clean, " do it");
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("REVIEW BODY"));
+        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nREVIEW BODY"));
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$review $submit go", &skills);
         assert_eq!(clean, "  go");
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("R\n\nS"));
+        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS"));
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         // Resolved `review` stripped; unresolved `$bogus` preserved verbatim.
         assert_eq!(clean, " $bogus");
         assert_eq!(unresolved, vec!["bogus"]);
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("R"));
+        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR"));
     }
 
     #[test]
@@ -194,7 +194,7 @@ mod tests {
         let skills = vec![skill("review", "R")];
         let (_, unresolved) = resolve_inline_skills_with(&s, "$review $review", &skills);
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("R"));
+        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR"));
     }
 
     #[tokio::test]

@@ -46,8 +46,10 @@ Commit: (working-tree, pre-initial-commit)
 | Bug 3: invalid UTF-8 剥离后解码推进 | `strips_leading_invalid_utf8_and_advances` | client/src/sse.rs |
 | Bug 4: total_tokens 溢出饱和 | `parse_usage_total_saturates_on_overflow` | llm/src/client_tests.rs |
 | Bug 12: --session/--continue 互斥 | cli_parse 集成测试（27 passed） | cli/tests/cli_parse.rs |
+| Bug 11: set_version 事务原子替换单行 | `set_version_replaces_single_row_atomically` | store/src/libsql_store/schema.rs |
+| Bug 13: turn-cancel 清零 doom 签名（差分回归） | `turn_cancel_clears_doom_signatures` | session/tests/doom_clear_on_cancel.rs |
 
-- 全量回归：core 167 / store 87 / llm 119 / client 9 / web 81 / cli 91 / session(runner::) 48 / tui(lib) 1236 → 共 1838 passed, 0 failed
+- 全量回归：core 167 / store 88（+1 Bug 11）/ llm 119 / client 9 / web 81 / cli 91 / session(runner::) 48 + doom_clear_on_cancel 1（+1 Bug 13）/ tui(lib) 1238 → 共 1842 passed, 0 failed
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - build：`cargo build --workspace` → Finished
 

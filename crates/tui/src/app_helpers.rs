@@ -385,7 +385,7 @@ pub(crate) fn apply_skill_tokens_with(
     for n in &unique {
         if let Some(sk) = skills.iter().find(|s| &s.name == n) {
             resolved_names.push(sk.name.clone());
-            resolved_bodies.push(sk.body.clone());
+            resolved_bodies.push(opencoder_core::body_with_source(sk));
         } else {
             unresolved.push(n.clone());
         }

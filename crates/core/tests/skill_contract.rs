@@ -210,3 +210,27 @@ fn dep_gated_skills_do_not_clobber_existing() {
     let chrome_body = std::fs::read_to_string(root.join("chrome-headless/SKILL.md")).unwrap();
     assert_eq!(chrome_body, "my custom chrome skill");
 }
+
+#[test]
+fn body_with_source_emits_path_annotation_then_body() {
+    // After discovery, a skill's body_with_source must carry the on-disk path
+    // of its source SKILL.md so the agent can locate sibling assets.
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("demo").join("SKILL.md"),
+        "---\nname: demo\ndescription: d\n---\nSee [EXAMPLES](./EXAMPLES.md)\n",
+    );
+    let found = discover_in(root.path());
+    assert_eq!(found.len(), 1);
+    let sk = &found[0];
+    let annotated = opencoder_core::body_with_source(sk);
+    let source_str = sk.source.to_string_lossy();
+    assert!(
+        annotated.starts_with(&format!("> Source: {}", source_str)),
+        "annotation must start with the resolved source path: {annotated}"
+    );
+    assert!(
+        annotated.contains("See [EXAMPLES](./EXAMPLES.md)"),
+        "body content must follow annotation: {annotated}"
+    );
+}

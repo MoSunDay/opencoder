@@ -466,11 +466,33 @@ pub fn strip_resolved_skill_tokens(text: &str, resolved: &HashSet<String>) -> St
     out
 }
 
+/// Prefix a skill's body with its source-file path as a blockquote annotation
+/// so the injected prompt carries enough context for the agent to locate
+/// skill-relative assets (e.g. `EXAMPLES.md`) referenced inside the body.
+pub fn body_with_source(skill: &Skill) -> String {
+    format!("> Source: {}\n\n{}", skill.source.display(), skill.body)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn body_with_source_prefixes_path_before_body() {
+        let skill = Skill {
+            name: "demo".into(),
+            description: "d".into(),
+            body: "Do the thing.".into(),
+            source: PathBuf::from("/skills/demo/SKILL.md"),
+        };
+        let out = body_with_source(&skill);
+        assert!(
+            out.starts_with("> Source: /skills/demo/SKILL.md"),
+            "must start with source path annotation: {out}"
+        );
+        assert!(out.contains("Do the thing."), "body must follow the annotation");
+    }
 
     fn write(path: impl AsRef<Path>, contents: &str) {
         let p = path.as_ref();

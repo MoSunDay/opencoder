@@ -45,17 +45,18 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     assert!(unresolved.is_empty(), "known skill must not be unresolved");
     // Skill activated (sticky display + body).
     assert_eq!(active_skill.as_deref(), Some("alpha"));
-    assert_eq!(active_skill_body.as_deref(), Some("the alpha body"));
+    let body = active_skill_body.as_deref().expect("skill body set");
+    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
+    assert!(body.ends_with("the alpha body"), "body must follow annotation: {body}");
     assert!(
         sys_tokens > 0,
         "sys_tokens must be recomputed with the skill body"
     );
     // The shared skill_handle (session.skill_prompt) is updated in-place.
-    assert_eq!(
-        skill_handle.lock().unwrap().as_deref(),
-        Some("the alpha body"),
-        "skill_handle must hold the resolved body"
-    );
+    let handle_body = skill_handle.lock().unwrap();
+    let handle_body = handle_body.as_deref().expect("skill_handle body set");
+    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+    assert!(handle_body.ends_with("the alpha body"), "skill_handle must hold the resolved body: {handle_body}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -167,12 +168,13 @@ async fn apply_skill_tokens_combined_content_token_at_end() {
         Some("alpha"),
         "skill must activate"
     );
-    assert_eq!(active_skill_body.as_deref(), Some("alpha body"));
-    assert_eq!(
-        skill_handle.lock().unwrap().as_deref(),
-        Some("alpha body"),
-        "skill_handle must carry the resolved body"
-    );
+    let body = active_skill_body.as_deref().expect("skill body set");
+    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
+    assert!(body.ends_with("alpha body"), "body must follow annotation: {body}");
+    let handle_body = skill_handle.lock().unwrap();
+    let handle_body = handle_body.as_deref().expect("skill_handle body set");
+    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+    assert!(handle_body.ends_with("alpha body"), "skill_handle must carry the resolved body: {handle_body}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -209,11 +211,13 @@ async fn apply_skill_tokens_combined_content_multiple_skills_with_text() {
     assert!(unresolved.is_empty());
     // Both skill names appear in the sticky display, both bodies joined.
     assert_eq!(active_skill.as_deref(), Some("alpha, beta"));
-    assert_eq!(
-        active_skill_body.as_deref(),
-        Some("alpha body\n\nbeta body"),
-        "bodies must be joined in first-seen order"
+    let body = active_skill_body.as_deref().expect("skill body set");
+    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
+    assert!(
+        body.contains("alpha body") && body.contains("beta body"),
+        "both bodies present in first-seen order: {body}"
     );
+    assert!(body.ends_with("beta body"), "last joined body must be beta: {body}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -244,9 +248,11 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
     // Only the known skill resolves; the unknown is reported back.
     assert_eq!(unresolved, vec!["ghost"]);
     assert_eq!(active_skill.as_deref(), Some("alpha"));
-    assert_eq!(
-        skill_handle.lock().unwrap().as_deref(),
-        Some("alpha body"),
-        "known skill body must still be injected despite an unknown peer"
+    let handle_body = skill_handle.lock().unwrap();
+    let handle_body = handle_body.as_deref().expect("skill_handle body set");
+    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+    assert!(
+        handle_body.ends_with("alpha body"),
+        "known body must follow annotation despite unknown peer: {handle_body}"
     );
 }

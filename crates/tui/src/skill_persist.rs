@@ -296,21 +296,29 @@ mod tests {
         assert_eq!(clean.trim(), "fix the bug");
         assert!(unresolved.is_empty());
         assert_eq!(active_skill.as_deref(), Some("alpha"));
-        assert_eq!(
-            skill_handle.lock().unwrap().as_deref(),
-            Some("the alpha body"),
-            "skill_prompt (in-memory) must carry the resolved body"
-        );
-        assert_eq!(
-            store
-                .get_session("s")
-                .await
-                .unwrap()
-                .unwrap()
-                .skill
-                .as_deref(),
-            Some("the alpha body"),
-            "resolve_persist must persist the skill for resume"
+        {
+        {
+            let handle_body = skill_handle.lock().unwrap();
+            let handle_body = handle_body.as_deref().expect("skill_prompt body set");
+            assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+            assert!(
+                handle_body.ends_with("the alpha body"),
+                "skill_prompt (in-memory) must carry the resolved body: {handle_body}"
+            );
+        }
+        }
+        let stored = store
+            .get_session("s")
+            .await
+            .unwrap()
+            .unwrap()
+            .skill
+            .clone()
+            .expect("persisted skill body");
+        assert!(stored.starts_with("> Source: "), "must prefix source path: {stored}");
+        assert!(
+            stored.ends_with("the alpha body"),
+            "resolve_persist must persist the skill for resume: {stored}"
         );
     }
 }

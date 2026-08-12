@@ -297,7 +297,6 @@ mod tests {
         assert!(unresolved.is_empty());
         assert_eq!(active_skill.as_deref(), Some("alpha"));
         {
-        {
             let handle_body = skill_handle.lock().unwrap();
             let handle_body = handle_body.as_deref().expect("skill_prompt body set");
             assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
@@ -305,7 +304,6 @@ mod tests {
                 handle_body.ends_with("the alpha body"),
                 "skill_prompt (in-memory) must carry the resolved body: {handle_body}"
             );
-        }
         }
         let stored = store
             .get_session("s")

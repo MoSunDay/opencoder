@@ -35,6 +35,13 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         return true;
     }
     if obj
+        .get("mcp_servers")
+        .and_then(|v| v.as_object())
+        .is_some_and(|p| !p.is_empty())
+    {
+        return true;
+    }
+    if obj
         .get("compaction")
         .and_then(|v| v.as_object())
         .is_some_and(|c| c.contains_key("context_threshold") || c.contains_key("auto"))
@@ -172,7 +179,15 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
-        if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
+        if let Some(servers) = obj.get("mcp_servers").and_then(|v| v.as_object()) {
+        for (name, sv) in servers {
+            if let Some(sobj) = sv.as_object() {
+                let entry = cfg.mcp_servers.entry(name.clone()).or_default();
+                super::mcp::merge(entry, sobj);
+            }
+        }
+    }
+    if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
             if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
                 cfg.compaction.auto = v;
             }
@@ -277,5 +292,46 @@ mod tests {
         });
         merge_into(&mut cfg, value);
         assert_eq!(cfg.tool_guard.max_consecutive_failures, u32::MAX);
+    }
+
+    /// Regression: a full config object carrying `mcp_servers` must populate
+    /// `cfg.mcp_servers` (the `merge_into` top-level branch used by
+    /// `Config::load` reading `mcp_servers` from `config.json`), and each
+    /// server's `env` map must run values through `env::resolve_env`:
+    /// brace-indirected `{VAR}` values resolve against the process env (empty
+    /// when unset), plain values are kept verbatim. Deterministic + parallel
+    /// safe (no `set_var`: only a getenv of a never-set var).
+    #[test]
+    fn mcp_servers_load_from_full_config_and_resolve_env_indirection() {
+        let mut cfg = Config::default();
+        let value = serde_json::json!({
+            "mcp_servers": {
+                "zai-vision": {
+                    "enabled": true,
+                    "command": "npx",
+                    "args": ["-y", "@z_ai/mcp-server@latest"],
+                    "env": {
+                        "Z_AI_MODE": "ZHIPU",
+                        "OPENCODER_TEST_UNSET_KEY": "{OPENCODER_TEST_UNSET_KEY_DOES_NOT_EXIST}"
+                    }
+                }
+            }
+        });
+        merge_into(&mut cfg, value);
+
+        let srv = cfg
+            .mcp_servers
+            .get("zai-vision")
+            .expect("mcp server loaded from full config object");
+        assert!(srv.enabled);
+        assert_eq!(srv.command.as_deref(), Some("npx"));
+        assert_eq!(srv.args, vec!["-y", "@z_ai/mcp-server@latest"]);
+        // literal value (no braces) kept verbatim
+        assert_eq!(srv.env.get("Z_AI_MODE").map(String::as_str), Some("ZHIPU"));
+        // brace-indirected value routed through resolve_env; unset var -> ""
+        assert_eq!(
+            srv.env.get("OPENCODER_TEST_UNSET_KEY").map(String::as_str),
+            Some("")
+        );
     }
 }

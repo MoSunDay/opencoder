@@ -116,6 +116,7 @@ pub(super) async fn run_app(
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
     let mut keymap = crate::keymap::KeyBindings::from_config(&config);
@@ -233,6 +234,7 @@ pub(super) async fn run_app(
                     task_picker.as_ref(),
                     command_menu.as_ref(),
                     model_menu.as_ref(),
+                    mcp_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
                     &mut hits,
@@ -342,6 +344,12 @@ pub(super) async fn run_app(
                             }
                             continue;
                         }
+                        if mcp_menu.is_some() {
+                            let _ = app_loop::handle_mcp_outcome(
+                                &mut mcp_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
+                            ).await;
+                            continue;
+                        }
                         if cache_salt_menu.is_some() {
                             if matches!(handle_cache_salt_key(&mut cache_salt_menu, k), CacheSaltOutcome::Quit) { let _ = cmd_tx.send(UiCmd::Quit).await; break; }
                             continue;
@@ -355,7 +363,7 @@ pub(super) async fn run_app(
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
-                                &session_id, &mut task_picker, &mut model_menu,
+                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu,
                                 &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
@@ -367,7 +375,7 @@ pub(super) async fn run_app(
                             {
                                 app_loop::LoopFlow::Quit => break,
                                 app_loop::LoopFlow::Proceed => {}
-                                app_loop::LoopFlow::InstallTools => {
+                                        app_loop::LoopFlow::InstallTools => {
                                     crate::install_tools::run(terminal, &mut chat);
                                     dirty = true;
                                     render_pending = true;
@@ -430,23 +438,30 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
-                                // A compound `/plan <content>` delivered while the agent is still
-                                // `act` arms the plan->act handoff *deferred*: the mode switch
-                                // lands asynchronously via `AgentSwitch("plan")`, which would
-                                // reset `plan_submitted`, so leave a pending flag for that event
-                                // to re-arm. Shift+Tab after the plan turn then keeps the plan
-                                // and starts the task instead of plain-swapping.
+                                // Compound `/plan <content>` while still in `act` mode arms a
+                                // *deferred* plan->act handoff (re-armed on `AgentSwitch`).
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
                                 // Intercept /annotation: open the editor instead of submitting
-                                if clean == "/annotation" {
-                                    crate::plan_edit::enter_annotation(
-                                        &mut plan_edit,
-                                        chat.last_annotation_text().unwrap_or_default(),
-                                    );
-                                    mode_flash = Some(("\u{2192} annotation".into(), anim_tick));
-                                } else if clean == "/notepad" {
-                                    notepad = Some(crate::notepad::NotepadView::new(workdir.clone()));
-                                } else if crate::local_cmd::run(&clean, &mut chat, &mut config, &cmd_tx, &workdir).await { // /ps /stop /ap
+                                if let Some(action) = crate::command::parse(&clean) {
+                                    // Unified slash-command dispatch: route recognized `/cmd`
+                                    // through the same handler as the `/` popup picker.
+                                    let f = app_loop::dispatch_slash_action(
+                                        action, &cmd_tx, &mut cancel, &mut chat,
+                                        &mut running, &mut follow, &store,
+                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu,
+                                        &mut cache_salt_menu, &agent_name, &mut input, &mut cursor_idx,
+                                        &mut config, &workdir,
+                                        &mut mode_flash, anim_tick, &mut sys_tokens,
+                                        &mut plan_edit, &mut notepad,
+                                    )
+                                    .await;
+                                    match f {
+                                        app_loop::LoopFlow::Quit => break,
+                                        app_loop::LoopFlow::InstallTools => {
+                                            crate::install_tools::run(terminal, &mut chat); dirty = true; render_pending = true; continue;
+                                        }
+                                        _ => push_history(&mut history, &mut hist_idx, &text),
+                                    }
                                 } else if clean.is_empty() {
                                     if active_skill.is_some() {
                                         if !text.is_empty() {
@@ -495,20 +510,8 @@ pub(super) async fn run_app(
                                         queue_items.push((seq, queued_item_display(&text, &clean)));
                                     }
                                 } else {
-                                    // Only suppress the transcript echo for BARE control commands
-                                    // (/plan, /act, /act_clear_context). Compound inputs
-                                    // (/plan $review, /plan fix the bug) carry user content and
-                                    // must be echoed before execution.
-                                    let is_pure_control = crate::control_helpers::is_pure_control_cmd(&clean);
-                                    if is_pure_control {
-                                        // Record in Up/Down history but suppress transcript echo and
-                                        // context accounting — pure control commands are mode switches,
-                                        // not conversation.
-                                        push_history(&mut history, &mut hist_idx, &text);
-                                    } else {
-                                        push_user(&mut chat, &mut history, &mut hist_idx, &text);
-                                        chat.context_used += estimate(&clean) as u64;
-                                    }
+                                    push_user(&mut chat, &mut history, &mut hist_idx, &text);
+                                    chat.context_used += estimate(&clean) as u64;
                                     let image_uris = snapshot_image_uris(&pending_images);
                                     if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(clean, image_uris)).await
                                     {
@@ -517,7 +520,7 @@ pub(super) async fn run_app(
                                     }
                                     pending_images.clear();
                                     task_elapsed_ms = 0;
-                                    cancelled = false; // B3: clear stale flag from a prior cancel
+                                    cancelled = false;
                                     running = true;
                                     follow = true;
                                     chat.note_requirement_submitted();

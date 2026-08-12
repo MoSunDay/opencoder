@@ -304,11 +304,17 @@ pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
 }
 
 async fn set_version(conn: &Connection, version: i64) -> Result<()> {
-    conn.execute("DELETE FROM schema_version", ()).await?;
-    conn.execute(
-        "INSERT INTO schema_version(version) VALUES (?1)",
-        libsql::params![version],
-    )
-    .await?;
-    Ok(())
+    // Wrap DELETE + INSERT in a single transaction so a crash between them
+    // cannot leave schema_version empty (which would trigger a spurious full
+    // re-migration on the next boot).
+    super::tx::run_tx(conn, "BEGIN", || async move {
+        conn.execute("DELETE FROM schema_version", ()).await?;
+        conn.execute(
+            "INSERT INTO schema_version(version) VALUES (?1)",
+            libsql::params![version],
+        )
+        .await?;
+        Ok(())
+    })
+    .await
 }

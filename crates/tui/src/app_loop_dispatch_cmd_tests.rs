@@ -63,6 +63,7 @@ async fn slash_act_from_plan_with_plan_routes_handoff() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -86,6 +87,7 @@ async fn slash_act_from_plan_with_plan_routes_handoff() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -124,6 +126,7 @@ async fn slash_clear_context_from_plan_with_plan_routes_handoff() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -147,6 +150,7 @@ async fn slash_clear_context_from_plan_with_plan_routes_handoff() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -185,6 +189,7 @@ async fn slash_clear_context_from_act_mode_dispatches_prompt() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -208,6 +213,7 @@ async fn slash_clear_context_from_act_mode_dispatches_prompt() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "act",
@@ -248,6 +254,7 @@ async fn slash_act_from_act_mode_dispatches_prompt() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -271,6 +278,7 @@ async fn slash_act_from_act_mode_dispatches_prompt() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "act",
@@ -312,6 +320,7 @@ async fn slash_act_from_plan_without_plan_dispatches_prompt() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -335,6 +344,7 @@ async fn slash_act_from_plan_without_plan_dispatches_prompt() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -369,6 +379,7 @@ async fn tab_fill_input_adds_trailing_space() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -392,6 +403,7 @@ async fn tab_fill_input_adds_trailing_space() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -436,6 +448,7 @@ async fn tab_fill_local_command_adds_trailing_space() {
     let mut follow = false;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -459,6 +472,7 @@ async fn tab_fill_local_command_adds_trailing_space() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "act",
@@ -497,6 +511,7 @@ async fn slash_plan_while_running_is_noop() {
     let mut follow = true;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -520,6 +535,7 @@ async fn slash_plan_while_running_is_noop() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "act",
@@ -567,6 +583,7 @@ async fn slash_act_while_running_is_noop() {
     let mut follow = true;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = "do it".to_string();
     let mut cursor_idx = 5usize;
@@ -590,6 +607,7 @@ async fn slash_act_while_running_is_noop() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -635,6 +653,7 @@ async fn slash_clear_context_while_running_is_noop() {
     let mut follow = true;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -658,6 +677,7 @@ async fn slash_clear_context_while_running_is_noop() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -708,6 +728,7 @@ async fn slash_act_while_subagent_running_is_noop() {
     let mut follow = true;
     let mut task_picker = None;
     let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut input = "do it".to_string();
     let mut cursor_idx = 5usize;
@@ -731,6 +752,7 @@ async fn slash_act_while_subagent_running_is_noop() {
         "test",
         &mut task_picker,
         &mut model_menu,
+        &mut mcp_menu,
         &mut cache_salt_menu,
         &mut None,
         "plan",

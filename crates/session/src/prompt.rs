@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_section_disabled_not_included() {
+    fn mcp_section_includes_enabled_server() {
         // enabled_mcp_servers already filters; but verify the helper works with
         // whatever it's given (it trusts the caller filtered).
         let cfg = McpServerConfig {

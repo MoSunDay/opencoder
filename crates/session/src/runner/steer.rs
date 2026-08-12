@@ -100,20 +100,20 @@ pub(super) async fn claim_one_queued(
 ) -> Option<(i64, String, Vec<String>)> {
     let store = session.store.clone()?;
     let sid = session.id.clone();
-    let hard = session.cancel.clone();
-    tokio::select! {
-        biased;
-        _ = cancel_guard(hard) => None,
-        v = async {
-            match store.claim_next_queue(&sid).await {
-                Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
-                Ok(None) => None,
-                Err(e) => {
-                    tracing::warn!(error = %e, "claim_one_queued failed");
-                    None
-                }
-            }
-        } => v,
+    // No cancel-guard select here. claim_next_queue runs
+    // BEGIN IMMEDIATE -> SELECT -> UPDATE -> COMMIT atomically; racing the
+    // hard cancel via a biased select could drop the future mid-COMMIT,
+    // leaving the item permanently promoted (invisible to future queries)
+    // yet never recorded as a user message -- permanent data loss. The whole
+    // transaction completes in <1ms on local SQLite; the run loop's
+    // top-of-loop interrupt check catches cancellation on the next iteration.
+    match store.claim_next_queue(&sid).await {
+        Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(error = %e, "claim_one_queued failed");
+            None
+        }
     }
 }
 
@@ -210,6 +210,7 @@ pub(super) async fn drain_one_queued(
 }
 
 /// Action the caller should take after an idle-boundary drain.
+#[derive(Debug)]
 pub(super) enum IdleAction {
     /// A prompt (or late steer/queue) was found — continue the outer loop.
     Continue,
@@ -233,10 +234,24 @@ pub(super) async fn idle_drain(
         DrainOutcome::ControlCmd => Ok(IdleAction::SkipLlm),
         DrainOutcome::Empty => {
             let late_steer = has_pending_steers(session).await;
-            let late_queue = !late_steer && has_pending_queues(session).await;
-            if late_steer || late_queue {
-                Ok(IdleAction::Continue)
-            } else if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
+            if late_steer {
+                // A steer admitted after our pop is claimed at the top of the
+                // next loop iteration -- nothing to consume here.
+                return Ok(IdleAction::Continue);
+            }
+            // A queued input may have been admitted in the gap between
+            // claim_next_queue's SELECT and this peek. Consume it for real
+            // instead of merely returning Continue: a bare Continue re-enters
+            // run_loop whose top-of-loop claim_steers never checks the queue,
+            // and a spurious LLM call could strand the item during thinking.
+            if has_pending_queues(session).await {
+                match drain_one_queued(session, on_event).await? {
+                    DrainOutcome::Prompt => return Ok(IdleAction::Continue),
+                    DrainOutcome::ControlCmd => return Ok(IdleAction::SkipLlm),
+                    DrainOutcome::Empty => {} // vanished between peek and pop
+                }
+            }
+            if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
                 match gate.settle_idle(epoch).await {
                     crate::subagent_steer_gate::IdleDecision::Continue => Ok(IdleAction::Continue),
                     crate::subagent_steer_gate::IdleDecision::Close => Ok(IdleAction::Done),
@@ -272,23 +287,32 @@ pub(super) async fn drain_mode_step(
         DrainOutcome::ControlCmd => Ok(DrainModeAction::ConsumeNext),
         DrainOutcome::Empty => {
             // Queue empty. If the transcript ends with an unresponded user
-            // message (e.g., a plan→act handoff awaiting execution), proceed
-            // to the LLM call. Exclude the clear-context fresh-start sentinel.
-            let needs_llm = session
-                .messages
-                .last()
-                .is_some_and(|m| m.role == Role::User)
-                && !session
+            // message (e.g. a plan→act handoff awaiting execution), proceed
+            // to the LLM call. A trailing Role::Tool message is equally
+            // "unresponded" — the model must process the tool result — so
+            // treat it the same way. Without this, a drain-mode session that
+            // ran a tool call (driven by a steer) would go Idle with the
+            // tool result stranded and never answered.
+            // Exclude the clear-context fresh-start sentinel.
+            let last_role = session.messages.last().map(|m| m.role);
+            let needs_llm = match last_role {
+                Some(Role::Tool) => true,
+                Some(Role::User) => !session
                     .handoff_plan
                     .as_deref()
-                    .is_some_and(crate::control_cmd::is_clear_context_handoff);
+                    .is_some_and(crate::control_cmd::is_clear_context_handoff),
+                _ => false,
+            };
+            // Late-check FIRST: a steer/queue admitted after the pop must be
+            // consumed before we proceed to the LLM, otherwise the item is
+            // stranded for the duration of the thinking phase.
+            if has_pending_steers(session).await || has_pending_queues(session).await {
+                return Ok(DrainModeAction::ConsumeNext);
+            }
             if needs_llm {
                 return Ok(DrainModeAction::Proceed);
             }
-            // Late-check: a steer/queue may have been admitted after the pop.
-            if has_pending_steers(session).await || has_pending_queues(session).await {
-                Ok(DrainModeAction::ConsumeNext)
-            } else if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
+            if let (Some(gate), Some(epoch)) = (&session.steer_gate, steer_epoch) {
                 match gate.settle_idle(epoch).await {
                     crate::subagent_steer_gate::IdleDecision::Continue => {
                         Ok(DrainModeAction::ConsumeNext)
@@ -367,8 +391,9 @@ pub(crate) fn reset_turn_cancel(session: &mut SessionState) {
 #[cfg(test)]
 mod tests {
     use super::{
-        claim_one_queued, claim_steers, drain_one_queued, has_pending_queues, has_pending_steers,
-        match_promoted, DrainOutcome,
+        claim_one_queued, claim_steers, drain_mode_step, drain_one_queued,
+        has_pending_queues, has_pending_steers, idle_drain, match_promoted,
+        DrainModeAction, DrainOutcome, IdleAction,
     };
     use crate::SessionState;
     use crate::SharedCancel;
@@ -427,6 +452,40 @@ mod tests {
         assert_eq!(result[2].0, 3);
     }
 
+    // ---- Bug 1: drain_mode_step must Proceed on trailing Role::Tool ----
+
+    #[tokio::test]
+    async fn drain_mode_step_proceeds_when_transcript_ends_with_tool_result() {
+        // Bug 1: after a tool call executes in drain_mode, the transcript ends
+        // with Role::Tool. drain_mode_step must return Proceed (not Idle) so
+        // the model processes the tool result instead of stranding it.
+        let (mut session, _store) = make_session("drain-tool-test").await;
+
+        session.messages.push(opencoder_core::Message {
+            id: "tool-1".into(),
+            role: Role::Tool,
+            blocks: vec![],
+            model: None,
+            agent: None,
+            usage: opencoder_core::MessageUsage::default(),
+            created_at: 0,
+            synthetic: false,
+        });
+
+        let action = drain_mode_step(&mut session, &mut |_| {}, None).await.unwrap();
+        assert!(matches!(action, DrainModeAction::Proceed));
+    }
+
+    #[tokio::test]
+    async fn drain_mode_step_idles_when_transcript_ends_with_assistant() {
+        let (mut session, _store) = make_session("drain-asst-test").await;
+
+        session.messages.push(opencoder_core::Message::assistant("asst-1"));
+
+        let action = drain_mode_step(&mut session, &mut |_| {}, None).await.unwrap();
+        assert!(matches!(action, DrainModeAction::Idle));
+    }
+
     // ---- cancel-guard: pre-fired turn_cancel returns defaults ----
     //
     // These exercise the tokio::select!{ biased; cancel_guard; db_op } wrapper
@@ -448,15 +507,14 @@ mod tests {
         )
     }
 
-    /// Build a SessionState wired to an in-memory store that already has one
-    /// pending Steer input and one pending Queue input.
-    async fn session_with_pending() -> (SessionState, Arc<dyn Store>, SharedCancel) {
+    /// Open an in-memory store, seed the session row, and build a SessionState
+    /// wired to it. Shared by all queue/drain test setups. The caller attaches
+    /// a turn_cancel token and seeds inputs as needed.
+    async fn make_session(id: &str) -> (SessionState, Arc<dyn Store>) {
         let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-
-        // Seed the session row (FK constraint on session_inputs).
         store
             .create_session(&opencoder_store::SessionMeta {
-                id: "cancel-guard-test".into(),
+                id: id.into(),
                 title: Some("test".into()),
                 agent: Some("act".into()),
                 model: Some("m/g".into()),
@@ -474,6 +532,17 @@ mod tests {
             })
             .await
             .unwrap();
+        let agent = resolve_agent("act").unwrap();
+        let config = Config { model: "m/g".into(), ..Default::default() };
+        let session = SessionState::new(id, agent, config, mock_client(), std::env::temp_dir())
+            .with_store(store.clone());
+        (session, store)
+    }
+
+    /// Build a SessionState wired to an in-memory store that already has one
+    /// pending Steer input and one pending Queue input.
+    async fn session_with_pending() -> (SessionState, Arc<dyn Store>, SharedCancel) {
+        let (mut session, store) = make_session("cancel-guard-test").await;
 
         // Admit one steer and one queue input.
         let steer_input = SessionInput {
@@ -502,22 +571,8 @@ mod tests {
         };
         store.admit_input(&queue_input).await.unwrap();
 
-        let agent = resolve_agent("act").unwrap();
-        let config = Config {
-            model: "m/g".into(),
-            ..Default::default()
-        };
         let token: SharedCancel = Arc::new(std::sync::Mutex::new(CancellationToken::new()));
-
-        let session = SessionState::new(
-            "cancel-guard-test",
-            agent,
-            config,
-            mock_client(),
-            std::env::temp_dir(),
-        )
-        .with_store(store.clone())
-        .with_turn_cancel(token.clone());
+        session = session.with_turn_cancel(token.clone());
 
         (session, store, token)
     }
@@ -583,27 +638,7 @@ mod tests {
     // ---- drain_one_queued: single-pop semantics ----
 
     async fn session_with_queue(prompts: &[&str]) -> (SessionState, Arc<dyn Store>, SharedCancel) {
-        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-        store
-            .create_session(&opencoder_store::SessionMeta {
-                id: "drain-test".into(),
-                title: Some("test".into()),
-                agent: Some("act".into()),
-                model: Some("m/g".into()),
-                workdir_hash: None,
-                created_at: 0,
-                updated_at: 0,
-                summary: None,
-                summary_seq: None,
-                summary_images: vec![],
-                handoff_seq: None,
-                handoff_plan: None,
-                skill: None,
-                task_type: None,
-                requirement: None,
-            })
-            .await
-            .unwrap();
+        let (mut session, store) = make_session("drain-test").await;
         for (i, p) in prompts.iter().enumerate() {
             store
                 .admit_input(&SessionInput {
@@ -620,21 +655,8 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let agent = resolve_agent("act").unwrap();
-        let config = Config {
-            model: "m/g".into(),
-            ..Default::default()
-        };
         let token: SharedCancel = Arc::new(std::sync::Mutex::new(CancellationToken::new()));
-        let session = SessionState::new(
-            "drain-test",
-            agent,
-            config,
-            mock_client(),
-            std::env::temp_dir(),
-        )
-        .with_store(store.clone())
-        .with_turn_cancel(token.clone());
+        session = session.with_turn_cancel(token.clone());
         (session, store, token)
     }
 
@@ -727,5 +749,37 @@ mod tests {
         assert!(has_review, "'review' recorded as a user prompt");
         // Agent switched to act.
         assert_eq!(session.agent.name, "act");
+    }
+
+    // ---- idle_drain + hard-cancel regression (Fixes 1 & 2) ----
+
+    #[tokio::test]
+    async fn idle_drain_consumes_pending_queue() {
+        let (mut session, store, _) = session_with_queue(&["late-msg"]).await;
+        let action = idle_drain(&mut session, &mut |_| {}, None).await.unwrap();
+        assert!(matches!(action, IdleAction::Continue));
+        assert!(store.pending_inputs(&session.id, Delivery::Queue).await.unwrap().is_empty());
+        assert!(session.messages.iter().any(|m| m.role == Role::User && m.text().contains("late-msg")));
+    }
+
+    #[tokio::test]
+    async fn idle_drain_empty_queue_no_gate_returns_done() {
+        let (mut session, _, _) = session_with_queue(&[]).await;
+        assert!(matches!(
+            idle_drain(&mut session, &mut |_| {}, None).await.unwrap(),
+            IdleAction::Done
+        ));
+    }
+
+    #[tokio::test]
+    async fn claim_one_queued_completes_under_hard_cancel() {
+        let (mut session, store, _) = session_with_queue(&["survives-cancel"]).await;
+        let hard = CancellationToken::new();
+        hard.cancel();
+        session.cancel = Some(hard);
+        let (seq, prompt, _) = claim_one_queued(&mut session).await.unwrap();
+        assert_eq!(prompt, "survives-cancel");
+        assert!(seq > 0);
+        assert!(store.pending_inputs(&session.id, Delivery::Queue).await.unwrap().is_empty());
     }
 }

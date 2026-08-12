@@ -272,7 +272,14 @@ pub async fn admit_and_drain(
         let wd_w = workdir.clone();
         let handle_w = handle.clone();
         tokio::spawn(async move {
-            for _ in 0..100 {
+            // Poll until the in-flight drain finishes. Real thinking phases
+            // last 10-60s+ (and long tool chains far longer), so the cap must
+            // comfortably exceed the longest legitimate drain; the previous
+            // 5s cap abandoned the drain mid-thinking and prevented the
+            // defense-in-depth restart below from ever firing. 12_000 * 50ms
+            // = 10 min; the atomic load is ~free and the swap guard at the
+            // bottom prevents duplicate drains.
+            for _ in 0..12_000 {
                 if !handle_w.draining.load(Ordering::SeqCst) {
                     break;
                 }

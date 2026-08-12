@@ -213,7 +213,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
             let mut resolved_names = std::collections::HashSet::new();
             for name in &names {
                 if let Some(sk) = skills.iter().find(|s| &s.name == name) {
-                    resolved_bodies.push(sk.body.clone());
+                    resolved_bodies.push(opencoder_core::body_with_source(sk));
                     resolved_names.insert(sk.name.clone());
                 }
             }

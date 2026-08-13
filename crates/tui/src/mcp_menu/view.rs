@@ -79,22 +79,15 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
         ));
     } else {
         lines.push(Line::styled(
-            format!(" {:<14} {}", "server", "transport"),
+            format!(" {:<5} {:<13} {}", "on", "server", "transport"),
             Style::default().fg(crate::theme::muted()),
         ));
         for (i, entry) in list.entries.iter().enumerate() {
             let selected = i == list.selected;
             let confirming = list.confirm_delete == Some(i);
-            let mark = if entry.enabled { "\u{25cf}" } else { " " };
+            let switch = if entry.enabled { "[ON]" } else { "[OFF]" };
             let prefix = if confirming { "?" } else { " " };
-            let text = format!(
-                "{}{} {:<13} {}",
-                prefix,
-                mark,
-                entry.name,
-                entry.transport_label()
-            );
-            let style = if confirming {
+            let line_style = if confirming {
                 Style::default()
                     .fg(Color::Red)
                     .add_modifier(Modifier::BOLD)
@@ -105,7 +98,22 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
             } else {
                 val_style()
             };
-            lines.push(Line::styled(text, style));
+            // The switch token carries its own state color so the toggle reads at a glance.
+            let switch_style = if confirming {
+                line_style
+            } else if entry.enabled {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                dim_style()
+            };
+            let spans = vec![
+                Span::styled(format!("{}{:<5} ", prefix, switch), switch_style),
+                Span::styled(format!("{:<13} ", entry.name), line_style),
+                Span::styled(entry.transport_label(), line_style),
+            ];
+            lines.push(Line::from(spans));
         }
     }
 

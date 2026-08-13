@@ -24,8 +24,8 @@ Commit: (working-tree, pre-initial-commit)
 - 目标 crate 回归：`cargo test -p opencoder-tui --lib mcp` → 22 passed; 0 failed（含全部 12 个 mcp_menu 单测）。
 - clippy：`cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 零警告。
 - 构建：`cargo build -p opencoder-tui` → 干净。
-- 全量 `cargo test --workspace`：因仓库中另一并行进行中的工作（`crates/session` MCP 客户端特性）持续占用 build lock，未能在本次干净跑通；本变更为 `mcp_menu/view.rs` 单一渲染函数的纯展示层改动，已隔离验证。
-- 行数：`crates/tui/src/mcp_menu/view.rs` 229 ≤ 800。
+- 全量 `cargo test --workspace`：干净跑通，`exit 0`（全 unit/integration/doc-test 报告 `0 failed`）。早先疑似的 `exit 101` 经「无管道裸跑」证伪，系 `grep|head` 管道提前关闭触发的 SIGPIPE 假象。本变为 `mcp_menu/view.rs` 单一渲染函数的纯展示层改动，已隔离验证。
+- 行数：`crates/tui/src/mcp_menu/view.rs` 237 ≤ 800。
 
 ## Impact Surface
 - 用户：`/mcp` 弹窗的服务器列表每行开关从 `●` 变为带颜色的 `[ON]`/`[OFF]`，启用态一目了然；交互（Enter 切换、e 编辑、n 新建、d 删除）不变。

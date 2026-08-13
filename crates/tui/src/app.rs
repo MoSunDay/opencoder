@@ -712,6 +712,8 @@ pub(super) async fn run_app(
                     }
                     Event::Mouse(m) => {
                         if crate::copy_mode::is_active(copy_mode, shift_held) { dirty = true; continue; }
+                        if keymap_menu.is_some() { if let app_loop::LoopFlow::Quit = app_loop::handle_keymap_mouse_event(&mut keymap_menu, &hits.keymap_btns, &m, &mut config, &mut keymap, &workdir, &cmd_tx).await { break }
+                            dirty = true; render_pending = true; continue; }
                         let outcome = handle_mouse(
                             m, &hits, &mut scroll, &mut follow, &mut chat,
                             &mut subagent_focus,

@@ -638,8 +638,21 @@ pub(crate) async fn handle_keymap_outcome(
     workdir: &Path,
     cmd_tx: &mpsc::Sender<UiCmd>,
 ) -> LoopFlow {
-    use crate::keymap_menu::{handle_keymap_key, KeymapOutcome};
-    match handle_keymap_key(keymap_menu, k) {
+    use crate::keymap_menu::handle_keymap_key;
+    let outcome = handle_keymap_key(keymap_menu, k);
+    apply_keymap_outcome(outcome, config, keymap, workdir, cmd_tx).await
+}
+
+/// Apply a [`KeymapOutcome`] (from keyboard or mouse) with shared side-effects.
+pub(crate) async fn apply_keymap_outcome(
+    outcome: crate::keymap_menu::KeymapOutcome,
+    config: &mut Config,
+    keymap: &mut crate::keymap::KeyBindings,
+    workdir: &Path,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+) -> LoopFlow {
+    use crate::keymap_menu::KeymapOutcome;
+    match outcome {
         KeymapOutcome::Quit => {
             let _ = cmd_tx.send(UiCmd::Quit).await;
             LoopFlow::Quit
@@ -655,4 +668,20 @@ pub(crate) async fn handle_keymap_outcome(
         }
         KeymapOutcome::Cancel | KeymapOutcome::Idle => LoopFlow::Proceed,
     }
+}
+
+/// Handle a mouse event while the keymap modal is open.
+pub(crate) async fn handle_keymap_mouse_event(
+    keymap_menu: &mut Option<KeymapMenu>,
+    btn_rects: &[ratatui::layout::Rect],
+    m: &crossterm::event::MouseEvent,
+    config: &mut Config,
+    keymap: &mut crate::keymap::KeyBindings,
+    workdir: &Path,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+) -> LoopFlow {
+    let outcome = crate::keymap_menu::mouse::handle_keymap_mouse(
+        keymap_menu, btn_rects, m.column, m.row, &m.kind,
+    );
+    apply_keymap_outcome(outcome, config, keymap, workdir, cmd_tx).await
 }

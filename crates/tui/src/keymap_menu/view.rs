@@ -11,7 +11,12 @@ use crate::keymap_menu::state::{Focus, KeymapMenu};
 use crate::theme;
 
 /// Render the keymap popup as a centered modal.
-pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
+pub fn render_keymap_popup(
+    f: &mut Frame,
+    area: Rect,
+    menu: &KeymapMenu,
+    btn_rects: &mut Vec<Rect>,
+) {
     let rows = menu.len() as u16;
     let want_h = 3 + rows + 2; // border-top + rows + footer + button-bar
     let h = want_h.min(area.height.saturating_sub(2));
@@ -19,6 +24,10 @@ pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let popup = Rect::new(x, y, w, h);
+
+    // Register button rects for mouse hit-testing.
+    register_button_rects(btn_rects, popup, rows);
+
     f.render_widget(Clear, popup);
 
     let block = theme::rounded_block("Keyboard Shortcuts");
@@ -107,6 +116,18 @@ pub fn render_keymap_popup(f: &mut Frame, area: Rect, menu: &KeymapMenu) {
     // --- Confirm-reset dialog (topmost) ---
     if menu.confirm_reset_open() {
         render_confirm_reset_overlay(f, area);
+    }
+}
+
+/// Compute the screen-space `Rect` for each of the three bottom buttons.
+fn register_button_rects(out: &mut Vec<Rect>, popup: Rect, rows: u16) {
+    out.clear();
+    let content_x = popup.x + 1;
+    let btn_y = popup.y + 1 + rows + 1;
+    // (offset, width) — CJK-aware: each glyph = 2 cells
+    let layouts = [(1u16, 8u16), (12, 12), (27, 8)];
+    for (off, w) in layouts {
+        out.push(Rect::new(content_x + off, btn_y, w, 1));
     }
 }
 

@@ -86,6 +86,7 @@ async fn jump_btn_click_works_after_recent_body_click() {
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
         compaction_btns: Vec::new(),
+        keymap_btns: Vec::new(),
         total_rows: 0,
     };
 
@@ -192,6 +193,7 @@ async fn thinking_header_toggles_even_right_after_another_click() {
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),
         compaction_btns: Vec::new(),
+        keymap_btns: Vec::new(),
         total_rows: 0,
     };
 
@@ -266,6 +268,7 @@ async fn compaction_header_click_toggles_collapse() {
             block_idx: crate::chat::ChatView::compaction_headers(&chat)[0].block_idx,
             rect: header_rect,
         }],
+        keymap_btns: Vec::new(),
         total_rows: 0,
     };
 

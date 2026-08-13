@@ -112,6 +112,14 @@ impl KeymapMenu {
         self.selected_button
     }
 
+    /// Set the focused button by index (used by mouse hit-testing).
+    pub fn select_button_for_click(&mut self, idx: usize) {
+        if idx < BUTTON_COUNT {
+            self.selected_button = idx;
+            self.focus = Focus::Buttons;
+        }
+    }
+
     /// `true` while the help overlay is visible.
     pub fn help_open(&self) -> bool {
         self.help_open
@@ -204,6 +212,27 @@ fn close_with_save(menu: &mut Option<KeymapMenu>, fallback: KeymapOutcome) -> Ke
         KeymapOutcome::Save(p)
     } else {
         fallback
+    }
+}
+
+/// Activate the button at `idx` (0 = Exit, 1 = Reset, 2 = Help).
+/// Shared by the keyboard Enter path and the mouse click path.
+pub(crate) fn activate_button(menu: &mut Option<KeymapMenu>, idx: usize) -> KeymapOutcome {
+    let m = match menu.as_mut() {
+        Some(m) => m,
+        None => return KeymapOutcome::Idle,
+    };
+    match idx {
+        0 => close_with_save(menu, KeymapOutcome::Quit),
+        1 => {
+            m.confirm_reset = true;
+            KeymapOutcome::Idle
+        }
+        _ => {
+            m.help_open = true;
+            m.help_scroll = 0;
+            KeymapOutcome::Idle
+        }
     }
 }
 
@@ -320,14 +349,7 @@ pub fn handle_keymap_key(menu: &mut Option<KeymapMenu>, k: KeyEvent) -> KeymapOu
             }
             KeyCode::Enter => {
                 let button = m.selected_button;
-                match button {
-                    0 => return close_with_save(menu, KeymapOutcome::Quit),
-                    1 => m.confirm_reset = true,
-                    _ => {
-                        m.help_open = true;
-                        m.help_scroll = 0;
-                    }
-                }
+                return activate_button(menu, button);
             }
             KeyCode::Up | KeyCode::Down => {
                 // Move focus back to the list.

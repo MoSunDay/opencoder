@@ -7,6 +7,7 @@
 //! confirmation dialog; the Help button opens a shortcut-reference overlay.
 
 pub mod help;
+pub mod mouse;
 pub mod state;
 pub mod view;
 

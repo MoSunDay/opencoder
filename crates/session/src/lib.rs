@@ -5,6 +5,7 @@ pub mod control_cmd;
 pub mod dangling_tools;
 pub mod event_sink;
 pub mod fork;
+pub mod mcp;
 pub mod plan_handoff;
 pub mod prompt;
 pub mod resume;

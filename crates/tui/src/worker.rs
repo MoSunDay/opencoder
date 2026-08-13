@@ -474,6 +474,14 @@ pub async fn process_cmd(
                 persist_event(&sess.store, &sess.id, &ev).await;
                 forward_event(&ui_tx, ev);
             }
+            // Sync MCP connections with the reloaded config.
+            let desired: Vec<_> = sess
+                .config
+                .enabled_mcp_servers()
+                .into_iter()
+                .map(|(n, c)| (n, c.clone()))
+                .collect();
+            opencoder_session::mcp::pool::sync(&sess.id, &desired).await;
             false
         }
         UiCmd::EditPlan(new_text) => {

@@ -123,6 +123,7 @@ pub async fn delete_session(
                 h.cancel.lock().await.cancel();
                 opencoder_session::fire_child_cancels(&h.child_cancels);
             }
+            opencoder_session::mcp::cleanup(&id).await; // MCP connection cleanup
             Json(json!({ "ok": true, "id": id })).into_response()
         }
         Err(e) => error_500(format!("delete_session: {e:#}")),

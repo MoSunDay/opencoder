@@ -52,7 +52,7 @@ fn estimated_tokens(session: &SessionState) -> u64 {
         &session.agent,
         &session.working_dir,
         skill.as_deref(),
-        crate::prompt::mcp_section(&session.config.enabled_mcp_servers()).as_deref(),
+        crate::prompt::mcp_section(&crate::mcp::pool::status_for(&session.id)).as_deref(),
     );
     let base = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
     let registry = crate::tools::registry();

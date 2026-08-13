@@ -1,4 +1,5 @@
-use opencoder_core::{config::McpServerConfig, message::now_ms, AgentKind, Message};
+use opencoder_core::{message::now_ms, AgentKind, Message};
+use crate::mcp::ConnStatus;
 use std::path::{Path, PathBuf};
 
 pub fn build_system(
@@ -39,47 +40,35 @@ pub fn build_system(
     Message::system("system", text)
 }
 
-/// Build the `## MCP Servers` system-prompt section.
+/// Build the `## MCP Servers` system-prompt section from live pool status.
 ///
-/// Returns `None` when there are no enabled servers (zero behaviour change
-/// for sessions without MCP). The section lists each enabled server with its
-/// transport (stdio `command args` or SSE `url`) so the model is aware of
-/// the available MCP servers.
-pub fn mcp_section(servers: &[(String, &McpServerConfig)]) -> Option<String> {
-    if servers.is_empty() {
+/// Returns `None` when there are no MCP connections (zero behaviour change
+/// for sessions without MCP). When servers are connected, lists each server
+/// name and tool count. Failed connections are surfaced so the model is
+/// aware of unavailable tools.
+pub fn mcp_section(status: &[(String, ConnStatus)]) -> Option<String> {
+    if status.is_empty() {
         return None;
     }
     let mut lines = String::from("## MCP Servers\n");
     lines.push_str(
-        "The following MCP (Model Context Protocol) servers are enabled. \
-         They provide additional tools and resources.",
+        "The following MCP (Model Context Protocol) servers are connected. \
+         Their tools are available as regular tools, prefixed with `mcp__`. \
+         Call them like any other tool.",
     );
-    for (name, cfg) in servers {
+    for (name, st) in status {
         lines.push_str("\n\n### ");
         lines.push_str(name);
-        match (&cfg.command, &cfg.url) {
-            (Some(cmd), _) => {
-                lines.push_str(" (stdio)");
-                lines.push_str("\n- command: `");
-                lines.push_str(cmd);
-                for a in &cfg.args {
-                    lines.push(' ');
-                    lines.push_str(a);
-                }
-                lines.push('`');
+        match st {
+            ConnStatus::Connected { tool_count } => {
+                lines.push_str(&format!(
+                    " — connected, {tool_count} tool(s) available"
+                ));
             }
-            (None, Some(url)) => {
-                lines.push_str(" (sse)");
-                lines.push_str("\n- url: `");
-                lines.push_str(url);
-                lines.push('`');
+            ConnStatus::Failed(msg) => {
+                lines.push_str(" — connection failed: ");
+                lines.push_str(msg);
             }
-            (None, None) => {
-                lines.push_str("\n- (no transport configured)");
-            }
-        }
-        if !cfg.env.is_empty() {
-            lines.push_str(&format!("\n- env: {} key(s) configured", cfg.env.len()));
         }
     }
     Some(lines)
@@ -252,7 +241,7 @@ pub fn _ts() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::mcp_section;
-    use opencoder_core::config::McpServerConfig;
+    use crate::mcp::ConnStatus;
 
     #[test]
     fn mcp_section_empty_returns_none() {
@@ -260,45 +249,41 @@ mod tests {
     }
 
     #[test]
-    fn mcp_section_includes_enabled_server() {
-        // enabled_mcp_servers already filters; but verify the helper works with
-        // whatever it's given (it trusts the caller filtered).
-        let cfg = McpServerConfig {
-            enabled: true,
-            command: Some("npx".to_string()),
-            args: vec!["-y".to_string(), "@mcp/server".to_string()],
-            ..Default::default()
-        };
-        let servers = vec![("active".to_string(), &cfg)];
-        let s = mcp_section(&servers).unwrap();
+    fn mcp_section_connected_shows_tool_count() {
+        let status = vec![
+            ("active".to_string(), ConnStatus::Connected { tool_count: 3 }),
+        ];
+        let s = mcp_section(&status).unwrap();
         assert!(s.contains("## MCP Servers"));
         assert!(s.contains("active"));
-        assert!(s.contains("stdio"));
-        assert!(s.contains("npx"));
-        assert!(s.contains("@mcp/server"));
+        assert!(s.contains("3 tool"));
+        assert!(s.contains("mcp__"));
     }
 
     #[test]
-    fn mcp_section_sse_transport() {
-        let cfg = McpServerConfig {
-            enabled: true,
-            url: Some("https://example.com/sse".to_string()),
-            ..Default::default()
-        };
-        let servers = vec![("remote".to_string(), &cfg)];
-        let s = mcp_section(&servers).unwrap();
-        assert!(s.contains("(sse)"));
-        assert!(s.contains("https://example.com/sse"));
+    fn mcp_section_failed_shows_error_message() {
+        let status = vec![
+            (
+                "broken".to_string(),
+                ConnStatus::Failed("spawn failed: ENOENT".into()),
+            ),
+        ];
+        let s = mcp_section(&status).unwrap();
+        assert!(s.contains("broken"));
+        assert!(s.contains("connection failed"));
+        assert!(s.contains("ENOENT"));
     }
 
     #[test]
-    fn mcp_section_no_transport() {
-        let cfg = McpServerConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let servers = vec![("bare".to_string(), &cfg)];
-        let s = mcp_section(&servers).unwrap();
-        assert!(s.contains("no transport configured"));
+    fn mcp_section_mixed_statuses() {
+        let status = vec![
+            ("ok".to_string(), ConnStatus::Connected { tool_count: 2 }),
+            ("bad".to_string(), ConnStatus::Failed("timeout".into())),
+        ];
+        let s = mcp_section(&status).unwrap();
+        assert!(s.contains("ok"));
+        assert!(s.contains("2 tool"));
+        assert!(s.contains("bad"));
+        assert!(s.contains("timeout"));
     }
 }

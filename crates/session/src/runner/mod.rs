@@ -127,9 +127,17 @@ pub async fn run_with_registry(
                 session.handoff_plan.as_deref().unwrap_or(""),
             )
         {
-            user_text.clear();
-            images.clear();
             handoff_pending = true;
+            match rest {
+                // Compound (/act_clear_context review) with a preserved plan:
+                // keep the request so it is recorded as a real user prompt and
+                // executed alongside the plan handoff message (not discarded).
+                Some(rest) => user_text = rest,
+                None => {
+                    user_text.clear();
+                    images.clear();
+                }
+            }
         } else if let Some(rest) = rest {
             // Compound (/plan review): switch done; fall through to recording
             // which resolves `$skill` tokens and records user_text as prompt.

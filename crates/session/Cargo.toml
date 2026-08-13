@@ -28,5 +28,9 @@ ignore = "0.4"
 ulid.workspace = true
 base64.workspace = true
 
+[[bin]]
+name = "mcp_mock_server"
+path = "bin/mcp_mock_server.rs"
+
 [dev-dependencies]
 tempfile.workspace = true

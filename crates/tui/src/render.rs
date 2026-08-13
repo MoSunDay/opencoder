@@ -55,6 +55,7 @@ pub(crate) struct MouseHits {
     pub tool_btns: Vec<ToolBtn>,
     /// Clickable Compaction-block header rows; clicking toggles collapse.
     pub compaction_btns: Vec<CompactionBtn>,
+    pub keymap_btns: Vec<Rect>,
     /// Cached total content rows from the last render_body call. Used by
     /// the scroll-wheel handler to clamp scroll without re-flattening.
     pub total_rows: usize,
@@ -147,6 +148,7 @@ pub(crate) fn render<B: Backend>(
             hits.subagent_btns.clear();
             hits.tool_btns.clear();
             hits.compaction_btns.clear();
+            hits.keymap_btns.clear();
             crate::notepad::render_top(f, area, np);
             return;
         }
@@ -220,6 +222,7 @@ pub(crate) fn render<B: Backend>(
         hits.subagent_btns.clear();
         hits.tool_btns.clear();
         hits.compaction_btns.clear();
+        hits.keymap_btns.clear();
         if !plan_active {
             render_body(
                 f,
@@ -319,7 +322,7 @@ pub(crate) fn render<B: Backend>(
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
         }
         if let Some(km) = keymap_menu {
-            crate::keymap_menu::render_keymap_popup(f, area, km);
+            crate::keymap_menu::render_keymap_popup(f, area, km, &mut hits.keymap_btns);
         }
         if ap_enabled {
             render_status_chip(f, composer_area, "AP", theme::local_color());

@@ -14,6 +14,7 @@ use opencoder_store::{SessionEventRecord, SubagentStatus, SubagentTaskRecord};
 use serde_json::Value;
 
 use crate::compaction;
+use crate::mcp;
 use crate::tools::registry as build_registry;
 use crate::SessionState;
 
@@ -64,7 +65,7 @@ pub async fn run(
     user_text: String,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
-    let registry = build_registry();
+    let registry = build_full_registry(session).await;
     run_with_registry(session, user_text, Vec::new(), &registry, on_event).await
 }
 
@@ -77,8 +78,28 @@ pub async fn run_with_images(
     images: Vec<String>,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
-    let registry = build_registry();
+    let registry = build_full_registry(session).await;
     run_with_registry(session, user_text, images, &registry, on_event).await
+}
+
+/// Build the builtin tool registry merged with any MCP tools discovered for
+/// this session.  Also synchronises the MCP connection pool so that enabled
+/// servers are connected (and disabled ones disconnected) before the turn.
+async fn build_full_registry(session: &SessionState) -> HashMap<String, ToolArc> {
+    let desired: Vec<(String, opencoder_core::config::McpServerConfig)> = session
+        .config
+        .enabled_mcp_servers()
+        .into_iter()
+        .map(|(n, c)| (n, c.clone()))
+        .collect();
+    if !desired.is_empty() {
+        mcp::pool::sync(&session.id, &desired).await;
+    }
+    let mut reg = build_registry();
+    if mcp::pool::has_mcp_tools(&session.id) {
+        reg.extend(mcp::pool::tools_for(&session.id));
+    }
+    reg
 }
 
 pub async fn run_with_registry(

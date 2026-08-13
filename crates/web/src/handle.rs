@@ -179,24 +179,47 @@ impl<S> Drop for DropGuardStream<S> {
 /// same `HandleMap` lock this holds, so the "last subscriber" check is
 /// authoritative w.r.t. concurrent subscribers — evicting only when nobody else
 /// is listening means dropping the broadcast Sender breaks no live Receiver.
+#[allow(unused_variables)]
 pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created: bool) {
     if let Ok(rt) = tokio::runtime::Handle::try_current() {
         rt.spawn(async move {
-            let mut map = handles.lock().await;
-            if let Some(h) = map.get(&id) {
-                let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
-                if created && prev == 1 && !h.draining.load(Ordering::SeqCst) {
-                    map.remove(&id);
+            let mut evict = false;
+            {
+                let mut map = handles.lock().await;
+                if let Some(h) = map.get(&id) {
+                    let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+                    if prev == 1 && !h.draining.load(Ordering::SeqCst) {
+                        map.remove(&id);
+                        evict = true;
+                    }
                 }
+            }
+            if evict {
+                opencoder_session::mcp::cleanup(&id).await;
             }
         });
     } else {
-        let mut map = handles.blocking_lock();
-        if let Some(h) = map.get(&id) {
-            let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
-            if created && prev == 1 && !h.draining.load(Ordering::SeqCst) {
-                map.remove(&id);
+        let mut evict = false;
+        {
+            let mut map = handles.blocking_lock();
+            if let Some(h) = map.get(&id) {
+                let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+                if prev == 1 && !h.draining.load(Ordering::SeqCst) {
+                    map.remove(&id);
+                    evict = true;
+                }
             }
+        }
+        if evict {
+            // No async runtime available — spawn a detached thread.
+            let id_clone = id.clone();
+            std::thread::spawn(move || {
+                // best-effort: block on a temporary runtime
+                let rt = tokio::runtime::Runtime::new().ok();
+                if let Some(rt) = rt {
+                    rt.block_on(async { opencoder_session::mcp::cleanup(&id_clone).await });
+                }
+            });
         }
     }
 }
@@ -456,6 +479,14 @@ async fn apply_drain_cmd(
                     },
                     Err(_) => session.apply_config_reload_keep_client(new_cfg),
                 }
+                // Sync MCP connections with the reloaded config.
+                let desired: Vec<_> = session
+                    .config
+                    .enabled_mcp_servers()
+                    .into_iter()
+                    .map(|(n, c)| (n, c.clone()))
+                    .collect();
+                opencoder_session::mcp::pool::sync(&session.id, &desired).await;
                 broadcast(SessionEvent::Done);
             }
             Err(e) => broadcast(SessionEvent::Error(format!("reload config: {e:#}"))),
@@ -604,11 +635,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn release_subscriber_keeps_handle_for_non_creator() {
+    async fn release_subscriber_keeps_handle_while_others_remain() {
         let handles = new_handle_map();
         let id = "sess-guest".to_string();
         let h = SessionHandle::new();
-        h.subscribers.store(1, Ordering::SeqCst);
+        // Two subscribers; a single non-creator release (prev == 2) is NOT the
+        // last subscriber, so the handle must survive.
+        h.subscribers.store(2, Ordering::SeqCst);
         h.draining.store(false, Ordering::SeqCst);
         handles.lock().await.insert(id.clone(), h);
 
@@ -616,7 +649,62 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         assert!(
             handles.lock().await.contains_key(&id),
-            "handle must survive when released by a non-creator"
+            "handle must survive when a non-creator leaves but another subscriber remains"
         );
+    }
+
+    // Bug #4: eviction must not depend on the `created` flag. If the creator
+    // disconnects first while a second (non-creator) subscriber remains, that
+    // second subscriber must still evict the handle when it becomes the last
+    // one leaving. The old `created &&` condition skipped eviction for the
+    // non-creator, leaking the handle forever.
+    #[tokio::test]
+    async fn session_handle_evicted_when_creator_leaves_first() {
+        let handles = new_handle_map();
+        let id = "test-session".to_string();
+
+        // Simulate subscriber A creating the handle (creator).
+        {
+            let mut map = handles.lock().await;
+            let handle = map
+                .entry(id.clone())
+                .or_insert_with(SessionHandle::new);
+            handle
+                .subscribers
+                .fetch_add(1, Ordering::SeqCst);
+        }
+
+        // Simulate subscriber B joining (non-creator).
+        {
+            let mut map = handles.lock().await;
+            let handle = map
+                .entry(id.clone())
+                .or_insert_with(SessionHandle::new);
+            handle
+                .subscribers
+                .fetch_add(1, Ordering::SeqCst);
+        }
+
+        // Creator A leaves first (created=true, prev=2 → not the last, kept).
+        release_events_subscriber(handles.clone(), id.clone(), true);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        {
+            let map = handles.lock().await;
+            assert!(
+                map.contains_key(&id),
+                "handle should survive when creator leaves but another subscriber remains"
+            );
+        }
+
+        // Subscriber B leaves last (created=false, prev=1 → must be evicted).
+        release_events_subscriber(handles.clone(), id.clone(), false);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        {
+            let map = handles.lock().await;
+            assert!(
+                !map.contains_key(&id),
+                "handle should be evicted when last subscriber leaves, even if not the creator"
+            );
+        }
     }
 }

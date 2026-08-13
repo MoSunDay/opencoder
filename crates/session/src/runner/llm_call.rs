@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use opencoder_core::{MessageUsage, ToolArc};
+use opencoder_core::{AgentKind, MessageUsage, ToolArc};
 use opencoder_llm::tool_call::CompletedToolCall;
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
 
@@ -17,7 +17,7 @@ pub(super) async fn run_one_llm_call(
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<(String, String, Vec<CompletedToolCall>, Option<Usage>)> {
-    let mcp = crate::prompt::mcp_section(&session.config.enabled_mcp_servers());
+    let mcp = crate::prompt::mcp_section(&crate::mcp::pool::status_for(&session.id));
     let system = build_system(
         &session.agent,
         &session.working_dir,
@@ -33,6 +33,12 @@ pub(super) async fn run_one_llm_call(
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
         .filter(|(name, _)| {
+            if crate::mcp::is_mcp_tool(name.as_str()) {
+                // MCP tools: visible to all non-subagent agents. Subagents
+                // (explore/build) are intentionally sandboxed — they never
+                // see MCP tools.
+                return !matches!(session.agent.kind, AgentKind::Subagent);
+            }
             session.agent.tools.allows(name)
                 && (!crate::tools::latent::is_latent_tool(name.as_str())
                     || unlocked.contains(name.as_str()))
@@ -259,4 +265,104 @@ mod tests {
         assert_eq!(reasoning, "live-thought");
         assert!(saw_retry, "consumer should surface the retry status");
     }
+
+    // ---- MCP ToolFilter tests ----
+
+    /// A minimal fake MCP tool for testing the filter behaviour.
+    struct FakeMcpTool {
+        tool_name: String,
+    }
+
+    #[async_trait::async_trait]
+    impl opencoder_core::Tool for FakeMcpTool {
+        fn name(&self) -> &str {
+            &self.tool_name
+        }
+        fn description(&self) -> &str {
+            "fake MCP tool for testing"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object", "properties": {}})
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &opencoder_core::ToolContext,
+        ) -> anyhow::Result<opencoder_core::ToolOutput> {
+            Ok(opencoder_core::ToolOutput::ok("ok"))
+        }
+    }
+
+    fn registry_with_mcp() -> HashMap<String, ToolArc> {
+        let mut reg = crate::tools::registry();
+        let tool: ToolArc = std::sync::Arc::new(FakeMcpTool {
+            tool_name: "mcp__test__fake".into(),
+        });
+        reg.insert("mcp__test__fake".into(), tool);
+        reg
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_visible_to_act_agent() {
+        let mock = Arc::new(
+            MockChatClient::new()
+                .with_default(vec![LlmEvent::Completed {
+                    text: "done".into(),
+                    tool_calls: vec![],
+                    usage: None,
+                }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let session = make_session(client);
+        let registry = registry_with_mcp();
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        let tool_names: Vec<&str> = reqs[0]
+            .tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(
+            tool_names.contains(&"mcp__test__fake"),
+            "MCP tool should be visible to act agent: {tool_names:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_hidden_from_subagent() {
+        let mock = Arc::new(
+            MockChatClient::new()
+                .with_default(vec![LlmEvent::Completed {
+                    text: "done".into(),
+                    tool_calls: vec![],
+                    usage: None,
+                }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let agent = resolve_agent("explore").unwrap();
+        let session = SessionState::new(
+            "test-subagent",
+            agent,
+            Config::default(),
+            client,
+            std::env::temp_dir(),
+        );
+        let registry = registry_with_mcp();
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        let tool_names: Vec<&str> = reqs[0]
+            .tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(
+            !tool_names.iter().any(|n| n.starts_with("mcp__")),
+            "MCP tools must be hidden from subagents: {tool_names:?}"
+        );
+    }
+
 }

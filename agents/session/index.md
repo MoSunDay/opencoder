@@ -8,7 +8,7 @@ agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → �
 ## 边界与非目标
 - 不做 HTTP / 终端 IO（由 web/cli/tui 负责）。
 - 不直接连数据库驱动——经 `Store` trait 抽象。
-- MCP server 配置 + 条件性 system prompt 注入已实现（`build_system` 经 `mcp_section` 将 enabled server 信息注入）；MCP 客户端连接/工具发现/工具调用仍为非目标。权限确认（当前未实现）。
+- MCP 全链路已实现：server 配置 + 条件性 system prompt 注入（`build_system` 经 `mcp_section` 将 enabled server 信息注入）；MCP 客户端连接/工具发现/工具调用由 `mcp` 模块提供（见下「依赖与接口」）。仅在 config 至少有一个 `enabled == true` server 时激活，否则零开销。权限确认（当前未实现）。
 - skills 仅承接「可选的系统提示注入」：`SessionState.skill_prompt`（`Arc<Mutex<Option<String>>>`）是共享可变状态——TUI 持有 `Arc` 克隆并直接写入（绕过 cmd channel），`run_one_llm_call` 每 turn 经 `skill_prompt_cloned()` 读取最新值。每轮 `build_system` 把它作为 `## Active skill` 段追加到系统提示末尾（最高优先级）。skill 的发现/解析/选择 UI 不在本模块（见 core 的 `skill` 模块与 tui 的 `menu` 模块）。
 
 ## 关键抽象
@@ -55,7 +55,8 @@ steer 与 queue 都是「先以 pending 落库（`admitted_seq` 列、`promoted_
 
 ## 依赖与接口
 - 依赖：opencoder-core、opencoder-llm（ChatStream）、opencoder-store（Store）、tokio-util（CancellationToken）。
-- 被依赖：web（drain_to_completion）、cli（run_headless / resume）、tui。
+- 内部模块：`mcp`（`src/mcp/`）— MCP 客户端实现。经 stdio transport 拉起配置的 MCP server 子进程，按 JSON-RPC 2.0 协议通信；发现远端工具并以 `mcp__{server}__{tool}` 前缀注册为标准 `Tool`（`tools_for(session_id)`），LLM 经 function-calling 调用如同内建工具。连接由 process-global 连接池管理（`pool.rs`：`static MCP_POOL`，键为 session_id → per-session 连接 map；`sync/cleanup/status_for` 维护生命周期）。
+- 被依赖：web（drain_to_completion）、cli（run_headless / resume）、tui（run_headless / resume）。
 
 ## 相关模块
 - [agents/store](../store/index.md) — 持久化与输入提升。

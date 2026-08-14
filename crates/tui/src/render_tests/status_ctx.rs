@@ -57,7 +57,7 @@ fn status_bar_shows_ctx_percent() {
 
 /// Colour-split regression: only the meter bar + percent value follow the
 /// threshold colour; the `thr` label and `ctx (used/limit)` counts keep the
-/// normal text colour (Say-body colour) no matter how high the usage climbs.
+/// soft light-blue label colour no matter how high the usage climbs.
 #[test]
 fn status_bar_colors_split_between_meter_and_labels() {
     crate::theme::set_theme(crate::theme::ThemeKind::Dark);
@@ -80,7 +80,7 @@ fn status_bar_colors_split_between_meter_and_labels() {
         row[..b].chars().count() as u16
     };
     let expected = crate::theme::err_color();
-    let normal = crate::theme::text();
+    let label = crate::theme::light_blue();
     let meter_cell = buf
         .cell((col_of("\u{25b0}"), 0))
         .expect("cell at first filled meter segment");
@@ -97,12 +97,12 @@ fn status_bar_colors_split_between_meter_and_labels() {
     );
     let thr_cell = buf.cell((col_of("thr"), 0)).expect("cell at thr label");
     assert_eq!(
-        thr_cell.fg, normal,
-        "thr label must keep normal text colour; got: {row}"
+        thr_cell.fg, label,
+        "thr label must stay light blue; got: {row}"
     );
     let ctx_cell = buf.cell((col_of("ctx"), 0)).expect("cell at ctx label");
     assert_eq!(
-        ctx_cell.fg, normal,
-        "ctx counts must keep normal text colour (ratio-to-total, not threshold-coloured); got: {row}"
+        ctx_cell.fg, label,
+        "ctx counts must stay light blue (ratio-to-total, not threshold-coloured); got: {row}"
     );
 }

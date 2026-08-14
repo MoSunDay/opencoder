@@ -49,7 +49,7 @@ pub(super) async fn execute_call(
 /// Wall-clock timeout the run loop wraps a single leaf tool in. Decides the
 /// safety-net fuse per tool name:
 ///
-/// - `bash` → `None` (exempt). Bash runs its own internal foreground deadline
+/// - `bash` / `question` → `None` (exempt). Bash runs its own internal deadline
 ///   (`tools::bash::BASH_TIMEOUT_SECS`) that hands long-running commands to the
 ///   background rather than killing them. Exempting it here keeps the two
 ///   deadlines from racing.
@@ -64,7 +64,10 @@ pub(super) async fn execute_call(
 /// Pure (no state) so the routing is directly unit-testable.
 pub(crate) fn leaf_tool_timeout(name: &str) -> Option<Duration> {
     match name {
-        "bash" => None,
+        // `question` waits for a human answer: wall-clock budgeting it
+        // would cut off slow users. Cancel (double-Esc / turn interrupt)
+        // remains the only way out, same as bash.
+        "bash" | "question" => None,
         "read" | "edit" | "search" => {
             Some(Duration::from_secs(crate::tools::bash::BASH_TIMEOUT_SECS))
         }

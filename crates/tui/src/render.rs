@@ -115,6 +115,7 @@ pub(crate) fn render<B: Backend>(
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
+    question_menu: Option<&crate::question_menu::QuestionMenu>,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
     shift_held: bool,
@@ -324,6 +325,9 @@ pub(crate) fn render<B: Backend>(
         if let Some(km) = keymap_menu {
             crate::keymap_menu::render_keymap_popup(f, area, km, &mut hits.keymap_btns);
         }
+        if let Some(qm) = question_menu {
+            crate::question_menu::render_question_popup(f, area, composer_area.y, qm);
+        }
         if ap_enabled {
             render_status_chip(f, composer_area, "AP", theme::local_color());
         }
@@ -342,7 +346,7 @@ pub(crate) fn render<B: Backend>(
                 theme::warn_color(),
             );
         }
-        if !input_disabled && model_menu.is_none() {
+        if !input_disabled && model_menu.is_none() && question_menu.is_none() {
             let position = composer::cursor_screen_position(
                 composer_area.x,
                 composer_area.y,

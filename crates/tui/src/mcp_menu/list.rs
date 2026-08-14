@@ -1,4 +1,4 @@
-//! `/mcp` server list: toggle (Enter), edit (e), add (n), delete (d).
+//! `/mcp` server list: toggle (←/→), close (Enter/Esc), edit (e), add (n), delete (d).
 
 use std::collections::HashMap;
 
@@ -124,10 +124,12 @@ pub fn handle_key(mut list: McpList, k: KeyEvent) -> (McpOutcome, Option<McpMenu
             list.move_down();
             (McpOutcome::Idle, Some(McpMenu::List(list)))
         }
-        KeyCode::Enter => {
-            let entry = &list.entries[list.selected];
-            let json = toggle_mcp_json(&entry.name, !entry.enabled);
-            (McpOutcome::Save(json), None)
+        KeyCode::Enter => (McpOutcome::Cancel, None),
+        KeyCode::Left | KeyCode::Right => {
+            let entry = &mut list.entries[list.selected];
+            entry.enabled = !entry.enabled;
+            let json = toggle_mcp_json(&entry.name, entry.enabled);
+            (McpOutcome::Save(json), Some(McpMenu::List(list)))
         }
         KeyCode::Char('e') => {
             let entry = &list.entries[list.selected];
@@ -170,25 +172,58 @@ mod tests {
     }
 
     #[test]
-    fn enter_toggles_enabled_on_selected() {
+    fn enter_closes_menu_without_saving() {
         let list = McpList::new(&config_with_server("srv", false));
         let (outcome, next) = handle_key(list, key(KeyCode::Enter));
-        match outcome {
-            McpOutcome::Save(json) => {
-                assert_eq!(json["mcp_servers"]["srv"]["enabled"], true);
-            }
-            _ => panic!("expected Save"),
-        }
+        assert!(matches!(outcome, McpOutcome::Cancel));
         assert!(next.is_none());
     }
 
     #[test]
-    fn enter_toggles_disabled_when_already_enabled() {
+    fn left_arrow_toggles_selected_and_stays_open() {
+        let list = McpList::new(&config_with_server("srv", false));
+        let (outcome, next) = handle_key(list, key(KeyCode::Left));
+        match outcome {
+            McpOutcome::Save(json) => assert_eq!(json["mcp_servers"]["srv"]["enabled"], true),
+            _ => panic!("expected Save"),
+        }
+        match next {
+            Some(McpMenu::List(l)) => assert!(l.entries[0].enabled),
+            _ => panic!("expected List to stay open"),
+        }
+    }
+
+    #[test]
+    fn right_arrow_toggles_selected_and_stays_open() {
         let list = McpList::new(&config_with_server("srv", true));
-        let (outcome, _) = handle_key(list, key(KeyCode::Enter));
+        let (outcome, next) = handle_key(list, key(KeyCode::Right));
         match outcome {
             McpOutcome::Save(json) => assert_eq!(json["mcp_servers"]["srv"]["enabled"], false),
             _ => panic!("expected Save"),
+        }
+        match next {
+            Some(McpMenu::List(l)) => assert!(!l.entries[0].enabled),
+            _ => panic!("expected List to stay open"),
+        }
+    }
+
+    #[test]
+    fn double_right_arrow_reverts_toggle() {
+        let list = McpList::new(&config_with_server("srv", false));
+        let (o1, next1) = handle_key(list, key(KeyCode::Right));
+        assert!(matches!(o1, McpOutcome::Save(_)));
+        let l1 = match next1 {
+            Some(McpMenu::List(l)) => l,
+            _ => panic!("expected List"),
+        };
+        let (o2, next2) = handle_key(l1, key(KeyCode::Right));
+        match o2 {
+            McpOutcome::Save(json) => assert_eq!(json["mcp_servers"]["srv"]["enabled"], false),
+            _ => panic!("expected Save"),
+        }
+        match next2 {
+            Some(McpMenu::List(l)) => assert!(!l.entries[0].enabled),
+            _ => panic!("expected List"),
         }
     }
 

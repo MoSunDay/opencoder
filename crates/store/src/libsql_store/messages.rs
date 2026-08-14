@@ -21,6 +21,13 @@ pub async fn append(conn: &Connection, session_id: &str, msg: &Message) -> Resul
     Ok(seqs.remove(0))
 }
 
+/// Append multiple messages in batches of `BATCH_CHUNK` (200) messages per
+/// transaction.
+///
+/// **Non-atomic**: if a batch fails mid-way, earlier batches remain persisted.
+/// Callers that need all-or-nothing semantics should check the returned `Err`
+/// and compensate (e.g., query `messages_after` to determine how many were
+/// persisted, or retry the remainder).
 pub async fn append_many(
     conn: &Connection,
     session_id: &str,

@@ -183,7 +183,10 @@ fn render_editor_mode_label_at_bottom_left() {
         .filter_map(|x| buf.cell((x, y)))
         .map(|c| c.symbol())
         .collect();
-    assert!(!right.contains("NORMAL"), "no mode label at bottom-right: {right:?}");
+    assert!(
+        !right.contains("NORMAL"),
+        "no mode label at bottom-right: {right:?}"
+    );
 }
 
 #[test]

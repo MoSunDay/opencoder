@@ -28,7 +28,12 @@ fn question_turn(id: &str) -> LlmEvent {
                 "options": ["sqlite", "postgres"]
             }),
         }],
-        usage: Some(Usage { input_tokens: 5, output_tokens: 5, total_tokens: 10, ..Default::default() }),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 5,
+            total_tokens: 10,
+            ..Default::default()
+        }),
     }
 }
 
@@ -36,7 +41,12 @@ fn text_done(text: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: text.into(),
         tool_calls: vec![],
-        usage: Some(Usage { input_tokens: 5, output_tokens: 1, total_tokens: 6, ..Default::default() }),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 1,
+            total_tokens: 6,
+            ..Default::default()
+        }),
     }
 }
 
@@ -53,7 +63,10 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
     let session = SessionState::new(
         "question-worker",
         resolve_agent("plan").unwrap(),
-        Config { model: "m/g".into(), ..Config::default() },
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
         mock as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
     )
@@ -63,7 +76,12 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
     // Drive the worker exactly like `run_app` does: one Prompt per turn.
     let worker = tokio::spawn(async move {
         let mut sess = session;
-        process_cmd(UiCmd::Prompt("plan a migration".into(), vec![]), &mut sess, &tx).await;
+        process_cmd(
+            UiCmd::Prompt("plan a migration".into(), vec![]),
+            &mut sess,
+            &tx,
+        )
+        .await;
         sess
     });
 
@@ -75,7 +93,10 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert!(hub.waiting_count() > 0, "worker never asked the question");
-    assert!(hub.resolve("qw-1", "postgres".into()), "resolve while waiting");
+    assert!(
+        hub.resolve("qw-1", "postgres".into()),
+        "resolve while waiting"
+    );
 
     let sess = tokio::time::timeout(Duration::from_secs(15), worker)
         .await
@@ -89,9 +110,15 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
         .flat_map(|m| m.blocks.iter())
         .filter(|b| matches!(b, opencoder_core::ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == "qw-1"))
         .collect();
-    assert_eq!(tool_results.len(), 1, "exactly one ToolResult for the question call");
+    assert_eq!(
+        tool_results.len(),
+        1,
+        "exactly one ToolResult for the question call"
+    );
     match tool_results[0] {
-        opencoder_core::ContentBlock::ToolResult { content, is_error, .. } => {
+        opencoder_core::ContentBlock::ToolResult {
+            content, is_error, ..
+        } => {
             assert!(!is_error);
             assert_eq!(content, "postgres");
         }
@@ -112,7 +139,9 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
     let mut saw_end = false;
     while let Ok(ev) = rx.try_recv() {
         match ev {
-            UiEvent::Session(SessionEvent::ToolStart { name, .. }) if name == "question" => saw_start = true,
+            UiEvent::Session(SessionEvent::ToolStart { name, .. }) if name == "question" => {
+                saw_start = true
+            }
             UiEvent::Session(SessionEvent::ToolEnd { name, output, .. }) if name == "question" => {
                 saw_end = true;
                 assert_eq!(output, "postgres");

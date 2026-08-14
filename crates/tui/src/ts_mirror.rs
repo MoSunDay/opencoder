@@ -78,8 +78,16 @@ impl TsMirrorStore {
             id: meta.id.clone(),
             workdir: Some(canonical.clone()),
             store_dir: Some(opencoder_core::data_dir_for(&canonical)),
-            created_at: if meta.created_at > 0 { meta.created_at } else { now },
-            updated_at: if meta.updated_at > 0 { meta.updated_at } else { now },
+            created_at: if meta.created_at > 0 {
+                meta.created_at
+            } else {
+                now
+            },
+            updated_at: if meta.updated_at > 0 {
+                meta.updated_at
+            } else {
+                now
+            },
             title: meta.title.clone(),
             preview: String::new(),
         };
@@ -251,7 +259,11 @@ impl Store for TsMirrorStore {
         self.inner.append_events(events).await
     }
 
-    async fn events_after(&self, session_id: &str, after_seq: i64) -> Result<Vec<SessionEventRecord>> {
+    async fn events_after(
+        &self,
+        session_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<SessionEventRecord>> {
         self.inner.events_after(session_id, after_seq).await
     }
 

@@ -45,4 +45,3 @@ pub(crate) fn plan_compound_for_submit(input: &str) -> Option<String> {
 pub(crate) fn is_compound_plan_cmd(clean: &str) -> bool {
     plan_compound_for_submit(clean).is_some()
 }
-

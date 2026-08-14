@@ -111,7 +111,11 @@ fn handle_options_focus(menu: &mut QuestionMenu, k: KeyEvent) -> QuestionAction 
     match k.code {
         KeyCode::Esc => QuestionAction::Skip(menu.prompt.id.clone()),
         KeyCode::Up | KeyCode::Char('k') => {
-            menu.selected = if menu.selected == 0 { rows - 1 } else { menu.selected - 1 };
+            menu.selected = if menu.selected == 0 {
+                rows - 1
+            } else {
+                menu.selected - 1
+            };
             QuestionAction::Idle
         }
         KeyCode::Down | KeyCode::Char('j') => {
@@ -218,7 +222,10 @@ mod tests {
     #[test]
     fn down_then_enter_answers_the_selected_option() {
         let mut m = menu();
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Down)), QuestionAction::Idle);
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Down)),
+            QuestionAction::Idle
+        );
         assert_eq!(
             handle_question_key(&mut m, key(KeyCode::Enter)),
             QuestionAction::Answer("q-1".into(), "postgres".into())
@@ -228,7 +235,10 @@ mod tests {
     #[test]
     fn up_from_top_wraps_to_the_custom_row() {
         let mut m = menu();
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Up)), QuestionAction::Idle);
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Up)),
+            QuestionAction::Idle
+        );
         assert_eq!(m.selected, m.custom_row());
     }
 
@@ -239,7 +249,10 @@ mod tests {
             handle_question_key(&mut m, key(KeyCode::Down));
         }
         assert_eq!(m.selected, m.custom_row());
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Enter)), QuestionAction::Idle);
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Enter)),
+            QuestionAction::Idle
+        );
         assert_eq!(m.focus, QuestionFocus::Custom);
     }
 
@@ -261,9 +274,12 @@ mod tests {
         let mut m = menu();
         handle_question_key(&mut m, key(KeyCode::Down)); // select "postgres"
         handle_question_key(&mut m, key(KeyCode::Tab)); // jump into custom box
-        // Enter with an empty custom box: current_answer has custom-priority
-        // logic — custom empty + custom focus means "nothing to say yet".
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Enter)), QuestionAction::Idle);
+                                                        // Enter with an empty custom box: current_answer has custom-priority
+                                                        // logic — custom empty + custom focus means "nothing to say yet".
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Enter)),
+            QuestionAction::Idle
+        );
         // But from the options list with empty custom text the preset wins.
         handle_question_key(&mut m, key(KeyCode::Tab));
         assert_eq!(
@@ -275,9 +291,15 @@ mod tests {
     #[test]
     fn esc_skips_regardless_of_focus() {
         let mut m = menu();
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Esc)), QuestionAction::Skip("q-1".into()));
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Esc)),
+            QuestionAction::Skip("q-1".into())
+        );
         handle_question_key(&mut m, key(KeyCode::Tab));
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Esc)), QuestionAction::Skip("q-1".into()));
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Esc)),
+            QuestionAction::Skip("q-1".into())
+        );
     }
 
     #[test]
@@ -312,7 +334,10 @@ mod tests {
         });
         assert_eq!(m.rows(), 1);
         // The only row IS the custom row.
-        assert_eq!(handle_question_key(&mut m, key(KeyCode::Enter)), QuestionAction::Idle);
+        assert_eq!(
+            handle_question_key(&mut m, key(KeyCode::Enter)),
+            QuestionAction::Idle
+        );
         assert_eq!(m.focus, QuestionFocus::Custom);
         handle_question_key(&mut m, key(KeyCode::Char('x')));
         assert_eq!(

@@ -113,6 +113,24 @@ pub fn backoff_duration(attempt: u8) -> Duration {
     Duration::from_millis(exp + jitter)
 }
 
+/// Upper bound on how much of a server-sent `Retry-After` hint (seconds, or an
+/// HTTP-date) we are willing to honor. A hostile or misbehaving server replying
+/// `429` + `Retry-After: 86400` must not stall a session for a full day — the
+/// retry loop would sit in `sleep` with nothing but channel-close to break it.
+pub const RETRY_AFTER_MAX_SECS: u64 = 120;
+
+/// Pure function deciding the delay to sleep before the next attempt when the
+/// server supplied a `Retry-After` hint. The hint is floored at 1 s, capped at
+/// [`RETRY_AFTER_MAX_SECS`], then combined with the locally computed backoff
+/// by taking the maximum — so we never wait less than either side wants, and
+/// never more than the cap above the backoff.
+pub fn retry_delay(retry_after_secs: Option<u64>, computed: Duration) -> Duration {
+    match retry_after_secs {
+        Some(secs) => computed.max(Duration::from_secs(secs.clamp(1, RETRY_AFTER_MAX_SECS))),
+        None => computed,
+    }
+}
+
 /// Classification of a mid-stream interruption. All three indicate a transient
 /// upstream/network fault rather than a logic error in the request, so all are
 /// retryable up to [`MAX_STREAM_ATTEMPTS`].
@@ -195,6 +213,56 @@ mod tests {
                 "attempt {attempt}: backoff_duration {d:?} not within [{lo}, {hi}] ms"
             );
         }
+    }
+
+    // ---- retry_delay: server `Retry-After` honored, but bounded ----
+
+    /// Regression: `Retry-After: 86400` used to sleep a full day; it must now
+    /// be capped at [`RETRY_AFTER_MAX_SECS`].
+    #[test]
+    fn retry_delay_caps_server_hint_at_max() {
+        assert_eq!(RETRY_AFTER_MAX_SECS, 120);
+        assert_eq!(
+            retry_delay(Some(86_400), Duration::from_secs(5)),
+            Duration::from_secs(RETRY_AFTER_MAX_SECS)
+        );
+        // Exactly at the cap is honored as-is.
+        assert_eq!(
+            retry_delay(Some(120), Duration::from_secs(5)),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[test]
+    fn retry_delay_floors_zero_and_one_to_one_second() {
+        assert_eq!(
+            retry_delay(Some(0), Duration::from_millis(500)),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            retry_delay(Some(1), Duration::from_millis(500)),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn retry_delay_without_hint_returns_computed_unchanged() {
+        let computed = Duration::from_millis(750);
+        assert_eq!(retry_delay(None, computed), computed);
+    }
+
+    #[test]
+    fn retry_delay_takes_max_of_capped_hint_and_backoff() {
+        // Hint above the (small) backoff wins...
+        assert_eq!(
+            retry_delay(Some(30), Duration::from_secs(5)),
+            Duration::from_secs(30)
+        );
+        // ...and a backoff larger than the hint is never shortened by it.
+        assert_eq!(
+            retry_delay(Some(30), Duration::from_secs(60)),
+            Duration::from_secs(60)
+        );
     }
 
     #[test]

@@ -19,7 +19,7 @@
 //!   command is applied immediately instead of being recorded as user text.
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, resolve_agent, ContentBlock, Message};
+use opencoder_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
@@ -109,9 +109,21 @@ pub async fn apply(
             }
         }
         ControlCmd::ClearContext => {
-            // Preserve the finalized plan via plan->act handoff when one exists;
-            // fall back to a blank fresh-start only when no plan was produced.
-            let plan_display = crate::plan_handoff::handoff(session, "");
+            // Plan-provenance gate: only a session that IS in plan mode, or
+            // recorded plan-mode inputs earlier in this phase (the counter
+            // survives a plain `/act` switch and resets on handoff), may hand
+            // a plan forward. `handoff`'s plan extraction is "last assistant
+            // message with non-empty text" — in act mode with no plan that is
+            // just the previous answer ("task done"), and wrapping it in the
+            // plan→act directive would fabricate a plan and hijack the fresh
+            // start. When the gate fails we take the blank sentinel path.
+            let from_plan_mode =
+                session.agent.kind == AgentKind::Plan || session.plan_input_count > 0;
+            let plan_display = if from_plan_mode {
+                crate::plan_handoff::handoff(session, "")
+            } else {
+                None
+            };
 
             if plan_display.is_none() {
                 // No plan to carry forward: blank fresh-start sentinel path.

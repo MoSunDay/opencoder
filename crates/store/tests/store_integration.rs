@@ -431,6 +431,11 @@ async fn delivery_parse_and_as_str_roundtrip() {
     // case-insensitive
     assert_eq!(Delivery::parse("STEER"), Some(Delivery::Steer));
     assert_eq!(Delivery::parse("Queue"), Some(Delivery::Queue));
+    // whitespace-tolerant (a padded " queue " must not degrade to Steer)
+    assert_eq!(Delivery::parse("  queue  "), Some(Delivery::Queue));
+    assert_eq!(Delivery::parse("\tSTEER\n"), Some(Delivery::Steer));
+    assert_eq!(Delivery::parse("   "), None);
+    assert_eq!(Delivery::parse(" stear "), None, "a typo must stay invalid");
 }
 
 #[tokio::test]

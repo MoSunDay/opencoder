@@ -11,7 +11,14 @@ pub(crate) fn summarize(input: &serde_json::Value) -> String {
     // 80-column cut hid the real command behind an ellipsis.
     match input {
         serde_json::Value::Object(m) => {
-            for k in ["command", "path", "description", "pattern", "prompt", "question"] {
+            for k in [
+                "command",
+                "path",
+                "description",
+                "pattern",
+                "prompt",
+                "question",
+            ] {
                 if let Some(s) = m.get(k).and_then(|v| v.as_str()) {
                     return sanitize_single_line(s.trim()).into_owned();
                 }

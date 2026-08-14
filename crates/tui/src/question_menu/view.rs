@@ -29,7 +29,9 @@ pub fn render_question_popup(f: &mut Frame, area: Rect, composer_top: u16, menu:
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::styled(
         menu.prompt.question.clone(),
-        Style::default().fg(theme::text()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::text())
+            .add_modifier(Modifier::BOLD),
     ));
     lines.push(Line::from(""));
 
@@ -48,16 +50,20 @@ pub fn render_question_popup(f: &mut Frame, area: Rect, composer_top: u16, menu:
 
     let block = crate::theme::rounded_block_plain().title(Span::styled(
         " Question ",
-        Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::BOLD),
     ));
-    let para = Paragraph::new(lines).block(block).wrap(ratatui::widgets::Wrap { trim: false });
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(para, popup);
 
     if menu.focus == QuestionFocus::Custom {
         // Row index: border(1) + question(q..) + blank(1) + options + custom.
         let custom_y = popup.y + 1 + q_lines + 1 + menu.prompt.options.len() as u16 + 1;
-        let custom_x = popup.x + 2
-            + crate::composer::cursor_column(&menu.custom_input, menu.custom_cursor);
+        let custom_x =
+            popup.x + 2 + crate::composer::cursor_column(&menu.custom_input, menu.custom_cursor);
         if custom_x < popup.x + popup.width.saturating_sub(1)
             && custom_y < popup.y + popup.height.saturating_sub(1)
         {
@@ -69,7 +75,9 @@ pub fn render_question_popup(f: &mut Frame, area: Rect, composer_top: u16, menu:
 fn option_line(opt: &str, selected: bool) -> Line<'static> {
     let marker = if selected { "▸ " } else { "  " };
     let style = if selected {
-        Style::default().fg(theme::accent()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::accent())
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::text())
     };
@@ -85,7 +93,9 @@ fn custom_line(menu: &QuestionMenu, custom_row: usize) -> Line<'static> {
         menu.custom_input.as_str()
     };
     let style = if focused {
-        Style::default().fg(theme::warn_color()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::warn_color())
+            .add_modifier(Modifier::BOLD)
     } else if selected {
         Style::default().fg(theme::accent())
     } else {
@@ -130,7 +140,10 @@ mod tests {
         if custom_focus {
             crate::question_menu::state::handle_question_key(
                 &mut m,
-                crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Tab, crossterm::event::KeyModifiers::NONE),
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Tab,
+                    crossterm::event::KeyModifiers::NONE,
+                ),
             );
         }
         let backend = TestBackend::new(80, 24);
@@ -180,9 +193,7 @@ mod tests {
         // The title row must be strictly above the composer line.
         let buf = terminal.backend().buffer();
         let title_row = (0..20).find(|&y| {
-            (0..80).any(|x| {
-                buf.cell((x, y)).map(|c| c.symbol() == "Q").unwrap_or(false)
-            })
+            (0..80).any(|x| buf.cell((x, y)).map(|c| c.symbol() == "Q").unwrap_or(false))
         });
         assert!(title_row.is_some(), "title rendered above the composer");
     }

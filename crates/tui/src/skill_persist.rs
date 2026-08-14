@@ -342,7 +342,10 @@ mod tests {
         {
             let handle_body = skill_handle.lock().unwrap();
             let handle_body = handle_body.as_deref().expect("skill_prompt body set");
-            assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+            assert!(
+                handle_body.starts_with("> Source: "),
+                "must prefix source path: {handle_body}"
+            );
             assert!(
                 handle_body.ends_with("the alpha body"),
                 "skill_prompt (in-memory) must carry the resolved body: {handle_body}"
@@ -356,7 +359,10 @@ mod tests {
             .skill
             .clone()
             .expect("persisted skill body");
-        assert!(stored.starts_with("> Source: "), "must prefix source path: {stored}");
+        assert!(
+            stored.starts_with("> Source: "),
+            "must prefix source path: {stored}"
+        );
         assert!(
             stored.ends_with("the alpha body"),
             "resolve_persist must persist the skill for resume: {stored}"

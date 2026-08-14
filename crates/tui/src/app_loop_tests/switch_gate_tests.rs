@@ -252,19 +252,41 @@ async fn switch_while_subagent_running_is_noop_even_when_running_false() {
     let active_skill_body: Option<String> = None;
 
     let outcome = handle_switch_agent(
-        "act".into(), false, &mut chat, &mut running, &mut follow,
-        &mut input, &mut cursor_idx, &mut mode_flash, 0,
-        &cmd_tx, &mut cancel, &mut sys_tokens, workdir, &active_skill_body,
-    ).await;
+        "act".into(),
+        false,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+    )
+    .await;
 
     assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert!(cmd_rx.try_recv().is_err(), "no command should be sent while a subagent is live");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "no command should be sent while a subagent is live"
+    );
     assert!(!running, "running must stay false (no turn started)");
     assert_eq!(input, "keep me", "input must be untouched on the noop");
     assert_eq!(sys_tokens, 42, "sys_tokens must be untouched on the noop");
-    assert_eq!(chat.agent, "plan", "agent must stay plan while a subagent is live");
+    assert_eq!(
+        chat.agent, "plan",
+        "agent must stay plan while a subagent is live"
+    );
     assert!(
-        mode_flash.as_ref().map(|(t, _)| t.contains("busy")).unwrap_or(false),
-        "mode flash should hint the switch is deferred; got {:?}", mode_flash
+        mode_flash
+            .as_ref()
+            .map(|(t, _)| t.contains("busy"))
+            .unwrap_or(false),
+        "mode flash should hint the switch is deferred; got {:?}",
+        mode_flash
     );
 }

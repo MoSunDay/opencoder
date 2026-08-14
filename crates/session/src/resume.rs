@@ -1,7 +1,7 @@
 //! Session recovery: reconstruct a `SessionState` from a durable store, and
 //! cheap background title generation (uses `small_model`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -231,7 +231,7 @@ pub async fn resume_and_replay(
     working_dir: PathBuf,
     replay_cancel: Option<CancellationToken>,
 ) -> Result<SessionState> {
-    let pending: Vec<SubagentTaskRecord> = store
+    let candidates: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(id)
         .await
         .unwrap_or_default()
@@ -243,6 +243,16 @@ pub async fn resume_and_replay(
             )
         })
         .collect();
+
+    // Duplicate/orphan tool_result guard: replay ONLY tasks whose `tool_use`
+    // is still unanswered AND visible above any handoff/compaction boundary
+    // (see `filter_replay_candidates`). Unfiltered, a task whose result is
+    // already persisted (timeout path recorded it but a crash left the row
+    // non-terminal; or a prior `resume_and_replay` backfilled then crashed)
+    // would get a DUPLICATE tool_result, and a task dispatched below a
+    // boundary would get an ORPHAN result — both are provider HTTP-400
+    // rejects that permanently break the session.
+    let pending = filter_replay_candidates(&store, id, candidates).await;
 
     // Replay each non-terminal child (Running or Cancelled), collecting results to backfill in ONE Tool
     // message -- mirrors run_loop, which batches a turn's tool results into a
@@ -313,6 +323,56 @@ pub async fn resume_and_replay(
     resume(store, id, config, client, working_dir).await
 }
 
+/// Replay-candidate guard for [`resume_and_replay`]: drop tasks whose replay
+/// would corrupt the parent transcript —
+///
+/// (a) duplicate: the task's `tool_use` id already carries a `tool_result`
+///     among the messages `resume` will show the model (timeout path recorded
+///     the result but a crash left the row non-terminal, or an earlier
+///     `resume_and_replay` backfilled and crashed before completion);
+/// (b) orphan: a handoff/compaction boundary trimmed the dispatching
+///     assistant message out of the visible tail, so a backfilled result
+///     would answer a `tool_use` the provider never sees.
+///
+/// Both defects are provider HTTP-400 rejects. This mirrors the in-process
+/// guard `replay_cancelled_tasks` applies, extended with the boundary check.
+/// Dropped rows are left untouched (same semantics as that guard): a
+/// `Running` row is reconciled to `Cancelled` by `resume` itself, and any
+/// later `resume_and_replay` re-collects and re-filters it the same way —
+/// the guard is idempotent, so a skip can never resurrect a duplicate.
+async fn filter_replay_candidates(
+    store: &Arc<dyn Store>,
+    id: &str,
+    candidates: Vec<SubagentTaskRecord>,
+) -> Vec<SubagentTaskRecord> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let visible = match store.get_session(id).await {
+        Ok(Some(meta)) => crate::dangling_tools::visible_parent_tail(store, id, &meta).await,
+        // Missing/unreadable meta: `resume` below surfaces the real error;
+        // keep the pre-guard behavior rather than silently dropping tasks.
+        _ => return candidates,
+    };
+    let answered = crate::dangling_tools::tool_result_ids(&visible);
+    candidates
+        .into_iter()
+        .filter(|t| {
+            let duplicate = answered.contains(t.task_id.as_str());
+            let dispatch_visible = crate::dangling_tools::task_tool_use_visible(t, &visible);
+            if duplicate || !dispatch_visible {
+                tracing::info!(
+                    task_id = %t.task_id,
+                    duplicate_result = duplicate,
+                    dispatch_visible,
+                    "skipping subagent replay (duplicate/orphan tool_result guard)"
+                );
+            }
+            !duplicate && dispatch_visible
+        })
+        .collect()
+}
+
 /// Replay subagent tasks left in `Cancelled` status, then mark them complete.
 ///
 /// Called from `run_with_registry` before the main loop runs, so a continued
@@ -330,16 +390,10 @@ pub async fn replay_cancelled_tasks(session: &mut SessionState, has_new_input: b
     // A Cancelled task whose result is already present (e.g. a timed-out
     // subagent, whose parent recorded the "timed out" tool_result) must NOT be
     // replayed — doing so would append a duplicate tool_result that providers
-    // reject with HTTP 400.
-    let answered: HashSet<&str> = session
-        .messages
-        .iter()
-        .flat_map(|m| m.blocks.iter())
-        .filter_map(|b| match b {
-            ContentBlock::ToolResult { tool_use_id, .. } => Some(tool_use_id.as_str()),
-            _ => None,
-        })
-        .collect();
+    // reject with HTTP 400. Shared computation (also used by
+    // `resume_and_replay`'s cross-process guard and the dangling-use safety
+    // net): `dangling_tools::tool_result_ids`.
+    let answered = crate::dangling_tools::tool_result_ids(&session.messages);
     let cancelled: Vec<SubagentTaskRecord> = store
         .list_subagent_tasks(&session.id)
         .await

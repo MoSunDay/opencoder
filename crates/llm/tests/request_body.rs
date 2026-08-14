@@ -48,7 +48,11 @@ fn body_passes_all_effort_levels_verbatim() {
     // could silently downgrade a max/xhigh reasoning request.
     for level in ["low", "medium", "high", "xhigh", "max"] {
         let body = req(Some(level)).to_body();
-        assert_eq!(body["reasoning_effort"], serde_json::json!(level), "{level}");
+        assert_eq!(
+            body["reasoning_effort"],
+            serde_json::json!(level),
+            "{level}"
+        );
     }
 }
 

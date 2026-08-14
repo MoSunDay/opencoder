@@ -25,9 +25,12 @@ use opencoder_web::handle::SessionHandle;
 /// Wraps a real store and delegates everything EXCEPT `update_session`, which
 /// flips the bound session handle's `draining` flag to `true` BEFORE delegating
 /// the write — reproducing a drain starting mid-write (the TOCTOU window).
+/// With `fail_get = true`, `get_session` errors instead, reproducing the
+/// pre-write rollback-capture read failing.
 struct DrainFlippingStore {
     inner: Arc<dyn Store>,
     handle: Arc<SessionHandle>,
+    fail_get: bool,
 }
 
 #[async_trait]
@@ -39,6 +42,9 @@ impl Store for DrainFlippingStore {
         self.inner.create_session(meta).await
     }
     async fn get_session(&self, id: &str) -> anyhow::Result<Option<SessionMeta>> {
+        if self.fail_get {
+            anyhow::bail!("simulated get_session failure");
+        }
         self.inner.get_session(id).await
     }
     async fn list_sessions(
@@ -169,28 +175,57 @@ impl Store for DrainFlippingStore {
 /// The handle for `sid` is pre-inserted so the handler finds a live, non-draining
 /// handle on entry, then observes the drain on its post-write re-check.
 async fn state_with_drain_flip(sid: &str) -> Arc<opencoder_web::AppState> {
-    let inner: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    state_with_drain_flip_inner(sid, false).await.0
+}
+
+/// Same as [`state_with_drain_flip`], plus `get_session` failing so the
+/// handler's rollback-capture read yields no old row. Returns the underlying
+/// real store too — assertions must bypass the failing wrapper.
+async fn state_with_drain_flip_failing_get(
+    sid: &str,
+) -> (Arc<opencoder_web::AppState>, Arc<LibsqlStore>) {
+    state_with_drain_flip_inner(sid, true).await
+}
+
+async fn state_with_drain_flip_inner(
+    sid: &str,
+    fail_get: bool,
+) -> (Arc<opencoder_web::AppState>, Arc<LibsqlStore>) {
+    let real = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let inner: Arc<dyn Store> = real.clone();
     let handle = SessionHandle::new(); // draining starts false
     let handles = opencoder_web::handle::new_handle_map();
     handles.lock().await.insert(sid.to_string(), handle.clone());
-    let store: Arc<dyn Store> = Arc::new(DrainFlippingStore { inner, handle });
-    Arc::new(opencoder_web::AppState {
-        client_override: None,
-        store,
-        workdir: std::env::temp_dir(),
-        handles,
-    })
+    let store: Arc<dyn Store> = Arc::new(DrainFlippingStore {
+        inner,
+        handle,
+        fail_get,
+    });
+    (
+        Arc::new(opencoder_web::AppState {
+            client_override: None,
+            store,
+            workdir: std::env::temp_dir(),
+            handles,
+        }),
+        real,
+    )
 }
 
 /// Seed a session row (agent "act", model "m").
 async fn seed(state: &opencoder_web::AppState, sid: &str) {
+    seed_as(state, sid, Some("act"), Some("m")).await;
+}
+
+/// Seed a session row with explicit (possibly NULL) agent/model.
+async fn seed_as(state: &opencoder_web::AppState, sid: &str, agent: Option<&str>, model: Option<&str>) {
     state
         .store
         .create_session(&SessionMeta {
             id: sid.to_string(),
             title: None,
-            agent: Some("act".into()),
-            model: Some("m".into()),
+            agent: agent.map(String::from),
+            model: model.map(String::from),
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -315,5 +350,124 @@ async fn post_model_rolls_back_on_toctou_drain_start() {
     assert!(
         o.model.is_none(),
         "runtime model override must not leak after TOCTOU rollback"
+    );
+}
+
+/// P1-5 (agent, NULL old value): when the pre-switch agent was NULL — the
+/// common case for sessions created without an explicit agent — the rollback
+/// must CLEAR the column. The previous `agent: old.agent.clone()` patch built
+/// `agent: None`, a silent no-op, so the refused switch stayed persisted.
+#[tokio::test]
+async fn post_agent_rolls_back_null_agent_by_clearing() {
+    let state = state_with_drain_flip("s3").await;
+    seed_as(&state, "s3", None, Some("m")).await;
+    assert_eq!(meta(&state, "s3").await.agent, None);
+
+    let resp = opencoder_web::api::post_agent(
+        axum::extract::State(state.clone()),
+        axum::extract::Path("s3".to_string()),
+        axum::Json(opencoder_web::api::SwitchBody {
+            value: "explore".into(),
+        }),
+    )
+    .await
+    .into_response();
+
+    let (status, v) = decode(resp).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(v["ok"], false);
+    assert_eq!(
+        meta(&state, "s3").await.agent, None,
+        "refused switch must not persist: NULL old agent must be restored as NULL"
+    );
+    let map = state.handles.lock().await;
+    let o = map.get("s3").unwrap().overrides.lock().await;
+    assert!(o.agent.is_none(), "runtime agent override must not leak");
+}
+
+/// P1-5 (model, NULL old value): same contract for the model column.
+#[tokio::test]
+async fn post_model_rolls_back_null_model_by_clearing() {
+    let state = state_with_drain_flip("s4").await;
+    seed_as(&state, "s4", Some("act"), None).await;
+    assert_eq!(meta(&state, "s4").await.model, None);
+
+    let resp = opencoder_web::api::post_model(
+        axum::extract::State(state.clone()),
+        axum::extract::Path("s4".to_string()),
+        axum::Json(opencoder_web::api::ModelBody {
+            value: "new-model".into(),
+            persist_default: false,
+        }),
+    )
+    .await
+    .into_response();
+
+    let (status, v) = decode(resp).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(v["ok"], false);
+    assert_eq!(
+        meta(&state, "s4").await.model, None,
+        "refused switch must not persist: NULL old model must be restored as NULL"
+    );
+    let map = state.handles.lock().await;
+    let o = map.get("s4").unwrap().overrides.lock().await;
+    assert!(o.model.is_none(), "runtime model override must not leak");
+}
+
+/// P1-5 (agent, capture read failed): when the pre-write `get_session` errors,
+/// no old row is captured. The rollback must still act (best-effort clear —
+/// a drain running implies the row exists) instead of skipping the write,
+/// which previously left the refused switch persisted.
+#[tokio::test]
+async fn post_agent_clears_agent_when_capture_read_failed() {
+    let (state, real) = state_with_drain_flip_failing_get("s5").await;
+    seed_as(&state, "s5", Some("act"), Some("m")).await;
+    assert_eq!(real.get_session("s5").await.unwrap().unwrap().agent.as_deref(), Some("act"));
+
+    let resp = opencoder_web::api::post_agent(
+        axum::extract::State(state.clone()),
+        axum::extract::Path("s5".to_string()),
+        axum::Json(opencoder_web::api::SwitchBody {
+            value: "explore".into(),
+        }),
+    )
+    .await
+    .into_response();
+
+    let (status, v) = decode(resp).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(v["ok"], false);
+    assert_eq!(
+        real.get_session("s5").await.unwrap().unwrap().agent, None,
+        "failed capture must still roll back: best-effort clear to NULL"
+    );
+}
+
+/// P1-5 (model, capture read failed): same best-effort clear for the model
+/// column.
+#[tokio::test]
+async fn post_model_clears_model_when_capture_read_failed() {
+    let (state, real) = state_with_drain_flip_failing_get("s6").await;
+    seed_as(&state, "s6", Some("act"), Some("m")).await;
+    assert_eq!(real.get_session("s6").await.unwrap().unwrap().model.as_deref(), Some("m"));
+
+    let resp = opencoder_web::api::post_model(
+        axum::extract::State(state.clone()),
+        axum::extract::Path("s6".to_string()),
+        axum::Json(opencoder_web::api::ModelBody {
+            value: "new-model".into(),
+            persist_default: false,
+        }),
+    )
+    .await
+    .into_response();
+
+    let (status, v) = decode(resp).await;
+    assert_eq!(status, axum::http::StatusCode::CONFLICT);
+    assert_eq!(v["ok"], false);
+    assert_eq!(
+        real.get_session("s6").await.unwrap().unwrap().model, None,
+        "failed capture must still roll back: best-effort clear to NULL"
     );
 }

@@ -172,7 +172,10 @@ fn composer_badge_renders_and_cursor_aligns() {
                 0,
                 8,
                 2,
-                &[("data:image/png;base64,xx".to_string(), "img.png".to_string())],
+                &[(
+                    "data:image/png;base64,xx".to_string(),
+                    "img.png".to_string(),
+                )],
                 false,
                 None,
                 None,

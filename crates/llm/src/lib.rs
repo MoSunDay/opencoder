@@ -1,10 +1,10 @@
-mod http_date;
 pub mod client;
-pub mod retry;
 pub mod event;
+mod http_date;
 pub mod message;
 pub mod mock;
 pub mod request;
+pub mod retry;
 pub mod schema;
 pub mod sse;
 pub mod stream;

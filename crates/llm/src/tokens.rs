@@ -32,10 +32,7 @@ pub fn estimate_messages(messages: &[Message]) -> usize {
 /// framing), so that the replay/resume `context_used` value matches what
 /// streaming would have accumulated over the same transcript.
 pub fn estimate_messages_for_display(messages: &[Message]) -> usize {
-    messages
-        .iter()
-        .map(|m| estimate(&m.estimate_chars()))
-        .sum()
+    messages.iter().map(|m| estimate(&m.estimate_chars())).sum()
 }
 
 /// Estimate tokens for the full session transcript that will be sent to the
@@ -80,11 +77,17 @@ mod tests {
     #[test]
     fn estimate_messages_for_display_excludes_overhead() {
         let m1 = Message::user("id1", "abcdefgh"); // 9ch -> 3 tokens (no +4 overhead)
-        let m2 = Message::assistant("id2");         // 0 tokens (no +4 overhead)
+        let m2 = Message::assistant("id2"); // 0 tokens (no +4 overhead)
         let total = estimate_messages_for_display(&[m1, m2]);
-        assert_eq!(total, 3, "display estimate must exclude per-message overhead");
+        assert_eq!(
+            total, 3,
+            "display estimate must exclude per-message overhead"
+        );
         // Contrast: estimate_messages includes +4/msg overhead = 3+4 + 0+4 = 11
-        assert_eq!(estimate_messages(&[Message::user("id1", "abcdefgh"), Message::assistant("id2")]), 11);
+        assert_eq!(
+            estimate_messages(&[Message::user("id1", "abcdefgh"), Message::assistant("id2")]),
+            11
+        );
     }
 
     #[test]

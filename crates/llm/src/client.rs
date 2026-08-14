@@ -7,12 +7,13 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::event::{LlmEvent, Usage};
+use crate::http_date::parse_http_date_to_secs;
 use crate::request::ChatRequest;
 use crate::retry::{
-    backoff_delay, backoff_duration, retry_decision, should_retry_stream_interruption,
-    AttemptOutcome, RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
+    backoff_delay, backoff_duration, retry_decision, retry_delay,
+    should_retry_stream_interruption, AttemptOutcome, RetryDecision, StreamInterruption,
+    MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
 };
-use crate::http_date::parse_http_date_to_secs;
 use crate::sse::SseDecoder;
 use crate::stream::ChatStream;
 use crate::tool_call::{CompletedToolCall, ToolAccumulator};
@@ -81,8 +82,8 @@ impl ChatClient {
         let idle_timeout = self.idle_timeout;
 
         tokio::spawn(async move {
-            if let Err(e) = run_stream(client, url, key, headers, body, tx.clone(), idle_timeout)
-                .await
+            if let Err(e) =
+                run_stream(client, url, key, headers, body, tx.clone(), idle_timeout).await
             {
                 let _ = tx
                     .send(LlmEvent::Error(format!("stream failed: {e:#}")))
@@ -460,7 +461,9 @@ async fn connect_with_retry(
                 warn!(attempt, status = status.as_u16(), "retryable HTTP status");
                 // Read `Retry-After` and drain the body BEFORE sleeping: an
                 // unread body keeps the connection tied up (preventing pool
-                // reuse), and the header may demand a longer wait than backoff.
+                // reuse), and the header may demand a longer wait than backoff
+                // (bounded by `RETRY_AFTER_MAX_SECS` so a hostile server
+                // cannot stall the session for a day).
                 let retry_after = resp
                     .headers()
                     .get("retry-after")
@@ -473,11 +476,7 @@ async fn connect_with_retry(
                         max: MAX_ATTEMPTS,
                     })
                     .await;
-                let computed = backoff_duration(attempt);
-                let delay = match retry_after {
-                    Some(secs) => computed.max(Duration::from_secs(secs.max(1))),
-                    None => computed,
-                };
+                let delay = retry_delay(retry_after, backoff_duration(attempt));
                 tokio::select! {
                     biased;
                     _ = tx.closed() => return Ok(None),

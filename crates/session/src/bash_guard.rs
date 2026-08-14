@@ -145,12 +145,12 @@ fn extract_command_substitutions(cmd: &str) -> Vec<String> {
 
 /// Find the index of the `)` that matches the `(` at position `start`.
 fn find_matching_paren(chars: &[char], start: usize) -> Option<usize> {
-    if start >= chars.len() || chars[start] != '(' {
+    if chars.get(start) != Some(&'(') {
         return None;
     }
     let mut depth = 0;
-    for i in start..chars.len() {
-        match chars[i] {
+    for (i, &c) in chars.iter().enumerate().skip(start) {
+        match c {
             '(' => depth += 1,
             ')' => {
                 depth -= 1;

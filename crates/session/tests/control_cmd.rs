@@ -313,7 +313,7 @@ async fn clear_context_survives_resume() {
 #[tokio::test]
 async fn clear_context_executes_preserved_result() {
     let store = mem_store().await;
-    seed(&store, "exec-sess", "act").await;
+    seed(&store, "exec-sess", "plan").await;
 
     let msgs = vec![Message::user("u1", "implement feature X"), {
         let mut m = Message::assistant("a1");
@@ -328,7 +328,7 @@ async fn clear_context_executes_preserved_result() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "exec-sess",
-        resolve_agent("act").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -336,6 +336,10 @@ async fn clear_context_executes_preserved_result() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = msgs.clone();
+    // Plan provenance: the plan was produced by a recorded plan-mode input.
+    // (An act-mode session with plan_input_count == 0 takes the sentinel
+    // path instead — see clear_context_regression.rs.)
+    session.plan_input_count = 1;
 
     run(&mut session, "/act_clear_context".into(), |_| {})
         .await

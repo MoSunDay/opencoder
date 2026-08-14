@@ -50,13 +50,24 @@ async fn handle_mcp_outcome_success_saves_and_reloads() {
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
     let mut chat = ChatView::default();
 
-    let flow = handle_mcp_outcome(&mut mcp_menu, enter_key(), &mut config, &cmd_tx, &mut chat, workdir).await;
+    let flow = handle_mcp_outcome(
+        &mut mcp_menu,
+        enter_key(),
+        &mut config,
+        &cmd_tx,
+        &mut chat,
+        workdir,
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(mcp_menu.is_none(), "modal should close after Save");
 
     let text = marker_text(&chat);
-    assert!(text.contains("[/mcp] saved"), "expected saved marker, got: {text}");
+    assert!(
+        text.contains("[/mcp] saved"),
+        "expected saved marker, got: {text}"
+    );
 
     let cmd = cmd_rx.recv().await.expect("ReloadConfig should be sent");
     assert!(matches!(cmd, UiCmd::ReloadConfig(_)));
@@ -82,15 +93,29 @@ async fn handle_mcp_outcome_save_failure_pushes_error_marker() {
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
     let mut chat = ChatView::default();
 
-    let flow = handle_mcp_outcome(&mut mcp_menu, enter_key(), &mut config, &cmd_tx, &mut chat, workdir).await;
+    let flow = handle_mcp_outcome(
+        &mut mcp_menu,
+        enter_key(),
+        &mut config,
+        &cmd_tx,
+        &mut chat,
+        workdir,
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
 
     let text = marker_text(&chat);
-    assert!(text.contains("[/mcp] save failed"), "expected save-failed marker, got: {text}");
+    assert!(
+        text.contains("[/mcp] save failed"),
+        "expected save-failed marker, got: {text}"
+    );
 
     // No ReloadConfig on save failure.
-    assert!(cmd_rx.try_recv().is_err(), "ReloadConfig must not be sent on save failure");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "ReloadConfig must not be sent on save failure"
+    );
 }
 
 /// Reload-failure: save succeeds (writes a fresh `opencoder.json`) but a
@@ -120,13 +145,27 @@ async fn handle_mcp_outcome_reload_failure_pushes_error_marker() {
     let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
     let mut chat = ChatView::default();
 
-    let flow = handle_mcp_outcome(&mut mcp_menu, enter_key(), &mut config, &cmd_tx, &mut chat, &workdir).await;
+    let flow = handle_mcp_outcome(
+        &mut mcp_menu,
+        enter_key(),
+        &mut config,
+        &cmd_tx,
+        &mut chat,
+        &workdir,
+    )
+    .await;
 
     assert!(matches!(flow, LoopFlow::Proceed));
 
     let text = marker_text(&chat);
-    assert!(text.contains("[/mcp] reload failed"), "expected reload-failed marker, got: {text}");
+    assert!(
+        text.contains("[/mcp] reload failed"),
+        "expected reload-failed marker, got: {text}"
+    );
 
     // No ReloadConfig on reload failure.
-    assert!(cmd_rx.try_recv().is_err(), "ReloadConfig must not be sent on reload failure");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "ReloadConfig must not be sent on reload failure"
+    );
 }

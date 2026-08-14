@@ -242,7 +242,6 @@ async fn done_with_empty_store_goes_idle() {
     assert!(!running, "must go idle when nothing is pending");
 }
 
-
 // ----- Bug #2: drain_pending restart must check start_turn return value -----
 
 /// When `drain_pending` is armed (a cancelled turn left stranded inputs) and
@@ -294,7 +293,10 @@ async fn drain_pending_restart_with_dead_worker_quits() {
     )
     .await;
 
-    assert!(matches!(flow, LoopFlow::Quit), "dead worker must return Quit");
+    assert!(
+        matches!(flow, LoopFlow::Quit),
+        "dead worker must return Quit"
+    );
     assert!(
         crate::chat::block_text(&chat).contains("worker stopped"),
         "worker_dead marker must be pushed to chat"
@@ -304,7 +306,6 @@ async fn drain_pending_restart_with_dead_worker_quits() {
         "drain_pending must be cleared before the start_turn attempt"
     );
 }
-
 
 // ----- Bug #7: sys_tokens updated before plan→act noop early return -----
 

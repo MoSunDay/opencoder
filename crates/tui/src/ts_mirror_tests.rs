@@ -41,7 +41,12 @@ async fn ts_session_is_registered_with_title_and_store_dir() {
     let (mirror, _tmp, workdir) = fixture().await;
     mirror.create_session(&ts_meta("01AAA")).await.unwrap();
 
-    let record = mirror.registry.get("01AAA").await.unwrap().expect("registered");
+    let record = mirror
+        .registry
+        .get("01AAA")
+        .await
+        .unwrap()
+        .expect("registered");
     assert_eq!(record.title.as_deref(), Some("seed title"));
     assert_eq!(record.workdir.as_deref(), Some(workdir.as_path()));
     assert_eq!(
@@ -124,7 +129,14 @@ async fn title_patch_mirrors_existing_row_only() {
     };
     mirror.update_session("01AAA", &patch).await.unwrap();
     assert_eq!(
-        mirror.registry.get("01AAA").await.unwrap().unwrap().title.as_deref(),
+        mirror
+            .registry
+            .get("01AAA")
+            .await
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
         Some("generated title")
     );
 
@@ -186,7 +198,10 @@ async fn maybe_wrap_gates_on_existing_registry() {
     // Registry present: a mirror wraps and ts sessions flow into it.
     TsRegistry::open(&ts_db).await.unwrap();
     let wrapped = maybe_wrap_at(inner.clone(), &workdir, ts_db).await;
-    assert!(!Arc::ptr_eq(&wrapped, &inner), "ts.db present -> mirror wraps");
+    assert!(
+        !Arc::ptr_eq(&wrapped, &inner),
+        "ts.db present -> mirror wraps"
+    );
     wrapped.create_session(&ts_meta("01AAA")).await.unwrap();
     let registry = TsRegistry::open(tmp.path().join("ts.db")).await.unwrap();
     assert!(registry.get("01AAA").await.unwrap().is_some());

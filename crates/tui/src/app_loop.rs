@@ -306,12 +306,18 @@ pub(crate) async fn fold_ui_events(
                 match &sev {
                     SessionEvent::ToolStart { id, name, input } if name == "question" => {
                         crate::question_menu::on_tool_start(
-                            question_menu, question_queue, id, input,
+                            question_menu,
+                            question_queue,
+                            id,
+                            input,
                         );
                     }
                     SessionEvent::ToolEnd { id, .. } => {
                         crate::question_menu::on_tool_end(
-                            question_menu, question_queue, id, question_hub,
+                            question_menu,
+                            question_queue,
+                            id,
+                            question_hub,
                         );
                     }
                     _ => {}
@@ -501,11 +507,28 @@ pub(crate) async fn dispatch_command(
     match outcome {
         CommandOutcome::Dispatch(action) => {
             return dispatch_slash_action(
-                action, cmd_tx, cancel, chat, running, follow, store,
-                session_id, task_picker, model_menu, mcp_menu,
-                cache_salt_menu, agent_name, input, cursor_idx,
-                config, workdir, mode_flash, anim_tick, sys_tokens,
-                plan_edit, notepad,
+                action,
+                cmd_tx,
+                cancel,
+                chat,
+                running,
+                follow,
+                store,
+                session_id,
+                task_picker,
+                model_menu,
+                mcp_menu,
+                cache_salt_menu,
+                agent_name,
+                input,
+                cursor_idx,
+                config,
+                workdir,
+                mode_flash,
+                anim_tick,
+                sys_tokens,
+                plan_edit,
+                notepad,
             )
             .await;
         }
@@ -697,7 +720,11 @@ pub(crate) async fn handle_keymap_mouse_event(
     cmd_tx: &mpsc::Sender<UiCmd>,
 ) -> LoopFlow {
     let outcome = crate::keymap_menu::mouse::handle_keymap_mouse(
-        keymap_menu, btn_rects, m.column, m.row, &m.kind,
+        keymap_menu,
+        btn_rects,
+        m.column,
+        m.row,
+        &m.kind,
     );
     apply_keymap_outcome(outcome, config, keymap, workdir, cmd_tx).await
 }

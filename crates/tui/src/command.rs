@@ -36,10 +36,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/act", "切换到 act 模式（不重置上下文）"),
     ("/plan", "切换到 plan 模式（不重置上下文）"),
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
-    (
-        "/notepad",
-        "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)",
-    ),
+    ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
     (
         "/act_clear_context",
         "清空对话上下文并切换到 act 模式（重新开始）",

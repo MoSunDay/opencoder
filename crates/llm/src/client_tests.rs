@@ -87,10 +87,15 @@ fn parse_usage_derives_total_when_omitted() {
     // Regression (Bug 11): when `total_tokens` is absent, the sum of
     // `prompt_tokens + completion_tokens` must be used instead of silently
     // reporting 0 (some providers omit total_tokens entirely).
-    let u = parse_usage(&usage_json(r#"{"prompt_tokens":100,"completion_tokens":50}"#));
+    let u = parse_usage(&usage_json(
+        r#"{"prompt_tokens":100,"completion_tokens":50}"#,
+    ));
     assert_eq!(u.input_tokens, 100);
     assert_eq!(u.output_tokens, 50);
-    assert_eq!(u.total_tokens, 150, "missing total must fall back to input+output");
+    assert_eq!(
+        u.total_tokens, 150,
+        "missing total must fall back to input+output"
+    );
 }
 
 #[test]
@@ -110,7 +115,10 @@ fn parse_usage_derives_total_when_explicit_zero() {
     let u = parse_usage(&usage_json(
         r#"{"prompt_tokens":7,"completion_tokens":3,"total_tokens":0}"#,
     ));
-    assert_eq!(u.total_tokens, 10, "explicit 0 total must fall back to input+output");
+    assert_eq!(
+        u.total_tokens, 10,
+        "explicit 0 total must fall back to input+output"
+    );
 }
 
 #[test]
@@ -120,7 +128,8 @@ fn parse_usage_total_saturates_on_overflow() {
         r#"{"prompt_tokens":18446744073709551615,"completion_tokens":1}"#,
     ));
     assert_eq!(
-        u.total_tokens, u64::MAX,
+        u.total_tokens,
+        u64::MAX,
         "overflow on input+output must saturate, not wrap"
     );
 }
@@ -424,13 +433,8 @@ async fn stream_task_exits_promptly_after_rx_drop() {
         let _ = closed_tx.send(());
     });
 
-    let client = ChatClient::new(
-        &format!("http://127.0.0.1:{port}"),
-        "test-key",
-        &[],
-        None,
-    )
-    .unwrap();
+    let client =
+        ChatClient::new(&format!("http://127.0.0.1:{port}"), "test-key", &[], None).unwrap();
 
     let req = ChatRequest {
         model: "test-model".to_string(),
@@ -460,7 +464,8 @@ async fn stream_task_exits_promptly_after_rx_drop() {
 
 #[test]
 fn parse_usage_handles_float_tokens() {
-    let u = usage_json(r#"{"prompt_tokens":1500.0,"completion_tokens":300.0,"total_tokens":1800.0}"#);
+    let u =
+        usage_json(r#"{"prompt_tokens":1500.0,"completion_tokens":300.0,"total_tokens":1800.0}"#);
     let usage = parse_usage(&u);
     assert_eq!(usage.input_tokens, 1500);
     assert_eq!(usage.output_tokens, 300);
@@ -473,7 +478,9 @@ async fn emit_delta_text_block_uses_content_fallback() {
     let mut tools = ToolAccumulator::default();
     let mut text = String::new();
     let delta = obj(r#"{"content":[{"type":"text","content":"hello"}]}"#);
-    emit_delta(&delta, &mut tools, &mut text, &tx).await.unwrap();
+    emit_delta(&delta, &mut tools, &mut text, &tx)
+        .await
+        .unwrap();
     drop(tx);
     let ev = rx.recv().await.unwrap();
     assert!(matches!(ev, LlmEvent::TextDelta(ref s) if s == "hello"));
@@ -488,7 +495,10 @@ fn parse_http_date_to_secs_parses_rfc7231() {
 
 #[test]
 fn parse_http_date_to_secs_rejects_non_gmt() {
-    assert_eq!(crate::http_date::parse_http_date_to_secs("Thu, 01 Jan 1970 00:00:00 PST"), None);
+    assert_eq!(
+        crate::http_date::parse_http_date_to_secs("Thu, 01 Jan 1970 00:00:00 PST"),
+        None
+    );
 }
 
 #[test]

@@ -81,6 +81,16 @@ pub struct SessionPatch {
     /// separately from `skill: None` (which means "don't touch").
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_skill: bool,
+    /// When true, sets `agent` to NULL (clears the persisted agent). Used
+    /// separately from `agent: None` (which means "don't touch"): the web
+    /// layer's TOCTOU rollback needs it to restore a NULL agent — a plain
+    /// `agent: None` patch would be a silent no-op.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_agent: bool,
+    /// When true, sets `model` to NULL (clears the persisted model). Same
+    /// purpose as `clear_agent` for the model column.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_model: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +101,39 @@ pub struct SessionPatch {
 
 fn is_false(b: &bool) -> bool {
     !b
+}
+
+impl SessionPatch {
+    /// Build the rollback patch for the `agent` column from the pre-switch
+    /// row captured by the caller.
+    ///
+    /// Restores the captured value when present. When the column was NULL —
+    /// or the capture read failed (`old` is `None`; a drain running implies
+    /// the row exists) — the column is CLEARED: `agent: None` alone means
+    /// "don't touch", so it would be a silent no-op and leave the refused
+    /// switch persisted. Always bumps `updated_at`.
+    pub fn rollback_agent(old: Option<&SessionMeta>) -> SessionPatch {
+        let v = old.and_then(|m| m.agent.clone());
+        SessionPatch {
+            agent: v.clone(),
+            clear_agent: v.is_none(),
+            updated_at: Some(opencoder_core::message::now_ms()),
+            ..Default::default()
+        }
+    }
+
+    /// Build the rollback patch for the `model` column from the pre-switch
+    /// row. See [`SessionPatch::rollback_agent`] for the NULL / failed-read
+    /// clearing semantics.
+    pub fn rollback_model(old: Option<&SessionMeta>) -> SessionPatch {
+        let v = old.and_then(|m| m.model.clone());
+        SessionPatch {
+            model: v.clone(),
+            clear_model: v.is_none(),
+            updated_at: Some(opencoder_core::message::now_ms()),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -154,8 +197,10 @@ impl Delivery {
             Delivery::Queue => "queue",
         }
     }
+    /// Parse a delivery name, tolerating case and surrounding whitespace
+    /// (`" queue "` is `Queue`). Returns `None` for unrecognized values.
     pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
+        match s.trim().to_ascii_lowercase().as_str() {
             "steer" => Some(Delivery::Steer),
             "queue" => Some(Delivery::Queue),
             _ => None,

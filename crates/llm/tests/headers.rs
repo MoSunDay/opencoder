@@ -89,7 +89,6 @@ fn malformed_custom_entries_are_skipped() {
     assert_eq!(map.get("x-ok").unwrap().to_str().unwrap(), "good");
 }
 
-
 #[test]
 fn invalid_key_bytes_are_reported_not_silently_dropped() {
     // A raw newline is invalid in an HTTP header value. Previously the

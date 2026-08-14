@@ -168,7 +168,9 @@ fn find_matching_paren(chars: &[char], start: usize) -> Option<usize> {
 ///
 /// Handles compound commands (`a && b`, `a; b`, `a | b`) by checking each
 /// segment independently. If ANY segment is mutating, the whole command is
-/// blocked.
+/// blocked. A segment that is the right-hand side of a pipe and invokes an
+/// interpreter without a script file (`curl … | sh`) is blocked as well: the
+/// interpreter executes its piped stdin.
 pub fn classify(command: &str) -> BashVerdict {
     let trimmed = command.trim();
     if trimmed.is_empty() {
@@ -199,8 +201,16 @@ pub fn classify(command: &str) -> BashVerdict {
 
     // Split into segments by &&, ;, |, and check each.
     for segment in split_segments(trimmed) {
-        if let Some(reason) = classify_segment(&segment) {
+        if let Some(reason) = classify_segment(&segment.text) {
             return BashVerdict::WriteBlocked(reason);
+        }
+        // The right-hand side of a pipe reads upstream output on stdin: an
+        // interpreter invoked there with no script-file argument (`curl … |
+        // sh`, `cat x.py | python -`) executes that input.
+        if segment.stdin_from_pipe {
+            if let Some(reason) = pipe_fed_interpreter_reason(&segment.text) {
+                return BashVerdict::WriteBlocked(reason);
+            }
         }
     }
 
@@ -323,11 +333,20 @@ fn is_safe_redirect_target(target: &str) -> bool {
     target == "/dev/null"
 }
 
+/// One split command segment, plus whether its stdin is fed by a pipe
+/// (i.e. the segment is the right-hand side of a `|` or `|&`).
+struct Segment {
+    text: String,
+    stdin_from_pipe: bool,
+}
+
 /// Split a command string into individual segments by shell separators
-/// (`&&`, `||`, `;`, `|`). Each segment is trimmed.
-fn split_segments(cmd: &str) -> Vec<String> {
+/// (`&&`, `||`, `;`, `|`, `&`, newline). Each segment is trimmed and
+/// remembers whether it follows a single `|` (pipe right-hand side).
+fn split_segments(cmd: &str) -> Vec<Segment> {
     let mut segments = Vec::new();
     let mut current = String::new();
+    let mut stdin_from_pipe = false;
     let chars: Vec<char> = cmd.chars().collect();
     let mut i = 0;
     while i < chars.len() {
@@ -336,29 +355,107 @@ fn split_segments(cmd: &str) -> Vec<String> {
         if i + 1 < chars.len() {
             let pair = format!("{}{}", c, chars[i + 1]);
             if pair == "&&" || pair == "||" {
-                if !current.trim().is_empty() {
-                    segments.push(current.trim().to_string());
-                }
-                current.clear();
+                push_segment(&mut segments, &mut current, stdin_from_pipe);
+                stdin_from_pipe = false;
+                i += 2;
+                continue;
+            }
+            // `|&` pipes both stdout and stderr — the tail still reads a pipe.
+            if pair == "|&" {
+                push_segment(&mut segments, &mut current, stdin_from_pipe);
+                stdin_from_pipe = true;
                 i += 2;
                 continue;
             }
         }
         if c == ';' || c == '|' || c == '&' || c == '\n' {
-            if !current.trim().is_empty() {
-                segments.push(current.trim().to_string());
-            }
-            current.clear();
+            push_segment(&mut segments, &mut current, stdin_from_pipe);
+            stdin_from_pipe = c == '|';
             i += 1;
             continue;
         }
         current.push(c);
         i += 1;
     }
-    if !current.trim().is_empty() {
-        segments.push(current.trim().to_string());
-    }
+    push_segment(&mut segments, &mut current, stdin_from_pipe);
     segments
+}
+
+/// Append a finished segment unless it is blank; always resets the
+/// accumulator so the next segment starts empty.
+fn push_segment(segments: &mut Vec<Segment>, current: &mut String, stdin_from_pipe: bool) {
+    let text = current.trim().to_string();
+    if !text.is_empty() {
+        segments.push(Segment {
+            text,
+            stdin_from_pipe,
+        });
+    }
+    current.clear();
+}
+
+/// Control-flow tokens that can lead a segment once the compound-command
+/// split has removed the separators: `if c; then rm x; fi` yields the
+/// segments `if c`, `then rm x`, `fi`. Classifying the bare token (`then`,
+/// `do`, …) as the command name would let the wrapped write through, so these
+/// are stripped first. `!` (pipeline negation) and leading `{` (brace group)
+/// are included for the same reason. Closer tokens (`fi`, `done`, `esac`,
+/// `}`) are segment-final and can never hide a command, so they are not
+/// listed.
+const CONTROL_LEADS: &[&str] = &[
+    "if", "then", "elif", "else", "do", "while", "until", "for", "!", "{",
+];
+
+/// Strip leading control-flow syntax from a segment so classification sees
+/// the actual command: `then rm x` → `rm x`, `do rm x` → `rm x`,
+/// `{ rm x` → `rm x`, `case $v in a) rm x` → `rm x`. Returns a slice of
+/// `segment`; no allocation.
+fn strip_leading_control(segment: &str) -> &str {
+    let mut rest = segment.trim_start();
+    loop {
+        let mut progressed = false;
+        // A leading `(` (or `((`) opens a subshell, not a command name.
+        let no_parens = rest.trim_start_matches('(');
+        if no_parens.len() != rest.len() {
+            rest = no_parens.trim_start();
+            progressed = true;
+        }
+        let Some(tok) = rest.split_whitespace().next() else {
+            return rest;
+        };
+        if CONTROL_LEADS.contains(&tok) {
+            rest = rest[tok.len()..].trim_start();
+            progressed = true;
+        } else if tok == "case" {
+            // `case subject in pattern) cmds` — drop the header so the first
+            // case-body command is inspected (labels are stripped on the next
+            // loop iteration).
+            let after_case = rest[tok.len()..].trim_start();
+            let Some(subject) = after_case.split_whitespace().next() else {
+                return after_case;
+            };
+            let after_subject = after_case[subject.len()..].trim_start();
+            rest = if after_subject.split_whitespace().next() == Some("in") {
+                after_subject["in".len()..].trim_start()
+            } else {
+                after_subject
+            };
+            progressed = true;
+        } else if is_case_pattern_label(tok) {
+            rest = rest[tok.len()..].trim_start();
+            progressed = true;
+        }
+        if !progressed {
+            return rest;
+        }
+    }
+}
+
+/// A `case` pattern label at the start of a segment: a glob/alternation word
+/// terminated by `)` — `a)`, `*)`, `linux|darwin)`. Tokens containing `(`
+/// (subshells, `foo()` function definitions) are not labels.
+fn is_case_pattern_label(tok: &str) -> bool {
+    tok.ends_with(')') && !tok.contains('(')
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +491,35 @@ fn is_env_assignment(tok: &str) -> bool {
     }
 }
 
+/// Whether `tok` is an option token (`-i`, `-n5`, `--long`, `-`, `--`).
+/// Used to skip a wrapper's own flags so the wrapped command is revealed
+/// (`env -i rm x`, `stdbuf -o0 rm x`). The bare `-` (stdin convention,
+/// e.g. `python -`) is treated as an option on purpose.
+fn is_option_token(tok: &str) -> bool {
+    tok.starts_with('-')
+}
+
+/// Skip leading option tokens of a wrapped command. Plain options (`-i`,
+/// `--long`, `-n5` with the value attached) are dropped; options listed in
+/// `valued` take their value as a *separate* token (`nice -n 5 rm x`) and
+/// consume it too. Returns the remainder starting at the first non-option
+/// token.
+fn skip_option_tokens<'a>(cmd: &'a str, valued: &[&str]) -> &'a str {
+    let mut rest = cmd.trim_start();
+    while let Some(tok) = rest.split_whitespace().next() {
+        if !is_option_token(tok) {
+            break;
+        }
+        rest = rest[tok.len()..].trim_start();
+        if valued.contains(&tok) {
+            if let Some(val) = rest.split_whitespace().next() {
+                rest = rest[val.len()..].trim_start();
+            }
+        }
+    }
+    rest
+}
+
 /// The trailing path component of the command's first token — e.g.
 /// `/usr/bin/rm -rf x` → `rm`. Returns `""` for empty/whitespace input.
 pub(crate) fn cmd_base(cmd: &str) -> &str {
@@ -402,25 +528,41 @@ pub(crate) fn cmd_base(cmd: &str) -> &str {
 }
 
 /// Strip wrapper commands (`env`, `exec`, `command`, `nohup`, `timeout`,
-/// `strace`, `ltrace`, `perf`, `valgrind`, `nice`, `ionice`) — and a leading
-/// `sudo`/`doas` — that merely delegate to the real program. This prevents
-/// trivial guard bypasses like `env rm`, `exec rm`, or `nohup rm`.
+/// `strace`, `ltrace`, `perf`, `valgrind`, `nice`, `ionice`, `time`,
+/// `stdbuf`, `setsid`) — and a leading `sudo`/`doas` — that merely delegate
+/// to the real program. This prevents trivial guard bypasses like `env rm`,
+/// `exec rm`, or `nohup rm`.
 ///
 /// Applies recursively so `env VAR=x exec sudo rm` is fully unwrapped.
-/// For `env`, skips leading `KEY=value` assignments. For `timeout`, skips the
-/// duration token. For tracing tools (`strace`/`ltrace`/`perf`/`valgrind`),
-/// skips leading flag tokens (`-flag`).
+/// Wrapper-specific handling:
+/// - `env`: skips leading `KEY=value` assignments *and* option tokens
+///   (`env -i rm x`, `env -u FOO VAR=1 rm x`).
+/// - `nice`/`ionice`: skips options; `-n`/`-c`/`-p` also consume the separate
+///   value token (`nice -n 5 rm x`, `ionice -c 2 rm x`).
+/// - `timeout`: skips options (`-k`/`-s` consume a value), then one duration
+///   token (`timeout -k 1 5 rm x`).
+/// - `time`/`stdbuf`/`setsid` and the tracing tools (`strace`/`ltrace`/
+///   `perf`/`valgrind`): skip leading option tokens (`stdbuf -o0 rm x`).
 pub(crate) fn strip_wrappers(cmd: &str) -> &str {
     let stripped = strip_leading_sudo(cmd);
     let first = stripped.split_whitespace().next().unwrap_or("");
     let base = first.rsplit('/').next().unwrap_or(first);
+    let rest = stripped[first.len()..].trim_start();
 
     match base {
         "env" => {
-            let rest = stripped[first.len()..].trim_start();
+            // `env` accepts options (`-u NAME` takes a separate value) and
+            // `KEY=value` assignments (in any order) before the real command.
             let mut pos = rest;
             while let Some(tok) = pos.split_whitespace().next() {
-                if is_env_assignment(tok) {
+                if is_option_token(tok) {
+                    pos = pos[tok.len()..].trim_start();
+                    if matches!(tok, "-u" | "--unset") {
+                        if let Some(name) = pos.split_whitespace().next() {
+                            pos = pos[name.len()..].trim_start();
+                        }
+                    }
+                } else if is_env_assignment(tok) {
                     pos = pos[tok.len()..].trim_start();
                 } else {
                     break;
@@ -428,50 +570,73 @@ pub(crate) fn strip_wrappers(cmd: &str) -> &str {
             }
             strip_wrappers(pos)
         }
-        "exec" | "command" | "nohup" | "nice" | "ionice" => {
-            strip_wrappers(stripped[first.len()..].trim_start())
-        }
+        // Wrappers without options of their own.
+        "exec" | "command" | "nohup" => strip_wrappers(rest),
+        "nice" => strip_wrappers(skip_option_tokens(rest, &["-n", "--adjustment"])),
+        "ionice" => strip_wrappers(skip_option_tokens(rest, &["-c", "-n", "-p"])),
+        "time" | "stdbuf" | "setsid" => strip_wrappers(skip_option_tokens(rest, &[])),
         "timeout" => {
-            // timeout takes a duration argument before the command.
-            let rest = stripped[first.len()..].trim_start();
-            if let Some(end) = rest.find(char::is_whitespace) {
-                strip_wrappers(rest[end..].trim_start())
-            } else {
-                rest
-            }
+            // After its options, `timeout` takes one duration token before
+            // the real command (`timeout -k 1 5 rm x`).
+            let after_flags = skip_option_tokens(rest, &["-k", "-s", "--kill-after", "--signal"]);
+            let after_duration = match after_flags.split_whitespace().next() {
+                Some(duration) => after_flags[duration.len()..].trim_start(),
+                None => after_flags,
+            };
+            strip_wrappers(after_duration)
         }
         "strace" | "ltrace" | "perf" | "valgrind" => {
-            let mut rest = stripped[first.len()..].trim_start();
-            while let Some(tok) = rest.split_whitespace().next() {
-                if tok.starts_with('-') {
-                    rest = rest[tok.len()..].trim_start();
-                } else {
-                    break;
-                }
-            }
-            strip_wrappers(rest)
+            strip_wrappers(skip_option_tokens(rest, &[]))
         }
         _ => stripped,
     }
 }
 
+/// Block interpreters that read code from stdin fed by a pipe:
+/// `curl … | sh` or `cat x.py | python -`. Without a script-file argument the
+/// interpreter executes its piped input, so read-only-looking upstream
+/// commands become arbitrary code execution. An interpreter with an explicit
+/// script-file argument (`python script.py`) keeps the existing (allowed)
+/// policy — as does a bare `sh` that is not the right-hand side of a pipe.
+fn pipe_fed_interpreter_reason(segment: &str) -> Option<String> {
+    let stripped = strip_wrappers(segment);
+    let base = cmd_base(stripped);
+    if !SHELL_INTERPRETERS.contains(&base) && !SCRIPT_INTERPRETERS.contains(&base) {
+        return None;
+    }
+    let words: Vec<&str> = stripped.split_whitespace().collect();
+    // No script-file argument: everything after the interpreter (if anything)
+    // is an option, including the `-` read-stdin convention (`python -`).
+    let has_script_arg = words[1..].iter().any(|w| !is_option_token(w));
+    if has_script_arg {
+        return None;
+    }
+    Some(format!("indirect execution: {base} (piped stdin)"))
+}
+
 /// Classify a single command segment (no separators).
 fn classify_segment(segment: &str) -> Option<String> {
+    // Compound-command splitting leaves control-flow tokens at the start of a
+    // segment (`if c; then rm x; fi` → `then rm x`, `{ rm x`, `a) rm x`).
+    // Strip them first so the real command — not `then`/`do`/the case label —
+    // is classified.
+    let unled = strip_leading_control(segment);
     // `exec`/`eval`/`source`/`.` can run arbitrary mutating commands. Inspect
     // the leading token (after sudo/doas) *before* wrapper stripping: `exec` is
     // itself a wrapper that `strip_wrappers` would peel away, so checking it up
     // front preserves its dedicated verdict regardless of what follows.
-    let sudo_stripped = strip_leading_sudo(segment);
+    let sudo_stripped = strip_leading_sudo(unled);
     let first_base = cmd_base(sudo_stripped);
     if matches!(first_base, "exec" | "eval" | "source" | ".") {
         return Some(format!("indirect execution: {first_base}"));
     }
 
     // Strip wrapper commands (`env`, `nohup`, `timeout`, `nice`, `command`,
-    // `strace`, …) and leading `sudo`/`doas` to reveal the real command.
-    // Without this, plan-mode writes wrapped as `env rm file`, `nohup rm`, or
-    // `timeout 5 rm -rf x` are misclassified as read-only and bypass the guard.
-    let stripped = strip_wrappers(segment);
+    // `strace`, `time`, `stdbuf`, `setsid`, …) and leading `sudo`/`doas` to
+    // reveal the real command. Without this, plan-mode writes wrapped as
+    // `env rm file`, `nohup rm`, or `timeout 5 rm -rf x` are misclassified as
+    // read-only and bypass the guard.
+    let stripped = strip_wrappers(unled);
     let cmd_words: Vec<&str> = stripped.split_whitespace().collect();
     if cmd_words.is_empty() {
         return None;
@@ -534,7 +699,13 @@ fn classify_segment(segment: &str) -> Option<String> {
     }
 
     // Check in-place editors: sed -i, awk -i inplace, perl -i
-    if cmd_base == "sed" && cmd_words.iter().any(|w| w == &"-i" || w.starts_with("-i")) {
+    if cmd_base == "sed"
+        && cmd_words.iter().any(|w| {
+            // `-i` may carry an attached backup suffix (`-i.bak`); the GNU
+            // long form is `--in-place` / `--in-place=.bak`.
+            w.starts_with("-i") || *w == "--in-place" || w.starts_with("--in-place=")
+        })
+    {
         return Some("sed -i (in-place edit)".into());
     }
     if cmd_base == "awk" && cmd_words.iter().any(|w| w == &"-i" || w == &"--inplace") {
@@ -586,13 +757,26 @@ fn classify_segment(segment: &str) -> Option<String> {
         return Some("indirect execution: xargs".into());
     }
 
-    // `find` with -exec/-execdir/-delete/-ok/-okdir can mutate state.
+    // `find` with -exec/-execdir/-delete/-ok/-okdir can mutate state, as can
+    // the file-writing print actions -fprint/-fprint0/-fprintf/-fls (unlike
+    // -print/-printf, which only write to stdout).
     if cmd_base == "find"
-        && cmd_words
-            .iter()
-            .any(|w| matches!(*w, "-exec" | "-execdir" | "-delete" | "-ok" | "-okdir"))
+        && cmd_words.iter().any(|w| {
+            matches!(
+                *w,
+                "-exec"
+                    | "-execdir"
+                    | "-delete"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprint0"
+                    | "-fprintf"
+                    | "-fls"
+            )
+        })
     {
-        return Some("indirect execution: find (-exec/-delete)".into());
+        return Some("indirect execution: find (-exec/-delete/-fprint)".into());
     }
 
     None
@@ -605,3 +789,7 @@ mod tests;
 #[cfg(test)]
 #[path = "bash_guard_security_tests.rs"]
 mod security_tests;
+
+#[cfg(test)]
+#[path = "bash_guard_bypass_regression.rs"]
+mod bypass_regression_tests;

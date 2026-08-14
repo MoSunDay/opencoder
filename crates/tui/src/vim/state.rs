@@ -32,7 +32,7 @@ pub struct VimState {
     pub register: String,                    // last yanked/deleted text
     pub register_linewise: bool,             // whether `register` was a linewise op
     pub status: String,                      // transient status message (e.g. search wrap)
-    pub history: UndoHistory,              // vim undo/redo stacks (u / Ctrl+R)
+    pub history: UndoHistory,                // vim undo/redo stacks (u / Ctrl+R)
 }
 
 impl VimState {

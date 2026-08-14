@@ -188,7 +188,10 @@ fn body_timer_visible_when_scrolled_away_from_tail() {
     let mut v = ChatView::default();
     // Enough content to overflow a small viewport.
     for i in 0..20 {
-        v.apply(&SessionEvent::TextDelta(format!("content line number {}\n", i)));
+        v.apply(&SessionEvent::TextDelta(format!(
+            "content line number {}\n",
+            i
+        )));
     }
     v.apply(&SessionEvent::Done);
 
@@ -198,12 +201,25 @@ fn body_timer_visible_when_scrolled_away_from_tail() {
     terminal
         .draw(|f| {
             render_body(
-                f, f.area(), &v, &Line::raw("test"),
-                &mut scroll, false, 0, 0,
-                &mut None, &mut None, &mut None,
-                &mut Vec::new(), &mut Vec::new(),
-                &mut Vec::new(), &mut Vec::new(),
-                &mut None, true, 30000, false,
+                f,
+                f.area(),
+                &v,
+                &Line::raw("test"),
+                &mut scroll,
+                false,
+                0,
+                0,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut None,
+                true,
+                30000,
+                false,
             );
         })
         .unwrap();

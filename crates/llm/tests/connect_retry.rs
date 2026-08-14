@@ -7,11 +7,11 @@
 //!   stop issuing further requests instead of looping until the retry budget is
 //!   exhausted.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use opencoder_llm::{ChatClient, ChatRequest, LlmEvent};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use opencoder_llm::{ChatClient, ChatRequest, LlmEvent};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -35,11 +35,7 @@ enum Resp {
 
 /// Spawn a mock server that serves `behaviors` in FIFO order, counting every
 /// accepted connection into `accepts`.
-fn spawn_counted_server(
-    listener: TcpListener,
-    behaviors: VecDeque<Resp>,
-    accepts: Arc<AtomicU32>,
-) {
+fn spawn_counted_server(listener: TcpListener, behaviors: VecDeque<Resp>, accepts: Arc<AtomicU32>) {
     let bq = Arc::new(Mutex::new(behaviors));
     tokio::spawn(async move {
         loop {
@@ -57,7 +53,11 @@ fn spawn_counted_server(
                 let _ = stream.set_nodelay(true);
                 consume_http_request(&mut stream).await;
                 match beh {
-                    Resp::Status { code, retry_after, body } => {
+                    Resp::Status {
+                        code,
+                        retry_after,
+                        body,
+                    } => {
                         let mut head = format!(
                             "HTTP/1.1 {code} {reason}\r\nContent-Type: application/json\r\n\
                              Content-Length: {len}\r\nConnection: close\r\n",
@@ -167,7 +167,9 @@ async fn retry_after_header_delays_retry_then_completes() {
                 retry_after: Some(1),
                 body: r#"{"error":"rate limited"}"#.to_string(),
             },
-            Resp::Full { text: "ok".to_string() },
+            Resp::Full {
+                text: "ok".to_string(),
+            },
         ]),
         Arc::new(AtomicU32::new(0)),
     )
@@ -195,7 +197,10 @@ async fn retry_after_header_delays_retry_then_completes() {
         "Retry-After not honored (too fast): {elapsed:?}"
     );
     // Sanity upper bound so a regression that sleeps far too long is caught.
-    assert!(elapsed < Duration::from_secs(6), "retry took too long: {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "retry took too long: {elapsed:?}"
+    );
 }
 
 /// When the consumer drops the receiver mid connect-loop, the loop must notice

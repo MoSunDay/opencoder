@@ -88,9 +88,7 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
             let switch = if entry.enabled { "[ON]" } else { "[OFF]" };
             let prefix = if confirming { "?" } else { " " };
             let line_style = if confirming {
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else if selected {
                 focus_style()
             } else if entry.enabled {
@@ -118,7 +116,9 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
     }
 
     f.render_widget(
-        Paragraph::new(lines).block(block).alignment(Alignment::Left),
+        Paragraph::new(lines)
+            .block(block)
+            .alignment(Alignment::Left),
         popup,
     );
 }

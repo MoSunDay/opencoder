@@ -114,7 +114,6 @@ pub(crate) async fn dispatch_mode_switch(
     LoopFlow::Proceed
 }
 
-
 /// Unified slash-command dispatch shared by both the `/` popup picker
 /// (`dispatch_command`) and free-text composer submit (`app.rs` Submit).
 /// Every recognized `/cmd` routes through here so the behavior is identical
@@ -157,14 +156,20 @@ pub(crate) async fn dispatch_slash_action(
                 .list_sessions(&opencoder_store::SessionFilter::default())
                 .await
                 .unwrap_or_default();
-            *task_picker = Some(crate::task::TaskPicker::new(sessions, session_id.to_string()));
+            *task_picker = Some(crate::task::TaskPicker::new(
+                sessions,
+                session_id.to_string(),
+            ));
         }
         SlashAction::Fork => {
             let sessions = store
                 .list_sessions(&opencoder_store::SessionFilter::default())
                 .await
                 .unwrap_or_default();
-            *task_picker = Some(crate::task::TaskPicker::new_fork(sessions, session_id.to_string()));
+            *task_picker = Some(crate::task::TaskPicker::new_fork(
+                sessions,
+                session_id.to_string(),
+            ));
         }
         SlashAction::Model => {
             *model_menu = Some(ModelMenu::List(ProviderList::new(config)));
@@ -205,21 +210,54 @@ pub(crate) async fn dispatch_slash_action(
         }
         SlashAction::Act => {
             return dispatch_mode_switch(
-                ModeSwitch::Act, cmd_tx, cancel, running, follow, chat,
-                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-            ).await;
+                ModeSwitch::Act,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
         }
         SlashAction::Plan => {
             return dispatch_mode_switch(
-                ModeSwitch::Plan, cmd_tx, cancel, running, follow, chat,
-                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-            ).await;
+                ModeSwitch::Plan,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
         }
         SlashAction::ClearContext => {
             return dispatch_mode_switch(
-                ModeSwitch::ClearContext, cmd_tx, cancel, running, follow, chat,
-                input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-            ).await;
+                ModeSwitch::ClearContext,
+                cmd_tx,
+                cancel,
+                running,
+                follow,
+                chat,
+                input,
+                cursor_idx,
+                sys_tokens,
+                mode_flash,
+                anim_tick,
+                workdir,
+            )
+            .await;
         }
         SlashAction::Annotation => {
             crate::plan_edit::enter_annotation(

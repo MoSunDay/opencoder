@@ -46,8 +46,14 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     // Skill activated (sticky display + body).
     assert_eq!(active_skill.as_deref(), Some("alpha"));
     let body = active_skill_body.as_deref().expect("skill body set");
-    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
-    assert!(body.ends_with("the alpha body"), "body must follow annotation: {body}");
+    assert!(
+        body.starts_with("> Source: "),
+        "must prefix source path: {body}"
+    );
+    assert!(
+        body.ends_with("the alpha body"),
+        "body must follow annotation: {body}"
+    );
     assert!(
         sys_tokens > 0,
         "sys_tokens must be recomputed with the skill body"
@@ -55,8 +61,14 @@ async fn apply_skill_tokens_resolves_and_activates_known_skill() {
     // The shared skill_handle (session.skill_prompt) is updated in-place.
     let handle_body = skill_handle.lock().unwrap();
     let handle_body = handle_body.as_deref().expect("skill_handle body set");
-    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
-    assert!(handle_body.ends_with("the alpha body"), "skill_handle must hold the resolved body: {handle_body}");
+    assert!(
+        handle_body.starts_with("> Source: "),
+        "must prefix source path: {handle_body}"
+    );
+    assert!(
+        handle_body.ends_with("the alpha body"),
+        "skill_handle must hold the resolved body: {handle_body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -169,12 +181,24 @@ async fn apply_skill_tokens_combined_content_token_at_end() {
         "skill must activate"
     );
     let body = active_skill_body.as_deref().expect("skill body set");
-    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
-    assert!(body.ends_with("alpha body"), "body must follow annotation: {body}");
+    assert!(
+        body.starts_with("> Source: "),
+        "must prefix source path: {body}"
+    );
+    assert!(
+        body.ends_with("alpha body"),
+        "body must follow annotation: {body}"
+    );
     let handle_body = skill_handle.lock().unwrap();
     let handle_body = handle_body.as_deref().expect("skill_handle body set");
-    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
-    assert!(handle_body.ends_with("alpha body"), "skill_handle must carry the resolved body: {handle_body}");
+    assert!(
+        handle_body.starts_with("> Source: "),
+        "must prefix source path: {handle_body}"
+    );
+    assert!(
+        handle_body.ends_with("alpha body"),
+        "skill_handle must carry the resolved body: {handle_body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -212,12 +236,18 @@ async fn apply_skill_tokens_combined_content_multiple_skills_with_text() {
     // Both skill names appear in the sticky display, both bodies joined.
     assert_eq!(active_skill.as_deref(), Some("alpha, beta"));
     let body = active_skill_body.as_deref().expect("skill body set");
-    assert!(body.starts_with("> Source: "), "must prefix source path: {body}");
+    assert!(
+        body.starts_with("> Source: "),
+        "must prefix source path: {body}"
+    );
     assert!(
         body.contains("alpha body") && body.contains("beta body"),
         "both bodies present in first-seen order: {body}"
     );
-    assert!(body.ends_with("beta body"), "last joined body must be beta: {body}");
+    assert!(
+        body.ends_with("beta body"),
+        "last joined body must be beta: {body}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -250,7 +280,10 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
     assert_eq!(active_skill.as_deref(), Some("alpha"));
     let handle_body = skill_handle.lock().unwrap();
     let handle_body = handle_body.as_deref().expect("skill_handle body set");
-    assert!(handle_body.starts_with("> Source: "), "must prefix source path: {handle_body}");
+    assert!(
+        handle_body.starts_with("> Source: "),
+        "must prefix source path: {handle_body}"
+    );
     assert!(
         handle_body.ends_with("alpha body"),
         "known body must follow annotation despite unknown peer: {handle_body}"

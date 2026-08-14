@@ -152,7 +152,6 @@ mod tests {
         assert_eq!(display_tail_ms(&chat, Some(0), 5000, true), 0);
     }
 
-
     #[test]
     fn top_level_live_round_counts_up() {
         // Active round: llm_round anchor is set, live elapsed.

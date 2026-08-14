@@ -142,28 +142,26 @@ async fn edit_command_opens_file() {
     fs::write(d.path().join("b.txt"), "content b").unwrap();
     let mut v = NotepadView::new(d.path().to_path_buf());
     open_first_file(&mut v).await;
-    assert!(
-        v.editor
-            .file_path
-            .as_ref()
-            .unwrap()
-            .to_string_lossy()
-            .ends_with("a.txt")
-    );
+    assert!(v
+        .editor
+        .file_path
+        .as_ref()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with("a.txt"));
     // Type :e b.txt
     handle_key(&mut v, key(KeyCode::Char(':'))).await;
     for c in "e b.txt".chars() {
         handle_key(&mut v, key(KeyCode::Char(c))).await;
     }
     handle_key(&mut v, key(KeyCode::Enter)).await;
-    assert!(
-        v.editor
-            .file_path
-            .as_ref()
-            .unwrap()
-            .to_string_lossy()
-            .ends_with("b.txt")
-    );
+    assert!(v
+        .editor
+        .file_path
+        .as_ref()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with("b.txt"));
     assert_eq!(v.editor.vim.text, "content b");
     // Focus should remain on Editor
     assert_eq!(v.focus, Focus::Editor);

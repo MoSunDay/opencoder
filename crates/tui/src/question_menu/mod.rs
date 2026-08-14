@@ -20,10 +20,7 @@ pub use view::render_question_popup;
 pub const SKIP_ANSWER: &str = "User skipped the question. Proceed with your best judgment.";
 
 /// Fresh dialog state for the app loop: `(open menu, queued prompts)`.
-pub fn dialog_state() -> (
-    Option<QuestionMenu>,
-    VecDeque<QuestionPrompt>,
-) {
+pub fn dialog_state() -> (Option<QuestionMenu>, VecDeque<QuestionPrompt>) {
     (None, VecDeque::new())
 }
 
@@ -44,7 +41,11 @@ pub fn prompt_from_input(id: &str, input: &Value) -> Option<QuestionPrompt> {
                 .collect()
         })
         .unwrap_or_default();
-    Some(QuestionPrompt { id: id.to_string(), question: question.to_string(), options })
+    Some(QuestionPrompt {
+        id: id.to_string(),
+        question: question.to_string(),
+        options,
+    })
 }
 
 /// ToolStart(name == "question") → open the dialog, or queue it if one is
@@ -56,7 +57,9 @@ pub fn on_tool_start(
     id: &str,
     input: &Value,
 ) {
-    let Some(prompt) = prompt_from_input(id, input) else { return };
+    let Some(prompt) = prompt_from_input(id, input) else {
+        return;
+    };
     if menu.is_none() {
         *menu = Some(QuestionMenu::new(prompt));
     } else {
@@ -171,10 +174,17 @@ mod tests {
         route_question_key(
             &mut menu,
             &mut queue,
-            crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE),
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Esc,
+                crossterm::event::KeyModifiers::NONE,
+            ),
             &hub,
         );
-        assert_eq!(menu.as_ref().unwrap().prompt.id, "q2", "queued question now showing");
+        assert_eq!(
+            menu.as_ref().unwrap().prompt.id,
+            "q2",
+            "queued question now showing"
+        );
         // The skipped tool call gets its skip answer.
         match hub.ask("q1") {
             AskOutcome::Answered(a) => assert_eq!(a, SKIP_ANSWER),

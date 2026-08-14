@@ -127,9 +127,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     // status-bar hide / pane-resize edge rows) would show through wherever the
     // first draw's diff emits no bytes (empty-vs-empty cells are never
     // rewritten). A real `Terminal::clear()` sends ESC[2J and resets the diff
-    // baseline so the first frame is a full repaint. Mirrors the
-    // `resume_screen` contract in terminal.rs, which likewise expects a clear
-    // after re-entering the alt screen.
+    // baseline so the first frame is a full repaint.
     terminal.clear()?;
 
     let result = super::run_app(

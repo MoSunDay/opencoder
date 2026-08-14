@@ -42,9 +42,6 @@ pub(crate) enum LoopFlow {
     Proceed,
     /// Used by extracted blocks that previously did `continue` (re-render).
     Redraw,
-    /// `/install_tools`: run the deps installer (handled one frame up in
-    /// `run_app` since `dispatch_command` lacks the terminal handle).
-    InstallTools,
     Quit,
 }
 

@@ -407,6 +407,12 @@ fn update_subcommand() {
 }
 
 #[test]
+fn install_tools_subcommand() {
+    let cli = parse(&["opencoder", "install-tools"]);
+    assert!(matches!(cli.command, Some(Command::InstallTools)));
+}
+
+#[test]
 fn ts_subcommand_parses_clean_flag() {
     let cli = parse(&["opencode", "ts", "-c"]);
     match cli.command {

@@ -107,7 +107,16 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
         .into_iter()
         .map(|s| s.name)
         .collect();
-    for expected in ["task-plan", "do-and-done", "repo-local-memory", "review", "summary", "submit"] {
+    for expected in [
+        "task-plan",
+        "do-and-done",
+        "repo-local-memory",
+        "repo-local-dreaming",
+        "say-and-replay",
+        "review",
+        "summary",
+        "submit",
+    ] {
         assert!(
             names.iter().any(|n| n == expected),
             "expected seeded skill {expected:?}, got {names:?}"

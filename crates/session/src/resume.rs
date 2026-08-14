@@ -205,6 +205,7 @@ pub async fn resume(
         handoff_plan: meta.handoff_plan.clone(),
         plan_input_count: 0,
         requirement: meta.requirement.clone(),
+        question_hub: crate::QuestionHub::new(),
     };
     Ok(s)
 }

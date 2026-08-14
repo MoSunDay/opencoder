@@ -79,6 +79,11 @@ pub(super) async fn run_app(
         .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(CancellationToken::new())));
     let mut child_runtime = crate::worker::ChildRuntimeHandles::from_session(&session);
     let mut skill_handle = session.skill_prompt.clone();
+    // Question hub: the TUI is the interactive question listener, attached
+    // before the worker spawns so the first turn may already ask the user.
+    let mut question_hub = session.question_hub.clone();
+    question_hub.attach();
+    let (mut question_menu, mut question_queue) = crate::question_menu::dialog_state();
     let mut chat = initial_chat_view(&session, &store).await;
     chat.annotation_text = session.requirement.clone();
     let mut input = String::new();
@@ -237,6 +242,7 @@ pub(super) async fn run_app(
                     mcp_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
+                    question_menu.as_ref(),
                     &mut hits,
                     &mut viewport,
                     shift_held,
@@ -290,6 +296,11 @@ pub(super) async fn run_app(
                         if task_picker.is_some() {
                             match handle_task_key(&mut task_picker, k) {
                                 TaskOutcome::Pick(pick) => {
+                                    // Drop any pending question dialog: abandoning its hub
+                                    // entry unblocks the tool with the skip reply.
+                                    if let Some(m) = question_menu.take() { question_hub.abandon(&m.prompt.id); }
+                                    question_queue.clear();
+
                                     app_task::switch_session(
                                         terminal,
                                         pick,
@@ -319,6 +330,7 @@ pub(super) async fn run_app(
                                         &mut turn_cancel,
                                         &mut child_runtime,
                                         &mut skill_handle,
+                                        &mut question_hub,
                                     )
                                     .await?;
                                 }
@@ -348,6 +360,14 @@ pub(super) async fn run_app(
                             let _ = app_loop::handle_mcp_outcome(
                                 &mut mcp_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
                             ).await;
+                            continue;
+                        }
+                        // Question dialog: answers resolve on the hub, mid-turn.
+                        if question_menu.is_some() {
+                            crate::question_menu::route_question_key(
+                                &mut question_menu, &mut question_queue, k, &question_hub,
+                            );
+                            dirty = true;
                             continue;
                         }
                         if cache_salt_menu.is_some() {
@@ -630,33 +650,12 @@ pub(super) async fn run_app(
                                 ) { break; }
                             }
                             KeyAction::SetSkill(opt) => {
-                                let skill_body = opt.as_ref().map(|(_, body)| body.clone());
-                                match opt {
-                                    Some((name, body)) => {
-                                        active_skill = Some(name.clone());
-                                        active_skill_body = Some(body.clone());
-                                        sys_tokens = sys_tokens_for(&agent_name, &workdir, Some(&body));
-                                        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body);
-                                    }
-                                    None => {
-                                        active_skill = None;
-                                        active_skill_body = None;
-                                        sys_tokens = sys_tokens_for(&agent_name, &workdir, None);
-                                        *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = None;
-                                    }
-                                }
-                                // Persist the active skill (best-effort) so it survives resume/restart;
-                                // the in-memory mutex write above keeps the in-flight turn immediate.
-                                let _ = store
-                                    .update_session(
-                                        &session_id,
-                                        &opencoder_store::SessionPatch {
-                                            skill: skill_body,
-                                            updated_at: Some(opencoder_core::message::now_ms()),
-                                            ..Default::default()
-                                        },
-                                    )
-                                    .await;
+                                crate::skill_persist::apply_skill_selection(
+                                    &opt, &mut active_skill, &mut active_skill_body,
+                                    &mut sys_tokens, &agent_name, &workdir,
+                                    &skill_handle, &store, &session_id,
+                                )
+                                .await;
                             }
                             KeyAction::Cancel => {
                                 // A cancelled compound `/plan` never reaches the runner's
@@ -744,7 +743,7 @@ pub(super) async fn run_app(
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(),
-                            &mut model_menu, &mut command_menu, &mut input,
+                            &mut model_menu, &mut command_menu, &mut question_menu, &mut input,
                             &mut cursor_idx, &mut pending_images, &mut img_asm,
                             &mut chat, &workdir,
                         ) {
@@ -759,6 +758,7 @@ pub(super) async fn run_app(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
                     &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
+                    &mut question_menu, &mut question_queue, &question_hub,
                 )
                 .await;
                 match np_flow {

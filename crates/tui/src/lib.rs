@@ -28,6 +28,7 @@ pub mod model_menu;
 pub mod model_session_switch;
 pub mod notepad;
 pub mod plan_edit;
+pub mod question_menu;
 pub mod queue_panel;
 pub mod render;
 pub mod render_viewport;

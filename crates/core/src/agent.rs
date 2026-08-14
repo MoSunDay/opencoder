@@ -73,6 +73,11 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: base_prompt_plan(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
+                // Structured clarification: the plan agent may ask the user one
+                // question per turn when a requirement is genuinely ambiguous.
+                // Other agents (act/explore/build) stay silent — zero schema
+                // token cost for them.
+                "question".into(),
             ]),
         },
         Agent {
@@ -154,7 +159,7 @@ pub fn base_prompt_build() -> String {
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
-Output an actionable plan the user reviews before switching to act mode; ask clarifying questions first if anything is ambiguous -- do not assume intent. \
+Output an actionable plan the user reviews before switching to act mode; when a requirement is genuinely ambiguous use the `question` tool to ask the user (at most one per turn) -- do not assume intent. \
 The plan MUST have these sections: Goal / TODO / Verify / Risks / Align.";
 
 const BASE_PROMPT: &str = "\
@@ -211,6 +216,22 @@ mod tests {
             plan.contains("'explore' (read-only)"),
             "plan prompt must still advertise 'explore', got: {plan}"
         );
+    }
+
+    /// The `question` tool is plan-only: plan must allow it, every other
+    /// agent must NOT (its schema costs tokens and only the TUI renders the
+    /// dialog). Structural guard (rules/01) against filter drift.
+    #[test]
+    fn question_tool_is_plan_agent_only() {
+        let plan = resolve_agent("plan").expect("plan agent registered");
+        assert!(plan.tools.allows("question"), "plan must allow 'question'");
+        for other in ["act", "explore", "build", "command"] {
+            let a = resolve_agent(other).expect("agent registered");
+            assert!(
+                !a.tools.allows("question"),
+                "{other} must not allow 'question'"
+            );
+        }
     }
 
     /// Pin down the `explore` subagent's exact tool set: it must carry

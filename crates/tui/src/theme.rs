@@ -170,11 +170,12 @@ pub fn ok_color() -> Color {
     palette(current_theme()).ok
 }
 
-/// Cargo's status-label colour (`Compiling` / `Building` / `Finished`):
-/// bold bright green — cargo emits `ESC[1m ESC[92m` (ANSI 92 = LightGreen).
-/// Theme-independent: cargo's own colour does not change with the palette.
-pub fn cargo_status_color() -> Color {
-    Color::LightGreen
+/// Status-bar label colour for the `thr` prefix and `ctx (used/limit)`
+/// counts: bold bright blue — ANSI 94 (LightBlue), the same brightness tier
+/// as cargo's green 92. Theme-independent: ratio-to-total context labels do
+/// not change with the palette.
+pub fn status_label_color() -> Color {
+    Color::LightBlue
 }
 pub fn err_color() -> Color {
     palette(current_theme()).err
@@ -322,13 +323,13 @@ mod tests {
     // ── ThemeKind / palette (pure — no global-state mutation) ────────────
 
     #[test]
-    fn cargo_status_color_is_ansi_bright_green() {
-        // cargo paints its `Building` / `Compiling` status label with
-        // ESC[1m ESC[92m — bold bright green (ANSI 92 = LightGreen), fixed
+    fn status_label_color_is_ansi_bright_blue() {
+        // `thr` / `ctx` labels keep the bright (ANSI 9x) tier but in blue:
+        // ESC[1m ESC[94m — bold bright blue (ANSI 94 = LightBlue), fixed
         // regardless of the active palette.
-        assert_eq!(cargo_status_color(), Color::LightGreen);
+        assert_eq!(status_label_color(), Color::LightBlue);
         set_theme(ThemeKind::Light);
-        assert_eq!(cargo_status_color(), Color::LightGreen);
+        assert_eq!(status_label_color(), Color::LightBlue);
         set_theme(ThemeKind::Dark);
     }
 

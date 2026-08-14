@@ -248,3 +248,75 @@ async fn drain_completion_persists_events_before_clearing_draining() {
         "the assistant's reply text must be persisted by the time draining clears"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Bug: drain_to_completion must restore cmd_rx BEFORE clearing `draining`.
+// The old order (draining=false while cmd_rx still held) let a new drain
+// start with cmd_rx.take() == None and silently lose every drain command.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn drain_completion_restores_cmd_rx_before_clearing_draining() {
+    let state = state().await;
+    let sid = "drain-cmdrx-order".to_string();
+    seed(&state, &sid).await;
+
+    // First drain: admit a prompt and wait for the drain to go idle.
+    opencoder_web::handle::admit_and_drain(
+        state.handles.clone(),
+        state.store.clone(),
+        &sid,
+        "hi".to_string(),
+        vec![],
+        Delivery::Queue,
+        mock_reply("ok"),
+        state.workdir.clone(),
+        Config::default(),
+    )
+    .await
+    .unwrap();
+
+    let handle = {
+        let map = state.handles.lock().await;
+        map.get(&sid).expect("handle survives drain").clone()
+    };
+    for _ in 0..200 {
+        if !handle.draining.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(!handle.draining.load(Ordering::SeqCst), "drain must finish");
+
+    // Once idle, cmd_rx must be back in the handle for the next drain.
+    {
+        let guard = handle.cmd_rx.lock().unwrap();
+        assert!(guard.is_some(), "cmd_rx must be restored after drain goes idle");
+    }
+
+    // A second drain runs cleanly end-to-end.
+    opencoder_web::handle::admit_and_drain(
+        state.handles.clone(),
+        state.store.clone(),
+        &sid,
+        "again".to_string(),
+        vec![],
+        Delivery::Queue,
+        mock_reply("ok2"),
+        state.workdir.clone(),
+        Config::default(),
+    )
+    .await
+    .unwrap();
+    let handle2 = {
+        let map = state.handles.lock().await;
+        map.get(&sid).expect("handle survives").clone()
+    };
+    for _ in 0..200 {
+        if !handle2.draining.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(!handle2.draining.load(Ordering::SeqCst), "second drain must finish");
+}

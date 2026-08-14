@@ -474,3 +474,67 @@ fn classify_bare_ampersand_between_readonly_stays_readonly() {
         BashVerdict::ReadOnly
     );
 }
+
+// ---------------------------------------------------------------------------
+// Command/process substitution bypass coverage.
+//
+// `echo "$(rm file)"` runs `rm` inside a substitution while `echo` is
+// read-only; the classifier must recurse into `$(...)`, backticks, and
+// process substitution `<(...)`/`>(...)` and block nested writes.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bash_guard_blocks_command_substitution_with_write() {
+    let v = classify(r#"echo "$(rm file)""#);
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)), "got {v:?}");
+}
+
+#[test]
+fn bash_guard_blocks_backtick_substitution_with_write() {
+    let v = classify("echo `rm -rf x`");
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}
+
+#[test]
+fn bash_guard_blocks_process_substitution_with_write() {
+    let v = classify("cat <(rm file)");
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}
+
+#[test]
+fn bash_guard_allows_command_substitution_with_readonly() {
+    let v = classify(r#"echo "$(date)""#);
+    assert!(matches!(v, BashVerdict::ReadOnly), "got {v:?}");
+}
+
+#[test]
+fn bash_guard_blocks_nested_substitution_in_compound() {
+    let v = classify(r#"echo "$(ls)" && cat "$(rm file)""#);
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}
+
+// ---------------------------------------------------------------------------
+// Wrapped eval/source/dot bypass coverage.
+//
+// `env eval 'rm file'` survives the pre-wrapper check (base was `env`).
+// After `strip_wrappers` peels `env`, the stripped base is `eval`, which must
+// also be treated as indirect execution.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bash_guard_blocks_wrapped_eval() {
+    let v = classify("env eval 'rm file'");
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}
+
+#[test]
+fn bash_guard_blocks_wrapped_source() {
+    let v = classify("exec source malicious.sh");
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}
+
+#[test]
+fn bash_guard_blocks_wrapped_dot_source() {
+    let v = classify("nohup . evil.sh");
+    assert!(matches!(v, BashVerdict::WriteBlocked(_)));
+}

@@ -24,7 +24,7 @@ pub struct AppState {
 pub async fn serve(
     host: String,
     port: u16,
-    _web: bool,
+    web: bool,
     workdir: std::path::PathBuf,
     token: String,
 ) -> Result<()> {
@@ -39,7 +39,7 @@ pub async fn serve(
         client_override: None,
     });
 
-    let app = build_app(state, Some(token));
+    let app = build_app(state, Some(token), web);
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let addr = listener.local_addr()?;
@@ -52,9 +52,12 @@ pub async fn serve(
 /// Build the application router. `token = Some(t)` enables bearer-token auth on
 /// every route (production); `token = None` skips the middleware (used by tests
 /// that build their own router with an injected `MockChatClient`).
-pub fn build_app(state: Arc<AppState>, token: Option<String>) -> axum::Router {
-    let mut app = Router::new()
-        .route("/", get(html::index))
+pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum::Router {
+    let mut app = Router::<Arc<AppState>>::new();
+    if web {
+        app = app.route("/", get(html::index));
+    }
+    let mut app = app
         .route(
             "/api/sessions",
             get(api::list_sessions).post(api::create_session),
@@ -94,8 +97,14 @@ pub use opencoder_core::data_dir_for;
 
 #[cfg(test)]
 mod tests {
-    use super::data_dir_for;
+    use super::{build_app, data_dir_for, handle, AppState};
     use std::path::Path;
+    use std::sync::Arc;
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use opencoder_store::{LibsqlStore, Store};
+    use tower::ServiceExt;
 
     #[test]
     fn data_dir_for_is_deterministic() {
@@ -110,6 +119,60 @@ mod tests {
         assert_ne!(
             data_dir_for(Path::new("/a/b")),
             data_dir_for(Path::new("/a/bb"))
+        );
+    }
+
+    /// Regression for `--web false`: the HTML UI route (`/`) must only be
+    /// registered when `web == true`. Previously `serve` ignored its `web`
+    /// argument (`_web: bool`) and `build_app` always wired `/`, so passing
+    /// `--web false` still exposed the manager UI.
+    async fn make_app() -> axum::Router {
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let state = Arc::new(AppState {
+            store,
+            workdir: std::env::temp_dir(),
+            handles: handle::new_handle_map(),
+            client_override: None,
+        });
+        build_app(state, None, true)
+    }
+
+    async fn make_api_only_app() -> axum::Router {
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        let state = Arc::new(AppState {
+            store,
+            workdir: std::env::temp_dir(),
+            handles: handle::new_handle_map(),
+            client_override: None,
+        });
+        build_app(state, None, false)
+    }
+
+    #[tokio::test]
+    async fn web_disabled_omits_html_route() {
+        let app = make_api_only_app().await;
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "`/` must not be served when web is disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn web_enabled_serves_html_route() {
+        let app = make_app().await;
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "`/` must be served when web is enabled"
         );
     }
 }

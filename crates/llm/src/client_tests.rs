@@ -455,3 +455,44 @@ async fn stream_task_exits_promptly_after_rx_drop() {
         "stream task did not close the connection within 5s after rx drop"
     );
 }
+
+// ---- Bug #9/#10/#11/#12 regression tests ----
+
+#[test]
+fn parse_usage_handles_float_tokens() {
+    let u = usage_json(r#"{"prompt_tokens":1500.0,"completion_tokens":300.0,"total_tokens":1800.0}"#);
+    let usage = parse_usage(&u);
+    assert_eq!(usage.input_tokens, 1500);
+    assert_eq!(usage.output_tokens, 300);
+    assert_eq!(usage.total_tokens, 1800);
+}
+
+#[tokio::test]
+async fn emit_delta_text_block_uses_content_fallback() {
+    let (tx, mut rx) = mpsc::channel::<LlmEvent>(16);
+    let mut tools = ToolAccumulator::default();
+    let mut text = String::new();
+    let delta = obj(r#"{"content":[{"type":"text","content":"hello"}]}"#);
+    emit_delta(&delta, &mut tools, &mut text, &tx).await.unwrap();
+    drop(tx);
+    let ev = rx.recv().await.unwrap();
+    assert!(matches!(ev, LlmEvent::TextDelta(ref s) if s == "hello"));
+    assert!(text.contains("hello"));
+}
+
+#[test]
+fn parse_http_date_to_secs_parses_rfc7231() {
+    let secs = crate::http_date::parse_http_date_to_secs("Thu, 01 Jan 1970 00:00:00 GMT");
+    assert_eq!(secs, Some(0));
+}
+
+#[test]
+fn parse_http_date_to_secs_rejects_non_gmt() {
+    assert_eq!(crate::http_date::parse_http_date_to_secs("Thu, 01 Jan 1970 00:00:00 PST"), None);
+}
+
+#[test]
+fn parse_http_date_to_secs_future_date_is_positive() {
+    let secs = crate::http_date::parse_http_date_to_secs("Wed, 01 Jan 3000 00:00:00 GMT");
+    assert!(secs.unwrap_or(0) > 30_000_000_000);
+}

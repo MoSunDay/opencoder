@@ -12,6 +12,7 @@ use crate::retry::{
     backoff_delay, backoff_duration, retry_decision, should_retry_stream_interruption,
     AttemptOutcome, RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
 };
+use crate::http_date::parse_http_date_to_secs;
 use crate::sse::SseDecoder;
 use crate::stream::ChatStream;
 use crate::tool_call::{CompletedToolCall, ToolAccumulator};
@@ -464,7 +465,7 @@ async fn connect_with_retry(
                     .headers()
                     .get("retry-after")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok());
+                    .and_then(|s| s.parse::<u64>().ok().or_else(|| parse_http_date_to_secs(s)));
                 let _ = resp.text().await;
                 let _ = tx
                     .send(LlmEvent::Retrying {
@@ -641,26 +642,35 @@ async fn emit_delta(
     text_buf: &mut String,
     tx: &mpsc::Sender<LlmEvent>,
 ) -> Result<bool> {
-    // Tracks whether this frame's delta carried reasoning text. The caller
-    // (`handle_event`) uses it as a cross-frame guard: the non-streaming
-    // `choice.message` fallback must not re-emit reasoning that was already
-    // delivered as `delta.reasoning_content`/thinking blocks.
+    // Whether this frame carried reasoning. The caller uses it as a cross-frame
+    // guard so the non-streaming fallback doesn't re-emit delivered reasoning.
     let mut emitted_reasoning = false;
-    // Structured `content` array: some providers (notably at max/xhigh)
-    // deliver content as `[{type:"text",text:..},{type:"thinking",text:..}]`
-    // blocks. Iterate IN ORDER so text/thinking keep their stream ordering.
+    // Alias-key reasoning is checked regardless of content shape: some
+    // providers send a content array AND reasoning via alias keys in one delta.
+    if let Some(reasoning) = extract_reasoning(delta) {
+        if !reasoning.is_empty() {
+            emitted_reasoning = true;
+            let _ = tx.send(LlmEvent::ReasoningDelta(reasoning)).await;
+        }
+    }
+
+    // Structured content array (text/thinking blocks), iterated in order.
     if let Some(content) = delta.get("content").and_then(|v| v.as_array()) {
         for item in content {
             match item.get("type").and_then(|v| v.as_str()) {
                 Some("text") => {
-                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                    let t = item
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| item.get("content").and_then(|v| v.as_str()));
+                    if let Some(t) = t {
                         if !t.is_empty() {
                             text_buf.push_str(t);
                             let _ = tx.send(LlmEvent::TextDelta(t.to_string())).await;
                         }
                     }
                 }
-                Some("thinking") | Some("reasoning") => {
+                Some("thinking") | Some("reasoning") if !emitted_reasoning => {
                     let t = item
                         .get("text")
                         .and_then(|v| v.as_str())
@@ -675,15 +685,7 @@ async fn emit_delta(
             }
         }
     } else {
-        // Flat OpenAI-compatible deltas may carry the final reasoning token
-        // and the first answer token together. Reasoning semantically precedes
-        // content in that shape, regardless of JSON object field order.
-        if let Some(reasoning) = extract_reasoning(delta) {
-            if !reasoning.is_empty() {
-                emitted_reasoning = true;
-                let _ = tx.send(LlmEvent::ReasoningDelta(reasoning)).await;
-            }
-        }
+        // Flat OpenAI-compatible deltas may carry the final answer token.
         if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
             if !content.is_empty() {
                 text_buf.push_str(content);
@@ -712,30 +714,24 @@ async fn emit_delta(
 }
 
 fn parse_usage(u: &Value) -> Usage {
-    let input_tokens = u
-        .get("prompt_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or_default();
-    let output_tokens = u
-        .get("completion_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or_default();
-    let total_tokens = u
-        .get("total_tokens")
-        .and_then(|v| v.as_u64())
+    fn get_tokens(u: &Value, key: &str) -> Option<u64> {
+        u.get(key)
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+    }
+    let input_tokens = get_tokens(u, "prompt_tokens").unwrap_or_default();
+    let output_tokens = get_tokens(u, "completion_tokens").unwrap_or_default();
+    let total_tokens = get_tokens(u, "total_tokens")
         .filter(|&t| t != 0)
         .unwrap_or(input_tokens.saturating_add(output_tokens));
 
-    // Prompt-caching accounting. Provider naming is inconsistent, so accept
-    // every known variant and normalize into two fields (see `Usage` docs):
-    //   cache_read:     cache_read_input_tokens | cache_read
-    //                   | prompt_tokens_details.cached_tokens (OpenAI native)
-    //   cache_creation: cache_creation_input_tokens | cache_write
+    // Prompt-caching accounting: accept every provider naming variant
+    // (cache_read_input_tokens | cache_read | prompt_tokens_details.cached_tokens;
+    //  cache_creation_input_tokens | cache_write) and normalize to two fields.
     let cache_read_tokens = first_u64(u, &["cache_read_input_tokens", "cache_read"])
         .or_else(|| {
             u.get("prompt_tokens_details")
                 .and_then(|d| d.get("cached_tokens"))
-                .and_then(|v| v.as_u64())
+                .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
         })
         .unwrap_or_default();
     let cache_creation_tokens =
@@ -754,8 +750,10 @@ fn parse_usage(u: &Value) -> Usage {
 /// Used by `parse_usage` to collapse provider-specific cache-field aliases
 /// (checked in priority order) into one normalized value.
 fn first_u64(obj: &Value, keys: &[&str]) -> Option<u64> {
-    keys.iter()
-        .find_map(|k| obj.get(*k).and_then(|v| v.as_u64()))
+    keys.iter().find_map(|k| {
+        obj.get(*k)
+            .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+    })
 }
 
 fn truncate(s: &str, n: usize) -> String {

@@ -40,7 +40,7 @@ async fn state_with_mock() -> Arc<opencoder_web::AppState> {
 /// Spawn a server on an ephemeral port and return its base URL + the shared
 /// AppState (so the test can inspect persisted records).
 async fn spawn_server(state: Arc<opencoder_web::AppState>) -> String {
-    let app = opencoder_web::build_app(state, Some(TOKEN.into()));
+    let app = opencoder_web::build_app(state, Some(TOKEN.into()), true);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {

@@ -151,6 +151,16 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             if let Some(k) = p.get("api_key").and_then(|v| v.as_str()) {
                 cfg.provider.api_key = Some(super::env::resolve_env(k));
             }
+            if let Some(m) = p.get("model").and_then(|v| v.as_str()) {
+                cfg.provider.model = Some(m.to_string());
+            }
+            if let Some(hs) = p.get("headers").and_then(|v| v.as_array()) {
+                cfg.provider.headers.extend(hs.iter().filter_map(|h| {
+                    let name = h.get("name")?.as_str()?.to_string();
+                    let value = h.get("value")?.as_str()?.to_string();
+                    Some(HttpHeader { name, value })
+                }));
+            }
         }
         if let Some(providers) = obj.get("providers").and_then(|v| v.as_object()) {
             for (name, pv) in providers {
@@ -333,5 +343,39 @@ mod tests {
             srv.env.get("OPENCODER_TEST_UNSET_KEY").map(String::as_str),
             Some("")
         );
+    }
+
+    /// Regression for the top-level `provider` block merge: previously only
+    /// `base_url` and `api_key` were merged (the `providers` *map* handled all
+    /// four fields), so `provider.model` and `provider.headers` set in a
+    /// project-level config were silently dropped. Both must now carry through.
+    #[test]
+    fn merge_top_level_provider_model_and_headers() {
+        let mut cfg = Config::default();
+        let value = serde_json::json!({
+            "provider": {
+                "model": "o3-mini",
+                "headers": [
+                    { "name": "X-Trace-Id", "value": "abc-123" },
+                    { "name": "X-Org", "value": "acme" }
+                ]
+            }
+        });
+        merge_into(&mut cfg, value);
+
+        assert_eq!(
+            cfg.provider.model.as_deref(),
+            Some("o3-mini"),
+            "top-level provider.model must merge through"
+        );
+        assert_eq!(
+            cfg.provider.headers.len(),
+            2,
+            "top-level provider.headers must merge through"
+        );
+        assert_eq!(cfg.provider.headers[0].name, "X-Trace-Id");
+        assert_eq!(cfg.provider.headers[0].value, "abc-123");
+        assert_eq!(cfg.provider.headers[1].name, "X-Org");
+        assert_eq!(cfg.provider.headers[1].value, "acme");
     }
 }

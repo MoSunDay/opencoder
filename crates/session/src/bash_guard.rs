@@ -92,6 +92,78 @@ const SCRIPT_INTERPRETERS: &[&str] = &[
     "python", "python3", "python2", "node", "ruby", "perl", "lua", "php", "php8",
 ];
 
+/// Extract inner command strings from command/process substitution syntax:
+/// `$(...)`, backticks, `<(...)`, and `>(...)`.
+///
+/// Uses balanced-paren matching for `$(...)` and `<(...)`/`>(...)`.
+/// Backticks use paired matching.
+fn extract_command_substitutions(cmd: &str) -> Vec<String> {
+    let chars: Vec<char> = cmd.chars().collect();
+    let mut results = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        // $(...)
+        if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
+            if let Some(end) = find_matching_paren(&chars, i + 1) {
+                let inner: String = chars[i + 2..end].iter().collect();
+                if !inner.trim().is_empty() {
+                    results.push(inner);
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        // <(...) or >(...)
+        if i + 1 < chars.len()
+            && (chars[i] == '<' || chars[i] == '>')
+            && chars[i + 1] == '('
+        {
+            if let Some(end) = find_matching_paren(&chars, i + 1) {
+                let inner: String = chars[i + 2..end].iter().collect();
+                if !inner.trim().is_empty() {
+                    results.push(inner);
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        // Backtick
+        if chars[i] == '`' {
+            if let Some(rel) = chars[i + 1..].iter().position(|&c| c == '`') {
+                let inner: String = chars[i + 1..i + 1 + rel].iter().collect();
+                if !inner.trim().is_empty() {
+                    results.push(inner);
+                }
+                i = i + 1 + rel + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    results
+}
+
+/// Find the index of the `)` that matches the `(` at position `start`.
+fn find_matching_paren(chars: &[char], start: usize) -> Option<usize> {
+    if start >= chars.len() || chars[start] != '(' {
+        return None;
+    }
+    let mut depth = 0;
+    for i in start..chars.len() {
+        match chars[i] {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Classify a bash command string.
 ///
 /// Handles compound commands (`a && b`, `a; b`, `a | b`) by checking each
@@ -108,6 +180,21 @@ pub fn classify(command: &str) -> BashVerdict {
     // redirects that write to a real file are blocked.
     if let Some(reason) = has_unsafe_redirect(trimmed) {
         return BashVerdict::WriteBlocked(reason);
+    }
+
+    // Recursively classify commands nested inside command/process
+    // substitution: `$(...)`, backticks, `<(...)`, `>(...)`. Without this,
+    // `echo "$(rm file)"` bypasses plan-mode because `echo` itself is
+    // read-only but the substitution runs `rm`.
+    for inner in extract_command_substitutions(trimmed) {
+        match classify(&inner) {
+            BashVerdict::WriteBlocked(reason) => {
+                return BashVerdict::WriteBlocked(format!(
+                    "nested command substitution: {reason}"
+                ));
+            }
+            BashVerdict::ReadOnly => {}
+        }
     }
 
     // Split into segments by &&, ;, |, and check each.
@@ -390,6 +477,13 @@ fn classify_segment(segment: &str) -> Option<String> {
         return None;
     }
     let cmd_base = cmd_base(stripped);
+
+    // Post-wrapper indirect execution check: `env eval 'rm file'` survives
+    // the pre-wrapper check (base was `env`, not `eval`) because `eval` is
+    // not a wrapper command. After stripping `env`, we must re-check.
+    if matches!(cmd_base, "eval" | "source" | ".") {
+        return Some(format!("indirect execution via wrapper: {cmd_base}"));
+    }
 
     // Check mutating commands
     if MUTATING_COMMANDS.contains(&cmd_base) {

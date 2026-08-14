@@ -48,20 +48,28 @@ pub async fn complete(conn: &Connection, task_id: &str, result: &str, ok: bool) 
         SubagentStatus::Failed
     };
     let now = opencoder_core::message::now_ms();
-    conn.execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
+    let rows = conn
+        .execute(COMPLETE, params![result, ok, status.as_str(), now, task_id])
         .await
         .context("update subagent_task completion")?;
+    if rows == 0 {
+        anyhow::bail!("subagent_task not found: {task_id}");
+    }
     Ok(())
 }
 
 pub async fn cancel(conn: &Connection, task_id: &str) -> Result<()> {
     let now = opencoder_core::message::now_ms();
-    conn.execute(
-        CANCEL,
-        params![SubagentStatus::Cancelled.as_str(), now, task_id],
-    )
-    .await
-    .context("cancel subagent_task")?;
+    let rows = conn
+        .execute(
+            CANCEL,
+            params![SubagentStatus::Cancelled.as_str(), now, task_id],
+        )
+        .await
+        .context("cancel subagent_task")?;
+    if rows == 0 {
+        anyhow::bail!("subagent_task not found: {task_id}");
+    }
     Ok(())
 }
 
@@ -240,10 +248,10 @@ mod tests {
         complete(&conn, "t3", "first-result", true)
             .await
             .unwrap();
-        // Late complete with different result: must be rejected by the guard.
-        complete(&conn, "t3", "late-result", false)
-            .await
-            .unwrap();
+        // Late complete with different result: rejected by the status guard
+        // (0 rows affected) and surfaced as an error, not a silent no-op.
+        let late = complete(&conn, "t3", "late-result", false).await;
+        assert!(late.is_err(), "late complete on terminal task must error");
 
         let rec = get_by_task_id(&conn, "t3")
             .await

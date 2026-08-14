@@ -47,7 +47,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
     ("/ap", "切换 autopilot 自动模式（不计入模型上下文）"),
-    ("/install_tools", "检测并安装所有 tools 依赖（tmux）"),
 ];
 
 /// Action produced by dispatching a slash command.
@@ -72,8 +71,6 @@ pub enum SlashAction {
     Stop,
     /// Display-only: toggle autopilot (never enters model context).
     Ap,
-    /// `/install_tools`: detect + install optional tool deps (tmux).
-    InstallTools,
 }
 
 /// Outcome of a keystroke while the command popup is open. `Dispatch` carries
@@ -197,7 +194,6 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
-        "install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
 }
@@ -218,7 +214,6 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/ap" => Some(SlashAction::Ap),
-        "/install_tools" => Some(SlashAction::InstallTools),
         _ => None,
     }
 }
@@ -687,51 +682,6 @@ mod tests {
             other => panic!("expected Dispatch(Fork), got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Enter-dispatch");
-    }
-
-    #[test]
-    fn parse_install_tools() {
-        assert_eq!(parse("/install_tools"), Some(SlashAction::InstallTools));
-        assert_eq!(parse("install_tools"), None); // bare name (no slash) -> None
-        assert_eq!(parse(" /install_tools "), Some(SlashAction::InstallTools));
-    }
-
-    #[test]
-    fn dispatch_install_tools() {
-        assert_eq!(dispatch("/install_tools"), Some(SlashAction::InstallTools));
-    }
-
-    #[test]
-    fn enter_on_install_tools_dispatches() {
-        let mut menu = Some(CommandMenu::new());
-        for c in "install_tools".chars() {
-            if let Some(m) = menu.as_mut() {
-                m.on_char(c);
-            }
-        }
-        let (outcome, _quit) =
-            handle_command_key(&mut menu, key(KeyCode::Enter, KeyModifiers::NONE));
-        match outcome {
-            CommandOutcome::Dispatch(SlashAction::InstallTools) => {}
-            other => panic!("expected Dispatch(InstallTools), got {:?}", other),
-        }
-        assert!(menu.is_none(), "popup closed after Enter-dispatch");
-    }
-
-    #[test]
-    fn tab_on_install_tools_fills_input() {
-        let mut menu = Some(CommandMenu::new());
-        for c in "install_tools".chars() {
-            if let Some(m) = menu.as_mut() {
-                m.on_char(c);
-            }
-        }
-        let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
-        match outcome {
-            CommandOutcome::FillInput(name) => assert_eq!(name, "/install_tools"),
-            other => panic!("expected FillInput, got {:?}", other),
-        }
-        assert!(menu.is_none(), "popup closed after Tab-fill");
     }
 
     #[test]

@@ -63,8 +63,16 @@ pub(crate) fn render_status(
     let bar_pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
     let (meter, ctx_color) = theme::context_meter(bar_pct);
     spans.push(Span::raw(" \u{00b7} "));
+    // Only the meter bar + percent value follow the semantic threshold colour.
+    // The `thr` label and the `ctx (used/limit)` counts are ratio-to-total
+    // context and keep the normal text colour (same as Say body text)
+    // regardless of how full the threshold meter is.
     spans.push(Span::styled(
-        format!("thr {meter} {bar_pct}% "),
+        "thr ",
+        Style::default().fg(theme::text()),
+    ));
+    spans.push(Span::styled(
+        format!("{meter} {bar_pct}% "),
         Style::default().fg(ctx_color),
     ));
     spans.push(Span::styled(
@@ -73,7 +81,7 @@ pub(crate) fn render_status(
             fmtmod::format_tokens_compact(used),
             fmtmod::format_tokens_compact(context_limit)
         ),
-        Style::default().fg(ctx_color),
+        Style::default().fg(theme::text()),
     ));
     spans.push(Span::raw("  "));
 

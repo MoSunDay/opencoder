@@ -73,9 +73,10 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: base_prompt_plan(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
-                // Structured clarification: the plan agent may ask the user one
-                // question per turn when a requirement is genuinely ambiguous.
-                // Other agents (act/explore/build) stay silent — zero schema
+                // Structured clarification: the plan agent may ask the user
+                // several questions per turn (one per call) to align on
+                // genuinely ambiguous requirements or open doubts. Other
+                // agents (act/explore/build) stay silent — zero schema
                 // token cost for them.
                 "question".into(),
             ]),
@@ -159,7 +160,7 @@ pub fn base_prompt_build() -> String {
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
-Output an actionable plan the user reviews before switching to act mode; when a requirement is genuinely ambiguous use the `question` tool to ask the user (at most one per turn) -- do not assume intent. \
+Output an actionable plan the user reviews before switching to act mode; when a requirement is genuinely ambiguous or you have doubts, align via the `question` tool (you may ask several in one turn) -- do not assume intent. \
 The plan MUST have these sections: Goal / TODO / Verify / Risks / Align.";
 
 const BASE_PROMPT: &str = "\
@@ -232,6 +233,28 @@ mod tests {
                 "{other} must not allow 'question'"
             );
         }
+    }
+
+    /// The plan prompt must allow batched clarification: the old "at most
+    /// one per turn" cap is gone (the runtime already supports parallel
+    /// questions; the TUI renders them as a sequential dialog queue). Also
+    /// pins the doubt-alignment wording: open doubts must be surfaced via
+    /// `question` before the plan is finalized, not silently assumed.
+    #[test]
+    fn plan_prompt_allows_multiple_questions_per_turn() {
+        let plan = base_prompt_plan();
+        assert!(
+            !plan.contains("at most one"),
+            "plan prompt must not cap the question tool at one per turn, got: {plan}"
+        );
+        assert!(
+            plan.contains("you may ask several in one turn"),
+            "plan prompt must advertise batched clarification, got: {plan}"
+        );
+        assert!(
+            plan.contains("doubts"),
+            "plan prompt must tell the agent to align open doubts via `question`, got: {plan}"
+        );
     }
 
     /// Pin down the `explore` subagent's exact tool set: it must carry

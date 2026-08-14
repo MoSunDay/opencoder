@@ -65,12 +65,9 @@ pub(crate) fn render_status(
     spans.push(Span::raw(" \u{00b7} "));
     // Only the meter bar + percent value follow the semantic threshold colour.
     // The `thr` label and the `ctx (used/limit)` counts are ratio-to-total
-    // context and keep the soft light-blue label colour regardless of how
-    // full the threshold meter is.
-    spans.push(Span::styled(
-        "thr ",
-        Style::default().fg(theme::light_blue()),
-    ));
+    // context and use the accent colour (same as the follow indicator in
+    // render.rs) regardless of how full the threshold meter is.
+    spans.push(Span::styled("thr ", Style::default().fg(theme::accent())));
     spans.push(Span::styled(
         format!("{meter} {bar_pct}% "),
         Style::default().fg(ctx_color),
@@ -81,7 +78,7 @@ pub(crate) fn render_status(
             fmtmod::format_tokens_compact(used),
             fmtmod::format_tokens_compact(context_limit)
         ),
-        Style::default().fg(theme::light_blue()),
+        Style::default().fg(theme::accent()),
     ));
     spans.push(Span::raw("  "));
 

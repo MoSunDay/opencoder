@@ -173,6 +173,22 @@ impl<S> Drop for DropGuardStream<S> {
     }
 }
 
+/// Decrement a handle's subscriber slot without ever underflowing, returning
+/// the value observed before the decrement. The map lookup is keyed by session
+/// id, so a release aimed at an OLD instance can land on a freshly created
+/// same-id handle whose counter is 0; a blind `fetch_sub` would wrap it to
+/// `usize::MAX`, permanently disabling last-subscriber eviction for that
+/// handle. `Err(current)` from `fetch_update` means the counter was already 0
+/// (f returned `None`) — report 0, never a wrapped value.
+fn release_subscriber_slot(h: &SessionHandle) -> usize {
+    match h.subscribers.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+        if v == 0 { None } else { Some(v - 1) }
+    }) {
+        Ok(prev) => prev,
+        Err(current) => current,
+    }
+}
+
 /// Decrement an events subscriber and, when THIS request *created* the handle,
 /// evict it once the last subscriber is gone and no drain is running. Spawned
 /// (async work can't run in `Drop`); all subscribe+increment happen under the
@@ -187,7 +203,7 @@ pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created:
             {
                 let mut map = handles.lock().await;
                 if let Some(h) = map.get(&id) {
-                    let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+                    let prev = release_subscriber_slot(h);
                     if prev == 1 && !h.draining.load(Ordering::SeqCst) {
                         map.remove(&id);
                         evict = true;
@@ -203,7 +219,7 @@ pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created:
         {
             let mut map = handles.blocking_lock();
             if let Some(h) = map.get(&id) {
-                let prev = h.subscribers.fetch_sub(1, Ordering::SeqCst);
+                let prev = release_subscriber_slot(h);
                 if prev == 1 && !h.draining.load(Ordering::SeqCst) {
                     map.remove(&id);
                     evict = true;
@@ -553,7 +569,31 @@ async fn drain_to_completion(
         Err(e) => {
             warn!(session_id, error = %e, "drain: cannot resume (session row missing?)");
             let mut map = handles.lock().await;
-            map.remove(session_id);
+            // Only reclaim the map entry when nobody is listening. Live SSE
+            // subscribers still hold THIS handle's broadcast receiver: removing
+            // the entry would orphan them (a later prompt creates a NEW
+            // handle/tx they never receive, and their eventual
+            // `release_events_subscriber` would decrement that fresh instance's
+            // counter — underflow). The check runs under the map lock, which is
+            // the same lock every subscribe/increment takes, so a zero count is
+            // authoritative. With subscribers attached, keep the entry: the
+            // normal eviction path (last subscriber leaves while idle) reclaims
+            // it later. Also only remove when the entry is still THIS instance —
+            // it may have been deleted + recreated meanwhile (e.g. DELETE).
+            let still_current = map
+                .get(session_id)
+                .is_some_and(|h| Arc::ptr_eq(h, &handle));
+            let live = handle.subscribers.load(Ordering::SeqCst) > 0
+                || handle.tx.receiver_count() > 0;
+            if live {
+                warn!(
+                    session_id,
+                    subscribers = handle.subscribers.load(Ordering::SeqCst),
+                    "drain: resume failed but SSE subscribers remain; keeping handle"
+                );
+            } else if still_current {
+                map.remove(session_id);
+            }
             return;
         }
     };
@@ -706,5 +746,37 @@ mod tests {
                 "handle should be evicted when last subscriber leaves, even if not the creator"
             );
         }
+    }
+
+    // Bug: `release_events_subscriber` looks the handle up by session id, so a
+    // release aimed at an OLD (already-removed) instance can land on a freshly
+    // created same-id handle whose counter is 0. A blind `fetch_sub` wraps to
+    // `usize::MAX`, corrupting the count and disabling last-subscriber
+    // eviction forever. The decrement must saturate at 0.
+    #[tokio::test]
+    async fn release_subscriber_does_not_underflow_fresh_instance() {
+        let handles = new_handle_map();
+        let id = "sess-underflow".to_string();
+        let h = SessionHandle::new();
+        // Fresh instance: no subscriber ever attached (count 0), not draining.
+        h.subscribers.store(0, Ordering::SeqCst);
+        h.draining.store(false, Ordering::SeqCst);
+        handles.lock().await.insert(id.clone(), h.clone());
+
+        // A stale release for the old same-id instance fires on this handle.
+        release_events_subscriber(handles.clone(), id.clone(), true);
+
+        // The release runs in a spawned task; poll until it settles (counter
+        // either changed or the sleep guarantees the task ran).
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(
+            h.subscribers.load(Ordering::SeqCst),
+            0,
+            "subscriber counter must saturate at 0, not wrap to usize::MAX"
+        );
+        assert!(
+            handles.lock().await.contains_key(&id),
+            "a zero-count release must not evict the handle"
+        );
     }
 }

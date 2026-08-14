@@ -44,17 +44,20 @@ async fn seed(store: &Arc<dyn Store>, id: &str, agent: &str) {
         .unwrap();
 }
 
-/// Regression: when the transcript holds an assistant message (so a plan is
-/// preserved for handoff), a compound `/act_clear_context <request>` must NOT
-/// discard the request. The request is recorded as a real user prompt and
+/// Regression: when the transcript holds a finalized plan (plan-mode session
+/// with recorded plan inputs), a compound `/act_clear_context <request>` must
+/// NOT discard the request. The request is recorded as a real user prompt and
 /// executed alongside the plan handoff message.
 #[tokio::test]
 async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     let store = mem_store().await;
-    seed(&store, "clear-compound-plan", "act").await;
+    seed(&store, "clear-compound-plan", "plan").await;
 
-    // An assistant message makes final_plan_text() return Some, so the
-    // preserved-plan branch is taken instead of the sentinel branch.
+    // A plan-mode session: one recorded plan input produced an assistant
+    // plan, so final_plan_text() returns Some and the preserved-plan branch
+    // is taken instead of the sentinel branch. (An act-mode session with a
+    // plain last assistant text takes the sentinel branch — see
+    // `act_mode_clear_context_uses_sentinel_not_fabricated_plan`.)
     let msgs = vec![Message::user("u1", "old question"), {
         let mut m = Message::assistant("a1");
         m.blocks.push(ContentBlock::text("I will implement X by..."));
@@ -70,7 +73,7 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-compound-plan",
-        resolve_agent("act").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -78,6 +81,7 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = msgs.clone();
+    session.plan_input_count = 1;
 
     run(&mut session, "/act_clear_context review".into(), |_| {})
         .await
@@ -122,4 +126,202 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
         .iter()
         .any(|m| m.role == Role::Assistant && m.text().contains("fresh reply"));
     assert!(has_reply, "execution reply recorded as an assistant turn");
+}
+
+/// Bug fix: `/act_clear_context` in ACT mode (no plan provenance: act agent,
+/// `plan_input_count == 0`) must take the blank fresh-start sentinel path —
+/// NOT wrap the last assistant text ("task done") in the plan→act directive
+/// prefix, which would fabricate a plan and immediately re-execute the
+/// finished task. (CLEAR_CONTEXT_SENTINEL is pub(crate); assert the literal.)
+#[tokio::test]
+async fn act_mode_clear_context_uses_sentinel_not_fabricated_plan() {
+    let store = mem_store().await;
+    seed(&store, "act-no-plan", "act").await;
+
+    // Act-mode history whose last assistant text is a plain completion, not
+    // a plan. Pre-fix, `handoff` picked it up and wrapped it in the
+    // "Planning phase complete. ... Execute it now" directive.
+    let msgs = vec![Message::user("u1", "implement X"), {
+        let mut m = Message::assistant("a1");
+        m.blocks.push(ContentBlock::text("task done"));
+        m
+    }];
+    store.append_messages("act-no-plan", &msgs).await.unwrap();
+
+    let mock: Arc<MockChatClient> = Arc::new(MockChatClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "act-no-plan",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+    assert_eq!(session.plan_input_count, 0, "no plan inputs recorded");
+
+    run(&mut session, "/act_clear_context".into(), |_| {})
+        .await
+        .unwrap();
+
+    // Fresh-start sentinel path: one blank marker message, sentinel stored.
+    assert_eq!(session.messages.len(), 1, "transcript collapses to 1 marker");
+    assert!(
+        session.messages[0].text().contains("Context cleared"),
+        "marker is the blank fresh-start, not a plan directive: {}",
+        session.messages[0].text()
+    );
+    assert_eq!(
+        session.handoff_plan.as_deref(),
+        Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+        "sentinel stored so resume reconstructs the fresh start"
+    );
+    // No fabricated plan reached the model: the sentinel path never executes.
+    assert_eq!(mock.call_count(), 0, "no LLM call for a fabricated plan");
+    let requests = mock.requests();
+    assert!(requests.is_empty());
+}
+
+/// The gate's second arm: an ACT session that WAS planning earlier in this
+/// phase (`plan_input_count > 0` survives a plain `/act` switch) still hands
+/// its finalized plan forward — the fix must not over-reach.
+#[tokio::test]
+async fn act_mode_after_plan_inputs_still_preserves_plan() {
+    let store = mem_store().await;
+    seed(&store, "act-after-plan", "act").await;
+
+    let msgs = vec![Message::user("u1", "plan the migration"), {
+        let mut m = Message::assistant("a1");
+        m.blocks.push(ContentBlock::text("## Plan\n1. migrate schema"));
+        m
+    }];
+    store.append_messages("act-after-plan", &msgs).await.unwrap();
+
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("executing")]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "act-after-plan",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+    // Simulate: planned in plan mode (inputs recorded), then `/act` switched
+    // without a handoff — the counter survives the switch.
+    session.plan_input_count = 2;
+
+    run(&mut session, "/act_clear_context".into(), |_| {})
+        .await
+        .unwrap();
+
+    // Plan preserved, not the sentinel: the handoff message carries the plan
+    // and one execution turn ran.
+    assert_eq!(
+        session.handoff_plan.as_deref(),
+        Some("## Plan\n1. migrate schema"),
+        "plan with recorded plan inputs must be preserved"
+    );
+    assert_eq!(mock.call_count(), 1, "one execution turn for the plan");
+    assert!(
+        session.messages[0].text().contains("## Plan\n1. migrate schema"),
+        "handoff directive carries the plan text"
+    );
+}
+
+/// Unit-level (apply()) check of the plan-provenance gate itself: ACT mode,
+/// no plan inputs → sentinel path even though the last assistant text is
+/// non-empty. Mirrors `act_mode_clear_context_uses_sentinel_not_fabricated_plan`
+/// but without the run loop, pinning the gate at the control-command layer.
+#[tokio::test]
+async fn apply_clear_context_act_mode_does_not_fabricate_plan() {
+    let mock: Arc<MockChatClient> = Arc::new(MockChatClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "act-gate",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    );
+    session.messages.push(Message::user("u1", "implement X"));
+    let mut a = Message::assistant("a1");
+    a.blocks.push(ContentBlock::text("task done"));
+    session.messages.push(a);
+    assert_eq!(session.plan_input_count, 0);
+
+    let mut evs = Vec::new();
+    opencoder_session::control_cmd::apply(
+        &mut session,
+        &opencoder_session::control_cmd::ControlCmd::ClearContext,
+        &mut |ev| evs.push(ev),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(session.messages.len(), 1, "collapses to 1 marker");
+    assert!(
+        session.messages[0].text().contains("Context cleared"),
+        "blank fresh-start marker, not a plan directive: {}",
+        session.messages[0].text()
+    );
+    assert_eq!(
+        session.handoff_plan.as_deref(),
+        Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>")
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, opencoder_session::SessionEvent::PlanHandoff(_))),
+        "no PlanHandoff for a fabricated plan"
+    );
+}
+
+/// Unit-level check of the gate's second arm: ACT mode but plan inputs were
+/// recorded earlier in the phase (counter survives a plain `/act` switch) →
+/// the finalized plan is still handed forward.
+#[tokio::test]
+async fn apply_clear_context_act_mode_with_plan_inputs_preserves_plan() {
+    let mock: Arc<MockChatClient> = Arc::new(MockChatClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "act-gate-plan",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    );
+    session.messages.push(Message::user("u1", "plan the work"));
+    let mut a = Message::assistant("a1");
+    a.blocks.push(ContentBlock::text("## Plan\n1. do X"));
+    session.messages.push(a);
+    session.plan_input_count = 2;
+
+    let mut evs = Vec::new();
+    opencoder_session::control_cmd::apply(
+        &mut session,
+        &opencoder_session::control_cmd::ControlCmd::ClearContext,
+        &mut |ev| evs.push(ev),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        session.handoff_plan.as_deref(),
+        Some("## Plan\n1. do X"),
+        "plan with recorded plan inputs must be preserved"
+    );
+    assert!(
+        session.messages[0].text().contains("## Plan\n1. do X"),
+        "handoff directive carries the plan text"
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, opencoder_session::SessionEvent::PlanHandoff(_))),
+        "PlanHandoff emitted for a genuine plan"
+    );
 }

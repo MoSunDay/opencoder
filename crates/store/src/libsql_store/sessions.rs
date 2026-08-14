@@ -145,6 +145,12 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.skill.is_some() && patch.clear_skill {
         anyhow::bail!("SessionPatch: skill field and clear_skill are mutually exclusive");
     }
+    if patch.agent.is_some() && patch.clear_agent {
+        anyhow::bail!("SessionPatch: agent field and clear_agent are mutually exclusive");
+    }
+    if patch.model.is_some() && patch.clear_model {
+        anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
+    }
 
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
@@ -195,6 +201,12 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     if patch.clear_skill {
         sets.push("skill = NULL");
+    }
+    if patch.clear_agent {
+        sets.push("agent = NULL");
+    }
+    if patch.clear_model {
+        sets.push("model = NULL");
     }
     if let Some(v) = patch.updated_at {
         sets.push("updated_at = ?");

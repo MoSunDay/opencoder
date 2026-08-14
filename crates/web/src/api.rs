@@ -211,11 +211,21 @@ pub async fn post_prompt(
             }
         }
     };
-    let delivery = body
-        .delivery
-        .as_deref()
-        .and_then(Delivery::parse)
-        .unwrap_or(Delivery::Steer);
+    // A present-but-unparseable delivery (e.g. a "stear" typo) must be a 400
+    // rather than silently degrade to `Steer` — that fallback would interrupt
+    // the running turn. A missing field keeps the `Steer` default. `parse`
+    // trims and lowercases, so `" queue "` is accepted as Queue.
+    let delivery = match body.delivery.as_deref() {
+        None => Delivery::Steer,
+        Some(s) => match Delivery::parse(s) {
+            Some(d) => d,
+            None => {
+                return error_400(format!(
+                    "invalid delivery {s:?}: expected \"steer\" or \"queue\""
+                ))
+            }
+        },
+    };
     if let Err(e) = ensure_session_row(&state, &id, &body.prompt, &config).await {
         return error_500(e);
     }
@@ -340,20 +350,12 @@ pub async fn post_agent(
     }
     // P1-5: Re-check draining AFTER the write. If a drain started between
     // the first check and this write (TOCTOU), rollback the meta change.
+    // `rollback_agent` restores the captured value — or CLEARS the column
+    // when it was NULL / the capture read failed: a plain `agent: None`
+    // patch is a no-op and would leave the refused switch persisted.
     if handle.draining.load(Ordering::SeqCst) {
-        if let Some(old) = &old_agent {
-            let _ = state
-                .store
-                .update_session(
-                    &id,
-                    &SessionPatch {
-                        agent: old.agent.clone(),
-                        updated_at: Some(opencoder_core::message::now_ms()),
-                        ..Default::default()
-                    },
-                )
-                .await;
-        }
+        let patch = SessionPatch::rollback_agent(old_agent.as_ref());
+        let _ = state.store.update_session(&id, &patch).await;
         return error_409("agent switch refused: drain started during write");
     }
     handle.overrides.lock().await.agent = Some(body.value.clone());
@@ -415,35 +417,21 @@ pub async fn post_model(
         return error_500(format!("update_session: {e:#}"));
     }
     // P1-5: Re-check draining AFTER the write (TOCTOU). Rollback meta if a
-    // drain started during the write.
+    // drain started during the write. `rollback_model` clears the column when
+    // the old value was NULL / unreadable (a `model: None` patch is a no-op).
     if handle.draining.load(Ordering::SeqCst) {
-        if let Some(old) = &old_model {
-            let _ = state
-                .store
-                .update_session(
-                    &id,
-                    &SessionPatch {
-                        model: old.model.clone(),
-                        updated_at: Some(opencoder_core::message::now_ms()),
-                        ..Default::default()
-                    },
-                )
-                .await;
-        }
+        let patch = SessionPatch::rollback_model(old_model.as_ref());
+        let _ = state.store.update_session(&id, &patch).await;
         return error_409("model switch refused: drain started during write");
     }
     // Persist global config only after all drain checks pass (Bug 6): a refused
-    // request never mutates the global default. Save failure rolls back meta.
+    // request never mutates the global default. Save failure rolls back meta
+    // (same NULL-clearing semantics as the drain rollback above).
     if body.persist_default {
         let patch = serde_json::json!({ "model": &body.value });
         if let Err(e) = Config::save(&state.workdir, &patch) {
-            if let Some(old) = &old_model {
-                let _ = state.store.update_session(&id, &SessionPatch {
-                    model: old.model.clone(),
-                    updated_at: Some(opencoder_core::message::now_ms()),
-                    ..Default::default()
-                }).await;
-            }
+            let rollback = SessionPatch::rollback_model(old_model.as_ref());
+            let _ = state.store.update_session(&id, &rollback).await;
             return error_500(format!("persist_default failed: {e:#}"));
         }
     }
@@ -740,6 +728,13 @@ pub async fn get_event_seq(
     Json(json!({ "id": id, "seq": seq }))
 }
 
+fn error_400(msg: String) -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
+}
 fn error_409(msg: &str) -> Response {
     (
         axum::http::StatusCode::CONFLICT,

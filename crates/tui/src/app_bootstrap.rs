@@ -189,9 +189,7 @@ mod tests {
         let supervisor_active = AtomicBool::new(true);
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<crate::worker::UiCmd>(4);
         // Cooperative worker: loops until the sender half is dropped.
-        let worker = tokio::spawn(async move {
-            while cmd_rx.recv().await.is_some() {}
-        });
+        let worker = tokio::spawn(async move { while cmd_rx.recv().await.is_some() {} });
 
         finish(&supervisor_active, cmd_tx, worker).await;
 

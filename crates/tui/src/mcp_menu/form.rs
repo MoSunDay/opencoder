@@ -94,7 +94,9 @@ impl McpForm {
         }
         match self.field {
             McpField::Name => insert_at_cursor(&mut self.name, &mut self.name_cursor, text),
-            McpField::Command => insert_at_cursor(&mut self.command, &mut self.command_cursor, text),
+            McpField::Command => {
+                insert_at_cursor(&mut self.command, &mut self.command_cursor, text)
+            }
             McpField::Args => {
                 if !self.args.is_empty() {
                     insert_at_cursor(&mut self.args, &mut self.args_cursor, " ");
@@ -162,11 +164,15 @@ impl McpForm {
 
     fn type_char(&mut self, c: char) {
         match self.field {
-            McpField::Name => insert_at_cursor(&mut self.name, &mut self.name_cursor, &c.to_string()),
+            McpField::Name => {
+                insert_at_cursor(&mut self.name, &mut self.name_cursor, &c.to_string())
+            }
             McpField::Command => {
                 insert_at_cursor(&mut self.command, &mut self.command_cursor, &c.to_string())
             }
-            McpField::Args => insert_at_cursor(&mut self.args, &mut self.args_cursor, &c.to_string()),
+            McpField::Args => {
+                insert_at_cursor(&mut self.args, &mut self.args_cursor, &c.to_string())
+            }
             McpField::Url => insert_at_cursor(&mut self.url, &mut self.url_cursor, &c.to_string()),
             McpField::Enabled => {}
         }
@@ -179,13 +185,25 @@ impl McpForm {
         }
         let cmd = {
             let c = self.command.trim();
-            if c.is_empty() { None } else { Some(c) }
+            if c.is_empty() {
+                None
+            } else {
+                Some(c)
+            }
         };
         let url = {
             let u = self.url.trim();
-            if u.is_empty() { None } else { Some(u) }
+            if u.is_empty() {
+                None
+            } else {
+                Some(u)
+            }
         };
-        let args: Vec<String> = self.args.split_whitespace().map(|s| s.to_string()).collect();
+        let args: Vec<String> = self
+            .args
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
         Some(McpOutcome::Save(save_mcp_json(
             name,
             self.enabled,
@@ -215,7 +233,11 @@ fn backspace_at(buf: &mut String, cursor: &mut usize) {
         .nth(*cursor - 1)
         .map(|(b, _)| b)
         .unwrap_or(0);
-    let char_len = buf[prev_byte..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+    let char_len = buf[prev_byte..]
+        .chars()
+        .next()
+        .map(|c| c.len_utf8())
+        .unwrap_or(0);
     buf.drain(prev_byte..prev_byte + char_len);
     *cursor -= 1;
 }
@@ -227,7 +249,10 @@ pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu
     if k.modifiers.contains(KeyModifiers::CONTROL) {
         if matches!(
             k.code,
-            KeyCode::Char('l') | KeyCode::Char('\u{c}') | KeyCode::Char('u') | KeyCode::Char('\u{15}')
+            KeyCode::Char('l')
+                | KeyCode::Char('\u{c}')
+                | KeyCode::Char('u')
+                | KeyCode::Char('\u{15}')
         ) && form.is_text_field()
         {
             let (buf, cur) = current_buf_cursor(&mut form);

@@ -171,12 +171,14 @@ mod tests {
         // for an un-started index (regression guard for delta-before-start).
         let evs1 = acc.apply(0, None, None, Some("{\"cmd\":"));
         assert!(
-            evs1.iter().all(|e| !matches!(e, LlmEvent::ToolCallStart { .. })),
+            evs1.iter()
+                .all(|e| !matches!(e, LlmEvent::ToolCallStart { .. })),
             "no ToolCallStart before id/name: {:?}",
             evs1
         );
         assert!(
-            evs1.iter().all(|e| !matches!(e, LlmEvent::ToolCallDelta { .. })),
+            evs1.iter()
+                .all(|e| !matches!(e, LlmEvent::ToolCallDelta { .. })),
             "no ToolCallDelta before ToolCallStart: {:?}",
             evs1
         );
@@ -190,10 +192,18 @@ mod tests {
         let mut acc = ToolAccumulator::default();
         // Args arrive while un-started → buffered, no events.
         let evs1 = acc.apply(0, None, None, Some("{\"a\":"));
-        assert!(evs1.is_empty(), "buffered args must emit nothing: {:?}", evs1);
+        assert!(
+            evs1.is_empty(),
+            "buffered args must emit nothing: {:?}",
+            evs1
+        );
         // More args while still un-started → still buffered, no events.
         let evs2 = acc.apply(0, None, None, Some("1,"));
-        assert!(evs2.is_empty(), "further buffered args must emit nothing: {:?}", evs2);
+        assert!(
+            evs2.is_empty(),
+            "further buffered args must emit nothing: {:?}",
+            evs2
+        );
         // id+name AND a fresh arg chunk arrive together: start is announced and
         // the full buffer is flushed exactly once (the fresh chunk must not be
         // double-counted as a separate delta).

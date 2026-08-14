@@ -151,7 +151,10 @@ fn compaction_header_and_text_are_uniform_purple() {
         .map(|span| &*span.content)
         .collect();
     assert!(header.contains("Compaction"));
-    assert_eq!(collapsed[0].spans[0].style.fg, Some(theme::compaction_color()));
+    assert_eq!(
+        collapsed[0].spans[0].style.fg,
+        Some(theme::compaction_color())
+    );
     assert!(!collapsed[0].spans[0]
         .style
         .add_modifier
@@ -159,6 +162,12 @@ fn compaction_header_and_text_are_uniform_purple() {
 
     v.toggle_compaction_at(0);
     let expanded = v.flatten();
-    assert_eq!(expanded[0].spans[0].style.fg, Some(theme::compaction_color()));
-    assert_eq!(expanded[1].spans[0].style.fg, Some(theme::compaction_color()));
+    assert_eq!(
+        expanded[0].spans[0].style.fg,
+        Some(theme::compaction_color())
+    );
+    assert_eq!(
+        expanded[1].spans[0].style.fg,
+        Some(theme::compaction_color())
+    );
 }

@@ -10,6 +10,7 @@ pub mod edit;
 pub mod image_data;
 pub mod latent;
 pub mod ls;
+pub mod question;
 pub mod read;
 pub mod search;
 pub mod ssh_pty;
@@ -24,6 +25,10 @@ pub fn registry() -> HashMap<String, ToolArc> {
         Arc::new(edit::EditTool) as ToolArc,
         Arc::new(search::SearchTool) as ToolArc,
         Arc::new(ls::ListTool) as ToolArc,
+        // Placeholder hub: registry() callers only project the schema /
+        // estimate tokens. The runner's `build_full_registry` rebinds this
+        // entry to the session's shared hub so answers actually flow.
+        Arc::new(question::QuestionTool::new(question::QuestionHub::new())) as ToolArc,
         Arc::new(task::TaskTool) as ToolArc,
         Arc::new(ssh_pty::SshPtyTool) as ToolArc,
     ];
@@ -210,6 +215,33 @@ mod tests {
                 "tool schemas must be sorted by name for deterministic requests ({kind:?}); got {names:?}"
             );
         }
+    }
+
+    /// The `question` tool schema is advertised to the plan agent only and
+    /// stays cheap: a compact two-parameter schema, hidden from every other
+    /// agent (zero token cost outside plan mode).
+    #[test]
+    fn question_schema_is_plan_only_and_compact() {
+        let reg = registry();
+        let plan = opencoder_core::resolve_agent("plan").unwrap();
+        let act = opencoder_core::resolve_agent("act").unwrap();
+        let plan_tokens = estimate_tool_schema_tokens(&plan, None, &reg);
+        let act_tokens = estimate_tool_schema_tokens(&act, None, &reg);
+        // Isolate the question schema's own cost.
+        let mut without = reg.clone();
+        without.remove("question");
+        let plan_without = estimate_tool_schema_tokens(&plan, None, &without);
+        let cost = plan_tokens - plan_without;
+        assert!(cost > 0, "plan agent must see the question schema");
+        assert_eq!(
+            act_tokens,
+            estimate_tool_schema_tokens(&act, None, &without),
+            "act agent must NOT see the question schema"
+        );
+        assert!(
+            cost < 200,
+            "question schema should stay compact (<200 tokens), got {cost}"
+        );
     }
 
     #[test]

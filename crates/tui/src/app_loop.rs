@@ -275,6 +275,9 @@ pub(crate) async fn fold_ui_events(
     cancel: &mut CancellationToken,
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     _notepad: &mut Option<crate::notepad::NotepadView>,
+    question_menu: &mut Option<crate::question_menu::QuestionMenu>,
+    question_queue: &mut std::collections::VecDeque<crate::question_menu::QuestionPrompt>,
+    question_hub: &std::sync::Arc<opencoder_session::QuestionHub>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
         Some(ev) => ev,
@@ -300,6 +303,22 @@ pub(crate) async fn fold_ui_events(
         let mut hidden_reasoning_append = false;
         match ev {
             UiEvent::Session(sev) => {
+                // Question dialogs ride on ToolStart/ToolEnd (no new event
+                // kind): open on `question` start, close on its end. Only
+                // live events reach here — store replay never opens dialogs.
+                match &sev {
+                    SessionEvent::ToolStart { id, name, input } if name == "question" => {
+                        crate::question_menu::on_tool_start(
+                            question_menu, question_queue, id, input,
+                        );
+                    }
+                    SessionEvent::ToolEnd { id, .. } => {
+                        crate::question_menu::on_tool_end(
+                            question_menu, question_queue, id, question_hub,
+                        );
+                    }
+                    _ => {}
+                }
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
                     let agent = chat.agent.clone();
                     let saved_plan_submitted = chat.plan_submitted;

@@ -102,6 +102,7 @@ pub(crate) fn route_paste(
     keymap_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
     command_menu: &mut Option<CommandMenu>,
+    question_menu: &mut Option<crate::question_menu::QuestionMenu>,
     input: &mut String,
     cursor_idx: &mut usize,
     pending_images: &mut Vec<(String, String)>,
@@ -122,6 +123,10 @@ pub(crate) fn route_paste(
     }
     if let Some(menu) = command_menu.as_mut() {
         menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    if let Some(menu) = question_menu.as_mut() {
+        menu.paste_custom(trimmed);
         return LoopFlow::Redraw;
     }
 

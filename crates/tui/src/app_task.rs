@@ -66,6 +66,7 @@ pub(crate) async fn switch_session(
     turn_cancel: &mut SharedCancel,
     child_runtime: &mut ChildRuntimeHandles,
     skill_handle: &mut Arc<Mutex<Option<String>>>,
+    question_hub: &mut Arc<opencoder_session::QuestionHub>,
 ) -> Result<()> {
     // Perform session switch.
     // Cancel the in-flight turn before Quit so the worker sees it promptly
@@ -134,6 +135,10 @@ pub(crate) async fn switch_session(
         .turn_cancel
         .clone()
         .unwrap_or_else(|| Arc::new(Mutex::new(CancellationToken::new())));
+    // The new session's question hub becomes the live one: attach it and
+    // rebind the app-loop pointer (pending dialogs were cleared by the caller).
+    new_session.question_hub.attach();
+    *question_hub = new_session.question_hub.clone();
     let new_child_runtime = ChildRuntimeHandles::from_session(&new_session);
     let new_skill_handle = new_session.skill_prompt.clone();
     let resumed_messages = match &pick {

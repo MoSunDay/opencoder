@@ -57,8 +57,7 @@ fn status_bar_shows_ctx_percent() {
 
 /// Colour-split regression: only the meter bar + percent value follow the
 /// threshold colour; the `thr` label and `ctx (used/limit)` counts use the
-/// cargo status colour (bold bright green, cargo's `Building` line) no
-/// matter how high the usage climbs.
+/// bold bright-blue status label colour no matter how high the usage climbs.
 #[test]
 fn status_bar_colors_split_between_meter_and_labels() {
     crate::theme::set_theme(crate::theme::ThemeKind::Dark);
@@ -81,7 +80,7 @@ fn status_bar_colors_split_between_meter_and_labels() {
         row[..b].chars().count() as u16
     };
     let expected = crate::theme::err_color();
-    let label = crate::theme::cargo_status_color();
+    let label = crate::theme::status_label_color();
     let meter_cell = buf
         .cell((col_of("\u{25b0}"), 0))
         .expect("cell at first filled meter segment");
@@ -97,11 +96,11 @@ fn status_bar_colors_split_between_meter_and_labels() {
     let thr_cell = buf.cell((col_of("thr"), 0)).expect("cell at thr label");
     assert_eq!(
         thr_cell.fg, label,
-        "thr label must stay cargo-green; got: {row}"
+        "thr label must stay bright blue; got: {row}"
     );
     let ctx_cell = buf.cell((col_of("ctx"), 0)).expect("cell at ctx label");
     assert_eq!(
         ctx_cell.fg, label,
-        "ctx counts must stay cargo-green (ratio-to-total, not threshold-coloured); got: {row}"
+        "ctx counts must stay bright blue (ratio-to-total, not threshold-coloured); got: {row}"
     );
 }

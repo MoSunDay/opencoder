@@ -11,7 +11,8 @@ suspend/resume needed since the CLI owns the terminal already. Non-zero
 installer exit codes now propagate as the process exit status.
 
 Also: status-bar `thr`/`ctx` label colour split (only the meter + percent
-value follow the threshold colour; labels keep normal text colour).
+value follow the threshold colour; labels use a new soft light-blue
+`theme::light_blue()` — `LightBlue` on dark, `Blue` on light).
 
 ## Changes
 
@@ -44,8 +45,11 @@ value follow the threshold colour; labels keep normal text colour).
 ### Misc
 - `crates/cli/src/exit_tips.rs`: setup hint now `opencode install-tools`.
 - `crates/tui/src/render_status.rs` + `render_tests/status_ctx.rs`: `thr`
-  label and `ctx (used/limit)` use `theme::text()` (Say-body colour), not
-  muted; meter + percent keep the semantic threshold colour.
+  label and `ctx (used/limit)` use `theme::light_blue()`; meter + percent
+  keep the semantic threshold colour.
+- `crates/tui/src/theme.rs`: `LIGHT_BLUE` const + `Palette::light_blue`
+  slot (`LightBlue` dark / `Blue` light) + `light_blue()` resolver;
+  `palette_dark_matches_constants` extended.
 
 ## Tests
 

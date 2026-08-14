@@ -88,7 +88,7 @@ fn custom_line(menu: &QuestionMenu, custom_row: usize) -> Line<'static> {
     let selected = menu.focus == QuestionFocus::Options && menu.selected == custom_row;
     let focused = menu.focus == QuestionFocus::Custom;
     let body = if menu.custom_input.is_empty() {
-        "✎ custom answer…"
+        "custom answer…"
     } else {
         menu.custom_input.as_str()
     };
@@ -176,6 +176,18 @@ mod tests {
         assert!(text.contains("postgres"), "option 2 present");
         assert!(text.contains("custom answer"), "custom row present");
         assert!(text.contains("Esc skip"), "hint present");
+    }
+
+    #[test]
+    fn custom_row_shows_exactly_one_pen_icon() {
+        // Regression: the placeholder used to carry its own "✎" while the row
+        // format prepended another one, rendering "✎ ✎ custom answer…".
+        for custom_focus in [false, true] {
+            let text = rendered_text(custom_focus);
+            let pens = text.matches('✎').count();
+            assert_eq!(pens, 1, "exactly one pen icon, got {pens} in:\n{text}");
+            assert!(text.contains("✎ custom answer…"), "placeholder row intact");
+        }
     }
 
     #[test]

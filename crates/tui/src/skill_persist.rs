@@ -124,6 +124,49 @@ pub(crate) async fn resolve_persist_with(
     (clean, unresolved)
 }
 
+/// Apply a `KeyAction::SetSkill` selection: update the sticky in-memory skill
+/// state (active name/body, token estimate, shared skill mutex) and persist
+/// the selection (best-effort) so it survives resume/restart. The in-memory
+/// mutex write keeps the in-flight turn immediate.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn apply_skill_selection(
+    opt: &Option<(String, String)>,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+    skill_handle: &Arc<Mutex<Option<String>>>,
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) {
+    let skill_body = opt.as_ref().map(|(_, body)| body.clone());
+    match opt {
+        Some((name, body)) => {
+            *active_skill = Some(name.clone());
+            *active_skill_body = Some(body.clone());
+            *sys_tokens = crate::app_helpers::sys_tokens_for(agent_name, workdir, Some(body));
+            *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(body.clone());
+        }
+        None => {
+            *active_skill = None;
+            *active_skill_body = None;
+            *sys_tokens = crate::app_helpers::sys_tokens_for(agent_name, workdir, None);
+            *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+    let _ = store
+        .update_session(
+            session_id,
+            &SessionPatch {
+                skill: skill_body,
+                updated_at: Some(now_ms()),
+                ..Default::default()
+            },
+        )
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

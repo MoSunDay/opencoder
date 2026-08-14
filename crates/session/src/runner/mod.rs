@@ -96,6 +96,15 @@ async fn build_full_registry(session: &SessionState) -> HashMap<String, ToolArc>
         mcp::pool::sync(&session.id, &desired).await;
     }
     let mut reg = build_registry();
+    // The registry's `question` entry carries a placeholder hub (schema/token
+    // estimation only). Rebind it to this session's shared hub so an attached
+    // frontend resolves tool results mid-turn.
+    reg.insert(
+        "question".to_string(),
+        Arc::new(crate::tools::question::QuestionTool::new(
+            session.question_hub.clone(),
+        )),
+    );
     if mcp::pool::has_mcp_tools(&session.id) {
         reg.extend(mcp::pool::tools_for(&session.id));
     }

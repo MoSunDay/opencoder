@@ -64,6 +64,12 @@ fn leaf_tool_timeout_exempts_bash() {
 }
 
 #[test]
+fn leaf_tool_timeout_exempts_question() {
+    // Waiting for a human answer has no wall-clock budget; only cancel ends it.
+    assert_eq!(leaf_tool_timeout("question"), None);
+}
+
+#[test]
 fn leaf_tool_timeout_defaults_unknown_tools() {
     assert_eq!(leaf_tool_timeout("ls"), Some(DEFAULT_TOOL_TIMEOUT));
     assert_eq!(

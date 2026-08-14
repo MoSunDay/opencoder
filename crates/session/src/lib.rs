@@ -23,6 +23,7 @@ pub use control_cmd::{
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
+pub use tools::question::QuestionHub;
 pub use subagent_steer_gate::{SteerReservation, SubagentSteerGate};
 
 use std::collections::{HashMap, HashSet};
@@ -194,6 +195,9 @@ pub struct SessionState {
     /// User-edited task description text, persisted via the /requirement
     /// slash command so it survives session resume.
     pub requirement: Option<String>,
+    /// Shared question/answer rendezvous for the `question` tool: an attached
+    /// frontend (TUI) resolves; the tool awaits inside the running turn.
+    pub question_hub: Arc<QuestionHub>,
 }
 
 impl SessionState {
@@ -233,6 +237,7 @@ impl SessionState {
             handoff_plan: None,
             plan_input_count: 0,
             requirement: None,
+            question_hub: QuestionHub::new(),
         }
     }
 
@@ -245,7 +250,13 @@ impl SessionState {
     /// Mark that the session row already exists in the store (e.g. created
     /// externally before the run loop starts). Prevents `persist()` from
     /// auto-creating a duplicate row with conflicting metadata.
-    pub fn mark_session_created(mut self) -> Self {
+    /// Share an externally owned question hub (tests, alternate frontends).
+pub fn with_question_hub(mut self, hub: Arc<QuestionHub>) -> Self {
+    self.question_hub = hub;
+    self
+}
+
+pub fn mark_session_created(mut self) -> Self {
         self.session_created = true;
         self
     }

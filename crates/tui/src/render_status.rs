@@ -2,7 +2,7 @@
 //! line cap. Draws the mode chip, context meter, task timer, and spinner.
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -65,9 +65,14 @@ pub(crate) fn render_status(
     spans.push(Span::raw(" \u{00b7} "));
     // Only the meter bar + percent value follow the semantic threshold colour.
     // The `thr` label and the `ctx (used/limit)` counts are ratio-to-total
-    // context and use the accent colour (same as the follow indicator in
-    // render.rs) regardless of how full the threshold meter is.
-    spans.push(Span::styled("thr ", Style::default().fg(theme::accent())));
+    // context and use the cargo status colour (bold bright green, like
+    // cargo's `Building` line) regardless of how full the threshold meter is.
+    spans.push(Span::styled(
+        "thr ",
+        Style::default()
+            .fg(theme::cargo_status_color())
+            .add_modifier(Modifier::BOLD),
+    ));
     spans.push(Span::styled(
         format!("{meter} {bar_pct}% "),
         Style::default().fg(ctx_color),
@@ -78,7 +83,9 @@ pub(crate) fn render_status(
             fmtmod::format_tokens_compact(used),
             fmtmod::format_tokens_compact(context_limit)
         ),
-        Style::default().fg(theme::accent()),
+        Style::default()
+            .fg(theme::cargo_status_color())
+            .add_modifier(Modifier::BOLD),
     ));
     spans.push(Span::raw("  "));
 

@@ -32,8 +32,6 @@ pub const TEXT: Color = Color::White;
 /// Local / non-context information shown to the user that never enters the
 /// model context (e.g. `/ps` / `/stop` echoes). Mirrors the `[model]` marker.
 pub const LOCAL: Color = Color::Magenta;
-/// Soft light blue — status-bar informational labels (`thr`, `ctx (x/x)`).
-pub const LIGHT_BLUE: Color = Color::LightBlue;
 /// Pink — dedicated to the Thinking (reasoning) block header so it stays
 /// visually distinct from the cyan-accented bash tool header.
 pub const PINK: Color = Color::LightMagenta;
@@ -91,7 +89,6 @@ pub struct Palette {
     pub info: Color,
     pub local: Color,
     pub pink: Color,
-    pub light_blue: Color,
     pub compaction: Color,
     pub user: Color,
 }
@@ -112,7 +109,6 @@ pub fn palette(kind: ThemeKind) -> Palette {
             info: Color::Blue,
             local: Color::Magenta,
             pink: Color::LightMagenta,
-            light_blue: Color::LightBlue,
             compaction: Color::Indexed(90),
         },
         ThemeKind::Light => Palette {
@@ -127,7 +123,6 @@ pub fn palette(kind: ThemeKind) -> Palette {
             info: Color::Blue,
             local: Color::Magenta,
             pink: Color::Magenta,
-            light_blue: Color::Blue,
             compaction: Color::Indexed(90),
         },
     }
@@ -168,14 +163,18 @@ pub fn muted() -> Color {
 pub fn subtle() -> Color {
     palette(current_theme()).subtle
 }
-pub fn light_blue() -> Color {
-    palette(current_theme()).light_blue
-}
 pub fn warn_color() -> Color {
     palette(current_theme()).warn
 }
 pub fn ok_color() -> Color {
     palette(current_theme()).ok
+}
+
+/// Cargo's status-label colour (`Compiling` / `Building` / `Finished`):
+/// bold bright green — cargo emits `ESC[1m ESC[92m` (ANSI 92 = LightGreen).
+/// Theme-independent: cargo's own colour does not change with the palette.
+pub fn cargo_status_color() -> Color {
+    Color::LightGreen
 }
 pub fn err_color() -> Color {
     palette(current_theme()).err
@@ -323,6 +322,17 @@ mod tests {
     // ── ThemeKind / palette (pure — no global-state mutation) ────────────
 
     #[test]
+    fn cargo_status_color_is_ansi_bright_green() {
+        // cargo paints its `Building` / `Compiling` status label with
+        // ESC[1m ESC[92m — bold bright green (ANSI 92 = LightGreen), fixed
+        // regardless of the active palette.
+        assert_eq!(cargo_status_color(), Color::LightGreen);
+        set_theme(ThemeKind::Light);
+        assert_eq!(cargo_status_color(), Color::LightGreen);
+        set_theme(ThemeKind::Dark);
+    }
+
+    #[test]
     fn theme_kind_label_roundtrip() {
         assert_eq!(
             ThemeKind::from_label(ThemeKind::Dark.label()),
@@ -356,7 +366,6 @@ mod tests {
         assert_eq!(p.err, ERR);
         assert_eq!(p.info, INFO);
         assert_eq!(p.local, LOCAL);
-        assert_eq!(p.light_blue, LIGHT_BLUE);
     }
 
     #[test]

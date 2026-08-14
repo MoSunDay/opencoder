@@ -395,12 +395,6 @@ pub(super) async fn run_app(
                             {
                                 app_loop::LoopFlow::Quit => break,
                                 app_loop::LoopFlow::Proceed => {}
-                                        app_loop::LoopFlow::InstallTools => {
-                                    crate::install_tools::run(terminal, &mut chat);
-                                    dirty = true;
-                                    render_pending = true;
-                                    continue;
-                                }
                                 app_loop::LoopFlow::Redraw => continue,
                             }
                             continue;
@@ -477,9 +471,6 @@ pub(super) async fn run_app(
                                     .await;
                                     match f {
                                         app_loop::LoopFlow::Quit => break,
-                                        app_loop::LoopFlow::InstallTools => {
-                                            crate::install_tools::run(terminal, &mut chat); dirty = true; render_pending = true; continue;
-                                        }
                                         _ => push_history(&mut history, &mut hist_idx, &text),
                                     }
                                 } else if clean.is_empty() {
@@ -764,7 +755,6 @@ pub(super) async fn run_app(
                 match np_flow {
                     app_loop::LoopFlow::Quit => break,
                     app_loop::LoopFlow::Proceed => dirty = true,
-                    app_loop::LoopFlow::InstallTools => dirty = true,
                     app_loop::LoopFlow::Redraw => continue,
                 }
             }

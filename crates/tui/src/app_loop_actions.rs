@@ -123,8 +123,7 @@ pub(crate) async fn dispatch_mode_switch(
 ///
 /// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
-/// Notepad, Ps, Stop, Ap). Returns [`LoopFlow::InstallTools`] for
-/// `/install_tools` (handled one frame up). For mode-switch commands
+/// Notepad, Ps, Stop, Ap). For mode-switch commands
 /// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]).
 #[allow(clippy::too_many_arguments)]
@@ -240,11 +239,6 @@ pub(crate) async fn dispatch_slash_action(
         }
         SlashAction::Ap => {
             local_cmd::run("/ap", chat, config, cmd_tx, workdir).await;
-        }
-        // `/install_tools`: handled one frame up in `run_app` (needs the
-        // terminal handle to suspend/resume the screen). Decision only.
-        SlashAction::InstallTools => {
-            return LoopFlow::InstallTools;
         }
     }
     LoopFlow::Proceed

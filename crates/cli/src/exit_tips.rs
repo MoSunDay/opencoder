@@ -39,7 +39,7 @@ pub fn print_exit_tips() {
         ));
         lines.push(String::from(""));
         lines.push(String::from(
-            "    Setup:  ~/.opencoder/install-skills-dep.sh",
+            "    Setup:  opencode install-tools",
         ));
         lines.push(String::from(
             "    Then in TUI: press $ and type the skill name to activate.",

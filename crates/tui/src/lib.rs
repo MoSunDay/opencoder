@@ -16,7 +16,6 @@ pub mod image_chunk;
 pub mod image_render;
 pub mod image_util;
 pub mod input;
-pub mod install_tools;
 pub mod key_handler;
 pub mod keymap;
 pub mod keymap_menu;

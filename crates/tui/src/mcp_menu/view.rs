@@ -63,7 +63,7 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
 
     let title = match list.confirm_delete {
         Some(_) => " /mcp \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
-        None => " /mcp \u{2014} \u{2191}/\u{2193} select, Enter=toggle, e=edit, n=new, d=delete, Esc cancel ".to_string(),
+        None => " /mcp \u{2014} \u{2191}/\u{2193} select, \u{2190}/\u{2192} toggle, e=edit, n=new, d=delete, Enter/Esc close ".to_string(),
     };
     let block = crate::theme::rounded_block_plain().title(title);
 

@@ -1,6 +1,7 @@
 pub mod client;
 pub mod display;
 pub mod exit_tips;
+pub mod install_tools;
 pub mod run;
 mod run_image;
 pub mod server;
@@ -147,6 +148,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: SessionSub,
     },
+    /// Detect and install the optional tools dependencies (tmux). Runs the
+    /// embedded `install-skills-dep.sh` with inherited stdio (a sudo password
+    /// may be required), then re-seeds the dep-gated skills. Ported from the
+    /// former TUI `/install_tools` slash command.
+    InstallTools,
     /// Self-update: clone latest main, rebuild, and swap the PATH binary.
     /// Runs a built-in prompt through the headless agent so the agent itself
     /// performs the clone/build/replace steps (handling the busy case).

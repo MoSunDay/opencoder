@@ -21,7 +21,7 @@ async fn app() -> axum::Router {
         handles: opencoder_web::handle::new_handle_map(),
         client_override: None,
     });
-    opencoder_web::build_app(state, Some(TOKEN.into()))
+    opencoder_web::build_app(state, Some(TOKEN.into()), true)
 }
 
 #[tokio::test]

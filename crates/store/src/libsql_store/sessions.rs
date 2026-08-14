@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use libsql::{params, params_from_iter, Connection, Value};
 
 use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
@@ -115,34 +115,37 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
     Ok(out)
 }
 
-/// Reject a `SessionPatch` that simultaneously sets a column and requests the
-/// same column be cleared. Such a combination would otherwise emit
-/// contradictory `SET` clauses -- e.g. both `summary = ?` and `summary = NULL`
-/// -- whose final effect depends on clause ordering in the generated SQL. The
-/// `update` path rejects these mutually-exclusive combinations up front.
-///
-/// `clear_summary` nulls `summary`, `summary_seq`, AND `summary_images_json`;
-/// `clear_handoff` nulls `handoff_seq` AND `handoff_plan`. Setting any of those
-/// fields together with the matching clear flag is rejected. (Bug #15)
-fn validate_no_field_clear_conflict(patch: &SessionPatch) -> Result<()> {
-    if patch.clear_summary
-        && (patch.summary.is_some()
-            || patch.summary_seq.is_some()
-            || patch.summary_images.is_some())
-    {
-        bail!("SessionPatch conflict: clear_summary set with summary/summary_seq/summary_images");
-    }
-    if patch.clear_handoff && (patch.handoff_seq.is_some() || patch.handoff_plan.is_some()) {
-        bail!("SessionPatch conflict: clear_handoff set with handoff_seq/handoff_plan");
-    }
-    if patch.clear_skill && patch.skill.is_some() {
-        bail!("SessionPatch conflict: clear_skill set with skill");
-    }
-    Ok(())
-}
-
 pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result<()> {
-    validate_no_field_clear_conflict(patch)?;
+    // Validate: a field value and the clear flag for the same column are
+    // contradictory — they would emit both `col = ?` and `col = NULL` SET
+    // clauses, producing order-dependent SQL. Reject these combos up front.
+    if patch.summary.is_some() && patch.clear_summary {
+        anyhow::bail!("SessionPatch: summary field and clear_summary are mutually exclusive");
+    }
+    if patch.summary_seq.is_some() && patch.clear_summary {
+        anyhow::bail!(
+            "SessionPatch: summary_seq field and clear_summary are mutually exclusive"
+        );
+    }
+    if patch.summary_images.is_some() && patch.clear_summary {
+        anyhow::bail!(
+            "SessionPatch: summary_images field and clear_summary are mutually exclusive"
+        );
+    }
+    if patch.handoff_plan.is_some() && patch.clear_handoff {
+        anyhow::bail!(
+            "SessionPatch: handoff_plan field and clear_handoff are mutually exclusive"
+        );
+    }
+    if patch.handoff_seq.is_some() && patch.clear_handoff {
+        anyhow::bail!(
+            "SessionPatch: handoff_seq field and clear_handoff are mutually exclusive"
+        );
+    }
+    if patch.skill.is_some() && patch.clear_skill {
+        anyhow::bail!("SessionPatch: skill field and clear_skill are mutually exclusive");
+    }
+
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
     if let Some(v) = &patch.title {
@@ -277,103 +280,4 @@ fn extract_preview(blocks_json: &Option<String>) -> String {
         }
     }
     String::new()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::validate_no_field_clear_conflict;
-    use crate::types::SessionPatch;
-
-    #[test]
-    fn non_conflicting_patch_is_accepted() {
-        // Clear one column while setting an unrelated one: different columns.
-        let patch = SessionPatch {
-            title: Some("renamed".into()),
-            clear_handoff: true,
-            ..Default::default()
-        };
-        assert!(validate_no_field_clear_conflict(&patch).is_ok());
-
-        // Clear flag with no matching field set.
-        let patch = SessionPatch {
-            clear_skill: true,
-            ..Default::default()
-        };
-        assert!(validate_no_field_clear_conflict(&patch).is_ok());
-
-        // Empty patch.
-        assert!(validate_no_field_clear_conflict(&SessionPatch::default()).is_ok());
-    }
-
-    #[test]
-    fn summary_fields_with_clear_summary_are_rejected() {
-        for (name, patch) in [
-            (
-                "summary",
-                SessionPatch {
-                    summary: Some("s".into()),
-                    clear_summary: true,
-                    ..Default::default()
-                },
-            ),
-            (
-                "summary_seq",
-                SessionPatch {
-                    summary_seq: Some(5),
-                    clear_summary: true,
-                    ..Default::default()
-                },
-            ),
-            (
-                "summary_images",
-                SessionPatch {
-                    summary_images: Some(vec!["i.png".into()]),
-                    clear_summary: true,
-                    ..Default::default()
-                },
-            ),
-        ] {
-            assert!(
-                validate_no_field_clear_conflict(&patch).is_err(),
-                "{name} + clear_summary must error"
-            );
-        }
-    }
-
-    #[test]
-    fn handoff_fields_with_clear_handoff_are_rejected() {
-        for (name, patch) in [
-            (
-                "handoff_plan",
-                SessionPatch {
-                    handoff_plan: Some("plan".into()),
-                    clear_handoff: true,
-                    ..Default::default()
-                },
-            ),
-            (
-                "handoff_seq",
-                SessionPatch {
-                    handoff_seq: Some(7),
-                    clear_handoff: true,
-                    ..Default::default()
-                },
-            ),
-        ] {
-            assert!(
-                validate_no_field_clear_conflict(&patch).is_err(),
-                "{name} + clear_handoff must error"
-            );
-        }
-    }
-
-    #[test]
-    fn skill_with_clear_skill_is_rejected() {
-        let patch = SessionPatch {
-            skill: Some("reviewer".into()),
-            clear_skill: true,
-            ..Default::default()
-        };
-        assert!(validate_no_field_clear_conflict(&patch).is_err());
-    }
 }

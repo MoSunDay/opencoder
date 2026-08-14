@@ -150,8 +150,8 @@ impl Tool for QuestionTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user one clarifying question. Use ONLY when the answer would change the plan \
-         and the requirement is genuinely ambiguous; at most one question per turn."
+        "Ask the user a clarifying question. Use ONLY when the answer would change the plan \
+         and the requirement is genuinely ambiguous; you may ask several in one turn (one per call)."
     }
 
     fn parameters(&self) -> Value {
@@ -262,6 +262,24 @@ mod tests {
         assert!(!hub.is_attached());
         hub.attach();
         assert!(hub.is_attached());
+    }
+
+    /// Pins the description semantics (rules/01): the per-turn cap is gone —
+    /// several calls per turn are fine (one question per call) — while the
+    /// "genuinely ambiguous" gate survives to prevent over-asking.
+    #[test]
+    fn description_allows_several_questions_per_turn() {
+        let tool = QuestionTool::new(QuestionHub::new());
+        let d = tool.description();
+        assert!(!d.contains("at most one"), "per-turn cap must be gone: {d}");
+        assert!(
+            d.contains("several in one turn"),
+            "batched wording must be advertised: {d}"
+        );
+        assert!(
+            d.contains("genuinely ambiguous"),
+            "gate wording must survive: {d}"
+        );
     }
 
     #[tokio::test]

@@ -72,7 +72,11 @@ impl SessionUiState {
             follow,
             queue_scroll,
             sys_tokens,
-            queue_items: queue_items.to_vec(),
+            // Never persist optimistic temp rows (negative seqs): their admission is
+            // still in flight on the admitter actor; a switch-back restore must show
+            // only rows the store actually owns (the authoritative mirror re-reads the
+            // store at the next turn boundary / resume path).
+            queue_items: queue_items.iter().filter(|(s, _)| *s >= 0).cloned().collect(),
             active_skill: active_skill.clone(),
             active_skill_body: active_skill_body.clone(),
             agent_name: chat.agent.clone(),
@@ -150,6 +154,27 @@ mod tests {
         assert_eq!(snap.active_skill, skill);
         assert_eq!(snap.active_skill_body, skill_body);
         assert_eq!(snap.agent_name, "act");
+    }
+
+    #[test]
+    fn snapshot_drops_optimistic_temp_queue_rows() {
+        // Negative seqs are optimistic temp rows whose admission is still in
+        // flight on the admitter actor; a snapshot must only carry rows the
+        // store actually owns.
+        let queues = vec![(-2_i64, "temp".into()), (7, "real".into())];
+        let snap = SessionUiState::snapshot(
+            false,
+            &sample_chat(),
+            &[],
+            0,
+            true,
+            0,
+            0,
+            &queues,
+            &None,
+            &None,
+        );
+        assert_eq!(snap.queue_items, vec![(7_i64, "real".to_string())]);
     }
 
     fn make_user(id: &str, text: &str, synthetic: bool) -> Message {

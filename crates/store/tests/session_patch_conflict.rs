@@ -84,6 +84,14 @@ async fn field_and_clear_combinations_are_rejected() {
             },
         ),
         (
+            "requirement + clear_requirement",
+            SessionPatch {
+                requirement: Some("r".into()),
+                clear_requirement: true,
+                ..Default::default()
+            },
+        ),
+        (
             "agent + clear_agent",
             SessionPatch {
                 agent: Some("act".into()),

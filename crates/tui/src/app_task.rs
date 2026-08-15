@@ -149,6 +149,9 @@ pub(crate) async fn switch_session(
     };
     let (ntx, nrx) = mpsc::channel::<UiEvent>(crate::worker::UI_EVENT_CAPACITY);
     let (n_cmd_tx, mut n_cmd_rx) = mpsc::channel::<UiCmd>(64);
+    // Capture the persisted requirement before `new_session` is moved into
+    // the worker task; applied after the transcript rebuild below.
+    let new_requirement = new_session.requirement.clone();
     let session_for_worker = new_session;
     let agent_name_for_tokens = session_for_worker.agent.name.clone();
     let workdir_for_tokens = session_for_worker.working_dir.clone();
@@ -231,6 +234,12 @@ pub(crate) async fn switch_session(
         *active_skill = None;
         *active_skill_body = None;
     }
+    // Restore the annotation from the persisted requirement (mirrors the
+    // startup path in app.rs) so reopening /ann doesn't seed-and-overwrite
+    // with first_prompt. Placed after the snapshot restore so the persisted
+    // requirement always wins; `None` for TaskPick::New correctly leaves
+    // the annotation unset.
+    chat.annotation_text = new_requirement;
     *running = false; // chat rebuilt from store on switch-back
     input.clear();
     *cursor_idx = 0;

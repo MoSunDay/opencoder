@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 
 # client 模块
 
@@ -16,7 +16,7 @@ Commit: (working-tree, pre-initial-commit)
 - `SseFrameDecoder` / `SseFrame`（`src/sse.rs`）：增量 SSE 解码器，UTF-8 边界安全（保留不完整多字节尾）、`\r\n`/`\r` 归一化；**额外捕获 `event:` 字段**（LLM 客户端解码器只取 `data:`），使远端客户端能从 server 的 wire 格式重建细粒度 `SessionEvent` 变体。
 
 ## 主流程
-`opencode client`（`crates/cli/src/client.rs::client_run`）：`resolve_token`（`--token` > `OPENCODER_SERVER_TOKEN`）→ `Remote::new` → 解析 session（显式 `--session` > `--continue` 取最近 > 新建）→ `last_event_seq` 快照游标（只流本次 prompt 产生的事件）→ `post_prompt` → `events` 循环，经 `SessionEvent::from_sse` 解码、`print_event` 回显，遇 `Done` 退出；`transcript_reset` 触发 `get_messages` 刷新（压缩重建路径）。
+`opencode client`（`crates/cli/src/client.rs::client_run`）：`resolve_token`（`--token` > `OPENCODER_SERVER_TOKEN`）→ `Remote::new` → 解析 session（显式 `--session` > `--continue` 取最近 > 新建）→ `last_event_seq` 快照游标（只流本次 prompt 产生的事件）→ `post_prompt` → `events` 循环，经 `SessionEvent::from_sse` 解码、`print_event` 回显，遇 `Done` 退出；`transcript_reset` 触发 `get_messages` 刷新（压缩重建路径）。流转发任务在 rx 全部 drop 时经 `tx.closed()` 立即退出（不等 server 关流），避免悬挂 HTTP 连接与后台任务（`tests/events_drop_exits.rs`）。
 
 ## 依赖与接口
 - 依赖：`opencoder-core`（`Message` / `SseEvt` / `now_ms` / `build_http_client_with_read_timeout`）、reqwest、tokio、futures、serde / serde_json、anyhow、tracing。

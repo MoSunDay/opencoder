@@ -1,4 +1,4 @@
-Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
+Commit: 366737aef3433255433c69620644e8b79a11f708
 
 # session 模块
 
@@ -8,7 +8,8 @@ agent 运行时核心。驱动「接收输入 → 调 LLM → 执行工具 → �
 ## 边界与非目标
 - 不做 HTTP / 终端 IO（由 web/cli/tui 负责）。
 - 不直接连数据库驱动——经 `Store` trait 抽象。
-- MCP 全链路已实现：server 配置 + 条件性 system prompt 注入（`build_system` 经 `mcp_section` 将 enabled server 信息注入）；MCP 客户端连接/工具发现/工具调用由 `mcp` 模块提供（见下「依赖与接口」）。仅在 config 至少有一个 `enabled == true` server 时激活，否则零开销。权限确认（当前未实现）。
+- MCP 全链路已实现：server 配置 + 条件性 system prompt 注入（`build_system` 经 `mcp_section` 将适用于当前 `AgentMode` 的 enabled server 信息注入）；MCP 客户端连接/工具发现/工具调用由 `mcp` 模块提供（见下「依赖与接口」）。每个 server 的 `inject_to=parent|subagents|all` 同时约束提示段和 `mcp__...` 工具可见性；workflow 调度 Agent 始终不获得 MCP 执行工具。仅在 config 至少有一个 enabled server 时建立连接，否则零开销。
+- CLI 注册是纯提示注入，不创建工具或执行进程：`Config.cli` 的 enabled、非空条目经 `cli_section` 聚合成 `## Registered CLI`，并按 `inject_to` 仅投递给父 Agent、explore/build 子 Agent或双方；`runtime_sections` 与 MCP 段合并后交给 `build_system`。
 - skills 仅承接「可选的系统提示注入」：`SessionState.skill_prompt`（`Arc<Mutex<Option<String>>>`）是共享可变状态——TUI 持有 `Arc` 克隆并直接写入（绕过 cmd channel），`run_one_llm_call` 每 turn 经 `skill_prompt_cloned()` 读取最新值。每轮 `build_system` 把它作为 `## Active skill` 段追加到系统提示末尾（最高优先级）。skill 的发现/解析/选择 UI 不在本模块（见 core 的 `skill` 模块与 tui 的 `menu` 模块）。
 
 ## 关键抽象

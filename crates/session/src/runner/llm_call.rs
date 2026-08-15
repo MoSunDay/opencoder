@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use opencoder_core::{AgentKind, MessageUsage, ToolArc};
+use opencoder_core::{AgentMode, Config, MessageUsage, ToolArc};
 use opencoder_llm::tool_call::CompletedToolCall;
 use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent, Usage};
 
@@ -17,12 +17,17 @@ pub(super) async fn run_one_llm_call(
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (impl FnMut(SessionEvent) + Send + ?Sized),
 ) -> Result<(String, String, Vec<CompletedToolCall>, Option<Usage>)> {
-    let mcp = crate::prompt::mcp_section(&crate::mcp::pool::status_for(&session.id));
+    let mcp_status = mcp_status_for_agent(session, registry);
+    let mcp = crate::prompt::mcp_section(&mcp_status);
+    let cli = (session.agent.name != "workflow")
+        .then(|| crate::prompt::cli_section(&session.config.enabled_cli_for(session.agent.mode)))
+        .flatten();
+    let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
     let system = build_system(
         &session.agent,
         &session.working_dir,
         session.skill_prompt_cloned().as_deref(),
-        mcp.as_deref(),
+        runtime.as_deref(),
     );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
@@ -34,10 +39,8 @@ pub(super) async fn run_one_llm_call(
         .iter()
         .filter(|(name, _)| {
             if crate::mcp::is_mcp_tool(name.as_str()) {
-                // MCP tools: visible to all non-subagent agents. Subagents
-                // (explore/build) are intentionally sandboxed — they never
-                // see MCP tools.
-                return !matches!(session.agent.kind, AgentKind::Subagent);
+                return session.agent.name != "workflow"
+                    && mcp_tool_allowed(&session.config, session.agent.mode, name);
             }
             session.agent.tools.allows(name)
                 && (!crate::tools::latent::is_latent_tool(name.as_str())
@@ -134,6 +137,40 @@ pub(super) async fn run_one_llm_call(
     let (text, tool_calls, usage) =
         completed.ok_or_else(|| anyhow!("stream ended without completion"))?;
     Ok((text, reasoning_buf, tool_calls, usage))
+}
+
+fn mcp_tool_allowed(config: &Config, mode: AgentMode, tool_name: &str) -> bool {
+    config
+        .enabled_mcp_servers_for(mode)
+        .into_iter()
+        .any(|(name, _)| {
+            let prefix = format!("mcp__{}__", name.replace(['-', '.'], "_"));
+            tool_name.starts_with(&prefix)
+        })
+}
+
+fn mcp_status_for_agent(
+    session: &SessionState,
+    registry: &HashMap<String, ToolArc>,
+) -> Vec<(String, crate::mcp::ConnStatus)> {
+    let applicable = session.config.enabled_mcp_servers_for(session.agent.mode);
+    let live: HashMap<_, _> = crate::mcp::pool::status_for(&session.id)
+        .into_iter()
+        .collect();
+    applicable
+        .into_iter()
+        .map(|(name, _)| {
+            let status = live.get(&name).cloned().unwrap_or_else(|| {
+                let prefix = format!("mcp__{}__", name.replace(['-', '.'], "_"));
+                let tool_count = registry
+                    .keys()
+                    .filter(|tool| tool.starts_with(&prefix))
+                    .count();
+                crate::mcp::ConnStatus::Connected { tool_count }
+            });
+            (name, status)
+        })
+        .collect()
 }
 
 pub(super) fn core_usage(u: &Usage) -> MessageUsage {
@@ -305,12 +342,11 @@ mod tests {
     #[tokio::test]
     async fn mcp_tools_visible_to_act_agent() {
         let mock = Arc::new(
-            MockChatClient::new()
-                .with_default(vec![LlmEvent::Completed {
-                    text: "done".into(),
-                    tool_calls: vec![],
-                    usage: None,
-                }]),
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "done".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
         );
         let client = mock.clone() as Arc<dyn ChatStream>;
         let session = make_session(client);
@@ -333,12 +369,11 @@ mod tests {
     #[tokio::test]
     async fn mcp_tools_hidden_from_subagent() {
         let mock = Arc::new(
-            MockChatClient::new()
-                .with_default(vec![LlmEvent::Completed {
-                    text: "done".into(),
-                    tool_calls: vec![],
-                    usage: None,
-                }]),
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "done".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
         );
         let client = mock.clone() as Arc<dyn ChatStream>;
         let agent = resolve_agent("explore").unwrap();
@@ -365,4 +400,44 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn mcp_tools_hidden_from_workflow_agent() {
+        let mock = Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: r#"{"operation":"suspend","reason":"test"}"#.into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let agent = resolve_agent("workflow").unwrap();
+        let mut config = Config::default();
+        config.cli.insert(
+            "fk-cli".into(),
+            opencoder_core::CliConfig {
+                enabled: true,
+                inject_to: opencoder_core::InjectionTarget::Parent,
+                content: "WORKFLOW_MUST_NOT_SEE_CLI".into(),
+            },
+        );
+        let session =
+            SessionState::new("test-workflow", agent, config, client, std::env::temp_dir());
+        let registry = registry_with_mcp();
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        assert!(
+            reqs[0].tools.is_empty(),
+            "workflow agent must not receive execution tools: {:?}",
+            reqs[0].tools
+        );
+        assert!(
+            !reqs[0]
+                .to_body()
+                .to_string()
+                .contains("WORKFLOW_MUST_NOT_SEE_CLI"),
+            "workflow agent must not receive registered CLI instructions"
+        );
+    }
 }

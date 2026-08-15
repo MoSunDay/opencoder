@@ -2,6 +2,7 @@
 //! Save produces a JSON merge-patch for `Config::save`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use opencoder_core::InjectionTarget;
 
 use super::list::McpEntry;
 use super::patch::save_mcp_json;
@@ -11,6 +12,7 @@ use super::state::{McpMenu, McpOutcome};
 pub enum McpField {
     Name,
     Enabled,
+    InjectTo,
     Command,
     Args,
     Url,
@@ -20,7 +22,8 @@ impl McpField {
     fn next(self) -> Self {
         match self {
             McpField::Name => McpField::Enabled,
-            McpField::Enabled => McpField::Command,
+            McpField::Enabled => McpField::InjectTo,
+            McpField::InjectTo => McpField::Command,
             McpField::Command => McpField::Args,
             McpField::Args => McpField::Url,
             McpField::Url => McpField::Name,
@@ -30,7 +33,8 @@ impl McpField {
         match self {
             McpField::Name => McpField::Url,
             McpField::Enabled => McpField::Name,
-            McpField::Command => McpField::Enabled,
+            McpField::InjectTo => McpField::Enabled,
+            McpField::Command => McpField::InjectTo,
             McpField::Args => McpField::Command,
             McpField::Url => McpField::Args,
         }
@@ -42,6 +46,7 @@ pub struct McpForm {
     pub name_cursor: usize,
     pub original_name: Option<String>,
     pub enabled: bool,
+    pub inject_to: InjectionTarget,
     pub command: String,
     pub command_cursor: usize,
     pub args: String,
@@ -61,6 +66,7 @@ impl McpForm {
             name_cursor: entry.name.chars().count(),
             original_name: Some(entry.name.clone()),
             enabled: entry.enabled,
+            inject_to: entry.inject_to,
             command: command.clone(),
             command_cursor: command.chars().count(),
             args: args_joined.clone(),
@@ -77,6 +83,7 @@ impl McpForm {
             name_cursor: 0,
             original_name: None,
             enabled: false,
+            inject_to: InjectionTarget::Parent,
             command: String::new(),
             command_cursor: 0,
             args: String::new(),
@@ -104,12 +111,12 @@ impl McpForm {
                 insert_at_cursor(&mut self.args, &mut self.args_cursor, text);
             }
             McpField::Url => insert_at_cursor(&mut self.url, &mut self.url_cursor, text),
-            McpField::Enabled => {}
+            McpField::Enabled | McpField::InjectTo => {}
         }
     }
 
     fn is_text_field(&self) -> bool {
-        !matches!(self.field, McpField::Enabled)
+        !matches!(self.field, McpField::Enabled | McpField::InjectTo)
     }
 
     fn cursor_move_left(&mut self) {
@@ -118,7 +125,7 @@ impl McpForm {
             McpField::Command => self.command_cursor = self.command_cursor.saturating_sub(1),
             McpField::Args => self.args_cursor = self.args_cursor.saturating_sub(1),
             McpField::Url => self.url_cursor = self.url_cursor.saturating_sub(1),
-            McpField::Enabled => self.field = self.field.prev(),
+            McpField::Enabled | McpField::InjectTo => self.field = self.field.prev(),
         }
     }
 
@@ -148,7 +155,7 @@ impl McpForm {
                     self.url_cursor += 1;
                 }
             }
-            McpField::Enabled => self.field = self.field.next(),
+            McpField::Enabled | McpField::InjectTo => self.field = self.field.next(),
         }
     }
 
@@ -158,7 +165,7 @@ impl McpForm {
             McpField::Command => backspace_at(&mut self.command, &mut self.command_cursor),
             McpField::Args => backspace_at(&mut self.args, &mut self.args_cursor),
             McpField::Url => backspace_at(&mut self.url, &mut self.url_cursor),
-            McpField::Enabled => {}
+            McpField::Enabled | McpField::InjectTo => {}
         }
     }
 
@@ -174,7 +181,7 @@ impl McpForm {
                 insert_at_cursor(&mut self.args, &mut self.args_cursor, &c.to_string())
             }
             McpField::Url => insert_at_cursor(&mut self.url, &mut self.url_cursor, &c.to_string()),
-            McpField::Enabled => {}
+            McpField::Enabled | McpField::InjectTo => {}
         }
     }
 
@@ -207,6 +214,7 @@ impl McpForm {
         Some(McpOutcome::Save(save_mcp_json(
             name,
             self.enabled,
+            self.inject_to,
             cmd,
             &args,
             url,
@@ -272,6 +280,8 @@ pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu
         KeyCode::Enter => {
             if form.field == McpField::Enabled {
                 form.enabled = !form.enabled;
+            } else if form.field == McpField::InjectTo {
+                form.inject_to = form.inject_to.next();
             } else if let Some(outcome) = form.build_save() {
                 return (outcome, None);
             }
@@ -280,8 +290,10 @@ pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu
         KeyCode::Char(c) => {
             if form.is_text_field() {
                 form.type_char(c);
-            } else if c == ' ' {
+            } else if c == ' ' && form.field == McpField::Enabled {
                 form.enabled = !form.enabled;
+            } else if c == ' ' && form.field == McpField::InjectTo {
+                form.inject_to = form.inject_to.next();
             }
         }
         _ => {}
@@ -295,7 +307,7 @@ fn current_buf_cursor(form: &mut McpForm) -> (&mut String, &mut usize) {
         McpField::Command => (&mut form.command, &mut form.command_cursor),
         McpField::Args => (&mut form.args, &mut form.args_cursor),
         McpField::Url => (&mut form.url, &mut form.url_cursor),
-        McpField::Enabled => unreachable!(),
+        McpField::Enabled | McpField::InjectTo => unreachable!(),
     }
 }
 

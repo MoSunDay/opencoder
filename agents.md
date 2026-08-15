@@ -1,4 +1,4 @@
-Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
+Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 
 # OpenCoder 逻辑地图
 
@@ -6,13 +6,13 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 
 ## 模块索引
 
-- [agents/store](agents/store/index.md) — 持久化抽象层。`Store` trait + libsql 实现（WAL，本地嵌入）。所有 session/message/input/event 持久化的唯一出口。未来可切其它 Rust SQLite 实现。
+- [agents/store](agents/store/index.md) — 持久化抽象层。`Store` trait + libsql 实现（WAL，本地嵌入）。所有 session/message/input/event/subagent 与 TODO 工作流持久化的唯一出口。未来可切其它 Rust SQLite 实现。
 - [agents/llm](agents/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` trait + `MockChatClient` + token 估算器。
-- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册、subagent 调度（explore/build + libsql 追踪）、plan 模式 bash 写拦截（bash_guard）、压缩、resume、title 生成、cancel。
+- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册（内建 + MCP + question）、subagent 调度（explore/build + libsql 追踪）、plan 模式 bash 写拦截（bash_guard）、压缩、resume、title 生成、cancel。
 - [agents/core](agents/core/index.md) — 共享类型与 Config（模型/压缩/上下文窗口/small_model 全配置化）。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理（prompt admit + 事件流 + 运行时切换 + interrupt）。
 - [agents/client](agents/client/index.md) — 远端 server 的瘦客户端（`opencode client`）：reqwest 转发每个请求到 server 并解码 SSE 事件流，本地不持数据、不调 LLM。
-- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/server/client/config/models/session 子命令，`ts` 别名 `rs`；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
+- [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/server/client/config/models/session/todos/update/install-tools 子命令，`ts` 别名 `rs`；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
 - [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流运行时：父 Workflow Session 调度和验收，每个 TODO 使用独立 Primary Session 执行，支持依赖、并发、恢复、回退与可选 debug 投影。
 

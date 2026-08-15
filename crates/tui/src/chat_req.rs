@@ -3,7 +3,6 @@
 //! Extracted to a sibling module to keep `chat.rs` under its line cap.
 
 use crate::chat::ChatView;
-use crate::terminal_text::sanitize_multiline;
 
 impl ChatView {
     /// Return the editable annotation text: prefer the explicitly saved
@@ -17,10 +16,10 @@ impl ChatView {
         self.first_prompt.clone()
     }
 
-    /// Save the annotation text (sanitized) for the current session.
+    /// Save the annotation text verbatim (byte-for-byte, matching the
+    /// persisted `sessions.requirement`).
     pub fn update_annotation_text(&mut self, text: &str) {
-        let text = sanitize_multiline(text);
-        self.annotation_text = Some(text.into_owned());
+        self.annotation_text = Some(text.to_string());
     }
 }
 
@@ -61,9 +60,12 @@ mod tests {
     }
 
     #[test]
-    fn update_annotation_text_sanitizes() {
+    fn update_annotation_text_preserves_raw_bytes() {
         let mut chat = ChatView::default();
-        chat.update_annotation_text("hello\r\nworld");
-        assert_eq!(chat.annotation_text.as_deref(), Some("hello\nworld"));
+        chat.update_annotation_text("tab\there\r\nbell\u{7}");
+        assert_eq!(
+            chat.annotation_text.as_deref(),
+            Some("tab\there\r\nbell\u{7}")
+        );
     }
 }

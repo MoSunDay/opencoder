@@ -101,6 +101,11 @@ pub struct SessionPatch {
     pub updated_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requirement: Option<String>,
+    /// When true, sets `requirement` to NULL (clears the user annotation).
+    /// Used separately from `requirement: None` (which means "don't touch") so
+    /// an explicit empty annotation save can be distinguished from no-op.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_requirement: bool,
 }
 
 fn is_false(b: &bool) -> bool {

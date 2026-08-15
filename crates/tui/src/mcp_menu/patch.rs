@@ -48,7 +48,7 @@ mod tests {
         let v = save_mcp_json(
             "myserver",
             true,
-            InjectionTarget::Parent,
+            InjectionTarget::parent_only(),
             Some("npx"),
             &args,
             Some("http://x"),
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn save_omits_empty_optional_fields() {
-        let v = save_mcp_json("bare", false, InjectionTarget::Parent, None, &[], None);
+        let v = save_mcp_json("bare", false, InjectionTarget::parent_only(), None, &[], None);
         assert_eq!(v["mcp_servers"]["bare"]["enabled"], false);
         assert!(v["mcp_servers"]["bare"].get("command").is_none());
         assert!(v["mcp_servers"]["bare"].get("args").is_none());

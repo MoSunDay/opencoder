@@ -22,7 +22,7 @@ fn mock_server_path() -> PathBuf {
 fn mock_server_config() -> McpServerConfig {
     McpServerConfig {
         enabled: true,
-        inject_to: opencoder_core::InjectionTarget::Parent,
+        inject_to: opencoder_core::InjectionTarget::parent_only(),
         command: Some(mock_server_path().to_string_lossy().to_string()),
         args: vec![],
         env: HashMap::new(),

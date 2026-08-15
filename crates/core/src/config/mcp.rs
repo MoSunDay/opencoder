@@ -18,7 +18,7 @@ pub struct McpServerConfig {
     #[serde(default)]
     pub enabled: bool,
     /// Agent tier that receives this server's prompt entry and tools.
-    #[serde(default, skip_serializing_if = "InjectionTarget::is_parent")]
+    #[serde(default, skip_serializing_if = "InjectionTarget::is_parent_default")]
     pub inject_to: InjectionTarget,
     /// Executable to spawn for stdio transport (e.g. `"npx"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,10 +41,11 @@ pub(super) fn merge(cfg: &mut McpServerConfig, obj: &serde_json::Map<String, ser
     if let Some(b) = obj.get("enabled").and_then(|v| v.as_bool()) {
         cfg.enabled = b;
     }
-    if let Some(target) = obj.get("inject_to").and_then(|v| v.as_str()) {
-        if let Ok(target) = serde_json::from_value(serde_json::Value::String(target.to_string())) {
-            cfg.inject_to = target;
-        }
+    if let Some(target) = obj
+        .get("inject_to")
+        .and_then(|v| serde_json::from_value::<InjectionTarget>(v.clone()).ok())
+    {
+        cfg.inject_to = target;
     }
     if let Some(c) = obj.get("command").and_then(|v| v.as_str()) {
         cfg.command = if c.is_empty() {
@@ -98,7 +99,7 @@ mod tests {
         env.insert("API_KEY".to_string(), "secret".to_string());
         let cfg = McpServerConfig {
             enabled: true,
-            inject_to: InjectionTarget::Parent,
+            inject_to: InjectionTarget::parent_only(),
             command: Some("npx".to_string()),
             args: vec!["-y".to_string(), "@mcp/server".to_string()],
             env,
@@ -131,6 +132,23 @@ mod tests {
         merge(&mut cfg, patch.as_object().unwrap());
         assert!(cfg.enabled);
         assert_eq!(cfg.command.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn merge_accepts_legacy_string_and_array_inject_to() {
+        let mut cfg = McpServerConfig::default();
+        merge(
+            &mut cfg,
+            serde_json::json!({ "inject_to": "subagents" }).as_object().unwrap(),
+        );
+        assert_eq!(cfg.inject_to, InjectionTarget::subagents());
+        merge(
+            &mut cfg,
+            serde_json::json!({ "inject_to": ["parent", "build"] }).as_object().unwrap(),
+        );
+        assert!(cfg.inject_to.parent);
+        assert!(!cfg.inject_to.explore);
+        assert!(cfg.inject_to.build);
     }
 
     #[test]

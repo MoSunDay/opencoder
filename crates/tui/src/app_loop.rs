@@ -263,6 +263,7 @@ pub(crate) async fn fold_ui_events(
     store: &Arc<dyn Store>,
     session_id: &str,
     queue_items: &mut Vec<(i64, String)>,
+    admit: &mut crate::queue_admitter::AdmitUiState,
     running: &mut bool,
     cancelled: &mut bool,
     drain_pending: &mut bool,
@@ -334,6 +335,10 @@ pub(crate) async fn fold_ui_events(
                     chat.apply(&sev);
                 }
                 if let SessionEvent::QueueConsumed { seq, text } = &sev {
+                    // Ledger for optimistic-admit reconciliation: if the drain
+                    // consumed a row whose admit completion is still in flight,
+                    // the completion must drop (never resurrect) the temp row.
+                    crate::queue_admitter::note_consumed(admit, *seq);
                     // Echo at consume time (prompt was visible in pending panel).
                     // Prefer the text carried by the event (robust against a
                     // saturated UI channel dropping the mirror update); fall

@@ -236,3 +236,96 @@ fn merge_into_applies_enable_tmux_session() {
     super::merge::merge_into(&mut c, serde_json::json!({ "enable_tmux_session": true }));
     assert_eq!(c.enable_tmux_session, Some(true));
 }
+
+#[cfg(test)]
+mod inject_to_filtering {
+    use super::super::{CliConfig, Config, McpServerConfig};
+    use crate::AgentMode;
+    use crate::InjectionTarget;
+
+    fn config_with(target: InjectionTarget) -> Config {
+        let mut config = Config::default();
+        config.cli.insert(
+            "probe".into(),
+            CliConfig {
+                enabled: true,
+                inject_to: target,
+                content: "c".into(),
+            },
+        );
+        config.mcp_servers.insert(
+            "probe".into(),
+            McpServerConfig {
+                enabled: true,
+                inject_to: target,
+                ..Default::default()
+            },
+        );
+        config
+    }
+
+    #[test]
+    fn enabled_for_filters_by_agent_name_within_subagents() {
+        let explore_only = InjectionTarget {
+            parent: false,
+            explore: true,
+            build: false,
+        };
+        let config = config_with(explore_only);
+        assert_eq!(
+            config
+                .enabled_cli_for("explore", AgentMode::Subagent)
+                .len(),
+            1
+        );
+        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 0);
+        assert_eq!(config.enabled_cli_for("act", AgentMode::Primary).len(), 0);
+
+        let mut cli = config.enabled_mcp_servers_for("explore", AgentMode::Subagent);
+        assert_eq!(cli.len(), 1);
+        cli = config.enabled_mcp_servers_for("build", AgentMode::Subagent);
+        assert!(cli.is_empty());
+    }
+
+    #[test]
+    fn parent_flag_covers_every_primary_agent() {
+        let config = config_with(InjectionTarget::parent_only());
+        for name in ["act", "plan", "command"] {
+            assert_eq!(
+                config.enabled_cli_for(name, AgentMode::Primary).len(),
+                1,
+                "{name} is a primary agent"
+            );
+            assert_eq!(
+                config
+                    .enabled_mcp_servers_for(name, AgentMode::Primary)
+                    .len(),
+                1
+            );
+        }
+        assert!(config
+            .enabled_mcp_servers_for("explore", AgentMode::Subagent)
+            .is_empty());
+    }
+
+    #[test]
+    fn legacy_subagents_value_loads_and_filters_to_both_subagents() {
+        // A config written by an older build says "subagents".
+        let json = r#"{"cli": {"old": {"enabled": true, "inject_to": "subagents", "content": "x"}}}"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let config = Config::default().merged_with(&value);
+        assert_eq!(config.enabled_cli_for("explore", AgentMode::Subagent).len(), 1);
+        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 1);
+        assert!(config.enabled_cli_for("act", AgentMode::Primary).is_empty());
+    }
+
+    #[test]
+    fn legacy_all_value_loads_into_every_agent() {
+        let json = r#"{"cli": {"old": {"enabled": true, "inject_to": "all", "content": "x"}}}"#;
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let config = Config::default().merged_with(&value);
+        assert_eq!(config.enabled_cli_for("act", AgentMode::Primary).len(), 1);
+        assert_eq!(config.enabled_cli_for("explore", AgentMode::Subagent).len(), 1);
+        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 1);
+    }
+}

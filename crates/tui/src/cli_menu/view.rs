@@ -4,6 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
+use super::content_dialog::{ContentDialog, VIEW_LINES};
 use super::{CliField, CliForm, CliList, CliMenu};
 
 fn focus() -> Style {
@@ -19,7 +20,15 @@ fn dim() -> Style {
 pub fn render_cli_popup(frame: &mut Frame, area: Rect, composer_top: u16, menu: &CliMenu) {
     match menu {
         CliMenu::List(list) => render_list(frame, area, composer_top, list),
-        CliMenu::Form(form) => render_form(frame, area, composer_top, form),
+        CliMenu::Form(form) => {
+            render_form(frame, area, composer_top, form);
+            if let Some(dialog) = form.scope_dialog.as_ref() {
+                crate::scope_dialog::render_scope_dialog(frame, area, dialog);
+            }
+            if let Some(dialog) = form.content_dialog.as_ref() {
+                render_content_dialog(frame, area, dialog);
+            }
+        }
     }
 }
 
@@ -142,9 +151,9 @@ fn render_form(frame: &mut Frame, area: Rect, top: u16, form: &CliForm) {
         ),
         field(
             "inject to:",
-            form.inject_to.label().into(),
+            form.inject_to.label(),
             form.field == CliField::InjectTo,
-            "Space/Enter cycle",
+            "Space/Enter pick",
         ),
         field(
             "content:",
@@ -154,7 +163,7 @@ fn render_form(frame: &mut Frame, area: Rect, top: u16, form: &CliForm) {
                 content
             },
             form.field == CliField::Content,
-            "type/paste usage contract, Enter=save",
+            "Enter multiline editor",
         ),
     ];
     let title = format!(" /cli {mode} — Tab/↑/↓ field, ←/→ cursor, Enter save, Esc cancel ");
@@ -180,5 +189,51 @@ fn render_form(frame: &mut Frame, area: Rect, top: u16, form: &CliForm) {
     };
     if let Some(row) = row {
         frame.set_cursor_position((area.x + 1 + 11 + cursor as u16, area.y + 1 + row));
+    }
+}
+
+// ── multi-line content editor overlay ──────────────────────────────────────
+
+/// Centered overlay rect for the editor: title + VIEW_LINES + borders.
+fn content_dialog_area(area: Rect) -> Rect {
+    let h = (VIEW_LINES as u16 + 2).min(area.height.saturating_sub(1).max(1));
+    let w = 72u16.min(area.width.saturating_sub(2));
+    Rect::new(
+        area.x + area.width.saturating_sub(w) / 2,
+        area.y + area.height.saturating_sub(h) / 2,
+        w,
+        h,
+    )
+}
+
+/// Render the multi-line editor over `area` (the full popup surface) and
+/// place the terminal cursor at the dialog's logical cursor position.
+pub fn render_content_dialog(frame: &mut Frame, area: Rect, dialog: &ContentDialog) {
+    let popup = content_dialog_area(area);
+    frame.render_widget(Clear, popup);
+    let (cursor_line, cursor_col) = dialog.line_col();
+    let inner_w = popup.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = dialog
+        .text
+        .split('\n')
+        .skip(dialog.scroll)
+        .take(VIEW_LINES)
+        .map(|l| {
+            let shown: String = l.chars().take(inner_w).collect();
+            Line::styled(
+                format!(" {shown}"),
+                Style::default().fg(crate::theme::text()),
+            )
+        })
+        .collect();
+    let title = " content — Enter newline, Ctrl+S apply, Esc cancel ";
+    frame.render_widget(
+        Paragraph::new(lines).block(crate::theme::rounded_block_plain().title(title)),
+        popup,
+    );
+    let visible_line = cursor_line.saturating_sub(dialog.scroll) as u16;
+    if visible_line < VIEW_LINES as u16 {
+        let col = (cursor_col as u16).min(inner_w.saturating_sub(1) as u16);
+        frame.set_cursor_position((popup.x + 1 + col, popup.y + 1 + visible_line));
     }
 }

@@ -32,7 +32,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 8, "schema_version must be 8 after bootstrap");
+    assert_eq!(v, 9, "schema_version must be 9 after bootstrap");
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 after migration");
+        assert_eq!(v, 9, "schema version must be 9 after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -138,7 +138,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 8, "schema version stays 8 after idempotent re-open");
+    assert_eq!(v, 9, "schema version stays 9 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -234,7 +234,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 after v2→v3 migration");
+        assert_eq!(v, 9, "schema version must be 9 after v2→v3 migration");
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
@@ -249,7 +249,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 8, "schema version stays 8 after idempotent re-open");
+    assert_eq!(v, 9, "schema version stays 9 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -337,7 +337,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 after migration");
+        assert_eq!(v, 9, "schema version must be 9 after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -367,7 +367,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 8, "schema version stays 8 after idempotent re-open");
+    assert_eq!(v, 9, "schema version stays 9 after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -416,7 +416,10 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
     // (1) Pre-existing row survives; the new column is NULL -> empty vec.
     let m0 = store.get_session("s6").await.unwrap().unwrap();
     assert_eq!(m0.id, "s6");
-    assert!(m0.summary_images.is_empty(), "v6 row: summary_images reads as empty");
+    assert!(
+        m0.summary_images.is_empty(),
+        "v6 row: summary_images reads as empty"
+    );
 
     // (2) The migrated column round-trips through SessionPatch.
     store
@@ -437,7 +440,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         "migrated summary_images_json round-trips"
     );
 
-    // (3) Schema version bumped to 8.
+    // (3) Schema version bumped to 9.
     {
         let conn = store.conn().await.unwrap();
         let stmt = conn
@@ -447,7 +450,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 after v6->v7 migration");
+        assert_eq!(v, 9, "schema version must be 9 after v6->v7 migration");
     }
 }
 
@@ -515,13 +518,19 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
                 break;
             }
         }
-        assert!(found, "sessions.requirement column must exist after v7->v8 migration");
+        assert!(
+            found,
+            "sessions.requirement column must exist after v7->v8 migration"
+        );
     }
 
     // (2) Pre-existing row survives; the new column reads back as NULL/None.
     let m0 = store.get_session("s7").await.unwrap().unwrap();
     assert_eq!(m0.id, "s7");
-    assert_eq!(m0.requirement, None, "v7 row: requirement reads as NULL after migration");
+    assert_eq!(
+        m0.requirement, None,
+        "v7 row: requirement reads as NULL after migration"
+    );
 
     // (3) The migrated column round-trips through SessionPatch.
     store
@@ -542,7 +551,7 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         "migrated requirement round-trips"
     );
 
-    // (4) Schema version bumped to 8.
+    // (4) Schema version bumped to 9.
     {
         let conn = store.conn().await.unwrap();
         let stmt = conn
@@ -552,6 +561,6 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 after v7->v8 migration");
+        assert_eq!(v, 9, "schema version must be 9 after v7->v8 migration");
     }
 }

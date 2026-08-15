@@ -1,5 +1,5 @@
 [package]
-name = "opencoder-cli"
+name = "opencoder-todos"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,19 +9,12 @@ opencoder-core.workspace = true
 opencoder-llm.workspace = true
 opencoder-session.workspace = true
 opencoder-store.workspace = true
-opencoder-web.workspace = true
-opencoder-client.workspace = true
-opencoder-todos.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
-clap.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-dirs.workspace = true
+anyhow.workspace = true
 ulid.workspace = true
-base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

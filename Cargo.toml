@@ -9,6 +9,7 @@ members = [
     "crates/web",
     "crates/client",
     "crates/cli",
+    "crates/todos",
 ]
 
 [package]
@@ -45,6 +46,7 @@ opencoder-tui    = { path = "crates/tui" }
 opencoder-web    = { path = "crates/web" }
 opencoder-client  = { path = "crates/client" }
 opencoder-cli    = { path = "crates/cli" }
+opencoder-todos  = { path = "crates/todos" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

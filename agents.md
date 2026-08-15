@@ -1,8 +1,8 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 
 # OpenCoder 逻辑地图
 
-OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进制 `opencoder`，workspace 由 8 个 crate 组成。所有上层依赖 `Arc<dyn Store>` / `Arc<dyn ChatStream>` 两个抽象口子，存储与 LLM 后端均可替换。
+OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进制 `opencoder`，workspace 由 9 个 crate 组成。所有上层依赖 `Arc<dyn Store>` / `Arc<dyn ChatStream>` 两个抽象口子，存储与 LLM 后端均可替换。
 
 ## 模块索引
 
@@ -14,6 +14,7 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 - [agents/client](agents/client/index.md) — 远端 server 的瘦客户端（`opencode client`）：reqwest 转发每个请求到 server 并解码 SSE 事件流，本地不持数据、不调 LLM。
 - [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/server/client/config/models/session 子命令，`ts` 别名 `rs`；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。
 - [agents/tui](agents/tui/index.md) — ratatui 交互界面。
+- [agents/todos](agents/todos/index.md) — 持久化 TODO 工作流运行时：父 Workflow Session 调度和验收，每个 TODO 使用独立 Primary Session 执行，支持依赖、并发、恢复、回退与可选 debug 投影。
 
 ## 关键抽象
 

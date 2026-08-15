@@ -77,6 +77,8 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 ### 配置
 
+首次交互式启动时，OpenCoder 会创建 `~/.opencoder/config.json`；若合并后的配置尚不可用，会在 TUI 内引导填写第一个模型。provider、model、端点和 API key 通过本地校验后，将在同一个 TUI 中直接进入任务输入界面；已有可用的项目配置或环境变量配置则不会重复提示。
+
 在项目根目录或 `~/.opencoder/` 放置 `opencoder.json`（环境变量与 CLI flag 优先级更高）：
 
 ```jsonc

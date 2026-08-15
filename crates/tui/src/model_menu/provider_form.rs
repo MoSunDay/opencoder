@@ -39,6 +39,7 @@ impl ProviderField {
     }
 }
 
+#[derive(Clone)]
 pub struct ProviderForm {
     pub name: String,
     /// `true` when editing an existing provider (Name field is read-only).
@@ -109,6 +110,40 @@ impl ProviderForm {
             headers: HeadersEditor::new(Vec::new()),
             headers_active: false,
             focus: ProviderField::Name,
+            error: None,
+        }
+    }
+
+    /// First-run form seeded from the effective config. Defaults already give
+    /// a useful OpenAI-compatible provider/model/base URL, so fresh users land
+    /// on the API-key field while every field remains editable.
+    pub fn new_onboarding(config: &Config) -> Self {
+        let name = config.provider_id().to_string();
+        let provider = config.provider_for(&name).unwrap_or(&config.provider);
+        let model_id = config.model_id().to_string();
+        let base_url = provider.base_url.clone();
+        let api_key = provider.api_key.clone().unwrap_or_default();
+        ProviderForm {
+            name_cursor: name.chars().count(),
+            name,
+            name_readonly: false,
+            model_id_cursor: model_id.chars().count(),
+            model_id,
+            base_url_cursor: base_url.chars().count(),
+            base_url,
+            api_key_input: String::new(),
+            api_key_cursor: 0,
+            api_key_original: api_key,
+            api_key_edited: false,
+            headers: HeadersEditor::new(
+                provider
+                    .headers
+                    .iter()
+                    .map(|h| (h.name.clone(), h.value.clone()))
+                    .collect(),
+            ),
+            headers_active: false,
+            focus: ProviderField::ApiKey,
             error: None,
         }
     }

@@ -343,7 +343,6 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -409,7 +408,6 @@ async fn fold_turn_done_plan_consumes_stale_pending_arm() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -479,7 +477,6 @@ async fn fold_error_does_not_clear_queue_items() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -539,7 +536,6 @@ async fn fold_done_clears_queue_items() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -597,7 +593,6 @@ async fn fold_queue_consumed_echoes_marker_and_drops_entry() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -662,7 +657,6 @@ async fn fold_queue_consumed_unknown_seq_is_noop() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -709,7 +703,6 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;

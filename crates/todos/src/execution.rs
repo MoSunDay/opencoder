@@ -85,10 +85,28 @@ pub async fn execute(
         .find(|message| message.role == Role::Assistant)
         .map(|message| message.text())
         .context("TODO agent returned no final candidate")?;
-    let candidate: Candidate = serde_json::from_str(raw.trim())
+    let candidate = parse_candidate(&raw)
         .with_context(|| format!("TODO {} returned invalid candidate JSON: {raw}", todo.id))?;
     let gate = evaluate_gate(todo, &events);
     Ok(TodoExecution { candidate, gate })
+}
+
+fn parse_candidate(raw: &str) -> Result<Candidate> {
+    let trimmed = raw.trim();
+    let json = if let Some(fenced) = trimmed
+        .strip_prefix("```json")
+        .and_then(|body| body.strip_suffix("```"))
+    {
+        fenced.trim()
+    } else if let Some(fenced) = trimmed
+        .strip_prefix("```")
+        .and_then(|body| body.strip_suffix("```"))
+    {
+        fenced.trim()
+    } else {
+        trimmed
+    };
+    Ok(serde_json::from_str(json)?)
 }
 
 pub async fn prepare_session(
@@ -143,7 +161,7 @@ fn focused_prompt(
         .as_ref()
         .map(|candidate| &candidate.recovery_context);
     Ok(format!(
-        "Complete exactly one focused TODO. You may use available tools and may delegate supporting work through the task tool, but must not advance another TODO. Return only the final Candidate JSON object with fields status(candidate|blocked|interrupted), summary, result, verification, evidence_refs, recovery_context{{summary,refs}}.\n\
+        "Complete exactly one focused TODO. You may use available tools and may delegate supporting work through the task tool, but must not advance another TODO. Return only the final Candidate JSON object with fields status(candidate|blocked|interrupted), summary(string), result(string|null), verification(string), evidence_refs(string[]), recovery_context{{summary:string,refs:string[]}}.\n\
          WORKFLOW_OBJECTIVE={}\nCONSTRAINTS={}\nTODO={}\nACCEPTED_DEPENDENCIES={}\nCONTEXT_MODE={}\nPREVIOUS_RECOVERY={}",
         serde_json::to_string(&workflow.objective)?,
         serde_json::to_string(&workflow.constraints)?,
@@ -193,6 +211,33 @@ fn evaluate_gate(todo: &TodoSpec, events: &[SessionEvent]) -> serde_json::Value 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const BLOCKED_CANDIDATE: &str = r#"{"status":"blocked","summary":"blocked","result":"none","verification":"failed","evidence_refs":[],"recovery_context":{"summary":"retry later","refs":[]}}"#;
+
+    #[test]
+    fn candidate_parser_accepts_raw_and_single_fenced_json() {
+        for value in [
+            BLOCKED_CANDIDATE.to_string(),
+            format!("```json\n{BLOCKED_CANDIDATE}\n```"),
+            format!("```\n{BLOCKED_CANDIDATE}\n```"),
+        ] {
+            assert_eq!(
+                parse_candidate(&value).unwrap().status,
+                CandidateStatus::Blocked
+            );
+        }
+    }
+
+    #[test]
+    fn candidate_parser_rejects_explanatory_text_around_json() {
+        assert!(parse_candidate(&format!("result:\n{BLOCKED_CANDIDATE}")).is_err());
+    }
+
+    #[test]
+    fn blocked_candidate_may_have_no_result() {
+        let value = BLOCKED_CANDIDATE.replace("\"none\"", "null");
+        assert_eq!(parse_candidate(&value).unwrap().result, None);
+    }
 
     #[test]
     fn gate_requires_matching_start_and_successful_end() {

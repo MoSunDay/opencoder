@@ -25,6 +25,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/fork", "从已有会话复制上下文创建新任务 (fork picker)"),
     ("/model", "切换供应商 / 模型 (provider picker)"),
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
+    ("/cli", "管理 CLI 注册内容及注入范围 (parent/subagents/all)"),
     (
         "/config",
         "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",
@@ -62,6 +63,8 @@ pub enum SlashAction {
     ClearContext,
     /// `/mcp` — manage MCP servers (enable/disable/add/edit/delete).
     Mcp,
+    /// `/cli` — manage CLI prompt registrations.
+    Cli,
     /// Display-only: list background bash (never enters model context).
     Ps,
     /// Display-only: kill all background bash (never enters model context).
@@ -188,6 +191,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "notepad" | "note" => Some(SlashAction::Notepad),
         "act_clear_context" => Some(SlashAction::ClearContext),
         "mcp" | "mc" => Some(SlashAction::Mcp),
+        "cli" => Some(SlashAction::Cli),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
@@ -208,6 +212,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/notepad" => Some(SlashAction::Notepad),
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/mcp" => Some(SlashAction::Mcp),
+        "/cli" => Some(SlashAction::Cli),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/ap" => Some(SlashAction::Ap),

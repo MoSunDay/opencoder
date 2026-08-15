@@ -5,12 +5,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 mod autopilot;
+mod cli;
 mod env;
 mod keymap;
 mod mcp;
 mod merge;
 
 pub use autopilot::AutoPilotConfig;
+pub use cli::{CliConfig, InjectionTarget};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
@@ -28,6 +30,9 @@ pub struct Config {
     /// Named MCP servers. Only entries with `enabled == true` are surfaced.
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+    /// Named CLI usage contracts. Enabled entries are injected into the system prompt.
+    #[serde(default)]
+    pub cli: HashMap<String, CliConfig>,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -334,6 +339,7 @@ impl Default for Config {
             },
             providers: HashMap::new(),
             mcp_servers: HashMap::new(),
+            cli: HashMap::new(),
             model: default_model(),
             small_model: None,
             agent: AgentDefaults::default(),
@@ -516,6 +522,37 @@ impl Config {
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
+    }
+
+    /// Returns enabled MCP servers applicable to an agent tier.
+    pub fn enabled_mcp_servers_for(
+        &self,
+        mode: crate::AgentMode,
+    ) -> Vec<(String, &McpServerConfig)> {
+        self.enabled_mcp_servers()
+            .into_iter()
+            .filter(|(_, cfg)| cfg.inject_to.allows(mode))
+            .collect()
+    }
+
+    /// Returns non-empty enabled CLI registrations sorted by name.
+    pub fn enabled_cli(&self) -> Vec<(String, &CliConfig)> {
+        let mut out: Vec<_> = self
+            .cli
+            .iter()
+            .filter(|(_, cfg)| cfg.enabled && !cfg.content.trim().is_empty())
+            .map(|(name, cfg)| (name.clone(), cfg))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// Returns enabled CLI registrations applicable to an agent tier.
+    pub fn enabled_cli_for(&self, mode: crate::AgentMode) -> Vec<(String, &CliConfig)> {
+        self.enabled_cli()
+            .into_iter()
+            .filter(|(_, cfg)| cfg.inject_to.allows(mode))
+            .collect()
     }
 
     /// Resolve the base_url for a provider name: `providers[name].base_url`

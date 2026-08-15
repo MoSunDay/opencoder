@@ -1,4 +1,4 @@
-Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
+Commit: 366737aef3433255433c69620644e8b79a11f708
 
 # OpenCoder 能力地图
 
@@ -6,6 +6,7 @@ OpenCoder 当前提供以下用户/调用方可感知的能力。每项链接到
 
 ## 能力组
 
+- **CLI/MCP 注册与 Agent 范围注入**：TUI `/cli` 管理自由文本 CLI usage contract，`/mcp` 管理 MCP server；两类条目均可启停并选择仅父 Agent、仅 explore/build 子 Agent或双方。CLI 内容条件性进入 system prompt，MCP 范围同时约束提示和工具可见性。详见 [changelog](changelog/2026-08-15/cli-registry-and-agent-injection-scope.md)。
 - **持久化 TODO 工作流**：`opencoder todos validate/run/resume/show/events/list/interrupt` 执行预编译通用 TODO 合同；父 Workflow Session 管理全局依赖、状态、并发、验收和回退，每个 TODO 使用独立 Primary Session 聚焦完成。Store 是权威状态，`--debug` 才生成可索引文件投影。详见 [TODO 工作流](todos/index.md)。
 - **plan 模式结构化提问**：模型经 `question` 工具向用户提问（仅 plan agent 注入 schema），TUI 弹出对话框（预设选项 + 自定义输入），作答作为 tool result 同轮回填驱动继续规划；headless/web 无监听时固定文案兜底不挂起。详见 [changelog](changelog/2026-08-14/plan-question-tool.md)。
 - **会话恢复**：CLI `--session <id>` / `--continue` / `--fork`，跨进程从 libsql 重建历史；title 由 small_model 异步生成。详见 [agents/session](../agents/session/index.md)。

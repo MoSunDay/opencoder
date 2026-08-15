@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
@@ -83,6 +83,40 @@ CREATE TABLE IF NOT EXISTS subagent_tasks (
   started_at        INTEGER NOT NULL,
   completed_at      INTEGER
 )";
+const CREATE_TODO_WORKFLOWS: &str = "\
+CREATE TABLE IF NOT EXISTS todo_workflows (
+  id TEXT PRIMARY KEY,
+  parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  spec_json TEXT NOT NULL,
+  state_json TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  terminal_reason TEXT
+)";
+const CREATE_TODO_ITEMS: &str = "\
+CREATE TABLE IF NOT EXISTS todo_items (
+  workflow_id TEXT NOT NULL REFERENCES todo_workflows(id) ON DELETE CASCADE,
+  todo_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  active_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+  session_history_json TEXT NOT NULL DEFAULT '[]',
+  result_json TEXT,
+  last_error TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workflow_id, todo_id)
+)";
+const CREATE_TODO_EVENTS: &str = "\
+CREATE TABLE IF NOT EXISTS todo_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id TEXT NOT NULL REFERENCES todo_workflows(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  ts INTEGER NOT NULL
+)";
 const CREATE_INDEX_MSG: &str =
     "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)";
 const CREATE_INDEX_IN: &str = "CREATE INDEX IF NOT EXISTS idx_inputs_pending ON session_inputs(session_id, promoted_seq, delivery, admitted_seq)";
@@ -94,6 +128,10 @@ const CREATE_INDEX_SA_CHILD: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_child ON subagent_tasks(child_session_id)";
 const CREATE_INDEX_SESSION_TASK_TYPE: &str =
     "CREATE INDEX IF NOT EXISTS idx_sessions_task_type ON sessions(task_type)";
+const CREATE_INDEX_TODO_STATUS: &str =
+    "CREATE INDEX IF NOT EXISTS idx_todo_workflows_status ON todo_workflows(status, updated_at)";
+const CREATE_INDEX_TODO_EVENTS: &str =
+    "CREATE INDEX IF NOT EXISTS idx_todo_events_workflow ON todo_events(workflow_id, seq)";
 
 /// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
 ///
@@ -143,6 +181,9 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_INPUTS, ()).await?;
     conn.execute(CREATE_EVENTS, ()).await?;
     conn.execute(CREATE_SUBAGENT_TASKS, ()).await?;
+    conn.execute(CREATE_TODO_WORKFLOWS, ()).await?;
+    conn.execute(CREATE_TODO_ITEMS, ()).await?;
+    conn.execute(CREATE_TODO_EVENTS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
     conn.execute(CREATE_INDEX_EV, ()).await?;
@@ -166,6 +207,8 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     // older databases, so it must run AFTER `migrate` rather than in the
     // pre-migration index batch above.
     conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
+    conn.execute(CREATE_INDEX_TODO_STATUS, ()).await?;
+    conn.execute(CREATE_INDEX_TODO_EVENTS, ()).await?;
     Ok(())
 }
 
@@ -250,6 +293,13 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // v8: requirement column on sessions, persisting the task description
         // text edited via the /requirement slash command so it survives resume.
         add_column_if_absent(conn, "sessions", "requirement", "TEXT").await?;
+    }
+    if from < 9 {
+        conn.execute(CREATE_TODO_WORKFLOWS, ()).await?;
+        conn.execute(CREATE_TODO_ITEMS, ()).await?;
+        conn.execute(CREATE_TODO_EVENTS, ()).await?;
+        conn.execute(CREATE_INDEX_TODO_STATUS, ()).await?;
+        conn.execute(CREATE_INDEX_TODO_EVENTS, ()).await?;
     }
     Ok(())
 }

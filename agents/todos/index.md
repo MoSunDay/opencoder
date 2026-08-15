@@ -1,4 +1,4 @@
-Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
+Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 
 # todos 模块
 
@@ -27,7 +27,7 @@ Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 2. 创建父 Workflow Session 和 Store 投影，进入 `running`。
 3. 父 Session 读取当前全局状态并输出下一条结构化决策。
 4. dispatch 前先创建 TODO Session 并原子写入 active Session 引用；一个批次中的 TODO 通过 `JoinSet` 并发执行。
-5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；工具门禁从事件记录独立计算。
+5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；解析器只规范化纯 JSON 或单个 JSON fence，工具门禁从事件记录独立计算。
 6. 父 Session 验收 Candidate。通过后推进依赖；修订时选择 resume/fork；回退时推进 world epoch 并失效里程碑后的状态。
 7. interrupt 或运行错误持久化为 `suspended`；resume 先把中断中的 TODO 归约为可恢复状态，再继续父决策循环。
 
@@ -39,6 +39,6 @@ Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 
 ## 代表性验证
 
-- `crates/todos/tests/runtime.rs`：单 TODO 闭环、父决定多 TODO 批次、debug 关闭不落目录、依赖环校验。
+- `crates/todos/tests/runtime.rs`：单 TODO 闭环、父决定多 TODO 批次、debug 关闭不落目录、已有 debug 投影刷新、依赖环校验。
 - `crates/store/tests/todos_workflow.rs`：投影与事件原子提交、generation 冲突、v8 到 v9 迁移。
 - `crates/cli/tests/todos_cli_parse.rs`：todos 命令和 debug 作用域。

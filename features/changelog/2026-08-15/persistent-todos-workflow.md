@@ -1,4 +1,4 @@
-Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
+Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 
 # 通用持久化 TODO 工作流
 
@@ -12,6 +12,7 @@ Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 - Store schema 升级到 v9，新增 workflow、TODO projection 和 append-only event，使用 generation 乐观并发控制。
 - 新增 `opencoder todos validate/run/resume/show/events/list/interrupt`；文件投影仅由 `run/resume --debug` 开启。
 - 支持依赖 DAG、父决定并发批次、new/resume/fork、milestone 回退、硬工具门禁和持久化中断恢复。
+- 外部 `interrupt` 会刷新已经存在的 debug 投影；Candidate 解析兼容单个标准 JSON fence，同时继续拒绝 JSON 外的解释文本。
 
 ## Impact Surface
 
@@ -27,6 +28,8 @@ Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 | 父/子 Session 闭环与任务类型 | `parent_drives_focused_primary_todo_to_completion` |
 | 父决定多 TODO 批次 | `parent_can_dispatch_multiple_independent_todos_in_one_batch` |
 | debug 默认不落文件 | `normal_execution_does_not_create_a_debug_projection` |
+| 外部状态变化刷新已有 debug 投影 | `existing_debug_projection_refreshes_after_external_state_change` |
+| Candidate JSON fence 规范化且拒绝外围说明 | `candidate_parser_accepts_raw_and_single_fenced_json`、`candidate_parser_rejects_explanatory_text_around_json` |
 | DAG 校验 | `dependency_validation_rejects_cycles_and_runnable_is_dependency_aware` |
 | App crash/挂起后当前位置清理并恢复 runnable | `suspended_active_todo_becomes_recoverable_and_runnable` |
 | Store 原子投影、事件、并发冲突和迁移 | `crates/store/tests/todos_workflow.rs` |

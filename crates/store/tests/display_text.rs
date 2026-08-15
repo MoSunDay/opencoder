@@ -209,8 +209,14 @@ async fn v5_to_v6_migration_adds_display_text() {
         .unwrap();
     let pending = store.pending_inputs("s1", Delivery::Queue).await.unwrap();
     assert_eq!(pending.len(), 2);
-    assert_eq!(pending[1].display_text.as_deref(), Some("new $skill display"));
-    assert_eq!(pending[0].display_text, None, "old row keeps NULL via pending_inputs");
+    assert_eq!(
+        pending[1].display_text.as_deref(),
+        Some("new $skill display")
+    );
+    assert_eq!(
+        pending[0].display_text, None,
+        "old row keeps NULL via pending_inputs"
+    );
 
     // Version bumped to the latest (SCHEMA_VERSION=8 after the
     // summary_images_json migration), and a second reopen is idempotent.
@@ -225,7 +231,7 @@ async fn v5_to_v6_migration_adds_display_text() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 8, "schema version must be 8 (latest) after v5 migration");
+        assert_eq!(v, 9, "schema version must be 9 (latest) after v5 migration");
     }
     let again = store2.pending_inputs("s1", Delivery::Queue).await.unwrap();
     assert_eq!(again.len(), 2, "re-open keeps data intact");
@@ -254,7 +260,10 @@ async fn claim_next_queue_keeps_prompt_clean_with_display_text() {
         .await
         .unwrap()
         .expect("a queued input to be claimed");
-    assert_eq!(claimed.prompt, "clean text", "LLM must only ever see the clean prompt");
+    assert_eq!(
+        claimed.prompt, "clean text",
+        "LLM must only ever see the clean prompt"
+    );
     assert_eq!(
         claimed.display_text.as_deref(),
         Some("clean text $skill token"),
@@ -269,7 +278,13 @@ async fn bundle_roundtrip_preserves_display_text() {
 
     // One input with a distinct display form, one old-style input with None.
     store
-        .admit_input(&input(1, "s", Delivery::Queue, "clean-1", Some("display-1 $skill")))
+        .admit_input(&input(
+            1,
+            "s",
+            Delivery::Queue,
+            "clean-1",
+            Some("display-1 $skill"),
+        ))
         .await
         .unwrap();
     store

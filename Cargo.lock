@@ -1731,6 +1731,7 @@ dependencies = [
  "opencoder-llm",
  "opencoder-session",
  "opencoder-store",
+ "opencoder-todos",
  "opencoder-web",
  "serde_json",
  "tempfile",
@@ -1833,6 +1834,23 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "opencoder-todos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "opencoder-core",
+ "opencoder-llm",
+ "opencoder-session",
+ "opencoder-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "ulid",
 ]
 
 [[package]]

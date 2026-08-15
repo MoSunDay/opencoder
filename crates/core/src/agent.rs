@@ -14,6 +14,7 @@ pub enum AgentKind {
     Plan,
     Subagent,
     Command,
+    Workflow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +109,14 @@ pub fn builtin_agents() -> Vec<Agent> {
             description: "One-shot single-turn agent. Runs a single prompt to completion without interactive follow-up.".into(),
             prompt: base_prompt_act(),
             tools: ToolFilter::Allow(vec!["bash".into(), "task".into()]),
+        },
+        Agent {
+            name: "workflow".into(),
+            kind: AgentKind::Workflow,
+            mode: AgentMode::Primary,
+            description: "Internal durable scheduler for todos workflows.".into(),
+            prompt: "You are the scheduler and acceptance brain for a durable TODO workflow. Return exactly one JSON object matching the operation schema in the user prompt. Never emit markdown or prose outside JSON. Use only the supplied state and references; never invent execution evidence.".into(),
+            tools: ToolFilter::Allow(Vec::new()),
         },
     ]
 }
@@ -226,7 +235,7 @@ mod tests {
     fn question_tool_is_plan_agent_only() {
         let plan = resolve_agent("plan").expect("plan agent registered");
         assert!(plan.tools.allows("question"), "plan must allow 'question'");
-        for other in ["act", "explore", "build", "command"] {
+        for other in ["act", "explore", "build", "command", "workflow"] {
             let a = resolve_agent(other).expect("agent registered");
             assert!(
                 !a.tools.allows("question"),

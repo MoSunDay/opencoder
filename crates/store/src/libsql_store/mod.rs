@@ -12,6 +12,7 @@ use crate::types::{
     Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
     SessionMeta, SessionPatch, SubagentTaskRecord,
 };
+use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 
 mod events;
 mod inputs;
@@ -19,6 +20,7 @@ mod messages;
 pub(crate) mod schema;
 mod sessions;
 mod subagent_tasks;
+mod todos;
 mod tx;
 
 /// Primary `Store` implementation backed by libsql (embedded local SQLite, WAL).
@@ -250,6 +252,50 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         subagent_tasks::cancel(&conn, task_id).await
+    }
+
+    async fn create_todo_workflow(
+        &self,
+        workflow: &TodoWorkflowRecord,
+        items: &[TodoItemRecord],
+        event: &TodoEventRecord,
+    ) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
+        todos::create(&self.conn, workflow, items, event).await
+    }
+
+    async fn get_todo_workflow(&self, id: &str) -> Result<Option<TodoWorkflowRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::get(&self.conn, id).await
+    }
+
+    async fn list_todo_workflows(&self, limit: u32) -> Result<Vec<TodoWorkflowSummary>> {
+        let _guard = self.db_lock.lock().await;
+        todos::list(&self.conn, limit).await
+    }
+
+    async fn list_todo_items(&self, workflow_id: &str) -> Result<Vec<TodoItemRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::items(&self.conn, workflow_id).await
+    }
+
+    async fn commit_todo_transition(
+        &self,
+        workflow: &TodoWorkflowRecord,
+        items: &[TodoItemRecord],
+        event: &TodoEventRecord,
+    ) -> Result<i64> {
+        let _guard = self.db_lock.lock().await;
+        todos::commit(&self.conn, workflow, items, event).await
+    }
+
+    async fn todo_events_after(
+        &self,
+        workflow_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<TodoEventRecord>> {
+        let _guard = self.db_lock.lock().await;
+        todos::events_after(&self.conn, workflow_id, after_seq).await
     }
 
     async fn import_messages(

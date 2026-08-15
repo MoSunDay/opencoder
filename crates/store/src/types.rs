@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub const TASK_TYPE_PARENT: &str = "parent";
 /// Child session spawned by a `task` subagent invocation.
 pub const TASK_TYPE_SUBAGENT: &str = "subagent";
+/// Internal parent session used by the todos workflow scheduler.
+pub const TASK_TYPE_TODO_WORKFLOW: &str = "todo_workflow";
+/// Full primary session assigned to one focused TODO.
+pub const TASK_TYPE_TODO: &str = "todo";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionMeta {

@@ -6,6 +6,7 @@ pub mod run;
 mod run_image;
 pub mod server;
 pub mod session_cmd;
+pub mod todos_cmd;
 pub mod ts;
 pub mod update;
 
@@ -45,7 +46,12 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "AGENT")]
     pub agent: Option<String>,
     /// Resume the most recent session for this workdir.
-    #[arg(long, global = true, default_value_t = false, conflicts_with = "session")]
+    #[arg(
+        long,
+        global = true,
+        default_value_t = false,
+        conflicts_with = "session"
+    )]
     pub continue_: bool,
     /// Fork (copy) the resumed session before continuing, leaving the original untouched.
     #[arg(long, global = true, default_value_t = false)]
@@ -148,6 +154,11 @@ pub enum Command {
         #[command(subcommand)]
         sub: SessionSub,
     },
+    /// Durable parent-workflow orchestration over focused TODO sessions.
+    Todos {
+        #[command(subcommand)]
+        sub: TodosSub,
+    },
     /// Detect and install the optional tools dependencies (tmux). Runs the
     /// embedded `install-skills-dep.sh` with inherited stdio (a sudo password
     /// may be required), then re-seeds the dep-gated skills. Ported from the
@@ -197,6 +208,50 @@ pub enum SessionSub {
         /// Path to the `.opencoder` bundle file.
         input: PathBuf,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TodosSub {
+    /// Validate a prepared TodoSpec without creating sessions or calling a model.
+    Validate {
+        #[arg(long, value_name = "PATH")]
+        file: PathBuf,
+    },
+    /// Create and execute a prepared TodoSpec workflow.
+    Run {
+        #[arg(long, value_name = "PATH")]
+        file: PathBuf,
+        /// Dump a rebuildable filesystem projection after every transition.
+        #[arg(long, default_value_t = false)]
+        debug: bool,
+    },
+    /// Resume a suspended or interrupted workflow from the Store.
+    Resume {
+        id: String,
+        #[arg(long, default_value_t = false)]
+        debug: bool,
+    },
+    /// Show the canonical workflow projection.
+    Show {
+        id: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Show append-only workflow transition events.
+    Events {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// List recent workflows for this workdir.
+    List {
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Persistently suspend a workflow and cancel active work on next poll.
+    Interrupt { id: String },
 }
 
 /// Path used to sink TUI logs so they never corrupt the alternate screen.

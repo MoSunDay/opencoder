@@ -101,6 +101,8 @@ pub(crate) fn route_paste(
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
+    mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     command_menu: &mut Option<CommandMenu>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
     input: &mut String,
@@ -118,6 +120,14 @@ pub(crate) fn route_paste(
     // trailing newline terminals append to pasted payloads.
     let trimmed = pasted.trim_end_matches(['\r', '\n']);
     if let Some(menu) = model_menu.as_mut() {
+        menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    if let Some(menu) = mcp_menu.as_mut() {
+        menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    if let Some(menu) = cli_menu.as_mut() {
         menu.paste(trimmed);
         return LoopFlow::Redraw;
     }

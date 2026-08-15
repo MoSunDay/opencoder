@@ -79,7 +79,10 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
         ));
     } else {
         lines.push(Line::styled(
-            format!(" {:<5} {:<13} {}", "on", "server", "transport"),
+            format!(
+                " {:<5} {:<13} {:<11} {}",
+                "on", "server", "inject", "transport"
+            ),
             Style::default().fg(crate::theme::muted()),
         ));
         for (i, entry) in list.entries.iter().enumerate() {
@@ -109,6 +112,7 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &McpList) {
             let spans = vec![
                 Span::styled(format!("{}{:<5} ", prefix, switch), switch_style),
                 Span::styled(format!("{:<13} ", entry.name), line_style),
+                Span::styled(format!("{:<11} ", entry.inject_to.label()), line_style),
                 Span::styled(entry.transport_label(), line_style),
             ];
             lines.push(Line::from(spans));
@@ -180,6 +184,12 @@ fn render_form(f: &mut Frame, area: Rect, composer_top: u16, form: &McpForm) {
             "Space/Enter toggle",
         ),
         field_line(
+            "inject to:",
+            form.inject_to.label(),
+            form.field == McpField::InjectTo,
+            "Space/Enter cycle: parent/subagents/all",
+        ),
+        field_line(
             "command:",
             &cmd_display,
             form.field == McpField::Command,
@@ -214,6 +224,7 @@ fn render_form(f: &mut Frame, area: Rect, composer_top: u16, form: &McpForm) {
         McpField::Args => Some(form.args.as_str()),
         McpField::Url => Some(form.url.as_str()),
         McpField::Enabled => None,
+        McpField::InjectTo => None,
     };
     let cursor_idx = match form.field {
         McpField::Name => Some(form.name_cursor),
@@ -221,13 +232,15 @@ fn render_form(f: &mut Frame, area: Rect, composer_top: u16, form: &McpForm) {
         McpField::Args => Some(form.args_cursor),
         McpField::Url => Some(form.url_cursor),
         McpField::Enabled => None,
+        McpField::InjectTo => None,
     };
     let row = match form.field {
         McpField::Name => Some(0u16),
         McpField::Enabled => Some(1),
-        McpField::Command => Some(2),
-        McpField::Args => Some(3),
-        McpField::Url => Some(4),
+        McpField::InjectTo => Some(2),
+        McpField::Command => Some(3),
+        McpField::Args => Some(4),
+        McpField::Url => Some(5),
     };
     if let (Some(raw), Some(idx), Some(row)) = (text_field, cursor_idx, row) {
         let cx = popup.x + 1 + 15 + crate::composer::cursor_column(raw, idx);

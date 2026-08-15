@@ -110,6 +110,7 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     for expected in [
         "task-plan",
         "do-and-done",
+        "fk-cli",
         "repo-local-memory",
         "repo-local-dreaming",
         "say-and-replay",

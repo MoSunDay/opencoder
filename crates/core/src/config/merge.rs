@@ -42,6 +42,13 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         return true;
     }
     if obj
+        .get("cli")
+        .and_then(|v| v.as_object())
+        .is_some_and(|entries| !entries.is_empty())
+    {
+        return true;
+    }
+    if obj
         .get("compaction")
         .and_then(|v| v.as_object())
         .is_some_and(|c| c.contains_key("context_threshold") || c.contains_key("auto"))
@@ -190,14 +197,22 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
             }
         }
         if let Some(servers) = obj.get("mcp_servers").and_then(|v| v.as_object()) {
-        for (name, sv) in servers {
-            if let Some(sobj) = sv.as_object() {
-                let entry = cfg.mcp_servers.entry(name.clone()).or_default();
-                super::mcp::merge(entry, sobj);
+            for (name, sv) in servers {
+                if let Some(sobj) = sv.as_object() {
+                    let entry = cfg.mcp_servers.entry(name.clone()).or_default();
+                    super::mcp::merge(entry, sobj);
+                }
             }
         }
-    }
-    if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
+        if let Some(entries) = obj.get("cli").and_then(|v| v.as_object()) {
+            for (name, cv) in entries {
+                if let Some(cobj) = cv.as_object() {
+                    let entry = cfg.cli.entry(name.clone()).or_default();
+                    super::cli::merge(entry, cobj);
+                }
+            }
+        }
+        if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
             if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
                 cfg.compaction.auto = v;
             }

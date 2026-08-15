@@ -113,6 +113,7 @@ pub(crate) fn render<B: Backend>(
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
+    cli_menu: Option<&crate::cli_menu::CliMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     question_menu: Option<&crate::question_menu::QuestionMenu>,
@@ -318,6 +319,9 @@ pub(crate) fn render<B: Backend>(
         }
         if let Some(mcp) = mcp_menu {
             crate::mcp_menu::render_mcp_popup(f, area, composer_area.y, mcp);
+        }
+        if let Some(cli) = cli_menu {
+            crate::cli_menu::render_cli_popup(f, area, composer_area.y, cli);
         }
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);

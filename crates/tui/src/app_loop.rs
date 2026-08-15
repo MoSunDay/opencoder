@@ -273,7 +273,6 @@ pub(crate) async fn fold_ui_events(
     evt_rx: &mut mpsc::Receiver<UiEvent>,
     _notepad: &mut Option<crate::notepad::NotepadView>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
-    question_queue: &mut std::collections::VecDeque<crate::question_menu::QuestionPrompt>,
     question_hub: &std::sync::Arc<opencoder_session::QuestionHub>,
 ) -> LoopFlow {
     let ev = match maybe_ev {
@@ -305,20 +304,10 @@ pub(crate) async fn fold_ui_events(
                 // live events reach here — store replay never opens dialogs.
                 match &sev {
                     SessionEvent::ToolStart { id, name, input } if name == "question" => {
-                        crate::question_menu::on_tool_start(
-                            question_menu,
-                            question_queue,
-                            id,
-                            input,
-                        );
+                        crate::question_menu::on_tool_start(question_menu, id, input);
                     }
                     SessionEvent::ToolEnd { id, .. } => {
-                        crate::question_menu::on_tool_end(
-                            question_menu,
-                            question_queue,
-                            id,
-                            question_hub,
-                        );
+                        crate::question_menu::on_tool_end(question_menu, id, question_hub);
                     }
                     _ => {}
                 }

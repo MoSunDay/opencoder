@@ -1,32 +1,28 @@
-//! `question` tool dialog: when the plan agent asks the user a clarifying
-//! question (ToolStart with `name == "question"`), a compact popup anchored
-//! above the composer collects the answer and resolves it directly on the
-//! session's shared [`QuestionHub`] — mid-turn, without queuing a `UiCmd`
-//! (which would deadlock behind the running prompt).
+//! Multi-question dialog for plan-mode `question` tool calls.
+//!
+//! All answers are held in the pure state machine until every visible
+//! question is confirmed, then resolved directly on the shared QuestionHub.
 
 pub mod state;
 pub mod view;
-
-use std::collections::VecDeque;
 
 use crossterm::event::KeyEvent;
 use opencoder_session::tools::question::QuestionHub;
 use serde_json::Value;
 
-pub use state::{QuestionAction, QuestionFocus, QuestionMenu, QuestionPrompt};
+pub use state::{
+    QuestionAction, QuestionFocus, QuestionItem, QuestionMenu, QuestionPrompt, QuestionResponse,
+};
 pub use view::render_question_popup;
 
-/// Answer sent to the model when the user skips the dialog (Esc).
+/// Answer sent to the model for an explicitly skipped question.
 pub const SKIP_ANSWER: &str = "User skipped the question. Proceed with your best judgment.";
 
-/// Fresh dialog state for the app loop: `(open menu, queued prompts)`.
-pub fn dialog_state() -> (Option<QuestionMenu>, VecDeque<QuestionPrompt>) {
-    (None, VecDeque::new())
+pub fn dialog_state() -> Option<QuestionMenu> {
+    None
 }
 
-/// Parse a question ToolStart payload into a dialog prompt. Returns None when
-/// the payload carries no usable question text (dialog skipped; the tool
-/// itself will still wait unless nothing ever resolves).
+/// Parse a question ToolStart payload into a dialog prompt.
 pub fn prompt_from_input(id: &str, input: &Value) -> Option<QuestionPrompt> {
     let question = input.get("question")?.as_str()?.trim();
     if question.is_empty() {
@@ -34,10 +30,11 @@ pub fn prompt_from_input(id: &str, input: &Value) -> Option<QuestionPrompt> {
     }
     let options = input
         .get("options")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
+        .and_then(Value::as_array)
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
                 .collect()
         })
         .unwrap_or_default();
@@ -48,86 +45,90 @@ pub fn prompt_from_input(id: &str, input: &Value) -> Option<QuestionPrompt> {
     })
 }
 
-/// ToolStart(name == "question") → open the dialog, or queue it if one is
-/// already showing (the model may emit several parallel questions despite the
-/// "one per turn" guidance).
-pub fn on_tool_start(
-    menu: &mut Option<QuestionMenu>,
-    queue: &mut VecDeque<QuestionPrompt>,
-    id: &str,
-    input: &Value,
-) {
+/// Add every parallel ToolStart to one navigable dialog.
+pub fn on_tool_start(menu: &mut Option<QuestionMenu>, id: &str, input: &Value) {
     let Some(prompt) = prompt_from_input(id, input) else {
         return;
     };
-    if menu.is_none() {
-        *menu = Some(QuestionMenu::new(prompt));
-    } else {
-        queue.push_back(prompt);
+    match menu {
+        Some(menu) => menu.push(prompt),
+        None => *menu = Some(QuestionMenu::new(prompt)),
     }
 }
 
-/// ToolEnd for a question: close the dialog if it is the one showing (cancel
-/// path — an answered question has already advanced), and drop it from the
-/// queue if it was still waiting.
-pub fn on_tool_end(
-    menu: &mut Option<QuestionMenu>,
-    queue: &mut VecDeque<QuestionPrompt>,
-    id: &str,
-    hub: &QuestionHub,
-) {
-    let was_current = menu.as_ref().map(|m| m.prompt.id == id).unwrap_or(false);
-    queue.retain(|p| p.id != id);
-    if was_current {
-        // Belt-and-braces: a cancelled tool future drops its own guard, but
-        // clearing here covers any missed race without parking an early answer.
-        hub.abandon(id);
-        advance(menu, queue);
+/// Drop a question whose tool ended externally (normally a cancel race).
+/// If the removed question was the only unfinished one, submit the already
+/// confirmed remainder so no still-waiting tool is stranded.
+pub fn on_tool_end(menu: &mut Option<QuestionMenu>, id: &str, hub: &QuestionHub) {
+    let Some(open) = menu.as_mut() else { return };
+    if !open.ids().any(|open_id| open_id == id) {
+        return;
+    }
+    hub.abandon(id);
+    open.remove(id);
+    if open.is_empty() {
+        *menu = None;
+        return;
+    }
+    if let Some(responses) = open.completed_responses() {
+        resolve_batch(hub, responses);
+        *menu = None;
     }
 }
 
-/// Close the current dialog and show the next queued question, if any.
-fn advance(menu: &mut Option<QuestionMenu>, queue: &mut VecDeque<QuestionPrompt>) {
-    *menu = queue.pop_front().map(QuestionMenu::new);
+/// Apply a dialog key and resolve only when the full batch is confirmed.
+pub fn route_question_key(menu: &mut Option<QuestionMenu>, key: KeyEvent, hub: &QuestionHub) {
+    let Some(open) = menu.as_mut() else { return };
+    if let QuestionAction::Submit(responses) = state::handle_question_key(open, key) {
+        resolve_batch(hub, responses);
+        *menu = None;
+    }
 }
 
-/// Key routing while the dialog is open: apply the keystroke, resolve
-/// Answer/Skip actions on the hub, advance to any queued question.
-pub fn route_question_key(
-    menu: &mut Option<QuestionMenu>,
-    queue: &mut VecDeque<QuestionPrompt>,
-    k: KeyEvent,
-    hub: &QuestionHub,
-) {
-    let Some(m) = menu.as_mut() else { return };
-    match state::handle_question_key(m, k) {
-        QuestionAction::Answer(id, answer) => {
-            let _ = hub.resolve(&id, answer);
-            advance(menu, queue);
+/// Abandon every question when changing sessions or otherwise closing the
+/// owning runtime. This never parks early answers.
+pub fn abandon_dialog(menu: &mut Option<QuestionMenu>, hub: &QuestionHub) {
+    if let Some(open) = menu.take() {
+        for id in open.ids() {
+            hub.abandon(id);
         }
-        QuestionAction::Skip(id) => {
-            let _ = hub.resolve(&id, SKIP_ANSWER.to_string());
-            advance(menu, queue);
-        }
-        QuestionAction::Idle => {}
+    }
+}
+
+fn resolve_batch(hub: &QuestionHub, responses: Vec<QuestionResponse>) {
+    for response in responses {
+        let answer = response.answer.unwrap_or_else(|| SKIP_ANSWER.to_string());
+        let _ = hub.resolve(&response.id, answer);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use opencoder_session::tools::question::AskOutcome;
 
     fn input(question: &str, options: &[&str]) -> Value {
         serde_json::json!({ "question": question, "options": options })
     }
 
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn early_answer(hub: &QuestionHub, id: &str) -> Option<String> {
+        match hub.ask(id) {
+            AskOutcome::Answered(answer) => Some(answer),
+            AskOutcome::Pending(_) => None,
+        }
+    }
+
     #[test]
     fn prompt_from_input_parses_question_and_options() {
-        let p = prompt_from_input("q1", &input("which?", &["a", "b"])).unwrap();
-        assert_eq!(p.id, "q1");
-        assert_eq!(p.question, "which?");
-        assert_eq!(p.options, vec!["a", "b"]);
+        let prompt = prompt_from_input("q1", &input("which?", &["a", "b"])).unwrap();
+        assert_eq!(prompt.id, "q1");
+        assert_eq!(prompt.question, "which?");
+        assert_eq!(prompt.options, vec!["a", "b"]);
     }
 
     #[test]
@@ -137,58 +138,77 @@ mod tests {
     }
 
     #[test]
-    fn tool_start_opens_then_queues_parallel_questions() {
-        let mut menu = None;
-        let mut queue = VecDeque::new();
-        on_tool_start(&mut menu, &mut queue, "q1", &input("first?", &[]));
-        assert!(menu.is_some());
-        on_tool_start(&mut menu, &mut queue, "q2", &input("second?", &[]));
-        assert_eq!(queue.len(), 1);
-        assert_eq!(menu.as_ref().unwrap().prompt.id, "q1");
+    fn tool_starts_join_one_navigable_dialog() {
+        let mut menu = dialog_state();
+        on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
+        on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
+        let menu = menu.unwrap();
+        assert_eq!(menu.len(), 2);
+        assert_eq!(menu.questions[0].prompt.id, "q1");
+        assert_eq!(menu.questions[1].prompt.id, "q2");
     }
 
     #[test]
-    fn tool_end_closes_only_the_matching_dialog() {
+    fn no_question_resolves_until_the_complete_batch_is_confirmed() {
         let hub = QuestionHub::new();
-        let mut menu = None;
-        let mut queue = VecDeque::new();
-        on_tool_start(&mut menu, &mut queue, "q1", &input("first?", &[]));
-        on_tool_start(&mut menu, &mut queue, "q2", &input("second?", &[]));
-        // ToolEnd for a queued question: it is dropped, the dialog stays.
-        on_tool_end(&mut menu, &mut queue, "q2", &hub);
-        assert_eq!(menu.as_ref().unwrap().prompt.id, "q1");
-        assert!(queue.is_empty());
-        // ToolEnd for the showing question (cancel path): dialog closes.
-        on_tool_end(&mut menu, &mut queue, "q1", &hub);
-        assert!(menu.is_none());
-    }
+        let mut menu = dialog_state();
+        on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
+        on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
 
-    #[test]
-    fn skip_resolves_on_the_hub_and_advances_the_queue() {
-        let hub = QuestionHub::new();
-        hub.attach();
-        let mut menu = None;
-        let mut queue = VecDeque::new();
-        on_tool_start(&mut menu, &mut queue, "q1", &input("first?", &[]));
-        on_tool_start(&mut menu, &mut queue, "q2", &input("second?", &[]));
-        route_question_key(
-            &mut menu,
-            &mut queue,
-            crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Esc,
-                crossterm::event::KeyModifiers::NONE,
-            ),
-            &hub,
-        );
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        assert!(menu.is_some(), "first confirmation keeps the dialog open");
         assert_eq!(
-            menu.as_ref().unwrap().prompt.id,
-            "q2",
-            "queued question now showing"
+            hub.waiting_count(),
+            0,
+            "no answer was parked or delivered yet"
         );
-        // The skipped tool call gets its skip answer.
-        match hub.ask("q1") {
-            AskOutcome::Answered(a) => assert_eq!(a, SKIP_ANSWER),
-            _ => panic!("expected Answered"),
-        }
+
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        assert!(menu.is_none(), "last confirmation closes the dialog");
+        assert_eq!(early_answer(&hub, "q1").as_deref(), Some("a"));
+        assert_eq!(early_answer(&hub, "q2").as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn skipped_question_is_resolved_with_the_batch() {
+        let hub = QuestionHub::new();
+        let mut menu = dialog_state();
+        on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
+        on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
+        route_question_key(&mut menu, key(KeyCode::Esc), &hub);
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        assert_eq!(early_answer(&hub, "q1").as_deref(), Some(SKIP_ANSWER));
+        assert_eq!(early_answer(&hub, "q2").as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn tool_end_removes_only_its_question() {
+        let hub = QuestionHub::new();
+        let mut menu = dialog_state();
+        on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
+        on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
+        on_tool_end(&mut menu, "q2", &hub);
+        let menu = menu.unwrap();
+        assert_eq!(menu.len(), 1);
+        assert_eq!(menu.current().prompt.id, "q1");
+    }
+
+    #[test]
+    fn abandon_dialog_clears_all_waiters_without_early_answers() {
+        let hub = QuestionHub::new();
+        let _first = match hub.ask("q1") {
+            AskOutcome::Pending(receiver) => receiver,
+            AskOutcome::Answered(_) => panic!("unexpected early answer"),
+        };
+        let _second = match hub.ask("q2") {
+            AskOutcome::Pending(receiver) => receiver,
+            AskOutcome::Answered(_) => panic!("unexpected early answer"),
+        };
+        let mut menu = dialog_state();
+        on_tool_start(&mut menu, "q1", &input("first?", &[]));
+        on_tool_start(&mut menu, "q2", &input("second?", &[]));
+        abandon_dialog(&mut menu, &hub);
+        assert!(menu.is_none());
+        assert_eq!(hub.waiting_count(), 0);
     }
 }

@@ -66,6 +66,15 @@ fn config_home_dir() -> Option<PathBuf> {
     isolated_home().or_else(dirs::home_dir)
 }
 
+/// Canonical global config file owned by this binary.
+///
+/// Kept here so production and tests share the same home-resolution rules;
+/// [`scoped_config_home`] therefore isolates both discovery and first-run
+/// creation without mutating process-wide environment variables.
+pub(super) fn primary_global_config_path() -> Option<PathBuf> {
+    config_home_dir().map(|home| home.join(".opencoder").join("config.json"))
+}
+
 /// Resolve the XDG config dir: the thread-local override when a test set it
 /// (mirrors the tests that pointed both `HOME` and `XDG_CONFIG_HOME` at one
 /// tempdir), otherwise the real `dirs::config_dir()`.

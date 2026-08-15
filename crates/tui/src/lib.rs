@@ -26,6 +26,7 @@ pub mod menu;
 pub mod model_menu;
 pub mod model_session_switch;
 pub mod notepad;
+pub mod onboarding;
 pub mod plan_edit;
 pub mod question_menu;
 pub mod queue_panel;

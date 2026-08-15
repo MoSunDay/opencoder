@@ -164,6 +164,19 @@ pub async fn debug_dump(
     Ok(())
 }
 
+pub async fn refresh_debug_dump_if_present(
+    store: &Arc<dyn Store>,
+    spec: &WorkflowSpec,
+    state: &WorkflowState,
+    root: &Path,
+) -> Result<bool> {
+    if !tokio::fs::try_exists(root.join(&state.workflow_id)).await? {
+        return Ok(false);
+    }
+    debug_dump(store, spec, state, root).await?;
+    Ok(true)
+}
+
 async fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
     atomic_write(path, &serde_json::to_vec_pretty(value)?).await
 }

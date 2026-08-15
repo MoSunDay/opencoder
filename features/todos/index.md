@@ -1,4 +1,4 @@
-Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
+Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 
 # 持久化 TODO 工作流
 
@@ -12,7 +12,8 @@ Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 - TODO 固定记录 status、attempt、active/history Session、Candidate、恢复摘要和验收结果；Workflow 固定记录 generation、当前位置集合、milestone、world epoch、incident 与终态原因。
 - required tool call 是硬门禁。名称、声明参数子集和成功结果必须同时匹配；父模型不能接受未满足门禁的 Candidate。
 - `interrupt` 持久化挂起状态；`resume` 从 Store 对运行中 TODO 做中断归约后继续。父工作流可选择 resume、fork 或回退到 milestone。
-- Store 永远是权威数据。`--debug` 仅为 `run/resume` 生成 `<data-dir>/todos/<run-id>/task-info`、`process` 和 `sessions` 的可恢复索引投影。
+- Store 永远是权威数据。`--debug` 为 `run/resume` 生成 `<data-dir>/todos/<run-id>/task-info`、`process` 和 `sessions` 的可恢复索引投影；后续 `interrupt` 会同步已经存在的投影，但不会为非 debug 运行新建目录。
+- Candidate 接受纯 JSON 或仅包裹单个完整对象的 Markdown JSON fence；包含解释文本的输出仍按合同错误失败。
 - 非 completed 终态让 `run/resume` 返回非零，合同错误、模型 JSON 错误和持久化冲突不会降级为猜测性继续。
 
 相关逻辑：[todos 模块](../../agents/todos/index.md)、[CLI](../../agents/cli/index.md)、[Store](../../agents/store/index.md)。

@@ -37,6 +37,17 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
         TodosSub::List { json } => list(&store, *json).await,
         TodosSub::Interrupt { id } => {
             let state = opencoder_todos::interrupt(&store, id, "CLI interrupt requested").await?;
+            let (spec, _) = opencoder_todos::persistence::load(&store, id)
+                .await?
+                .with_context(|| format!("todo workflow not found after interrupt: {id}"))?;
+            let debug_root = opencoder_core::data_dir_for(&workdir).join("todos");
+            opencoder_todos::persistence::refresh_debug_dump_if_present(
+                &store,
+                &spec,
+                &state,
+                &debug_root,
+            )
+            .await?;
             println!(
                 "{} suspended at generation {}",
                 state.workflow_id, state.generation

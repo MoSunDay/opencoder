@@ -120,7 +120,7 @@ impl TodoStatus {
 pub struct Candidate {
     pub status: CandidateStatus,
     pub summary: String,
-    pub result: String,
+    pub result: Option<String>,
     pub verification: String,
     #[serde(default)]
     pub evidence_refs: Vec<String>,

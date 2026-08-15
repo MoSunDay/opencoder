@@ -113,6 +113,47 @@ async fn normal_execution_does_not_create_a_debug_projection() {
 }
 
 #[tokio::test]
+async fn existing_debug_projection_refreshes_after_external_state_change() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let workflow = spec();
+    let mut state = opencoder_todos::domain::initial_state(
+        &workflow,
+        "run-refresh".into(),
+        "parent-refresh".into(),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("dump");
+
+    assert!(
+        !opencoder_todos::persistence::refresh_debug_dump_if_present(
+            &store, &workflow, &state, &root,
+        )
+        .await
+        .unwrap()
+    );
+    opencoder_todos::persistence::debug_dump(&store, &workflow, &state, &root)
+        .await
+        .unwrap();
+    state.status = WorkflowStatus::Suspended;
+    state.terminal_reason = Some("external interrupt".into());
+
+    assert!(opencoder_todos::persistence::refresh_debug_dump_if_present(
+        &store, &workflow, &state, &root,
+    )
+    .await
+    .unwrap());
+    let projected: WorkflowState = serde_json::from_slice(
+        &std::fs::read(root.join("run-refresh/task-info/index.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(projected.status, WorkflowStatus::Suspended);
+    assert_eq!(
+        projected.terminal_reason.as_deref(),
+        Some("external interrupt")
+    );
+}
+
+#[tokio::test]
 async fn parent_can_dispatch_multiple_independent_todos_in_one_batch() {
     let mut workflow = spec();
     let mut second = workflow.todos[0].clone();

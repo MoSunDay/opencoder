@@ -37,6 +37,36 @@ fn question_turn(id: &str) -> LlmEvent {
     }
 }
 
+fn two_question_turn() -> LlmEvent {
+    LlmEvent::Completed {
+        text: String::new(),
+        tool_calls: vec![
+            CompletedToolCall {
+                id: "qw-db".into(),
+                name: "question".into(),
+                input: serde_json::json!({
+                    "question": "Which database?",
+                    "options": ["sqlite", "postgres"]
+                }),
+            },
+            CompletedToolCall {
+                id: "qw-runtime".into(),
+                name: "question".into(),
+                input: serde_json::json!({
+                    "question": "Which runtime?",
+                    "options": ["native", "container"]
+                }),
+            },
+        ],
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 5,
+            total_tokens: 10,
+            ..Default::default()
+        }),
+    }
+}
+
 fn text_done(text: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: text.into(),
@@ -152,4 +182,87 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
     assert!(saw_start, "ToolStart(question) reached the UI channel");
     assert!(saw_end, "ToolEnd(question) reached the UI channel");
     assert_eq!(hub.waiting_count(), 0, "hub drained after the turn");
+}
+
+#[tokio::test]
+async fn worker_waits_for_the_complete_question_batch_before_followup_context() {
+    let hub = QuestionHub::new();
+    hub.attach();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![two_question_turn()])
+            .push_script(vec![text_done("## Plan\npostgres on native")]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let session = SessionState::new(
+        "question-batch-worker",
+        resolve_agent("plan").unwrap(),
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock.clone() as Arc<dyn ChatStream>,
+        dir.path().to_path_buf(),
+    )
+    .with_question_hub(hub.clone());
+
+    let (tx, _rx) = tokio::sync::mpsc::channel::<UiEvent>(64);
+    let worker = tokio::spawn(async move {
+        let mut session = session;
+        process_cmd(
+            UiCmd::Prompt("plan deployment".into(), vec![]),
+            &mut session,
+            &tx,
+        )
+        .await;
+        session
+    });
+
+    for _ in 0..2_000 {
+        if hub.waiting_count() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(hub.waiting_count(), 2, "both questions must wait together");
+
+    assert!(hub.resolve("qw-db", "postgres".into()));
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "the follow-up model call must not start with a partial answer batch"
+    );
+
+    assert!(hub.resolve("qw-runtime", "native".into()));
+    let session = tokio::time::timeout(Duration::from_secs(15), worker)
+        .await
+        .expect("turn completes after all answers")
+        .unwrap();
+    assert_eq!(
+        mock.call_count(),
+        2,
+        "one follow-up sees the complete batch"
+    );
+
+    let results: Vec<(&str, &str)> = session
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            opencoder_core::ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            } if matches!(tool_use_id.as_str(), "qw-db" | "qw-runtime") => {
+                Some((tool_use_id.as_str(), content.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        results,
+        vec![("qw-db", "postgres"), ("qw-runtime", "native")],
+        "tool results preserve original question order"
+    );
 }

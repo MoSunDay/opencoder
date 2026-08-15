@@ -1,5 +1,4 @@
-//! Question dialog rendering: a compact popup anchored to the composer's top
-//! edge (same geometry recipe as the model/mcp menus).
+//! Rendering for the multi-question plan dialog.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -10,69 +9,104 @@ use ratatui::Frame;
 use super::state::{QuestionFocus, QuestionMenu};
 use crate::theme;
 
-/// Render the question dialog with its bottom edge flush against
-/// `composer_top`. Places the terminal cursor inside the custom box when it
-/// has focus.
-pub fn render_question_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &QuestionMenu) {
-    let inner_w = 56usize;
-    let q_lines = wrapped_lines(&menu.prompt.question, inner_w).max(1) as u16;
-    let option_rows = menu.prompt.options.len().max(1) as u16;
-    // border(2) + question + blank + options + custom row + blank + hint
-    let want_h = 2 + q_lines + 1 + option_rows + 1 + 1 + 1;
-    let h = want_h.min(composer_top.max(1));
-    let w = 60u16.min(area.width.saturating_sub(4));
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = composer_top.saturating_sub(h);
-    let popup = Rect::new(x, y, w, h);
-    f.render_widget(Clear, popup);
+const INPUT_PREFIX: &str = "✎ ";
+// Ratatui/unicode-width renders the text-style pen as one cell. Keep this
+// explicit instead of composer::char_width (which conservatively treats the
+// whole dingbats range as emoji-wide).
+const INPUT_PREFIX_WIDTH: u16 = 2;
 
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::styled(
-        menu.prompt.question.clone(),
+/// Render the dialog above the composer and place the terminal cursor at the
+/// active question's exact custom-input character position.
+pub fn render_question_popup(
+    frame: &mut Frame,
+    area: Rect,
+    composer_top: u16,
+    menu: &QuestionMenu,
+) {
+    let item = menu.current();
+    let inner_w = 56usize;
+    let question_lines = wrapped_lines(&item.prompt.question, inner_w).max(1) as u16;
+    let answer_rows = item.rows() as u16;
+    // border + question + blank + answers + blank + input + blank + hint
+    let wanted_height = 2 + question_lines + 1 + answer_rows + 1 + 1 + 1 + 1;
+    let height = wanted_height.min(composer_top.max(1));
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = composer_top.saturating_sub(height);
+    let popup = Rect::new(x, y, width, height);
+    frame.render_widget(Clear, popup);
+
+    let mut lines = vec![Line::styled(
+        item.prompt.question.clone(),
         Style::default()
             .fg(theme::text())
             .add_modifier(Modifier::BOLD),
+    )];
+    lines.push(Line::from(""));
+    for (index, option) in item.prompt.options.iter().enumerate() {
+        lines.push(option_line(
+            option,
+            menu.focus == QuestionFocus::Options && item.selected == index,
+        ));
+    }
+    lines.push(option_line(
+        "Custom",
+        menu.focus == QuestionFocus::Options && item.selected == item.custom_row(),
     ));
     lines.push(Line::from(""));
 
-    let custom_row = menu.custom_row();
-    for (i, opt) in menu.prompt.options.iter().enumerate() {
-        let selected = menu.focus == QuestionFocus::Options && menu.selected == i;
-        lines.push(option_line(opt, selected));
-    }
-    lines.push(custom_line(menu, custom_row));
-
+    let input_width = popup
+        .width
+        .saturating_sub(2)
+        .saturating_sub(INPUT_PREFIX_WIDTH)
+        .saturating_sub(1) as usize;
+    let focused = menu.focus == QuestionFocus::Custom;
+    let (visible_input, cursor_column) = if focused {
+        input_window(&item.custom_input, item.custom_cursor, input_width)
+    } else if item.custom_input.is_empty() {
+        ("add optional details…".to_string(), 0)
+    } else {
+        input_window(&item.custom_input, item.custom_cursor, input_width)
+    };
+    lines.push(input_line(&visible_input, focused));
     lines.push(Line::from(""));
     lines.push(Line::styled(
-        "↑↓ select · Enter answer · Tab custom · Esc skip",
+        "←→ question · ↑↓ answer · Tab input · Enter confirm · Esc skip",
         Style::default().fg(theme::muted()),
     ));
 
+    let confirmation = if item.confirmed() { " ✓" } else { "" };
+    let title = format!(
+        " Question {}/{}{} ",
+        menu.active + 1,
+        menu.len(),
+        confirmation
+    );
     let block = crate::theme::rounded_block_plain().title(Span::styled(
-        " Question ",
+        title,
         Style::default()
             .fg(theme::warn_color())
             .add_modifier(Modifier::BOLD),
     ));
-    let para = Paragraph::new(lines)
-        .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
-    f.render_widget(para, popup);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: false }),
+        popup,
+    );
 
-    if menu.focus == QuestionFocus::Custom {
-        // Row index: border(1) + question(q..) + blank(1) + options + custom.
-        let custom_y = popup.y + 1 + q_lines + 1 + menu.prompt.options.len() as u16 + 1;
-        let custom_x =
-            popup.x + 2 + crate::composer::cursor_column(&menu.custom_input, menu.custom_cursor);
-        if custom_x < popup.x + popup.width.saturating_sub(1)
-            && custom_y < popup.y + popup.height.saturating_sub(1)
+    if focused {
+        let input_y = popup.y + 1 + question_lines + 1 + answer_rows + 1;
+        let input_x = popup.x + 1 + INPUT_PREFIX_WIDTH + cursor_column as u16;
+        if input_x < popup.x + popup.width.saturating_sub(1)
+            && input_y < popup.y + popup.height.saturating_sub(1)
         {
-            f.set_cursor_position((custom_x, custom_y));
+            frame.set_cursor_position((input_x, input_y));
         }
     }
 }
 
-fn option_line(opt: &str, selected: bool) -> Line<'static> {
+fn option_line(option: &str, selected: bool) -> Line<'static> {
     let marker = if selected { "▸ " } else { "  " };
     let style = if selected {
         Style::default()
@@ -81,41 +115,60 @@ fn option_line(opt: &str, selected: bool) -> Line<'static> {
     } else {
         Style::default().fg(theme::text())
     };
-    Line::from(Span::styled(format!("{marker}{opt}"), style))
+    Line::from(Span::styled(format!("{marker}{option}"), style))
 }
 
-fn custom_line(menu: &QuestionMenu, custom_row: usize) -> Line<'static> {
-    let selected = menu.focus == QuestionFocus::Options && menu.selected == custom_row;
-    let focused = menu.focus == QuestionFocus::Custom;
-    let body = if menu.custom_input.is_empty() {
-        "custom answer…"
-    } else {
-        menu.custom_input.as_str()
-    };
+fn input_line(input: &str, focused: bool) -> Line<'static> {
     let style = if focused {
         Style::default()
             .fg(theme::warn_color())
             .add_modifier(Modifier::BOLD)
-    } else if selected {
-        Style::default().fg(theme::accent())
     } else {
         Style::default().fg(theme::muted())
     };
-    Line::from(Span::styled(format!("✎ {body}"), style))
+    Line::from(Span::styled(format!("{INPUT_PREFIX}{input}"), style))
 }
 
-/// Crude word-wrap row estimate (the Paragraph uses real wrapping; this only
-/// reserves enough vertical space).
+/// Keep the cursor visible in a single terminal row. The returned column is
+/// relative to the first rendered input character and uses display width,
+/// not byte or char count.
+fn input_window(input: &str, cursor: usize, max_width: usize) -> (String, usize) {
+    let chars: Vec<char> = input.chars().collect();
+    let cursor = cursor.min(chars.len());
+    let mut start = cursor;
+    let mut before_width = 0;
+    while start > 0 {
+        let width = crate::composer::char_width(chars[start - 1]);
+        if before_width + width > max_width {
+            break;
+        }
+        start -= 1;
+        before_width += width;
+    }
+
+    let mut output: String = chars[start..cursor].iter().collect();
+    let mut used = before_width;
+    for ch in &chars[cursor..] {
+        let width = crate::composer::char_width(*ch);
+        if used + width > max_width {
+            break;
+        }
+        output.push(*ch);
+        used += width;
+    }
+    (output, before_width)
+}
+
 fn wrapped_lines(text: &str, width: usize) -> usize {
     let mut lines = 1;
-    let mut col = 0;
+    let mut column = 0;
     for word in text.split_whitespace() {
-        let w = word.chars().count() + 1;
-        if col + w > width && col > 0 {
+        let word_width = crate::composer::str_width(word) + 1;
+        if column + word_width > width && column > 0 {
             lines += 1;
-            col = w;
+            column = word_width;
         } else {
-            col += w;
+            column += word_width;
         }
     }
     lines
@@ -124,89 +177,93 @@ fn wrapped_lines(text: &str, width: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::question_menu::state::QuestionPrompt;
+    use crate::question_menu::state::{handle_question_key, QuestionPrompt};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::backend::TestBackend;
 
     fn menu() -> QuestionMenu {
-        QuestionMenu::new(QuestionPrompt {
-            id: "q-9".into(),
+        let mut menu = QuestionMenu::new(QuestionPrompt {
+            id: "q1".into(),
             question: "Which database engine should the migration target?".into(),
             options: vec!["sqlite".into(), "postgres".into()],
-        })
+        });
+        menu.push(QuestionPrompt {
+            id: "q2".into(),
+            question: "Which runtime?".into(),
+            options: vec!["native".into()],
+        });
+        menu
     }
 
-    fn rendered_text(custom_focus: bool) -> String {
-        let mut m = menu();
-        if custom_focus {
-            crate::question_menu::state::handle_question_key(
-                &mut m,
-                crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Tab,
-                    crossterm::event::KeyModifiers::NONE,
-                ),
-            );
-        }
+    fn rendered_text(menu: &QuestionMenu) -> String {
         let backend = TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| {
-                let area = f.area();
-                render_question_popup(f, area, 20, &m);
-            })
+            .draw(|frame| render_question_popup(frame, frame.area(), 20, menu))
             .unwrap();
-        let buf = terminal.backend().buffer();
-        let mut out = String::new();
+        let buffer = terminal.backend().buffer();
+        let mut output = String::new();
         for y in 0..24 {
             for x in 0..80 {
-                if let Some(c) = buf.cell((x, y)) {
-                    out.push_str(c.symbol());
+                if let Some(cell) = buffer.cell((x, y)) {
+                    output.push_str(cell.symbol());
                 }
             }
-            out.push('\n');
+            output.push('\n');
         }
-        out
+        output
     }
 
     #[test]
-    fn popup_shows_question_options_and_hint() {
-        let text = rendered_text(false);
-        assert!(text.contains("Question"), "title present");
-        assert!(text.contains("Which database"), "question present");
-        assert!(text.contains("sqlite"), "option 1 present");
-        assert!(text.contains("postgres"), "option 2 present");
-        assert!(text.contains("custom answer"), "custom row present");
-        assert!(text.contains("Esc skip"), "hint present");
+    fn popup_shows_navigation_custom_option_and_separate_input() {
+        let text = rendered_text(&menu());
+        assert!(text.contains("Question 1/2"));
+        assert!(text.contains("sqlite"));
+        assert!(text.contains("Custom"));
+        assert!(text.contains("✎ add optional details…"));
+        assert!(text.contains("←→ question"));
     }
 
     #[test]
-    fn custom_row_shows_exactly_one_pen_icon() {
-        // Regression: the placeholder used to carry its own "✎" while the row
-        // format prepended another one, rendering "✎ ✎ custom answer…".
-        for custom_focus in [false, true] {
-            let text = rendered_text(custom_focus);
-            let pens = text.matches('✎').count();
-            assert_eq!(pens, 1, "exactly one pen icon, got {pens} in:\n{text}");
-            assert!(text.contains("✎ custom answer…"), "placeholder row intact");
-        }
-    }
-
-    #[test]
-    fn popup_respects_composer_top_anchor() {
-        // composer_top = 20 in a 24-row terminal: the popup must live above it.
+    fn cursor_starts_after_the_input_prefix() {
+        let mut menu = menu();
+        handle_question_key(&mut menu, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let backend = TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
-        let m = menu();
         terminal
-            .draw(|f| {
-                let area = f.area();
-                render_question_popup(f, area, 20, &m);
-            })
+            .draw(|frame| render_question_popup(frame, frame.area(), 20, &menu))
             .unwrap();
-        // The title row must be strictly above the composer line.
-        let buf = terminal.backend().buffer();
-        let title_row = (0..20).find(|&y| {
-            (0..80).any(|x| buf.cell((x, y)).map(|c| c.symbol() == "Q").unwrap_or(false))
-        });
-        assert!(title_row.is_some(), "title rendered above the composer");
+        // popup x=10, content x=11, "✎ " occupies two columns.
+        terminal.backend_mut().assert_cursor_position((13, 16));
+    }
+
+    #[test]
+    fn cursor_uses_unicode_display_width_at_an_interior_position() {
+        let mut menu = menu();
+        handle_question_key(&mut menu, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        menu.paste_custom("你好a");
+        handle_question_key(&mut menu, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_question_popup(frame, frame.area(), 20, &menu))
+            .unwrap();
+        // Two CJK chars before the cursor occupy four columns.
+        terminal.backend_mut().assert_cursor_position((17, 16));
+    }
+
+    #[test]
+    fn long_input_window_keeps_cursor_inside_the_popup() {
+        let input = "0123456789".repeat(8);
+        let (visible, cursor) = input_window(&input, input.chars().count(), 52);
+        assert_eq!(crate::composer::str_width(&visible), 52);
+        assert_eq!(cursor, 52);
+    }
+
+    #[test]
+    fn popup_stays_above_the_composer_anchor() {
+        let text = rendered_text(&menu());
+        let title_row = text.lines().position(|line| line.contains("Question 1/2"));
+        assert!(title_row.is_some_and(|row| row < 20));
     }
 }

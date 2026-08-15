@@ -524,14 +524,17 @@ impl Config {
         out
     }
 
-    /// Returns enabled MCP servers applicable to an agent tier.
+    /// Returns enabled MCP servers applicable to the agent session `name`
+    /// running in `mode` (primary agents share the `parent` flag; subagents
+    /// are matched by name — see [`InjectionTarget::allows_agent`]).
     pub fn enabled_mcp_servers_for(
         &self,
+        name: &str,
         mode: crate::AgentMode,
     ) -> Vec<(String, &McpServerConfig)> {
         self.enabled_mcp_servers()
             .into_iter()
-            .filter(|(_, cfg)| cfg.inject_to.allows(mode))
+            .filter(|(_, cfg)| cfg.inject_to.allows_agent(name, mode))
             .collect()
     }
 
@@ -547,11 +550,12 @@ impl Config {
         out
     }
 
-    /// Returns enabled CLI registrations applicable to an agent tier.
-    pub fn enabled_cli_for(&self, mode: crate::AgentMode) -> Vec<(String, &CliConfig)> {
+    /// Returns enabled CLI registrations applicable to the agent session
+    /// `name` running in `mode` (see [`InjectionTarget::allows_agent`]).
+    pub fn enabled_cli_for(&self, name: &str, mode: crate::AgentMode) -> Vec<(String, &CliConfig)> {
         self.enabled_cli()
             .into_iter()
-            .filter(|(_, cfg)| cfg.inject_to.allows(mode))
+            .filter(|(_, cfg)| cfg.inject_to.allows_agent(name, mode))
             .collect()
     }
 

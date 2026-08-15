@@ -350,7 +350,16 @@ pub(crate) fn render<B: Backend>(
                 theme::warn_color(),
             );
         }
-        if !input_disabled && model_menu.is_none() && question_menu.is_none() {
+        // Popups that own an editable text field (/cli form + content
+        // dialog, /mcp form, /model, question) place the terminal cursor
+        // themselves; the composer cursor must not override theirs — the
+        // last `set_cursor_position` in a frame wins.
+        if !input_disabled
+            && model_menu.is_none()
+            && question_menu.is_none()
+            && cli_menu.is_none()
+            && mcp_menu.is_none()
+        {
             let position = composer::cursor_screen_position(
                 composer_area.x,
                 composer_area.y,

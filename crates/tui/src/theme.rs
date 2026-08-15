@@ -274,9 +274,9 @@ pub fn list_highlight() -> Style {
 pub fn context_meter(pct: u8) -> (String, Color) {
     let filled = (pct as usize).min(100) / 10;
     let bar = "\u{25b0}".repeat(filled) + &"\u{25b1}".repeat(10 - filled);
-    let color = if pct >= 85 {
+    let color = if pct > 80 {
         err_color()
-    } else if pct >= 60 {
+    } else if pct > 40 {
         warn_color()
     } else {
         ok_color()
@@ -416,25 +416,25 @@ mod tests {
     }
 
     #[test]
-    fn context_meter_just_below_yellow_threshold_is_green() {
-        // 59 is the highest percentage that stays Green.
-        assert_meter(59, 5, OK);
+    fn context_meter_at_green_ceiling_is_green() {
+        // 40 is the highest percentage that stays Green.
+        assert_meter(40, 4, OK);
     }
 
     #[test]
-    fn context_meter_yellow_threshold_is_yellow() {
-        assert_meter(60, 6, WARN);
+    fn context_meter_just_above_green_threshold_is_warn() {
+        assert_meter(41, 4, WARN);
     }
 
     #[test]
-    fn context_meter_just_below_red_threshold_is_yellow() {
-        // 84 is the highest percentage that stays Yellow.
-        assert_meter(84, 8, WARN);
+    fn context_meter_at_warn_ceiling_is_warn() {
+        // 80 is the highest percentage that stays Yellow.
+        assert_meter(80, 8, WARN);
     }
 
     #[test]
     fn context_meter_red_threshold_is_red() {
-        assert_meter(85, 8, ERR);
+        assert_meter(81, 8, ERR);
     }
 
     #[test]

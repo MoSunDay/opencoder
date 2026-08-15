@@ -20,7 +20,13 @@ pub(super) async fn run_one_llm_call(
     let mcp_status = mcp_status_for_agent(session, registry);
     let mcp = crate::prompt::mcp_section(&mcp_status);
     let cli = (session.agent.name != "workflow")
-        .then(|| crate::prompt::cli_section(&session.config.enabled_cli_for(session.agent.mode)))
+        .then(|| {
+            crate::prompt::cli_section(
+                &session
+                    .config
+                    .enabled_cli_for(&session.agent.name, session.agent.mode),
+            )
+        })
         .flatten();
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
     let system = build_system(
@@ -40,7 +46,12 @@ pub(super) async fn run_one_llm_call(
         .filter(|(name, _)| {
             if crate::mcp::is_mcp_tool(name.as_str()) {
                 return session.agent.name != "workflow"
-                    && mcp_tool_allowed(&session.config, session.agent.mode, name);
+                    && mcp_tool_allowed(
+                        &session.config,
+                        &session.agent.name,
+                        session.agent.mode,
+                        name,
+                    );
             }
             session.agent.tools.allows(name)
                 && (!crate::tools::latent::is_latent_tool(name.as_str())
@@ -139,9 +150,9 @@ pub(super) async fn run_one_llm_call(
     Ok((text, reasoning_buf, tool_calls, usage))
 }
 
-fn mcp_tool_allowed(config: &Config, mode: AgentMode, tool_name: &str) -> bool {
+fn mcp_tool_allowed(config: &Config, agent: &str, mode: AgentMode, tool_name: &str) -> bool {
     config
-        .enabled_mcp_servers_for(mode)
+        .enabled_mcp_servers_for(agent, mode)
         .into_iter()
         .any(|(name, _)| {
             let prefix = format!("mcp__{}__", name.replace(['-', '.'], "_"));
@@ -153,7 +164,9 @@ fn mcp_status_for_agent(
     session: &SessionState,
     registry: &HashMap<String, ToolArc>,
 ) -> Vec<(String, crate::mcp::ConnStatus)> {
-    let applicable = session.config.enabled_mcp_servers_for(session.agent.mode);
+    let applicable = session
+        .config
+        .enabled_mcp_servers_for(&session.agent.name, session.agent.mode);
     let live: HashMap<_, _> = crate::mcp::pool::status_for(&session.id)
         .into_iter()
         .collect();
@@ -349,7 +362,18 @@ mod tests {
             }]),
         );
         let client = mock.clone() as Arc<dyn ChatStream>;
-        let session = make_session(client);
+        // The registry alone is not enough: the server must be enabled in the
+        // session config (parent scope) for its tools to be surfaced.
+        let mut config = Config::default();
+        config.mcp_servers.insert(
+            "test".into(),
+            opencoder_core::config::McpServerConfig {
+                enabled: true,
+                inject_to: opencoder_core::InjectionTarget::parent_only(),
+                ..Default::default()
+            },
+        );
+        let session = session_for("act", config, client);
         let registry = registry_with_mcp();
         let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
 
@@ -400,6 +424,131 @@ mod tests {
         );
     }
 
+    /// Config fixture: one CLI registration injected to `explore` only.
+    fn explore_only_cli_config() -> Config {
+        let mut config = Config::default();
+        config.cli.insert(
+            "fk-cli".into(),
+            opencoder_core::CliConfig {
+                enabled: true,
+                inject_to: opencoder_core::InjectionTarget {
+                    parent: false,
+                    explore: true,
+                    build: false,
+                },
+                content: "EXPLORE_ONLY_CONTRACT".into(),
+            },
+        );
+        config
+    }
+
+    fn session_for(
+        agent_name: &str,
+        config: Config,
+        client: Arc<dyn ChatStream>,
+    ) -> SessionState {
+        SessionState::new(
+            "test-inject-target",
+            resolve_agent(agent_name).unwrap(),
+            config,
+            client,
+            std::env::temp_dir(),
+        )
+    }
+
+    async fn request_body_for(agent_name: &str, config: Config) -> String {
+        let mock = Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "done".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let session = session_for(agent_name, config, client);
+        let registry: HashMap<String, ToolArc> = HashMap::new();
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 1);
+        reqs[0].to_body().to_string()
+    }
+
+    #[tokio::test]
+    async fn cli_injected_only_into_explore_subagent_by_name() {
+        let body = request_body_for("explore", explore_only_cli_config()).await;
+        assert!(body.contains("EXPLORE_ONLY_CONTRACT"));
+        let body = request_body_for("build", explore_only_cli_config()).await;
+        assert!(
+            !body.contains("EXPLORE_ONLY_CONTRACT"),
+            "build subagent must not see explore-only CLI: {body}"
+        );
+        let body = request_body_for("act", explore_only_cli_config()).await;
+        assert!(
+            !body.contains("EXPLORE_ONLY_CONTRACT"),
+            "parent agent must not see explore-only CLI: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_scoped_to_single_subagent_by_name() {
+        // Server injected to `build` only: tools surface for build, not explore.
+        let mut config = Config::default();
+        config.mcp_servers.insert(
+            "test".into(),
+            opencoder_core::config::McpServerConfig {
+                enabled: true,
+                inject_to: opencoder_core::InjectionTarget {
+                    parent: false,
+                    explore: false,
+                    build: true,
+                },
+                ..Default::default()
+            },
+        );
+        let mock = Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "done".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let session = session_for("build", config.clone(), client);
+        let registry = registry_with_mcp();
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        let reqs = mock.requests();
+        let tool_names: Vec<&str> = reqs[0]
+            .tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(
+            tool_names.contains(&"mcp__test__fake"),
+            "build subagent sees its scoped server: {tool_names:?}"
+        );
+
+        let mock = Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "done".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        );
+        let client = mock.clone() as Arc<dyn ChatStream>;
+        let session = session_for("explore", config, client);
+        let _ = run_one_llm_call(&session, &registry, &mut |_| {}).await;
+        let reqs = mock.requests();
+        let tool_names: Vec<&str> = reqs[0]
+            .tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(
+            !tool_names.iter().any(|n| n.starts_with("mcp__")),
+            "explore subagent must not see build-only server: {tool_names:?}"
+        );
+    }
+
     #[tokio::test]
     async fn mcp_tools_hidden_from_workflow_agent() {
         let mock = Arc::new(
@@ -416,7 +565,7 @@ mod tests {
             "fk-cli".into(),
             opencoder_core::CliConfig {
                 enabled: true,
-                inject_to: opencoder_core::InjectionTarget::Parent,
+                inject_to: opencoder_core::InjectionTarget::parent_only(),
                 content: "WORKFLOW_MUST_NOT_SEE_CLI".into(),
             },
         );

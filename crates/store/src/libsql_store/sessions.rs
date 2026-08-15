@@ -151,6 +151,9 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.model.is_some() && patch.clear_model {
         anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
     }
+    if patch.requirement.is_some() && patch.clear_requirement {
+        anyhow::bail!("SessionPatch: requirement field and clear_requirement are mutually exclusive");
+    }
 
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Value> = Vec::new();
@@ -215,6 +218,9 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if let Some(v) = &patch.requirement {
         sets.push("requirement = ?");
         args.push(v.clone().into());
+    }
+    if patch.clear_requirement {
+        sets.push("requirement = NULL");
     }
     if sets.is_empty() {
         return Ok(());

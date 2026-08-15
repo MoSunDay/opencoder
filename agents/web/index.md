@@ -1,4 +1,4 @@
-Commit: 4ae5b50508e9d9016edeb45c61361240ecce1e37
+Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 
 # web 模块
 
@@ -15,8 +15,9 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 - `HandleMap = Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>`：活跃 drain 句柄注册表；handle 可由 `/events` 或 `/prompt` get-or-create。
 - `admit_and_drain`（`src/handle.rs`）：admit 输入到 Store → get-or-create handle（共享 broadcast 通道）→ `draining.swap(true)` CAS 决定是否 spawn drain → 立即返回 admitted_seq。
 - `drain_to_completion`（`src/handle.rs`）：`DrainGuard` 在 Drop（含 panic）复位 `draining`；`resume` 构建 session → 应用 overrides → `run(session, "", ...)`（drain 模式）→ on_event 同时 broadcast（`SseEvt::from_session_event` 现走 `SessionEvent::sse_kind()/sse_data()/coarse_kind()` 单一真相源）+ 落 `session_events` 表（持久化 `sse_kind`）供 SSE replay；`GET /events` 的 `get_events` replay 优先取 `sse_kind`、`None` 回退 `event_kind_str(coarse)` → 完成后**保留 handle 于 map**（供 late SSE replay + 后续 re-admit 再 spawn）；仅 resume 失败（session 行缺失）时移除。
+- MCP 连接池生命周期：session 删除与最后一个 `/events` 订阅者离开时经 `opencoder_session::mcp::cleanup(&id)` 释放该 session 的 MCP 连接；订阅者增减经 `release_events_subscriber`（`src/handle.rs`——创建者先离开时句柄仍保留给其余订阅者，计数归零才 evict+cleanup）；config reload 时按 `config.enabled_mcp_servers()` 经 `mcp::pool::sync` 增删连接。
 - drain 命令通道：`SessionHandle` 另携 `cmd_tx`/`cmd_rx`（`Arc<std::sync::Mutex<CmdRx>>`，锁仅在取命令时短暂持有，绝不跨 await）。`DrainCmd` 枚举（`src/cmd.rs`）：`Compact`、`Handoff{extra}`、`SetSkill(Option<String>)`、`ReloadConfig`。需 `&mut SessionState`（仅存于 `drain_to_completion` 内）的操作经 `send_cmd()` 入队；`run()` 完成后 `process_drain_cmds()` 在 drain 闭包内排空队列。`CmdRxGuard` 在 Drop 时还原 `cmd_rx`（panic-safe）。
-- `data_dir_for`（`src/lib.rs`）：workdir → 稳定 FNV-1a 64 指纹（非 `DefaultHasher`，后者 std 不保证跨版本稳定，会让 DB 路径身份漂移）→ 本地数据目录。
+- data dir 解析：统一经 `opencoder_core::data_dir_for`（唯一实现与稳定性论证见 [agents/core](../core/index.md)），web 无本地副本。
 
 ## 主流程
 POST /prompt（`src/api.rs`）：解析 body → load config → 建 ChatClient → `ensure_session_row` → `admit_and_drain` → 返回 `{admitted_seq}`（非阻塞）。

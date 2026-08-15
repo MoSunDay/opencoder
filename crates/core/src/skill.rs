@@ -28,6 +28,28 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
+/// Cache entry: the (path, mtime) fingerprint captured at discovery time plus
+/// the discovered skills behind an Arc so hits clone cheaply.
+struct DiscoverCacheEntry {
+    files: Vec<(PathBuf, SystemTime)>,
+    skills: Arc<Vec<Skill>>,
+}
+
+/// Process-level discovery cache, keyed on the single most recently scanned
+/// root.
+///
+/// Purpose: the UI submit path (`skill_persist::resolve_persist`) calls
+/// [`discover`] on every Enter/Tab submit, which without this cache means a
+/// full `read_to_string` sweep of the skills directory per keypress. With the
+/// cache, a hit costs one `read_dir` plus N `stat` calls and never reads a
+/// skill file. Invalidation is exact: any (path, mtime) change in the watched
+/// file set (see [`fingerprint`]) makes the next call a miss and forces a
+/// rescan. [`discover_in`] stays uncached so tests pointing at tempdirs
+/// always observe the real directory.
+static DISCOVER_CACHE: Mutex<Option<(PathBuf, DiscoverCacheEntry)>> = Mutex::new(None);
 
 mod seed;
 
@@ -60,7 +82,34 @@ pub fn skills_dir() -> PathBuf {
 /// A missing or unreadable directory is not an error — it yields an empty
 /// `Vec`, so the TUI picker simply reports "no skills" instead of crashing.
 pub fn discover() -> Vec<Skill> {
-    discover_in(&skills_dir())
+    discover_cached(&skills_dir())
+}
+
+/// Cached variant of [`discover_in`] for hot paths: returns the previously
+/// discovered skills when `root` matches the cached root and its
+/// [`fingerprint`] is unchanged, otherwise rescans via [`discover_in`] and
+/// refreshes the cache. The lock is never held across the rescan itself, so
+/// concurrent callers never serialize on file I/O.
+pub fn discover_cached(root: &Path) -> Vec<Skill> {
+    let files = fingerprint(root);
+    {
+        let cache = DISCOVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((cached_root, entry)) = cache.as_ref() {
+            if cached_root == root && entry.files == files {
+                return entry.skills.as_ref().clone();
+            }
+        }
+    }
+    let skills = discover_in(root);
+    let mut cache = DISCOVER_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    *cache = Some((
+        root.to_path_buf(),
+        DiscoverCacheEntry {
+            files,
+            skills: Arc::new(skills.clone()),
+        },
+    ));
+    skills
 }
 
 /// Directory-scanning core, factored out so tests can point at a tempdir.
@@ -97,6 +146,48 @@ pub fn discover_in(root: &Path) -> Vec<Skill> {
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// Build the (path, mtime) fingerprint of exactly the file set
+/// [`discover_in`] reads: top-level `*.md` files plus `<dir>/SKILL.md` for
+/// each subdirectory that has one. Sorted for stable comparison. An empty
+/// result (unreadable root or any stat failure) always mismatches a cached
+/// non-empty fingerprint, forcing a rescan.
+fn fingerprint(root: &Path) -> Vec<(PathBuf, SystemTime)> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(root) {
+        Ok(it) => it,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        let target = if ft.is_file() {
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                path
+            } else {
+                continue;
+            }
+        } else if ft.is_dir() {
+            let inner = path.join("SKILL.md");
+            if inner.is_file() {
+                inner
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        match std::fs::metadata(&target).and_then(|m| m.modified()) {
+            Ok(mtime) => out.push((target, mtime)),
+            Err(_) => return Vec::new(),
+        }
+    }
+    out.sort();
     out
 }
 
@@ -586,5 +677,67 @@ mod tests {
             extract_skill_tokens("$a first task then $b second task");
         assert_eq!(clean, " first task then  second task");
         assert_eq!(names, vec!["a", "b"]);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    // Tests share the process-global cache across threads, so every test uses
+    // a fresh tempdir to guarantee fingerprints never collide.
+    fn write(path: impl AsRef<Path>, contents: &str) {
+        let p = path.as_ref();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, contents).unwrap();
+    }
+
+    #[test]
+    fn cache_serves_repeat_calls_and_invalidates_on_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path().join("alpha.md"), "one");
+        let first = discover_cached(dir.path());
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].name, "alpha");
+        // Unchanged fingerprint must be served from the cache verbatim.
+        let second = discover_cached(dir.path());
+        assert_eq!(first, second);
+        thread::sleep(Duration::from_millis(15));
+        write(dir.path().join("alpha.md"), "---\nname: beta\n---\ntwo");
+        let third = discover_cached(dir.path());
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].name, "beta", "mtime change must force a rescan");
+    }
+
+    #[test]
+    fn cache_invalidates_on_file_add() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path().join("alpha.md"), "one");
+        assert_eq!(discover_cached(dir.path()).len(), 1);
+        thread::sleep(Duration::from_millis(15));
+        write(dir.path().join("second.md"), "two");
+        assert_eq!(discover_cached(dir.path()).len(), 2);
+    }
+
+    #[test]
+    fn distinct_roots_do_not_collide() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        write(a.path().join("alpha.md"), "one");
+        write(b.path().join("beta.md"), "two");
+        // Alternate roots against the single-entry cache: each lookup must
+        // key on the root and never serve the other directory's skills.
+        let in_a = discover_cached(a.path());
+        let in_b = discover_cached(b.path());
+        let in_a_again = discover_cached(a.path());
+        let in_b_again = discover_cached(b.path());
+        assert_eq!(in_a.len(), 1);
+        assert_eq!(in_a[0].name, "alpha");
+        assert_eq!(in_b.len(), 1);
+        assert_eq!(in_b[0].name, "beta");
+        assert_eq!(in_a_again, in_a);
+        assert_eq!(in_b_again, in_b);
     }
 }

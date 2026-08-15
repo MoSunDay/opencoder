@@ -83,7 +83,7 @@ pub(super) async fn run_app(
     // before the worker spawns so the first turn may already ask the user.
     let mut question_hub = session.question_hub.clone();
     question_hub.attach();
-    let (mut question_menu, mut question_queue) = crate::question_menu::dialog_state();
+    let mut question_menu = crate::question_menu::dialog_state();
     let mut chat = initial_chat_view(&session, &store).await;
     chat.annotation_text = session.requirement.clone();
     let mut input = String::new();
@@ -298,8 +298,7 @@ pub(super) async fn run_app(
                                 TaskOutcome::Pick(pick) => {
                                     // Drop any pending question dialog: abandoning its hub
                                     // entry unblocks the tool with the skip reply.
-                                    if let Some(m) = question_menu.take() { question_hub.abandon(&m.prompt.id); }
-                                    question_queue.clear();
+                                    crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
 
                                     app_task::switch_session(
                                         terminal,
@@ -365,7 +364,7 @@ pub(super) async fn run_app(
                         // Question dialog: answers resolve on the hub, mid-turn.
                         if question_menu.is_some() {
                             crate::question_menu::route_question_key(
-                                &mut question_menu, &mut question_queue, k, &question_hub,
+                                &mut question_menu, k, &question_hub,
                             );
                             dirty = true;
                             continue;
@@ -749,7 +748,7 @@ pub(super) async fn run_app(
                     maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
                     &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
-                    &mut question_menu, &mut question_queue, &question_hub,
+                    &mut question_menu, &question_hub,
                 )
                 .await;
                 match np_flow {

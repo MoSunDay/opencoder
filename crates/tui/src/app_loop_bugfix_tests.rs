@@ -81,7 +81,6 @@ async fn fold_stale_turndone_keeps_newer_turn_running() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -164,7 +163,6 @@ async fn done_with_pending_queue_arms_drain_pending() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -233,7 +231,6 @@ async fn done_with_empty_store_goes_idle() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -288,7 +285,6 @@ async fn drain_pending_restart_with_dead_worker_quits() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -437,7 +433,6 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -465,7 +460,6 @@ async fn first_reasoning_delta_renders_then_hidden_appends_are_coalesced() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -517,7 +511,6 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;
@@ -574,7 +567,6 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
         &mut evt_rx,
         &mut notepad,
         &mut None,
-        &mut std::collections::VecDeque::new(),
         &opencoder_session::QuestionHub::new(),
     )
     .await;

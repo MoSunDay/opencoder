@@ -1,4 +1,4 @@
-Commit: (working-tree, pre-commit)
+Commit: 58e1563
 
 # ctx 仪表阈值调整：>80 Red / >40 Yellow（预警前移）
 

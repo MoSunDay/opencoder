@@ -1,4 +1,4 @@
-Commit: bd3c980275fd79dbd23173a88fdd6f4806f72bfd
+Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 
 # tui 模块
 
@@ -10,6 +10,7 @@ ratatui + crossterm 交互界面。3-region 布局、事件循环、鼠标命中
 - 非目标：TUI 不是 Web 替代品——app 内无 SSE replay，仅 live event 流；但 **worker 持有 `Option<Arc<dyn Store>>`**，每个 SessionEvent 经 `worker::persist_event`（fire-and-forget spawn）写入 `session_events`（含 `sse_kind`），故 web/SSE 客户端可回放 TUI 驱动的会话（TUI 自身不在 app 内回放）。
 
 ## 关键抽象
+- `onboarding`（`src/onboarding.rs` + `app_bootstrap.rs`）：交互式启动先确保 `~/.opencoder/config.json` 存在，再对完整有效配置执行凭证、HTTP(S) URL、headers、proxy 与 `ChatClient` 本地构建校验（不发送模型请求）。不可用时在 TUI 内复用 `ProviderForm`，预填有效 provider/model/base_url、掩码密钥并聚焦 API key；保存固定写全局配置，随后重载 project/CLI/env 覆盖并再次校验，成功才创建 Store/Session/worker。Esc/Ctrl-D 直接退出，空配置保留供下次继续。`ActiveTerminal` 把 onboarding 的同一 alt-screen 交给主 chat loop，并以 RAII 同时恢复终端和 tmux status。
 - `ChatView`（`src/chat.rs` + `src/chat_stream.rs`）：`blocks: Vec<ChatBlock>` + `agent/status/subagents_running/subagents_total/context_used`。`apply(&SessionEvent)` 逐事件更新——核心接缝；同一 LLM round 可有多个 Thinking，但最多一个 Assistant，交错的 `ReasoningDelta → TextDelta → ReasoningDelta → TextDelta` 会把 Thinking 统一排在前、所有正文 chunk 原样拼入唯一 Say，`LlmRoundEnd` 为硬边界。`track_context` 只累加本 view transcript token（不递归 SubagentChild），Thinking/Assistant 由 `sealed`/`done` 保证只计一次。`last_open_thinking_collapsed()` 同时识别尾部 Thinking 和位于未完成 Assistant 前的开放 Thinking；首个 reasoning delta 触发绘制，后续折叠增量才跳过重复绘制。
 - `ChatBlock`（定义于 `src/chat_types.rs`）：`Marker(Vec<Line>)` / `User{rendered}` / `Assistant{raw,rendered,done}` / `Thinking{text,collapsed,sealed}` / `Tool{header,output,started_at_ms,elapsed_ms}` / `Subagent{id,child_session_id,kind,prompt,view:ChatView,done,ok,summary,started_at_ms,elapsed_ms}`。`flatten_with(anim_tick, now_ms)` → `Vec<Line>` 供 Paragraph 渲染。用户输入统一经 `User{rendered}` 块渲染；Assistant 对应绿色加粗 `❯ Say:`，每轮唯一。`turn_block_start` 标记当前顶层 turn 的块下界，使可靠完成态只校准本轮 Assistant、绝不覆盖历史回答。User/Assistant 正文共用 `indented(rendered, 4)`。
 - `terminal_text`（`src/terminal_text.rs`）：动态文本进入 UI 模型时的一次性终端安全边界。`sanitize_multiline` 保留结构换行、展开 TAB 并移除 CR/C0/C1/DEL，`sanitize_single_line` 额外把换行压成空格，`sanitize_line` 在保留 Span 样式的同时净化 marker。普通文本返回 borrowed `Cow`、不分配；live delta 仅扫描当前增量，历史消息仅在 replay 时扫描一次，`flatten_with` / `ViewportCache` / 每帧 render 不重复遍历。原始 SessionEvent、Store 消息和模型上下文不改写。

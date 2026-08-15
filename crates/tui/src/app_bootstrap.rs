@@ -5,15 +5,13 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use opencoder_core::{resolve_agent, Config};
-use opencoder_llm::{ChatClient, ChatStream};
+use opencoder_llm::ChatStream;
 use opencoder_session::SessionState;
 use opencoder_store::Store;
 use ratatui::backend::CrosstermBackend;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{
-    open_store, persist_session_model, reapply_session_model, resume_hint, startup_endpoint,
-};
+use crate::app_helpers::{open_store, persist_session_model, reapply_session_model, resume_hint};
 use crate::render::Term;
 use crate::terminal::TerminalGuard;
 use crate::TuiOpts;
@@ -25,19 +23,35 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         .workdir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    Config::ensure_global_config().context("create ~/.opencoder/config.json")?;
     let mut config = Config::load(&workdir)?;
     crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }
-    let ep = startup_endpoint(&config)?;
-    let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new_with_read_timeout(
-        &ep.base_url,
-        &ep.api_key,
-        &ep.headers,
-        config.stream_idle_timeout(),
-        config.network.proxy.as_deref(),
-    )?);
+    let (config, concrete_client, active_terminal) =
+        match crate::onboarding::build_ready_client(&config) {
+            Ok(client) => (config, client, None),
+            Err(startup_error) => {
+                let mut terminal = ActiveTerminal::enter()?;
+                match crate::onboarding::run(
+                    &mut terminal.terminal,
+                    &workdir,
+                    opts.model.as_deref(),
+                    config,
+                    startup_error,
+                )
+                .await?
+                {
+                    crate::onboarding::OnboardingOutcome::Ready { config, client } => {
+                        (*config, client, Some(terminal))
+                    }
+                    crate::onboarding::OnboardingOutcome::Exit => return Ok(()),
+                }
+            }
+        };
+    crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
+    let client: Arc<dyn ChatStream> = Arc::new(concrete_client);
 
     let store: Arc<dyn Store> = open_store(&workdir).await?;
     // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)
@@ -118,20 +132,13 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     // the old "cleanup only ran on the happy path" trap that bricked the
     // terminal on any panic, leaving the user with a frozen last frame, no
     // echo, and ineffective Ctrl+C/D.
-    let tmux_bar_prev = crate::tmux_bar::hide();
-    let _guard = TerminalGuard::enter()?;
-    let backend = CrosstermBackend::new(std::io::stdout());
-    let mut terminal = Term::new(backend)?;
-    // Entering the alt screen does NOT clear it: tmux keeps one persistent
-    // alt-screen grid per pane, so a previous run's last frame (and any
-    // status-bar hide / pane-resize edge rows) would show through wherever the
-    // first draw's diff emits no bytes (empty-vs-empty cells are never
-    // rewritten). A real `Terminal::clear()` sends ESC[2J and resets the diff
-    // baseline so the first frame is a full repaint.
-    terminal.clear()?;
+    let mut active_terminal = match active_terminal {
+        Some(terminal) => terminal,
+        None => ActiveTerminal::enter()?,
+    };
 
     let result = super::run_app(
-        &mut terminal,
+        &mut active_terminal.terminal,
         session,
         store,
         session_id,
@@ -144,13 +151,60 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     )
     .await;
 
-    // Restore the tmux status bar and the real terminal on every exit path
-    // (normal return or `?` error) before printing the resume hint.
-    crate::tmux_bar::restore(tmux_bar_prev);
-    drop(_guard);
+    // Restore the tmux status bar and terminal before printing the hint.
+    drop(active_terminal);
     let final_id = result?;
     eprintln!("\n\x1b[2m{}\x1b[0m", resume_hint(&final_id));
     Ok(())
+}
+
+/// A fully-entered terminal whose Drop restores both terminal state and the
+/// tmux status bar. Keeping it as one value lets onboarding hand the same live
+/// screen to the normal chat loop without a leave/re-enter flicker.
+struct ActiveTerminal {
+    terminal: Term,
+    guard: Option<TerminalGuard>,
+    tmux_bar_prev: Option<bool>,
+}
+
+impl ActiveTerminal {
+    fn enter() -> Result<Self> {
+        let tmux_bar_prev = crate::tmux_bar::hide();
+        let guard = match TerminalGuard::enter() {
+            Ok(guard) => guard,
+            Err(error) => {
+                crate::tmux_bar::restore(tmux_bar_prev);
+                return Err(error);
+            }
+        };
+        let backend = CrosstermBackend::new(std::io::stdout());
+        let mut terminal = match Term::new(backend) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                drop(guard);
+                crate::tmux_bar::restore(tmux_bar_prev);
+                return Err(error.into());
+            }
+        };
+        // tmux retains its alternate-screen grid; force a clean first frame.
+        if let Err(error) = terminal.clear() {
+            drop(guard);
+            crate::tmux_bar::restore(tmux_bar_prev);
+            return Err(error.into());
+        }
+        Ok(Self {
+            terminal,
+            guard: Some(guard),
+            tmux_bar_prev,
+        })
+    }
+}
+
+impl Drop for ActiveTerminal {
+    fn drop(&mut self) {
+        drop(self.guard.take());
+        crate::tmux_bar::restore(self.tmux_bar_prev);
+    }
 }
 
 /// Disarm the liveness supervisor and bound the worker shutdown wait.

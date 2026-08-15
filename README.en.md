@@ -77,6 +77,8 @@ curl -fsSL https://raw.githubusercontent.com/MoSunDay/opencoder/main/scripts/ins
 
 ### Configuration
 
+On the first interactive launch, OpenCoder creates `~/.opencoder/config.json` and opens an in-TUI model setup form when the effective configuration is not yet usable. After the provider, model, endpoint, and API key pass local validation, the same TUI continues directly to the task composer. Existing usable project or environment configuration is honored without prompting.
+
 Place an `opencoder.json` in the project root or `~/.opencoder/` (env vars and CLI flags take higher precedence):
 
 ```jsonc

@@ -360,6 +360,52 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Canonical user-global config path: `~/.opencoder/config.json`.
+    /// Test callers using [`scoped_config_home`] receive the isolated path.
+    pub fn global_config_path() -> Result<PathBuf> {
+        env::primary_global_config_path().ok_or_else(|| {
+            CoreError::Config("cannot resolve home directory for ~/.opencoder/config.json".into())
+        })
+    }
+
+    /// Ensure the canonical global config exists without overwriting it.
+    /// Returns `(path, created)`; a newly-created file contains an empty JSON
+    /// object so a cancelled first-run wizard can safely resume next launch.
+    pub fn ensure_global_config() -> Result<(PathBuf, bool)> {
+        use std::io::Write;
+
+        let path = Self::global_config_path()?;
+        if path.exists() {
+            return Ok((path, false));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(mut file) => {
+                file.write_all(b"{}\n")?;
+                Ok((path, true))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok((path, false)),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Return a cloned config with `patch` applied using the same merge rules
+    /// as disk loading/saving. The source config is never mutated.
+    pub fn merged_with(&self, patch: &serde_json::Value) -> Config {
+        let mut merged = self.clone();
+        merge::merge_into(&mut merged, patch.clone());
+        merged
+    }
+
     pub fn load(working_dir: &Path) -> Result<Config> {
         let mut cfg = Config::default();
         // Merge ALL existing candidates, least-specific first so project files
@@ -553,13 +599,25 @@ impl Config {
     /// missing. Returns the path written.
     pub fn save(working_dir: &Path, patch: &serde_json::Value) -> Result<PathBuf> {
         let target = Self::save_target(working_dir);
+        Self::save_to(&target, patch)
+    }
+
+    /// Merge a patch into the canonical global config, regardless of project
+    /// config precedence. Used by first-run onboarding; normal `/model` saves
+    /// continue to use [`save`](Self::save).
+    pub fn save_global(patch: &serde_json::Value) -> Result<PathBuf> {
+        let _ = Self::ensure_global_config()?;
+        let target = Self::global_config_path()?;
+        Self::save_to(&target, patch)
+    }
+
+    fn save_to(target: &Path, patch: &serde_json::Value) -> Result<PathBuf> {
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).ok();
+            std::fs::create_dir_all(parent)?;
         }
         let mut root: serde_json::Value = if target.exists() {
-            let raw = std::fs::read_to_string(&target).map_err(|e| {
-                CoreError::Config(format!("read config {}: {e}", target.display()))
-            })?;
+            let raw = std::fs::read_to_string(target)
+                .map_err(|e| CoreError::Config(format!("read config {}: {e}", target.display())))?;
             match serde_json::from_str::<serde_json::Value>(&raw) {
                 Ok(v) => v,
                 Err(e) => {
@@ -595,8 +653,8 @@ impl Config {
             }
         }
         let pretty = serde_json::to_string_pretty(&root)?;
-        std::fs::write(&target, pretty)?;
-        Ok(target)
+        std::fs::write(target, pretty)?;
+        Ok(target.to_path_buf())
     }
 }
 

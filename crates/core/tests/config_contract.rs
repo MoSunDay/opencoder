@@ -729,6 +729,77 @@ fn default_provider_base_url_is_openai() {
     assert_eq!(cfg.provider.base_url, "https://api.openai.com/v1");
 }
 
+#[test]
+fn ensure_global_config_creates_empty_file_without_clobbering() {
+    let home = tempfile::tempdir().unwrap();
+    let _isolation = opencoder_core::scoped_config_home(home.path().to_path_buf());
+
+    let (path, created) = Config::ensure_global_config().unwrap();
+    assert!(created);
+    assert_eq!(path, home.path().join(".opencoder/config.json"));
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{}\n");
+
+    fs::write(&path, r#"{"keep":true}"#).unwrap();
+    let (same_path, created_again) = Config::ensure_global_config().unwrap();
+    assert_eq!(same_path, path);
+    assert!(!created_again);
+    assert_eq!(fs::read_to_string(path).unwrap(), r#"{"keep":true}"#);
+}
+
+#[cfg(unix)]
+#[test]
+fn ensure_global_config_is_private_on_unix() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let _isolation = opencoder_core::scoped_config_home(home.path().to_path_buf());
+    let (path, _) = Config::ensure_global_config().unwrap();
+    let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
+#[test]
+fn save_global_ignores_project_save_target_and_preserves_unknown_keys() {
+    let home = tempfile::tempdir().unwrap();
+    let _isolation = opencoder_core::scoped_config_home(home.path().to_path_buf());
+    let workdir = tempfile::tempdir().unwrap();
+    let project = workdir.path().join("opencoder.json");
+    fs::write(&project, r#"{"model":"project/model"}"#).unwrap();
+    let global = home.path().join(".opencoder/config.json");
+    fs::create_dir_all(global.parent().unwrap()).unwrap();
+    fs::write(&global, r#"{"keep":true}"#).unwrap();
+
+    let written = Config::save_global(&serde_json::json!({
+        "model": "demo/model",
+        "providers": {"demo": {"base_url": "https://example.com/v1", "api_key": "secret"}}
+    }))
+    .unwrap();
+
+    assert_eq!(written, global);
+    assert_eq!(
+        fs::read_to_string(project).unwrap(),
+        r#"{"model":"project/model"}"#
+    );
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(global).unwrap()).unwrap();
+    assert_eq!(saved["keep"], true);
+    assert_eq!(saved["model"], "demo/model");
+}
+
+#[test]
+fn merged_with_is_pure_and_uses_config_merge_rules() {
+    let original = Config::default();
+    let merged = original.merged_with(&serde_json::json!({
+        "model": "demo/model",
+        "providers": {"demo": {"base_url": "https://example.com/v1", "api_key": "key"}}
+    }));
+
+    assert_eq!(original.model, "openai/gpt-4o-mini");
+    assert!(original.providers.is_empty());
+    assert_eq!(merged.model, "demo/model");
+    assert_eq!(merged.providers["demo"].api_key.as_deref(), Some("key"));
+}
+
 /// Isolate HOME + XDG_CONFIG_HOME into a temp dir so `Config::load` from `dir`
 /// does not pick up the developer's real global config. Returns the home guard
 /// (keep it alive for the test body) and a clean working-dir tempdir.

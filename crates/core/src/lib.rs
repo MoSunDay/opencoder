@@ -18,7 +18,7 @@ pub use agent::{
 };
 pub use config::{
     looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig,
-    CompactionConfig, Config, Endpoint, HttpHeader, McpServerConfig,
+    CliConfig, CompactionConfig, Config, Endpoint, HttpHeader, InjectionTarget, McpServerConfig,
     NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, KeymapConfig, KEYMAP_INFO, DEFAULT_CONTEXT_LIMIT,
 };

@@ -5,6 +5,7 @@ pub mod cache_salt_menu;
 pub mod chat;
 pub mod chat_plan;
 pub mod chat_req;
+pub mod cli_menu;
 pub mod clipboard;
 pub mod command;
 pub mod composer;

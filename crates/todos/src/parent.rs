@@ -48,7 +48,7 @@ pub async fn schedule(
 ) -> Result<ParentDecision> {
     let runnable = domain::runnable(spec, state);
     let prompt = format!(
-        "Decide the next workflow operation. You control how many runnable TODOs execute concurrently.\n\
+        "Decide the next workflow operation. You control how many runnable TODOs execute concurrently. You have no execution authority: never emit or request a tool call, inspect the environment, diagnose credentials, or perform a TODO yourself. Return exactly one raw JSON object with no Markdown. When a runnable TODO is blocked or interrupted, dispatch it with resume or fork, or suspend the workflow; never investigate the blocker yourself.\n\
          Allowed JSON operations:\n\
          {{\"operation\":\"dispatch\",\"todos\":[{{\"todo_id\":\"...\",\"context_mode\":\"new|resume|fork\"}}],\"reason\":\"...\"}}\n\
          {{\"operation\":\"mark_milestone\",\"todo_id\":\"...\",\"reason\":\"...\"}}\n\
@@ -80,7 +80,7 @@ pub async fn accept(
         .as_ref()
         .context("candidate missing")?;
     let prompt = format!(
-        "Accept or reject one TODO candidate. Required tool gates are authoritative: when gate.ok=false you MUST revise or fail.\n\
+        "Accept or reject one TODO candidate. You have no execution authority: never emit or request a tool call, inspect the environment, diagnose credentials, or perform the TODO yourself. Return exactly one raw JSON object with no Markdown. Required tool gates are authoritative: when gate.ok=false you MUST revise or fail.\n\
          Allowed JSON operations:\n\
          {{\"operation\":\"accept\",\"reason\":\"...\",\"mark_milestone\":false}}\n\
          {{\"operation\":\"revise\",\"reason\":\"...\",\"context_mode\":\"resume|fork\"}}\n\
@@ -119,7 +119,7 @@ async fn decide<T: serde::de::DeserializeOwned>(
         .find(|message| message.role == Role::Assistant)
         .map(|message| message.text())
         .context("workflow agent returned no assistant decision")?;
-    let decision = serde_json::from_str(raw.trim())
+    let decision = crate::json_output::parse(&raw)
         .with_context(|| format!("workflow agent returned invalid JSON: {raw}"))?;
     let seq = runtime
         .store

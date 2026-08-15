@@ -1,5 +1,5 @@
-use opencoder_core::{message::now_ms, AgentKind, Message};
 use crate::mcp::ConnStatus;
+use opencoder_core::{message::now_ms, AgentKind, CliConfig, Message};
 use std::path::{Path, PathBuf};
 
 pub fn build_system(
@@ -61,9 +61,7 @@ pub fn mcp_section(status: &[(String, ConnStatus)]) -> Option<String> {
         lines.push_str(name);
         match st {
             ConnStatus::Connected { tool_count } => {
-                lines.push_str(&format!(
-                    " — connected, {tool_count} tool(s) available"
-                ));
+                lines.push_str(&format!(" — connected, {tool_count} tool(s) available"));
             }
             ConnStatus::Failed(msg) => {
                 lines.push_str(" — connection failed: ");
@@ -72,6 +70,38 @@ pub fn mcp_section(status: &[(String, ConnStatus)]) -> Option<String> {
         }
     }
     Some(lines)
+}
+
+/// Build the system-prompt section for enabled CLI registrations.
+pub fn cli_section(entries: &[(String, &CliConfig)]) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+    let mut text = String::from(
+        "## Registered CLI\nThe following user-registered command-line interfaces are enabled. Follow each registration's usage contract when using that CLI.",
+    );
+    for (name, cfg) in entries {
+        let content = cfg.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        text.push_str("\n\n### ");
+        text.push_str(name);
+        text.push('\n');
+        text.push_str(content);
+    }
+    Some(text)
+}
+
+/// Join optional runtime prompt sections while preserving zero-config behavior.
+pub fn runtime_sections(mcp: Option<&str>, cli: Option<&str>) -> Option<String> {
+    let sections: Vec<&str> = [mcp, cli]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|section| !section.is_empty())
+        .collect();
+    (!sections.is_empty()).then(|| sections.join("\n\n"))
 }
 
 /// Load and concatenate project instruction files (AGENTS.md) from up to
@@ -250,9 +280,10 @@ mod tests {
 
     #[test]
     fn mcp_section_connected_shows_tool_count() {
-        let status = vec![
-            ("active".to_string(), ConnStatus::Connected { tool_count: 3 }),
-        ];
+        let status = vec![(
+            "active".to_string(),
+            ConnStatus::Connected { tool_count: 3 },
+        )];
         let s = mcp_section(&status).unwrap();
         assert!(s.contains("## MCP Servers"));
         assert!(s.contains("active"));
@@ -262,12 +293,10 @@ mod tests {
 
     #[test]
     fn mcp_section_failed_shows_error_message() {
-        let status = vec![
-            (
-                "broken".to_string(),
-                ConnStatus::Failed("spawn failed: ENOENT".into()),
-            ),
-        ];
+        let status = vec![(
+            "broken".to_string(),
+            ConnStatus::Failed("spawn failed: ENOENT".into()),
+        )];
         let s = mcp_section(&status).unwrap();
         assert!(s.contains("broken"));
         assert!(s.contains("connection failed"));

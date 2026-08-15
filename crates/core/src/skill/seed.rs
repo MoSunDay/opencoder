@@ -14,7 +14,8 @@ use super::skills_dir;
 /// [`include_str!`]. Each entry is `(skill_dir, &[(file_name, contents)])`.
 /// Seeded into `~/.opencoder/skills` on first startup so a fresh install ships
 /// the `task-plan -> do-and-done -> review -> submit` workflow, the orthogonal
-/// `summary` retrospective tool (read-only task recap at any checkpoint) and
+/// `summary` retrospective tool (read-only task recap at any checkpoint), the
+/// `fk-cli` focused mobile UI execution contract, and
 /// the `say-and-replay` alignment snapshot tool (read-only progress replay),
 /// plus the memory pair `repo-local-memory` (per-iteration repair-on-touch
 /// minimal updates) and `repo-local-dreaming` (periodic full memory
@@ -29,6 +30,13 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
         &[(
             "SKILL.md",
             include_str!("../../assets/skills/do-and-done/SKILL.md"),
+        )],
+    ),
+    (
+        "fk-cli",
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/fk-cli/SKILL.md"),
         )],
     ),
     (

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crossterm::event::{KeyCode, KeyEvent};
 use opencoder_core::config::McpServerConfig;
 use opencoder_core::Config;
+use opencoder_core::InjectionTarget;
 
 use super::form::McpForm;
 use super::patch::{delete_mcp_json, toggle_mcp_json};
@@ -15,6 +16,7 @@ use super::state::{McpMenu, McpOutcome};
 pub struct McpEntry {
     pub name: String,
     pub enabled: bool,
+    pub inject_to: InjectionTarget,
     pub command: Option<String>,
     pub args: Vec<String>,
     pub url: Option<String>,
@@ -27,6 +29,7 @@ impl McpEntry {
         Self {
             name: name.to_string(),
             enabled: cfg.enabled,
+            inject_to: cfg.inject_to,
             command: cfg.command.clone(),
             args: cfg.args.clone(),
             url: cfg.url.clone(),

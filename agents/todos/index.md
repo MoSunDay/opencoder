@@ -1,4 +1,4 @@
-Commit: b98058ed96d82224f4070da893aecb653fafc6c8
+Commit: 366737a414f92dfcbb61a4a738b142a2664dff1d
 
 # todos 模块
 
@@ -10,8 +10,9 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 
 - `WorkflowSpec` 是启动前准备好的通用合同，不在运行时解释 UI Case 或自然语言步骤。
 - Store 是唯一权威状态；文件目录只在 CLI `--debug` 下生成，不能反向覆盖 Store。
-- 父 Session 不执行 TODO 工具；子 Session 不修改工作流投影。Rust 状态机校验双方结构化决定。
+- 父 Session 不执行 TODO 工具，也不接收 MCP/registered CLI 指令；子 Session 不修改工作流投影。Rust 状态机校验双方结构化决定。
 - 工具门禁读取持久化 SessionEvent，只接受声明工具的匹配参数与成功 ToolEnd，模型验收不能绕过失败门禁。
+- UI TODO 可在聚焦指令中激活 `$fk-cli`，通过 `bash` 执行唯一精确的 `fk-session --args` 命令；该路径不需要 FK MCP。
 
 ## 关键抽象
 
@@ -27,7 +28,7 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 2. 创建父 Workflow Session 和 Store 投影，进入 `running`。
 3. 父 Session 读取当前全局状态并输出下一条结构化决策。
 4. dispatch 前先创建 TODO Session 并原子写入 active Session 引用；一个批次中的 TODO 通过 `JoinSet` 并发执行。
-5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；解析器只规范化纯 JSON 或单个 JSON fence，工具门禁从事件记录独立计算。
+5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；解析器接受纯 JSON 或全文中唯一一个完整 JSON fence，并拒绝多个 fence 或未 fenced 的外围说明，工具门禁从事件记录独立计算。
 6. 父 Session 验收 Candidate。通过后推进依赖；修订时选择 resume/fork；回退时推进 world epoch 并失效里程碑后的状态。
 7. interrupt 或运行错误持久化为 `suspended`；resume 先把中断中的 TODO 归约为可恢复状态，再继续父决策循环。
 
@@ -39,6 +40,6 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 
 ## 代表性验证
 
-- `crates/todos/tests/runtime.rs`：单 TODO 闭环、父决定多 TODO 批次、debug 关闭不落目录、已有 debug 投影刷新、依赖环校验。
+- `crates/todos/tests/runtime.rs`：单 TODO 闭环、父决定多 TODO 批次、debug 关闭不落目录、已有 debug 投影刷新、依赖环校验；`json_output` 单测覆盖结构化响应规范化。
 - `crates/store/tests/todos_workflow.rs`：投影与事件原子提交、generation 冲突、v8 到 v9 迁移。
 - `crates/cli/tests/todos_cli_parse.rs`：todos 命令和 debug 作用域。

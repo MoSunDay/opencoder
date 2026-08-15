@@ -48,19 +48,29 @@ pub fn should_compact(session: &SessionState) -> bool {
 /// like any other context the model actually consumes.
 fn estimated_tokens(session: &SessionState) -> u64 {
     let skill = session.skill_prompt_cloned();
+    let mcp_status: Vec<_> = crate::mcp::pool::status_for(&session.id)
+        .into_iter()
+        .filter(|(name, _)| {
+            session
+                .config
+                .enabled_mcp_servers_for(session.agent.mode)
+                .iter()
+                .any(|(enabled, _)| enabled == name)
+        })
+        .collect();
+    let mcp = crate::prompt::mcp_section(&mcp_status);
+    let cli = crate::prompt::cli_section(&session.config.enabled_cli_for(session.agent.mode));
+    let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
     let system = build_system(
         &session.agent,
         &session.working_dir,
         skill.as_deref(),
-        crate::prompt::mcp_section(&crate::mcp::pool::status_for(&session.id)).as_deref(),
+        runtime.as_deref(),
     );
     let base = estimate_messages(&session.messages).saturating_add(estimate(&system.text()));
     let registry = crate::tools::registry();
-    let tool_tokens = crate::tools::estimate_tool_schema_tokens(
-        &session.agent,
-        skill.as_deref(),
-        &registry,
-    );
+    let tool_tokens =
+        crate::tools::estimate_tool_schema_tokens(&session.agent, skill.as_deref(), &registry);
     base.saturating_add(tool_tokens) as u64
 }
 

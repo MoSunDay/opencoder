@@ -1,4 +1,4 @@
-Commit: b98058ed96d82224f4070da893aecb653fafc6c8
+Commit: 366737a414f92dfcbb61a4a738b142a2664dff1d
 
 # 通用持久化 TODO 工作流
 
@@ -12,7 +12,8 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 - Store schema 升级到 v9，新增 workflow、TODO projection 和 append-only event，使用 generation 乐观并发控制。
 - 新增 `opencoder todos validate/run/resume/show/events/list/interrupt`；文件投影仅由 `run/resume --debug` 开启。
 - 支持依赖 DAG、父决定并发批次、new/resume/fork、milestone 回退、硬工具门禁和持久化中断恢复。
-- 外部 `interrupt` 会刷新已经存在的 debug 投影；Candidate 解析兼容单个标准 JSON fence，同时继续拒绝 JSON 外的解释文本。
+- 外部 `interrupt` 会刷新已经存在的 debug 投影；结构化响应兼容全文中唯一一个标准 JSON fence，同时拒绝多个 fence 或无法唯一定位的输出。
+- 父 workflow 不接收执行工具或 registered CLI 指令；新增内置 `$fk-cli` skill，使 UI TODO 通过精确 `fk-session --args` 的 `bash` 门禁执行，不依赖 FK MCP。
 
 ## Impact Surface
 
@@ -20,6 +21,7 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 - `crates/store`
 - `crates/cli` 与根 binary 分发
 - builtin `workflow` agent
+- builtin `fk-cli` skill
 
 ## Tests
 
@@ -29,7 +31,8 @@ Commit: b98058ed96d82224f4070da893aecb653fafc6c8
 | 父决定多 TODO 批次 | `parent_can_dispatch_multiple_independent_todos_in_one_batch` |
 | debug 默认不落文件 | `normal_execution_does_not_create_a_debug_projection` |
 | 外部状态变化刷新已有 debug 投影 | `existing_debug_projection_refreshes_after_external_state_change` |
-| Candidate JSON fence 规范化且拒绝外围说明 | `candidate_parser_accepts_raw_and_single_fenced_json`、`candidate_parser_rejects_explanatory_text_around_json` |
+| 结构化 JSON fence 规范化且拒绝歧义输出 | `json_output::tests`、`candidate_parser_accepts_raw_and_single_fenced_json` |
+| workflow 隔离执行工具、MCP 和 registered CLI | `mcp_tools_hidden_from_workflow_agent` |
 | DAG 校验 | `dependency_validation_rejects_cycles_and_runnable_is_dependency_aware` |
 | App crash/挂起后当前位置清理并恢复 runnable | `suspended_active_todo_becomes_recoverable_and_runnable` |
 | Store 原子投影、事件、并发冲突和迁移 | `crates/store/tests/todos_workflow.rs` |

@@ -92,21 +92,7 @@ pub async fn execute(
 }
 
 fn parse_candidate(raw: &str) -> Result<Candidate> {
-    let trimmed = raw.trim();
-    let json = if let Some(fenced) = trimmed
-        .strip_prefix("```json")
-        .and_then(|body| body.strip_suffix("```"))
-    {
-        fenced.trim()
-    } else if let Some(fenced) = trimmed
-        .strip_prefix("```")
-        .and_then(|body| body.strip_suffix("```"))
-    {
-        fenced.trim()
-    } else {
-        trimmed
-    };
-    Ok(serde_json::from_str(json)?)
+    crate::json_output::parse(raw)
 }
 
 pub async fn prepare_session(

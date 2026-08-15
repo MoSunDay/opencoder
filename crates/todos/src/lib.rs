@@ -1,6 +1,7 @@
 mod batch;
 pub mod domain;
 pub mod execution;
+mod json_output;
 pub mod parent;
 pub mod persistence;
 pub mod runner;

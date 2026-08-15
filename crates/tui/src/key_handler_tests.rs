@@ -682,13 +682,18 @@ fn bang_prefix_returns_bash_action() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        80, 2,
-        false, false,
+        80,
+        2,
+        false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
-    assert!(input.is_empty(), "input must be cleared after Bash dispatch");
+    assert!(
+        input.is_empty(),
+        "input must be cleared after Bash dispatch"
+    );
 }
 
 #[test]
@@ -718,13 +723,18 @@ fn bang_prefix_with_spaces_returns_bash() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        80, 2,
-        false, false,
+        80,
+        2,
+        false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "echo hi"));
-    assert!(input.is_empty(), "input must be cleared after Bash dispatch");
+    assert!(
+        input.is_empty(),
+        "input must be cleared after Bash dispatch"
+    );
 }
 
 #[test]
@@ -753,8 +763,10 @@ fn bare_bang_is_noop() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        80, 2,
-        false, false,
+        80,
+        2,
+        false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
     );
@@ -789,11 +801,16 @@ fn bang_prefix_works_while_running() {
         &mut follow,
         &mut last_esc,
         &mut skill_menu,
-        80, 2,
-        false, false,
+        80,
+        2,
+        false,
+        false,
         &mut undo_state,
         &mut queue_scroll,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
-    assert!(input.is_empty(), "input must be cleared after Bash dispatch");
+    assert!(
+        input.is_empty(),
+        "input must be cleared after Bash dispatch"
+    );
 }

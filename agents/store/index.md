@@ -1,43 +1,54 @@
-Commit: (working-tree, pre-initial-commit)
+Commit: 2a89df3e3c01cc1e928b8eb52c71d22105172ebb
 
 # store 模块
 
 ## 职责
-会话历史的唯一持久化层。封装 sessions / messages / session_inputs / session_events / subagent_tasks 五类数据的 CRUD，对外暴露 `Store` trait，对内提供 libsql（本地嵌入 + WAL）实现。
 
-## 边界与非目标
-- 不做任何 LLM / agent 逻辑（纯存储）。
-- 不直接被 TUI/CLI 调用业务逻辑——上层经 `Arc<dyn Store>` 依赖。
-- 非目标：远程/turso 复制（当前仅 local embedded）。
+会话与 TODO 工作流的唯一持久化层。`Store` trait 隔离上层运行时与 libsql 实现，保存 Session、Message、Input、Event、Subagent 关系、TODO Workflow projection 和 append-only TODO Event。
+
+## 边界
+
+- 不执行 LLM、agent、TUI 或工作流决策。
+- 上层只依赖 `Arc<dyn Store>`，不直接依赖 libsql 查询。
+- 当前后端是本地 embedded libsql + WAL；远程复制不是该模块能力。
+- 删除 Session 或数据库数据必须由显式上层操作触发。
 
 ## 关键抽象
-- `Store` trait（`src/store.rs`）：async_trait，dyn 兼容。这是「切换其它 Rust SQLite 实现」的唯一接缝——换后端只需新实现 trait，上层零改动。
-- `LibsqlStore`（`src/libsql_store/mod.rs`）：持有**单个** Connection（`db.connect()` 一次），每个 op clone。libsql 的 `:memory:` 每次 connect 返回独立空库，故必须缓存连接共享——这是正确性关键。 另持 `db_lock: tokio::sync::Mutex<()>`，在全部 27 个 async Store 方法入口 `lock().await` 串行化——libsql 0.9.x 把同步 SQLite FFI 直接跑在 tokio worker 线程，并发 op（多 subagent flusher + run_loop）争 SQLite 内部互斥锁会饿死 runtime；async Mutex 争用时 yield（不阻塞 worker 线程），保证同一时刻至多一个 worker 触碰 FFI。
-- `run_tx`（`src/libsql_store/tx.rs`）：手动 `BEGIN`/`COMMIT`/`ROLLBACK` 事务辅助函数，替代 `libsql::Transaction`。原因：libsql 0.9.30 的 `Transaction::Drop` 调用 `do_rollback().unwrap()`，在 async 取消（`tokio::select!`）先丢弃 `MutexGuard` 后丢弃 `Transaction` 时，另一任务可能已修改共享连接使 rollback 失败 → panic。`run_tx` 把 rollback 失败降级为 `tracing::warn!`（绝不 panic），并在 `BEGIN` 前做 best-effort `ROLLBACK` 恢复上一轮取消遗留的悬挂事务。全部事务方法（inputs.rs 5 处 / messages.rs 2 处 / events.rs 1 处）均经此函数。`claim_next_queue` 传 `"BEGIN IMMEDIATE"`（写锁），其余传 `"BEGIN"`（deferred）。
-- **并发加固**（`src/libsql_store/schema.rs` + `messages.rs`）：批量 INSERT 经 `BATCH_CHUNK=200` 分块——`append_many` / `import` 各自把消息切成 200 条/事务（`append_chunk_in_tx` / `import_chunk_in_tx`），更短事务 = 更短锁持有 = 更少 `SQLITE_BUSY` 争用。配合 `busy_timeout=30s` + `wal_autocheckpoint=1000` 应对多 subagent 并发写。
-- schema（`src/libsql_store/schema.rs`）：6 表 + 6 索引 + `schema_version`（当前 v8）。bootstrap 幂等：先 CREATE TABLE IF NOT EXISTS 全表，再读已存版本做**增量迁移**（`migrate(from)`：v2 加 `session_events.sse_kind TEXT`；v3 对 `sessions` 加 `handoff_seq INTEGER`/`handoff_plan TEXT`/`skill TEXT`；v4 对 `session_inputs` 加 `images_json TEXT NOT NULL DEFAULT '[]'`；v5 对 `sessions` 加 `task_type TEXT NOT NULL DEFAULT 'parent'` + 回填已知 subagent 子会话为 `'subagent'`（`UPDATE ... WHERE id IN (SELECT child_session_id FROM subagent_tasks)`）+ 建索引 `idx_sessions_task_type`；v6 对 `session_inputs` 加 `display_text TEXT`（TUI 队列/插队项展示原文，可空，旧行 NULL；LLM 只读 `prompt`，resume/`/task` 重载由 TUI 回退 `prompt` 展示）；v7 对 `sessions` 加 `summary_images_json TEXT`（压缩时保留最近 ≤4 张图片 URL，可空，resume 重建合成 summary 不需重载已软删的压缩头）；v8 对 `sessions` 加 `requirement TEXT`（`/requirement` 斜杠命令编辑的任务描述文本，可空，跨 resume 持久化）；均 nullable/有默认故旧行仍合法）；新库（version None）已含全量 schema 故跳过迁移，仅写版本号。注意 `task_type` 索引在 migrate() 之后建（迁移路径下该列此时才物理存在）。`PRAGMA journal_mode=WAL` 等 per-connection 应用——首条为 `busy_timeout=30000`（30s 锁等待，从 5s 上调）+ `wal_autocheckpoint=1000`（≈4MB 被动检查点）；注意这些 pragma 返回行，必须用 `query`+drain，`execute` 会报 "Execute returned rows"。`open()`/`open_memory()` 另做 best-effort `checkpoint_wal()`（`PRAGMA wal_checkpoint(PASSIVE)`）合并遗留 WAL，并把 `busy_timeout=30s` 经 `conn.busy_timeout()` 再设一次（belt-and-suspenders）。`subagent_tasks` 表记录父子 agent 关系（task_id/parent/child session_id/prompt/result/status）。
-- 类型（`src/types.rs`）：`SessionMeta`/`SessionPatch`/`SessionFilter`/`SessionListItem`/`Delivery{Steer,Queue}`/`SessionInput`/`SessionEventRecord`（含 `sse_kind: Option<String>`——细粒度 SSE 事件名，replay 优先取它、`None` 时回退 `event_kind_str(coarse)`）/`EventKind`（12 变体，粗粒度，仅作 DB `type` 列与回退）/`SubagentTaskRecord`/`SubagentStatus{Running,Completed,Failed}`。Store trait 含 `create_subagent_task`/`complete_subagent_task`/`list_subagent_tasks` 三方法。`SessionMeta`/`SessionPatch` 额外暴露 v3 三列 `handoff_seq: Option<i64>`/`handoff_plan: Option<String>`/`skill: Option<String>`（plan→act 移交边界 + 技能持久化），libsql 的 INSERT/SELECT/update handler/`row_to_meta` 四处读写。`SessionMeta.task_type: Option<String>`（v5，None→`'parent'`；常量 `TASK_TYPE_PARENT`/`TASK_TYPE_SUBAGENT`）区分顶层会话与 subagent 子会话——子会话在 `runner/subagent.rs` 创建时即标 `'subagent'`（消除 create_session 与 create_subagent_task 之间的竞态窗口）。`list_sessions` 默认过滤 `task_type='parent'`（主标记）+ 保留 `NOT EXISTS(subagent_tasks)` 双保险，使 `/task` 列表不泄漏孤儿子会话；`include_subagents=true` 放开。
+
+- `Store`（`src/store.rs`）：dyn-compatible async 持久化接口。默认方法只用于后端兼容；libsql 实现完整支持 todos。
+- `LibsqlStore`（`src/libsql_store/mod.rs`）：缓存单个 Connection，并以 async Mutex 串行触碰同步 SQLite FFI，避免并发 worker 阻塞。
+- `run_tx`（`src/libsql_store/tx.rs`）：显式 BEGIN/COMMIT/ROLLBACK，避免 async 取消时 `libsql::Transaction::Drop` panic。
+- Session 类型（`src/types.rs`）：`SessionMeta`、`SessionPatch`、Input/Event/Subagent records；`task_type` 区分 parent、subagent、todo_workflow 和 todo。
+- TODO 类型（`src/todo_types.rs`）：`TodoWorkflowRecord`、`TodoItemRecord`、`TodoEventRecord` 和列表摘要。
+
+## Schema 与一致性
+
+schema 当前为 v9：
+
+- Session 面：`sessions`、`messages`、`session_inputs`、`session_events`、`subagent_tasks` 及 ts registry 相关结构。
+- TODO 面：`todo_workflows` 保存 spec/state/generation；`todo_items` 保存每项 projection；`todo_events` 保存有序不可变 transition。
+- v9 migration 从既有 v8 数据库新增 TODO 表和索引，不修改既有 Session 数据。
+- `commit_todo_transition` 在单事务内更新 workflow、替换 TODO projection 并追加 event；workflow update 带 expected generation，陈旧父进程不能覆盖 interrupt 或其他 writer。
+- Foreign key 将 parent/active TODO Session 关联到 `sessions`，因此 dispatch 先创建 Session，再提交 active reference。
+- 消息批量写按 200 条分块；WAL 使用 30 秒 busy timeout 和被动 checkpoint。
 
 ## 主流程
-- session 生命周期：`create_session` / `get_session` / `list_sessions`（`SessionFilter`：workdir_hash / search / cursor 分页）/ `update_session`（`SessionPatch` 局部更新；字段与对应 `clear_*` 标志互斥——summary/summary_seq/summary_images↔clear_summary、handoff_plan/handoff_seq↔clear_handoff、skill↔clear_skill、model↔clear_model、agent↔clear_agent 同 patch 同时设置即 Err；`SessionPatch::rollback_model/rollback_agent` 构造器按旧值分支（Some→还原值，None/读取失败→clear）供 web TOCTOU 回滚使用）/ `delete_session`。`clear_other_sessions(keep)` 单条 `DELETE FROM sessions WHERE id != keep` 批量清理（保留当前会话），子表经 `ON DELETE CASCADE` 外键级联删除，返回删除条数。
-- 写消息：`append_message` / `append_messages`（事务，all-or-nothing）。
-- 输入提升：`admit_input`（计算单调 admitted_seq）→ `pending_inputs` 查询 → `promote_inputs`（按 admitted_seq 截止批量标记）/ `claim_next_queue`（原子返回 `(seq, SessionInput)` + 标记单条 queue，供 runner drain idle 消费；seq 随 `QueueConsumed` 事件回传前端收缩镜像）。`delete_input`（带 `promoted_seq IS NULL` 守卫，不删已提升行）/ `swap_input_order`（交换两行 admitted_seq，无 UNIQUE 约束可直接交换）供 TUI 队列面板删除/重排未消费的 follow-up。
-- 事件回放：`append_events(&[record])`（**批量**，单事务 all-or-nothing，返回 seq 数组；`append_event` 单条默认委托它——批量 INSERT + 单次 `SELECT seq ... LIMIT N` backfill + reverse 还原写入序）→ `events_after(seq)` 供 SSE replay。批量写是高频表面（token delta 流）的首选路径，把 O(tokens) 次 fsync 降到 O(turn)。
-- 迁移：`src/import.rs::import_jsonl_dir` 把旧 `<id>.jsonl` 一次性导入（幂等，已存在的 session 跳过）。
-- **二进制导出/导入**（`src/bundle.rs`）：`SessionBundle` 递归结构（meta + messages + events + inputs + subagents）。自定义 opencoder 二进制格式（magic `OPENCODR` + 版本 + payload）。`export_bundle` 递归收集父子 session 树；`import_bundle` 幂等写入（已存在则跳过）。CLI：`opencoder session export <id> -o <file>`（默认输出 `<id>.opencoder`）/ `opencoder session import <file>`（读取 `.opencoder` 二进制）。不导出 Config（含 API key）。
+
+- Session：create/get/list/update/delete；append messages；admit/promote/claim inputs；append/replay events；记录 subagent 生命周期。
+- Resume：上层读取 SessionMeta、压缩摘要和保留消息，Store 不推断 agent 行为。
+- Bundle：`src/bundle.rs` 递归导出/导入 Session 与 subagent 树，不包含 Config 或 API key。
+- TODO：create workflow → 按 generation 原子 commit projection/event → list/load/events-after；interrupt、resume 和 debug projection 都以这些数据为源。
+- Migration：bootstrap 幂等创建当前表，再按 `schema_version` 增量迁移；旧数据库保持可打开。
 
 ## 依赖与接口
-- 依赖：libsql 0.9.30（锁定 0.9 系列）、opencoder-core（Message 类型）、async-trait。
-- 被依赖：session（resume/drain/record）、web（AppState.store）、cli（session 子命令）。
 
-## 相关模块
-- [agents/session](../session/index.md) — 通过 Store 持久化与 resume。
-- [agents/web](../web/index.md) — 通过 Store 做 prompt admit 与事件回放。
+- 依赖 libsql 0.9.x、opencoder-core message 类型和 async-trait。
+- 被 session、web、cli、tui 和 [todos](../todos/index.md) 依赖。
+- 用户能力见 [TODO 工作流](../../features/todos/index.md) 与 [会话 CLI](../cli/index.md)。
 
-## 代表性锚点
-- WAL 并发读写契约：`tests/store_integration.rs::concurrent_readers_while_writer`
-- 崩溃恢复：`tests/store_integration.rs::wal_crash_recovery`
-- 事务回滚：`tests/store_integration.rs::transaction_rollback_on_partial_failure`
-- 性能门槛：`tests/store_perf.rs`（0.031ms/append、2.4ms/load1000、0.95ms/list200）
-- 取消安全（无 panic）：`tests/store_integration.rs::cancelled_transaction_does_not_panic`
-- 取消后一致性：`tests/store_integration.rs::cancelled_then_concurrent_ops_stay_consistent`
+## 代表性验证
+
+- `tests/store_integration.rs`：WAL 并发、事务回滚、取消安全和崩溃恢复。
+- `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
+- `tests/store_perf.rs`：持久化性能门槛。
+- `src/bundle.rs` 相关测试：Session 树导入导出与幂等性。

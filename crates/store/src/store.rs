@@ -7,6 +7,7 @@ use crate::types::{
     ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
     SessionPatch, SubagentTaskRecord,
 };
+use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 
 /// Storage abstraction — the single seam that lets us swap libsql for another
 /// Rust SQLite implementation later without touching upper layers.
@@ -37,11 +38,7 @@ pub trait Store: Send + Sync {
     /// `load_messages` + in-memory drain so test fakes need not override it;
     /// the libsql backend overrides with an `OFFSET` query that skips without
     /// deserializing the dropped rows.
-    async fn load_messages_after(
-        &self,
-        session_id: &str,
-        skip_count: i64,
-    ) -> Result<Vec<Message>> {
+    async fn load_messages_after(&self, session_id: &str, skip_count: i64) -> Result<Vec<Message>> {
         let mut msgs = self.load_messages(session_id).await?;
         let skip = skip_count.clamp(0, i64::MAX) as usize;
         if skip < msgs.len() {
@@ -127,6 +124,59 @@ pub trait Store: Send + Sync {
     /// parent `task` tool_use stays open so the child can be replayed on the
     /// next user turn.
     async fn cancel_subagent_task(&self, task_id: &str) -> Result<()>;
+
+    async fn create_todo_workflow(
+        &self,
+        _workflow: &TodoWorkflowRecord,
+        _items: &[TodoItemRecord],
+        _event: &TodoEventRecord,
+    ) -> Result<i64> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn get_todo_workflow(&self, _id: &str) -> Result<Option<TodoWorkflowRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn list_todo_workflows(&self, _limit: u32) -> Result<Vec<TodoWorkflowSummary>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn list_todo_items(&self, _workflow_id: &str) -> Result<Vec<TodoItemRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    /// Atomically replace the workflow projection and its item projections,
+    /// then append the transition event.
+    async fn commit_todo_transition(
+        &self,
+        _workflow: &TodoWorkflowRecord,
+        _items: &[TodoItemRecord],
+        _event: &TodoEventRecord,
+    ) -> Result<i64> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
+    async fn todo_events_after(
+        &self,
+        _workflow_id: &str,
+        _after_seq: i64,
+    ) -> Result<Vec<TodoEventRecord>> {
+        anyhow::bail!(
+            "todo workflows are not supported by {}",
+            self.backend_name()
+        )
+    }
 
     async fn import_messages(&self, session_id: &str, msgs: &[Message]) -> Result<ImportReport> {
         let seqs = self.append_messages(session_id, msgs).await?;

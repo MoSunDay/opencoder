@@ -107,6 +107,7 @@ async fn main() -> Result<()> {
         Some(Command::Session { sub }) => {
             opencoder_cli::session_cmd::session_dispatch(sub, &cli).await
         }
+        Some(Command::Todos { sub }) => opencoder_cli::todos_cmd::dispatch(&cli, sub).await,
         Some(Command::InstallTools) => {
             let code = opencoder_cli::install_tools::install_tools_run()?;
             if code != 0 {

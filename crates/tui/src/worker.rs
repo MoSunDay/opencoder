@@ -510,17 +510,40 @@ pub async fn process_cmd(
             false
         }
         UiCmd::EditAnnotation(text) => {
-            sess.requirement = Some(text.clone());
-            if let Some(store) = &sess.store {
-                let _ = store
-                    .update_session(
-                        &sess.id,
-                        &opencoder_store::SessionPatch {
-                            requirement: Some(text),
-                            ..Default::default()
-                        },
-                    )
-                    .await;
+            if text.trim().is_empty() {
+                // Blank submit is an explicit clear: drop the requirement
+                // in-memory and persist the clear.
+                sess.requirement = None;
+                if let Some(store) = &sess.store {
+                    if let Err(e) = store
+                        .update_session(
+                            &sess.id,
+                            &opencoder_store::SessionPatch {
+                                clear_requirement: true,
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                    {
+                        tracing::warn!(error = %e, "persist requirement clear failed");
+                    }
+                }
+            } else {
+                sess.requirement = Some(text.clone());
+                if let Some(store) = &sess.store {
+                    if let Err(e) = store
+                        .update_session(
+                            &sess.id,
+                            &opencoder_store::SessionPatch {
+                                requirement: Some(text),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                    {
+                        tracing::warn!(error = %e, "persist requirement failed");
+                    }
+                }
             }
             false
         }

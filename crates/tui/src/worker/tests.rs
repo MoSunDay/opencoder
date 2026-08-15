@@ -237,6 +237,47 @@ async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
     );
 }
 
+// EditAnnotation persists the /ann editor's submitted text as the session
+// requirement. The text must land verbatim in `sess.requirement` and the
+// worker loop must keep running (store is None in the test session, so the
+// patch is skipped and the assertion is in-memory only).
+#[tokio::test]
+async fn edit_annotation_sets_requirement() {
+    let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
+    let mut sess = test_session("edit-annotation-set");
+
+    let should_break = process_cmd(
+        UiCmd::EditAnnotation("需要 tab:\tand CR\r\nraw".to_string()),
+        &mut sess,
+        &evt_tx,
+    )
+    .await;
+    assert!(!should_break, "EditAnnotation must not break the worker loop");
+    assert_eq!(
+        sess.requirement.as_deref(),
+        Some("需要 tab:\tand CR\r\nraw"),
+        "requirement must hold the text byte-for-byte"
+    );
+}
+
+// A blank (whitespace-only) submit is an explicit clear: any previously
+// stored requirement must be dropped in-memory.
+#[tokio::test]
+async fn edit_annotation_blank_clears_requirement() {
+    let (evt_tx, _evt_rx) = mpsc::channel::<UiEvent>(8);
+    let mut sess = test_session("edit-annotation-clear");
+    sess.requirement = Some("old".into());
+
+    let should_break = process_cmd(
+        UiCmd::EditAnnotation("   \n\t ".to_string()),
+        &mut sess,
+        &evt_tx,
+    )
+    .await;
+    assert!(!should_break, "EditAnnotation must not break the worker loop");
+    assert_eq!(sess.requirement, None, "blank submit must clear the requirement");
+}
+
 #[tokio::test]
 async fn ordered_forwarder_drops_only_repairable_parent_text() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(DELTA_MIN_CAPACITY + 1);

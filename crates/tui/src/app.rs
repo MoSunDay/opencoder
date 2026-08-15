@@ -19,6 +19,7 @@ use crate::input::spawn_input_pump;
 use crate::key_handler::{handle_key, KeyAction};
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
+use crate::queue_admitter;
 use crate::render::{MouseHits, Term};
 use crate::skill_persist::resolve_persist;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
@@ -117,6 +118,14 @@ pub(super) async fn run_app(
     let mut queue_items =
         crate::queue_panel::restore_pending_mirrors(&store, &session_id, &mut chat.steer_items)
             .await;
+    // Off-loop queue admission: Tab / Enter-while-running submits go through a
+    // dedicated actor so this event loop never waits on the store-wide db_lock
+    // (held in bursts by the running turn's message/subagent flushers). The
+    // optimistic temp row appears instantly; reconciliation arrives on
+    // `admit_done_rx` (select branch below).
+    let (admit_tx, mut admit_done_rx) = queue_admitter::spawn_admitter(Arc::clone(&store));
+    let mut admit_st = queue_admitter::AdmitUiState::default();
+    let mut admitter_alive = true;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
@@ -504,29 +513,21 @@ pub(super) async fn run_app(
                                             chat.begin_turn();
                                             body_refresh_pending = true;
                                         } else {
-                                            // Skill-only submit while running: admit the trigger as a queued input and
-                                            // drain pending images so they don't leak into a later unrelated submit.
+                                            // Skill-only submit while running: hand the trigger to the
+                                            // off-loop admitter (submit drains/restores pending_images).
                                             let skill_name = active_skill.as_deref().unwrap_or("");
                                             let trigger = skill_trigger(skill_name);
-                                            let image_uris = snapshot_image_uris(&pending_images);
-                                            if let Ok(seq) = store
-                                                .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(skill_token_display(skill_name)), &image_uris))
-                                                .await
-                                            {
-                                                pending_images.clear();
-                                                queue_items.push((seq, skill_token_display(skill_name)));
-                                            }
+                                            let disp = skill_token_display(skill_name);
+                                            let input = mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(disp.clone()), &snapshot_image_uris(&pending_images));
+                                            queue_admitter::submit(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, input, disp);
                                         }
                                     }
                                 } else if running {
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store
-                                        .admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(queued_item_display(&text, &clean)), &image_uris))
-                                        .await
-                                    {
-                                        pending_images.clear();
-                                        queue_items.push((seq, queued_item_display(&text, &clean)));
-                                    }
+                                    // Enter while running: optimistic admit via the off-loop
+                                    // actor — no db_lock wait on this loop.
+                                    let disp = queued_item_display(&text, &clean);
+                                    let input = mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(disp.clone()), &snapshot_image_uris(&pending_images));
+                                    queue_admitter::submit(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, input, disp);
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
@@ -582,33 +583,16 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
-                                let (clean, _unresolved) = resolve_persist(
-                                    &text, &mut active_skill, &mut active_skill_body,
-                                    &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                    &store, &session_id,
-                                ).await;
-                                let clean = clean.trim();
-                                let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
-                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                if !clean.is_empty() {
-                                    let display = queued_item_display(&text, &clean);
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(display.clone()), &image_uris)).await {
-                                        pending_images.clear();
-                                        queue_items.push((seq, display.clone()));
-                                        chat.note_requirement_submitted();
-                                    }
-                                } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit: admit the trigger so the active skill is acted on.
-                                    let trigger = skill_trigger(skill_name);
-                                    let display = skill_token_display(skill_name);
-                                    let image_uris = snapshot_image_uris(&pending_images);
-                                    if let Ok(seq) = store.admit_input(&mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(display.clone()), &image_uris)).await {
-                                        pending_images.clear();
-                                        queue_items.push((seq, display.clone()));
-                                        chat.note_requirement_submitted();
-                                    }
-                                }
+                                // Tab-queue: the full admit flow (skill resolution, optimistic
+                                // mirror row, off-loop store write, requirement note) lives in
+                                // queue_admitter — this loop never waits on db_lock.
+                                queue_admitter::handle_queue(
+                                    &text, &admit_tx, &mut admit_st, &mut queue_items,
+                                    &mut pending_images, &mut chat, &mut active_skill,
+                                    &mut active_skill_body, &mut sys_tokens, &agent_name,
+                                    &workdir, &skill_handle, &store, &session_id,
+                                )
+                                .await;
                                 push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
                             }
@@ -751,9 +735,22 @@ pub(super) async fn run_app(
                     _ => {}
                 }
             }
+            maybe_done = admit_done_rx.recv(), if admitter_alive => {
+                match maybe_done {
+                    Some(done) => {
+                        if let Some(flash) = queue_admitter::apply_done(&mut admit_st, done, &mut queue_items, &mut pending_images) {
+                            mode_flash = Some((flash.to_string(), anim_tick));
+                        }
+                        dirty = true;
+                    }
+                    // Actor gone (only after a panic): stop polling the closed
+                    // channel — a permanently-ready None would busy-spin.
+                    None => admitter_alive = false,
+                }
+            }
             maybe_ev = evt_rx.recv() => {
                 let np_flow = app_loop::fold_ui_events(
-                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut running,
+                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut admit_st, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
                     &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
                     &mut question_menu, &question_hub,

@@ -7,6 +7,7 @@ use opencoder_core::InjectionTarget;
 use super::list::McpEntry;
 use super::patch::save_mcp_json;
 use super::state::{McpMenu, McpOutcome};
+use crate::scope_dialog::{ScopeDialog, ScopeOutcome};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum McpField {
@@ -54,6 +55,8 @@ pub struct McpForm {
     pub url: String,
     pub url_cursor: usize,
     pub field: McpField,
+    /// Open multi-select overlay for `inject_to` (Enter/Space on the field).
+    pub scope_dialog: Option<ScopeDialog>,
 }
 
 impl McpForm {
@@ -74,6 +77,7 @@ impl McpForm {
             url: url.clone(),
             url_cursor: url.chars().count(),
             field: McpField::Name,
+            scope_dialog: None,
         }
     }
 
@@ -83,7 +87,7 @@ impl McpForm {
             name_cursor: 0,
             original_name: None,
             enabled: false,
-            inject_to: InjectionTarget::Parent,
+            inject_to: InjectionTarget::parent_only(),
             command: String::new(),
             command_cursor: 0,
             args: String::new(),
@@ -91,10 +95,15 @@ impl McpForm {
             url: String::new(),
             url_cursor: 0,
             field: McpField::Name,
+            scope_dialog: None,
         }
     }
 
     pub fn paste_into(&mut self, text: &str) {
+        if self.scope_dialog.is_some() {
+            // Checkbox dialog has no text input: swallow the paste.
+            return;
+        }
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -251,6 +260,18 @@ fn backspace_at(buf: &mut String, cursor: &mut usize) {
 }
 
 pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu>) {
+    // The inject_to checkbox overlay owns the keyboard while open.
+    if let Some(dialog) = form.scope_dialog.as_mut() {
+        match dialog.handle_key(k) {
+            ScopeOutcome::Confirm(target) => {
+                form.scope_dialog = None;
+                form.inject_to = target;
+            }
+            ScopeOutcome::Cancel => form.scope_dialog = None,
+            ScopeOutcome::Idle => {}
+        }
+        return (McpOutcome::Idle, Some(McpMenu::Form(form)));
+    }
     // Ctrl combos: Ctrl-U / Ctrl-L clear the focused text field; all other
     // Ctrl chords are swallowed so they never reach text input. (Mirrors the
     // /model provider_form dispatch.)
@@ -281,7 +302,7 @@ pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu
             if form.field == McpField::Enabled {
                 form.enabled = !form.enabled;
             } else if form.field == McpField::InjectTo {
-                form.inject_to = form.inject_to.next();
+                form.scope_dialog = Some(ScopeDialog::new(form.inject_to));
             } else if let Some(outcome) = form.build_save() {
                 return (outcome, None);
             }
@@ -293,7 +314,7 @@ pub fn handle_key(mut form: McpForm, k: KeyEvent) -> (McpOutcome, Option<McpMenu
             } else if c == ' ' && form.field == McpField::Enabled {
                 form.enabled = !form.enabled;
             } else if c == ' ' && form.field == McpField::InjectTo {
-                form.inject_to = form.inject_to.next();
+                form.scope_dialog = Some(ScopeDialog::new(form.inject_to));
             }
         }
         _ => {}
@@ -366,6 +387,11 @@ mod tests {
             Some(McpMenu::Form(f)) => f,
             _ => panic!("expected Form"),
         };
+        assert_eq!(form.field, McpField::InjectTo);
+        form = match handle_key(form, key(KeyCode::Tab)).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
         assert_eq!(form.field, McpField::Command);
     }
 
@@ -385,6 +411,57 @@ mod tests {
             _ => panic!("expected Form"),
         };
         assert!(form.enabled);
+    }
+
+    #[test]
+    fn enter_on_inject_to_opens_and_confirms_scope_dialog() {
+        let mut form = McpForm::new_blank();
+        // Name -> Enabled -> InjectTo
+        for _ in 0..2 {
+            form = match handle_key(form, key(KeyCode::Tab)).1 {
+                Some(McpMenu::Form(f)) => f,
+                _ => panic!("expected Form"),
+            };
+        }
+        assert_eq!(form.field, McpField::InjectTo);
+        form = match handle_key(form, key(KeyCode::Enter)).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        assert!(form.scope_dialog.is_some());
+        // uncheck parent (row 0), check explore (row 1), confirm
+        form = match handle_key(form, key(KeyCode::Char(' '))).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        form = match handle_key(form, key(KeyCode::Down)).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        form = match handle_key(form, key(KeyCode::Char(' '))).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        form = match handle_key(form, key(KeyCode::Enter)).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        assert!(form.scope_dialog.is_none());
+        assert!(!form.inject_to.parent);
+        assert!(form.inject_to.explore);
+        assert!(!form.inject_to.build);
+    }
+
+    #[test]
+    fn paste_is_swallowed_while_scope_dialog_open() {
+        let mut form = McpForm::new_blank();
+        form.field = McpField::InjectTo;
+        form = match handle_key(form, key(KeyCode::Enter)).1 {
+            Some(McpMenu::Form(f)) => f,
+            _ => panic!("expected Form"),
+        };
+        form.paste_into("ignored");
+        assert_eq!(form.inject_to, InjectionTarget::parent_only());
     }
 
     #[test]

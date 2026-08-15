@@ -14,7 +14,12 @@ use super::state::McpMenu;
 pub fn render_mcp_popup(f: &mut Frame, area: Rect, composer_top: u16, menu: &McpMenu) {
     match menu {
         McpMenu::List(list) => render_list(f, area, composer_top, list),
-        McpMenu::Form(form) => render_form(f, area, composer_top, form),
+        McpMenu::Form(form) => {
+            render_form(f, area, composer_top, form);
+            if let Some(dialog) = form.scope_dialog.as_ref() {
+                crate::scope_dialog::render_scope_dialog(f, area, dialog);
+            }
+        }
     }
 }
 
@@ -185,9 +190,9 @@ fn render_form(f: &mut Frame, area: Rect, composer_top: u16, form: &McpForm) {
         ),
         field_line(
             "inject to:",
-            form.inject_to.label(),
+            &form.inject_to.label(),
             form.field == McpField::InjectTo,
-            "Space/Enter cycle: parent/subagents/all",
+            "Space/Enter pick targets",
         ),
         field_line(
             "command:",

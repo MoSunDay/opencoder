@@ -83,6 +83,13 @@ pub async fn restore_pending_mirrors(
 /// current ordered pending list (admitted_seq ASC = drain order). Pure: does not
 /// mutate; returns the seq pair to swap, the seq to delete, or `None`.
 pub(crate) fn plan(items: &[(i64, String)], seq: i64, action: QueueBtnAction) -> QueueEffect {
+    // Optimistic temp rows (negative seqs) have no store row yet: reorder/delete
+    // against them cannot be persisted and would desync the mirror that the
+    // admit completion is about to rewrite. The in-flight window is milliseconds
+    // (UI dispatch → actor's store write), so a no-op is imperceptible.
+    if seq < 0 {
+        return QueueEffect::None;
+    }
     // Delete only needs the seq — not the list index — so handle it first.
     // This lets the ✕ work for steer rows, whose seq lives in a separate
     // `steer_items` vec and is never present in `items` here.
@@ -356,6 +363,17 @@ mod tests {
             plan(&items(), 777, QueueBtnAction::Delete),
             QueueEffect::Delete(777)
         );
+    }
+
+    #[test]
+    fn negative_seq_is_noop_for_every_action() {
+        // Optimistic temp rows (negative seqs) have no store row yet: even
+        // Delete must no-op or the ✕ would issue an unpersistable removal
+        // against a row the admit completion is about to rewrite.
+        let mixed = vec![(-1_i64, "a".into()), (5, "b".into())];
+        assert_eq!(plan(&mixed, -1, QueueBtnAction::Up), QueueEffect::None);
+        assert_eq!(plan(&mixed, -1, QueueBtnAction::Down), QueueEffect::None);
+        assert_eq!(plan(&mixed, -1, QueueBtnAction::Delete), QueueEffect::None);
     }
 
     #[test]

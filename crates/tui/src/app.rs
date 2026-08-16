@@ -142,7 +142,7 @@ pub(super) async fn run_app(
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut shift_held = false;
-    let mut copy_sel: Option<crate::copy_select::CopySel> = None;
+    let mut copy_mode = false;
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -257,7 +257,7 @@ pub(super) async fn run_app(
                     &mut hits,
                     &mut viewport,
                     shift_held,
-                    copy_sel.as_ref(),
+                    copy_mode,
                     &pending_images,
                     input_disabled,
                     tail_ms,
@@ -294,17 +294,7 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
-                        let copy_body_h = hits.body.map_or(0, |r| {
-                            r.height.saturating_sub(2 + u16::from(tail_ms > 0)) as usize
-                        });
-                        if crate::copy_select::dispatch_key(
-                            &k, &mut copy_sel, &keymap, viewport.as_ref(), copy_body_h,
-                            &mut scroll, &mut follow, &mut mode_flash, anim_tick,
-                        ) {
-                            dirty = true;
-                            render_pending = true;
-                            continue;
-                        }
+                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -700,7 +690,7 @@ pub(super) async fn run_app(
                         }
                     }
                     Event::Mouse(m) => {
-                        if crate::copy_select::is_active(copy_sel.as_ref(), shift_held) { dirty = true; continue; }
+                        if crate::copy_mode::is_active(copy_mode, shift_held) { dirty = true; continue; }
                         if keymap_menu.is_some() { if let app_loop::LoopFlow::Quit = app_loop::handle_keymap_mouse_event(&mut keymap_menu, &hits.keymap_btns, &m, &mut config, &mut keymap, &workdir, &cmd_tx).await { break }
                             dirty = true; render_pending = true; continue; }
                         let outcome = handle_mouse(

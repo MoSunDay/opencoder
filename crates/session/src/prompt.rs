@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 pub fn build_system(
     agent: &opencoder_core::Agent,
     working_dir: &Path,
-    skill_prompt: Option<&str>,
     mcp_block: Option<&str>,
 ) -> Message {
     let mut text = agent.prompt.clone();
@@ -18,16 +17,6 @@ pub fn build_system(
     let env = environment_block(working_dir, agent.kind);
     text.push_str("\n\n");
     text.push_str(&env);
-
-    if let Some(skill) = skill_prompt {
-        let trimmed = skill.trim();
-        if !trimmed.is_empty() {
-            // Appended last so an active skill is the highest-priority
-            // instruction in the system prompt.
-            text.push_str("\n\n## Active skill\n");
-            text.push_str(trimmed);
-        }
-    }
 
     if let Some(mcp) = mcp_block {
         let trimmed = mcp.trim();

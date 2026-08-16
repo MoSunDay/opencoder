@@ -10,6 +10,7 @@ mod env;
 mod keymap;
 mod mcp;
 mod merge;
+mod skill;
 
 pub use autopilot::AutoPilotConfig;
 pub use cli::{CliConfig, InjectionTarget};
@@ -17,6 +18,7 @@ pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
+pub use skill::SkillConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -33,6 +35,10 @@ pub struct Config {
     /// Named CLI usage contracts. Enabled entries are injected into the system prompt.
     #[serde(default)]
     pub cli: HashMap<String, CliConfig>,
+    /// Named skill default-injection toggles. Only `enabled == true` entries are
+    /// surfaced (as names in the context-tail skill catalog reminder).
+    #[serde(default)]
+    pub skills: HashMap<String, SkillConfig>,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -340,6 +346,7 @@ impl Default for Config {
             providers: HashMap::new(),
             mcp_servers: HashMap::new(),
             cli: HashMap::new(),
+            skills: HashMap::new(),
             model: default_model(),
             small_model: None,
             agent: AgentDefaults::default(),
@@ -557,6 +564,18 @@ impl Config {
             .into_iter()
             .filter(|(_, cfg)| cfg.inject_to.allows_agent(name, mode))
             .collect()
+    }
+
+    /// Returns names of skills enabled for default injection, sorted by name.
+    pub fn enabled_skill_names(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .skills
+            .iter()
+            .filter(|(_, c)| c.enabled)
+            .map(|(n, _)| n.clone())
+            .collect();
+        out.sort();
+        out
     }
 
     /// Resolve the base_url for a provider name: `providers[name].base_url`

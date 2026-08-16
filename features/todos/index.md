@@ -9,7 +9,7 @@ Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 - `validate --file` 只校验合同，不创建 Session、不调用模型。
 - `run --file` 创建唯一运行 ID。一个父 Workflow Session 管理全局进度，每个 TODO 对应独立 Primary Session；该 Session 内可进行任意必要模型轮次、工具调用及 subagent 调度。
 - 父工作流按依赖和当前状态决定一次 dispatch 一个或多个 TODO；“聚焦一个 TODO”不等于“每轮只能调用一个工具”。
-- 父 workflow 不接收执行工具或 registered CLI 指令。移动 UI TODO 可显式激活内置 `$fk-cli`，并由独立 TODO Session 仅通过 `bash` 调用预编译的精确 `fk-session --args` 命令；无需配置 FK MCP。
+- 父 workflow 不接收执行工具或 registered CLI 指令。
 - TODO 固定记录 status、attempt、active/history Session、Candidate、恢复摘要和验收结果；Workflow 固定记录 generation、当前位置集合、milestone、world epoch、incident 与终态原因。
 - required tool call 是硬门禁。名称、声明参数子集和成功结果必须同时匹配；父模型不能接受未满足门禁的 Candidate。
 - `interrupt` 持久化挂起状态；`resume` 从 Store 对运行中 TODO 做中断归约后继续。父工作流可选择 resume、fork 或回退到 milestone。

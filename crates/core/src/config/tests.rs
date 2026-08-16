@@ -237,6 +237,67 @@ fn merge_into_applies_enable_tmux_session() {
     assert_eq!(c.enable_tmux_session, Some(true));
 }
 
+// --- Skill default-injection toggles (`/skill` menu) ---
+#[test]
+fn skills_default_empty_and_enabled_names_follow_toggles() {
+    let empty: Config = serde_json::from_str("{}").unwrap();
+    assert!(empty.skills.is_empty());
+    assert!(empty.enabled_skill_names().is_empty());
+
+    let cfg: Config =
+        serde_json::from_str(r#"{"skills":{"review":{"enabled":true},"other":{}}}"#).unwrap();
+    // missing `enabled` deserializes as false (Default OFF)
+    assert!(!cfg.skills["other"].enabled);
+    assert_eq!(cfg.enabled_skill_names(), vec!["review".to_string()]);
+}
+
+#[test]
+fn merge_into_skills_preserves_sibling_entries() {
+    let mut c = Config::default();
+    c.skills.insert(
+        "review".to_string(),
+        super::SkillConfig { enabled: true },
+    );
+    super::merge::merge_into(
+        &mut c,
+        serde_json::json!({ "skills": { "deploy": { "enabled": true } } }),
+    );
+    // entry-level merge: the pre-existing `review` survives the patch
+    assert!(c.skills["review"].enabled);
+    assert!(c.skills["deploy"].enabled);
+    assert_eq!(c.enabled_skill_names(), vec!["deploy".to_string(), "review".to_string()]);
+}
+
+#[test]
+fn enabled_skill_names_are_sorted() {
+    let cfg: Config = serde_json::from_str(
+        r#"{"skills":{"zeta":{"enabled":true},"alpha":{"enabled":true},"mid":{"enabled":true}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.enabled_skill_names(),
+        vec!["alpha".to_string(), "mid".to_string(), "zeta".to_string()]
+    );
+}
+
+#[test]
+fn load_reads_skills_from_config_file() {
+    let dir = tempfile::tempdir().unwrap();
+    // Thread-local HOME isolation (see save_handles_corrupt_and_empty_config_files)
+    // so a real global config can't leak entries into this load.
+    let _home = scoped_config_home(dir.path().to_path_buf());
+    std::fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{"skills":{"review":{"enabled":true},"other":{"enabled":false}}}"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.skills.len(), 2);
+    assert!(cfg.skills["review"].enabled);
+    assert!(!cfg.skills["other"].enabled);
+    assert_eq!(cfg.enabled_skill_names(), vec!["review".to_string()]);
+}
+
 #[cfg(test)]
 mod inject_to_filtering {
     use super::super::{CliConfig, Config, McpServerConfig};

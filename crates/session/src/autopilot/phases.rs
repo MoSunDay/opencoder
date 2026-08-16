@@ -34,7 +34,7 @@ fn activate_review_skill(session: &SessionState) {
     let body = opencoder_core::skill::discover()
         .into_iter()
         .find(|s| s.name == "review")
-        .map(|s| s.body);
+        .map(|s| opencoder_core::body_with_source(&s));
     session.set_skill(body);
 }
 

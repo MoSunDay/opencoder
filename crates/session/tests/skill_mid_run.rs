@@ -1,6 +1,8 @@
 //! Skill activation mid-run: when a skill is set via the shared `Arc<Mutex>`
-//! while a session is running (between turns), the next turn's system prompt
-//! must include the skill body.
+//! while a session is running (between turns), the next turn's request must
+//! carry the skill — as a transient `[active skill]` tail reminder naming the
+//! skill's source file, NOT as system-prompt content (skill bodies never ship
+//! in the system prompt; see `opencoder_session::skill_context`).
 //!
 //! Before the fix, `skill_prompt` was `Option<String>` updated through the
 //! cmd channel (`UiCmd::SetSkill`). While `run_loop` was executing, the
@@ -8,6 +10,11 @@
 //! so the skill never reached the turn that needed it. The fix makes
 //! `skill_prompt` an `Arc<Mutex<Option<String>>>` so the TUI can update it
 //! directly, and `run_one_llm_call` reads the latest value each turn.
+//!
+//! Skill bodies are stored with the `> Source: <path>` prefix that
+//! `opencoder_core::body_with_source` writes (mirroring the TUI `$` picker /
+//! `skill_resolve` storage), which is what lets the tail reminder surface
+//! the skill's path.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -64,6 +71,36 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
         .to_string()
 }
 
+/// Extract the content of the LAST user-role message of a ChatRequest —
+/// where the transient `[active skill]` tail reminder is appended.
+fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
+    req.messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Whether any user message of the request carries the `[active skill]`
+/// tail reminder.
+fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
+    req.messages.iter().any(|m| {
+        m.get("role").and_then(|r| r.as_str()) == Some("user")
+            && m.get("content")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.contains("[active skill]"))
+    })
+}
+
+/// Skill body as the TUI `$` picker / `skill_resolve` actually store it:
+/// the `> Source:` prefix (`opencoder_core::body_with_source` format) that
+/// the tail reminder parses the skill's path from.
+fn sourced_body(path: &str, body: &str) -> String {
+    format!("> Source: {path}\n\n{body}")
+}
+
 /// Create the session row so input admission (FK) succeeds before the run.
 async fn seed_session(store: &Arc<dyn Store>) {
     store
@@ -89,8 +126,9 @@ async fn seed_session(store: &Arc<dyn Store>) {
 }
 
 /// When a skill is set via the shared `Arc<Mutex>` during turn 1's tool
-/// execution, turn 2's system prompt must include the skill body — even
-/// though turn 1's system prompt did not.
+/// execution, turn 2's request must carry the skill as a transient tail
+/// reminder (last user message, `[active skill]` + source path) — even
+/// though turn 1's request carried nothing.
 ///
 /// Flow:
 /// 1. Turn 1: bash tool call → ToolStart event fires → skill is set via Arc
@@ -98,7 +136,7 @@ async fn seed_session(store: &Arc<dyn Store>) {
 /// 3. Turn 2: `run_one_llm_call` reads `skill_prompt_cloned()` → finds the skill
 /// 4. Turn 2: done (no tool calls) → idle → Done
 #[tokio::test]
-async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
+async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     let store = mem_store().await;
     let mock: Arc<MockChatClient> = Arc::new(
         MockChatClient::new()
@@ -151,7 +189,8 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
             if matches!(ev, SessionEvent::ToolStart { .. })
                 && !skill_set_clone.load(Ordering::SeqCst)
             {
-                *skill_handle.lock().unwrap() = Some("MID-RUN-SKILL".into());
+                *skill_handle.lock().unwrap() =
+                    Some(sourced_body("/skills/mid-run/SKILL.md", "MID-RUN-SKILL"));
                 skill_set_clone.store(true, Ordering::SeqCst);
             }
         })
@@ -173,19 +212,31 @@ async fn skill_set_mid_run_appears_in_next_turn_system_prompt() {
         requests.len()
     );
 
-    // Turn 1's system prompt must NOT contain the skill (it was set during
-    // tool execution, after the request was already sent).
+    // Turn 1's request must carry no trace of the skill (it was set during
+    // tool execution, after the request was already sent): no body in the
+    // system prompt and no tail-reminder message at all.
     let first_system = system_content(&requests[0]);
     assert!(
         !first_system.contains("MID-RUN-SKILL"),
         "turn 1 system prompt must NOT contain the skill (not yet set): {first_system}"
     );
+    assert!(
+        !has_active_skill_reminder(&requests[0]),
+        "turn 1 payload must carry no [active skill] reminder: {:?}",
+        requests[0].messages
+    );
 
-    // Turn 2's system prompt MUST contain the skill.
+    // Turn 2's system prompt still excludes the body; the skill arrives as
+    // the transient tail reminder — the LAST user message of the payload.
     let second_system = system_content(&requests[1]);
     assert!(
-        second_system.contains("MID-RUN-SKILL"),
-        "turn 2 system prompt must contain the mid-run skill: {second_system}"
+        !second_system.contains("MID-RUN-SKILL"),
+        "skill bodies never ship in the system prompt: {second_system}"
+    );
+    let tail = last_user_content(&requests[1]);
+    assert!(
+        tail.contains("[active skill]") && tail.contains("/skills/mid-run/SKILL.md"),
+        "turn 2 tail reminder must name the mid-run skill's path: {tail}"
     );
 }
 
@@ -265,7 +316,8 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
             if matches!(ev, SessionEvent::ToolStart { .. })
                 && !skill_set_clone.load(Ordering::SeqCst)
             {
-                *skill_handle.lock().unwrap() = Some("QUEUE-SKILL".into());
+                *skill_handle.lock().unwrap() =
+                    Some(sourced_body("/skills/queue/SKILL.md", "QUEUE-SKILL"));
                 skill_set_clone.store(true, Ordering::SeqCst);
             }
         })
@@ -291,12 +343,23 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
         !system_content(&requests[0]).contains("QUEUE-SKILL"),
         "turn 1 must not have skill"
     );
+    assert!(
+        !has_active_skill_reminder(&requests[0]),
+        "turn 1 payload must carry no [active skill] reminder"
+    );
 
-    // Turn 3 (queue follow-up): must have the skill.
+    // Turn 3 (queue follow-up): the skill arrives via the tail reminder —
+    // the LAST user message names the skill's source path; the system
+    // prompt stays skill-free.
     let third_system = system_content(&requests[2]);
     assert!(
-        third_system.contains("QUEUE-SKILL"),
-        "turn 3 (queue follow-up) system prompt must contain the skill: {third_system}"
+        !third_system.contains("QUEUE-SKILL"),
+        "skill bodies never ship in the system prompt: {third_system}"
+    );
+    let tail = last_user_content(&requests[2]);
+    assert!(
+        tail.contains("[active skill]") && tail.contains("/skills/queue/SKILL.md"),
+        "turn 3 (queue follow-up) tail reminder must name the skill path: {tail}"
     );
 }
 
@@ -330,7 +393,7 @@ async fn with_skill_builder_sets_skill() {
 
 /// Skill-only submit: when the prompt is empty but a skill is active, the
 /// runner must still execute a turn (drain mode) so the model reads the
-/// skill body from the system prompt and acts on it.
+/// skill (via its `[active skill]` tail reminder) and acts on it.
 ///
 /// Flow:
 /// 1. Skill is set on the session via `set_skill` (mirrors TUI
@@ -340,7 +403,7 @@ async fn with_skill_builder_sets_skill() {
 /// 3. `run_one_llm_call` reads `skill_prompt_cloned()` → finds the skill.
 /// 4. Turn: done (no tool calls) → idle → no queue → Done.
 #[tokio::test]
-async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
+async fn skill_only_empty_prompt_starts_turn_with_skill_tail_reminder() {
     let store = mem_store().await;
     let mock: Arc<MockChatClient> =
         Arc::new(MockChatClient::new().push_script(vec![done_turn("skill executed")]));
@@ -378,8 +441,12 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
         .await
         .unwrap();
 
-    // Set the skill before the run.
-    s.set_skill(Some("DO-THE-THING".into()));
+    // Set the skill before the run (Source-prefixed body, as the TUI /
+    // skill_resolve store it).
+    s.set_skill(Some(sourced_body(
+        "/skills/do-the-thing/SKILL.md",
+        "DO-THE-THING",
+    )));
 
     // Empty prompt with an active skill: a synthetic trigger user message is
     // injected so the model records a user turn and acts on the skill body.
@@ -395,8 +462,13 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
 
     let system = system_content(&requests[0]);
     assert!(
-        system.contains("DO-THE-THING"),
-        "system prompt must contain the skill body: {system}"
+        !system.contains("DO-THE-THING"),
+        "skill bodies never ship in the system prompt: {system}"
+    );
+    let tail = last_user_content(&requests[0]);
+    assert!(
+        tail.contains("[active skill]") && tail.contains("/skills/do-the-thing/SKILL.md"),
+        "tail reminder (last user message) must name the skill path: {tail}"
     );
 
     // A synthetic trigger user message must be recorded for skill-only submits
@@ -413,8 +485,8 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_in_system_prompt() {
 ///
 /// After a skill-only submit, the last recorded message must be the synthetic
 /// trigger (user-role, `synthetic == true`) — verifying the model acts on it
-/// as the most recent turn, rather than only seeing the skill body passively
-/// in the system prompt.
+/// as the most recent recorded turn, rather than only seeing the skill
+/// passively via its tail reminder.
 #[tokio::test]
 async fn skill_only_empty_prompt_records_user_trigger_message() {
     let store = mem_store().await;

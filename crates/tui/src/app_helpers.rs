@@ -320,7 +320,11 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 }
 
 /// Estimated tokens of the system prompt that will accompany every request:
-/// `agent.prompt + project instructions + environment block + active skill`.
+/// `agent.prompt + project instructions + environment block` plus the
+/// latent-tool schemas an active skill unlocks and the one-line active-skill
+/// tail reminder. The skill body itself no longer ships in the system text
+/// (it moved to a transient tail message); the catalog-reminder tokens
+/// (config-dependent, tiny) are not counted here.
 /// Tracked separately from `ChatView::context_used` (which sums the streamed
 /// transcript and resets on compaction) so the context meter reflects the
 /// real request size — including the global `~/.opencoder/AGENTS.md` content,
@@ -330,11 +334,16 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
         Some(a) => a,
         None => return 0,
     };
-    let text = opencoder_session::prompt::build_system(&agent, workdir, skill, None).text();
+    let text = opencoder_session::prompt::build_system(&agent, workdir, None).text();
     let registry = opencoder_session::tools::registry();
     let tool_tokens =
         opencoder_session::tools::estimate_tool_schema_tokens(&agent, skill, &registry);
-    estimate(&text) as u64 + tool_tokens as u64
+    let tail = skill
+        .and_then(opencoder_session::skill_context::source_path_from_body)
+        .map(|path| opencoder_session::skill_context::reminder_text(&[], Some(path)))
+        .map(|t| estimate(&t))
+        .unwrap_or(0);
+    estimate(&text) as u64 + tool_tokens as u64 + tail as u64
 }
 
 /// Resolve inline `$name` skill tokens in `text`: strip them from the

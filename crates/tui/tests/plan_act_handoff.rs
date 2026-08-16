@@ -366,4 +366,16 @@ async fn switch_and_start_clears_skill_prompt() {
         !sys_has_skill,
         "act system prompt must not contain the plan-mode skill instructions"
     );
+
+    // The skill was cleared at handoff, so the transient tail reminder must
+    // be absent from the act request entirely (no `[active skill]` message).
+    let any_active_reminder = requests[0].messages.iter().any(|m| {
+        m.get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| c.contains("[active skill]"))
+    });
+    assert!(
+        !any_active_reminder,
+        "cleared skill must not resurface as a tail reminder in the act request"
+    );
 }

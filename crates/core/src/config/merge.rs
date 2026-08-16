@@ -49,6 +49,13 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         return true;
     }
     if obj
+        .get("skills")
+        .and_then(|v| v.as_object())
+        .is_some_and(|entries| !entries.is_empty())
+    {
+        return true;
+    }
+    if obj
         .get("compaction")
         .and_then(|v| v.as_object())
         .is_some_and(|c| c.contains_key("context_threshold") || c.contains_key("auto"))
@@ -209,6 +216,14 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 if let Some(cobj) = cv.as_object() {
                     let entry = cfg.cli.entry(name.clone()).or_default();
                     super::cli::merge(entry, cobj);
+                }
+            }
+        }
+        if let Some(entries) = obj.get("skills").and_then(|v| v.as_object()) {
+            for (name, sv) in entries {
+                if let Some(sobj) = sv.as_object() {
+                    let entry = cfg.skills.entry(name.clone()).or_default();
+                    super::skill::merge(entry, sobj);
                 }
             }
         }

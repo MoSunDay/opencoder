@@ -17,6 +17,7 @@ fn route_paste_into_main_composer_inserts_verbatim_text() {
         false,
         false,
         false,
+        false,
         &mut model_menu,
         &mut None,
         &mut None,
@@ -47,6 +48,7 @@ fn route_paste_swallowed_when_task_picker_open() {
     let flow = route_paste(
         "plain text",
         true,
+        false,
         false,
         false,
         &mut model_menu,
@@ -81,6 +83,7 @@ fn route_paste_swallowed_when_cache_salt_menu_open() {
         false,
         true,
         false,
+        false,
         &mut model_menu,
         &mut None,
         &mut None,
@@ -112,6 +115,7 @@ fn paste(
     let mut cm: Option<CommandMenu> = None;
     route_paste(
         pasted,
+        false,
         false,
         false,
         false,

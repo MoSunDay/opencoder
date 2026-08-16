@@ -139,6 +139,7 @@ pub(crate) async fn dispatch_slash_action(
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
+    skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
     input: &mut String,
@@ -186,6 +187,11 @@ pub(crate) async fn dispatch_slash_action(
         SlashAction::Cli => {
             *cli_menu = Some(crate::cli_menu::CliMenu::List(
                 crate::cli_menu::CliList::new(config),
+            ));
+        }
+        SlashAction::Skill => {
+            *skill_toggle_menu = Some(crate::skill_menu::SkillMenu::List(
+                crate::skill_menu::SkillList::new(config),
             ));
         }
         SlashAction::Compact => match gate_compact(*running) {

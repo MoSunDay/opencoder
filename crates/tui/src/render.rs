@@ -114,6 +114,7 @@ pub(crate) fn render<B: Backend>(
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
+    skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     question_menu: Option<&crate::question_menu::QuestionMenu>,
@@ -323,6 +324,9 @@ pub(crate) fn render<B: Backend>(
         if let Some(cli) = cli_menu {
             crate::cli_menu::render_cli_popup(f, area, composer_area.y, cli);
         }
+        if let Some(sk) = skill_toggle_menu {
+            crate::skill_menu::render_skill_popup(f, area, composer_area.y, sk);
+        }
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
         }
@@ -359,6 +363,7 @@ pub(crate) fn render<B: Backend>(
             && question_menu.is_none()
             && cli_menu.is_none()
             && mcp_menu.is_none()
+            && skill_toggle_menu.is_none()
         {
             let position = composer::cursor_screen_position(
                 composer_area.x,

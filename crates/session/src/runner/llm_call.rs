@@ -29,14 +29,14 @@ pub(super) async fn run_one_llm_call(
         })
         .flatten();
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
-    let system = build_system(
-        &session.agent,
-        &session.working_dir,
-        session.skill_prompt_cloned().as_deref(),
-        runtime.as_deref(),
-    );
+    let system = build_system(&session.agent, &session.working_dir, runtime.as_deref());
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
+    // Transient skill-context reminder: derived per call, never persisted.
+    // Keeps the system prompt byte-stable for prefix caching.
+    if let Some(tail) = crate::skill_context::tail_reminder(session) {
+        to_send.push(tail);
+    }
     let openai_msgs = lower_messages(&to_send);
 
     let skill_body = session.skill_prompt_cloned();
@@ -428,7 +428,7 @@ mod tests {
     fn explore_only_cli_config() -> Config {
         let mut config = Config::default();
         config.cli.insert(
-            "fk-cli".into(),
+            "test-cli".into(),
             opencoder_core::CliConfig {
                 enabled: true,
                 inject_to: opencoder_core::InjectionTarget {
@@ -562,7 +562,7 @@ mod tests {
         let agent = resolve_agent("workflow").unwrap();
         let mut config = Config::default();
         config.cli.insert(
-            "fk-cli".into(),
+            "test-cli".into(),
             opencoder_core::CliConfig {
                 enabled: true,
                 inject_to: opencoder_core::InjectionTarget::parent_only(),

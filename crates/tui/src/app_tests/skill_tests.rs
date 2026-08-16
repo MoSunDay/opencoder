@@ -13,12 +13,21 @@ fn sys_tokens_counts_system_prompt() {
     assert!(base > 0, "the system prompt must register some tokens");
     // deterministic
     assert_eq!(crate::app::sys_tokens_for("act", &dir, None), base);
-    // a skill body adds tokens on top of the base system prompt
-    let with_skill =
-        crate::app::sys_tokens_for("act", &dir, Some("extra skill guidance body text"));
+    // a plain skill body (no Source prefix, no latent tools) no longer adds
+    // tokens: skill bodies moved out of the system prompt, so the count is
+    // unchanged until a Source path or latent tool name appears.
+    let plain = crate::app::sys_tokens_for("act", &dir, Some("extra skill guidance body text"));
+    assert_eq!(
+        plain, base,
+        "a plain skill body must not change the system-prompt estimate"
+    );
+    // a Source-prefixed body surfaces the one-line active-skill tail
+    // reminder, which does add tokens on top of the base.
+    let sourced_body = "> Source: /skills/x/SKILL.md\n\nbody";
+    let sourced = crate::app::sys_tokens_for("act", &dir, Some(sourced_body));
     assert!(
-        with_skill > base,
-        "activating a skill must increase the count"
+        sourced > base,
+        "a Source-prefixed skill body must raise the count (tail reminder)"
     );
     // unknown agent -> 0 (no panic)
     assert_eq!(crate::app::sys_tokens_for("does-not-exist", &dir, None), 0);
@@ -28,34 +37,57 @@ fn sys_tokens_counts_system_prompt() {
 /// `KeyAction::SwitchAgent`): when a skill is active and the user switches
 /// agent mode (plan <-> act), `sys_tokens` is recomputed via
 /// `sys_tokens_for(agent, workdir, skill)`. The `skill` argument must be the
-/// skill **body** (the injected instruction text), not the skill **name** —
-/// otherwise the "ctx N%" meter under-counts, estimating a short label instead
-/// of the (potentially long) instruction. This pins the contract that call
-/// relies on: a long body must dominate a short name by a wide margin, so
-/// passing the body is observably correct.
+/// skill **body** (the stored instruction text), not the skill **name**: the
+/// body is what latent-tool unlocking (`tools::latent::unlocked_from_body`)
+/// derives from, and it carries the `> Source:` prefix that surfaces the
+/// tail reminder. No builtin agent allowlists a latent tool, so the unlock
+/// delta is pinned on the exact estimator `sys_tokens_for` feeds the body
+/// to, plus an end-to-end body-vs-name check through `sys_tokens_for`.
 #[test]
-fn sys_tokens_skill_body_dominates_skill_name() {
+fn sys_tokens_skill_body_unlocks_latent_tools_and_beats_name() {
     // take the shared HOME lock so a concurrent test that mutates HOME can't
     // race a system-prompt build in this test and flake the determinism
     // assertion below (system prompt reads workdir + global instructions).
     let _home = crate::app::app_loop::tests::HOME_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    let dir = std::env::temp_dir();
-    // A realistic short skill name vs. a long instruction body.
-    let name = "code-review";
-    let body = "x".repeat(500);
-    let by_name = crate::app::sys_tokens_for("act", &dir, Some(name));
-    let by_body = crate::app::sys_tokens_for("act", &dir, Some(&body));
+    // Tool-schema unlock: a body naming the ssh-pty skill unlocks the
+    // ssh_pty schema, a plain body unlocks nothing.
+    let all = opencoder_core::Agent {
+        name: "all".into(),
+        kind: opencoder_core::AgentKind::Act,
+        mode: opencoder_core::AgentMode::Primary,
+        description: String::new(),
+        prompt: String::new(),
+        tools: opencoder_core::ToolFilter::All,
+    };
+    let registry = opencoder_session::tools::registry();
+    let plain = "a plain body with no tool names";
+    let unlocking = "# ssh-pty skill\n\nUse ssh_pty for persistent SSH.";
+    let plain_tokens =
+        opencoder_session::tools::estimate_tool_schema_tokens(&all, Some(plain), &registry);
+    let unlocking_tokens =
+        opencoder_session::tools::estimate_tool_schema_tokens(&all, Some(unlocking), &registry);
     assert!(
-        by_body > by_name + 100,
-        "estimating the skill body ({by_body}) must far exceed estimating the \
-         skill name ({by_name}); otherwise the SwitchAgent recalculation \
+        unlocking_tokens > plain_tokens,
+        "a body naming a latent tool ({unlocking_tokens}) must exceed a plain \
+         body ({plain_tokens}); otherwise the SwitchAgent recalculation \
          under-counts the context meter"
     );
-    // Sanity: the body-based estimate also exceeds the no-skill baseline.
-    let base = crate::app::sys_tokens_for("act", &dir, None);
-    assert!(by_body > base, "a long skill body must raise the count");
+    // End-to-end: a stored body (Source-prefixed) out-estimates the bare
+    // skill name — pinning that SwitchAgent passes the body.
+    let dir = std::env::temp_dir();
+    let by_name = crate::app::sys_tokens_for("act", &dir, Some("code-review"));
+    let by_body = crate::app::sys_tokens_for(
+        "act",
+        &dir,
+        Some("> Source: /skills/code-review/SKILL.md\n\nReview the diff line by line."),
+    );
+    assert!(
+        by_body > by_name,
+        "estimating the stored skill body ({by_body}) must exceed estimating \
+         the bare skill name ({by_name})"
+    );
 }
 
 #[test]

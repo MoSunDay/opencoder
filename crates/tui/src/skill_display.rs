@@ -7,10 +7,11 @@
 
 /// Build the synthetic prompt sent when a user submits ONLY a skill token
 /// (`$name` with no accompanying text) — i.e. a pure-skill submission. The
-/// skill body itself is injected into the system prompt; this trigger text just
-/// records a user turn and tells the model to begin acting on the skill. Used by
-/// the Submit (idle), Steer (running), and Queue (running) paths so a pure-skill
-/// submission is never silently dropped regardless of the submit verb.
+/// skill itself is surfaced via the context-tail reminder; this trigger text
+/// just records a user turn and tells the model to begin acting on the
+/// skill. Used by the Submit (idle), Steer (running), and Queue (running)
+/// paths so a pure-skill submission is never silently dropped regardless of
+/// the submit verb.
 pub(crate) fn skill_trigger(skill_name: &str) -> String {
     format!("The `{skill_name}` skill is now active. Begin executing its instructions immediately.")
 }

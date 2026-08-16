@@ -213,10 +213,18 @@ pub async fn run_with_registry(
         run_loop(session, registry, &mut on_event, true).await?;
     }
 
-    // Autopilot: after the initial task completes, hand control to the
-    // PLAN -> ACT -> VERIFY loop so the agent self-drives toward the goal.
-    if session.config.autopilot.enabled {
-        crate::autopilot::drive(session, registry, &mut on_event).await?;
+    // Autopilot mode dispatch: after the initial task completes, `ap` hands
+    // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a
+    // one-shot review pass (plan agent + review skill, no ACT/VERIFY), and
+    // `off` does nothing.
+    match session.config.autopilot.mode {
+        opencoder_core::ApMode::Ap => {
+            crate::autopilot::drive(session, registry, &mut on_event).await?;
+        }
+        opencoder_core::ApMode::Review => {
+            crate::autopilot::review_pass(session, registry, &mut on_event).await?;
+        }
+        opencoder_core::ApMode::Off => {}
     }
     Ok(())
 }

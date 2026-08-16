@@ -15,12 +15,14 @@ SOFT = model-cooperation-dependent, recorded as skip not failure):
   E13     interleaved thinking reasoning_content persisted    SOFT (model-dependent)
   E14     config show emits valid merged JSON                 HARD (deterministic)
   E18     autopilot self-drive loop (phase markers + injected prompt persisted)  HARD
+  E19     todos workflow run→resume→observe HARD (contract) + SOFT (model)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 
@@ -425,14 +427,14 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # injected phase prompts are code strings persisted into the transcript.
     print("== E18: autopilot self-driving loop (PLAN -> ACT -> VERIFY) ==")
     ap_cfg = lib.make_config(api_key=api_key)
-    ap_cfg["autopilot"] = {"enabled": True, "max_iterations": 1, "verify_retries": 1}
+    ap_cfg["autopilot"] = {"mode": "ap", "max_iterations": 1, "verify_retries": 1}
     ap_wd = lib.seed_workdir(ap_cfg)
     rc, ap_log = lib.run_prompt(bin_path, ap_wd, AP_PROMPT)
     sid_ap = lib.extract_session_id(ap_log)
 
     # Config contract (deterministic — no model call): the merged config JSON
     # must carry the autopilot knobs from opencoder.json (config show reads
-    # defaults < env < project-file merge, so enabled/max_iterations survive).
+    # defaults < env < project-file merge, so mode/max_iterations survive).
     ap_cfg_out = lib.config_show(bin_path, ap_wd)
     ap_cfg_json = None
     try:
@@ -443,7 +445,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     c.check("config show includes autopilot object", apj_ok)
     if apj_ok:
         apj_cfg = ap_cfg_json["autopilot"]
-        c.check("autopilot.enabled merged true", apj_cfg.get("enabled") is True)
+        c.check("autopilot.mode merged ap", apj_cfg.get("mode") == "ap")
         c.check("autopilot.max_iterations merged 1", apj_cfg.get("max_iterations") == 1)
 
     # Reverse guard: autopilot is OFF by default, so the E1 run (default
@@ -487,6 +489,96 @@ def run_all(bin_path: str, api_key: str) -> Counter:
         c.soft("handoff_plan persisted in session meta",
                bool((apj_show.get("meta") or {}).get("handoff_plan")),
                "PLAN produced no plan text -> fallback ACT path (no handoff)")
+
+    # ---- E19: todos workflow smoke (run -> resume -> observe) ----
+    # Contract under test (CLI-level, model only feeds the one todo):
+    # `todos run` puts workflow_id= on STDERR and ONLY the final state JSON on
+    # stdout (compact with --json); events/show/list observe the store;
+    # resume of a terminal workflow returns the state early (rc 0, unchanged).
+    print("== E19: todos workflow smoke (run -> resume -> observe) ==")
+
+    def _run_split(args: list[str], timeout: int = 900) -> tuple[int, str, str]:
+        """Run the binary with stdout/stderr captured SEPARATELY (lib.run merges)."""
+        try:
+            p = subprocess.run([bin_path] + args, capture_output=True, text=True, timeout=timeout)
+            return p.returncode, p.stdout or "", p.stderr or ""
+        except subprocess.TimeoutExpired:
+            return 124, "", f"TIMEOUT after {timeout}s"
+
+    twd = lib.seed_workdir(base_cfg)
+    todo_spec = {
+        "schema_version": 1,
+        "id": "todos-smoke",
+        "name": "todos smoke",
+        "objective": "Create todo_done.txt containing 'ok' and verify it with cat.",
+        "constraints": [],
+        "todos": [{
+            "id": "t1",
+            "title": "create marker file",
+            "requirement_background": "e2e smoke marker todo",
+            "instructions": (
+                "Use the write tool to create a file named todo_done.txt in the "
+                "current directory with the exact single-line content 'ok'. "
+                "Then run 'cat todo_done.txt' with the bash tool to verify it prints ok."
+            ),
+            "depends_on": [],
+            "agent": "act",
+            "max_attempts": 3,
+            "acceptance": {"criteria": "todo_done.txt exists and cat prints ok",
+                           "required_tool_calls": []},
+        }],
+        "metadata": {},
+    }
+    lib.write_file(twd, "todos-smoke.json", json.dumps(todo_spec))
+
+    def _json_or_none(text: str):
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+
+    rc, out, err = _run_split(["--workdir", twd, "todos", "run",
+                               "--file", os.path.join(twd, "todos-smoke.json"), "--json"])
+    c.check("todos run rc==0", rc == 0, f"rc={rc} err_tail={err[-300:]}")
+    state = _json_or_none(out)
+    c.check("todos run stdout is pure state JSON", isinstance(state, dict),
+            f"stdout_tail={out[-200:]}")
+    if isinstance(state, dict):
+        c.check("todos run final status completed", state.get("status") == "completed",
+                f"status={state.get('status')}")
+    c.check("todos run stderr carries workflow_id=", "workflow_id=" in err)
+    m = re.search(r"workflow_id=(\S+)", err)
+    wf_id = m.group(1) if m else None
+    c.check("workflow_id extractable from stderr", bool(wf_id), f"err_tail={err[-200:]}")
+
+    if wf_id:
+        rc2, out2, _ = _run_split(["--workdir", twd, "todos", "events", wf_id, "--json"], 60)
+        ev = _json_or_none(out2)
+        c.check("todos events rc==0 json list non-empty",
+                rc2 == 0 and isinstance(ev, list) and len(ev) > 0)
+        rc3, out3, _ = _run_split(["--workdir", twd, "todos", "show", wf_id, "--json"], 60)
+        shown = _json_or_none(out3)
+        c.check("todos show rc==0 json", rc3 == 0 and isinstance(shown, dict))
+        if isinstance(shown, dict):
+            c.check("todos show spec.id matches",
+                    (shown.get("spec") or {}).get("id") == "todos-smoke")
+        rc4, out4, _ = _run_split(["--workdir", twd, "todos", "list"], 60)
+        c.check("todos list (text) contains workflow id", rc4 == 0 and wf_id in out4)
+        rc5, out5, _ = _run_split(["--workdir", twd, "todos", "resume", wf_id, "--json"], 900)
+        res = _json_or_none(out5)
+        c.check("todos resume of terminal workflow rc==0 completed",
+                rc5 == 0 and isinstance(res, dict) and res.get("status") == "completed")
+    else:
+        c.soft("todos observe chain", False, "no workflow_id — run failed")
+
+    # Model-cooperation soft checks: the single todo actually passed and the
+    # artifact landed on disk.
+    if isinstance(state, dict):
+        c.soft("todo t1 passed", all(t.get("status") == "passed"
+                                     for t in state.get("todos", {}).values()),
+               "todo not passed (model/acceptance did not cooperate)")
+    c.soft("todo_done.txt artifact exists", os.path.isfile(os.path.join(twd, "todo_done.txt")),
+           "file missing (model did not finish the write)")
 
     c.summary("CLI scenarios")
     return c

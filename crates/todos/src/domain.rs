@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::types::*;
 
@@ -125,25 +125,39 @@ pub fn initial_state(
     }
 }
 
-pub fn runnable(spec: &WorkflowSpec, state: &WorkflowState) -> Vec<String> {
-    spec.todos
-        .iter()
-        .filter(|todo| {
-            let current = &state.todos[&todo.id];
-            matches!(
-                current.status,
-                TodoStatus::Pending
-                    | TodoStatus::NeedsRevision
-                    | TodoStatus::Interrupted
-                    | TodoStatus::Invalidated
-                    | TodoStatus::Recovering
-            ) && todo
-                .depends_on
-                .iter()
-                .all(|dep| state.todos[dep].status == TodoStatus::Passed)
-        })
-        .map(|todo| todo.id.clone())
-        .collect()
+pub fn runnable(spec: &WorkflowSpec, state: &WorkflowState) -> Result<Vec<String>> {
+    let mut runnable = Vec::new();
+    for todo in &spec.todos {
+        let current = state_todo(state, &todo.id)?;
+        let eligible = matches!(
+            current.status,
+            TodoStatus::Pending
+                | TodoStatus::NeedsRevision
+                | TodoStatus::Interrupted
+                | TodoStatus::Invalidated
+                | TodoStatus::Recovering
+        ) && deps_passed(state, todo)?;
+        if eligible {
+            runnable.push(todo.id.clone());
+        }
+    }
+    Ok(runnable)
+}
+
+fn deps_passed(state: &WorkflowState, todo: &TodoSpec) -> Result<bool> {
+    for dep in &todo.depends_on {
+        if state_todo(state, dep)?.status != TodoStatus::Passed {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn state_todo<'a>(state: &'a WorkflowState, id: &str) -> Result<&'a TodoState> {
+    state
+        .todos
+        .get(id)
+        .with_context(|| format!("state missing TODO {id}"))
 }
 
 pub fn descendants(spec: &WorkflowSpec, root: &str) -> BTreeSet<String> {
@@ -188,5 +202,117 @@ mod tests {
             &serde_json::json!({"a":{"b":1,"c":2}}),
             &serde_json::json!({"a":{"b":1}})
         ));
+    }
+
+    fn valid_todo(id: &str, deps: &[&str]) -> TodoSpec {
+        TodoSpec {
+            id: id.into(),
+            title: format!("title {id}"),
+            requirement_background: "background".into(),
+            instructions: "instructions".into(),
+            depends_on: deps.iter().map(|dep| (*dep).to_string()).collect(),
+            agent: "act".into(),
+            max_attempts: 2,
+            acceptance: AcceptanceSpec {
+                criteria: "done".into(),
+                required_tool_calls: Vec::new(),
+            },
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    fn valid_spec(todos: Vec<TodoSpec>) -> WorkflowSpec {
+        WorkflowSpec {
+            schema_version: 1,
+            id: "wf".into(),
+            name: "wf".into(),
+            objective: "objective".into(),
+            constraints: Vec::new(),
+            todos,
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn validate_spec_rejects_unknown_dependency() {
+        let workflow = valid_spec(vec![valid_todo("a", &[]), valid_todo("b", &["ghost"])]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("invalid dependency ghost"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_self_dependency() {
+        let workflow = valid_spec(vec![valid_todo("a", &["a"])]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("invalid dependency a"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_zero_max_attempts() {
+        let mut todo = valid_todo("a", &[]);
+        todo.max_attempts = 0;
+        let workflow = valid_spec(vec![todo]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("max_attempts must be positive"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_empty_instructions() {
+        let mut todo = valid_todo("a", &[]);
+        todo.instructions = "   ".into();
+        let workflow = valid_spec(vec![todo]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("empty required field"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_non_object_tool_arguments() {
+        let mut todo = valid_todo("a", &[]);
+        todo.acceptance.required_tool_calls = vec![RequiredToolCall {
+            name: "mcp__fk__tap".into(),
+            arguments_contains: serde_json::json!(["not-an-object"]),
+            result_ok: true,
+        }];
+        let workflow = valid_spec(vec![todo]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("invalid required tool call"));
+    }
+
+    #[test]
+    fn validate_spec_accepts_diamond_and_runnable_orders_correctly() {
+        let workflow = valid_spec(vec![
+            valid_todo("a", &[]),
+            valid_todo("b", &["a"]),
+            valid_todo("c", &["a"]),
+            valid_todo("d", &["b", "c"]),
+        ]);
+
+        validate_spec(&workflow).unwrap();
+        let mut workflow_state = initial_state(&workflow, "run".into(), "parent".into());
+        assert_eq!(runnable(&workflow, &workflow_state).unwrap(), vec!["a"]);
+
+        workflow_state.todos.get_mut("a").unwrap().status = TodoStatus::Passed;
+        assert_eq!(
+            runnable(&workflow, &workflow_state).unwrap(),
+            vec!["b", "c"]
+        );
+
+        for id in ["b", "c"] {
+            workflow_state.todos.get_mut(id).unwrap().status = TodoStatus::Passed;
+        }
+        assert_eq!(runnable(&workflow, &workflow_state).unwrap(), vec!["d"]);
+
+        workflow_state.todos.get_mut("d").unwrap().status = TodoStatus::Passed;
+        assert!(runnable(&workflow, &workflow_state).unwrap().is_empty());
     }
 }

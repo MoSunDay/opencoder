@@ -17,10 +17,14 @@ pub use agent::{
     AgentMode, ToolFilter,
 };
 pub use config::{
-    looks_like_env_var, scoped_config_home, AgentDefaults, AutoPilotConfig,
+    looks_like_env_var, scoped_config_home, AgentDefaults, ApMode, AutoPilotConfig,
     CliConfig, CompactionConfig, Config, Endpoint, HttpHeader, InjectionTarget, McpServerConfig,
     NetworkConfig, OutputStreamlineConfig,
     ProviderConfig, ScopedConfigHome, KeymapConfig, KEYMAP_INFO, DEFAULT_CONTEXT_LIMIT,
+};
+pub use config::envs::{
+    active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
+    set_active_env, validate_env_name,
 };
 pub use data_dir::{data_dir_for, data_root};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};

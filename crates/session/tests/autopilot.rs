@@ -1,10 +1,11 @@
 //! Integration tests for the autopilot loop: shadow VERIFY isolation, full
 //! PLAN -> ACT -> VERIFY drives, abort/max-iteration outcomes, and the
-//! enabled=false gate.
+//! three-state mode gate (`off` / `ap` / `review`). The one-shot review pass
+//! and the run-entry mode dispatch live in `autopilot_review.rs`.
 
 use std::sync::{Arc, Mutex};
 
-use opencoder_core::{resolve_agent, AutoPilotConfig, Config, Message};
+use opencoder_core::{resolve_agent, ApMode, AutoPilotConfig, Config, Message};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::autopilot::{drive, verify, ApOutcome, ApPhase, ApState, VerifyVerdict};
 use opencoder_session::runner::run_with_registry;
@@ -38,7 +39,7 @@ fn autopilot_config(max_iterations: u32, verify_retries: u32) -> Config {
     Config {
         model: "m/g".into(),
         autopilot: AutoPilotConfig {
-            enabled: true,
+            mode: opencoder_core::ApMode::Ap,
             max_iterations,
             verify_retries,
         },
@@ -65,6 +66,7 @@ fn phase_label(phase: &ApPhase) -> &'static str {
         ApPhase::Plan => "plan",
         ApPhase::Act => "act",
         ApPhase::Verify => "verify",
+        ApPhase::Review => "review",
     }
 }
 
@@ -238,7 +240,7 @@ async fn drive_max_iterations_one_yields_max_iterations() {
     assert_eq!(outcome, ApOutcome::MaxIterations);
 }
 
-// ── gating: enabled=false never starts the loop ──────────────────────────
+// ── gating: mode=off never starts the loop ────────────────────────────────
 
 #[tokio::test]
 async fn autopilot_disabled_never_invokes_drive() {
@@ -249,7 +251,7 @@ async fn autopilot_disabled_never_invokes_drive() {
         model: "m/g".into(),
         ..Config::default()
     };
-    assert!(!cfg.autopilot.enabled, "autopilot is off by default");
+    assert_eq!(cfg.autopilot.mode, ApMode::Off, "autopilot is off by default");
     let (_dir, mut session) = make_session(mock.clone() as Arc<dyn ChatStream>, cfg);
 
     let reg = registry();
@@ -262,6 +264,38 @@ async fn autopilot_disabled_never_invokes_drive() {
         mock.call_count(),
         1,
         "disabled autopilot must not start the loop"
+    );
+}
+
+/// mode=Off is a hard zero on the event surface too: the mode dispatch arm
+/// is a no-op, so not a single `AutoPilot` event (any phase) may surface.
+#[tokio::test]
+async fn autopilot_off_mode_emits_no_autopilot_events() {
+    let mock = Arc::new(MockChatClient::new().push_script(vec![completed("done", vec![])]));
+    let cfg = Config {
+        model: "m/g".into(),
+        autopilot: AutoPilotConfig {
+            mode: ApMode::Off,
+            ..AutoPilotConfig::default()
+        },
+        ..Config::default()
+    };
+    let (_dir, mut session) = make_session(mock as Arc<dyn ChatStream>, cfg);
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    run_with_registry(&mut session, "kickoff".into(), vec![], &reg, &mut on_event)
+        .await
+        .unwrap();
+
+    let events = buf.lock().unwrap();
+    let offending: Vec<_> = events
+        .iter()
+        .filter(|ev| matches!(ev, SessionEvent::AutoPilot { .. }))
+        .collect();
+    assert!(
+        offending.is_empty(),
+        "mode=Off must emit zero AutoPilot events, got {offending:?}"
     );
 }
 

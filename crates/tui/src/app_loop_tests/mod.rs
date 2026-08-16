@@ -427,6 +427,7 @@ async fn fold_turn_done_plan_consumes_stale_pending_arm() {
 
 mod cli_outcome_tests;
 mod mcp_outcome_tests;
+mod envs_outcome_tests;
 mod model_outcome_tests;
 mod skill_outcome_tests;
 

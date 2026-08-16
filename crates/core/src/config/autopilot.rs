@@ -1,9 +1,24 @@
 use serde::{Deserialize, Serialize};
 
+/// Autopilot operating mode (three-state, default `Off`).
+///
+/// - `Off` — no automatic behavior after the initial task.
+/// - `Ap` — the fully automatic PLAN → ACT → VERIFY self-driving loop.
+/// - `Review` — one-shot automatic review (plan agent + review skill) after
+///   the initial task, then stop.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApMode {
+    #[default]
+    Off,
+    Ap,
+    Review,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoPilotConfig {
     #[serde(default)]
-    pub enabled: bool,
+    pub mode: ApMode,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
     #[serde(default = "default_verify_retries")]
@@ -20,16 +35,34 @@ fn default_verify_retries() -> u32 {
 impl Default for AutoPilotConfig {
     fn default() -> Self {
         AutoPilotConfig {
-            enabled: false,
+            mode: ApMode::Off,
             max_iterations: default_max_iterations(),
             verify_retries: default_verify_retries(),
         }
     }
 }
 
+/// Parse a `mode` string from raw JSON; unknown values are ignored (the
+/// caller keeps the previous value), matching the lenient scalar handling
+/// used for every other merge key.
+fn parse_mode(v: &str) -> Option<ApMode> {
+    match v {
+        "off" => Some(ApMode::Off),
+        "ap" => Some(ApMode::Ap),
+        "review" => Some(ApMode::Review),
+        _ => None,
+    }
+}
+
 pub(super) fn merge(cfg: &mut AutoPilotConfig, obj: &serde_json::Map<String, serde_json::Value>) {
-    if let Some(v) = obj.get("enabled").and_then(|v| v.as_bool()) {
-        cfg.enabled = v;
+    // `mode` is the canonical key. Legacy configs carry only the boolean
+    // `enabled`: `true` maps to `ap` (so old users keep their self-driving
+    // loop instead of being silently switched off), `false` maps to `off`.
+    // When both keys are present `mode` wins and `enabled` is ignored.
+    if let Some(v) = obj.get("mode").and_then(|v| v.as_str()).and_then(parse_mode) {
+        cfg.mode = v;
+    } else if let Some(v) = obj.get("enabled").and_then(|v| v.as_bool()) {
+        cfg.mode = if v { ApMode::Ap } else { ApMode::Off };
     }
     if let Some(v) = obj.get("max_iterations").and_then(|v| v.as_u64()) {
         cfg.max_iterations = v.min(u32::MAX as u64) as u32;
@@ -37,4 +70,45 @@ pub(super) fn merge(cfg: &mut AutoPilotConfig, obj: &serde_json::Map<String, ser
     if let Some(v) = obj.get("verify_retries").and_then(|v| v.as_u64()) {
         cfg.verify_retries = v.min(u32::MAX as u64) as u32;
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn merged(json: serde_json::Value) -> AutoPilotConfig {
+        let mut cfg = AutoPilotConfig::default();
+        merge(&mut cfg, json.as_object().unwrap());
+        cfg
+    }
+
+    #[test]
+    fn mode_parses_all_three_states_and_ignores_unknown() {
+        assert_eq!(merged(json!({"mode": "ap"})).mode, ApMode::Ap);
+        assert_eq!(merged(json!({"mode": "review"})).mode, ApMode::Review);
+        assert_eq!(merged(json!({"mode": "off"})).mode, ApMode::Off);
+        // Unknown string keeps the previous value (default off).
+        assert_eq!(
+            merged(json!({"mode": "warp"})).mode,
+            ApMode::Off,
+            "unknown mode ignored"
+        );
+    }
+
+    #[test]
+    fn legacy_enabled_maps_ap_and_off() {
+        assert_eq!(merged(json!({"enabled": true})).mode, ApMode::Ap);
+        assert_eq!(merged(json!({"enabled": false})).mode, ApMode::Off);
+    }
+
+    #[test]
+    fn mode_wins_over_legacy_enabled_when_both_present() {
+        assert_eq!(
+            merged(json!({"mode": "off", "enabled": true})).mode,
+            ApMode::Off,
+            "mode is canonical"
+        );
+    }
+
 }

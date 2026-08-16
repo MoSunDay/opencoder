@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 use super::env::which_tmux;
 use super::naming::id_from_name;
@@ -69,7 +69,9 @@ pub(crate) fn current_session_name() -> Result<Option<String>> {
     if !output.status.success() {
         bail!("tmux display-message failed");
     }
-    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+    Ok(Some(
+        String::from_utf8_lossy(&output.stdout).trim().to_string(),
+    ))
 }
 
 /// One managed tmux session observed via `list-sessions`.

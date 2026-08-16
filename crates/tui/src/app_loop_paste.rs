@@ -103,6 +103,7 @@ pub(crate) fn route_paste(
     skill_toggle_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     command_menu: &mut Option<CommandMenu>,
     question_menu: &mut Option<crate::question_menu::QuestionMenu>,
@@ -125,6 +126,10 @@ pub(crate) fn route_paste(
         return LoopFlow::Redraw;
     }
     if let Some(menu) = mcp_menu.as_mut() {
+        menu.paste(trimmed);
+        return LoopFlow::Redraw;
+    }
+    if let Some(menu) = envs_menu.as_mut() {
         menu.paste(trimmed);
         return LoopFlow::Redraw;
     }
@@ -211,4 +216,58 @@ pub(crate) fn route_paste(
     *input = new_input;
     *cursor_idx = new_idx;
     LoopFlow::Proceed
+}
+
+/// Handle one `Event::Paste` end-to-end (extracted from `app.rs` to keep
+/// that file under the 800-line iteration cap). Empty pastes attempt a
+/// silent clipboard-image read; otherwise the paste is routed modal-first,
+/// mirroring `Event::Key` priority. Returns `true` when a modal consumed the
+/// paste (caller `continue`s — identical to the old inline `Redraw` flow);
+/// `false` lets the loop fall through with `dirty` already set.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_paste_event(
+    pasted: &str,
+    task_picker_open: bool,
+    cache_salt_menu_open: bool,
+    keymap_menu_open: bool,
+    skill_toggle_menu_open: bool,
+    model_menu: &mut Option<ModelMenu>,
+    mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
+    cli_menu: &mut Option<crate::cli_menu::CliMenu>,
+    command_menu: &mut Option<CommandMenu>,
+    question_menu: &mut Option<crate::question_menu::QuestionMenu>,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    pending_images: &mut Vec<(String, String)>,
+    asm: &mut crate::image_chunk::Assembly,
+    chat: &mut ChatView,
+    workdir: &Path,
+) -> bool {
+    if pasted.trim().is_empty() {
+        paste_clipboard_image_silent(chat, pending_images).await;
+        return true;
+    }
+    matches!(
+        route_paste(
+            pasted,
+            task_picker_open,
+            cache_salt_menu_open,
+            keymap_menu_open,
+            skill_toggle_menu_open,
+            model_menu,
+            mcp_menu,
+            envs_menu,
+            cli_menu,
+            command_menu,
+            question_menu,
+            input,
+            cursor_idx,
+            pending_images,
+            asm,
+            chat,
+            workdir,
+        ),
+        LoopFlow::Redraw
+    )
 }

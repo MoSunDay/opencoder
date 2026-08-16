@@ -1,4 +1,5 @@
 pub mod api;
+pub mod api_envs;
 pub mod api_ops;
 pub mod auth;
 pub mod cmd;
@@ -8,7 +9,7 @@ pub mod html;
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use opencoder_store::{LibsqlStore, Store};
 
@@ -83,6 +84,12 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/sessions/:id/skill", post(api_ops::post_skill))
         .route("/api/config", get(api_ops::get_config))
         .route("/api/config", patch(api_ops::patch_config))
+        .route(
+            "/api/envs",
+            get(api_envs::list).post(api_envs::create).patch(api_envs::patch),
+        )
+        .route("/api/envs/:name/recapture", post(api_envs::recapture))
+        .route("/api/envs/:name", delete(api_envs::delete))
         .route("/api/bg", get(api_ops::list_bg))
         .route("/api/bg/stop", post(api_ops::stop_bg))
         .route("/api/health", get(api::health))

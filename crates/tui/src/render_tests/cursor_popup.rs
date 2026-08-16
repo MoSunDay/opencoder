@@ -47,15 +47,17 @@ fn draw(
         None,          // command_menu
         None,          // model_menu
         mcp_menu,
+        None,          // envs_menu
         cli_menu,
         None,          // skill_toggle_menu
+        None,          // ap_menu
         None,          // cache_salt_menu
         None,          // keymap_menu
         None,          // question_menu
         &mut hits,
         &mut viewport,
         false,
-        false,
+        None,
         &[],
         false,
         None,
@@ -63,7 +65,7 @@ fn draw(
         0,
         0,
         true,
-        false,
+        opencoder_core::ApMode::Off,
         "act",
         None,
     )

@@ -218,7 +218,13 @@ impl Runtime {
 
     async fn dump(&self, spec: &WorkflowSpec, state: &WorkflowState) -> Result<()> {
         if let Some(root) = &self.debug_root {
-            persistence::debug_dump(&self.store, spec, state, root).await?;
+            if let Err(error) = persistence::debug_dump(&self.store, spec, state, root).await {
+                tracing::warn!(
+                    workflow_id = %state.workflow_id,
+                    error = %error,
+                    "debug dump failed; continuing without projection refresh"
+                );
+            }
         }
         Ok(())
     }
@@ -252,9 +258,16 @@ pub(crate) async fn poll_interrupt(
                 return;
             }
             Ok(Some(_)) => {}
-            _ => {
+            Ok(None) => {
                 cancel.cancel();
                 return;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    error = %error,
+                    "transient store error while polling todo workflow interrupt state"
+                );
             }
         }
     }
@@ -267,7 +280,7 @@ pub async fn interrupt(
 ) -> Result<WorkflowState> {
     let (spec, state) = persistence::load(store, workflow_id)
         .await?
-        .context("workflow not found")?;
+        .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
     if matches!(
         state.status,
         WorkflowStatus::Completed | WorkflowStatus::Failed
@@ -283,5 +296,10 @@ pub async fn interrupt(
         serde_json::json!({"reason":reason}),
     )
     .await?;
+    tracing::info!(
+        workflow_id = %workflow_id,
+        reason = %reason,
+        "todo workflow interrupted"
+    );
     Ok(state)
 }

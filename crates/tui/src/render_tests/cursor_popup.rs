@@ -57,7 +57,7 @@ fn draw(
         &mut hits,
         &mut viewport,
         false,
-        None,
+        false,
         &[],
         false,
         None,

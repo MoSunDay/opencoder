@@ -111,6 +111,20 @@ impl ViewportCache {
     /// Found via two binary searches over `cum_rows`, so it is O(log n)
     /// regardless of transcript length. Empty input or `visible_h == 0`
     /// yields `(0, 0, 0)`.
+    /// Index of the logical line that contains absolute screen `row`
+    /// (binary search over `cum_rows`). Rows at or past the end clamp to
+    /// the last line; an empty cache returns 0. Inverse of
+    /// [`Self::row_of_line`] for row spans: `row_of_line(i) <= row <
+    /// row_of_line(i + 1)` implies `line_at_row(row) == i`.
+    pub fn line_at_row(&self, row: usize) -> usize {
+        if self.lines.is_empty() {
+            return 0;
+        }
+        self.cum_rows[1..]
+            .partition_point(|&r| r <= row)
+            .min(self.lines.len() - 1)
+    }
+
     pub fn visible_window(&self, scroll_y: usize, visible_h: usize) -> (usize, usize, usize) {
         if self.lines.is_empty() || visible_h == 0 {
             return (0, 0, 0);
@@ -134,5 +148,45 @@ impl ViewportCache {
             end = start + 1;
         }
         (start, end, top_skip)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::ChatView;
+    use ratatui::text::Line;
+
+    /// A view whose flattened lines are exactly `lines` (one Marker block per
+    /// line) — markers render verbatim, independent of the markdown renderer.
+    fn view_from_lines(lines: &[&str]) -> ChatView {
+        let mut v = ChatView::default();
+        for &l in lines {
+            v.push_marker(Line::from(l.to_string()));
+        }
+        v
+    }
+
+    #[test]
+    fn line_at_row_maps_rows_through_wrapped_lines() {
+        // Width 10: the 20-char line wraps into 2 rows, others into 1.
+        // cum_rows = [0, 2, 3, 4].
+        let v = view_from_lines(&["0123456789abcdefghij", "b", "c"]);
+        let cache = ViewportCache::build(&v, 10, 0, 0);
+        assert_eq!(cache.total_rows(), 4);
+        assert_eq!(cache.line_at_row(0), 0);
+        assert_eq!(cache.line_at_row(1), 0, "second wrapped row -> same line");
+        assert_eq!(cache.line_at_row(2), 1);
+        assert_eq!(cache.line_at_row(3), 2);
+        // Past-the-end rows clamp to the last line.
+        assert_eq!(cache.line_at_row(4), 2);
+        assert_eq!(cache.line_at_row(999), 2);
+    }
+
+    #[test]
+    fn line_at_row_empty_cache_returns_zero() {
+        let cache = ViewportCache::build(&ChatView::default(), 10, 0, 0);
+        assert_eq!(cache.total_rows(), 0);
+        assert_eq!(cache.line_at_row(0), 0);
     }
 }

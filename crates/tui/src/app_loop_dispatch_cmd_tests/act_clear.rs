@@ -44,6 +44,8 @@ async fn slash_clear_context_while_running_is_noop() {
         &mut mcp_menu,
         &mut None,
         &mut None,
+        &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "plan",

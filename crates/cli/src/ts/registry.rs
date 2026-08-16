@@ -80,7 +80,7 @@ async fn scan(root: &Path, strict: bool) -> Result<Vec<StoredSession>> {
         Ok(rd) => rd,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
-            return Err(error).with_context(|| format!("read data root: {}", root.display()))
+            return Err(error).with_context(|| format!("read data root: {}", root.display()));
         }
     };
     let mut out = Vec::new();
@@ -223,7 +223,10 @@ mod tests {
         {
             let store = LibsqlStore::open(h1.join("opencoder.db")).await.unwrap();
             store.create_session(&meta("TSA1", None, 1)).await.unwrap();
-            store.create_session(&meta("PLAIN1", Some("m"), 2)).await.unwrap();
+            store
+                .create_session(&meta("PLAIN1", Some("m"), 2))
+                .await
+                .unwrap();
         }
         tokio::fs::write(h1.join("workdir"), workdir_a.to_string_lossy().as_bytes())
             .await
@@ -239,7 +242,9 @@ mod tests {
 
         // A directory without a db file and a plain file: both skipped.
         tokio::fs::create_dir_all(root.join("cccc")).await.unwrap();
-        tokio::fs::write(root.join("not-a-store"), "x").await.unwrap();
+        tokio::fs::write(root.join("not-a-store"), "x")
+            .await
+            .unwrap();
 
         let registry = TsRegistry::open_memory().await.unwrap();
         migrate_legacy(&registry, root).await.unwrap();
@@ -247,7 +252,11 @@ mod tests {
         let rows = registry.list().await.unwrap();
         assert_eq!(rows.len(), 2, "TSA1 + TSB1 imported; PLAIN1 skipped");
         let a = registry.get("TSA1").await.unwrap().expect("ts session");
-        assert_eq!(a.workdir.as_deref(), Some(workdir_a.as_path()), "marker read");
+        assert_eq!(
+            a.workdir.as_deref(),
+            Some(workdir_a.as_path()),
+            "marker read"
+        );
         assert_eq!(a.store_dir.as_deref(), Some(h1.as_path()));
         let b = registry.get("TSB1").await.unwrap().expect("ts session");
         assert_eq!(b.workdir, None, "missing marker keeps (unknown) semantics");

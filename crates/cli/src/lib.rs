@@ -224,12 +224,22 @@ pub enum TodosSub {
         /// Dump a rebuildable filesystem projection after every transition.
         #[arg(long, default_value_t = false)]
         debug: bool,
+        /// Emit the final workflow state as single-line compact JSON; default
+        /// is pretty-printed JSON — both are jq-parseable, stdout contains
+        /// ONLY the JSON document.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Resume a suspended or interrupted workflow from the Store.
     Resume {
         id: String,
         #[arg(long, default_value_t = false)]
         debug: bool,
+        /// Emit the final workflow state as single-line compact JSON; default
+        /// is pretty-printed JSON — both are jq-parseable, stdout contains
+        /// ONLY the JSON document.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Show the canonical workflow projection.
     Show {
@@ -249,6 +259,9 @@ pub enum TodosSub {
     List {
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Max workflows to list.
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
     },
     /// Persistently suspend a workflow and cancel active work on next poll.
     Interrupt { id: String },

@@ -113,151 +113,141 @@ fn header_line_indices_aligned_with_flatten_while_withheld() {
     }
 }
 
-/// The `AP` autopilot chip is drawn at the composer top-right in the local
-/// (magenta) color when autopilot is enabled, and absent when disabled.
+/// The autopilot status chip is tri-state: `AP` for fully-automatic mode,
+/// `RV` for auto-review, and absent when off. Chips draw on the local
+/// (magenta) background at the composer top-right.
 #[test]
-fn ap_chip_visible_only_when_autopilot_enabled() {
+fn ap_chip_reflects_autopilot_mode() {
     use crate::render::render;
+    use opencoder_core::ApMode;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
     crate::theme::set_theme(crate::theme::ThemeKind::Dark);
-    let chat = ChatView::default();
-    let local = crate::theme::local_color();
 
-    let find_ap = |terminal: &mut Terminal<TestBackend>| -> bool {
+    /// Render one frame with benign defaults and the given autopilot mode.
+    fn draw(mode: ApMode, terminal: &mut Terminal<TestBackend>) {
+        let chat = ChatView::default();
+        let mut scroll = 0u32;
+        let mut queue_scroll = 0u32;
+        let mut hits = MouseHits::default();
+        render(
+            terminal,
+            &chat,
+            "",
+            0,
+            &Line::raw("title"),
+            false,
+            0,
+            0,
+            200_000,
+            200_000,
+            "idle",
+            &[],
+            &[],
+            &mut scroll,
+            true,
+            &mut queue_scroll,
+            0,
+            0,
+            None, // mode_flash
+            None, // skill_menu
+            None, // task_picker
+            None, // command_menu
+            None, // model_menu
+            None, // mcp_menu
+            None, // envs_menu
+            None, // cli_menu
+            None, // skill_toggle_menu
+            None, // ap_menu
+            None, // cache_salt_menu
+            None, // keymap_menu
+            None, // question_menu
+            &mut hits,
+            &mut None,
+            false,
+            None,
+            &[],
+            false,
+            None,
+            None,
+            0,
+            0,
+            true,
+            mode,
+            "act",
+            None,
+        )
+        .unwrap();
+    }
+
+    /// Whether any cell with one of `letters` sits on the local (magenta) bg.
+    fn chip_cell(terminal: &mut Terminal<TestBackend>, letters: &[&str]) -> bool {
+        let local = crate::theme::local_color();
         let buf = terminal.backend().buffer();
         for y in 0..buf.area.height {
             for x in 0..buf.area.width {
                 if let Some(cell) = buf.cell((x, y)) {
-                    let symbol = cell.symbol();
-                    let is_ap = symbol == "A" || symbol == "P";
-                    let on_local_bg = cell.bg == local;
-                    if is_ap && on_local_bg {
+                    if letters.contains(&cell.symbol()) && cell.bg == local {
                         return true;
                     }
                 }
             }
         }
         false
-    };
-
-    let mut scroll = 0u32;
-    let mut queue_scroll: u32 = 0;
-    let mut hits = MouseHits::default();
-
-    // Disabled: no AP chip anywhere on the frame.
-    {
-        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
-        render(
-            &mut terminal,
-            &chat,
-            "",
-            0,
-            &Line::raw("title"),
-            false,
-            0,
-            0,
-            200_000,
-            200_000,
-            "idle",
-            &[],
-            &[],
-            &mut scroll,
-            true,
-            &mut queue_scroll,
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &mut hits,
-            &mut None,
-            false,
-            false,
-            &[],
-            false,
-            None,
-            None,
-            0,
-            0,
-            true,
-            false,
-            "act",
-            None,
-        )
-        .unwrap();
-        assert!(!find_ap(&mut terminal), "no AP chip when autopilot is off");
     }
 
-    // Enabled: the AP chip sits on a local-color (magenta) background cell.
-    {
-        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
-        render(
-            &mut terminal,
-            &chat,
-            "",
-            0,
-            &Line::raw("title"),
-            false,
-            0,
-            0,
-            200_000,
-            200_000,
-            "idle",
-            &[],
-            &[],
-            &mut scroll,
-            true,
-            &mut queue_scroll,
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &mut hits,
-            &mut None,
-            false,
-            false,
-            &[],
-            false,
-            None,
-            None,
-            0,
-            0,
-            true,
-            true,
-            "act",
-            None,
-        )
-        .unwrap();
-        assert!(find_ap(&mut terminal), "AP chip must render when enabled");
-        // The chip text " AP " is visible somewhere on the frame (drawn at the
-        // composer's top-right row).
+    /// Rows whose flattened text contains `needle` (for full chip text).
+    fn chip_rows(terminal: &mut Terminal<TestBackend>, needle: &str) -> Vec<u16> {
         let buf = terminal.backend().buffer();
         let area = buf.area;
-        let chip_rows: Vec<u16> = (0..area.height)
-            .filter(|&y| row_text(buf, y, area.width).contains(" AP "))
-            .collect();
+        (0..area.height)
+            .filter(|&y| row_text(buf, y, area.width).contains(needle))
+            .collect()
+    }
+
+    // Off: no AP/RV chip anywhere on the frame.
+    {
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        draw(ApMode::Off, &mut terminal);
         assert!(
-            !chip_rows.is_empty(),
-            "AP chip text must be visible; rows with it: {chip_rows:?}"
+            !chip_cell(&mut terminal, &["A", "P"]),
+            "no AP chip letters on local bg when mode is off"
+        );
+        assert!(
+            chip_rows(&mut terminal, " AP ").is_empty()
+                && chip_rows(&mut terminal, " RV ").is_empty(),
+            "neither AP nor RV chip text may render when mode is off"
+        );
+    }
+
+    // Ap: the " AP " chip sits on a local-color (magenta) background cell.
+    {
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        draw(ApMode::Ap, &mut terminal);
+        assert!(chip_cell(&mut terminal, &["A", "P"]), "AP chip must render in ap mode");
+        assert!(
+            !chip_rows(&mut terminal, " AP ").is_empty(),
+            "AP chip text must be visible; rows with it exist"
+        );
+        assert!(
+            chip_rows(&mut terminal, " RV ").is_empty(),
+            "ap mode must not show an RV chip"
+        );
+    }
+
+    // Review: the " RV " chip replaces AP.
+    {
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        draw(ApMode::Review, &mut terminal);
+        assert!(chip_cell(&mut terminal, &["R", "V"]), "RV chip must render in review mode");
+        assert!(
+            !chip_rows(&mut terminal, " RV ").is_empty(),
+            "RV chip text must be visible; rows with it exist"
+        );
+        assert!(
+            chip_rows(&mut terminal, " AP ").is_empty(),
+            "review mode must not show an AP chip"
         );
     }
 }

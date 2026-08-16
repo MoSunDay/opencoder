@@ -4,7 +4,7 @@
 use std::fs;
 use std::sync::Mutex;
 
-use opencoder_core::Config;
+use opencoder_core::{ApMode, Config};
 
 // Env mutation is process-global; serialize tests that touch the environment.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -433,18 +433,18 @@ fn autopilot_config_roundtrips_through_save() {
     let _g = ENV_LOCK.lock().unwrap();
     let (_home_guard, dir) = isolated_home();
 
-    // Write a config with autopilot enabled and all fields set.
+    // Write a config with autopilot on (ap mode) and all fields set.
     let patch = serde_json::json!({
         "model": "demo/model",
         "autopilot": {
-            "enabled": true,
+            "mode": "ap",
             "max_iterations": 5,
             "verify_retries": 2
         }
     });
     Config::save(dir.path(), &patch).unwrap();
     let cfg = Config::load(dir.path()).unwrap();
-    assert!(cfg.autopilot.enabled, "autopilot.enabled round-trips");
+    assert_eq!(cfg.autopilot.mode, ApMode::Ap, "autopilot.mode round-trips");
     assert_eq!(
         cfg.autopilot.max_iterations, 5,
         "max_iterations round-trips"
@@ -460,7 +460,7 @@ fn autopilot_config_roundtrips_through_save() {
     });
     Config::save(dir.path(), &patch2).unwrap();
     let cfg2 = Config::load(dir.path()).unwrap();
-    assert!(cfg2.autopilot.enabled, "enabled preserved by deep merge");
+    assert_eq!(cfg2.autopilot.mode, ApMode::Ap, "mode preserved by deep merge");
     assert_eq!(cfg2.autopilot.max_iterations, 20, "max_iterations patched");
     assert_eq!(cfg2.autopilot.verify_retries, 2, "verify_retries preserved");
 }

@@ -16,6 +16,8 @@ pub async fn execute(
     let assignments = assignments(state, &requests)?;
     prepare_sessions(runtime, spec, &assignments).await?;
     *state = transitions::dispatch(spec, state.clone(), &assignments)?;
+    let dispatched_ids: Vec<String> = requests.iter().map(|r| r.todo_id.clone()).collect();
+    let dispatch_reason = reason.clone();
     runtime
         .commit(
             spec,
@@ -24,42 +26,93 @@ pub async fn execute(
             serde_json::json!({"todos":requests,"reason":reason}),
         )
         .await?;
+    tracing::info!(
+        workflow_id = %state.workflow_id,
+        todo_ids = ?dispatched_ids,
+        reason = %dispatch_reason,
+        "todos dispatched"
+    );
 
     let results = run_assignments(runtime, spec, state, assignments).await?;
+    let mut fatal: Option<anyhow::Error> = None;
     for (todo_id, result) in results {
-        let execution = result?;
-        *state = transitions::candidate(state.clone(), &todo_id, execution.candidate)?;
-        runtime
-            .commit(
-                spec,
-                state,
-                "todo_candidate_ready",
-                serde_json::json!({"todo_id":todo_id,"gate":execution.gate}),
-            )
-            .await?;
-        if state.todos[&todo_id].status != TodoStatus::CandidateReady {
-            continue;
+        if let Err(error) = apply_result(runtime, spec, state, &todo_id, result).await {
+            if fatal.is_none() {
+                fatal = Some(error);
+            }
         }
-        *state = transitions::accepting(state.clone(), &todo_id)?;
-        runtime
-            .commit(
+    }
+    match fatal {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+async fn apply_result(
+    runtime: &Runtime,
+    spec: &WorkflowSpec,
+    state: &mut WorkflowState,
+    todo_id: &str,
+    result: Result<execution::TodoExecution>,
+) -> Result<()> {
+    let execution = match result {
+        Ok(execution) => execution,
+        Err(error) => {
+            let interrupted = runtime.cancel.is_cancelled();
+            let reason = format!("{error:#}");
+            *state = transitions::execution_failed(
                 spec,
-                state,
-                "todo_acceptance_started",
-                serde_json::json!({"todo_id":todo_id}),
-            )
-            .await?;
-        let decision = parent::accept(
-            &runtime.parent_runtime(),
+                state.clone(),
+                todo_id,
+                reason.clone(),
+                interrupted,
+            )?;
+            runtime
+                .commit(
+                    spec,
+                    state,
+                    "todo_execution_failed",
+                    serde_json::json!({"todo_id":todo_id,"reason":reason,"interrupted":interrupted}),
+                )
+                .await?;
+            return Ok(());
+        }
+    };
+    *state = transitions::candidate(state.clone(), todo_id, execution.candidate)?;
+    runtime
+        .commit(
             spec,
             state,
-            &todo_id,
-            &execution.gate,
+            "todo_candidate_ready",
+            serde_json::json!({"todo_id":todo_id,"gate":execution.gate}),
         )
         .await?;
-        apply_acceptance(runtime, spec, state, &todo_id, execution.gate, decision).await?;
+    if state
+        .todos
+        .get(todo_id)
+        .map(|todo| todo.status)
+        != Some(TodoStatus::CandidateReady)
+    {
+        return Ok(());
     }
-    Ok(())
+    *state = transitions::accepting(state.clone(), todo_id)?;
+    runtime
+        .commit(
+            spec,
+            state,
+            "todo_acceptance_started",
+            serde_json::json!({"todo_id":todo_id}),
+        )
+        .await?;
+    let decision = parent::accept(
+        &runtime.parent_runtime(),
+        spec,
+        state,
+        todo_id,
+        &execution.gate,
+    )
+    .await?;
+    apply_acceptance(runtime, spec, state, todo_id, execution.gate, decision).await
 }
 
 fn assignments(
@@ -70,7 +123,10 @@ fn assignments(
         .iter()
         .map(|request| {
             let session_id = if request.context_mode == ContextMode::Resume {
-                state.todos[&request.todo_id]
+                state
+                    .todos
+                    .get(&request.todo_id)
+                    .with_context(|| format!("state missing TODO {}", request.todo_id))?
                     .active_session_id
                     .clone()
                     .context("resume session missing")?
@@ -177,6 +233,12 @@ async fn apply_acceptance(
             }
             *state = transitions::accepted(state.clone(), todo_id, mark_milestone)?;
             runtime.commit(spec, state, "todo_accepted", serde_json::json!({"todo_id":todo_id,"reason":reason,"mark_milestone":mark_milestone})).await?;
+            tracing::info!(
+                workflow_id = %state.workflow_id,
+                todo_id = %todo_id,
+                mark_milestone,
+                "todo accepted"
+            );
         }
         AcceptanceDecision::Revise {
             reason,
@@ -185,6 +247,11 @@ async fn apply_acceptance(
             *state =
                 transitions::revise(spec, state.clone(), todo_id, reason.clone(), context_mode)?;
             runtime.commit(spec, state, "todo_revision_requested", serde_json::json!({"todo_id":todo_id,"reason":reason,"context_mode":context_mode})).await?;
+            tracing::info!(
+                workflow_id = %state.workflow_id,
+                todo_id = %todo_id,
+                "todo revision requested"
+            );
         }
         AcceptanceDecision::Fail { reason } => {
             if let Some(todo) = state.todos.get_mut(todo_id) {
@@ -200,6 +267,11 @@ async fn apply_acceptance(
                     serde_json::json!({"todo_id":todo_id,"reason":reason}),
                 )
                 .await?;
+            tracing::info!(
+                workflow_id = %state.workflow_id,
+                todo_id = %todo_id,
+                "todo failed"
+            );
         }
         AcceptanceDecision::Rewind {
             milestone_todo_id,

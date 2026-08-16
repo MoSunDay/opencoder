@@ -27,7 +27,7 @@ pub async fn execute(
     session_id: String,
     cancel: CancellationToken,
 ) -> Result<TodoExecution> {
-    config.autopilot.enabled = false;
+    config.autopilot.mode = opencoder_core::ApMode::Off;
     let agent = resolve_agent(&todo.agent)
         .with_context(|| format!("TODO {} has unknown agent {}", todo.id, todo.agent))?;
     if !agent.is_primary() || agent.name == "workflow" {
@@ -37,7 +37,10 @@ pub async fn execute(
         );
     }
     let mut session = if context_mode == ContextMode::Resume {
-        let existing = state.todos[&todo.id]
+        let existing = state
+            .todos
+            .get(&todo.id)
+            .with_context(|| format!("state missing TODO {}", todo.id))?
             .active_session_id
             .as_deref()
             .context("resume requested without active session")?;
@@ -130,19 +133,22 @@ fn focused_prompt(
     todo: &TodoSpec,
     context_mode: ContextMode,
 ) -> Result<String> {
-    let dependencies = todo
-        .depends_on
-        .iter()
-        .map(|id| {
-            let item = &state.todos[id];
-            serde_json::json!({
-                "todo_id": id,
-                "summary": item.candidate.as_ref().map(|candidate| &candidate.summary),
-                "evidence_refs": item.candidate.as_ref().map(|candidate| &candidate.evidence_refs),
-            })
-        })
-        .collect::<Vec<_>>();
-    let recovery = state.todos[&todo.id]
+    let mut dependencies = Vec::new();
+    for id in &todo.depends_on {
+        let item = state
+            .todos
+            .get(id)
+            .with_context(|| format!("state missing TODO {id}"))?;
+        dependencies.push(serde_json::json!({
+            "todo_id": id,
+            "summary": item.candidate.as_ref().map(|candidate| &candidate.summary),
+            "evidence_refs": item.candidate.as_ref().map(|candidate| &candidate.evidence_refs),
+        }));
+    }
+    let recovery = state
+        .todos
+        .get(&todo.id)
+        .with_context(|| format!("state missing TODO {}", todo.id))?
         .candidate
         .as_ref()
         .map(|candidate| &candidate.recovery_context);
@@ -260,5 +266,66 @@ mod tests {
             },
         ];
         assert_eq!(evaluate_gate(&todo, &events)["ok"], true);
+    }
+
+    fn required_call_todo() -> TodoSpec {
+        TodoSpec {
+            id: "x".into(),
+            title: "x".into(),
+            requirement_background: "x".into(),
+            instructions: "x".into(),
+            depends_on: vec![],
+            agent: "act".into(),
+            max_attempts: 1,
+            acceptance: AcceptanceSpec {
+                criteria: "x".into(),
+                required_tool_calls: vec![RequiredToolCall {
+                    name: "mcp__fk__tap".into(),
+                    arguments_contains: serde_json::json!({"label":"A"}),
+                    result_ok: true,
+                }],
+            },
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    fn tool_start() -> SessionEvent {
+        SessionEvent::ToolStart {
+            id: "1".into(),
+            name: "mcp__fk__tap".into(),
+            input: serde_json::json!({"label":"A","x":1}),
+        }
+    }
+
+    #[test]
+    fn gate_rejects_when_required_call_missing() {
+        let todo = required_call_todo();
+        // Matching ToolStart but the stream ended before any ToolEnd arrived.
+        let events = vec![tool_start()];
+
+        let gate = evaluate_gate(&todo, &events);
+
+        assert_eq!(gate["ok"], false);
+        assert_eq!(gate["checks"][0]["matched"], false);
+    }
+
+    #[test]
+    fn gate_rejects_errored_tool_end() {
+        let todo = required_call_todo();
+        let events = vec![
+            tool_start(),
+            SessionEvent::ToolEnd {
+                id: "1".into(),
+                name: "mcp__fk__tap".into(),
+                output: "boom".into(),
+                is_error: true,
+                images: vec![],
+            },
+        ];
+
+        let gate = evaluate_gate(&todo, &events);
+
+        assert_eq!(gate["ok"], false);
+        assert_eq!(gate["checks"][0]["matched"], false);
     }
 }

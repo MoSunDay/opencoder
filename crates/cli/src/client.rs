@@ -3,7 +3,7 @@
 //! by decoding the server's SSE `/events` stream. The client stores nothing
 //! locally and calls no LLM — it is a thin shell over the server.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use opencoder_client::Remote;
 use opencoder_session::SessionEvent;
 
@@ -36,7 +36,10 @@ pub fn resolve_client_session_flags(
     global_session: Option<String>,
     global_continue: bool,
 ) -> (Option<String>, bool) {
-    (client_session.or(global_session), client_continue || global_continue)
+    (
+        client_session.or(global_session),
+        client_continue || global_continue,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

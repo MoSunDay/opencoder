@@ -122,7 +122,7 @@ def run_all(bin_path: str, api_key: str) -> Counter:
     # ---- E18b: autopilot over web SSE (independent serve: sharing this
     # instance would let autopilot's extra turns perturb E15's timing) ----
     ap_cfg = lib.make_config(api_key=api_key)
-    ap_cfg["autopilot"] = {"enabled": True, "max_iterations": 1, "verify_retries": 1}
+    ap_cfg["autopilot"] = {"mode": "ap", "max_iterations": 1, "verify_retries": 1}
     ap_booted = _boot_serve(bin_path, ap_cfg, "E18b autopilot serve")
     if ap_booted is None:
         c.soft("E18b autopilot serve started", False, "serve did not become ready")

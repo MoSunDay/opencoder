@@ -12,6 +12,9 @@ pub enum ApPhase {
     Plan,
     Act,
     Verify,
+    /// One-shot review pass (`autopilot.mode = "review"`): not part of the
+    /// PLAN → ACT → VERIFY loop.
+    Review,
 }
 
 /// The verdict produced by the shadow VERIFY one-shot.

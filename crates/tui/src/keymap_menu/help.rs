@@ -25,7 +25,7 @@ pub const HELP: &str = "\
   $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
-  Ctrl+G          进入复制/选择模式，用方向键移动光标选中并复制文本
+  Ctrl+G          应用内选择模式: ↑↓←→/hjkl 移动, v 选区, y/Enter 复制(OSC52), Esc 退出
   Ctrl+Shift+T    折叠/展开底部输入框（扩大或恢复输出区域）
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务
@@ -45,8 +45,8 @@ pub const HELP: &str = "\
   Ctrl+L / Ctrl+U  /config、/model 弹窗内: 清空当前聚焦字段
 
 鼠标:            滚轮滚动对话记录；点击箭头跟随最新
-                  拖拽选择文本并复制到剪贴板（OSC52）
-                  SHIFT+拖拽 = 选中并复制到剪贴板
+                  文本复制请用 Ctrl+G 应用内选择模式（OSC52，跨终端/SSH 可用）
+                  SHIFT+拖拽 = 终端原生选择（Kitty/WezTerm 等透传 Shift 的终端）
                   转向面板: ✕ 删除, > 立即提交（中断并提升）
 ";
 
@@ -176,6 +176,16 @@ mod tests {
     fn build_wrapped_lines_nonempty() {
         let lines = build_wrapped_lines(40);
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn help_copy_mode_text_is_current() {
+        // Ctrl+G now opens the in-app selection mode (cursor + v/y + OSC52);
+        // the old "hand the drag to the terminal" wording must not return.
+        assert!(HELP.contains("应用内选择模式"));
+        assert!(HELP.contains("OSC52"));
+        assert!(!HELP.contains("拖拽选择文本并复制到剪贴板"));
+        assert!(!HELP.contains("进入复制/选择模式，用方向键移动光标"));
     }
 
     #[test]

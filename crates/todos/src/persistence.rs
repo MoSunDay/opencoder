@@ -63,8 +63,8 @@ pub async fn load(
     Ok(Some((spec, state)))
 }
 
-pub async fn list(store: &Arc<dyn Store>) -> Result<Vec<TodoWorkflowSummary>> {
-    store.list_todo_workflows(100).await
+pub async fn list(store: &Arc<dyn Store>, limit: u32) -> Result<Vec<TodoWorkflowSummary>> {
+    store.list_todo_workflows(limit).await
 }
 
 fn workflow_record(
@@ -94,7 +94,10 @@ fn item_records(
         .iter()
         .enumerate()
         .map(|(ordinal, spec_todo)| {
-            let item = &state.todos[&spec_todo.id];
+            let item = state
+                .todos
+                .get(&spec_todo.id)
+                .with_context(|| format!("state missing TODO {}", spec_todo.id))?;
             Ok(TodoItemRecord {
                 workflow_id: state.workflow_id.clone(),
                 todo_id: spec_todo.id.clone(),
@@ -125,11 +128,15 @@ pub async fn debug_dump(
     write_json(&base.join("task-info/workflow.json"), spec).await?;
     write_json(&base.join("task-info/index.json"), state).await?;
     for todo in &spec.todos {
+        let item = state
+            .todos
+            .get(&todo.id)
+            .with_context(|| format!("state missing TODO {}", todo.id))?;
         write_json(
             &base
                 .join("task-info/todos")
                 .join(format!("{}.json", todo.id)),
-            &serde_json::json!({"spec":todo,"state":state.todos[&todo.id]}),
+            &serde_json::json!({"spec":todo,"state":item}),
         )
         .await?;
     }

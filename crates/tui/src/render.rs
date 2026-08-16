@@ -14,6 +14,7 @@ use ratatui::Terminal;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
+use crate::copy_select::CopySel;
 use crate::composer;
 use crate::fmt as fmtmod;
 use crate::keymap_menu::KeymapMenu;
@@ -113,15 +114,17 @@ pub(crate) fn render<B: Backend>(
     command_menu: Option<&CommandMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
+    envs_menu: Option<&crate::envs_menu::EnvsMenu>,
     cli_menu: Option<&crate::cli_menu::CliMenu>,
     skill_toggle_menu: Option<&crate::skill_menu::SkillMenu>,
+    ap_menu: Option<&crate::ap_menu::ApMenu>,
     cache_salt_menu: Option<&CacheSaltMenu>,
     keymap_menu: Option<&KeymapMenu>,
     question_menu: Option<&crate::question_menu::QuestionMenu>,
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
     shift_held: bool,
-    copy_mode: bool,
+    copy_sel: Option<&CopySel>,
     pending_images: &[(String, String)],
     input_disabled: bool,
     plan_mode: Option<&str>,
@@ -129,7 +132,7 @@ pub(crate) fn render<B: Backend>(
     tail_ms: u64,
     task_ms: u64,
     is_top_level: bool,
-    ap_enabled: bool,
+    ap_mode: opencoder_core::ApMode,
     display_mode: &str,
     notepad: Option<&crate::notepad::NotepadView>,
 ) -> Result<()> {
@@ -246,7 +249,7 @@ pub(crate) fn render<B: Backend>(
                 viewport,
                 is_top_level,
                 tail_ms,
-                copy_mode,
+                copy_sel,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -321,11 +324,15 @@ pub(crate) fn render<B: Backend>(
         if let Some(mcp) = mcp_menu {
             crate::mcp_menu::render_mcp_popup(f, area, composer_area.y, mcp);
         }
+        if let Some(envs) = envs_menu { crate::envs_menu::render_envs_popup(f, area, composer_area.y, envs); }
         if let Some(cli) = cli_menu {
             crate::cli_menu::render_cli_popup(f, area, composer_area.y, cli);
         }
         if let Some(sk) = skill_toggle_menu {
             crate::skill_menu::render_skill_popup(f, area, composer_area.y, sk);
+        }
+        if let Some(am) = ap_menu {
+            crate::ap_menu::render_ap_popup(f, area, composer_area.y, am);
         }
         if let Some(cs) = cache_salt_menu {
             crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
@@ -336,8 +343,8 @@ pub(crate) fn render<B: Backend>(
         if let Some(qm) = question_menu {
             crate::question_menu::render_question_popup(f, area, composer_area.y, qm);
         }
-        if ap_enabled {
-            render_status_chip(f, composer_area, "AP", theme::local_color());
+        if let Some(label) = crate::ap_menu::chip_label(ap_mode) {
+            render_status_chip(f, composer_area, label, theme::local_color());
         }
         if let Some(text) = mode_flash {
             let is_plan = text.contains("plan");
@@ -346,13 +353,13 @@ pub(crate) fn render<B: Backend>(
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
         }
-        if copy_mode {
-            render_status_chip(
-                f,
-                composer_area,
-                "COPY MODE: Ctrl+G/Esc",
-                theme::warn_color(),
-            );
+        if let Some(sel) = copy_sel {
+            let color = if sel.flash_active(anim_tick) {
+                theme::ok_color()
+            } else {
+                theme::warn_color()
+            };
+            render_status_chip(f, composer_area, &sel.chip_text(anim_tick), color);
         }
         // Popups that own an editable text field (/cli form + content
         // dialog, /mcp form, /model, question) place the terminal cursor
@@ -363,6 +370,7 @@ pub(crate) fn render<B: Backend>(
             && question_menu.is_none()
             && cli_menu.is_none()
             && mcp_menu.is_none()
+            && envs_menu.is_none()
             && skill_toggle_menu.is_none()
         {
             let position = composer::cursor_screen_position(
@@ -401,11 +409,11 @@ fn render_body(
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
     tail_ms: u64,
-    copy_mode: bool,
+    copy_sel: Option<&CopySel>,
 ) {
     *body_out = Some(area);
     let mut block = theme::rounded_block_line(title);
-    if copy_mode {
+    if copy_sel.is_some() {
         block = block.border_style(Style::default().fg(theme::warn_color()));
     }
     let inner = block.inner(area);
@@ -495,7 +503,10 @@ fn render_body(
     // instead of passing the entire transcript to Paragraph. This avoids
     // ratatui internally processing all lines for wrapping/rendering.
     let (start, end, top_skip) = cache.visible_window(scroll_y, content_h);
-    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
+    if let Some(sel) = copy_sel {
+        crate::copy_select::highlight_lines(&mut visible_lines, cache, start, sel);
+    }
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
 

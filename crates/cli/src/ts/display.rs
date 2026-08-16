@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn preview_of_prefers_preview() {
-        assert_eq!(preview_of("build the thing", Some("fallback")), "build the thing");
+        assert_eq!(
+            preview_of("build the thing", Some("fallback")),
+            "build the thing"
+        );
         // Whitespace-only preview falls back to title.
         assert_eq!(preview_of("   ", Some("title here")), "title here");
         assert_eq!(preview_of("", Some("title here")), "title here");

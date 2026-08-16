@@ -51,3 +51,14 @@ pub fn verify_user_prompt(goal: &str) -> String {
          needed).",
     )
 }
+
+/// User turn for the one-shot review pass (`autopilot.mode = "review"`).
+/// Anchors the review to the original goal; the review skill body rides in
+/// the system prompt (activated by `activate_review_skill`).
+pub fn review_prompt(goal: &str) -> String {
+    format!(
+        "Review the work completed toward this goal: {goal}\n\n         Review the current state of the work — correctness, completeness, and \
+         any defects or risks. Do NOT redo or extend the work; produce a \
+         focused review of what was done. Keep it short and actionable."
+    )
+}

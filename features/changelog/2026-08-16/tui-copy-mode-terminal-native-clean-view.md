@@ -1,4 +1,4 @@
-Commit: (working-tree)
+Commit: 1c0b35e
 
 # feat(tui): copy 模式回归终端原生选择 + 正文去装饰全宽净化视图；移除 OSC52
 

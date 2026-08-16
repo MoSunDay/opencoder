@@ -14,7 +14,6 @@ use ratatui::Terminal;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
-use crate::copy_select::CopySel;
 use crate::composer;
 use crate::fmt as fmtmod;
 use crate::keymap_menu::KeymapMenu;
@@ -124,7 +123,7 @@ pub(crate) fn render<B: Backend>(
     hits: &mut MouseHits,
     viewport: &mut Option<ViewportCache>,
     shift_held: bool,
-    copy_sel: Option<&CopySel>,
+    copy_mode: bool,
     pending_images: &[(String, String)],
     input_disabled: bool,
     plan_mode: Option<&str>,
@@ -249,7 +248,7 @@ pub(crate) fn render<B: Backend>(
                 viewport,
                 is_top_level,
                 tail_ms,
-                copy_sel,
+                copy_mode,
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -353,13 +352,13 @@ pub(crate) fn render<B: Backend>(
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
         }
-        if let Some(sel) = copy_sel {
-            let color = if sel.flash_active(anim_tick) {
-                theme::ok_color()
-            } else {
-                theme::warn_color()
-            };
-            render_status_chip(f, composer_area, &sel.chip_text(anim_tick), color);
+        if copy_mode {
+            render_status_chip(
+                f,
+                composer_area,
+                "COPY MODE: Ctrl+G/Esc",
+                theme::warn_color(),
+            );
         }
         // Popups that own an editable text field (/cli form + content
         // dialog, /mcp form, /model, question) place the terminal cursor
@@ -409,13 +408,18 @@ fn render_body(
     viewport: &mut Option<ViewportCache>,
     is_top_level: bool,
     tail_ms: u64,
-    copy_sel: Option<&CopySel>,
+    copy_mode: bool,
 ) {
     *body_out = Some(area);
-    let mut block = theme::rounded_block_line(title);
-    if copy_sel.is_some() {
-        block = block.border_style(Style::default().fg(theme::warn_color()));
+    // Copy mode: undecorated full-width view so terminal-native selection
+    // spans clean text (no border/scrollbar/timer/indicator rows).
+    if copy_mode {
+        crate::copy_mode::render_clean(
+            f, area, chat, scroll, follow, anim_tick, now_ms, viewport,
+        );
+        return;
     }
+    let block = theme::rounded_block_line(title);
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -503,10 +507,7 @@ fn render_body(
     // instead of passing the entire transcript to Paragraph. This avoids
     // ratatui internally processing all lines for wrapping/rendering.
     let (start, end, top_skip) = cache.visible_window(scroll_y, content_h);
-    let mut visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
-    if let Some(sel) = copy_sel {
-        crate::copy_select::highlight_lines(&mut visible_lines, cache, start, sel);
-    }
+    let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
 

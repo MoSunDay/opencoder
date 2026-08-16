@@ -1,6 +1,6 @@
 //! Keymap engine: parses key-spec strings (e.g. `"ctrl+h"`) into `KeyCombo`
 //! structs that can match `KeyEvent` values. Used by `key_handler.rs` and
-//! `app_helpers.rs` to drive all 18 re-bindable shortcuts from config.
+//! `app_helpers.rs` to drive all 19 re-bindable shortcuts from config.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::{Config, KeymapConfig};
@@ -245,7 +245,7 @@ pub(crate) fn key_event_to_spec(k: KeyEvent) -> Option<String> {
     Some(parts.join("+"))
 }
 
-/// All 18 parsed key bindings, ready for O(1) matching in the event loop.
+/// All 19 parsed key bindings, ready for O(1) matching in the event loop.
 pub(crate) struct KeyBindings {
     pub help: KeyCombo,
     pub quit: KeyCombo,

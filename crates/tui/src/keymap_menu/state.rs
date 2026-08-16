@@ -35,7 +35,7 @@ pub struct KeymapMenu {
     /// When `true`, the next key event is captured as the new binding for
     /// `selected` instead of navigating.
     pub capturing: bool,
-    /// `(config_key, human_label, current_spec)` for all 21 entries.
+    /// `(config_key, human_label, current_spec)` for all 19 entries.
     entries: Vec<(String, String, String)>,
     /// Original specs at construction time, for dirty detection.
     original_specs: Vec<String>,
@@ -374,9 +374,9 @@ mod tests {
     }
 
     #[test]
-    fn new_menu_has_20_entries() {
+    fn new_menu_has_19_entries() {
         let m = make_menu();
-        assert_eq!(m.len(), 20);
+        assert_eq!(m.len(), 19);
         assert_eq!(m.selected, 0);
         assert!(!m.capturing);
         assert!(!m.is_dirty());
@@ -391,7 +391,7 @@ mod tests {
         m.move_down();
         assert_eq!(m.selected, 1);
         // Wrap to 0 from last
-        m.selected = 19;
+        m.selected = 18;
         m.move_down();
         assert_eq!(m.selected, 0);
     }
@@ -400,7 +400,7 @@ mod tests {
     fn navigate_up_wraps() {
         let mut m = make_menu();
         m.move_up(); // from 0 -> last index
-        assert_eq!(m.selected, 19);
+        assert_eq!(m.selected, 18);
     }
 
     #[test]

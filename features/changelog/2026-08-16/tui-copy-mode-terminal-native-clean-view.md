@@ -40,21 +40,27 @@ b663adb 把 Ctrl+G 改成 app 内 vi 风格选区（光标行走 + v/y + OSC52 �
   `render_clean`（跳过边框/滚动条/timer/指示器与 hit-rect 记录）；chip 恢复固定
   文案；移除选区高亮与边框高亮。
 - `frame.rs`：参数改名 `copy_sel` → `copy_mode: bool`。
-- 测试接线：`render_tests/body.rs`（10 处）/`timer.rs`（3 处）render_body 末参
+- 测试接线：`render_tests/body.rs`（9 处）/`timer.rs`（3 处）render_body 末参
   `None` → `false`；全量 `render()` 调用点（chips/arrow_click/cursor_popup/
   render_clear_tests）同步。
 
 ## 测试
 
-- `copy_mode` 单测 10 条（全绿）：恢复旧 5 条（is_active 真值表 / toggle 翻转 /
-  活跃吞键 / Esc 退出 / 非激活透传）+ 新增 4 条 `clean_text` 规则（头/分隔线/
+- `copy_mode` 单测 9 条（全绿）：恢复旧 5 条（is_active 真值表 / toggle 翻转 /
+  活跃吞键 / Esc 退出 / 非激活透传）+ 新增 3 条 `clean_text` 规则（头/分隔线/
   代码框丢弃；gutter 与 `│ `/`▎ ` 前缀剥离且深缩进保留；语义头保留）+
   1 条 `render_clean` 端到端（TestBackend：代码文本存活、`┌`/`└`/`│`/`❯ Say:`
   全无）。
 - `keymap_menu/help`：`help_copy_mode_text_is_current` 断言重写（锁定"终端原生拖拽
   选择/去装饰"、禁止 OSC52/应用内选择模式文案回归）；快捷键菜单 19 条计数契约不变。
-- 回归：`cargo test --workspace` 全绿；`cargo clippy --workspace --all-targets
+- 回归：`cargo test --workspace` 全绿（2801 passed / 0 failed）；基线核算
+  2818 → 2801 = −26（`copy_select_tests` 13 + `copy_select_move_tests` 13，
+  随 app 内选区 + OSC52 特性整体删除，经用户确认移除；幸存文件删除测试数 0）
+  + 9（`copy_mode` 新增）。`cargo clippy --workspace --all-targets
   -- -D warnings` 零警告；`cargo build --workspace` 干净。
+- 勘误：commit 1c0b35e 的 message 数字有笔误（copy_mode 单测实为 9 条、
+  clean_text 规则 3 条、render_body 调用点实为 12 处 = body.rs 9 + timer.rs 3）；
+  commit message 不可改写，数字以本 changelog 为准。
 
 ## Memory 同步
 

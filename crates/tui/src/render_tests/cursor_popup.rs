@@ -48,6 +48,7 @@ fn draw(
         None,          // model_menu
         mcp_menu,
         cli_menu,
+        None,          // skill_toggle_menu
         None,          // cache_salt_menu
         None,          // keymap_menu
         None,          // question_menu

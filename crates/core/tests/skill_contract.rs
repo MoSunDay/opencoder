@@ -110,7 +110,6 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     for expected in [
         "task-plan",
         "do-and-done",
-        "fk-cli",
         "repo-local-memory",
         "repo-local-dreaming",
         "say-and-replay",
@@ -123,6 +122,12 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
             "expected seeded skill {expected:?}, got {names:?}"
         );
     }
+    // Retired built-ins must stay retired: upgrades must not re-seed packs
+    // that were removed from BUILTIN_SKILLS (e.g. fk-cli).
+    assert!(
+        !names.iter().any(|n| n == "fk-cli"),
+        "fk-cli must no longer be seeded, got {names:?}"
+    );
     // repo-local-memory ships sidecar files alongside SKILL.md.
     let rlm = root.path().join("repo-local-memory");
     assert!(rlm.join("EXAMPLES.md").exists());

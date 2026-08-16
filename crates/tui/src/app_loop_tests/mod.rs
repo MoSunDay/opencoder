@@ -740,7 +740,7 @@ mod session_only_tests;
 mod image_paste_tests;
 
 #[cfg(test)]
-#[path = "../app_loop_dispatch_cmd_tests.rs"]
+#[path = "../app_loop_dispatch_cmd_tests/mod.rs"]
 mod dispatch_cmd_tests;
 
 #[cfg(test)]

@@ -132,6 +132,7 @@ pub(super) async fn run_app(
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cli_menu: Option<crate::cli_menu::CliMenu> = None;
+    let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
     let mut keymap = crate::keymap::KeyBindings::from_config(&config);
@@ -250,7 +251,7 @@ pub(super) async fn run_app(
                     command_menu.as_ref(),
                     model_menu.as_ref(),
                     mcp_menu.as_ref(),
-                    cli_menu.as_ref(),
+                    cli_menu.as_ref(), skill_toggle_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
                     question_menu.as_ref(),
@@ -378,6 +379,10 @@ pub(super) async fn run_app(
                             ).await;
                             continue;
                         }
+                        // `/skill` toggle modal (after cli/mcp blocks, which `continue` first).
+                        if skill_toggle_menu.is_some() {
+                            let _ = app_loop::handle_skill_outcome(&mut skill_toggle_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue;
+                        }
                         // Question dialog: answers resolve on the hub, mid-turn.
                         if question_menu.is_some() {
                             crate::question_menu::route_question_key(
@@ -399,7 +404,7 @@ pub(super) async fn run_app(
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
-                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu,
+                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu,
                                 &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
@@ -478,7 +483,7 @@ pub(super) async fn run_app(
                                     let f = app_loop::dispatch_slash_action(
                                         action, &cmd_tx, &mut cancel, &mut chat,
                                         &mut running, &mut follow, &store,
-                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu,
+                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu,
                                         &mut cache_salt_menu, &agent_name, &mut input, &mut cursor_idx,
                                         &mut config, &workdir,
                                         &mut mode_flash, anim_tick, &mut sys_tokens,
@@ -725,6 +730,7 @@ pub(super) async fn run_app(
                         // Modal-priority paste routing (mirrors Event::Key).
                         if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(),
+                            skill_toggle_menu.is_some(), // paste is not key-routed: pass explicitly so the modal swallows it
                             &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input,
                             &mut cursor_idx, &mut pending_images, &mut img_asm,
                             &mut chat, &workdir,

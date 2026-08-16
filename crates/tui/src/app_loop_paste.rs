@@ -100,6 +100,7 @@ pub(crate) fn route_paste(
     task_picker_open: bool,
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
+    skill_toggle_menu_open: bool,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
@@ -112,7 +113,7 @@ pub(crate) fn route_paste(
     chat: &mut ChatView,
     workdir: &Path,
 ) -> LoopFlow {
-    if task_picker_open || cache_salt_menu_open || keymap_menu_open {
+    if task_picker_open || cache_salt_menu_open || keymap_menu_open || skill_toggle_menu_open {
         // No text fields here -- modal isolation: swallow the paste.
         return LoopFlow::Redraw;
     }

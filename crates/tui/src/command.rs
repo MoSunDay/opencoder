@@ -26,6 +26,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/model", "切换供应商 / 模型 (provider picker)"),
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
     ("/cli", "管理 CLI 注册内容及注入范围 (parent/subagents/all)"),
+    ("/skill", "管理默认注入的 skill (ON=目录+名称+概要 注入 context 尾部)"),
     (
         "/config",
         "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",
@@ -65,6 +66,8 @@ pub enum SlashAction {
     Mcp,
     /// `/cli` — manage CLI prompt registrations.
     Cli,
+    /// `/skill` — manage default-injection skill toggles.
+    Skill,
     /// Display-only: list background bash (never enters model context).
     Ps,
     /// Display-only: kill all background bash (never enters model context).
@@ -192,6 +195,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "act_clear_context" => Some(SlashAction::ClearContext),
         "mcp" | "mc" => Some(SlashAction::Mcp),
         "cli" => Some(SlashAction::Cli),
+        "skill" | "sk" => Some(SlashAction::Skill),
         "ps" => Some(SlashAction::Ps),
         "stop" => Some(SlashAction::Stop),
         "ap" => Some(SlashAction::Ap),
@@ -213,6 +217,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/act_clear_context" => Some(SlashAction::ClearContext),
         "/mcp" => Some(SlashAction::Mcp),
         "/cli" => Some(SlashAction::Cli),
+        "/skill" => Some(SlashAction::Skill),
         "/ps" => Some(SlashAction::Ps),
         "/stop" => Some(SlashAction::Stop),
         "/ap" => Some(SlashAction::Ap),
@@ -398,6 +403,10 @@ mod tests {
         assert_eq!(parse("/t"), Some(SlashAction::Task));
         assert_eq!(parse("/compact"), Some(SlashAction::Compact));
         assert_eq!(parse("/c"), Some(SlashAction::Compact));
+        assert_eq!(parse("/cli"), Some(SlashAction::Cli));
+        assert_eq!(parse("/mcp"), Some(SlashAction::Mcp));
+        assert_eq!(parse("/skill"), Some(SlashAction::Skill));
+        assert_eq!(parse("/sk"), Some(SlashAction::Skill));
         assert_eq!(parse("/"), Some(SlashAction::Task));
         assert_eq!(parse("/unknown"), None);
         assert_eq!(parse("hello"), None);
@@ -689,7 +698,8 @@ mod tests {
     #[test]
     fn short_key_command_removed() {
         assert_eq!(parse("/short_key"), None);
-        assert_eq!(parse("/sk"), None);
+        // `/sk` is now the alias of `/skill` (default-injection toggles).
+        assert_eq!(parse("/sk"), Some(SlashAction::Skill));
         assert_eq!(parse("short_key"), None);
         assert_eq!(dispatch("/short_key"), None);
     }

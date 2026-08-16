@@ -10,6 +10,7 @@ pub mod plan_handoff;
 pub mod prompt;
 pub mod resume;
 pub mod runner;
+pub mod skill_context;
 pub mod skill_resolve;
 pub mod streamline;
 pub mod subagent_steer_gate;
@@ -130,8 +131,12 @@ pub struct SessionState {
     pub last_usage: opencoder_llm::Usage,
     /// Optional durable store. When set, `record` persists each new message.
     pub store: Option<Arc<dyn Store>>,
-    /// Active skill instructions, injected into the system prompt each turn.
-    /// `None` means no skill is active. Set from the TUI `$` picker.
+    /// Active skill instructions. NOT part of the system prompt — a
+    /// transient tail reminder (`skill_context::tail_reminder`) surfaces the
+    /// skill at LLM-call time; bodies carrying the `body_with_source`
+    /// `> Source:` prefix yield the `[active skill]` path reminder (the
+    /// model lazily reads the SKILL.md). `None` means no skill is active.
+    /// Set from the TUI `$` picker.
     pub skill_prompt: Arc<Mutex<Option<String>>>,
     /// Names of skills currently activated via `$name` tokens. Used to
     /// unlock latent tools (ssh_pty) in the runner filter.
@@ -288,7 +293,9 @@ pub fn mark_session_created(mut self) -> Self {
         self
     }
 
-    /// Set the active skill instructions, injected into the system prompt.
+    /// Set the active skill instructions (surfaced as a transient tail
+    /// reminder by `skill_context::tail_reminder`; `body_with_source`-
+    /// prefixed bodies yield the `[active skill]` path reminder).
     pub fn with_skill(self, skill_prompt: String) -> Self {
         *self.skill_prompt.lock().unwrap() = Some(skill_prompt);
         self

@@ -39,6 +39,7 @@ pub mod scrollbar;
 pub mod scope_dialog;
 pub mod session_ui;
 pub mod skill_display;
+pub mod skill_menu;
 pub mod skill_persist;
 pub mod skill_token;
 pub mod supervisor;

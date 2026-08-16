@@ -6,8 +6,10 @@
 //! must never see the token), activating the skill in-memory + persisting
 //! `sessions.skill` at queue time (`resolve_persist`, see skill_persist.rs).
 //! This test pins the full chain through the worker: queue admit → submit →
-//! idle-boundary drain → the drained turn's system prompt carries the skill
-//! body, and the queued user message is the clean text.
+//! idle-boundary drain → the drained turn's request carries the skill as a
+//! transient `[active skill]` tail reminder (the LAST user message, naming
+//! the skill's source file) while the system prompt stays skill-free, and
+//! the queued user message is the clean text.
 use std::sync::Arc;
 
 use opencoder_core::{message::now_ms, resolve_agent, Config};
@@ -71,7 +73,7 @@ async fn queued_combined_submission_drains_with_skill() {
     // activate the skill through the shared Arc (same handle the worker's
     // `run_one_llm_call` reads) and persist `sessions.skill`, then admit only
     // the token-stripped clean text.
-    let skill_body = "Always answer in haiku form.";
+    let skill_body = "> Source: /skills/haiku/SKILL.md\n\nAlways answer in haiku form.";
     let skill_handle = sess.skill_prompt.clone();
     *skill_handle.lock().unwrap() = Some(skill_body.to_string());
     store
@@ -112,11 +114,25 @@ async fn queued_combined_submission_drains_with_skill() {
         requests.len()
     );
 
-    // Effect: the drained turn's system prompt carries the skill body.
+    // Effect: the drained turn's system prompt stays skill-free; the skill
+    // arrives as the transient tail reminder — the LAST user message of the
+    // request names the skill's source file.
     let drained_system = system_content(&requests[1]);
     assert!(
-        drained_system.contains("haiku"),
-        "drained queued turn must run with the skill in the system prompt: {drained_system}"
+        !drained_system.contains("haiku"),
+        "skill bodies never ship in the system prompt: {drained_system}"
+    );
+    let last_user: Option<&serde_json::Value> = requests[1]
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"));
+    let tail = last_user
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("");
+    assert!(
+        tail.contains("[active skill]") && tail.contains("/skills/haiku/SKILL.md"),
+        "drained queued turn must end with the skill tail reminder: {tail}"
     );
 
     // The queued user message is the clean text (token stripped at admit —

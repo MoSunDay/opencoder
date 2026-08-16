@@ -12,7 +12,6 @@ Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 - Store 是唯一权威状态；文件目录只在 CLI `--debug` 下生成，不能反向覆盖 Store。
 - 父 Session 不执行 TODO 工具，也不接收 MCP/registered CLI 指令；子 Session 不修改工作流投影。Rust 状态机校验双方结构化决定。
 - 工具门禁读取持久化 SessionEvent，只接受声明工具的匹配参数与成功 ToolEnd，模型验收不能绕过失败门禁。
-- UI TODO 可在聚焦指令中激活 `$fk-cli`，通过 `bash` 执行唯一精确的 `fk-session --args` 命令；该路径不需要 FK MCP。
 
 ## 关键抽象
 

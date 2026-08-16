@@ -14,6 +14,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
 use opencoder_store::LibsqlStore;
 
+mod act_clear;
+
 /// Build a CommandMenu filtered to the given query.
 fn menu_for(query: &str) -> Option<CommandMenu> {
     let mut cm = CommandMenu::new();
@@ -89,6 +91,7 @@ async fn slash_act_from_plan_with_plan_routes_handoff() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -153,6 +156,7 @@ async fn slash_clear_context_from_plan_with_plan_routes_handoff() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -216,6 +220,7 @@ async fn slash_clear_context_from_act_mode_dispatches_prompt() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
         &mut None,
         &mut cache_salt_menu,
         &mut None,
@@ -282,6 +287,7 @@ async fn slash_act_from_act_mode_dispatches_prompt() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
         &mut None,
         &mut cache_salt_menu,
         &mut None,
@@ -350,6 +356,7 @@ async fn slash_act_from_plan_without_plan_dispatches_prompt() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -409,6 +416,7 @@ async fn tab_fill_input_adds_trailing_space() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
         &mut None,
         &mut cache_salt_menu,
         &mut None,
@@ -480,6 +488,7 @@ async fn tab_fill_local_command_adds_trailing_space() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "act",
@@ -543,6 +552,7 @@ async fn slash_plan_while_running_is_noop() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
         &mut None,
         &mut cache_salt_menu,
         &mut None,
@@ -617,6 +627,7 @@ async fn slash_act_while_running_is_noop() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         &mut None,
         "plan",
@@ -649,75 +660,6 @@ async fn slash_act_while_running_is_noop() {
     );
 }
 
-/// `/act_clear_context` while a turn is running is a no-op (same gate).
-#[tokio::test]
-async fn slash_clear_context_while_running_is_noop() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        plan_submitted: true,
-        ..Default::default()
-    };
-    let mut running = true;
-    let mut follow = true;
-    let mut task_picker = None;
-    let mut model_menu = None;
-    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut cache_salt_menu = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
-    let mut config = Config::default();
-    let workdir = std::path::Path::new(".");
-    let mut mode_flash: Option<(String, u32)> = None;
-    let mut sys_tokens = 0u64;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let mut command_menu = menu_for("act_clear");
-
-    let flow = dispatch_command(
-        &mut command_menu,
-        enter_key(),
-        &cmd_tx,
-        &mut cancel,
-        &mut chat,
-        &mut running,
-        &mut follow,
-        &store,
-        "test",
-        &mut task_picker,
-        &mut model_menu,
-        &mut mcp_menu,
-        &mut None,
-        &mut cache_salt_menu,
-        &mut None,
-        "plan",
-        &mut input,
-        &mut cursor_idx,
-        &mut config,
-        workdir,
-        &mut mode_flash,
-        0,
-        &mut sys_tokens,
-        &mut None,
-        &mut None,
-    )
-    .await;
-
-    assert!(matches!(flow, LoopFlow::Proceed));
-    assert!(running, "running must stay true (turn still active)");
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "no command should be sent while running"
-    );
-    assert!(
-        chat.blocks
-            .iter()
-            .any(|b| matches!(b, ChatBlock::Marker(lines)
-            if lines.iter().any(|l| l.to_string().contains("busy")))),
-        "a [switch] busy marker must be pushed; blocks: {:?}",
-        chat.blocks
-    );
-}
 
 /// `/act` while a subagent is live is a no-op — running=false but
 /// subagents_running>0 (the dropped-SubagentEnd window: Done/TurnDone clear
@@ -763,6 +705,7 @@ async fn slash_act_while_subagent_running_is_noop() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
         &mut None,
         &mut cache_salt_menu,
         &mut None,

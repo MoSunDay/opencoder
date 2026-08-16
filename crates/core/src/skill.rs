@@ -1,10 +1,12 @@
 //! User-authored "skill" instruction packs.
 //!
-//! A skill is a markdown file whose body is injected into the agent's system
-//! prompt when the user activates it from the TUI (`$` menu). This lets users
-//! drop reusable operating procedures (a SKILL.md per topic) into
-//! `~/.opencoder/skills/` and load them on demand without touching the agent
-//! registry or config.
+//! A skill is a markdown file that, once activated, surfaces via a transient
+//! context-tail reminder carrying its source path — the model lazily reads
+//! the SKILL.md on demand; skill bodies no longer ship in the system prompt.
+//! Which skills are listed in that catalog by default is toggled in config
+//! `skills` (`enabled` per name). This lets users drop reusable operating
+//! procedures (a SKILL.md per topic) into `~/.opencoder/skills/` and load
+//! them on demand without touching the agent registry or config.
 //!
 //! Two on-disk layouts are accepted, mirroring the opencoder skill convention:
 //!

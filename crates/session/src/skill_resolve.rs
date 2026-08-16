@@ -23,9 +23,9 @@ use crate::SessionState;
 /// Synthetic trigger injected when `$skill` token stripping empties the text
 /// but a skill was activated (e.g. `/plan $review` or a pure `$review` queue
 /// item). Mirrors the idle path's pure-skill trigger so the model begins
-/// executing the skill body already injected into the system prompt. The
-/// plan-mode read-only tag is deliberately NOT applied to this trigger,
-/// matching the idle path.
+/// executing the active skill (surfaced via the `[active skill]` tail
+/// reminder). The plan-mode read-only tag is deliberately NOT applied to
+/// this trigger, matching the idle path.
 pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin executing it now.";
 
 /// Resolve `$name` skill tokens in `text` against an *explicit* skill slice,

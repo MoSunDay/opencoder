@@ -64,6 +64,7 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         "act",
         &mut input,
@@ -126,6 +127,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut cache_salt_menu,
         "act",
         &mut input,
@@ -153,5 +155,70 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         )),
         "a [compact] busy marker must be pushed; blocks: {:?}",
         chat.blocks
+    );
+}
+
+/// `/skill` (and its `/sk` alias) parses to `SlashAction::Skill` and the
+/// dispatch opens the default-injection toggle modal (`SkillMenu::List`
+/// built from the discovered skills merged with the config toggles).
+#[tokio::test]
+async fn slash_action_skill_parses_and_opens_toggle_menu() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
+    let mut cache_salt_menu = None;
+    let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    assert_eq!(crate::command::parse("/skill"), Some(SlashAction::Skill));
+    assert_eq!(crate::command::parse("/sk"), Some(SlashAction::Skill));
+
+    let flow = dispatch_slash_action(
+        SlashAction::Skill,
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut mcp_menu,
+        &mut None,
+        &mut skill_toggle_menu,
+        &mut cache_salt_menu,
+        "act",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+        &mut None,
+        &mut None,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(
+        matches!(skill_toggle_menu, Some(crate::skill_menu::SkillMenu::List(_))),
+        "the /skill toggle modal must open"
+    );
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "opening the modal must not send a UiCmd"
     );
 }

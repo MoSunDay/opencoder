@@ -1,0 +1,400 @@
+//! Domain config files (`mcp.json` / `cli.json` / `skills.json`).
+//!
+//! The three map-shaped domains (`mcp_servers`, `cli`, `skills`) are hard-cut
+//! from `config.json`: they load from — and save to — a dedicated domain file.
+//! Lookup is exactly two candidates, project first, and a single effective
+//! file wins (the project file shadows the global one entirely — no per-key
+//! merge across the two files, unlike `config.json` candidates):
+//!
+//! - project: `<working_dir>/.opencoder/<domain>.json`
+//! - global: `<global_opencode_home>/<domain>.json` (the home behind
+//!   [`super::env::primary_global_config_path`], so the `scoped_config_home`
+//!   override applies; XDG dirs are NOT consulted for domain files).
+
+use std::path::{Path, PathBuf};
+
+use super::Config;
+
+/// Domain key -> domain file name. Order defines the split/save routing order.
+pub(crate) const DOMAIN_FILES: [(&str, &str); 3] = [
+    ("mcp_servers", "mcp.json"),
+    ("cli", "cli.json"),
+    ("skills", "skills.json"),
+];
+
+/// Placeholder path piece for a non-domain key: never matches a real file, so
+/// callers treat the result as "no domain file".
+const NOT_A_DOMAIN_FILE: &str = "__not_a_domain__.json";
+
+/// Resolve a top-level config key to its `(key, file)` table entry.
+fn domain_entry(key: &str) -> Option<(&'static str, &'static str)> {
+    DOMAIN_FILES.iter().find(|(k, _)| *k == key).copied()
+}
+
+/// `true` when `key` is routed to a dedicated domain file instead of
+/// `config.json`.
+pub(crate) fn is_domain_key(key: &str) -> bool {
+    domain_entry(key).is_some()
+}
+
+/// The domain file name for `key` (`mcp_servers` -> `mcp.json`), or `None`.
+pub(crate) fn domain_file_name(key: &str) -> Option<&'static str> {
+    domain_entry(key).map(|(_, file)| file)
+}
+
+/// Project-scope domain file: `<working_dir>/.opencoder/<domain>.json`.
+/// A non-domain key yields a never-existing path (see [`NOT_A_DOMAIN_FILE`]).
+pub(crate) fn project_domain_path(working_dir: &Path, key: &str) -> PathBuf {
+    let file = domain_file_name(key).unwrap_or(NOT_A_DOMAIN_FILE);
+    working_dir.join(".opencoder").join(file)
+}
+
+/// Global-scope domain file: `<global_opencode_home>/<domain>.json`. `None`
+/// when the key is not a domain key or the home directory is unresolvable.
+pub(crate) fn global_domain_path(key: &str) -> Option<PathBuf> {
+    let file = domain_file_name(key).unwrap_or(NOT_A_DOMAIN_FILE);
+    super::env::global_opencode_home().map(|home| home.join(file))
+}
+
+/// The single effective domain file: the project one if it exists, else the
+/// global one if it exists, else `None` (nothing to load). Non-domain keys
+/// (guarded by [`is_domain_key`]) resolve to no file at all.
+pub(crate) fn effective_path(working_dir: &Path, key: &str) -> Option<PathBuf> {
+    if !is_domain_key(key) {
+        return None;
+    }
+    let project = project_domain_path(working_dir, key);
+    if project.exists() {
+        return Some(project);
+    }
+    let global = global_domain_path(key)?;
+    if global.exists() { Some(global) } else { None }
+}
+
+/// Write target for a domain patch: the project file if it already exists,
+/// else the global file if it exists, else (neither exists) the global one —
+/// created on save. Falls back to the project path when no home resolves.
+pub(crate) fn write_target(working_dir: &Path, key: &str) -> Option<PathBuf> {
+    if !is_domain_key(key) {
+        return None;
+    }
+    let project = project_domain_path(working_dir, key);
+    if project.exists() {
+        return Some(project);
+    }
+    // Whether or not a global file exists, it is the target from here on
+    // (created on save); only an unresolvable home falls back to the project.
+    global_domain_path(key).or(Some(project))
+}
+
+/// Read the effective domain file for `key`. Missing/empty -> `None`. Corrupt
+/// or non-object JSON warns (mirroring how [`Config::load`] skips bad config
+/// candidates) and is treated as absent — a bad domain file must not break
+/// startup.
+pub(crate) fn read_effective(working_dir: &Path, key: &str) -> Option<serde_json::Value> {
+    let path = effective_path(working_dir, key)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(v) if v.is_object() => Some(v),
+        Ok(v) => {
+            tracing::warn!(
+                "domain file {} is valid JSON but not an object (got {}); ignoring",
+                path.display(),
+                json_kind(&v)
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!("domain file {} is corrupt: {e}; ignoring", path.display());
+            None
+        }
+    }
+}
+
+fn json_kind(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Merge `patch` into the domain file for `key` (pretty-printed, parents
+/// created). A `null` entry deletes that key from the file (the
+/// [`super::merge::merge_json`] semantics). An existing-but-corrupt target
+/// file refuses the write (error) and is left byte-for-byte untouched,
+/// mirroring `Config::save_to`. Returns the path written.
+pub(crate) fn save_domain(
+    working_dir: &Path,
+    key: &str,
+    patch: &serde_json::Value,
+) -> anyhow::Result<PathBuf> {
+    let target = write_target(working_dir, key)
+        .ok_or_else(|| anyhow::anyhow!("no write target for domain key `{key}`"))?;
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut root: serde_json::Value = if target.exists() {
+        let raw = std::fs::read_to_string(&target)
+            .map_err(|e| anyhow::anyhow!("read {}: {e}", target.display()))?;
+        match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(v) => v,
+            // An empty/whitespace-only file is an empty object (matches a
+            // freshly-created file); anything unparseable is corrupt.
+            Err(_) if raw.trim().is_empty() => serde_json::json!({}),
+            Err(e) => {
+                anyhow::bail!(
+                    "domain file {} is corrupt: {e}; refusing to overwrite",
+                    target.display()
+                )
+            }
+        }
+    } else {
+        serde_json::json!({})
+    };
+    super::merge::merge_json(&mut root, patch);
+    let pretty = serde_json::to_string_pretty(&root)?;
+    std::fs::write(&target, pretty)?;
+    Ok(target)
+}
+
+/// Pure patch split: extract top-level domain keys (values passed through
+/// verbatim, including `null` deletions) and return `(config_remainder,
+/// domain_entries)` where the remainder is a shallow copy without them.
+pub(crate) fn split_patch(
+    patch: &serde_json::Value,
+) -> (serde_json::Value, Vec<(&'static str, serde_json::Value)>) {
+    let mut remainder = serde_json::Map::new();
+    let mut domains: Vec<(&'static str, serde_json::Value)> = Vec::new();
+    if let Some(obj) = patch.as_object() {
+        for (k, v) in obj {
+            match domain_entry(k) {
+                Some((key, _)) => domains.push((key, v.clone())),
+                None => {
+                    remainder.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+    (serde_json::Value::Object(remainder), domains)
+}
+
+/// Apply one domain file's parsed JSON onto `cfg`, entry by entry (omitted
+/// fields preserve siblings — the loops previously lived in `merge_into`).
+/// Non-object values and unknown keys are ignored.
+pub(crate) fn apply_domain(cfg: &mut Config, key: &str, value: &serde_json::Value) {
+    let entries = match value.as_object() {
+        Some(o) => o,
+        None => return,
+    };
+    match key {
+        "mcp_servers" => {
+            for (name, sv) in entries {
+                if let Some(sobj) = sv.as_object() {
+                    let entry = cfg.mcp_servers.entry(name.clone()).or_default();
+                    super::mcp::merge(entry, sobj);
+                }
+            }
+        }
+        "cli" => {
+            for (name, cv) in entries {
+                if let Some(cobj) = cv.as_object() {
+                    let entry = cfg.cli.entry(name.clone()).or_default();
+                    super::cli::merge(entry, cobj);
+                }
+            }
+        }
+        "skills" => {
+            for (name, sv) in entries {
+                if let Some(sobj) = sv.as_object() {
+                    let entry = cfg.skills.entry(name.clone()).or_default();
+                    super::skill::merge(entry, sobj);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_key_table_maps_keys_to_files() {
+        for key in ["mcp_servers", "cli", "skills"] {
+            assert!(is_domain_key(key), "{key} must be a domain key");
+        }
+        for key in ["model", "theme", "providers", "keymap", ""] {
+            assert!(!is_domain_key(key), "{key} must not be a domain key");
+        }
+        assert_eq!(domain_file_name("mcp_servers"), Some("mcp.json"));
+        assert_eq!(domain_file_name("cli"), Some("cli.json"));
+        assert_eq!(domain_file_name("skills"), Some("skills.json"));
+        assert_eq!(domain_file_name("model"), None);
+    }
+
+    #[test]
+    fn project_domain_path_lives_under_opencoder_dir() {
+        let p = project_domain_path(Path::new("/w"), "skills");
+        assert_eq!(p, PathBuf::from("/w/.opencoder/skills.json"));
+        // non-domain keys map to a never-existing placeholder path
+        let foreign = project_domain_path(Path::new("/w"), "theme");
+        assert_eq!(
+            foreign,
+            PathBuf::from("/w/.opencoder/__not_a_domain__.json")
+        );
+    }
+
+    #[test]
+    fn global_domain_path_honors_scoped_home() {
+        // Pure path construction (no filesystem touch): the scoped override
+        // must redirect the global candidate, exactly like config.json.
+        let probe = PathBuf::from("/scoped-home-probe");
+        let _guard = super::super::env::scoped_config_home(probe.clone());
+        assert_eq!(
+            global_domain_path("mcp_servers"),
+            Some(probe.join(".opencoder").join("mcp.json"))
+        );
+    }
+
+    #[test]
+    fn split_patch_separates_domain_keys_verbatim() {
+        let patch = serde_json::json!({
+            "theme": "light",
+            "model": "prov/model",
+            "skills": { "review": { "enabled": true } },
+            "mcp_servers": { "srv": { "enabled": false } },
+            "cli": null
+        });
+        let (remainder, domains) = split_patch(&patch);
+        assert_eq!(
+            remainder,
+            serde_json::json!({ "theme": "light", "model": "prov/model" })
+        );
+        assert_eq!(domains.len(), 3, "all three domain keys extracted");
+        // values pass through verbatim, nulls included (delete semantics)
+        let by_key = |k: &str| {
+            domains
+                .iter()
+                .find(|(dk, _)| *dk == k)
+                .map(|(_, v)| v)
+                .cloned()
+        };
+        assert_eq!(
+            by_key("skills"),
+            Some(serde_json::json!({ "review": { "enabled": true } }))
+        );
+        assert_eq!(by_key("cli"), Some(serde_json::Value::Null));
+        assert_eq!(
+            by_key("mcp_servers"),
+            Some(serde_json::json!({ "srv": { "enabled": false } }))
+        );
+    }
+
+    #[test]
+    fn split_patch_empty_patch_yields_empty_split() {
+        let (remainder, domains) = split_patch(&serde_json::json!({}));
+        assert_eq!(remainder, serde_json::json!({}));
+        assert!(domains.is_empty());
+    }
+
+    #[test]
+    fn apply_domain_routes_entries_to_the_right_field() {
+        let mut cfg = Config::default();
+        apply_domain(
+            &mut cfg,
+            "mcp_servers",
+            &serde_json::json!({ "srv": { "enabled": true, "command": "npx" } }),
+        );
+        apply_domain(
+            &mut cfg,
+            "cli",
+            &serde_json::json!({ "git": { "enabled": true, "content": "c" } }),
+        );
+        apply_domain(
+            &mut cfg,
+            "skills",
+            &serde_json::json!({ "review": { "enabled": true } }),
+        );
+        assert_eq!(cfg.mcp_servers.len(), 1);
+        assert_eq!(cfg.mcp_servers["srv"].command.as_deref(), Some("npx"));
+        assert_eq!(cfg.cli.len(), 1);
+        assert_eq!(cfg.cli["git"].content, "c");
+        assert_eq!(cfg.enabled_skill_names(), vec!["review".to_string()]);
+    }
+
+    #[test]
+    fn apply_domain_entry_merge_preserves_siblings_and_toggles() {
+        let mut cfg = Config::default();
+        apply_domain(
+            &mut cfg,
+            "skills",
+            &serde_json::json!({ "a": { "enabled": true }, "b": { "enabled": true } }),
+        );
+        // second patch toggles only `a`; sibling `b` must survive
+        apply_domain(
+            &mut cfg,
+            "skills",
+            &serde_json::json!({ "a": { "enabled": false } }),
+        );
+        assert!(!cfg.skills["a"].enabled, "patch must toggle `a` off");
+        assert!(cfg.skills["b"].enabled, "sibling `b` must survive");
+        assert_eq!(cfg.enabled_skill_names(), vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn apply_domain_ignores_non_object_values_and_unknown_keys() {
+        let mut cfg = Config::default();
+        apply_domain(&mut cfg, "skills", &serde_json::json!(null));
+        apply_domain(&mut cfg, "skills", &serde_json::json!([1, 2]));
+        apply_domain(&mut cfg, "skills", &serde_json::json!("str"));
+        apply_domain(&mut cfg, "theme", &serde_json::json!({ "x": 1 }));
+        assert!(cfg.skills.is_empty(), "non-object values apply nothing");
+    }
+
+    /// Regression (moved from merge.rs when the domain loops moved here):
+    /// mcp server `env` values must run through `env::resolve_env` —
+    /// brace-indirected `{VAR}` values resolve against the process env (empty
+    /// when unset), plain values are kept verbatim. Parallel safe: only a
+    /// getenv of a never-set var.
+    #[test]
+    fn apply_domain_resolves_mcp_env_indirection() {
+        let mut cfg = Config::default();
+        apply_domain(
+            &mut cfg,
+            "mcp_servers",
+            &serde_json::json!({
+                "zai-vision": {
+                    "enabled": true,
+                    "command": "npx",
+                    "args": ["-y", "@z_ai/mcp-server@latest"],
+                    "env": {
+                        "Z_AI_MODE": "ZHIPU",
+                        "OPENCODER_TEST_UNSET_KEY": "{OPENCODER_TEST_UNSET_KEY_DOES_NOT_EXIST}"
+                    }
+                }
+            }),
+        );
+        let srv = cfg
+            .mcp_servers
+            .get("zai-vision")
+            .expect("mcp server applied from domain file object");
+        assert!(srv.enabled);
+        assert_eq!(srv.command.as_deref(), Some("npx"));
+        assert_eq!(srv.args, vec!["-y", "@z_ai/mcp-server@latest"]);
+        // literal value (no braces) kept verbatim
+        assert_eq!(srv.env.get("Z_AI_MODE").map(String::as_str), Some("ZHIPU"));
+        // brace-indirected value routed through resolve_env; unset var -> ""
+        assert_eq!(
+            srv.env.get("OPENCODER_TEST_UNSET_KEY").map(String::as_str),
+            Some("")
+        );
+    }
+}

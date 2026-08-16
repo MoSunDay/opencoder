@@ -16,7 +16,7 @@ use crate::SessionState;
 
 /// Switch the active agent, emitting an `AgentSwitch` event so surfaces stay
 /// in sync. Falls back to the current agent if the requested name is unknown.
-fn switch_agent(
+pub(super) fn switch_agent(
     session: &mut SessionState,
     name: &str,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
@@ -30,7 +30,7 @@ fn switch_agent(
 /// Hardcode the review skill for the PLAN phase. Always discovers the
 /// `"review"` skill from `~/.opencoder/skills`; a missing skill body is a
 /// no-op (skill set to `None`).
-fn activate_review_skill(session: &SessionState) {
+pub(super) fn activate_review_skill(session: &SessionState) {
     let body = opencoder_core::skill::discover()
         .into_iter()
         .find(|s| s.name == "review")

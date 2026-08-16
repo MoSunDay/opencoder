@@ -4,16 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use anyhow::{anyhow, Context, Result};
-use opencoder_core::{resolve_agent, Config};
+use anyhow::{Context, Result, anyhow};
+use opencoder_core::{Config, resolve_agent};
 use opencoder_llm::{ChatClient, ChatStream};
-use opencoder_session::{
-    generate_title, resume_and_replay as resume_session, SessionState,
-};
+use opencoder_session::{SessionState, generate_title, resume_and_replay as resume_session};
 use opencoder_store::{SessionFilter, SessionPatch, Store};
 
-use crate::display::{print_event, truncate};
 use crate::Cli;
+use crate::display::{print_event, truncate};
 
 pub(crate) use crate::run_image::load_image_data_uris;
 
@@ -137,8 +135,7 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
         let agent = if agent_name.is_empty() {
             resolve_agent("act").ok_or_else(|| anyhow!("agent not found: act"))?
         } else {
-            resolve_agent(agent_name)
-                .ok_or_else(|| anyhow!("agent not found: {agent_name}"))?
+            resolve_agent(agent_name).ok_or_else(|| anyhow!("agent not found: {agent_name}"))?
         };
         let mut s = SessionState::new(
             opencoder_session::runner::new_id(),
@@ -739,10 +736,10 @@ mod tests {
             Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
             std::path::PathBuf::from("/tmp"),
         );
-        let err = reapply_resume_agent(&mut s, &Some("nonexistent-agent".into()))
-            .unwrap_err();
+        let err = reapply_resume_agent(&mut s, &Some("nonexistent-agent".into())).unwrap_err();
         assert!(
-            err.to_string().contains("agent not found: nonexistent-agent"),
+            err.to_string()
+                .contains("agent not found: nonexistent-agent"),
             "expected unknown-agent error, got: {err}"
         );
         // session agent unchanged by the failed reapply

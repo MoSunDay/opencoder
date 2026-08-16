@@ -4,8 +4,6 @@ use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
 use opencoder_store::{Delivery, Store};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
@@ -24,7 +22,6 @@ use crate::render::{MouseHits, Term};
 use crate::skill_persist::resolve_persist;
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::consume_modifier_or_release;
-use crate::theme;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
 use crate::TuiOpts;
 #[path = "app_bootstrap.rs"]
@@ -131,8 +128,10 @@ pub(super) async fn run_app(
     let mut command_menu: Option<CommandMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
+    let mut envs_menu: Option<crate::envs_menu::EnvsMenu> = None;
     let mut cli_menu: Option<crate::cli_menu::CliMenu> = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
+    let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
     let mut keymap = crate::keymap::KeyBindings::from_config(&config);
@@ -143,7 +142,7 @@ pub(super) async fn run_app(
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut shift_held = false;
-    let mut copy_mode = false;
+    let mut copy_sel: Option<crate::copy_select::CopySel> = None;
     let mut session_states: std::collections::HashMap<String, crate::session_ui::SessionUiState> =
         std::collections::HashMap::new();
     let (mut cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
@@ -250,21 +249,21 @@ pub(super) async fn run_app(
                     task_picker.as_ref(),
                     command_menu.as_ref(),
                     model_menu.as_ref(),
-                    mcp_menu.as_ref(),
-                    cli_menu.as_ref(), skill_toggle_menu.as_ref(),
+                    mcp_menu.as_ref(), envs_menu.as_ref(),
+                    cli_menu.as_ref(), skill_toggle_menu.as_ref(), ap_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
                     question_menu.as_ref(),
                     &mut hits,
                     &mut viewport,
                     shift_held,
-                    copy_mode,
+                    copy_sel.as_ref(),
                     &pending_images,
                     input_disabled,
                     tail_ms,
                     task_elapsed_ms,
                     subagent_focus.is_none(),
-                    config.autopilot.enabled,
+                    config.autopilot.mode,
                     &display_mode,
                     notepad.as_ref(),
                 )?;
@@ -295,7 +294,21 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
-                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
+                        let copy_body_h = hits.body.map_or(0, |r| {
+                            r.height.saturating_sub(2 + u16::from(tail_ms > 0)) as usize
+                        });
+                        let copy_outcome = crate::copy_select::handle_key(
+                            &k, &mut copy_sel, &keymap, viewport.as_ref(), copy_body_h,
+                            &mut scroll, &mut follow,
+                        );
+                        if copy_outcome != crate::copy_select::CopyOutcome::Ignored {
+                            crate::copy_select::apply_key(
+                                copy_outcome, &mut copy_sel, viewport.as_ref(), anim_tick,
+                            );
+                            dirty = true;
+                            render_pending = true;
+                            continue;
+                        }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -373,6 +386,12 @@ pub(super) async fn run_app(
                             ).await;
                             continue;
                         }
+                        if envs_menu.is_some() {
+                            match app_loop::handle_envs_outcome(&mut envs_menu, k, &mut client, &mut config, &mut model_label, &mut compaction_threshold, &mut context_limit, &mut frame_ms, &mut frame_ticker, &cmd_tx, &mut chat, &workdir).await {
+                                app_loop::LoopFlow::Quit => break, app_loop::LoopFlow::Redraw => continue, _ => {}
+                            }
+                            continue;
+                        }
                         if cli_menu.is_some() {
                             let _ = app_loop::handle_cli_outcome(
                                 &mut cli_menu, k, &mut config, &cmd_tx, &mut chat, &workdir,
@@ -383,6 +402,9 @@ pub(super) async fn run_app(
                         if skill_toggle_menu.is_some() {
                             let _ = app_loop::handle_skill_outcome(&mut skill_toggle_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue;
                         }
+                        // `/ap` mode-picker modal (same slot.take() pattern as /skill).
+                        if ap_menu.is_some() {
+                            let _ = app_loop::handle_ap_outcome(&mut ap_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue; }
                         // Question dialog: answers resolve on the hub, mid-turn.
                         if question_menu.is_some() {
                             crate::question_menu::route_question_key(
@@ -404,7 +426,7 @@ pub(super) async fn run_app(
                             match app_loop::dispatch_command(
                                 &mut command_menu, k, &cmd_tx, &mut cancel, &mut chat,
                                 &mut running, &mut follow, &store,
-                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu,
+                                &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu, &mut ap_menu,
                                 &mut cache_salt_menu, &mut keymap_menu, &agent_name,
                                 &mut input, &mut cursor_idx,
                                 &mut config, &workdir,
@@ -483,8 +505,8 @@ pub(super) async fn run_app(
                                     let f = app_loop::dispatch_slash_action(
                                         action, &cmd_tx, &mut cancel, &mut chat,
                                         &mut running, &mut follow, &store,
-                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut skill_toggle_menu,
-                                        &mut cache_salt_menu, &agent_name, &mut input, &mut cursor_idx,
+                                        &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu,
+                                        &mut ap_menu, &mut cache_salt_menu, &agent_name, &mut input, &mut cursor_idx,
                                         &mut config, &workdir,
                                         &mut mode_flash, anim_tick, &mut sys_tokens,
                                         &mut plan_edit, &mut notepad,
@@ -645,25 +667,10 @@ pub(super) async fn run_app(
                                 .await;
                             }
                             KeyAction::Cancel => {
-                                // A cancelled compound `/plan` never reaches the runner's
-                                // AgentSwitch, so drop the deferred arming it left behind.
-                                chat.pending_plan_arm = false;
-                                cancel.cancel();
-                                opencoder_session::fire_child_cancels(&child_runtime.cancels);
-                                // Double-Esc hard-abort: also drop any pending
-                                // steer/queue inputs so they don't resurface on
-                                // resume. delete_input is idempotent.
-                                clear_pending_inputs(
-                                    store.as_ref(),
-                                    &mut chat.steer_items,
-                                    &mut queue_items,
-                                )
-                                .await;
-                                chat.push_marker(Line::from(Span::styled(
-                                    "[interrupted] stopping…", Style::default().fg(theme::warn_color()))));
-                                running = false;
-                                cancelled = true;
-                                follow = true;
+                                app_loop::cancel_running_turn(
+                                    store.as_ref(), &mut chat, &mut queue_items, &mut cancel,
+                                    &mut child_runtime, &mut running, &mut cancelled, &mut follow,
+                                ).await;
                             }
                             KeyAction::EnterPlanEdit => {
                                 app_loop::enter_plan_edit(
@@ -697,7 +704,7 @@ pub(super) async fn run_app(
                         }
                     }
                     Event::Mouse(m) => {
-                        if crate::copy_mode::is_active(copy_mode, shift_held) { dirty = true; continue; }
+                        if crate::copy_select::is_active(copy_sel.as_ref(), shift_held) { dirty = true; continue; }
                         if keymap_menu.is_some() { if let app_loop::LoopFlow::Quit = app_loop::handle_keymap_mouse_event(&mut keymap_menu, &hits.keymap_btns, &m, &mut config, &mut keymap, &workdir, &cmd_tx).await { break }
                             dirty = true; render_pending = true; continue; }
                         let outcome = handle_mouse(
@@ -708,35 +715,27 @@ pub(super) async fn run_app(
                         )
                         .await;
                         if outcome == MouseOutcome::SteerSubmit {
-                            let outcome = steer_fire::handle_steer_submit(
-                                subagent_focus, running, &child_runtime.cancels,
-                                &child_runtime.turn_cancels, &turn_cancel, &chat,
-                            );
-                            if outcome == steer_fire::SteerSubmitOutcome::StartTurn {
-                                start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(String::new(), Vec::new())).await;
-                                running = true; chat.begin_turn();
-                            }
-                            follow = true;
+                            app_loop::steer_submit_after_mouse(
+                                &cmd_tx, &mut cancel, subagent_focus, &mut running,
+                                &mut chat, &mut follow, &child_runtime, &turn_cancel,
+                            ).await;
                         }
                         dirty = true;
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size)?,
                     Event::Paste(pasted) => {
-                        if pasted.trim().is_empty() {
-                            app_loop::paste_clipboard_image_silent(&mut chat, &mut pending_images).await;
-                            dirty = true;
-                            continue;
-                        }
-                        // Modal-priority paste routing (mirrors Event::Key).
-                        if let app_loop::LoopFlow::Redraw = app_loop::route_paste(
+                        // Modal-priority paste routing (mirrors Event::Key);
+                        // empty pastes try a silent clipboard-image read.
+                        // (clippy's collapsible_match suggestion would put an
+                        // `.await` in a match guard, which Rust forbids.)
+                        #[allow(clippy::collapsible_match)]
+                        if app_loop::handle_paste_event(
                             &pasted, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(),
-                            skill_toggle_menu.is_some(), // paste is not key-routed: pass explicitly so the modal swallows it
-                            &mut model_menu, &mut mcp_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input,
-                            &mut cursor_idx, &mut pending_images, &mut img_asm,
+                            skill_toggle_menu.is_some(),
+                            &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu,
+                            &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm,
                             &mut chat, &workdir,
-                        ) {
-                            continue;
-                        }
+                        ).await { continue; }
                     }
                     _ => {}
                 }
@@ -790,7 +789,7 @@ pub(super) async fn run_app(
     Ok(session_id)
 }
 pub(crate) use crate::app_helpers::{
-    apply_force_redraw, clear_pending_inputs, handle_mouse, initial_chat_view,
+    apply_force_redraw, handle_mouse, initial_chat_view,
     mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_history,
     push_user, snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };

@@ -27,6 +27,7 @@ POST /agent|/model：更新 store meta + handle.overrides（下一轮 drain 生�
 POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
 POST `/api/sessions/:id/subagents/:task_id/steer`：先校验 task 属于父 session 且为 `Running`，再从 live handle 的 child gate 取得 reservation 后写入 child session。gate 缺失/关闭返回 409 且不落 input；若写入后被强制关闭则删除该 row 后返回 409；成功提交后触发目标 child turn cancel，保持 Web 的立即打断语义。
 - 8 个 feature-parity 端点（`src/api_ops.rs`，于 `src/lib.rs::build_app()` 注册）：fork（`POST /api/sessions/:id/fork`，调共享实现 `opencoder_session::fork::fork_session`，404 语义在 handler 层判定）、compact、handoff、skill、config GET/PATCH（PATCH 经 `DrainCmd::ReloadConfig` 热重载）、bg list/stop。
+- `/api/envs` 环境配置管理（`src/api_envs.rs`，5 路由）：`GET`（列表 + active）、`POST {name, capture_current=true}`（400 非法名 / 409 重名）、`PATCH {active: name|null}`（404 未知环境）、`POST /:name/recapture`、`DELETE /:name`（active 环境删除先清标记）。所有会改变有效配置的变更向全部 live session 扇出 `DrainCmd::ReloadConfig`（与 `PATCH /api/config` 同机制——快照 handles keys 后逐个 send_cmd）；recapture/delete 仅在影响 active 环境时扇出。`GET /api/config` 自动反映环境层（`Config::load` 解析）。
 - SPA 前端 `GET /`（`src/html.rs`）：`src/assets/`（index.html、styles.css、render.js、app.js）经 `include_str!` + `LazyLock` 在编译期拼为单一内联 HTML 文档（单二进制，无静态文件服务）。SPA 覆盖全部 17 种 SSE 事件类型、interrupt、steer/queue 投递、model/agent 切换、image 上传、fork/compact。
 
 ## 依赖与接口
@@ -41,4 +42,4 @@ POST `/api/sessions/:id/subagents/:task_id/steer`：先校验 task 属于父 ses
 - HTTP 表面契约测试：`tests/web_contract.rs`（health、session CRUD、prompt admit 立即返回、SSE replay+live、agent/model 切换持久化、interrupt 取消 token）
 - drain 生命周期契约测试：`tests/web_drain_contract.rs`（pre-existing handle 不阻塞 drain 的 F1 回归；drain 完成后 `draining` 复位使再次 prompt 重 spawn 的 G1；interrupt 不毒化后续 drain 的 G2；早订阅者经共享 broadcast 收 live 的 G3）
 - drain 生命周期测试：`tests/web_drain_contract.rs`（早订阅 handle 不阻塞 drain、drain 完成后再次 prompt 再 spawn、interrupt 后再 prompt 跑到完、先订 /events 再 prompt 收 live 帧、POST /prompt 配置失败→500、/events 慢订阅者背压）
-- feature-parity 端点测试：`tests/web_api_ops.rs`（fork/skill/compact/handoff/config/bg）；SPA 装配单测：`src/html.rs`。
+- feature-parity 端点测试：`tests/web_api_ops.rs`（fork/skill/compact/handoff/config/bg）；SPA 装配单测：`src/html.rs`。 环境管理端点：`tests/web_envs.rs`（列表/创建/激活/重捕获/删除 + ReloadConfig 扇出）。

@@ -46,7 +46,7 @@ pub async fn schedule(
     spec: &WorkflowSpec,
     state: &WorkflowState,
 ) -> Result<ParentDecision> {
-    let runnable = domain::runnable(spec, state);
+    let runnable = domain::runnable(spec, state)?;
     let prompt = format!(
         "Decide the next workflow operation. You control how many runnable TODOs execute concurrently. You have no execution authority: never emit or request a tool call, inspect the environment, diagnose credentials, or perform a TODO yourself. Return exactly one raw JSON object with no Markdown. When a runnable TODO is blocked or interrupted, dispatch it with resume or fork, or suspend the workflow; never investigate the blocker yourself.\n\
          Allowed JSON operations:\n\
@@ -75,7 +75,10 @@ pub async fn accept(
         .iter()
         .find(|todo| todo.id == todo_id)
         .context("acceptance TODO not found")?;
-    let candidate = state.todos[todo_id]
+    let candidate = state
+        .todos
+        .get(todo_id)
+        .with_context(|| format!("state missing TODO {todo_id}"))?
         .candidate
         .as_ref()
         .context("candidate missing")?;
@@ -101,7 +104,7 @@ async fn decide<T: serde::de::DeserializeOwned>(
     prompt: String,
 ) -> Result<T> {
     let mut config = runtime.config.clone();
-    config.autopilot.enabled = false;
+    config.autopilot.mode = opencoder_core::ApMode::Off;
     let mut session = opencoder_session::resume(
         runtime.store.clone(),
         &state.parent_session_id,

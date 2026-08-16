@@ -41,7 +41,7 @@ async fn slash_action_compact_idle_starts_turn() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut cache_salt_menu = None;
+        let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
     let mut config = Config::default();
@@ -63,6 +63,8 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
+        &mut None,
         &mut None,
         &mut None,
         &mut cache_salt_menu,
@@ -104,7 +106,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut cache_salt_menu = None;
+        let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
     let mut config = Config::default();
@@ -126,6 +128,8 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut task_picker,
         &mut model_menu,
         &mut mcp_menu,
+        &mut None,
+        &mut None,
         &mut None,
         &mut None,
         &mut cache_salt_menu,
@@ -170,7 +174,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut cache_salt_menu = None;
+        let mut cache_salt_menu = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -197,7 +201,9 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut model_menu,
         &mut mcp_menu,
         &mut None,
+        &mut None,
         &mut skill_toggle_menu,
+        &mut None,
         &mut cache_salt_menu,
         "act",
         &mut input,
@@ -217,6 +223,75 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         matches!(skill_toggle_menu, Some(crate::skill_menu::SkillMenu::List(_))),
         "the /skill toggle modal must open"
     );
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "opening the modal must not send a UiCmd"
+    );
+}
+
+/// `/ap` parses to `SlashAction::Ap` and the dispatch opens the tri-state
+/// mode-picker modal (`ApMenu`) with the cursor on the config's current
+/// mode. No `UiCmd` is sent until the user confirms a mode in the modal.
+#[tokio::test]
+async fn slash_action_ap_parses_and_opens_mode_menu() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mut chat = ChatView::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut task_picker = None;
+    let mut model_menu = None;
+    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
+        let mut cache_salt_menu = None;
+    let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0usize;
+    let mut config = Config::default();
+    config.autopilot.mode = opencoder_core::ApMode::Review;
+    let workdir = std::path::Path::new(".");
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut sys_tokens = 0u64;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    assert_eq!(crate::command::parse("/ap"), Some(SlashAction::Ap));
+
+    let flow = dispatch_slash_action(
+        SlashAction::Ap,
+        &cmd_tx,
+        &mut cancel,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &store,
+        "test",
+        &mut task_picker,
+        &mut model_menu,
+        &mut mcp_menu,
+        &mut None,
+        &mut None,
+        &mut None,
+        &mut ap_menu,
+        &mut cache_salt_menu,
+        "act",
+        &mut input,
+        &mut cursor_idx,
+        &mut config,
+        workdir,
+        &mut mode_flash,
+        0,
+        &mut sys_tokens,
+        &mut None,
+        &mut None,
+    )
+    .await;
+
+    assert!(matches!(flow, LoopFlow::Proceed));
+    let menu = ap_menu.expect("the /ap mode-picker modal must open");
+    assert_eq!(
+        menu.selected, 2,
+        "cursor highlights the config's current (review) mode"
+    );
+    assert_eq!(menu.current, opencoder_core::ApMode::Review);
     assert!(
         cmd_rx.try_recv().is_err(),
         "opening the modal must not send a UiCmd"

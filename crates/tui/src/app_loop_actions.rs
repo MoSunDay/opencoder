@@ -138,8 +138,10 @@ pub(crate) async fn dispatch_slash_action(
     task_picker: &mut Option<crate::task::TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
+    ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
     input: &mut String,
@@ -182,6 +184,11 @@ pub(crate) async fn dispatch_slash_action(
         SlashAction::Mcp => {
             *mcp_menu = Some(crate::mcp_menu::McpMenu::List(
                 crate::mcp_menu::McpList::new(config),
+            ));
+        }
+        SlashAction::Envs => {
+            *envs_menu = Some(crate::envs_menu::EnvsMenu::List(
+                crate::envs_menu::EnvsList::discover(),
             ));
         }
         SlashAction::Cli => {
@@ -282,14 +289,77 @@ pub(crate) async fn dispatch_slash_action(
             *notepad = Some(crate::notepad::NotepadView::new(workdir.to_path_buf()));
         }
         SlashAction::Ps => {
-            local_cmd::run("/ps", chat, config, cmd_tx, workdir).await;
+            local_cmd::run("/ps", chat).await;
         }
         SlashAction::Stop => {
-            local_cmd::run("/stop", chat, config, cmd_tx, workdir).await;
+            local_cmd::run("/stop", chat).await;
         }
         SlashAction::Ap => {
-            local_cmd::run("/ap", chat, config, cmd_tx, workdir).await;
+            *ap_menu = Some(crate::ap_menu::ApMenu::new(config));
         }
     }
     LoopFlow::Proceed
+}
+
+/// Finish a queue-panel "submit now" (✎/>) mouse click: run the steer
+/// decision and start a turn when it says so (extracted from `app.rs`'s
+/// mouse arm to keep that file under the 800-line iteration cap).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn steer_submit_after_mouse(
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    subagent_focus: Option<usize>,
+    running: &mut bool,
+    chat: &mut crate::chat::ChatView,
+    follow: &mut bool,
+    child_runtime: &crate::worker::ChildRuntimeHandles,
+    turn_cancel: &std::sync::Arc<std::sync::Mutex<CancellationToken>>,
+) {
+    let outcome = crate::app::steer_fire::handle_steer_submit(
+        subagent_focus,
+        *running,
+        &child_runtime.cancels,
+        &child_runtime.turn_cancels,
+        turn_cancel,
+        chat,
+    );
+    if outcome == crate::app::steer_fire::SteerSubmitOutcome::StartTurn {
+        crate::app_helpers::start_turn(
+            cmd_tx,
+            cancel,
+            UiCmd::Prompt(String::new(), Vec::new()),
+        )
+        .await;
+        *running = true;
+        chat.begin_turn();
+    }
+    *follow = true;
+}
+
+/// Hard-cancel the running turn (double-Esc / Ctrl+C arm in `app.rs`):
+/// drop a deferred `/plan` arming, cancel tokens, delete pending
+/// steer/queue inputs so they don't resurface on resume, and show the
+/// interrupted marker. Extracted to keep `app.rs` under the line cap.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn cancel_running_turn(
+    store: &dyn opencoder_store::Store,
+    chat: &mut crate::chat::ChatView,
+    queue_items: &mut Vec<(i64, String)>,
+    cancel: &mut CancellationToken,
+    child_runtime: &mut crate::worker::ChildRuntimeHandles,
+    running: &mut bool,
+    cancelled: &mut bool,
+    follow: &mut bool,
+) {
+    chat.pending_plan_arm = false;
+    cancel.cancel();
+    opencoder_session::fire_child_cancels(&child_runtime.cancels);
+    crate::app_helpers::clear_pending_inputs(store, &mut chat.steer_items, queue_items).await;
+    chat.push_marker(ratatui::text::Line::from(ratatui::text::Span::styled(
+        "[interrupted] stopping\u{2026}",
+        ratatui::style::Style::default().fg(crate::theme::warn_color()),
+    )));
+    *running = false;
+    *cancelled = true;
+    *follow = true;
 }

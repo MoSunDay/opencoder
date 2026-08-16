@@ -1,6 +1,6 @@
 //! Autopilot: a self-driving PLAN -> ACT -> VERIFY loop.
 //!
-//! When `config.autopilot.enabled` is on, the session runner hands control to
+//! When `config.autopilot.mode` is `"ap"` the session runner hands control to
 //! [`drive`] after the initial task. Each iteration:
 //!
 //! - **PLAN** — switch to the plan agent, inject a continuation prompt, run one
@@ -23,11 +23,13 @@
 mod decision;
 mod phases;
 mod prompts;
+mod review_pass;
 pub mod state;
 mod verify;
 
 pub use decision::{parse_verdict, should_stop};
 pub use state::{ApOutcome, ApPhase, ApState, VerifyVerdict};
+pub use review_pass::review_pass;
 pub use verify::verify;
 
 #[cfg(test)]

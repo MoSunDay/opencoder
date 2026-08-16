@@ -86,7 +86,6 @@ impl WorkflowStatus {
 #[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
     Pending,
-    Dispatching,
     Running,
     CandidateReady,
     Accepting,
@@ -102,7 +101,6 @@ impl TodoStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
-            Self::Dispatching => "dispatching",
             Self::Running => "running",
             Self::CandidateReady => "candidate_ready",
             Self::Accepting => "accepting",

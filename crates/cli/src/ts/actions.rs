@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use opencoder_store::{LibsqlStore, Store, TsRecord, TsRegistry};
 
@@ -16,8 +16,8 @@ use super::env::tmux_available;
 use super::naming::{fresh_id, id_from_name, resolve_target, session_name};
 use super::registry::{open_registry, register};
 use super::tmux::{
-    attach, current_session_name, kill_session, list_managed, session_exists, tmux_bin,
-    ManagedSession,
+    ManagedSession, attach, current_session_name, kill_session, list_managed, session_exists,
+    tmux_bin,
 };
 
 /// `opencode ts`/`rs` (bare). A bare `ts`/`rs` **always creates a fresh
@@ -93,11 +93,7 @@ fn spawn_session(workdir: &Path, id: &str) -> Result<()> {
     if !status.success() {
         bail!("tmux new-session failed (exit {:?})", status.code());
     }
-    if inside {
-        attach(&name)
-    } else {
-        Ok(())
-    }
+    if inside { attach(&name) } else { Ok(()) }
 }
 
 fn spawn_args(exe: &Path, workdir: &Path, id: &str, inside: bool) -> Vec<OsString> {
@@ -261,7 +257,10 @@ fn build_rows(records: &[TsRecord], tmux: &[ManagedSession]) -> Vec<GlobalRow> {
 /// the registration-time seed has neither preview nor title.
 fn has_content(record: &TsRecord) -> bool {
     !record.preview.trim().is_empty()
-        || record.title.as_deref().is_some_and(|t| !t.trim().is_empty())
+        || record
+            .title
+            .as_deref()
+            .is_some_and(|t| !t.trim().is_empty())
 }
 
 /// Task head for a registry session: preview (fallback title) truncated to 20
@@ -394,10 +393,9 @@ pub(crate) async fn ts_delete(target: &str) -> Result<()> {
             let store = LibsqlStore::open(&db)
                 .await
                 .with_context(|| format!("open session store for delete: {}", db.display()))?;
-            store
-                .delete_session(&record.id)
-                .await
-                .with_context(|| format!("delete global tmux session {id} from {}", db.display()))?;
+            store.delete_session(&record.id).await.with_context(|| {
+                format!("delete global tmux session {id} from {}", db.display())
+            })?;
         }
         registry.delete(&record.id).await?;
     }
@@ -594,9 +592,18 @@ mod tests {
             !LIST_LEGEND.contains("--new"),
             "legend must not reference removed --new: {LIST_LEGEND}"
         );
-        assert!(LIST_LEGEND.contains("resume"), "must advertise resume: {LIST_LEGEND}");
-        assert!(LIST_LEGEND.contains("clean"), "must advertise clean: {LIST_LEGEND}");
-        assert!(LIST_LEGEND.contains("delete"), "must advertise delete: {LIST_LEGEND}");
+        assert!(
+            LIST_LEGEND.contains("resume"),
+            "must advertise resume: {LIST_LEGEND}"
+        );
+        assert!(
+            LIST_LEGEND.contains("clean"),
+            "must advertise clean: {LIST_LEGEND}"
+        );
+        assert!(
+            LIST_LEGEND.contains("delete"),
+            "must advertise delete: {LIST_LEGEND}"
+        );
     }
 
     fn mk_managed_at(id: &str, attached: u8, pane_path: &str, created: i64) -> ManagedSession {
@@ -638,12 +645,10 @@ mod tests {
     fn classify_three_states() {
         let m1 = mk_managed("01AAA", 1);
         let m2 = mk_managed("02BBB", 0);
-        let map: HashMap<String, &ManagedSession> = [
-            ("01AAA".to_string(), &m1),
-            ("02BBB".to_string(), &m2),
-        ]
-        .into_iter()
-        .collect();
+        let map: HashMap<String, &ManagedSession> =
+            [("01AAA".to_string(), &m1), ("02BBB".to_string(), &m2)]
+                .into_iter()
+                .collect();
 
         assert_eq!(classify("01AAA", &map), TmuxState::Attached);
         assert_eq!(classify("02BBB", &map), TmuxState::Detached);
@@ -697,30 +702,58 @@ mod tests {
 
         let rows = build_rows(&records, &tmux);
 
-        assert_eq!(rows.len(), 4, "AA1 live + DD1 live + EE5/TT4 stopped; CC3 excluded");
-        let aa = rows.iter().find(|r| r.id == "AA1").expect("live enriched row");
+        assert_eq!(
+            rows.len(),
+            4,
+            "AA1 live + DD1 live + EE5/TT4 stopped; CC3 excluded"
+        );
+        let aa = rows
+            .iter()
+            .find(|r| r.id == "AA1")
+            .expect("live enriched row");
         assert_eq!(aa.state, TmuxState::Attached);
-        assert_eq!(aa.path, "/work/projY", "live path comes from tmux pane_current_path");
-        assert_eq!(aa.task, "build the api", "task enriched from the registry row");
-        assert_eq!(aa.created_at, 200, "creation time taken from the registry (ms)");
+        assert_eq!(
+            aa.path, "/work/projY",
+            "live path comes from tmux pane_current_path"
+        );
+        assert_eq!(
+            aa.task, "build the api",
+            "task enriched from the registry row"
+        );
+        assert_eq!(
+            aa.created_at, 200,
+            "creation time taken from the registry (ms)"
+        );
         // Dedupe: AA1 appears exactly once (tmux row wins over a stopped row).
         assert_eq!(rows.iter().filter(|r| r.id == "AA1").count(), 1);
 
         let dd = rows.iter().find(|r| r.id == "DD1").expect("tmux-only row");
         assert_eq!(dd.state, TmuxState::Detached);
         assert_eq!(dd.path, "/work/projX");
-        assert_eq!(dd.created_at, 1000, "tmux created (unix seconds) scaled to ms");
+        assert_eq!(
+            dd.created_at, 1000,
+            "tmux created (unix seconds) scaled to ms"
+        );
         assert_eq!(dd.task, "(no task yet)", "no registry row -> placeholder");
 
         let ee = rows.iter().find(|r| r.id == "EE5").expect("stopped row");
         assert_eq!(ee.state, TmuxState::Dead);
-        assert_eq!(ee.path, "/work/projY", "stopped path from the recorded workdir");
+        assert_eq!(
+            ee.path, "/work/projY",
+            "stopped path from the recorded workdir"
+        );
         assert_eq!(ee.task, "refactor module");
 
         let tt = rows.iter().find(|r| r.id == "TT4").expect("title-only row");
         assert_eq!(tt.state, TmuxState::Dead);
-        assert_eq!(tt.task, "titled task", "title-only sessions still get a task head");
-        assert!(rows.iter().all(|r| r.id != "CC3"), "empty seed never listed");
+        assert_eq!(
+            tt.task, "titled task",
+            "title-only sessions still get a task head"
+        );
+        assert!(
+            rows.iter().all(|r| r.id != "CC3"),
+            "empty seed never listed"
+        );
     }
 
     #[test]
@@ -745,9 +778,10 @@ mod tests {
 
         assert_eq!(
             targets,
-            BTreeMap::from([
-                (PathBuf::from("/data/store"), vec!["DEAD_A".to_string(), "EMPTY_B".to_string()]),
-            ]),
+            BTreeMap::from([(
+                PathBuf::from("/data/store"),
+                vec!["DEAD_A".to_string(), "EMPTY_B".to_string()]
+            ),]),
             "both records share the mk_record store dir"
         );
     }
@@ -755,6 +789,9 @@ mod tests {
     #[test]
     fn now_ms_is_milliseconds() {
         let t = opencoder_core::message::now_ms();
-        assert!(t > 1_000_000_000_000, "now_ms should be in milliseconds, got {t}");
+        assert!(
+            t > 1_000_000_000_000,
+            "now_ms should be in milliseconds, got {t}"
+        );
     }
 }

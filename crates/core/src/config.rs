@@ -8,14 +8,19 @@ mod autopilot;
 mod cli;
 mod domain;
 mod env;
+pub mod envs;
 mod keymap;
 mod mcp;
 mod merge;
 mod skill;
 
-pub use autopilot::AutoPilotConfig;
+pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
+pub use envs::{
+    active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,
+    set_active_env, validate_env_name,
+};
 pub use keymap::KeymapConfig;
 pub use keymap::KEYMAP_INFO;
 pub use mcp::McpServerConfig;
@@ -652,8 +657,18 @@ impl Config {
     /// Pick the file to persist config edits to. Rule (project-first, global
     /// fallback): the first existing candidate that already holds any of the
     /// editable keys; if none, create the project-local `./opencoder.json`.
+    /// While an env is active the env's config.json is the terminal target:
+    /// global/XDG candidates are skipped so `/model`-style edits land in the
+    /// env and the base files stay pristine for deactivation.
     pub fn save_target(working_dir: &Path) -> PathBuf {
-        let candidates = env::config_candidates(working_dir);
+        let active = envs::active_env();
+        let mut candidates = env::config_candidates_with(working_dir, active.as_deref());
+        if active.is_some() {
+            // candidate layout: 2 project entries + 1 env entry; drop the
+            // global/XDG tail (active_env() validated the env dir, so the
+            // env candidate is always present here).
+            candidates.truncate(3);
+        }
         // candidates are ordered project-first (index 0) → global-last, which
         // is exactly the priority we want for picking a save target.
         for p in &candidates {
@@ -669,7 +684,12 @@ impl Config {
         }
         // Nothing editable on disk yet → create the project-local opencoder.json
         // at the working-dir root (more idiomatic than .opencoder/config.json).
-        working_dir.join("opencoder.json")
+        // With an env active, create the env's config.json instead so the edit
+        // stays env-scoped (deactivation restores the base config verbatim).
+        match active.as_deref().and_then(envs::env_dir) {
+            Some(dir) => dir.join("config.json"),
+            None => working_dir.join("opencoder.json"),
+        }
     }
 
     /// Split-routing save (分流): top-level domain keys (`mcp_servers` /

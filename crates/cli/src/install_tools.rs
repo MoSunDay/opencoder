@@ -10,7 +10,7 @@
 
 use std::process::Command;
 
-use opencoder_core::tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
+use opencoder_core::tool_deps::{ToolDepStatus, all_installed, check_tool_deps};
 use opencoder_core::{seed_dep_gated_skills, skills_dir, write_install_script};
 
 /// Path to the installer written into `~/.opencoder/` by
@@ -38,9 +38,7 @@ pub fn install_tools_run() -> anyhow::Result<i32> {
     // Ensure the script exists on disk (idempotent) before we try to run it.
     write_install_script();
 
-    println!(
-        "[install_tools] running installer \u{2014} a sudo password may be required\u{2026}"
-    );
+    println!("[install_tools] running installer \u{2014} a sudo password may be required\u{2026}");
 
     let script = install_script_path();
     let exit_code = match Command::new(&script).status() {
@@ -88,11 +86,7 @@ fn format_result(exit_code: i32, status: &ToolDepStatus) -> Vec<String> {
 }
 
 fn yn(b: bool) -> &'static str {
-    if b {
-        "yes"
-    } else {
-        "no"
-    }
+    if b { "yes" } else { "no" }
 }
 
 #[cfg(test)]

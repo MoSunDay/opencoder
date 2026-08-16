@@ -5,12 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter,
-    SessionMeta, Store,
+    LibsqlStore, SessionFilter, SessionMeta, Store, export_bundle, import_bundle, read_bundle,
+    write_bundle,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -20,6 +20,10 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
         Some(ConfigSub::Show) | None => {
             let workdir = current_workdir(cli)?;
             let cfg = Config::load(&workdir)?;
+            if let Some(banner) = active_env_banner() {
+                // stderr: stdout stays pure machine-readable JSON.
+                eprintln!("{banner}");
+            }
             let json = serde_json::to_string_pretty(&cfg).context("serialize config")?;
             println!("{json}");
             Ok(())
@@ -219,10 +223,34 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<LibsqlStore> {
     LibsqlStore::open(data_dir.join("opencoder.db")).await
 }
 
+/// One-line active-env note for `config show` (None when no env is active).
+pub fn active_env_banner() -> Option<String> {
+    opencoder_core::config::envs::active_env()
+        .map(|name| format!("active env: {name}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::models_summary;
     use opencoder_core::Config;
+
+    #[test]
+    fn active_env_banner_tracks_active_env() {
+        let workdir = std::env::temp_dir()
+            .join(format!("oc-cli-envs-{}", ulid::Ulid::new()));
+        std::fs::create_dir_all(&workdir).unwrap();
+        let _iso = opencoder_core::scoped_config_home(workdir.clone());
+
+        assert_eq!(super::active_env_banner(), None);
+        opencoder_core::config::envs::create_env("clienv", &workdir, false).unwrap();
+        opencoder_core::config::envs::set_active_env(Some("clienv")).unwrap();
+        assert_eq!(
+            super::active_env_banner().as_deref(),
+            Some("active env: clienv")
+        );
+        opencoder_core::config::envs::set_active_env(None).unwrap();
+        assert_eq!(super::active_env_banner(), None);
+    }
 
     #[test]
     fn models_summary_shows_reasoning_effort_when_set() {
@@ -460,5 +488,4 @@ mod tests {
         let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(cfg["model"], "openai/gpt-4o");
     }
-
 }

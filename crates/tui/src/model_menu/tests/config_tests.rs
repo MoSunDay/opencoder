@@ -5,6 +5,7 @@ use crate::model_menu::config_form::{ConfigField, ConfigForm, Reasoning};
 use crate::model_menu::patch::ConfigPatch;
 use crate::model_menu::render_model_popup;
 use crate::model_menu::state::{handle_model_key, ModelMenu, ModelOutcome};
+use opencoder_core::ApMode;
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
@@ -280,7 +281,7 @@ fn config_form_paste_into_threshold() {
 #[test]
 fn config_form_inits_autopilot_from_config() {
     let mut c = cfg();
-    c.autopilot.enabled = true;
+    c.autopilot.mode = ApMode::Ap;
     c.autopilot.max_iterations = 7;
     let f = ConfigForm::new(&c);
     assert_eq!(f.ap_max_iter_input, "7");

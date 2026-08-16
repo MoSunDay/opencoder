@@ -1,4 +1,4 @@
-Commit: (working-tree, post-b663adb)
+Commit: e2aa1f8
 
 # feat(todos,cli): todos 中断/崩溃容错硬化 + CLI 观测面（**BREAKING**：run/resume stdout 改纯 JSON）
 

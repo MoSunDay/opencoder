@@ -146,15 +146,63 @@ fn inactive_passes_through_non_toggle_keys() {
 }
 
 #[test]
-fn toggle_ignored_when_nothing_to_select() {
+fn toggle_on_empty_viewport_flashes_instead_of_ignoring() {
     let kb = keybindings();
     let empty = ViewportCache::build(&ChatView::default(), 40, 0, 0);
     let mut sel = None;
     let (mut scroll, mut follow) = (0u32, true);
     assert_eq!(
         handle_key(&ctrl('g'), &mut sel, &kb, Some(&empty), 5, &mut scroll, &mut follow),
-        CopyOutcome::Ignored
+        CopyOutcome::Empty
     );
+    assert!(sel.is_none(), "mode must not be entered with nothing to select");
+    assert_eq!((scroll, follow), (0u32, true), "state must be untouched");
+    // Tutorial-screen case: the cache was never built at all.
+    assert_eq!(
+        handle_key(&ctrl('g'), &mut sel, &kb, None, 5, &mut scroll, &mut follow),
+        CopyOutcome::Empty
+    );
+    assert!(sel.is_none());
+    assert_eq!((scroll, follow), (0u32, true));
+}
+
+#[test]
+fn empty_flash_text_is_user_facing() {
+    assert!(!EMPTY_FLASH_TEXT.is_empty());
+    assert!(EMPTY_FLASH_TEXT.contains("nothing to copy"));
+}
+
+#[test]
+fn dispatch_key_flashes_on_empty_and_passes_through() {
+    let kb = keybindings();
+    let mut sel = None;
+    let (mut scroll, mut follow) = (0u32, true);
+    let mut flash: Option<(String, u32)> = None;
+    // Non-toggle key passes through without touching the flash.
+    assert!(!dispatch_key(
+        &plain('x'), &mut sel, &kb, None, 5, &mut scroll, &mut follow, &mut flash, 7,
+    ));
+    assert!(flash.is_none(), "pass-through must not flash");
+    // Empty-transcript toggle is consumed and sets the feedback flash.
+    assert!(dispatch_key(
+        &ctrl('g'), &mut sel, &kb, None, 5, &mut scroll, &mut follow, &mut flash, 7,
+    ));
+    assert_eq!(flash.as_ref().map(|(t, _)| t.as_str()), Some(EMPTY_FLASH_TEXT));
+    assert_eq!(flash.as_ref().map(|(_, t)| *t), Some(7), "flash stamps anim_tick");
+    assert!(sel.is_none(), "empty toggle must not enter the mode");
+    // Non-empty viewport: toggle enters without setting any flash, second
+    // toggle exits (fresh flash slot proves nothing was written).
+    let c = cache(&["a"], 40);
+    let (mut scroll2, mut follow2) = (0u32, true);
+    let mut flash2: Option<(String, u32)> = None;
+    assert!(dispatch_key(
+        &ctrl('g'), &mut sel, &kb, Some(&c), 5, &mut scroll2, &mut follow2, &mut flash2, 7,
+    ));
+    assert!(sel.is_some());
+    assert!(flash2.is_none(), "entering on content must not flash");
+    assert!(dispatch_key(
+        &ctrl('g'), &mut sel, &kb, Some(&c), 5, &mut scroll2, &mut follow2, &mut flash2, 7,
+    ));
     assert!(sel.is_none());
 }
 

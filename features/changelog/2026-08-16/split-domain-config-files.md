@@ -1,4 +1,4 @@
-Commit: (working-tree, post-f6ae527)
+Commit: 4027d70
 
 # 配置按域拆分：mcp.json / cli.json / skills.json 独立域文件（硬切，breaking）
 

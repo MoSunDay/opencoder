@@ -75,6 +75,12 @@ async fn apply_result(
                     serde_json::json!({"todo_id":todo_id,"reason":reason,"interrupted":interrupted}),
                 )
                 .await?;
+            tracing::info!(
+                workflow_id = %state.workflow_id,
+                todo_id = %todo_id,
+                interrupted,
+                "todo execution failed"
+            );
             return Ok(());
         }
     };
@@ -286,6 +292,11 @@ async fn apply_acceptance(
                     serde_json::json!({"milestone_todo_id":milestone_todo_id,"reason":reason}),
                 )
                 .await?;
+            tracing::info!(
+                workflow_id = %state.workflow_id,
+                milestone_todo_id = %milestone_todo_id,
+                "workflow rewound to milestone"
+            );
         }
     }
     Ok(())

@@ -26,7 +26,7 @@ Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 1. `validate_spec` 校验 ID、非空字段、依赖存在性和无环性。
 2. 创建父 Workflow Session 和 Store 投影，进入 `running`。
 3. 父 Session 读取当前全局状态并输出下一条结构化决策。
-4. dispatch 前先创建 TODO Session 并原子写入 active Session 引用；一个批次中的 TODO 通过 `JoinSet` 并发执行。
+4. dispatch 前先创建 TODO Session 并原子写入 active Session 引用；一个批次中的 TODO 通过 `JoinSet` 并发执行。批结果逐项应用：执行错误经 `transitions::execution_failed` 落 NeedsRevision/Failed/Interrupted 并提交，兄弟 TODO 结果恒持久化，仅致命（转换/提交失败）错误挂起整个 run。
 5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；解析器接受纯 JSON 或全文中唯一一个完整 JSON fence，并拒绝多个 fence 或未 fenced 的外围说明，工具门禁从事件记录独立计算。
 6. 父 Session 验收 Candidate。通过后推进依赖；修订时选择 resume/fork；回退时推进 world epoch 并失效里程碑后的状态。
 7. interrupt 或运行错误持久化为 `suspended`；resume 先把中断中的 TODO 归约为可恢复状态，再继续父决策循环。
@@ -40,5 +40,7 @@ Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 ## 代表性验证
 
 - `crates/todos/tests/runtime.rs`：单 TODO 闭环、父决定多 TODO 批次、debug 关闭不落目录、已有 debug 投影刷新、依赖环校验；`json_output` 单测覆盖结构化响应规范化。
+- `crates/todos/tests/recovery.rs`：验收窗口崩溃 → runtime_error 挂起后 resume 自愈、父 fail/suspend 决定、`persistence::list` limit。
+- `crates/todos/tests/interrupt.rs`：外部 interrupt 取消在飞 TODO 且可 resume、本地 Ctrl-C 单项标 Interrupted、generation 冲突停车、终态拒绝 interrupt。
 - `crates/store/tests/todos_workflow.rs`：投影与事件原子提交、generation 冲突、v8 到 v9 迁移。
 - `crates/cli/tests/todos_cli_parse.rs`：todos 命令和 debug 作用域。

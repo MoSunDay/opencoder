@@ -66,13 +66,22 @@ fn config_home_dir() -> Option<PathBuf> {
     isolated_home().or_else(dirs::home_dir)
 }
 
+/// The binary's own config home (`~/.opencoder`): the directory that owns
+/// [`primary_global_config_path`] *and* the domain config files
+/// (`mcp.json` / `cli.json` / `skills.json`). Kept here so domain-file
+/// discovery shares the exact home resolution (and therefore the
+/// [`scoped_config_home`] test override) of `config.json`.
+pub(super) fn global_opencode_home() -> Option<PathBuf> {
+    config_home_dir().map(|home| home.join(".opencoder"))
+}
+
 /// Canonical global config file owned by this binary.
 ///
 /// Kept here so production and tests share the same home-resolution rules;
 /// [`scoped_config_home`] therefore isolates both discovery and first-run
 /// creation without mutating process-wide environment variables.
 pub(super) fn primary_global_config_path() -> Option<PathBuf> {
-    config_home_dir().map(|home| home.join(".opencoder").join("config.json"))
+    global_opencode_home().map(|home| home.join("config.json"))
 }
 
 /// Resolve the XDG config dir: the thread-local override when a test set it

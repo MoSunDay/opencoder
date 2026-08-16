@@ -124,6 +124,19 @@ fn has_editable_key_recognizes_enable_tmux_session() {
 }
 
 #[test]
+fn has_editable_key_ignores_domain_keys() {
+    // config.json whose ONLY keys are the (hard-cut) domain keys is not an
+    // editable config.json — those keys live in mcp.json / cli.json /
+    // skills.json and never route a save back into config.json.
+    let v = serde_json::json!({
+        "mcp_servers": { "srv": { "enabled": true } },
+        "cli": { "git": { "enabled": true, "content": "c" } },
+        "skills": { "review": { "enabled": true } }
+    });
+    assert!(!super::merge::has_editable_key(&v));
+}
+
+#[test]
 fn merge_into_applies_theme() {
     let mut c = Config::default();
     super::merge::merge_into(
@@ -252,20 +265,31 @@ fn skills_default_empty_and_enabled_names_follow_toggles() {
 }
 
 #[test]
-fn merge_into_skills_preserves_sibling_entries() {
+fn merge_into_preserves_siblings_and_hard_cuts_domain_keys() {
     let mut c = Config::default();
-    c.skills.insert(
-        "review".to_string(),
-        super::SkillConfig { enabled: true },
-    );
+    c.compaction.tail_turns = 5;
     super::merge::merge_into(
         &mut c,
-        serde_json::json!({ "skills": { "deploy": { "enabled": true } } }),
+        // a legacy config.json still carrying the domain keys alongside a
+        // real config key: the domain keys are ignored (hard-cut), the rest
+        // merges normally with sub-key sibling preservation.
+        serde_json::json!({
+            "compaction": { "context_threshold": 9000 },
+            "skills": { "deploy": { "enabled": true } },
+            "mcp_servers": { "srv": { "enabled": true } },
+            "cli": { "git": { "enabled": true, "content": "c" } }
+        }),
     );
-    // entry-level merge: the pre-existing `review` survives the patch
-    assert!(c.skills["review"].enabled);
-    assert!(c.skills["deploy"].enabled);
-    assert_eq!(c.enabled_skill_names(), vec!["deploy".to_string(), "review".to_string()]);
+    // entry-level merge: the pre-existing `tail_turns` survives the patch
+    assert_eq!(c.compaction.tail_turns, 5);
+    assert_eq!(c.compaction.context_threshold, 9000);
+    // domain keys are hard-cut out of config.json (they live in domain files)
+    assert!(c.skills.is_empty(), "legacy config.json `skills` ignored");
+    assert!(
+        c.mcp_servers.is_empty(),
+        "legacy config.json `mcp_servers` ignored"
+    );
+    assert!(c.cli.is_empty(), "legacy config.json `cli` ignored");
 }
 
 #[test]
@@ -281,14 +305,17 @@ fn enabled_skill_names_are_sorted() {
 }
 
 #[test]
-fn load_reads_skills_from_config_file() {
+fn load_reads_skills_from_domain_file() {
     let dir = tempfile::tempdir().unwrap();
     // Thread-local HOME isolation (see save_handles_corrupt_and_empty_config_files)
-    // so a real global config can't leak entries into this load.
+    // so a real global skills.json can't leak entries into this load.
     let _home = scoped_config_home(dir.path().to_path_buf());
+    std::fs::create_dir_all(dir.path().join(".opencoder")).unwrap();
+    // domain file = the bare entries map (no `skills` envelope — the file IS
+    // the domain)
     std::fs::write(
-        dir.path().join("opencoder.json"),
-        r#"{"skills":{"review":{"enabled":true},"other":{"enabled":false}}}"#,
+        dir.path().join(".opencoder").join("skills.json"),
+        r#"{"review":{"enabled":true},"other":{"enabled":false}}"#,
     )
     .unwrap();
     let cfg = Config::load(dir.path()).unwrap();

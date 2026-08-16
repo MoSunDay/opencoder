@@ -297,14 +297,10 @@ pub(super) async fn run_app(
                         let copy_body_h = hits.body.map_or(0, |r| {
                             r.height.saturating_sub(2 + u16::from(tail_ms > 0)) as usize
                         });
-                        let copy_outcome = crate::copy_select::handle_key(
+                        if crate::copy_select::dispatch_key(
                             &k, &mut copy_sel, &keymap, viewport.as_ref(), copy_body_h,
-                            &mut scroll, &mut follow,
-                        );
-                        if copy_outcome != crate::copy_select::CopyOutcome::Ignored {
-                            crate::copy_select::apply_key(
-                                copy_outcome, &mut copy_sel, viewport.as_ref(), anim_tick,
-                            );
+                            &mut scroll, &mut follow, &mut mode_flash, anim_tick,
+                        ) {
                             dirty = true;
                             render_pending = true;
                             continue;

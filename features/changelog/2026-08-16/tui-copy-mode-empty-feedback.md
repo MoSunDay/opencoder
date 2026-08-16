@@ -1,4 +1,4 @@
-Commit: (working-tree, post-4174956)
+Commit: cfa5761
 
 # fix(tui): 空转录 Ctrl+G 静默死区 → 可感知反馈；摘除未实现的 hide_composer 绑定
 

@@ -12,7 +12,9 @@
 //! All state math (`next_state`/`move_target`/`ensure_visible`/`yank_text`/
 //! `strip_decor`) is pure and unit-tested; only [`handle_key`] mutates the
 //! caller's mode/scroll state, mirroring the old `copy_mode::handle_key`
-//! contract (toggle flips, active mode swallows, inactive passes through).
+//! contract (toggle flips, active mode swallows, inactive passes through —
+//! except a toggle on an empty transcript, which yields [`CopyOutcome::Empty`]
+//! for a status flash instead of entering the mode).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Modifier;
@@ -24,6 +26,9 @@ use crate::theme;
 
 /// Anim-tick lifetime of the `COPIED` chip shown after a yank (10 FPS ticks).
 pub const COPIED_FLASH_TICKS: u32 = 20;
+
+/// Status-flash text shown when the copy toggle hits an empty transcript.
+pub const EMPTY_FLASH_TEXT: &str = "empty \u{2014} nothing to copy";
 
 /// In-app selection state. All rows are absolute content rows
 /// (`screen row + scroll offset`) so the cursor/selection stay anchored to
@@ -97,6 +102,9 @@ pub enum CopyOutcome {
     YankExit,
     /// Consumed; exit without copying (`Esc`/`q`/toggle).
     Exit,
+    /// Consumed; the toggle hit an empty transcript (nothing to select) —
+    /// the caller flashes feedback instead of entering the mode.
+    Empty,
 }
 
 /// `true` for `c` typed with no modifiers (SHIFT tolerated for letters).
@@ -192,7 +200,9 @@ pub fn ensure_visible(
 /// Full key routing for copy/selection mode. Mirrors the old
 /// `copy_mode::handle_key` contract (toggle key flips the mode, the active
 /// mode swallows every key, inactive mode passes non-toggle keys through)
-/// extended with cursor movement and selection anchoring.
+/// extended with cursor movement and selection anchoring. When the toggle
+/// hits an empty transcript it is still consumed, but the caller receives
+/// [`CopyOutcome::Empty`] to flash feedback instead of entering the mode.
 ///
 /// Entering the mode parks the cursor on the current scroll top so the
 /// visible window is unchanged. Returns [`CopyOutcome::Ignored`] when the
@@ -209,10 +219,15 @@ pub(crate) fn handle_key(
 ) -> CopyOutcome {
     let total_rows = viewport.map_or(0, |v| v.total_rows());
     let Some(s) = sel.as_mut() else {
-        // Inactive: only the toggle key enters the mode.
-        if keymap.copy_mode.matches(k) && total_rows > 0 {
-            *sel = Some(CopySel::entry(*scroll));
-            return CopyOutcome::Consumed;
+        // Inactive: the toggle key enters the mode — or, on an empty
+        // transcript (nothing to select), is still consumed but reports
+        // [`CopyOutcome::Empty`] so the caller can flash feedback.
+        if keymap.copy_mode.matches(k) {
+            if total_rows > 0 {
+                *sel = Some(CopySel::entry(*scroll));
+                return CopyOutcome::Consumed;
+            }
+            return CopyOutcome::Empty;
         }
         return CopyOutcome::Ignored;
     };
@@ -340,6 +355,34 @@ pub(crate) fn apply_key(
     if matches!(outcome, CopyOutcome::YankExit | CopyOutcome::Exit) {
         *sel = None;
     }
+}
+
+/// Full copy-mode key dispatch for the app loop: route `k` through
+/// [`handle_key`], apply its effects ([`apply_key`]: OSC 52 yank, mode
+/// clear) and set the transient status flash on an empty-transcript toggle.
+/// Returns `true` when the key was consumed (`false` ⇒ pass through to the
+/// rest of the app); `mode_flash` mirrors the loop's status-chip state.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn dispatch_key(
+    k: &KeyEvent,
+    sel: &mut Option<CopySel>,
+    keymap: &KeyBindings,
+    viewport: Option<&ViewportCache>,
+    content_h: usize,
+    scroll: &mut u32,
+    follow: &mut bool,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+) -> bool {
+    let outcome = handle_key(k, sel, keymap, viewport, content_h, scroll, follow);
+    if outcome == CopyOutcome::Ignored {
+        return false;
+    }
+    apply_key(outcome, sel, viewport, anim_tick);
+    if outcome == CopyOutcome::Empty {
+        *mode_flash = Some((EMPTY_FLASH_TEXT.to_string(), anim_tick));
+    }
+    true
 }
 
 #[cfg(test)]

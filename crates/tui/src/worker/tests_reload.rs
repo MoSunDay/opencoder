@@ -49,7 +49,7 @@ async fn reload_config_same_model_emits_no_model_switch() {
     let prev_model = sess.config.model.clone();
 
     // Same model, resolvable endpoint (api_key present): the only thing
-    // that changes is e.g. autopilot.enabled — no ModelSwitch may fire.
+    // that changes is e.g. autopilot.mode — no ModelSwitch may fire.
     let new_cfg = Config {
         provider: ProviderConfig {
             api_key: Some("k".into()),

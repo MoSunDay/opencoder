@@ -96,6 +96,11 @@ impl Runtime {
                 .with_context(|| {
                     format!("runtime failed and suspension could not be persisted: {error:#}")
                 })?;
+                tracing::info!(
+                    workflow_id = %state.workflow_id,
+                    error = %format!("{error:#}"),
+                    "todo workflow suspended after runtime error"
+                );
             }
             return Err(error);
         }

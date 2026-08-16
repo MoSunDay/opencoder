@@ -1,4 +1,4 @@
-Commit: (working-tree, post-33b5ba2)
+Commit: b663adb
 
 # autopilot 三态模式（off / ap / review）+ `/ap` 模式选择菜单
 

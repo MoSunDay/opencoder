@@ -480,8 +480,10 @@ pub(crate) async fn dispatch_command(
     task_picker: &mut Option<TaskPicker>,
     model_menu: &mut Option<ModelMenu>,
     mcp_menu: &mut Option<crate::mcp_menu::McpMenu>,
+    envs_menu: &mut Option<crate::envs_menu::EnvsMenu>,
     cli_menu: &mut Option<crate::cli_menu::CliMenu>,
     skill_toggle_menu: &mut Option<crate::skill_menu::SkillMenu>,
+    ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     _keymap_menu: &mut Option<KeymapMenu>,
     agent_name: &str,
@@ -514,8 +516,10 @@ pub(crate) async fn dispatch_command(
                 task_picker,
                 model_menu,
                 mcp_menu,
+                envs_menu,
                 cli_menu,
                 skill_toggle_menu,
+                ap_menu,
                 cache_salt_menu,
                 agent_name,
                 input,
@@ -653,6 +657,11 @@ mod app_loop_mcp;
 
 pub(crate) use app_loop_mcp::handle_mcp_outcome;
 
+#[path = "app_loop_envs.rs"]
+mod app_loop_envs;
+
+pub(crate) use app_loop_envs::handle_envs_outcome;
+
 #[path = "app_loop_cli.rs"]
 mod app_loop_cli;
 
@@ -663,15 +672,23 @@ mod app_loop_skill;
 
 pub(crate) use app_loop_skill::handle_skill_outcome;
 
+#[path = "app_loop_ap.rs"]
+mod app_loop_ap;
+
+pub(crate) use app_loop_ap::handle_ap_outcome;
+
+
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;
 
-pub(crate) use app_loop_paste::{paste_clipboard_image, paste_clipboard_image_silent, route_paste};
+pub(crate) use app_loop_paste::{handle_paste_event, paste_clipboard_image};
+#[cfg(test)]
+pub(crate) use app_loop_paste::route_paste;
 
 #[path = "app_loop_actions.rs"]
 mod app_loop_actions;
 
-pub(crate) use app_loop_actions::dispatch_slash_action;
+pub(crate) use app_loop_actions::{cancel_running_turn, dispatch_slash_action, steer_submit_after_mouse};
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds

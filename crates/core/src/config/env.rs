@@ -103,10 +103,24 @@ pub(super) fn env_get(name: &str) -> Option<String> {
 }
 
 pub(super) fn config_candidates(working_dir: &Path) -> Vec<PathBuf> {
+    config_candidates_with(working_dir, super::envs::active_env().as_deref())
+}
+
+/// Candidate chain with an explicit env layer override. `Some(name)` inserts
+/// `~/.opencoder/envs/<name>/config.json` between the project files and the
+/// global home (project > env > ~/.opencoder > XDG); `None` is the base chain
+/// — also what env capture snapshots run against, avoiding self-reference.
+pub(super) fn config_candidates_with(
+    working_dir: &Path,
+    active: Option<&str>,
+) -> Vec<PathBuf> {
     let mut v = vec![
         working_dir.join(".opencoder").join("config.json"),
         working_dir.join("opencoder.json"),
     ];
+    if let (Some(home), Some(name)) = (config_home_dir(), active) {
+        v.push(home.join(".opencoder").join("envs").join(name).join("config.json"));
+    }
     if let Some(home) = config_home_dir() {
         // ~/.opencoder/ (this binary's own config home) — highest-priority global,
         // so `opencoder` runs directly from any directory with no project config.

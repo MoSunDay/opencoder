@@ -3,17 +3,24 @@
 //! "the switched model appears in the next request body".
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use tokio::sync::mpsc;
 
 use crate::{ChatRequest, ChatStream, LlmEvent};
 
+/// One queued `chat_stream` response. `Hang` parks the stream on an external
+/// `Notify` so tests can hold an in-flight LLM call open deterministically.
+enum ScriptEntry {
+    Events(Vec<LlmEvent>),
+    Hang(Arc<tokio::sync::Notify>),
+}
+
 /// Builder-friendly mock. Push one script per expected `chat_stream` call.
 pub struct MockChatClient {
     requests: Mutex<Vec<ChatRequest>>,
-    scripts: Mutex<VecDeque<Vec<LlmEvent>>>,
+    scripts: Mutex<VecDeque<ScriptEntry>>,
     default: Mutex<Option<Vec<LlmEvent>>>,
 }
 
@@ -28,7 +35,22 @@ impl MockChatClient {
 
     /// Queue the events to return for the next `chat_stream` call (FIFO).
     pub fn push_script(self, events: Vec<LlmEvent>) -> Self {
-        self.scripts.lock().unwrap().push_back(events);
+        self.scripts
+            .lock()
+            .unwrap()
+            .push_back(ScriptEntry::Events(events));
+        self
+    }
+
+    /// Queue a hanging stream for the next `chat_stream` call: the receiver
+    /// yields nothing until `notify` fires (or a permit is stored), then the
+    /// channel closes so the stream ends. Lets a test hold an in-flight LLM
+    /// call open and release it on demand.
+    pub fn push_hang(self, notify: Arc<tokio::sync::Notify>) -> Self {
+        self.scripts
+            .lock()
+            .unwrap()
+            .push_back(ScriptEntry::Hang(notify));
         self
     }
 
@@ -58,19 +80,28 @@ impl Default for MockChatClient {
 impl ChatStream for MockChatClient {
     fn chat_stream(&self, req: ChatRequest) -> Result<mpsc::Receiver<LlmEvent>> {
         self.requests.lock().unwrap().push(req);
-        let script = match self.scripts.lock().unwrap().pop_front() {
-            Some(s) => s,
+        let entry = match self.scripts.lock().unwrap().pop_front() {
+            Some(entry) => entry,
             None => match self.default.lock().unwrap().clone() {
-                Some(s) => s,
+                Some(events) => ScriptEntry::Events(events),
                 None => return Err(anyhow!("mock exhausted: no script queued and no default")),
             },
         };
         let (tx, rx) = mpsc::channel::<LlmEvent>(128);
         tokio::spawn(async move {
-            for ev in script {
-                tokio::task::yield_now().await;
-                if tx.send(ev).await.is_err() {
-                    break;
+            match entry {
+                ScriptEntry::Events(events) => {
+                    for ev in events {
+                        tokio::task::yield_now().await;
+                        if tx.send(ev).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                ScriptEntry::Hang(notify) => {
+                    // Zero events: once released, dropping `tx` closes the
+                    // channel and the consumer sees end-of-stream.
+                    notify.notified().await;
                 }
             }
         });
@@ -79,5 +110,52 @@ impl ChatStream for MockChatClient {
 
     fn backend(&self) -> &'static str {
         "mock"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::sync::mpsc::error::TryRecvError;
+
+    use super::*;
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            model: "mock-model".into(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            tool_choice: None,
+            temperature: None,
+            max_tokens: None,
+            reasoning_effort: None,
+            cache_salt: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn push_hang_holds_stream_silent_then_ends_after_release() {
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let mock = MockChatClient::new().push_hang(notify.clone());
+
+        let mut rx = mock.chat_stream(req()).expect("hang must open a stream");
+        assert_eq!(mock.call_count(), 1);
+
+        // While hung the channel stays open and silent.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+
+        // `notify_one` stores a permit, so the release works even if the
+        // spawned hang task has not yet polled `notified()`.
+        notify.notify_one();
+
+        let end = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("stream must end shortly after release");
+        assert!(end.is_none(), "hang sends zero events, then closes");
+
+        // The hang entry is consumed exactly once; the queue is now empty.
+        assert!(mock.chat_stream(req()).is_err());
     }
 }

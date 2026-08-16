@@ -213,7 +213,7 @@ fn dependency_validation_rejects_cycles_and_runnable_is_dependency_aware() {
     opencoder_todos::domain::validate_spec(&workflow).unwrap();
     let state = opencoder_todos::domain::initial_state(&workflow, "run".into(), "parent".into());
     assert_eq!(
-        opencoder_todos::domain::runnable(&workflow, &state),
+        opencoder_todos::domain::runnable(&workflow, &state).unwrap(),
         vec!["step-1"]
     );
     workflow.todos[0].depends_on = vec!["step-2".into()];
@@ -247,7 +247,7 @@ fn suspended_active_todo_becomes_recoverable_and_runnable() {
     assert!(state.active_todo_ids.is_empty());
     assert_eq!(state.todos["step-1"].status, TodoStatus::Interrupted);
     assert_eq!(
-        opencoder_todos::domain::runnable(&workflow, &state),
+        opencoder_todos::domain::runnable(&workflow, &state).unwrap(),
         vec!["step-1"]
     );
 }

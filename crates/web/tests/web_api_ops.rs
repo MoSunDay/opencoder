@@ -201,6 +201,61 @@ async fn skill_nonexistent_returns_404() {
 }
 
 #[tokio::test]
+async fn patch_config_writes_skills_domain_file() {
+    let state = state().await;
+    // Isolate config discovery: the skills domain write must land under the
+    // scoped home, never in the real ~/.opencoder.
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    let app = app(state.clone());
+    let resp = app.clone().oneshot(Request::builder()
+        .method("PATCH").uri("/api/config")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"skills":{"alpha":{"enabled":true}}}"#))
+        .unwrap()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], serde_json::Value::Bool(true));
+
+    // The `skills` patch lands in the dedicated domain file. Its top level
+    // IS the per-skill map — no `skills` wrapper key.
+    let skills_path = state.workdir.join(".opencoder").join("skills.json");
+    let domain: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&skills_path).unwrap()).unwrap();
+    assert_eq!(domain["alpha"]["enabled"], true);
+    assert_eq!(domain.as_object().map(|o| o.len()), Some(1));
+
+    // config.json must not carry the domain key (a domain-only patch must
+    // not create it at all; if some other path did, the key must be absent).
+    for cfg_path in [
+        state.workdir.join(".opencoder").join("config.json"),
+        state.workdir.join("opencoder.json"),
+    ] {
+        if cfg_path.exists() {
+            let cfg: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&cfg_path).unwrap()).unwrap();
+            assert!(
+                cfg.get("skills").is_none(),
+                "{} must not contain a `skills` key: {cfg}",
+                cfg_path.display()
+            );
+        }
+    }
+
+    // A follow-up GET reflects the persisted toggle (config load path).
+    let resp = app.oneshot(Request::builder()
+        .method("GET").uri("/api/config")
+        .body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["skills"]["alpha"]["enabled"], true,
+        "GET /api/config must reflect the domain-file toggle"
+    );
+}
+
+#[tokio::test]
 async fn get_config_returns_json() {
     let state = state().await;
     // Isolate config discovery so this test never reads the real

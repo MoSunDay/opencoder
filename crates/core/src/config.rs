@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 mod autopilot;
 mod cli;
+mod domain;
 mod env;
 mod keymap;
 mod mcp;
@@ -412,10 +413,18 @@ impl Config {
     }
 
     /// Return a cloned config with `patch` applied using the same merge rules
-    /// as disk loading/saving. The source config is never mutated.
+    /// as disk loading/saving. The source config is never mutated. Domain
+    /// keys (`mcp_servers` / `cli` / `skills`) still apply here — they are
+    /// routed through the same per-entry domain merge, so building configs
+    /// from JSON patches keeps working even though `config.json` itself no
+    /// longer carries them.
     pub fn merged_with(&self, patch: &serde_json::Value) -> Config {
         let mut merged = self.clone();
-        merge::merge_into(&mut merged, patch.clone());
+        let (remainder, domains) = domain::split_patch(patch);
+        merge::merge_into(&mut merged, remainder);
+        for (key, value) in &domains {
+            domain::apply_domain(&mut merged, key, value);
+        }
         merged
     }
 
@@ -451,6 +460,15 @@ impl Config {
                     );
                 }
                 merge::merge_into(&mut cfg, parsed);
+            }
+        }
+        // Domain files (mcp.json / cli.json / skills.json): `mcp_servers` /
+        // `cli` / `skills` are hard-cut from config.json and load from exactly
+        // one file — the project one when it exists, else the global one
+        // (project shadows global entirely; no per-key merge across files).
+        for (key, _) in domain::DOMAIN_FILES {
+            if let Some(v) = domain::read_effective(working_dir, key) {
+                domain::apply_domain(&mut cfg, key, &v);
             }
         }
         env::apply_env(&mut cfg);
@@ -654,10 +672,33 @@ impl Config {
         working_dir.join("opencoder.json")
     }
 
-    /// Merge `patch` into the JSON at `save_target`, preserving unrelated keys
-    /// and pretty-printing. Creates the file (and parent `.opencoder/` dir) if
-    /// missing. Returns the path written.
+    /// Split-routing save (分流): top-level domain keys (`mcp_servers` /
+    /// `cli` / `skills`) are written to their dedicated domain files
+    /// (`mcp.json` / `cli.json` / `skills.json`); the remainder follows the
+    /// normal [`save_target`](Self::save_target) + [`save_to`] config.json
+    /// flow.
+    ///
+    /// Return-path semantics: a non-empty config remainder writes config.json
+    /// and returns its path (domain writes still happen); a patch containing
+    /// only domain keys returns the last domain write target and never
+    /// creates a config.json; an empty patch with no domain keys keeps the
+    /// legacy config.json-only behavior.
     pub fn save(working_dir: &Path, patch: &serde_json::Value) -> Result<PathBuf> {
+        let (remainder, domains) = domain::split_patch(patch);
+        let mut last_domain: Option<PathBuf> = None;
+        for (key, value) in &domains {
+            let target = domain::save_domain(working_dir, key, value).map_err(|e| {
+                CoreError::Config(format!("save domain file for `{key}`: {e}"))
+            })?;
+            last_domain = Some(target);
+        }
+        if remainder.as_object().is_some_and(|o| !o.is_empty()) {
+            let target = Self::save_target(working_dir);
+            return Self::save_to(&target, &remainder);
+        }
+        if let Some(target) = last_domain {
+            return Ok(target);
+        }
         let target = Self::save_target(working_dir);
         Self::save_to(&target, patch)
     }

@@ -34,27 +34,9 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     {
         return true;
     }
-    if obj
-        .get("mcp_servers")
-        .and_then(|v| v.as_object())
-        .is_some_and(|p| !p.is_empty())
-    {
-        return true;
-    }
-    if obj
-        .get("cli")
-        .and_then(|v| v.as_object())
-        .is_some_and(|entries| !entries.is_empty())
-    {
-        return true;
-    }
-    if obj
-        .get("skills")
-        .and_then(|v| v.as_object())
-        .is_some_and(|entries| !entries.is_empty())
-    {
-        return true;
-    }
+    // NOTE: `mcp_servers` / `cli` / `skills` are deliberately NOT editable
+    // config.json keys — they are hard-cut into their own domain files
+    // (mcp.json / cli.json / skills.json); see `config::domain`.
     if obj
         .get("compaction")
         .and_then(|v| v.as_object())
@@ -203,30 +185,10 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
-        if let Some(servers) = obj.get("mcp_servers").and_then(|v| v.as_object()) {
-            for (name, sv) in servers {
-                if let Some(sobj) = sv.as_object() {
-                    let entry = cfg.mcp_servers.entry(name.clone()).or_default();
-                    super::mcp::merge(entry, sobj);
-                }
-            }
-        }
-        if let Some(entries) = obj.get("cli").and_then(|v| v.as_object()) {
-            for (name, cv) in entries {
-                if let Some(cobj) = cv.as_object() {
-                    let entry = cfg.cli.entry(name.clone()).or_default();
-                    super::cli::merge(entry, cobj);
-                }
-            }
-        }
-        if let Some(entries) = obj.get("skills").and_then(|v| v.as_object()) {
-            for (name, sv) in entries {
-                if let Some(sobj) = sv.as_object() {
-                    let entry = cfg.skills.entry(name.clone()).or_default();
-                    super::skill::merge(entry, sobj);
-                }
-            }
-        }
+        // NOTE: `mcp_servers` / `cli` / `skills` are hard-cut from
+        // config.json (see `config::domain`); a legacy config.json still
+        // carrying them is ignored here — users migrate those keys into
+        // mcp.json / cli.json / skills.json.
         if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
             if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
                 cfg.compaction.auto = v;
@@ -334,15 +296,13 @@ mod tests {
         assert_eq!(cfg.tool_guard.max_consecutive_failures, u32::MAX);
     }
 
-    /// Regression: a full config object carrying `mcp_servers` must populate
-    /// `cfg.mcp_servers` (the `merge_into` top-level branch used by
-    /// `Config::load` reading `mcp_servers` from `config.json`), and each
-    /// server's `env` map must run values through `env::resolve_env`:
-    /// brace-indirected `{VAR}` values resolve against the process env (empty
-    /// when unset), plain values are kept verbatim. Deterministic + parallel
-    /// safe (no `set_var`: only a getenv of a never-set var).
+    /// Hard-cut pin: `mcp_servers` / `cli` / `skills` no longer merge from
+    /// config.json (they live in mcp.json / cli.json / skills.json — see
+    /// `config::domain`). A legacy config.json still carrying them must be
+    /// ignored, not error. (The mcp env-indirection coverage that used to
+    /// live here moved to `config::domain`'s `apply_domain` tests.)
     #[test]
-    fn mcp_servers_load_from_full_config_and_resolve_env_indirection() {
+    fn merge_into_hard_cuts_domain_keys_from_config_json() {
         let mut cfg = Config::default();
         let value = serde_json::json!({
             "mcp_servers": {
@@ -350,29 +310,27 @@ mod tests {
                     "enabled": true,
                     "command": "npx",
                     "args": ["-y", "@z_ai/mcp-server@latest"],
-                    "env": {
-                        "Z_AI_MODE": "ZHIPU",
-                        "OPENCODER_TEST_UNSET_KEY": "{OPENCODER_TEST_UNSET_KEY_DOES_NOT_EXIST}"
-                    }
+                    "env": { "Z_AI_MODE": "ZHIPU" }
                 }
-            }
+            },
+            "cli": { "git": { "enabled": true, "content": "use git" } },
+            "skills": { "review": { "enabled": true } }
         });
         merge_into(&mut cfg, value);
 
-        let srv = cfg
-            .mcp_servers
-            .get("zai-vision")
-            .expect("mcp server loaded from full config object");
-        assert!(srv.enabled);
-        assert_eq!(srv.command.as_deref(), Some("npx"));
-        assert_eq!(srv.args, vec!["-y", "@z_ai/mcp-server@latest"]);
-        // literal value (no braces) kept verbatim
-        assert_eq!(srv.env.get("Z_AI_MODE").map(String::as_str), Some("ZHIPU"));
-        // brace-indirected value routed through resolve_env; unset var -> ""
-        assert_eq!(
-            srv.env.get("OPENCODER_TEST_UNSET_KEY").map(String::as_str),
-            Some("")
+        assert!(
+            cfg.mcp_servers.is_empty(),
+            "legacy config.json `mcp_servers` must be ignored"
         );
+        assert!(
+            cfg.cli.is_empty(),
+            "legacy config.json `cli` must be ignored"
+        );
+        assert!(
+            cfg.skills.is_empty(),
+            "legacy config.json `skills` must be ignored"
+        );
+        assert!(cfg.enabled_skill_names().is_empty());
     }
 
     /// Regression for the top-level `provider` block merge: previously only

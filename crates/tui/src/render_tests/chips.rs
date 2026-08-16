@@ -166,7 +166,7 @@ fn ap_chip_reflects_autopilot_mode() {
             &mut hits,
             &mut None,
             false,
-            None,
+            false,
             &[],
             false,
             None,

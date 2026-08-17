@@ -1,12 +1,12 @@
 ---
 name: say-and-replay
-description: Read-only alignment snapshot at any checkpoint with a mandatory five-question recap. Restates the original goal/acceptance criteria, replays completed TODOs with verify-method + evidence, exposes all encountered blockers (resolved and open, plus what/who is needed to clear the open ones), and lists the remaining TODOs to fully close the loop. Orthogonal to the main chain — use it to align progress, surface blockers, and support handoff/resume. Never edits code or commits.
+description: Read-only alignment snapshot at any checkpoint with a mandatory five-question recap. Restates the original goal/acceptance criteria, replays completed TODOs with verify-method + evidence, quantifies progress (completed/total + percent), exposes all encountered blockers (resolved and open, plus what/who is needed to clear the open ones), and lists the remaining TODOs to fully close the loop. Orthogonal to the main chain — use it to align progress, surface blockers, and support handoff/resume. Never edits code or commits.
 ---
 
 # say-and-replay —— 复述与回放（对齐快照）
 
 ## 角色
-对齐快照契约。在任意检查点介入，**五问必答**——① 原始需求目标是什么（复述）② 做了哪些事情（回放）③ 过程中遇到了什么卡点（含已解除）④ 每个完成点怎么验证的、证据是什么 ⑤ 下一步 TODO——把当前任务「**说清楚原始需求目标本身 → 回放已做的 TODO 及验证方式与证据 → 暴露全程遇到的卡点与当前卡点 → 列出后续完全闭环所需 TODO**」一气呈现，用于对齐进度、暴露阻塞、支撑交接 / 恢复。
+对齐快照契约。在任意检查点介入，**五问必答**——① 原始需求目标是什么（复述）② 做了哪些事情、做到了多少（回放 + 完成度 completed/total + 百分比）③ 过程中遇到了什么卡点（含已解除）④ 每个完成点怎么验证的、证据是什么 ⑤ 下一步 TODO——把当前任务「**说清楚原始需求目标本身 → 回放已做的 TODO 及验证方式与证据 → 暴露全程遇到的卡点与当前卡点 → 列出后续完全闭环所需 TODO**」一气呈现，用于对齐进度、暴露阻塞、支撑交接 / 恢复。
 
 > **只读**：本 skill 不修改代码、不提交、不推送、不重排 STATUS 块。它只做一次结构化复述 + 回放。需要实现时回 `do-and-done`；需要规划 / 重排时回 `task-plan`；需要提交时用 `submit`；需要回顾优化空间用 `summary`。
 
@@ -27,7 +27,7 @@ description: Read-only alignment snapshot at any checkpoint with a mandatory fiv
 ```
 ## REPLAY
 goal: <复述原始需求目标本身 + 验收标准 —— 来自用户原始 prompt，而非派生的 STATUS goal>
-progress: <completed 数>/<总数>   ← 仅计入 verify+evidence 俱全的 completed
+progress: <completed 数>/<总数>（<0-100>%，向下取整）   ← 仅计入 verify+evidence 俱全的 completed
 done:                          ← 已完成且有验证方式+证据的 TODO
   - <已完成 TODO> | accept: <验收标准> | verify: <怎么验证的：命令 / 方法> | evidence: <当次证据：命令+结果 / file:line / 日志摘要>
 doing:                         ← 进行中或证据尚不充分的项
@@ -43,7 +43,7 @@ verdict: <on-track | at-risk | blocked | done>   ← 一句话对齐判定 + 理
 
 ### 字段语义（精确映射用户诉求）
 - **goal（复述原始需求目标本身）**：逐字 / 贴近地复述用户**最初提出**的需求目标 + 验收标准。不是 STATUS 块里派生改写后的 `goal`，而是回溯到「用户到底要什么」。需求中途变化则一并标出。
-- **progress（进度）**：`completed/total`。只计入**有验收证据**的 completed；无证据项归入 `doing`，不得虚高进度。
+- **progress（进度）**：`completed/total` + 百分比（`floor(completed 数/总数 × 100)`）。只计入**有验收证据**的 completed；无证据项归入 `doing`，不得虚高进度。
 - **done（已做的回放）**：逐条列已完成 TODO + 验收标准 + **验证方式（`verify`）** + **可追溯证据（`evidence`）**。`verify` 回答「怎么验证的」（跑了什么命令 / 用了什么方法），`evidence` 回答「证据是什么」（命令 + 结果摘要、`file:line`、日志）。**两者缺一不计入 completed**，归入 `doing` 并写明 `reason`。
 - **doing（进行中）**：正在做但未完成、或证据不足的项，附 `reason:` 说明为何卡在这一步。
 - **encountered（全程遇到的卡点）**：过程中遇到的**所有**卡点，含已解除的——已解除标 `status: resolved` 并在 `resolution:` 写明解除方式（怎么解除的）；未解除标 `status: open`、`resolution: pending`（细节在 `blocked` 展开）。无则写 `none`。

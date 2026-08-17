@@ -1,6 +1,6 @@
 ---
 name: review
-description: Read-only post-completion assessment that meets the repo go-live standard (rules/01-03). Opens with a mandatory five-question recap — restates the original goal, replays each completed item with verify-method + evidence, lists encountered blockers (resolved and open), and names next TODOs. Then re-runs the regression gates itself for fresh evidence, checks the test-count baseline didn't drop, scans the diff for green-washing (#[ignore], deleted tests, weakened asserts), verifies test quality + layering + structural coverage, reviews the full diff for scope-creep/secrets/debug output, then rules on go-live readiness. Never edits code or commits.
+description: Read-only post-completion assessment that meets the repo go-live standard (rules/01-03). Opens with a mandatory five-question recap — restates the original goal, replays each completed item with verify-method + evidence, quantifies progress (completed/total + percent), lists encountered blockers (resolved and open), and names next TODOs. Then re-runs the regression gates itself for fresh evidence, checks the test-count baseline didn't drop, scans the diff for green-washing (#[ignore], deleted tests, weakened asserts), verifies test quality + layering + structural coverage, reviews the full diff for scope-creep/secrets/debug output, then rules on go-live readiness. Never edits code or commits.
 ---
 
 # review —— 上线前评审契约（符合 rules/01-03 go-live 标准）
@@ -10,7 +10,7 @@ description: Read-only post-completion assessment that meets the repo go-live st
 
 五问（复述回顾，必答——任一缺失或空泛即 not ready）：
 1. 原始需求目标是什么？（逐字 / 贴近复述，不判定）
-2. 做了哪些事情？（逐条完成点回放）
+2. 做了哪些事情？做到了多少？（逐条完成点回放 + 核心 TODO 完成度：completed/total + 百分比，向下取整）
 3. 过程中遇到了什么卡点？（含已解除的 + 解除方式）
 4. 每个完成点怎么验证的？证据是什么？（没有证据 = 没有通过）
 5. 下一步 TODO 是什么？
@@ -119,6 +119,7 @@ cargo build --workspace                      # 零错误
 ```
 ## REVIEW
 goal: <复述原始需求目标 + 验收标准 —— 取自用户原始 prompt；对照 STATUS goal 标注是否偏航>
+progress: <completed 数>/<总数>（<0-100>%，向下取整）   ← 仅计入 verify+evidence 俱全的 completed；口径同 task-plan progress%
 done:                          ← 逐条完成点回放（verify+evidence 缺一不计入）
   - <完成点> | verify: <怎么验证的：命令 / 方法> | evidence: <当次证据：输出尾段 / file:line>
 blockers:                      ← 遇到的卡点（含已解除；无则 none）
@@ -150,7 +151,7 @@ gaps: <若 not ready，逐条列出阻塞项与建议；ready 则 none>
 ```
 
 ## 结论规则
-- 五问任一缺失或空泛（`goal` / `done` / `blockers` / `next_todos` 缺字段，或完成点无 `verify`+`evidence`）→ 视同证据不充分，`verdict: not ready`。
+- 五问任一缺失或空泛（`goal` / `progress` / `done` / `blockers` / `next_todos` 缺字段，或完成点无 `verify`+`evidence`）→ 视同证据不充分，`verdict: not ready`。
 - 任一 go-live gate ❌ → `verdict: not ready`，并在 `gaps` 列清阻塞项与建议。
 - 全部 ✅ 或附理由 N/A → `verdict: go-live ready`。
 - **绝不**伪绿：没实跑的测试不算通过；没看的回归面不算覆盖；推测的影响不算评估；N/A 无理由视为 ❌。

@@ -27,6 +27,10 @@ impl McpTool {
         format!("mcp__{server}__{tool}")
     }
 
+    // Mirrors `normalized_server_name` in `crates/tui/src/mcp_menu/patch.rs`
+    // (the TUI save-time collision guard): `-` and `.` both become `_`, so
+    // `a-b` / `a.b` / `a_b` share one tool prefix. Deliberately duplicated
+    // (one line each side, cross-referenced) instead of a cross-crate dep.
     fn sanitize_server_name(name: &str) -> String {
         name.replace(['-', '.'], "_")
     }

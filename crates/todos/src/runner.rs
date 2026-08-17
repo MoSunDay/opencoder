@@ -8,6 +8,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{batch, domain, parent, persistence, transitions, types::*};
 
+/// Maximum dispatch-correction re-asks in `drive_inner`: 1 initial decision
+/// plus 2 corrected re-decisions before the invalid dispatch bails.
+const DISPATCH_CORRECTION_RETRIES: u32 = 2;
+
 #[derive(Clone)]
 pub struct Runtime {
     pub store: Arc<dyn Store>,
@@ -50,6 +54,18 @@ impl Runtime {
             .await?
             .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
         domain::validate_spec(&spec)?;
+        // Bug #16c: a persisted Running status means another runner is
+        // driving this workflow (or a previous runner crashed mid-flight and
+        // the state never converged). Two drivers would fight over the
+        // generation CAS, so resume refuses until an interrupt has parked
+        // the workflow — `opencoder todos interrupt <id>` is the takeover
+        // path after a crash.
+        if state.status == WorkflowStatus::Running {
+            anyhow::bail!(
+                "todo workflow {workflow_id} is still running: another runner may be driving it. \
+                 Run `opencoder todos interrupt {workflow_id}` first, then resume to take over"
+            );
+        }
         if matches!(
             state.status,
             WorkflowStatus::Completed | WorkflowStatus::Failed
@@ -141,7 +157,41 @@ impl Runtime {
                     .await?;
                 return Ok(());
             }
-            let decision = parent::schedule(&parent_runtime, spec, state).await?;
+            let mut correction: Option<String> = None;
+            let mut retries_left = DISPATCH_CORRECTION_RETRIES;
+            let decision = loop {
+                let decision =
+                    parent::schedule(&parent_runtime, spec, state, correction.as_deref()).await?;
+                let ParentDecision::Dispatch { todos, .. } = &decision else {
+                    break decision;
+                };
+                // Bug #16b: an invalid dispatch decision (unrunnable id,
+                // wrong context_mode, exhausted attempts, ...) is a
+                // correctable model mistake, not a runtime failure. Dry-run
+                // the same validation `batch::execute` applies and re-ask
+                // the parent with a correction before a bad decision
+                // suspends the whole workflow.
+                match batch::validate_request(spec, state, todos) {
+                    Ok(()) => break decision,
+                    Err(error) if retries_left > 0 => {
+                        retries_left -= 1;
+                        let reason = format!("{error:#}");
+                        tracing::info!(
+                            workflow_id = %state.workflow_id,
+                            error = %reason,
+                            retries_left,
+                            "parent dispatch rejected; re-asking with correction"
+                        );
+                        correction = Some(format!(
+                            "your previous dispatch decision was rejected: {reason}. Dispatch only runnable TODO ids with a valid context_mode, or choose another allowed operation."
+                        ));
+                    }
+                    Err(error) => {
+                        return Err(error
+                            .context("parent dispatch stayed invalid after correction retries"));
+                    }
+                }
+            };
             match decision {
                 ParentDecision::Dispatch { todos, reason } => {
                     batch::execute(self, spec, state, todos, reason).await?;

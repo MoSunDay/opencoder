@@ -239,3 +239,150 @@ async fn persistence_list_returns_summaries_and_honors_limit() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Bug #16b: empty/invalid parent decisions are correctable model mistakes.
+// The parent gets a bounded correction re-ask instead of a one-shot
+// suspension; only a persistently invalid decision suspends the workflow.
+// ---------------------------------------------------------------------------
+
+fn two_step_spec() -> WorkflowSpec {
+    let mut workflow = spec();
+    workflow.todos.push(TodoSpec {
+        id: "step-2".into(),
+        title: "second".into(),
+        requirement_background: "required by test".into(),
+        instructions: "return the candidate".into(),
+        depends_on: vec!["step-1".into()],
+        agent: "act".into(),
+        max_attempts: 2,
+        acceptance: AcceptanceSpec {
+            criteria: "candidate exists".into(),
+            required_tool_calls: Vec::new(),
+        },
+        metadata: serde_json::Value::Null,
+    });
+    workflow
+}
+
+/// One unparseable JSON reply must be corrected in-session and the workflow
+/// must continue instead of suspending on the first model hiccup.
+#[tokio::test]
+async fn unparseable_parent_decision_is_corrected_without_suspending() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(done("sorry, I cannot produce JSON right now"))
+            .push_script(dispatch("step-1", "new"))
+            .push_script(done(CANDIDATE))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":false}"#,
+            ))
+            .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = make_runtime(&store, mock.clone(), temp.path());
+
+    let state = runtime
+        .run_new_with_id(spec(), "run-correct".into())
+        .await
+        .unwrap();
+
+    assert_eq!(state.status, WorkflowStatus::Completed);
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Passed);
+    assert_eq!(mock.call_count(), 5, "exactly one correction re-ask");
+    // The correction prompt landed in the parent transcript.
+    let parent = store
+        .load_messages(&state.parent_session_id)
+        .await
+        .unwrap()
+        .iter()
+        .map(|message| message.text())
+        .collect::<String>();
+    assert!(
+        parent.contains("could not be parsed"),
+        "the re-ask must explain why the previous reply was rejected"
+    );
+}
+
+/// A dispatch decision for a non-runnable TODO must be re-asked with a
+/// correction instead of suspending the round through dispatch validation.
+#[tokio::test]
+async fn non_runnable_dispatch_is_corrected_without_suspending() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mock = Arc::new(
+        MockChatClient::new()
+            // step-2 is not runnable while step-1 is still pending.
+            .push_script(dispatch("step-2", "new"))
+            .push_script(dispatch("step-1", "new"))
+            .push_script(done(CANDIDATE))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":false}"#,
+            ))
+            .push_script(dispatch("step-2", "new"))
+            .push_script(done(CANDIDATE))
+            .push_script(done(
+                r#"{"operation":"accept","reason":"ok","mark_milestone":false}"#,
+            ))
+            .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = make_runtime(&store, mock.clone(), temp.path());
+
+    let state = runtime
+        .run_new_with_id(two_step_spec(), "run-correct-dispatch".into())
+        .await
+        .unwrap();
+
+    assert_eq!(state.status, WorkflowStatus::Completed);
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Passed);
+    assert_eq!(state.todos["step-2"].status, TodoStatus::Passed);
+    assert_eq!(mock.call_count(), 8, "exactly one correction re-ask");
+    let parent = store
+        .load_messages(&state.parent_session_id)
+        .await
+        .unwrap()
+        .iter()
+        .map(|message| message.text())
+        .collect::<String>();
+    assert!(
+        parent.contains("TODO step-2 is not runnable"),
+        "the correction must carry the validation error"
+    );
+    let events = kinds(&store, "run-correct-dispatch").await;
+    assert!(!events.iter().any(|kind| kind == "runtime_error"));
+}
+
+/// Three consecutive unparseable replies exhaust the correction budget: the
+/// workflow suspends and the underlying parse error stays visible.
+#[tokio::test]
+async fn three_unparseable_parent_decisions_suspend_with_error_preserved() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(done("nope one"))
+            .push_script(done("nope two"))
+            .push_script(done("nope three")),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = make_runtime(&store, mock.clone(), temp.path());
+
+    let crashed = runtime
+        .run_new_with_id(spec(), "run-junk".into())
+        .await
+        .unwrap_err();
+
+    let reason = format!("{crashed:#}");
+    assert!(reason.contains("invalid JSON"), "{reason}");
+    let suspended = load(&store, "run-junk").await;
+    assert_eq!(suspended.status, WorkflowStatus::Suspended);
+    let terminal = suspended.terminal_reason.unwrap();
+    assert!(
+        terminal.contains("workflow agent returned invalid JSON"),
+        "{terminal}"
+    );
+    assert!(terminal.contains("nope three"), "{terminal}");
+    assert_eq!(mock.call_count(), 3, "1 initial ask + 2 corrections");
+    let events = kinds(&store, "run-junk").await;
+    assert_eq!(events.last().map(String::as_str), Some("runtime_error"));
+}

@@ -174,9 +174,11 @@ fn json_kind(v: &serde_json::Value) -> &'static str {
 
 /// Merge `patch` into the domain file for `key` (pretty-printed, parents
 /// created). A `null` entry deletes that key from the file (the
-/// [`super::merge::merge_json`] semantics). An existing-but-corrupt target
-/// file refuses the write (error) and is left byte-for-byte untouched,
-/// mirroring `Config::save_to`. Returns the path written.
+/// [`super::merge::merge_json`] semantics); a whole-domain `null` patch
+/// empties the file to `{}` instead of writing a literal `null` (see the
+/// normalization below). An existing-but-corrupt target file refuses the
+/// write (error) and is left byte-for-byte untouched, mirroring
+/// `Config::save_to`. Returns the path written.
 pub(crate) fn save_domain(
     working_dir: &Path,
     key: &str,
@@ -206,6 +208,17 @@ pub(crate) fn save_domain(
         serde_json::json!({})
     };
     super::merge::merge_json(&mut root, patch);
+    // A whole-domain `null` patch (e.g. `{"cli": null}` after `split_patch`)
+    // must not write a literal 4-byte `null` file: `merge_json`'s fallthrough
+    // branch clobbers `root` wholesale, which pollutes the user-visible file
+    // and makes the *next* save start from `Null` and whole-replace again.
+    // An empty object deletes every entry while keeping the file present (so
+    // corrupt-refusal semantics keep applying); the same normalization
+    // defensively rescues any other non-object result (e.g. a pre-existing
+    // `null`/scalar file merged with a plain object patch).
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
     let pretty = serde_json::to_string_pretty(&root)?;
     std::fs::write(&target, pretty)?;
     Ok(target)
@@ -442,6 +455,94 @@ mod tests {
         assert_eq!(
             srv.env.get("OPENCODER_TEST_UNSET_KEY").map(String::as_str),
             Some("")
+        );
+    }
+
+    /// Thread-local home isolation for `save_domain` tests: without it the
+    /// global write target would be the real `~/.opencoder/<domain>.json`.
+    /// With the tempdir as both working dir and home, every fallback layer
+    /// resolves inside it (project == global path, no active env marker).
+    fn scoped_save_home(dir: &std::path::Path) -> super::super::env::ScopedConfigHome {
+        super::super::env::scoped_config_home(dir.to_path_buf())
+    }
+
+    // --- Bug #12: whole-domain null patch must not write a literal `null` ---
+
+    #[test]
+    fn save_domain_whole_null_empties_existing_file_to_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = scoped_save_home(dir.path());
+        let file = dir.path().join(".opencoder").join("mcp.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            r#"{ "a": { "enabled": true }, "b": { "enabled": false } }"#,
+        )
+        .unwrap();
+        let written = save_domain(dir.path(), "mcp_servers", &serde_json::Value::Null)
+            .expect("whole-domain null save must succeed");
+        assert_eq!(written, file, "existing project file is the write target");
+        let raw = std::fs::read_to_string(&file).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw)
+            .unwrap_or_else(|e| panic!("file must stay parseable, got {raw:?}: {e}"));
+        assert_eq!(parsed, serde_json::json!({}), "must be `{{}}`, not `null`");
+    }
+
+    #[test]
+    fn save_domain_whole_null_on_empty_dir_writes_empty_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = scoped_save_home(dir.path());
+        let written = save_domain(dir.path(), "cli", &serde_json::Value::Null)
+            .expect("whole-domain null save into a fresh dir must succeed");
+        assert!(written.exists(), "file is created (not deleted) on save");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&written).unwrap())
+                .expect("file must be parseable JSON, not a bare `null`");
+        assert_eq!(parsed, serde_json::json!({}));
+    }
+
+    #[test]
+    fn save_domain_after_whole_null_keeps_new_entries_and_deletions() {
+        let dir = tempfile::tempdir().unwrap();
+        let _home = scoped_save_home(dir.path());
+        let file = dir.path().join(".opencoder").join("mcp.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{ "stale": { "enabled": true } }"#).unwrap();
+
+        save_domain(dir.path(), "mcp_servers", &serde_json::Value::Null).unwrap();
+        let after_null: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(after_null, serde_json::json!({}));
+
+        // Pre-fix this started from a literal `null` root, so a follow-up
+        // entry-deletion patch whole-replaced instead of merging, and a new
+        // entry landed on a non-object root.
+        save_domain(
+            dir.path(),
+            "mcp_servers",
+            &serde_json::json!({ "fresh": { "enabled": true } }),
+        )
+        .unwrap();
+        let after_add: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(
+            after_add,
+            serde_json::json!({ "fresh": { "enabled": true } }),
+            "new entry must land on the normalized `{{}}` root"
+        );
+
+        save_domain(
+            dir.path(),
+            "mcp_servers",
+            &serde_json::json!({ "fresh": null }),
+        )
+        .unwrap();
+        let after_del: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(
+            after_del,
+            serde_json::json!({}),
+            "entry-level null deletion must remove the key, not write a null entry"
         );
     }
 }

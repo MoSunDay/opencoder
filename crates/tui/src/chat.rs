@@ -7,6 +7,19 @@ use crate::theme;
 use opencoder_llm::estimate;
 use opencoder_session::SessionEvent;
 
+// ── Exact flattened header shapes (single source of truth) ────────────────
+// These headers are emitted as single spans with exactly these contents, and
+// copy-mode's structured cleaner (`crate::copy_mode::clean`) drops rows by
+// matching the same constants — shape drift becomes a compile-time-visible
+// shared change instead of a silent mis-classification.
+
+/// `ChatBlock::User` header row.
+pub(crate) const ROLE_USER_HEADER: &str = "\u{276f} User:";
+/// `ChatBlock::Assistant` header row.
+pub(crate) const ROLE_SAY_HEADER: &str = "\u{276f} Say:";
+/// `ChatBlock::Plan` header row.
+pub(crate) const PLAN_HEADER: &str = "\u{2576}\u{2500} plan \u{2500}\u{2574}";
+
 /// Body lines of streaming assistant `raw`, mirroring `flatten_with`: drop the
 /// single trailing empty element from a terminating newline (interior blanks kept).
 /// Shared by `collect_headers` and `flatten_with` so they never diverge (A2/A3).
@@ -432,7 +445,7 @@ impl ChatView {
                 ChatBlock::Marker(lines) => out.extend(lines.iter().cloned()),
                 ChatBlock::User { rendered } => {
                     out.push(Line::from(Span::styled(
-                        "\u{276f} User:",
+                        ROLE_USER_HEADER,
                         Style::default()
                             .fg(theme::user_color())
                             .add_modifier(Modifier::BOLD),
@@ -452,7 +465,7 @@ impl ChatView {
                     // Visual header so assistant output has its own labelled region,
                     // mirroring the `user:` marker on user prompts.
                     out.push(Line::from(Span::styled(
-                        "\u{276f} Say:",
+                        ROLE_SAY_HEADER,
                         Style::default()
                             .fg(theme::ok_color())
                             .add_modifier(Modifier::BOLD),
@@ -554,7 +567,7 @@ impl ChatView {
                 }
                 ChatBlock::Plan { rendered, .. } => {
                     out.push(Line::from(Span::styled(
-                        "\u{2576}\u{2500} plan \u{2500}\u{2574}",
+                        PLAN_HEADER,
                         Style::default()
                             .fg(theme::warn_color())
                             .add_modifier(Modifier::BOLD),

@@ -4,14 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use anyhow::{Context, Result, anyhow};
-use opencoder_core::{Config, resolve_agent};
+use anyhow::{anyhow, Context, Result};
+use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{ChatClient, ChatStream};
-use opencoder_session::{SessionState, generate_title, resume_and_replay as resume_session};
+use opencoder_session::{generate_title, resume_and_replay as resume_session, SessionState};
 use opencoder_store::{SessionFilter, SessionPatch, Store};
 
-use crate::Cli;
 use crate::display::{print_event, truncate};
+use crate::Cli;
 
 pub(crate) use crate::run_image::load_image_data_uris;
 

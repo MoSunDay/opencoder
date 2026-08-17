@@ -85,16 +85,30 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 /// queue-drain and steer paths for both compound commands (`/plan review`)
 /// and plain prompts (`$review do it`) so both get consistent skill handling.
 ///
-/// When `$skill` stripping empties the text but a skill was activated (e.g.
-/// `/plan $review`), injects [`SKILL_TRIGGER`] instead — mirroring the idle
-/// path's pure-skill behavior — and skips the plan-mode tag.
+/// When THIS input resolved at least one `$skill` token and the stripping
+/// empties the text (e.g. `/plan $review`), injects [`SKILL_TRIGGER`]
+/// instead — mirroring the idle path's pure-skill behavior — and skips the
+/// plan-mode tag. The condition is scoped to tokens resolved by this very
+/// call, NOT the session's sticky skill: a queue/steer restart with a stale
+/// active skill must not re-inject a trigger for a skill the item never
+/// mentioned (that amplified the drain self-continuation loop).
 pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[String]) {
-    let mut text = resolve_inline_skills(session, rest);
-    // Pure-skill: tokens consumed all text but activated a skill. Inject the
-    // trigger so the model acts on the skill body (no plan-mode tag, matching
-    // the idle path).
+    let skills = discover_skills();
+    let (mut text, unresolved) = resolve_inline_skills_with(session, rest, &skills);
+    // "Resolved now": THIS input carried at least one `$name` token that
+    // extraction found and discovery matched (so it was stripped and
+    // activated above). Scoped to this call — not the sticky skill — so a
+    // queue/steer restart with a stale active skill cannot re-inject a
+    // trigger for a skill the item never mentioned.
+    let resolved_now = extract_skill_tokens(rest)
+        .1
+        .iter()
+        .any(|name| skills.iter().any(|s| &s.name == name) && !unresolved.contains(name));
+    // Pure-skill: tokens consumed all text AND at least one resolved here.
+    // Inject the trigger so the model acts on the skill body (no plan-mode
+    // tag, matching the idle path).
     if text.trim().is_empty() && images.is_empty() {
-        if session.skill_prompt_cloned().is_some() {
+        if resolved_now {
             let mut msg = Message::user(new_id(), SKILL_TRIGGER);
             msg.synthetic = true;
             session.record(msg).await;
@@ -151,7 +165,10 @@ mod tests {
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$review do it", &skills);
         assert_eq!(clean, " do it");
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nREVIEW BODY"));
+        assert_eq!(
+            s.skill_prompt_cloned().as_deref(),
+            Some("> Source: /skills/review/SKILL.md\n\nREVIEW BODY")
+        );
     }
 
     #[test]
@@ -174,7 +191,12 @@ mod tests {
         let (clean, unresolved) = resolve_inline_skills_with(&s, "$review $submit go", &skills);
         assert_eq!(clean, "  go");
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS"));
+        assert_eq!(
+            s.skill_prompt_cloned().as_deref(),
+            Some(
+                "> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS"
+            )
+        );
     }
 
     #[test]
@@ -185,7 +207,10 @@ mod tests {
         // Resolved `review` stripped; unresolved `$bogus` preserved verbatim.
         assert_eq!(clean, " $bogus");
         assert_eq!(unresolved, vec!["bogus"]);
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR"));
+        assert_eq!(
+            s.skill_prompt_cloned().as_deref(),
+            Some("> Source: /skills/review/SKILL.md\n\nR")
+        );
     }
 
     #[test]
@@ -194,7 +219,10 @@ mod tests {
         let skills = vec![skill("review", "R")];
         let (_, unresolved) = resolve_inline_skills_with(&s, "$review $review", &skills);
         assert!(unresolved.is_empty());
-        assert_eq!(s.skill_prompt_cloned().as_deref(), Some("> Source: /skills/review/SKILL.md\n\nR"));
+        assert_eq!(
+            s.skill_prompt_cloned().as_deref(),
+            Some("> Source: /skills/review/SKILL.md\n\nR")
+        );
     }
 
     #[tokio::test]
@@ -219,14 +247,52 @@ mod tests {
     async fn record_compound_pure_skill_injects_trigger() {
         let mut s = make_session();
         s.agent = resolve_agent("plan").unwrap();
-        // Seed the skill first, then call record_compound with only the token.
-        s.set_skill(Some("REVIEW BODY".into()));
-        record_compound(&mut s, "$review", &[]).await;
+        {
+            let _guard = lock_home(tempfile::tempdir().unwrap().path());
+            opencoder_core::seed_builtin_skills();
+            // A pure `$review` token resolves against the seeded skill and
+            // empties the text -> trigger injected.
+            record_compound(&mut s, "$review", &[]).await;
+        }
         assert_eq!(s.messages.len(), 1);
         assert_eq!(s.messages[0].text(), SKILL_TRIGGER, "trigger injected");
         assert!(s.messages[0].synthetic);
+        assert!(
+            s.skill_prompt_cloned().is_some(),
+            "skill activated by the token"
+        );
         // plan_input_count NOT incremented (trigger skips the plan tag).
         assert_eq!(s.plan_input_count, 0, "trigger skips plan-mode counter");
+    }
+
+    #[tokio::test]
+    async fn record_compound_sticky_skill_without_token_records_nothing() {
+        let mut s = make_session();
+        // A stale sticky skill from an earlier turn must NOT be re-triggered
+        // by an empty queue/steer item that carries no `$token` of its own.
+        s.set_skill(Some("STALE BODY".into()));
+        record_compound(&mut s, "", &[]).await;
+        assert!(
+            s.messages.is_empty(),
+            "no trigger for empty text with only a sticky skill"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_compound_unresolved_token_does_not_inject() {
+        let mut s = make_session();
+        s.set_skill(Some("STALE BODY".into()));
+        {
+            let _guard = lock_home(tempfile::tempdir().unwrap().path());
+            // `$bogus` matches no discovered skill: the token survives as
+            // literal text, so a REAL user message is recorded — but no
+            // SKILL_TRIGGER (nothing resolved now; the sticky skill alone is
+            // not a trigger source).
+            record_compound(&mut s, "$bogus", &[]).await;
+        }
+        assert_eq!(s.messages.len(), 1, "literal unresolved token recorded");
+        assert_eq!(s.messages[0].text(), "$bogus");
+        assert!(!s.messages[0].synthetic, "no synthetic trigger injected");
     }
 
     #[tokio::test]
@@ -234,5 +300,41 @@ mod tests {
         let mut s = make_session();
         record_compound(&mut s, "", &[]).await;
         assert!(s.messages.is_empty(), "nothing recorded for empty no-skill");
+    }
+
+    // ---- HOME isolation for discover_skills (mirrors tests/drain_mode.rs) ----
+
+    static HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeGuard {
+        prev_home: Option<std::ffi::OsString>,
+        prev_xdg: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn lock_home(home: &std::path::Path) -> HomeGuard {
+        let _lock = HOME_MUTEX.lock().unwrap();
+        let prev_home = std::env::var_os("HOME");
+        let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("HOME", home);
+        std::env::set_var("XDG_CONFIG_HOME", home);
+        HomeGuard {
+            prev_home,
+            prev_xdg,
+            _lock,
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match self.prev_home.take() {
+                Some(h) => std::env::set_var("HOME", h),
+                None => std::env::remove_var("HOME"),
+            }
+            match self.prev_xdg.take() {
+                Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
     }
 }

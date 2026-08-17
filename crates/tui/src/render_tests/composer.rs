@@ -13,6 +13,7 @@ fn composer_renders_prompt_and_multiline_text() {
                 f,
                 Rect::new(0, 0, 40, 5),
                 "hello\nworld",
+                false, // copy_mode
                 0,
                 38,  // inner_w: 40 - 2 borders
                 2,   // prompt_w: "❯ "
@@ -66,6 +67,7 @@ fn annotation_editor_shows_green_top_title() {
                 f,
                 Rect::new(0, 0, 80, 6),
                 "",
+                false, // copy_mode
                 0,
                 78, // inner_w
                 2,  // prompt_w
@@ -113,6 +115,7 @@ fn plan_editor_has_no_info_top_title() {
                 f,
                 Rect::new(0, 0, 80, 6),
                 "",
+                false, // copy_mode
                 0,
                 78,
                 2,
@@ -132,4 +135,62 @@ fn plan_editor_has_no_info_top_title() {
         !top.contains("glm-5.2"),
         "plan editor must not show info title; got: {top}"
     );
+}
+
+/// Copy mode integrates at the `render_composer` seam: with `copy_mode`
+/// set, the function early-exits into the clean renderer — text flush at
+/// column 0, no border, no prompt glyph — regardless of the other
+/// decoration parameters (plan label, titles, badges).
+#[test]
+fn composer_copy_mode_param_early_exits_to_clean_view() {
+    let backend = TestBackend::new(40, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_composer(
+                f,
+                Rect::new(0, 0, 40, 6),
+                "plain text",
+                true, // copy_mode
+                0,
+                38,
+                2,
+                &[],
+                false,
+                Some("PLAN"),
+                Some("edit annotation"),
+                &Line::raw("ignored"),
+            );
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let row0: String = (0..40)
+        .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
+        .collect();
+    assert!(
+        row0.starts_with("plain text"),
+        "text flush at col 0: {row0:?}"
+    );
+    let all: String = (0..6)
+        .flat_map(|y| (0..40).map(move |x| (x, y)))
+        .flat_map(|(x, y)| {
+            buf.cell((x, y))
+                .unwrap()
+                .symbol()
+                .chars()
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(!all.contains('\u{276f}'), "no prompt glyph: {all:?}");
+    assert!(
+        !all.contains("edit annotation"),
+        "decoration titles must not render in copy mode: {all:?}"
+    );
+    for deco in ['\u{250c}', '\u{2514}', '\u{2500}'] {
+        assert!(
+            !all.contains(deco),
+            "border {deco:?} must be absent: {all:?}"
+        );
+    }
 }

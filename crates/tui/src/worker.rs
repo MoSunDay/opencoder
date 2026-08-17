@@ -348,6 +348,22 @@ pub async fn process_cmd(
                 let ev2 = SessionEvent::PlanHandoff(plan_display);
                 let _ = sink.push(&ev2);
                 forward_event(&ui_tx, ev2);
+            } else {
+                // No plan found (fallback path): the in-memory skill clear
+                // below must also reach the store, or a resume would
+                // resurrect the deactivated sticky skill.
+                if let Some(store) = &sess.store {
+                    let _ = store
+                        .update_session(
+                            &sess.id,
+                            &opencoder_store::SessionPatch {
+                                clear_skill: true,
+                                updated_at: Some(now_ms()),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                }
             }
             sess.set_skill(None);
             let message_floor = sess.messages.len();

@@ -14,7 +14,10 @@ use opencoder_session::tools::question::QuestionHub;
 use opencoder_session::{run, SessionEvent, SessionState};
 
 fn config() -> Config {
-    Config { model: "m/g".into(), ..Config::default() }
+    Config {
+        model: "m/g".into(),
+        ..Config::default()
+    }
 }
 
 fn question_turn(id: &str, question: &str) -> LlmEvent {
@@ -25,7 +28,12 @@ fn question_turn(id: &str, question: &str) -> LlmEvent {
             name: "question".into(),
             input: serde_json::json!({ "question": question, "options": ["sqlite", "postgres"] }),
         }],
-        usage: Some(Usage { input_tokens: 5, output_tokens: 5, total_tokens: 10, ..Default::default() }),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 5,
+            total_tokens: 10,
+            ..Default::default()
+        }),
     }
 }
 
@@ -33,7 +41,12 @@ fn text_done(text: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: text.into(),
         tool_calls: vec![],
-        usage: Some(Usage { input_tokens: 5, output_tokens: 1, total_tokens: 6, ..Default::default() }),
+        usage: Some(Usage {
+            input_tokens: 5,
+            output_tokens: 1,
+            total_tokens: 6,
+            ..Default::default()
+        }),
     }
 }
 
@@ -67,9 +80,12 @@ async fn resolve_when_asked(hub: Arc<QuestionHub>, id: &str, answer: &str) {
 
 fn tool_end_for(events: &[SessionEvent], id: &str) -> Option<(String, bool)> {
     events.iter().find_map(|ev| match ev {
-        SessionEvent::ToolEnd { id: eid, output, is_error, .. } if eid == id => {
-            Some((output.clone(), *is_error))
-        }
+        SessionEvent::ToolEnd {
+            id: eid,
+            output,
+            is_error,
+            ..
+        } if eid == id => Some((output.clone(), *is_error)),
         _ => None,
     })
 }
@@ -107,7 +123,10 @@ async fn answered_question_feeds_the_followup_call() {
     let reqs = mock.requests();
     assert_eq!(reqs.len(), 2, "question turn + follow-up turn");
     let second = serde_json::to_string(&reqs[1].to_body()).unwrap();
-    assert!(second.contains("postgres please"), "answer in round-2 context");
+    assert!(
+        second.contains("postgres please"),
+        "answer in round-2 context"
+    );
 }
 
 /// Esc / skip: the tool result is the skip text, turn completes normally.
@@ -139,7 +158,10 @@ async fn skipped_question_returns_the_skip_text() {
     let evs = events.lock().unwrap();
     let (output, is_error) = tool_end_for(&evs, "q-2").expect("ToolEnd present");
     assert!(!is_error);
-    assert!(output.contains("User skipped"), "skip text is the tool result");
+    assert!(
+        output.contains("User skipped"),
+        "skip text is the tool result"
+    );
 }
 
 /// Headless (run/web): no listener attached → fixed fallback reply at once,
@@ -156,9 +178,12 @@ async fn unattached_hub_falls_back_without_waiting() {
     let observed = events.clone();
 
     // No resolver at all: completion within the bound proves no hang.
-    tokio::time::timeout(Duration::from_secs(10), run(&mut session, "plan".into(), move |ev| {
-        observed.lock().unwrap().push(ev);
-    }))
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        run(&mut session, "plan".into(), move |ev| {
+            observed.lock().unwrap().push(ev);
+        }),
+    )
     .await
     .expect("turn completes without a listener")
     .unwrap();
@@ -166,7 +191,10 @@ async fn unattached_hub_falls_back_without_waiting() {
     let evs = events.lock().unwrap();
     let (output, is_error) = tool_end_for(&evs, "q-3").expect("ToolEnd present");
     assert!(!is_error);
-    assert!(output.contains("No interactive user"), "fallback reply, got: {output}");
+    assert!(
+        output.contains("No interactive user"),
+        "fallback reply, got: {output}"
+    );
 }
 
 /// Turn interrupt while the question is pending: the tool returns an

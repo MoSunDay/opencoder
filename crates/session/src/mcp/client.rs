@@ -81,12 +81,10 @@ impl McpClient {
         let msg = serde_json::to_string(&req)?;
         self.transport.send(&msg).await?;
 
-        let resp = tokio::time::timeout(timeout, rx)
-            .await
-            .map_err(|_| {
-                self.pending.lock().unwrap().remove(&id);
-                anyhow!("MCP `{method}` timed out after {:?}", timeout)
-            })??;
+        let resp = tokio::time::timeout(timeout, rx).await.map_err(|_| {
+            self.pending.lock().unwrap().remove(&id);
+            anyhow!("MCP `{method}` timed out after {:?}", timeout)
+        })??;
 
         if let Some(err) = resp.error {
             return Err(anyhow!(err.to_string()));
@@ -126,15 +124,17 @@ impl McpClient {
         let init_result: InitializeResult = serde_json::from_value(result_val)?;
 
         // Per spec, the client must send this notification after initialize.
-        self.notify("notifications/initialized", Value::Null).await?;
+        self.notify("notifications/initialized", Value::Null)
+            .await?;
 
         Ok(init_result)
     }
 
     /// List available tools from the server.
     pub async fn list_tools(&self) -> Result<Vec<super::protocol::ToolInfo>> {
-        let result_val =
-            self.request("tools/list", serde_json::json!({}), LIST_TIMEOUT).await?;
+        let result_val = self
+            .request("tools/list", serde_json::json!({}), LIST_TIMEOUT)
+            .await?;
         let list: ToolsListResult = serde_json::from_value(result_val)?;
         Ok(list.tools)
     }

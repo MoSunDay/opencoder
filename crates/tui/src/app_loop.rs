@@ -677,18 +677,19 @@ mod app_loop_ap;
 
 pub(crate) use app_loop_ap::handle_ap_outcome;
 
-
 #[path = "app_loop_paste.rs"]
 mod app_loop_paste;
 
-pub(crate) use app_loop_paste::{handle_paste_event, paste_clipboard_image};
 #[cfg(test)]
 pub(crate) use app_loop_paste::route_paste;
+pub(crate) use app_loop_paste::{handle_paste_event, paste_clipboard_image};
 
 #[path = "app_loop_actions.rs"]
 mod app_loop_actions;
 
-pub(crate) use app_loop_actions::{cancel_running_turn, dispatch_slash_action, steer_submit_after_mouse};
+pub(crate) use app_loop_actions::{
+    cancel_running_turn, dispatch_slash_action, steer_submit_after_mouse,
+};
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds

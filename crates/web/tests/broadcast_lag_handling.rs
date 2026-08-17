@@ -30,5 +30,8 @@ fn lagged_is_surfaced_as_error_not_dropped() {
         .and_then(|v| v.as_str())
         .expect("error event must carry an `error` string");
     assert!(msg.contains("lag"), "msg should mention lag, got: {msg}");
-    assert!(msg.contains("500"), "msg should mention the count, got: {msg}");
+    assert!(
+        msg.contains("500"),
+        "msg should mention the count, got: {msg}"
+    );
 }

@@ -154,7 +154,15 @@ pub(crate) fn render<B: Backend>(
             hits.tool_btns.clear();
             hits.compaction_btns.clear();
             hits.keymap_btns.clear();
-            crate::notepad::render_top(f, area, np);
+            // Copy mode: undecorated fullscreen editor text — no tree
+            // panel, no border, no line-number gutter — so native
+            // selection spans pure file text (see copy_mode::render_clean
+            // for the body's counterpart).
+            if copy_mode {
+                crate::copy_mode::render_notepad_clean(f, area, np);
+            } else {
+                crate::notepad::render_top(f, area, np);
+            }
             return;
         }
         let draw_area = area;
@@ -283,6 +291,7 @@ pub(crate) fn render<B: Backend>(
             f,
             chunks[ci],
             input,
+            copy_mode,
             composer_scroll,
             inner_w,
             prompt_w,
@@ -323,7 +332,9 @@ pub(crate) fn render<B: Backend>(
         if let Some(mcp) = mcp_menu {
             crate::mcp_menu::render_mcp_popup(f, area, composer_area.y, mcp);
         }
-        if let Some(envs) = envs_menu { crate::envs_menu::render_envs_popup(f, area, composer_area.y, envs); }
+        if let Some(envs) = envs_menu {
+            crate::envs_menu::render_envs_popup(f, area, composer_area.y, envs);
+        }
         if let Some(cli) = cli_menu {
             crate::cli_menu::render_cli_popup(f, area, composer_area.y, cli);
         }
@@ -347,7 +358,7 @@ pub(crate) fn render<B: Backend>(
         }
         if let Some(text) = mode_flash {
             let is_plan = text.contains("plan");
-            render_status_chip(f, composer_area, text, mode_flash_bg(is_plan));
+            render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_plan));
         }
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());
@@ -365,6 +376,7 @@ pub(crate) fn render<B: Backend>(
         // themselves; the composer cursor must not override theirs — the
         // last `set_cursor_position` in a frame wins.
         if !input_disabled
+            && !copy_mode
             && model_menu.is_none()
             && question_menu.is_none()
             && cli_menu.is_none()
@@ -414,9 +426,7 @@ fn render_body(
     // Copy mode: undecorated full-width view so terminal-native selection
     // spans clean text (no border/scrollbar/timer/indicator rows).
     if copy_mode {
-        crate::copy_mode::render_clean(
-            f, area, chat, scroll, follow, anim_tick, now_ms, viewport,
-        );
+        crate::copy_mode::render_clean(f, area, chat, scroll, follow, anim_tick, now_ms, viewport);
         return;
     }
     let block = theme::rounded_block_line(title);
@@ -612,6 +622,7 @@ fn render_composer(
     f: &mut Frame,
     area: Rect,
     input: &str,
+    copy_mode: bool,
     scroll: u16,
     inner_w: u16,
     prompt_w: u16,
@@ -621,6 +632,13 @@ fn render_composer(
     edit_title: Option<&str>,
     top_title: &Line<'static>,
 ) {
+    // Copy mode: undecorated input text — no block/border, no prompt
+    // glyph, no attachment badge — so terminal-native selection spans
+    // exactly the typed text (mirrors the body's clean view).
+    if copy_mode {
+        crate::copy_mode::render_composer_clean(f, area, input);
+        return;
+    }
     if disabled {
         let dim = Style::default()
             .fg(theme::muted())
@@ -738,15 +756,6 @@ fn render_composer(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
-/// Foreground color of the `[mode]` chip (issue #6): Yellow in read-only
-/// plan mode (caution), Cyan for act. Was uniformly Magenta. Shared by the
-/// top body title and the `/task` picker so the two stay visually
-/// consistent.
-pub(crate) fn agent_chip_fg(agent: &str) -> Color {
-    theme::agent_chip_fg(agent)
-}
-
 /// Render a 1-row chip (status bubble) at the top-right of the composer area.
 /// Shared by the mode-flash and copy-status overlays so both use identical
 /// positioning and layout. `bg` controls the background colour.
@@ -775,16 +784,6 @@ fn render_status_chip(f: &mut Frame, composer_area: Rect, text: &str, bg: Color)
         ))),
         chip_rect,
     );
-}
-
-/// Background color of the plan/act mode-flash chip (issue #6): Yellow for
-/// plan, Cyan for act. Extracted pure so the theme mapping is testable.
-fn mode_flash_bg(is_plan: bool) -> Color {
-    if is_plan {
-        theme::warn_color()
-    } else {
-        theme::accent()
-    }
 }
 
 #[path = "render_hits.rs"]

@@ -60,7 +60,8 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     // `act_mode_clear_context_uses_sentinel_not_fabricated_plan`.)
     let msgs = vec![Message::user("u1", "old question"), {
         let mut m = Message::assistant("a1");
-        m.blocks.push(ContentBlock::text("I will implement X by..."));
+        m.blocks
+            .push(ContentBlock::text("I will implement X by..."));
         m
     }];
     store
@@ -167,7 +168,11 @@ async fn act_mode_clear_context_uses_sentinel_not_fabricated_plan() {
         .unwrap();
 
     // Fresh-start sentinel path: one blank marker message, sentinel stored.
-    assert_eq!(session.messages.len(), 1, "transcript collapses to 1 marker");
+    assert_eq!(
+        session.messages.len(),
+        1,
+        "transcript collapses to 1 marker"
+    );
     assert!(
         session.messages[0].text().contains("Context cleared"),
         "marker is the blank fresh-start, not a plan directive: {}",
@@ -194,10 +199,14 @@ async fn act_mode_after_plan_inputs_still_preserves_plan() {
 
     let msgs = vec![Message::user("u1", "plan the migration"), {
         let mut m = Message::assistant("a1");
-        m.blocks.push(ContentBlock::text("## Plan\n1. migrate schema"));
+        m.blocks
+            .push(ContentBlock::text("## Plan\n1. migrate schema"));
         m
     }];
-    store.append_messages("act-after-plan", &msgs).await.unwrap();
+    store
+        .append_messages("act-after-plan", &msgs)
+        .await
+        .unwrap();
 
     let mock: Arc<MockChatClient> =
         Arc::new(MockChatClient::new().push_script(vec![done_turn("executing")]));
@@ -229,7 +238,9 @@ async fn act_mode_after_plan_inputs_still_preserves_plan() {
     );
     assert_eq!(mock.call_count(), 1, "one execution turn for the plan");
     assert!(
-        session.messages[0].text().contains("## Plan\n1. migrate schema"),
+        session.messages[0]
+            .text()
+            .contains("## Plan\n1. migrate schema"),
         "handoff directive carries the plan text"
     );
 }

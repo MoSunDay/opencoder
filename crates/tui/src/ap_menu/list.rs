@@ -3,7 +3,7 @@
 //! constants — `/ap` is a picker over the tri-state `ApMode`.
 
 use opencoder_core::ApMode;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// One selectable autopilot mode with its display description.
 pub struct ApChoice {
@@ -83,7 +83,10 @@ mod tests {
                 json!({ "autopilot": { "mode": choice.key } })
             );
             assert_eq!(
-                ap_mode_json(choice.mode)["autopilot"].as_object().unwrap().len(),
+                ap_mode_json(choice.mode)["autopilot"]
+                    .as_object()
+                    .unwrap()
+                    .len(),
                 1,
                 "patch must not carry extra autopilot keys"
             );

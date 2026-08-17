@@ -27,7 +27,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/mcp", "管理 MCP server 列表 (enable/disable/增删改)"),
     ("/envs", "管理环境配置集 (激活/新建/快照/删除)"),
     ("/cli", "管理 CLI 注册内容及注入范围 (parent/subagents/all)"),
-    ("/skill", "管理默认注入的 skill (ON=目录+名称+概要 注入 context 尾部)"),
+    (
+        "/skill",
+        "管理默认注入的 skill (ON=目录+名称+概要 注入 context 尾部)",
+    ),
     (
         "/config",
         "配置模型 / 思考深度 / base_url / api_key / 上下文阈值 / 渲染帧率 / tmux",

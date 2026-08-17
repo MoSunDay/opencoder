@@ -100,7 +100,10 @@ pub fn handle_key(mut form: EnvNameForm, k: KeyEvent) -> (EnvsOutcome, Option<En
         return (EnvsOutcome::Idle, Some(EnvsMenu::Form(form)));
     }
     match k.code {
-        KeyCode::Esc => (EnvsOutcome::Idle, Some(EnvsMenu::List(EnvsList::discover()))),
+        KeyCode::Esc => (
+            EnvsOutcome::Idle,
+            Some(EnvsMenu::List(EnvsList::discover())),
+        ),
         KeyCode::Tab | KeyCode::Down => {
             form.field = match form.field {
                 EnvField::Name => EnvField::Capture,
@@ -175,15 +178,15 @@ mod tests {
         let mut f = EnvNameForm::new(vec!["taken".into()]);
         for c in "work".chars() {
             let (_, next) = handle_key(f, key(KeyCode::Char(c)));
-            let EnvsMenu::Form(g) = next.unwrap() else { panic!() };
+            let EnvsMenu::Form(g) = next.unwrap() else {
+                panic!()
+            };
             f = g;
         }
         assert!(f.validation_error().is_none());
 
         let (o, next) = handle_key(f, key(KeyCode::Enter));
-        assert!(
-            matches!(o, EnvsOutcome::Create { ref name, capture: true } if name == "work")
-        );
+        assert!(matches!(o, EnvsOutcome::Create { ref name, capture: true } if name == "work"));
         assert!(next.is_none(), "create closes the modal");
     }
 
@@ -212,14 +215,18 @@ mod tests {
         let mut f = EnvNameForm::new(vec![]);
         f.field = EnvField::Capture;
         let (_, next) = handle_key(f, key(KeyCode::Char(' ')));
-        let EnvsMenu::Form(g) = next.unwrap() else { panic!() };
+        let EnvsMenu::Form(g) = next.unwrap() else {
+            panic!()
+        };
         assert!(!g.capture, "space on capture toggles off");
 
         let mut f = EnvNameForm::new(vec![]);
         f.name = "ab".into();
         f.name_cursor = 1;
         let (_, next) = handle_key(f, key(KeyCode::Char(' ')));
-        let EnvsMenu::Form(g) = next.unwrap() else { panic!() };
+        let EnvsMenu::Form(g) = next.unwrap() else {
+            panic!()
+        };
         assert_eq!(g.name, "a b", "space on name types a space");
     }
 

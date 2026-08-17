@@ -56,9 +56,8 @@ static DISCOVER_CACHE: Mutex<Option<(PathBuf, DiscoverCacheEntry)>> = Mutex::new
 mod seed;
 
 pub use seed::{
-    seed_builtin_skills, seed_builtin_skills_in, seed_dep_gated_skills,
-    seed_dep_gated_skills_in, write_install_script, write_install_script_in,
-    DEPS_SENTINEL,
+    seed_builtin_skills, seed_builtin_skills_in, seed_dep_gated_skills, seed_dep_gated_skills_in,
+    write_install_script, write_install_script_in, DEPS_SENTINEL,
 };
 
 /// A loadable skill instruction pack.
@@ -325,7 +324,6 @@ pub fn extract_skill_tokens(text: &str) -> (String, Vec<String>) {
     (clean, names)
 }
 
-
 /// Strip only the `$name` tokens whose name is in `resolved`, leaving every
 /// **unresolved** `$name` sequence intact as literal text.
 ///
@@ -401,7 +399,10 @@ mod tests {
             out.starts_with("> Source: /skills/demo/SKILL.md"),
             "must start with source path annotation: {out}"
         );
-        assert!(out.contains("Do the thing."), "body must follow the annotation");
+        assert!(
+            out.contains("Do the thing."),
+            "body must follow the annotation"
+        );
     }
 
     fn write(path: impl AsRef<Path>, contents: &str) {
@@ -587,7 +588,10 @@ mod tests {
         // old `extract_skill_tokens`, which stripped `review1` unconditionally
         // and lost the `$review1` bytes.)
         let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(strip_resolved_skill_tokens("$review1) task", &resolved), "$review1) task");
+        assert_eq!(
+            strip_resolved_skill_tokens("$review1) task", &resolved),
+            "$review1) task"
+        );
     }
 
     #[test]
@@ -596,20 +600,29 @@ mod tests {
         // it) and leaves the rest intact — the picker inserts a trailing
         // space precisely to enable this clean path.
         let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(strip_resolved_skill_tokens("$review 1) task", &resolved), " 1) task");
+        assert_eq!(
+            strip_resolved_skill_tokens("$review 1) task", &resolved),
+            " 1) task"
+        );
     }
 
     #[test]
     fn strip_resolved_keeps_unresolved_verbatim() {
         let resolved: HashSet<String> = HashSet::new();
-        assert_eq!(strip_resolved_skill_tokens("$bogus text", &resolved), "$bogus text");
+        assert_eq!(
+            strip_resolved_skill_tokens("$bogus text", &resolved),
+            "$bogus text"
+        );
     }
 
     #[test]
     fn strip_resolved_mixed_tokens() {
         // Resolved `review` is dropped; unresolved `bogus` is preserved.
         let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(strip_resolved_skill_tokens("$review $bogus mixed", &resolved), " $bogus mixed");
+        assert_eq!(
+            strip_resolved_skill_tokens("$review $bogus mixed", &resolved),
+            " $bogus mixed"
+        );
     }
 
     #[test]
@@ -623,15 +636,20 @@ mod tests {
         // `$5` / `$HOME` / trailing `$` are never tokens, so they pass through
         // regardless of `resolved`.
         let resolved: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(strip_resolved_skill_tokens("price is $5 $HOME total $", &resolved), "price is $5 $HOME total $");
+        assert_eq!(
+            strip_resolved_skill_tokens("price is $5 $HOME total $", &resolved),
+            "price is $5 $HOME total $"
+        );
     }
 
     #[test]
     fn strip_resolved_utf8_preserved() {
         let resolved: HashSet<String> = ["review"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(strip_resolved_skill_tokens("$review héllo 日本語", &resolved), " héllo 日本語");
+        assert_eq!(
+            strip_resolved_skill_tokens("$review héllo 日本語", &resolved),
+            " héllo 日本語"
+        );
     }
-
 
     // ------------------------------------------------------------------
     // Combined-content cases: skill token mixed with other input text.
@@ -650,8 +668,7 @@ mod tests {
     #[test]
     fn extract_tokens_realistic_combined_input() {
         // A realistic prompt: skill token + a natural-language task.
-        let (clean, names) =
-            extract_skill_tokens("$repo-memory Summarize the recent changes.");
+        let (clean, names) = extract_skill_tokens("$repo-memory Summarize the recent changes.");
         assert_eq!(clean, " Summarize the recent changes.");
         assert_eq!(names, vec!["repo-memory"]);
     }
@@ -675,8 +692,7 @@ mod tests {
     #[test]
     fn extract_tokens_multiple_skills_split_by_text() {
         // Two skill tokens separated by substantial prose.
-        let (clean, names) =
-            extract_skill_tokens("$a first task then $b second task");
+        let (clean, names) = extract_skill_tokens("$a first task then $b second task");
         assert_eq!(clean, " first task then  second task");
         assert_eq!(names, vec!["a", "b"]);
     }

@@ -10,9 +10,8 @@ use crate::event::{LlmEvent, Usage};
 use crate::http_date::parse_http_date_to_secs;
 use crate::request::ChatRequest;
 use crate::retry::{
-    backoff_delay, backoff_duration, retry_decision, retry_delay,
-    should_retry_stream_interruption, AttemptOutcome, RetryDecision, StreamInterruption,
-    MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
+    backoff_delay, backoff_duration, retry_decision, retry_delay, should_retry_stream_interruption,
+    AttemptOutcome, RetryDecision, StreamInterruption, MAX_ATTEMPTS, MAX_STREAM_ATTEMPTS,
 };
 use crate::sse::SseDecoder;
 use crate::stream::ChatStream;

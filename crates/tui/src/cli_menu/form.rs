@@ -114,8 +114,16 @@ impl CliForm {
 
     fn save(&self) -> Option<CliOutcome> {
         let name = self.name.trim();
-        (!name.is_empty())
-            .then(|| CliOutcome::Save(save_json(name, self.enabled, self.inject_to, &self.content)))
+        (!name.is_empty()).then(|| {
+            CliOutcome::Save(save_json(
+                name,
+                self.enabled,
+                self.inject_to,
+                &self.content,
+                // Unedited names are filtered inside `save_json` (old != name).
+                self.original_name.as_deref(),
+            ))
+        })
     }
 }
 
@@ -271,7 +279,12 @@ mod tests {
             Some(CliMenu::Form(f)) => f,
             _ => panic!("expected Form"),
         };
-        for k in [key(KeyCode::Char(' ')), key(KeyCode::Down), key(KeyCode::Char(' ')), key(KeyCode::Enter)] {
+        for k in [
+            key(KeyCode::Char(' ')),
+            key(KeyCode::Down),
+            key(KeyCode::Char(' ')),
+            key(KeyCode::Enter),
+        ] {
             form = match handle_key(form, k).1 {
                 Some(CliMenu::Form(f)) => f,
                 _ => panic!("expected Form"),
@@ -324,15 +337,22 @@ mod tests {
         };
         // type a newline + text inside the dialog
         form.paste_into("more\nlines");
-        let form = match handle_key(form, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
-            .1
+        let form = match handle_key(
+            form,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+        )
+        .1
         {
             Some(CliMenu::Form(f)) => f,
             _ => panic!("expected Form"),
         };
         assert!(form.content_dialog.is_none(), "apply closes the dialog");
         assert_eq!(form.content, "basemore\nlines");
-        assert_eq!(form.display_content(), "basemore lines", "form preview stays single-line");
+        assert_eq!(
+            form.display_content(),
+            "basemore lines",
+            "form preview stays single-line"
+        );
     }
 
     #[test]
@@ -370,10 +390,38 @@ mod tests {
         let (outcome, next) = handle_key(form, key(KeyCode::Enter));
         match outcome {
             CliOutcome::Save(json) => {
-                assert_eq!(json["cli"]["mycli"]["inject_to"], serde_json::json!(["parent"]));
+                assert_eq!(
+                    json["cli"]["mycli"]["inject_to"],
+                    serde_json::json!(["parent"])
+                );
             }
             _ => panic!("expected Save"),
         }
         assert!(next.is_none());
+    }
+
+    #[test]
+    fn renaming_existing_entry_nulls_old_key() {
+        let entry = CliEntry {
+            name: "a".into(),
+            enabled: true,
+            inject_to: InjectionTarget::parent_only(),
+            content: "body".into(),
+        };
+        let mut form = CliForm::from_existing(&entry);
+        form.name = "b".into();
+        form.name_cursor = 1;
+        let (outcome, _) = handle_key(form, key(KeyCode::Enter));
+        match outcome {
+            CliOutcome::Save(json) => {
+                assert!(json["cli"]["a"].is_null(), "rename must null the old key");
+                assert!(
+                    json["cli"]["b"].is_object(),
+                    "rename must save under the new key"
+                );
+                assert_eq!(json["cli"]["b"]["content"], "body");
+            }
+            _ => panic!("expected Save"),
+        }
     }
 }

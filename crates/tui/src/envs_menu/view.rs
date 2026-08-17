@@ -46,8 +46,9 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &EnvsList) {
 
     let title = match list.confirm_delete {
         Some(_) => " /envs \u{2014} CONFIRM DELETE? y=delete, n/Esc=cancel ".to_string(),
-        None => " /envs \u{2014} Enter=switch, n=new, e=recapture, d=delete, Esc=close "
-            .to_string(),
+        None => {
+            " /envs \u{2014} Enter=switch, n=new, e=recapture, d=delete, Esc=close ".to_string()
+        }
     };
     let block = crate::theme::rounded_block_plain().title(title);
 
@@ -77,7 +78,9 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &EnvsList) {
         let confirming = list.confirm_delete == Some(row);
         let is_active = list.active.as_deref() == Some(name.as_str());
         let style = if confirming {
-            Style::default().fg(ratatui::style::Color::Red).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(ratatui::style::Color::Red)
+                .add_modifier(Modifier::BOLD)
         } else if selected {
             focus_style()
         } else if is_active {
@@ -85,11 +88,7 @@ fn render_list(f: &mut Frame, area: Rect, composer_top: u16, list: &EnvsList) {
         } else {
             val_style()
         };
-        let mut label = format!(
-            " {} {}",
-            if selected { "\u{276f}" } else { " " },
-            name
-        );
+        let mut label = format!(" {} {}", if selected { "\u{276f}" } else { " " }, name);
         if is_active {
             label.push_str("  [active]");
         }
@@ -135,18 +134,32 @@ fn render_form(f: &mut Frame, area: Rect, composer_top: u16, form: &EnvNameForm)
     let name_focused = form.field == EnvField::Name;
     lines.push(Line::from(vec![
         Span::styled(format!(" {:<width$}", "name", width = LABEL_W), dim_style()),
-        Span::styled(form.name.clone(), if name_focused { focus_style() } else { val_style() }),
+        Span::styled(
+            form.name.clone(),
+            if name_focused {
+                focus_style()
+            } else {
+                val_style()
+            },
+        ),
     ]));
     let cap_focused = form.field == EnvField::Capture;
     lines.push(Line::from(vec![
-        Span::styled(format!(" {:<width$}", "capture", width = LABEL_W), dim_style()),
+        Span::styled(
+            format!(" {:<width$}", "capture", width = LABEL_W),
+            dim_style(),
+        ),
         Span::styled(
             if form.capture {
                 "[x] \u{5f53}\u{524d}\u{57fa}\u{7840}\u{914d}\u{7f6e}\u{5feb}\u{7167}"
             } else {
                 "[ ] \u{7a7a}\u{76ee}\u{5f55}"
             },
-            if cap_focused { focus_style() } else { val_style() },
+            if cap_focused {
+                focus_style()
+            } else {
+                val_style()
+            },
         ),
     ]));
     match form.validation_error() {

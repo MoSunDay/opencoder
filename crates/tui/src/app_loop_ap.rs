@@ -11,7 +11,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 
-use crate::ap_menu::{ApMenu, ApOutcome, handle_ap_key};
+use crate::ap_menu::{handle_ap_key, ApMenu, ApOutcome};
 use crate::chat::ChatView;
 use crate::worker::UiCmd;
 
@@ -31,7 +31,10 @@ pub(crate) async fn handle_ap_outcome(
     workdir: &Path,
 ) -> LoopFlow {
     if let ApOutcome::Save(json) = handle_ap_key(menu, key) {
-        let mode = json["autopilot"]["mode"].as_str().unwrap_or("off").to_string();
+        let mode = json["autopilot"]["mode"]
+            .as_str()
+            .unwrap_or("off")
+            .to_string();
         match Config::save(workdir, &json)
             .and_then(|path| Config::load(workdir).map(|cfg| (path, cfg)))
         {

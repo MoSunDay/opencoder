@@ -23,10 +23,22 @@ fn app(state: Arc<opencoder_web::AppState>) -> Router {
             "/api/sessions/:id",
             get(opencoder_web::api::get_session).delete(opencoder_web::api::delete_session),
         )
-        .route("/api/sessions/:id/fork", post(opencoder_web::api_ops::fork_session))
-        .route("/api/sessions/:id/skill", post(opencoder_web::api_ops::post_skill))
-        .route("/api/sessions/:id/compact", post(opencoder_web::api_ops::post_compact))
-        .route("/api/sessions/:id/handoff", post(opencoder_web::api_ops::post_handoff))
+        .route(
+            "/api/sessions/:id/fork",
+            post(opencoder_web::api_ops::fork_session),
+        )
+        .route(
+            "/api/sessions/:id/skill",
+            post(opencoder_web::api_ops::post_skill),
+        )
+        .route(
+            "/api/sessions/:id/compact",
+            post(opencoder_web::api_ops::post_compact),
+        )
+        .route(
+            "/api/sessions/:id/handoff",
+            post(opencoder_web::api_ops::post_handoff),
+        )
         .route("/api/config", get(opencoder_web::api_ops::get_config))
         .route("/api/config", patch(opencoder_web::api_ops::patch_config))
         .route("/api/bg", get(opencoder_web::api_ops::list_bg))
@@ -50,16 +62,14 @@ async fn state() -> Arc<opencoder_web::AppState> {
 /// AppState whose drain mock returns a deterministic completion — needed for
 /// endpoints whose drain task calls the LLM (e.g. manual compaction).
 async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
-    let mock: Arc<dyn ChatStream> = Arc::new(
-        MockChatClient::new().with_default(vec![
-            LlmEvent::TextDelta(text.into()),
-            LlmEvent::Completed {
-                text: text.into(),
-                tool_calls: vec![],
-                usage: None,
-            },
-        ]),
-    );
+    let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
+        LlmEvent::TextDelta(text.into()),
+        LlmEvent::Completed {
+            text: text.into(),
+            tool_calls: vec![],
+            usage: None,
+        },
+    ]));
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = std::env::temp_dir().join(format!("oc-web-ops-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workdir).ok();
@@ -72,23 +82,27 @@ async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
 }
 
 async fn seed(state: &opencoder_web::AppState, sid: &str) {
-    state.store.create_session(&opencoder_store::SessionMeta {
-        id: sid.to_string(),
-        title: Some("test".into()),
-        agent: Some("act".into()),
-        model: Some("m".into()),
-        workdir_hash: None,
-        created_at: 0,
-        updated_at: 0,
-        summary: None,
-        summary_seq: None,
-        summary_images: vec![],
-        handoff_seq: None,
-        handoff_plan: None,
-        skill: None,
-        task_type: None,
-        requirement: None,
-    }).await.unwrap();
+    state
+        .store
+        .create_session(&opencoder_store::SessionMeta {
+            id: sid.to_string(),
+            title: Some("test".into()),
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            summary_images: vec![],
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+            task_type: None,
+            requirement: None,
+        })
+        .await
+        .unwrap();
 }
 
 fn assistant_with_text(id: &str, text: &str) -> Message {
@@ -102,14 +116,28 @@ async fn fork_copies_messages_and_returns_new_id() {
     let state = state().await;
     let app = app(state.clone());
     seed(&state, "parent").await;
-    state.store.append_messages("parent", &[
-        Message::user("u1".to_string(), "hello"),
-        assistant_with_text("a1", "hi there"),
-    ]).await.unwrap();
+    state
+        .store
+        .append_messages(
+            "parent",
+            &[
+                Message::user("u1".to_string(), "hello"),
+                assistant_with_text("a1", "hi there"),
+            ],
+        )
+        .await
+        .unwrap();
 
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/parent/fork")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/parent/fork")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -129,9 +157,16 @@ async fn fork_copies_messages_and_returns_new_id() {
 async fn fork_nonexistent_returns_404() {
     let state = state().await;
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/nope/fork")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/nope/fork")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -140,12 +175,24 @@ async fn fork_title_gets_fork_suffix() {
     let state = state().await;
     let app = app(state.clone());
     seed(&state, "p2").await;
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/p2/fork")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/p2/fork")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let meta = state.store.get_session(v["id"].as_str().unwrap()).await.unwrap().unwrap();
+    let meta = state
+        .store
+        .get_session(v["id"].as_str().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(meta.title.as_deref(), Some("test (fork)"));
 }
 
@@ -154,10 +201,17 @@ async fn skill_persists_to_store_meta() {
     let state = state().await;
     let app = app(state.clone());
     seed(&state, "s1").await;
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/s1/skill")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"skill":"repo-local-memory"}"#)).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/s1/skill")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"skill":"repo-local-memory"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let meta = state.store.get_session("s1").await.unwrap().unwrap();
     assert_eq!(meta.skill.as_deref(), Some("repo-local-memory"));
@@ -168,13 +222,28 @@ async fn skill_clear_with_null() {
     let state = state().await;
     let app = app(state.clone());
     seed(&state, "s2").await;
-    state.store.update_session("s2", &opencoder_store::SessionPatch {
-        skill: Some("my-skill".into()), ..Default::default()
-    }).await.unwrap();
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/s2/skill")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"skill":null}"#)).unwrap()).await.unwrap();
+    state
+        .store
+        .update_session(
+            "s2",
+            &opencoder_store::SessionPatch {
+                skill: Some("my-skill".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/s2/skill")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"skill":null}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let meta = state.store.get_session("s2").await.unwrap().unwrap();
     assert!(meta.skill.is_none(), "skill should be cleared");
@@ -184,10 +253,17 @@ async fn skill_clear_with_null() {
 async fn skill_nonexistent_returns_404() {
     let state = state().await;
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/nope/skill")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"skill":"repo-local-memory"}"#)).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/nope/skill")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"skill":"repo-local-memory"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     // post_skill must reject unknown sessions the same way post_compact /
     // post_handoff do — previously it returned a false `{ok:true}` success.
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -207,11 +283,18 @@ async fn patch_config_writes_skills_domain_file() {
     // scoped home, never in the real ~/.opencoder.
     let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
     let app = app(state.clone());
-    let resp = app.clone().oneshot(Request::builder()
-        .method("PATCH").uri("/api/config")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"skills":{"alpha":{"enabled":true}}}"#))
-        .unwrap()).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"skills":{"alpha":{"enabled":true}}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -243,9 +326,16 @@ async fn patch_config_writes_skills_domain_file() {
     }
 
     // A follow-up GET reflects the persisted toggle (config load path).
-    let resp = app.oneshot(Request::builder()
-        .method("GET").uri("/api/config")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -262,9 +352,16 @@ async fn get_config_returns_json() {
     // ~/.opencoder/config.json (host secrets/values must never leak in).
     let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("GET").uri("/api/config")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -285,10 +382,17 @@ async fn patch_config_merges_and_persists() {
     let new_model = format!("test-{}", before.model);
     let body = format!(r#"{{"model":"{}"}}"#, new_model);
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("PATCH").uri("/api/config")
-        .header("content-type", "application/json")
-        .body(Body::from(body)).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let cfg = opencoder_core::Config::load(&state.workdir).unwrap();
     assert_eq!(cfg.model, new_model);
@@ -298,9 +402,16 @@ async fn patch_config_merges_and_persists() {
 async fn list_bg_returns_empty_array() {
     let state = state().await;
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("GET").uri("/api/bg")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/bg")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -311,9 +422,16 @@ async fn list_bg_returns_empty_array() {
 async fn stop_bg_returns_ok() {
     let state = state().await;
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/bg/stop")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/bg/stop")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -327,15 +445,29 @@ async fn compact_returns_ok_and_persists_summary() {
     let sid = "c1";
     seed(&state, sid).await;
     // Seed >=2 turns so compaction_split produces a non-empty head to summarize.
-    state.store.append_messages(sid, &[
-        Message::user("u1", "what is rust?"),
-        assistant_with_text("a1", "a systems programming language"),
-        Message::user("u2", "show me an example"),
-        assistant_with_text("a2", "fn main() { println!(\"hi\"); }"),
-    ]).await.unwrap();
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/c1/compact")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    state
+        .store
+        .append_messages(
+            sid,
+            &[
+                Message::user("u1", "what is rust?"),
+                assistant_with_text("a1", "a systems programming language"),
+                Message::user("u2", "show me an example"),
+                assistant_with_text("a2", "fn main() { println!(\"hi\"); }"),
+            ],
+        )
+        .await
+        .unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/c1/compact")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     // The Compact command is processed asynchronously by the drain task.
     // Poll the durable store for the compaction boundary instead of a sleep.
@@ -367,9 +499,16 @@ async fn compact_returns_ok_and_persists_summary() {
 async fn compact_nonexistent_returns_404() {
     let state = state().await;
     let app = app(state.clone());
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/nope/compact")
-        .body(Body::empty()).unwrap()).await.unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/nope/compact")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -379,13 +518,25 @@ async fn handoff_persists_boundary_when_plan_exists() {
     let app = app(state.clone());
     let sid = "h1";
     seed(&state, sid).await;
-    state.store.append_messages(sid, &[
-        assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
-    ]).await.unwrap();
-    let resp = app.oneshot(Request::builder()
-        .method("POST").uri("/api/sessions/h1/handoff")
-        .header("content-type", "application/json")
-        .body(Body::from(r#"{"extra":"begin"}"#)).unwrap()).await.unwrap();
+    state
+        .store
+        .append_messages(
+            sid,
+            &[assistant_with_text("a1", "## Plan\n1. do X\n2. do Y")],
+        )
+        .await
+        .unwrap();
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions/h1/handoff")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"extra":"begin"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     // The Handoff command is processed asynchronously by the drain task.
     // Poll the durable store for the handoff boundary (handoff_seq + plan).

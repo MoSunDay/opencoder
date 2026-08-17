@@ -10,7 +10,7 @@
 
 use std::process::Command;
 
-use opencoder_core::tool_deps::{ToolDepStatus, all_installed, check_tool_deps};
+use opencoder_core::tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 use opencoder_core::{seed_dep_gated_skills, skills_dir, write_install_script};
 
 /// Path to the installer written into `~/.opencoder/` by
@@ -86,7 +86,11 @@ fn format_result(exit_code: i32, status: &ToolDepStatus) -> Vec<String> {
 }
 
 fn yn(b: bool) -> &'static str {
-    if b { "yes" } else { "no" }
+    if b {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 #[cfg(test)]

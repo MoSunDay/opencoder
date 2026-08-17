@@ -75,13 +75,14 @@ async fn start_stall_server() -> (String, tokio::sync::oneshot::Receiver<bool>) 
         // task exits promptly on `drop(rx)` → the reqwest response is dropped →
         // the TCP connection closes → this `read` returns `Ok(0)` (EOF).
         // Without the guard the task lingers and this read hits the 3s timeout.
-        let got_eof = match tokio::time::timeout(SERVER_DISCONNECT_WINDOW, sock.read(&mut buf)).await {
-            Ok(Ok(0)) => true,
-            // Any non-zero bytes or a read error still indicate the connection
-            // was disturbed; but a healthy fix yields a clean EOF, so treat
-            // everything else as "did not promptly disconnect".
-            Ok(Ok(_)) | Ok(Err(_)) | Err(_) => false,
-        };
+        let got_eof =
+            match tokio::time::timeout(SERVER_DISCONNECT_WINDOW, sock.read(&mut buf)).await {
+                Ok(Ok(0)) => true,
+                // Any non-zero bytes or a read error still indicate the connection
+                // was disturbed; but a healthy fix yields a clean EOF, so treat
+                // everything else as "did not promptly disconnect".
+                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => false,
+            };
         // Best-effort: try to flush any RST, ignore failure.
         let _ = sock.shutdown().await;
         let _ = tx.send(got_eof);

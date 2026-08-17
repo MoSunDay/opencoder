@@ -16,8 +16,8 @@ fn main() {
 
     let short = run_git(&["rev-parse", "--short", "HEAD"], &manifest_dir)
         .unwrap_or_else(|| "unknown".to_string());
-    let full = run_git(&["rev-parse", "HEAD"], &manifest_dir)
-        .unwrap_or_else(|| "unknown".to_string());
+    let full =
+        run_git(&["rev-parse", "HEAD"], &manifest_dir).unwrap_or_else(|| "unknown".to_string());
     let dirty = is_dirty(&manifest_dir);
 
     println!("cargo:rustc-env=OPENCODER_GIT_COMMIT={short}");
@@ -25,7 +25,10 @@ fn main() {
     println!("cargo:rustc-env=OPENCODER_GIT_DIRTY={}", u8::from(dirty));
 
     let pkg = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_string());
-    println!("cargo:rustc-env=OPENCODER_VERSION_LONG={}", assemble(&pkg, &short, dirty));
+    println!(
+        "cargo:rustc-env=OPENCODER_VERSION_LONG={}",
+        assemble(&pkg, &short, dirty)
+    );
 }
 
 /// Re-run the build script when HEAD, loose refs, or packed refs move, so the

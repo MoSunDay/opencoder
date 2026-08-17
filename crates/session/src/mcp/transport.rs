@@ -43,14 +43,13 @@ impl StdioTransport {
     ///
     /// Falls back to `sh -c <command>` when `command` looks like it contains
     /// shell metacharacters (e.g. `npx -y @mcp/server`).
-    pub fn spawn(
-        command: &str,
-        args: &[String],
-        env: &HashMap<String, String>,
-    ) -> Result<Self> {
+    pub fn spawn(command: &str, args: &[String], env: &HashMap<String, String>) -> Result<Self> {
         let (program, owned_args) = if command.contains(' ') && args.is_empty() {
             // Shell form: run via `sh -c`.
-            ("sh".to_string(), vec!["-c".to_string(), command.to_string()])
+            (
+                "sh".to_string(),
+                vec!["-c".to_string(), command.to_string()],
+            )
         } else {
             (command.to_string(), args.to_vec())
         };
@@ -63,9 +62,9 @@ impl StdioTransport {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = cmd.spawn().map_err(|e| {
-            anyhow!("failed to spawn MCP server `{program}`: {e}")
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| anyhow!("failed to spawn MCP server `{program}`: {e}"))?;
 
         let stdin = child
             .stdin

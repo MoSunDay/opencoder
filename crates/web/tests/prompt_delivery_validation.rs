@@ -20,13 +20,14 @@ use opencoder_store::{Delivery, LibsqlStore, Store};
 /// config files or env keys (mirrors web_drain_contract / store_error_surfacing).
 async fn state() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mock: Arc<dyn ChatStream> = Arc::new(
-        MockChatClient::new().with_default(vec![LlmEvent::Completed {
-            text: "ok".into(),
-            tool_calls: vec![],
-            usage: None,
-        }]),
-    );
+    let mock: Arc<dyn ChatStream> =
+        Arc::new(
+            MockChatClient::new().with_default(vec![LlmEvent::Completed {
+                text: "ok".into(),
+                tool_calls: vec![],
+                usage: None,
+            }]),
+        );
     Arc::new(opencoder_web::AppState {
         client_override: Some(mock),
         store,
@@ -56,7 +57,9 @@ async fn post(
     .await
     .into_response();
     let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     (status, v)
 }
@@ -115,22 +118,18 @@ async fn invalid_delivery_is_a_400() {
         state.store.get_session("s-typo").await.unwrap().is_none(),
         "400 must happen before ensure_session_row"
     );
-    assert!(
-        state
-            .store
-            .pending_inputs("s-typo", Delivery::Steer)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        state
-            .store
-            .pending_inputs("s-typo", Delivery::Queue)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(state
+        .store
+        .pending_inputs("s-typo", Delivery::Steer)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(state
+        .store
+        .pending_inputs("s-typo", Delivery::Queue)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 /// Whitespace-only and empty-string deliveries are also invalid (after trim).

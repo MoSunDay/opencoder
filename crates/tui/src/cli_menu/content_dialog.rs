@@ -268,7 +268,10 @@ mod tests {
 
     #[test]
     fn scroll_follows_cursor_line() {
-        let text = (0..=10).map(|i| i.to_string()).collect::<Vec<_>>().join("\n");
+        let text = (0..=10)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         let total = text.chars().count();
         let mut d = ContentDialog::new(text, total);
         // 11 lines with an 8-line viewport: end-of-text cursor on line 10

@@ -111,6 +111,27 @@ impl Runtime {
         let parent_runtime = self.parent_runtime();
         for _cycle in 0..1000 {
             if self.cancel.is_cancelled() {
+                // An external writer (e.g. `runner::interrupt` from another
+                // process) may have already moved the persisted generation —
+                // most importantly a Suspended verdict. Adopt that state
+                // instead of committing a local "workflow_interrupted" over
+                // it. A local cancel keeps the store generation in sync with
+                // the in-memory state, so it falls through to the original
+                // local-interrupt path below.
+                let external = persistence::load(&self.store, &state.workflow_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|(_, latest)| latest.generation != state.generation);
+                if let Some((_, latest)) = external {
+                    tracing::info!(
+                        workflow_id = %state.workflow_id,
+                        generation = latest.generation,
+                        "local interrupt superseded by externally advanced workflow state"
+                    );
+                    *state = latest;
+                    return Ok(());
+                }
                 *state = transitions::terminal(
                     state.clone(),
                     WorkflowStatus::Suspended,

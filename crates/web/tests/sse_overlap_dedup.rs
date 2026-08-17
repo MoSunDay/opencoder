@@ -94,12 +94,7 @@ impl Store for OverlapStore {
     async fn pending_inputs(&self, sid: &str, d: Delivery) -> Result<Vec<SessionInput>> {
         self.inner.pending_inputs(sid, d).await
     }
-    async fn promote_inputs(
-        &self,
-        sid: &str,
-        up_to: i64,
-        d: Delivery,
-    ) -> Result<Vec<i64>> {
+    async fn promote_inputs(&self, sid: &str, up_to: i64, d: Delivery) -> Result<Vec<i64>> {
         self.inner.promote_inputs(sid, up_to, d).await
     }
     async fn promote_next_queued(&self, sid: &str) -> Result<Option<i64>> {
@@ -117,11 +112,7 @@ impl Store for OverlapStore {
     async fn append_events(&self, events: &[SessionEventRecord]) -> Result<Vec<i64>> {
         self.inner.append_events(events).await
     }
-    async fn events_after(
-        &self,
-        sid: &str,
-        after: i64,
-    ) -> Result<Vec<SessionEventRecord>> {
+    async fn events_after(&self, sid: &str, after: i64) -> Result<Vec<SessionEventRecord>> {
         // Inject the overlap event on the first query, simulating an event
         // persisted between the baseline snapshot and this query.
         if !self.seeded.swap(true, Ordering::SeqCst) {
@@ -139,12 +130,7 @@ impl Store for OverlapStore {
     async fn create_subagent_task(&self, rec: &SubagentTaskRecord) -> Result<()> {
         self.inner.create_subagent_task(rec).await
     }
-    async fn complete_subagent_task(
-        &self,
-        task_id: &str,
-        result: &str,
-        ok: bool,
-    ) -> Result<()> {
+    async fn complete_subagent_task(&self, task_id: &str, result: &str, ok: bool) -> Result<()> {
         self.inner.complete_subagent_task(task_id, result, ok).await
     }
     async fn list_subagent_tasks(&self, parent: &str) -> Result<Vec<SubagentTaskRecord>> {
@@ -159,23 +145,27 @@ impl Store for OverlapStore {
 }
 
 async fn seed(state: &opencoder_web::AppState, sid: &str) {
-    state.store.create_session(&SessionMeta {
-        id: sid.into(),
-        title: None,
-        agent: Some("act".into()),
-        model: Some("m".into()),
-        workdir_hash: None,
-        created_at: 0,
-        updated_at: 0,
-        summary: None,
-        summary_seq: None,
-        summary_images: vec![],
-        handoff_seq: None,
-        handoff_plan: None,
-        skill: None,
-        task_type: None,
-        requirement: None,
-    }).await.unwrap();
+    state
+        .store
+        .create_session(&SessionMeta {
+            id: sid.into(),
+            title: None,
+            agent: Some("act".into()),
+            model: Some("m".into()),
+            workdir_hash: None,
+            created_at: 0,
+            updated_at: 0,
+            summary: None,
+            summary_seq: None,
+            summary_images: vec![],
+            handoff_seq: None,
+            handoff_plan: None,
+            skill: None,
+            task_type: None,
+            requirement: None,
+        })
+        .await
+        .unwrap();
 }
 
 /// Unique marker so the dedup count is unambiguous in the streamed bytes.
@@ -207,14 +197,18 @@ async fn overlap_window_event_is_deduped_once() {
 
     // (a) A base event persisted BEFORE the handler — the baseline must include
     // it (seq 1), so the overlap event (seq 2) genuinely exceeds the baseline.
-    state.store.append_event(&SessionEventRecord {
-        session_id: sid.into(),
-        kind: EventKind::Step,
-        payload: json!({ "k": "base" }),
-        ts: 1,
-        seq: None,
-        sse_kind: Some("status".into()),
-    }).await.unwrap();
+    state
+        .store
+        .append_event(&SessionEventRecord {
+            session_id: sid.into(),
+            kind: EventKind::Step,
+            payload: json!({ "k": "base" }),
+            ts: 1,
+            seq: None,
+            sse_kind: Some("status".into()),
+        })
+        .await
+        .unwrap();
 
     // (b) Run the SSE handler. It subscribes, snapshots baseline (=1), then
     // queries events_after — which lazily persists the overlap event (seq 2),

@@ -304,3 +304,146 @@ async fn interrupt_rejects_terminal_workflow() {
 
     assert!(format!("{error:#}").contains("cannot interrupt terminal workflow"));
 }
+
+/// Bug #5 regression: with max_attempts=1, an external store-level interrupt
+/// that lands while the local cancel token has not been flipped yet (the
+/// `poll_interrupt` 250ms window) must NOT be mistaken for a plain execution
+/// failure — the TODO must stay Interrupted (not Failed) and the externally
+/// persisted Suspended state must survive untouched.
+#[tokio::test]
+async fn external_interrupt_window_keeps_max_attempt_todo_unfailed() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let hang = Arc::new(tokio::sync::Notify::new());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(dispatch("step-1", "new"))
+            .push_hang(hang.clone()),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    // A runtime whose local cancel token is never touched: only the external
+    // store write interrupts the run, exercising the polling window.
+    let run_runtime = Arc::new(runtime(&store, mock, temp.path()));
+    let spawned = {
+        let rt = run_runtime.clone();
+        tokio::spawn(async move {
+            let mut workflow = spec();
+            workflow.todos[0].max_attempts = 1;
+            rt.run_new_with_id(workflow, "run-window".into()).await
+        })
+    };
+
+    wait_until_running(&store, "run-window").await;
+    opencoder_todos::interrupt(&store, "run-window", "external stop")
+        .await
+        .unwrap();
+    // Release the in-flight call immediately — the child session fails while
+    // the local token is still unset, the exact misclassification window.
+    hang.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), spawned)
+        .await
+        .expect("run task finished after external interrupt window")
+        .unwrap();
+    if let Ok(finished) = &outcome {
+        assert_eq!(finished.status, WorkflowStatus::Suspended);
+    }
+
+    // The externally written Suspended verdict must be intact: not Failed,
+    // not re-committed from the stale local Running state.
+    let state = load(&store, "run-window").await;
+    assert_eq!(state.status, WorkflowStatus::Suspended);
+    assert_eq!(state.terminal_reason.as_deref(), Some("external stop"));
+    assert_ne!(
+        state.todos["step-1"].status,
+        TodoStatus::Failed,
+        "a max_attempts=1 TODO must not fail from an external interrupt"
+    );
+    assert_eq!(
+        state.todos["step-1"].status,
+        TodoStatus::Interrupted,
+        "the external suspension verdict for the in-flight TODO must survive"
+    );
+    assert_eq!(state.todos["step-1"].attempt, 1);
+    assert!(
+        state.todos["step-1"].active_session_id.is_some(),
+        "child session kept for resume"
+    );
+
+    // The local execution-failure bookkeeping must never have been applied.
+    let events = kinds(&store, "run-window").await;
+    assert!(
+        !events.iter().any(|kind| kind == "todo_execution_failed"),
+        "the external interrupt must not be recorded as a local execution failure"
+    );
+    assert!(events.contains(&"workflow_interrupted".into()));
+}
+
+/// Bug #5 regression (runner half): when a local cancel races an external
+/// store write, `drive_inner`'s interrupt branch must adopt the externally
+/// persisted state instead of committing a local "workflow_interrupted"
+/// (with "local interrupt requested") over it.
+#[tokio::test]
+async fn local_cancel_after_external_write_adopts_external_state() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let hang = Arc::new(tokio::sync::Notify::new());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(dispatch("step-1", "new"))
+            .push_hang(hang.clone()),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let cancel = CancellationToken::new();
+    let mut run_config = runtime(&store, mock, temp.path());
+    run_config.cancel = cancel.clone();
+    let run_runtime = Arc::new(run_config);
+    let spawned = {
+        let rt = run_runtime.clone();
+        tokio::spawn(async move { rt.run_new_with_id(spec(), "run-mixed".into()).await })
+    };
+
+    wait_until_running(&store, "run-mixed").await;
+    // External verdict first, then a local cancel while the batch is still
+    // holding the in-flight call.
+    opencoder_todos::interrupt(&store, "run-mixed", "external stop")
+        .await
+        .unwrap();
+    cancel.cancel();
+    hang.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), spawned)
+        .await
+        .expect("run task finished after mixed interrupt")
+        .unwrap()
+        .expect("mixed interrupt resolves to the adopted external state");
+
+    assert_eq!(outcome.status, WorkflowStatus::Suspended);
+    assert_eq!(outcome.terminal_reason.as_deref(), Some("external stop"));
+
+    // The store keeps the external verdict; the runtime's local interrupt
+    // commit must not have overwritten it.
+    let state = load(&store, "run-mixed").await;
+    assert_eq!(state.status, WorkflowStatus::Suspended);
+    assert_eq!(state.terminal_reason.as_deref(), Some("external stop"));
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Interrupted);
+    assert_ne!(state.todos["step-1"].status, TodoStatus::Failed);
+    assert_eq!(state.todos["step-1"].attempt, 1);
+
+    let events = kinds(&store, "run-mixed").await;
+    assert!(
+        !events.iter().any(|kind| kind == "todo_execution_failed"),
+        "no local execution-failure bookkeeping over the external interrupt"
+    );
+    let interrupts: Vec<_> = store
+        .todo_events_after("run-mixed", 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "workflow_interrupted")
+        .collect();
+    assert_eq!(
+        interrupts.len(),
+        1,
+        "exactly the external workflow_interrupted commit must exist"
+    );
+    assert_eq!(interrupts[0].payload["reason"], "external stop");
+}

@@ -58,8 +58,35 @@ impl CliList {
     }
 }
 
-pub fn save_json(name: &str, enabled: bool, inject_to: InjectionTarget, content: &str) -> Value {
-    json!({ "cli": { name: { "enabled": enabled, "inject_to": inject_to, "content": content } } })
+/// Build a save/upsert merge-patch for one CLI entry.
+///
+/// `renamed_from` carries the entry's pre-edit key (edit mode only). When it
+/// differs from `name`, the domain object also sets the old key to null —
+/// merge-patch semantics delete nulled keys, so without this a rename would
+/// leave both `old` and `name` in cli.json and the content would be injected
+/// twice. The `old == name` filter lives here (an unconditional null would
+/// self-delete the just-saved entry), so callers may pass `original_name`
+/// as-is.
+pub fn save_json(
+    name: &str,
+    enabled: bool,
+    inject_to: InjectionTarget,
+    content: &str,
+    renamed_from: Option<&str>,
+) -> Value {
+    let mut entry = serde_json::Map::new();
+    entry.insert("enabled".to_string(), json!(enabled));
+    entry.insert("inject_to".to_string(), json!(inject_to));
+    entry.insert("content".to_string(), json!(content));
+    // Built via an explicit Map so the old (null) and new keys provably
+    // coexist in one object — a nested `json!` with a variable key makes
+    // that invariant too easy to break silently.
+    let mut cli = serde_json::Map::new();
+    if let Some(old) = renamed_from.filter(|old| *old != name) {
+        cli.insert(old.to_string(), Value::Null);
+    }
+    cli.insert(name.to_string(), Value::Object(entry));
+    json!({ "cli": Value::Object(cli) })
 }
 
 fn toggle_json(name: &str, enabled: bool) -> Value {
@@ -121,5 +148,40 @@ pub fn handle_key(mut list: CliList, key: KeyEvent) -> (CliOutcome, Option<CliMe
             (CliOutcome::Idle, Some(CliMenu::List(list)))
         }
         _ => (CliOutcome::Idle, Some(CliMenu::List(list))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_nulls_old_key_on_rename() {
+        let v = save_json("b", true, InjectionTarget::parent_only(), "body", Some("a"));
+        assert!(v["cli"]["a"].is_null(), "old key must be nulled");
+        assert!(v["cli"]["b"].is_object(), "new key must carry the entry");
+        assert_eq!(v["cli"]["b"]["enabled"], true);
+        assert_eq!(v["cli"]["b"]["content"], "body");
+    }
+
+    #[test]
+    fn save_keeps_entry_when_name_unchanged() {
+        let v = save_json("a", true, InjectionTarget::parent_only(), "body", Some("a"));
+        assert!(
+            v["cli"]["a"].is_object(),
+            "unchanged name must not self-delete"
+        );
+        assert_eq!(v["cli"]["a"]["enabled"], true);
+    }
+
+    #[test]
+    fn save_without_rename_writes_single_key() {
+        let v = save_json("a", false, InjectionTarget::parent_only(), "body", None);
+        assert!(v["cli"]["a"].is_object());
+        assert_eq!(
+            v["cli"].as_object().map(|o| o.len()),
+            Some(1),
+            "no stray null keys for a fresh entry"
+        );
     }
 }

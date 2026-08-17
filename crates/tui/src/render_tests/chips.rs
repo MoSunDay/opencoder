@@ -1,5 +1,6 @@
 use super::*;
 use crate::chat::ChatView;
+use crate::theme::{agent_chip_fg, mode_flash_bg};
 use opencoder_session::SessionEvent;
 
 /// Issue #6: the `[agent]` status chip is Yellow in plan mode and Cyan
@@ -225,7 +226,10 @@ fn ap_chip_reflects_autopilot_mode() {
     {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         draw(ApMode::Ap, &mut terminal);
-        assert!(chip_cell(&mut terminal, &["A", "P"]), "AP chip must render in ap mode");
+        assert!(
+            chip_cell(&mut terminal, &["A", "P"]),
+            "AP chip must render in ap mode"
+        );
         assert!(
             !chip_rows(&mut terminal, " AP ").is_empty(),
             "AP chip text must be visible; rows with it exist"
@@ -240,7 +244,10 @@ fn ap_chip_reflects_autopilot_mode() {
     {
         let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
         draw(ApMode::Review, &mut terminal);
-        assert!(chip_cell(&mut terminal, &["R", "V"]), "RV chip must render in review mode");
+        assert!(
+            chip_cell(&mut terminal, &["R", "V"]),
+            "RV chip must render in review mode"
+        );
         assert!(
             !chip_rows(&mut terminal, " RV ").is_empty(),
             "RV chip text must be visible; rows with it exist"

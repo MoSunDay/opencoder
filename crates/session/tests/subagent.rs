@@ -21,6 +21,18 @@ fn config() -> Config {
     }
 }
 
+/// Config with autopilot on — children must force it off regardless.
+fn autopilot_config() -> Config {
+    Config {
+        model: "m/g".into(),
+        autopilot: opencoder_core::AutoPilotConfig {
+            mode: opencoder_core::ApMode::Ap,
+            ..Default::default()
+        },
+        ..Config::default()
+    }
+}
+
 fn task_turn(prompt: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: "delegating".into(),
@@ -698,4 +710,70 @@ async fn subagent_failure_surfaces_actual_error() {
             "must not collapse to the opaque generic banner"
         );
     }
+}
+
+/// A subagent child inherits the parent's config — including
+/// `autopilot.mode = "ap"`. Without the force-off in `run_subagent`, the
+/// child's `run_with_registry` would hand control to `drive` after its
+/// scoped task: PLAN/ACT/VERIFY phases would run under the child, consuming
+/// the shared mock's scripts (exhausting it before the parent's own
+/// autopilot phases) and emitting AutoPilot events inside the child window.
+/// The child must run exactly its task and stop; only the PARENT may drive.
+#[tokio::test]
+async fn subagent_child_never_enters_autopilot() {
+    // Script order over the shared mock: parent task turn, child turn,
+    // parent wrap-up turn, then the PARENT's own autopilot phases
+    // (plan/act/verify=yes). Exactly enough — a child that entered `drive`
+    // would burn the parent's phase scripts (or exhaust the mock) and break
+    // the run.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![task_turn("scoped job")]) // parent turn 1
+            .push_script(vec![text_done("child result")]) // child turn 1
+            .push_script(vec![text_done("all done")]) // parent turn 2
+            .push_script(vec![text_done("parent plan")]) // parent PLAN
+            .push_script(vec![text_done("parent act")]) // parent ACT
+            .push_script(vec![text_done("yes")]), // parent VERIFY -> Complete
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("act").unwrap();
+    let mut session = SessionState::new(
+        "sub-no-autopilot",
+        agent,
+        autopilot_config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "delegate this".into(), |ev| events.push(ev))
+        .await
+        .expect("run completes cleanly with autopilot only on the parent");
+
+    // No AutoPilot event may appear between the child's start and end —
+    // the window where the child's run_with_registry is on the stack.
+    // (AutoPilot events AFTER SubagentEnd belong to the parent and are fine.)
+    let start_idx = events
+        .iter()
+        .position(|e| matches!(e, SessionEvent::SubagentStart { .. }))
+        .expect("SubagentStart emitted");
+    let end_idx = events
+        .iter()
+        .position(|e| matches!(e, SessionEvent::SubagentEnd { .. }))
+        .expect("SubagentEnd emitted");
+    assert!(
+        events[start_idx..=end_idx]
+            .iter()
+            .all(|e| !matches!(e, SessionEvent::AutoPilot { .. })),
+        "no AutoPilot phase may run inside a subagent child: {:?}",
+        events.iter().map(format_ev).collect::<Vec<_>>()
+    );
+    // Sanity: the parent's own autopilot DID run (so the config reached it).
+    assert!(
+        events
+            .iter()
+            .any(|ev| matches!(ev, SessionEvent::AutoPilot { .. })),
+        "the parent itself must still run its autopilot phases"
+    );
 }

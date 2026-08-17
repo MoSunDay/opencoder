@@ -22,6 +22,15 @@ pub fn dialog_state() -> Option<QuestionMenu> {
     None
 }
 
+/// Soft-wrap width of the custom input row. Key routing and rendering share
+/// this one formula so vertical cursor movement can never drift from the
+/// drawn (wrapped) rows: popup width -> popup inner -> input border (2) ->
+/// one reserved cell for the hardware cursor.
+pub fn input_wrap_width(area_width: u16) -> u16 {
+    let popup_width = 60u16.min(area_width.saturating_sub(4));
+    popup_width.saturating_sub(5).max(1)
+}
+
 /// Parse a question ToolStart payload into a dialog prompt.
 pub fn prompt_from_input(id: &str, input: &Value) -> Option<QuestionPrompt> {
     let question = input.get("question")?.as_str()?.trim();
@@ -77,9 +86,15 @@ pub fn on_tool_end(menu: &mut Option<QuestionMenu>, id: &str, hub: &QuestionHub)
 }
 
 /// Apply a dialog key and resolve only when the full batch is confirmed.
-pub fn route_question_key(menu: &mut Option<QuestionMenu>, key: KeyEvent, hub: &QuestionHub) {
+/// `width` is the custom input wrap width (see [`input_wrap_width`]).
+pub fn route_question_key(
+    menu: &mut Option<QuestionMenu>,
+    key: KeyEvent,
+    hub: &QuestionHub,
+    width: u16,
+) {
     let Some(open) = menu.as_mut() else { return };
-    if let QuestionAction::Submit(responses) = state::handle_question_key(open, key) {
+    if let QuestionAction::Submit(responses) = state::handle_question_key(open, key, width) {
         resolve_batch(hub, responses);
         *menu = None;
     }
@@ -155,7 +170,7 @@ mod tests {
         on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
         on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
 
-        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub, 55);
         assert!(menu.is_some(), "first confirmation keeps the dialog open");
         assert_eq!(
             hub.waiting_count(),
@@ -163,7 +178,7 @@ mod tests {
             "no answer was parked or delivered yet"
         );
 
-        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub, 55);
         assert!(menu.is_none(), "last confirmation closes the dialog");
         assert_eq!(early_answer(&hub, "q1").as_deref(), Some("a"));
         assert_eq!(early_answer(&hub, "q2").as_deref(), Some("b"));
@@ -175,8 +190,8 @@ mod tests {
         let mut menu = dialog_state();
         on_tool_start(&mut menu, "q1", &input("first?", &["a"]));
         on_tool_start(&mut menu, "q2", &input("second?", &["b"]));
-        route_question_key(&mut menu, key(KeyCode::Esc), &hub);
-        route_question_key(&mut menu, key(KeyCode::Enter), &hub);
+        route_question_key(&mut menu, key(KeyCode::Esc), &hub, 55);
+        route_question_key(&mut menu, key(KeyCode::Enter), &hub, 55);
         assert_eq!(early_answer(&hub, "q1").as_deref(), Some(SKIP_ANSWER));
         assert_eq!(early_answer(&hub, "q2").as_deref(), Some("b"));
     }

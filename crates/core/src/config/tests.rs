@@ -1,4 +1,3 @@
-
 use super::{is_suspicious_model, scoped_config_home, Config};
 
 #[test]
@@ -361,12 +360,13 @@ mod inject_to_filtering {
         };
         let config = config_with(explore_only);
         assert_eq!(
-            config
-                .enabled_cli_for("explore", AgentMode::Subagent)
-                .len(),
+            config.enabled_cli_for("explore", AgentMode::Subagent).len(),
             1
         );
-        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 0);
+        assert_eq!(
+            config.enabled_cli_for("build", AgentMode::Subagent).len(),
+            0
+        );
         assert_eq!(config.enabled_cli_for("act", AgentMode::Primary).len(), 0);
 
         let mut cli = config.enabled_mcp_servers_for("explore", AgentMode::Subagent);
@@ -399,11 +399,18 @@ mod inject_to_filtering {
     #[test]
     fn legacy_subagents_value_loads_and_filters_to_both_subagents() {
         // A config written by an older build says "subagents".
-        let json = r#"{"cli": {"old": {"enabled": true, "inject_to": "subagents", "content": "x"}}}"#;
+        let json =
+            r#"{"cli": {"old": {"enabled": true, "inject_to": "subagents", "content": "x"}}}"#;
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         let config = Config::default().merged_with(&value);
-        assert_eq!(config.enabled_cli_for("explore", AgentMode::Subagent).len(), 1);
-        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 1);
+        assert_eq!(
+            config.enabled_cli_for("explore", AgentMode::Subagent).len(),
+            1
+        );
+        assert_eq!(
+            config.enabled_cli_for("build", AgentMode::Subagent).len(),
+            1
+        );
         assert!(config.enabled_cli_for("act", AgentMode::Primary).is_empty());
     }
 
@@ -413,7 +420,13 @@ mod inject_to_filtering {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
         let config = Config::default().merged_with(&value);
         assert_eq!(config.enabled_cli_for("act", AgentMode::Primary).len(), 1);
-        assert_eq!(config.enabled_cli_for("explore", AgentMode::Subagent).len(), 1);
-        assert_eq!(config.enabled_cli_for("build", AgentMode::Subagent).len(), 1);
+        assert_eq!(
+            config.enabled_cli_for("explore", AgentMode::Subagent).len(),
+            1
+        );
+        assert_eq!(
+            config.enabled_cli_for("build", AgentMode::Subagent).len(),
+            1
+        );
     }
 }

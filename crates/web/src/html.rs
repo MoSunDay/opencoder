@@ -19,7 +19,10 @@ const JS_APP: &str = include_str!("assets/app.js");
 
 static MANAGER_HTML: LazyLock<String> = LazyLock::new(|| {
     let with_css = SHELL.replace("<!--STYLES-->", &format!("<style>\n{CSS}\n</style>"));
-    let with_render = with_css.replace("<!--JS_RENDER-->", &format!("<script>\n{JS_RENDER}\n</script>"));
+    let with_render = with_css.replace(
+        "<!--JS_RENDER-->",
+        &format!("<script>\n{JS_RENDER}\n</script>"),
+    );
     with_render.replace("<!--JS_APP-->", &format!("<script>\n{JS_APP}\n</script>"))
 });
 
@@ -45,6 +48,9 @@ mod tests {
         let html = MANAGER_HTML.as_str();
         let r = html.find("function openStream").unwrap();
         let a = html.find("async function send").unwrap();
-        assert!(r < a, "render.js (state/helpers) must precede app.js (controller)");
+        assert!(
+            r < a,
+            "render.js (state/helpers) must precede app.js (controller)"
+        );
     }
 }

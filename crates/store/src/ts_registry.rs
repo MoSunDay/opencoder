@@ -29,8 +29,7 @@ CREATE TABLE IF NOT EXISTS ts_sessions (
   title      TEXT,
   preview    TEXT
 )";
-const CREATE_META: &str =
-    "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)";
+const CREATE_META: &str = "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)";
 
 /// One indexed ts session. `workdir`/`store_dir` are `None` only for legacy
 /// rows whose migration-time marker was missing (`store_dir` is practically
@@ -104,7 +103,10 @@ impl TsRegistry {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 libsql::params![
                     record.id.clone(),
-                    record.workdir.as_ref().map(|p| p.to_string_lossy().into_owned()),
+                    record
+                        .workdir
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned()),
                     record
                         .store_dir
                         .as_ref()
@@ -125,7 +127,8 @@ impl TsRegistry {
         let _guard = self.db_lock.lock().await;
         let mut rows = self
             .conn
-            .query("SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
+            .query(
+                "SELECT id, workdir, store_dir, created_at, updated_at, title, preview \
                     FROM ts_sessions ORDER BY id",
                 (),
             )
@@ -135,12 +138,8 @@ impl TsRegistry {
         while let Some(row) = rows.next().await? {
             out.push(TsRecord {
                 id: row.get::<String>(0)?,
-                workdir: row
-                    .get::<Option<String>>(1)?
-                    .map(PathBuf::from),
-                store_dir: row
-                    .get::<Option<String>>(2)?
-                    .map(PathBuf::from),
+                workdir: row.get::<Option<String>>(1)?.map(PathBuf::from),
+                store_dir: row.get::<Option<String>>(2)?.map(PathBuf::from),
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
                 title: row.get(5)?,
@@ -236,7 +235,10 @@ mod tests {
     #[tokio::test]
     async fn upsert_get_list_roundtrip() {
         let registry = TsRegistry::open_memory().await.unwrap();
-        registry.upsert(&record("01AAA", Some("/work/a"))).await.unwrap();
+        registry
+            .upsert(&record("01AAA", Some("/work/a")))
+            .await
+            .unwrap();
         registry.upsert(&record("02BBB", None)).await.unwrap();
 
         let got = registry.get("01AAA").await.unwrap().expect("row present");
@@ -259,7 +261,10 @@ mod tests {
     #[tokio::test]
     async fn upsert_is_idempotent_and_replaces() {
         let registry = TsRegistry::open_memory().await.unwrap();
-        registry.upsert(&record("01AAA", Some("/work/a"))).await.unwrap();
+        registry
+            .upsert(&record("01AAA", Some("/work/a")))
+            .await
+            .unwrap();
         let mut replacement = record("01AAA", Some("/work/b"));
         replacement.preview = "updated".into();
         registry.upsert(&replacement).await.unwrap();
@@ -296,7 +301,10 @@ mod tests {
         let path = dir.path().join("ts.db");
         {
             let registry = TsRegistry::open(&path).await.unwrap();
-            registry.upsert(&record("01AAA", Some("/work/a"))).await.unwrap();
+            registry
+                .upsert(&record("01AAA", Some("/work/a")))
+                .await
+                .unwrap();
             registry.mark_migrated().await.unwrap();
         }
         let reopened = TsRegistry::open(&path).await.unwrap();

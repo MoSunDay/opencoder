@@ -3,7 +3,7 @@
 //! by decoding the server's SSE `/events` stream. The client stores nothing
 //! locally and calls no LLM — it is a thin shell over the server.
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use opencoder_client::Remote;
 use opencoder_session::SessionEvent;
 

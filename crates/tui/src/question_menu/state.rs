@@ -3,6 +3,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Line;
 
+use crate::composer;
+
 /// One question parsed from a `question` ToolStart event.
 #[derive(Debug, Clone)]
 pub struct QuestionPrompt {
@@ -169,13 +171,14 @@ impl QuestionMenu {
     }
 
     /// Paste goes to the active question and focuses its custom input.
+    /// Multi-line paste is preserved; the shared composer boundary strips
+    /// terminal-corrupting controls and enforces the size cap.
     pub fn paste_custom(&mut self, text: &str) {
-        let text = crate::terminal_text::sanitize_single_line(text);
         let item = self.current_mut();
         item.invalidate();
-        for ch in text.chars() {
-            insert_at_cursor(&mut item.custom_input, &mut item.custom_cursor, ch);
-        }
+        let (input, cursor) = composer::insert_str(&item.custom_input, item.custom_cursor, text);
+        item.custom_input = input;
+        item.custom_cursor = cursor;
         self.focus = QuestionFocus::Custom;
     }
 
@@ -202,7 +205,9 @@ impl QuestionMenu {
 }
 
 /// Handle one keystroke. Pure: returns an action and mutates only `menu`.
-pub fn handle_question_key(menu: &mut QuestionMenu, key: KeyEvent) -> QuestionAction {
+/// `width` is the custom input's wrap width ([`super::input_wrap_width`]) so
+/// vertical cursor movement mirrors the renderer's soft-wrapped rows.
+pub fn handle_question_key(menu: &mut QuestionMenu, key: KeyEvent, width: u16) -> QuestionAction {
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('d') | KeyCode::Char('\u{4}'))
     {
@@ -210,7 +215,7 @@ pub fn handle_question_key(menu: &mut QuestionMenu, key: KeyEvent) -> QuestionAc
     }
     match menu.focus {
         QuestionFocus::Options => handle_options_focus(menu, key),
-        QuestionFocus::Custom => handle_custom_focus(menu, key),
+        QuestionFocus::Custom => handle_custom_focus(menu, key, width),
     }
 }
 
@@ -257,11 +262,50 @@ fn handle_options_focus(menu: &mut QuestionMenu, key: KeyEvent) -> QuestionActio
     }
 }
 
-fn handle_custom_focus(menu: &mut QuestionMenu, key: KeyEvent) -> QuestionAction {
+fn handle_custom_focus(menu: &mut QuestionMenu, key: KeyEvent, width: u16) -> QuestionAction {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    if ctrl && !alt {
+        return custom_ctrl_key(menu, key.code);
+    }
+    if alt && !ctrl {
+        return custom_alt_key(menu, key.code);
+    }
     match key.code {
         KeyCode::Esc => confirm_skip(menu),
-        KeyCode::Tab | KeyCode::BackTab | KeyCode::Up => {
+        KeyCode::Tab | KeyCode::BackTab => {
             menu.focus = QuestionFocus::Options;
+            QuestionAction::Idle
+        }
+        KeyCode::Up => {
+            // Above the first visual row the key moves the cursor between
+            // wrapped rows; only there does it hand focus back to Options.
+            let item = menu.current();
+            let (row, _) =
+                composer::cursor_row_col(&item.custom_input, item.custom_cursor, width, 0);
+            if row > 0 {
+                let item = menu.current_mut();
+                item.custom_cursor = composer::move_cursor_vertical(
+                    &item.custom_input,
+                    item.custom_cursor,
+                    -1,
+                    width,
+                    0,
+                );
+            } else {
+                menu.focus = QuestionFocus::Options;
+            }
+            QuestionAction::Idle
+        }
+        KeyCode::Down => {
+            let item = menu.current_mut();
+            item.custom_cursor = composer::move_cursor_vertical(
+                &item.custom_input,
+                item.custom_cursor,
+                1,
+                width,
+                0,
+            );
             QuestionAction::Idle
         }
         KeyCode::Left => {
@@ -276,22 +320,156 @@ fn handle_custom_focus(menu: &mut QuestionMenu, key: KeyEvent) -> QuestionAction
             }
             QuestionAction::Idle
         }
+        KeyCode::Home => {
+            let item = menu.current_mut();
+            item.custom_cursor = line_start(&item.custom_input, item.custom_cursor);
+            QuestionAction::Idle
+        }
+        KeyCode::End => {
+            let item = menu.current_mut();
+            item.custom_cursor = line_end(&item.custom_input, item.custom_cursor);
+            QuestionAction::Idle
+        }
         KeyCode::Backspace => {
             let item = menu.current_mut();
-            if backspace_at(&mut item.custom_input, &mut item.custom_cursor) {
+            if let Some((text, cursor)) =
+                composer::backspace(&item.custom_input, item.custom_cursor)
+            {
+                item.custom_input = text;
+                item.custom_cursor = cursor;
                 item.invalidate();
             }
+            QuestionAction::Idle
+        }
+        KeyCode::Delete => {
+            let item = menu.current_mut();
+            if let Some((text, cursor)) = delete_forward(&item.custom_input, item.custom_cursor) {
+                item.custom_input = text;
+                item.custom_cursor = cursor;
+                item.invalidate();
+            }
+            QuestionAction::Idle
+        }
+        // Enter confirms; Shift+Enter inserts an explicit newline instead.
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            let item = menu.current_mut();
+            let (text, cursor) =
+                composer::insert_newline(&item.custom_input, item.custom_cursor);
+            item.custom_input = text;
+            item.custom_cursor = cursor;
+            item.invalidate();
             QuestionAction::Idle
         }
         KeyCode::Enter => confirm_answer(menu),
         KeyCode::Char(ch) => {
             let item = menu.current_mut();
-            insert_at_cursor(&mut item.custom_input, &mut item.custom_cursor, ch);
+            let (text, cursor) = composer::insert_char(&item.custom_input, item.custom_cursor, ch);
+            item.custom_input = text;
+            item.custom_cursor = cursor;
             item.invalidate();
             QuestionAction::Idle
         }
         _ => QuestionAction::Idle,
     }
+}
+
+/// Readline-style Ctrl bindings inside the custom input.
+fn custom_ctrl_key(menu: &mut QuestionMenu, code: KeyCode) -> QuestionAction {
+    let item = menu.current_mut();
+    match code {
+        KeyCode::Char('a' | 'A') => {
+            item.custom_cursor = line_start(&item.custom_input, item.custom_cursor);
+        }
+        KeyCode::Char('e' | 'E') => {
+            item.custom_cursor = line_end(&item.custom_input, item.custom_cursor);
+        }
+        KeyCode::Char('u' | 'U') => {
+            if !item.custom_input.is_empty() {
+                item.custom_input.clear();
+                item.custom_cursor = 0;
+                item.invalidate();
+            }
+        }
+        KeyCode::Char('k' | 'K') => {
+            if item.custom_cursor < item.custom_input.chars().count() {
+                item.custom_input = item.custom_input.chars().take(item.custom_cursor).collect();
+                item.invalidate();
+            }
+        }
+        KeyCode::Char('w' | 'W') => {
+            if let Some((text, cursor)) =
+                composer::delete_word_back(&item.custom_input, item.custom_cursor)
+            {
+                item.custom_input = text;
+                item.custom_cursor = cursor;
+                item.invalidate();
+            }
+        }
+        KeyCode::Char('j' | 'J') => {
+            let (text, cursor) = composer::insert_newline(&item.custom_input, item.custom_cursor);
+            item.custom_input = text;
+            item.custom_cursor = cursor;
+            item.invalidate();
+        }
+        // Remaining Ctrl combos never reach the text buffer.
+        _ => {}
+    }
+    QuestionAction::Idle
+}
+
+/// Alt bindings: word motion plus Alt+Backspace / Alt+Enter. Unhandled Alt
+/// combos are swallowed so tmux Esc-merge garbage cannot reach the buffer.
+fn custom_alt_key(menu: &mut QuestionMenu, code: KeyCode) -> QuestionAction {
+    let item = menu.current_mut();
+    match code {
+        KeyCode::Backspace => {
+            if let Some((text, cursor)) =
+                composer::delete_word_back(&item.custom_input, item.custom_cursor)
+            {
+                item.custom_input = text;
+                item.custom_cursor = cursor;
+                item.invalidate();
+            }
+        }
+        KeyCode::Char('b' | 'B') => {
+            item.custom_cursor = composer::backward_word(&item.custom_input, item.custom_cursor);
+        }
+        KeyCode::Char('f' | 'F') => {
+            item.custom_cursor = composer::forward_word(&item.custom_input, item.custom_cursor);
+        }
+        KeyCode::Enter => {
+            let (text, cursor) = composer::insert_newline(&item.custom_input, item.custom_cursor);
+            item.custom_input = text;
+            item.custom_cursor = cursor;
+            item.invalidate();
+        }
+        _ => {}
+    }
+    QuestionAction::Idle
+}
+
+/// Char index of the start of the logical line holding `cursor`.
+fn line_start(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let cursor = cursor.min(chars.len());
+    (0..cursor).rev().find(|&i| chars[i] == '\n').map_or(0, |i| i + 1)
+}
+
+/// Char index of the end of the logical line holding `cursor` (before '\n').
+fn line_end(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let cursor = cursor.min(chars.len());
+    (cursor..chars.len()).find(|&i| chars[i] == '\n').unwrap_or(chars.len())
+}
+
+/// Delete the char under the cursor (forward delete).
+fn delete_forward(text: &str, cursor: usize) -> Option<(String, usize)> {
+    if cursor >= text.chars().count() {
+        return None;
+    }
+    let mut out: String = text.chars().take(cursor).collect();
+    out.extend(text.chars().skip(cursor + 1));
+    Some((out, cursor))
 }
 
 fn confirm_answer(menu: &mut QuestionMenu) -> QuestionAction {
@@ -316,30 +494,6 @@ fn finish_or_advance(menu: &mut QuestionMenu) -> QuestionAction {
     }
 }
 
-fn insert_at_cursor(buf: &mut String, cursor: &mut usize, ch: char) {
-    let at = buf
-        .char_indices()
-        .nth(*cursor)
-        .map(|(index, _)| index)
-        .unwrap_or(buf.len());
-    buf.insert(at, ch);
-    *cursor += 1;
-}
-
-fn backspace_at(buf: &mut String, cursor: &mut usize) -> bool {
-    if *cursor == 0 {
-        return false;
-    }
-    let at = buf
-        .char_indices()
-        .nth(*cursor - 1)
-        .map(|(index, _)| index)
-        .unwrap_or(buf.len());
-    buf.remove(at);
-    *cursor -= 1;
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,12 +512,27 @@ mod tests {
         menu
     }
 
+    /// Terminal-wide (80 col) question popup wrap width.
+    const WIDTH: u16 = 55;
+
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
     fn press(menu: &mut QuestionMenu, code: KeyCode) -> QuestionAction {
-        handle_question_key(menu, key(code))
+        handle_question_key(menu, key(code), WIDTH)
+    }
+
+    fn press_with(menu: &mut QuestionMenu, event: KeyEvent, width: u16) -> QuestionAction {
+        handle_question_key(menu, event, width)
+    }
+
+    fn ctrl(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
+    }
+
+    fn alt(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::ALT)
     }
 
     #[test]
@@ -482,14 +651,148 @@ mod tests {
     }
 
     #[test]
-    fn paste_keeps_the_custom_input_single_line_and_cursor_aligned() {
+    fn paste_preserves_newlines_and_aligns_the_cursor() {
         let mut menu = menu();
         menu.paste_custom("first\nsecond\tpart");
-        assert_eq!(menu.current().custom_input, "first second    part");
+        assert_eq!(menu.current().custom_input, "first\nsecond    part");
         assert_eq!(
             menu.current().custom_cursor,
             menu.current().custom_input.chars().count()
         );
+    }
+
+    #[test]
+    fn readline_jump_keys_reach_line_boundaries() {
+        let mut menu = menu();
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("one two\nthree");
+        // Jump keys operate on the logical line, not the whole buffer.
+        press_with(&mut menu, ctrl('a'), WIDTH);
+        assert_eq!(menu.current().custom_cursor, 8); // start of "three"
+        press(&mut menu, KeyCode::Home);
+        assert_eq!(menu.current().custom_cursor, 8);
+        press_with(&mut menu, ctrl('e'), WIDTH);
+        assert_eq!(menu.current().custom_cursor, 13);
+        press(&mut menu, KeyCode::End);
+        assert_eq!(menu.current().custom_cursor, 13);
+        for _ in 0..6 {
+            press(&mut menu, KeyCode::Left); // onto the first line
+        }
+        press(&mut menu, KeyCode::Home);
+        assert_eq!(menu.current().custom_cursor, 0);
+        press_with(&mut menu, ctrl('e'), WIDTH);
+        assert_eq!(menu.current().custom_cursor, 7);
+    }
+
+    #[test]
+    fn ctrl_u_clears_and_ctrl_k_deletes_to_the_end() {
+        let mut menu = menu();
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("hello world");
+        for _ in 0..6 {
+            press(&mut menu, KeyCode::Left);
+        }
+        assert_eq!(menu.current().custom_cursor, 5);
+        press_with(&mut menu, ctrl('k'), WIDTH);
+        assert_eq!(menu.current().custom_input, "hello");
+        assert_eq!(menu.current().custom_cursor, 5);
+        press_with(&mut menu, ctrl('u'), WIDTH);
+        assert_eq!(menu.current().custom_input, "");
+        assert_eq!(menu.current().custom_cursor, 0);
+    }
+
+    #[test]
+    fn word_keys_delete_and_move_by_word() {
+        let mut menu = menu();
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("foo bar baz");
+        for _ in 0..3 {
+            press(&mut menu, KeyCode::Left);
+        }
+        assert_eq!(menu.current().custom_cursor, 8);
+        press_with(&mut menu, ctrl('w'), WIDTH);
+        assert_eq!(menu.current().custom_input, "foo baz");
+        assert_eq!(menu.current().custom_cursor, 4);
+        press_with(&mut menu, alt('f'), WIDTH);
+        assert_eq!(menu.current().custom_cursor, 7); // end of "baz"
+        press_with(&mut menu, alt('b'), WIDTH);
+        assert_eq!(menu.current().custom_cursor, 4);
+        press_with(
+            &mut menu,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT),
+            WIDTH,
+        );
+        assert_eq!(menu.current().custom_input, "baz");
+        assert_eq!(menu.current().custom_cursor, 0);
+    }
+
+    #[test]
+    fn delete_key_removes_the_char_under_the_cursor() {
+        let mut menu = menu();
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("abc");
+        press(&mut menu, KeyCode::Home);
+        press(&mut menu, KeyCode::Delete);
+        assert_eq!(menu.current().custom_input, "bc");
+        assert_eq!(menu.current().custom_cursor, 0);
+        press(&mut menu, KeyCode::Delete);
+        press(&mut menu, KeyCode::Delete);
+        assert_eq!(menu.current().custom_input, "");
+    }
+
+    #[test]
+    fn explicit_newline_keys_keep_enter_as_confirm() {
+        let mut menu = QuestionMenu::new(prompt("q1", "Free form?"));
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("line1");
+        press_with(
+            &mut menu,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            WIDTH,
+        );
+        press_with(&mut menu, ctrl('j'), WIDTH);
+        press(&mut menu, KeyCode::Char('x'));
+        assert_eq!(menu.current().custom_input, "line1\n\nx");
+        assert_eq!(
+            press(&mut menu, KeyCode::Enter),
+            QuestionAction::Submit(vec![QuestionResponse {
+                id: "q1".into(),
+                // Preset option selected: custom details append on a new line.
+                answer: Some("sqlite\nline1\n\nx".into()),
+            }])
+        );
+    }
+
+    #[test]
+    fn up_down_move_across_wrapped_rows_before_leaving_the_input() {
+        let mut menu = menu();
+        press_with(&mut menu, key(KeyCode::Tab), WIDTH);
+        menu.paste_custom("aaaaaaaaaaaa"); // wraps to 2 rows at width 10
+        assert_eq!(menu.focus, QuestionFocus::Custom);
+        press_with(&mut menu, key(KeyCode::Up), 10);
+        assert_eq!(menu.current().custom_cursor, 2);
+        assert_eq!(menu.focus, QuestionFocus::Custom);
+        press_with(&mut menu, key(KeyCode::Up), 10);
+        assert_eq!(menu.focus, QuestionFocus::Options);
+        press_with(&mut menu, key(KeyCode::Tab), WIDTH);
+        press_with(&mut menu, key(KeyCode::Down), 10);
+        assert_eq!(menu.current().custom_cursor, 12);
+        // Down on the last visual row is a no-op that keeps the focus.
+        press_with(&mut menu, key(KeyCode::Down), 10);
+        assert_eq!(menu.current().custom_cursor, 12);
+        assert_eq!(menu.focus, QuestionFocus::Custom);
+    }
+
+    #[test]
+    fn up_crosses_explicit_newlines_too() {
+        let mut menu = menu();
+        press(&mut menu, KeyCode::Tab);
+        menu.paste_custom("one\ntwo");
+        press(&mut menu, KeyCode::Up);
+        assert_eq!(menu.current().custom_cursor, 3);
+        assert_eq!(menu.focus, QuestionFocus::Custom);
+        press(&mut menu, KeyCode::Up);
+        assert_eq!(menu.focus, QuestionFocus::Options);
     }
 
     #[test]

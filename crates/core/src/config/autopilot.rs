@@ -59,10 +59,25 @@ pub(super) fn merge(cfg: &mut AutoPilotConfig, obj: &serde_json::Map<String, ser
     // `enabled`: `true` maps to `ap` (so old users keep their self-driving
     // loop instead of being silently switched off), `false` maps to `off`.
     // When both keys are present `mode` wins and `enabled` is ignored.
-    if let Some(v) = obj.get("mode").and_then(|v| v.as_str()).and_then(parse_mode) {
+    if let Some(v) = obj
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .and_then(parse_mode)
+    {
         cfg.mode = v;
-    } else if let Some(v) = obj.get("enabled").and_then(|v| v.as_bool()) {
-        cfg.mode = if v { ApMode::Ap } else { ApMode::Off };
+    } else {
+        // `mode` present but unrecognized (typo, wrong type): surface it —
+        // a silently ignored mode means the user thinks autopilot is on
+        // while it stays off. The lenient fallback chain is unchanged.
+        if let Some(raw) = obj.get("mode") {
+            tracing::warn!(
+                value = ?raw,
+                "unrecognized config autopilot.mode (expected \"off\"|\"ap\"|\"review\"); ignoring"
+            );
+        }
+        if let Some(v) = obj.get("enabled").and_then(|v| v.as_bool()) {
+            cfg.mode = if v { ApMode::Ap } else { ApMode::Off };
+        }
     }
     if let Some(v) = obj.get("max_iterations").and_then(|v| v.as_u64()) {
         cfg.max_iterations = v.min(u32::MAX as u64) as u32;
@@ -96,6 +111,24 @@ mod tests {
         );
     }
 
+    /// An unrecognized `mode` keeps the lenient fallback chain: a legacy
+    /// `enabled` key present alongside it still applies (the merge only
+    /// warns — it must not silently strand a user who typo'd the mode but
+    /// still carries the legacy boolean).
+    #[test]
+    fn unknown_mode_warns_but_keeps_legacy_fallback() {
+        assert_eq!(
+            merged(json!({"mode": "warp", "enabled": true})).mode,
+            ApMode::Ap,
+            "bad mode + legacy enabled=true still maps to ap"
+        );
+        assert_eq!(
+            merged(json!({"mode": 3, "enabled": false})).mode,
+            ApMode::Off,
+            "non-string mode falls back to legacy enabled=false"
+        );
+    }
+
     #[test]
     fn legacy_enabled_maps_ap_and_off() {
         assert_eq!(merged(json!({"enabled": true})).mode, ApMode::Ap);
@@ -110,5 +143,4 @@ mod tests {
             "mode is canonical"
         );
     }
-
 }

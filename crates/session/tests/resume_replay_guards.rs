@@ -83,9 +83,7 @@ fn assert_pairing_well_formed(msgs: &[Message]) {
 fn count_results_for(msgs: &[Message], id: &str) -> usize {
     msgs.iter()
         .flat_map(|m| m.blocks.iter())
-        .filter(|b| {
-            matches!(b, ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id)
-        })
+        .filter(|b| matches!(b, ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == id))
         .count()
 }
 
@@ -121,7 +119,10 @@ async fn resume_and_replay_skips_task_with_persisted_result() {
         .await
         .unwrap();
     store
-        .append_message("parent", &tool_result_msg("task-dup", "subagent timed out", true))
+        .append_message(
+            "parent",
+            &tool_result_msg("task-dup", "subagent timed out", true),
+        )
         .await
         .unwrap();
     store
@@ -305,7 +306,10 @@ async fn resume_and_replay_replays_only_the_unanswered_visible_task() {
         .await
         .unwrap();
     store
-        .append_message("parent", &tool_result_msg("task-answered", "timed out earlier", true))
+        .append_message(
+            "parent",
+            &tool_result_msg("task-answered", "timed out earlier", true),
+        )
         .await
         .unwrap();
     store
@@ -328,7 +332,11 @@ async fn resume_and_replay_replays_only_the_unanswered_visible_task() {
         .await
         .unwrap();
     store
-        .create_subagent_task(&task_row("task-open", "child-open", SubagentStatus::Running))
+        .create_subagent_task(&task_row(
+            "task-open",
+            "child-open",
+            SubagentStatus::Running,
+        ))
         .await
         .unwrap();
 

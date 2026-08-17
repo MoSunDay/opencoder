@@ -41,7 +41,7 @@ async fn slash_action_compact_idle_starts_turn() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-        let mut cache_salt_menu = None;
+    let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
     let mut config = Config::default();
@@ -106,7 +106,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-        let mut cache_salt_menu = None;
+    let mut cache_salt_menu = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
     let mut config = Config::default();
@@ -174,7 +174,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-        let mut cache_salt_menu = None;
+    let mut cache_salt_menu = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;
@@ -220,7 +220,10 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
 
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(
-        matches!(skill_toggle_menu, Some(crate::skill_menu::SkillMenu::List(_))),
+        matches!(
+            skill_toggle_menu,
+            Some(crate::skill_menu::SkillMenu::List(_))
+        ),
         "the /skill toggle modal must open"
     );
     assert!(
@@ -241,7 +244,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
     let mut task_picker = None;
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-        let mut cache_salt_menu = None;
+    let mut cache_salt_menu = None;
     let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
     let mut input = String::new();
     let mut cursor_idx = 0usize;

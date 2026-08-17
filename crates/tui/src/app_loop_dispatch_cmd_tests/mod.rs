@@ -678,7 +678,6 @@ async fn slash_act_while_running_is_noop() {
     );
 }
 
-
 /// `/act` while a subagent is live is a no-op — running=false but
 /// subagents_running>0 (the dropped-SubagentEnd window: Done/TurnDone clear
 /// `running` and zero the counter in `apply`, but a forwarded SubagentEnd can

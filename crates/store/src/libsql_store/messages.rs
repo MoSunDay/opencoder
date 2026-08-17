@@ -153,11 +153,7 @@ pub async fn import(conn: &Connection, session_id: &str, msgs: &[Message]) -> Re
     })
 }
 
-async fn import_chunk_in_tx(
-    conn: &Connection,
-    session_id: &str,
-    msgs: &[Message],
-) -> Result<u32> {
+async fn import_chunk_in_tx(conn: &Connection, session_id: &str, msgs: &[Message]) -> Result<u32> {
     super::tx::run_tx(conn, "BEGIN", || async move {
         let mut count = 0u32;
         for m in msgs {

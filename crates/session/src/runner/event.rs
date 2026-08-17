@@ -574,7 +574,8 @@ mod from_sse_tests {
         match ev {
             SessionEvent::AutoPilot { iteration, .. } => {
                 assert_eq!(
-                    iteration, u32::MAX,
+                    iteration,
+                    u32::MAX,
                     "iteration must saturate to u32::MAX, not wrap"
                 );
             }

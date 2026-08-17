@@ -146,18 +146,24 @@ mod tests {
     fn navigation_clamps_between_base_and_last_env() {
         let (o, next) = handle_key(list(&["a", "b"], None, 0), key(KeyCode::Up));
         assert!(matches!(o, EnvsOutcome::Idle));
-        let EnvsMenu::List(l) = next.unwrap() else { panic!() };
+        let EnvsMenu::List(l) = next.unwrap() else {
+            panic!()
+        };
         assert_eq!(l.selected, 0, "up at base row clamps");
 
         let (_, next) = handle_key(list(&["a", "b"], None, 2), key(KeyCode::Down));
-        let EnvsMenu::List(l) = next.unwrap() else { panic!() };
+        let EnvsMenu::List(l) = next.unwrap() else {
+            panic!()
+        };
         assert_eq!(l.selected, 2, "down at last env clamps");
     }
 
     #[test]
     fn n_opens_form_with_existing_names() {
         let (_, next) = handle_key(list(&["a"], None, BASE_ROW), key(KeyCode::Char('n')));
-        let EnvsMenu::Form(f) = next.unwrap() else { panic!() };
+        let EnvsMenu::Form(f) = next.unwrap() else {
+            panic!()
+        };
         assert_eq!(f.existing, vec!["a".to_string()]);
         assert!(f.capture, "capture defaults on");
     }
@@ -169,20 +175,34 @@ mod tests {
         assert!(matches!(next, Some(EnvsMenu::List(_))));
 
         let (_, next) = handle_key(list(&["a"], None, 1), key(KeyCode::Char('d')));
-        let EnvsMenu::List(l) = next.unwrap() else { panic!() };
+        let EnvsMenu::List(l) = next.unwrap() else {
+            panic!()
+        };
         assert_eq!(l.confirm_delete, Some(1));
 
         // y confirms, n/Esc cancels
         let (o, _) = handle_key(
-            EnvsList { envs: vec!["a".into()], active: None, selected: 1, confirm_delete: Some(1) },
+            EnvsList {
+                envs: vec!["a".into()],
+                active: None,
+                selected: 1,
+                confirm_delete: Some(1),
+            },
             key(KeyCode::Char('y')),
         );
         assert!(matches!(o, EnvsOutcome::Delete(ref n) if n == "a"));
         let (_, next) = handle_key(
-            EnvsList { envs: vec!["a".into()], active: None, selected: 1, confirm_delete: Some(1) },
+            EnvsList {
+                envs: vec!["a".into()],
+                active: None,
+                selected: 1,
+                confirm_delete: Some(1),
+            },
             key(KeyCode::Esc),
         );
-        let EnvsMenu::List(l) = next.unwrap() else { panic!() };
+        let EnvsMenu::List(l) = next.unwrap() else {
+            panic!()
+        };
         assert!(l.confirm_delete.is_none());
     }
 

@@ -90,9 +90,21 @@ mod tests {
             terminal
                 .draw(|f| render_scope_dialog(f, f.area(), &dialog))
                 .expect("render must not panic");
-            let text = terminal.backend().buffer().content.iter().map(|c| c.symbol()).collect::<String>();
-            assert!(text.contains("[x] explore"), "checked row rendered at {width}x{height}");
-            assert!(text.contains("[ ] parent"), "unchecked row rendered at {width}x{height}");
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert!(
+                text.contains("[x] explore"),
+                "checked row rendered at {width}x{height}"
+            );
+            assert!(
+                text.contains("[ ] parent"),
+                "unchecked row rendered at {width}x{height}"
+            );
         }
         // Degenerate size: must clamp and render without panicking.
         let mut tiny = TestTerminal::new(TestBackend::new(10, 4)).unwrap();

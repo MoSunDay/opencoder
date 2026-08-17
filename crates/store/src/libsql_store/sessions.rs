@@ -56,10 +56,12 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
     if let Some(s) = &filter.search {
         // Escape LIKE metacharacters (`\`, `%`, `_`) in the user-supplied term
         // so they match literally. `ESCAPE '\'` declares the escape character.
-        where_clauses.push(
-            "(s.id LIKE ? ESCAPE '\\' OR COALESCE(s.title,'') LIKE ? ESCAPE '\\')".into(),
-        );
-        let escaped = s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        where_clauses
+            .push("(s.id LIKE ? ESCAPE '\\' OR COALESCE(s.title,'') LIKE ? ESCAPE '\\')".into());
+        let escaped = s
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let like = format!("%{escaped}%");
         args.push(like.clone().into());
         args.push(like.into());
@@ -123,9 +125,7 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         anyhow::bail!("SessionPatch: summary field and clear_summary are mutually exclusive");
     }
     if patch.summary_seq.is_some() && patch.clear_summary {
-        anyhow::bail!(
-            "SessionPatch: summary_seq field and clear_summary are mutually exclusive"
-        );
+        anyhow::bail!("SessionPatch: summary_seq field and clear_summary are mutually exclusive");
     }
     if patch.summary_images.is_some() && patch.clear_summary {
         anyhow::bail!(
@@ -133,14 +133,10 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         );
     }
     if patch.handoff_plan.is_some() && patch.clear_handoff {
-        anyhow::bail!(
-            "SessionPatch: handoff_plan field and clear_handoff are mutually exclusive"
-        );
+        anyhow::bail!("SessionPatch: handoff_plan field and clear_handoff are mutually exclusive");
     }
     if patch.handoff_seq.is_some() && patch.clear_handoff {
-        anyhow::bail!(
-            "SessionPatch: handoff_seq field and clear_handoff are mutually exclusive"
-        );
+        anyhow::bail!("SessionPatch: handoff_seq field and clear_handoff are mutually exclusive");
     }
     if patch.skill.is_some() && patch.clear_skill {
         anyhow::bail!("SessionPatch: skill field and clear_skill are mutually exclusive");
@@ -152,7 +148,9 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
         anyhow::bail!("SessionPatch: model field and clear_model are mutually exclusive");
     }
     if patch.requirement.is_some() && patch.clear_requirement {
-        anyhow::bail!("SessionPatch: requirement field and clear_requirement are mutually exclusive");
+        anyhow::bail!(
+            "SessionPatch: requirement field and clear_requirement are mutually exclusive"
+        );
     }
 
     let mut sets: Vec<&str> = Vec::new();
@@ -179,7 +177,11 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     }
     if let Some(v) = &patch.summary_images {
         sets.push("summary_images_json = ?");
-        args.push(serde_json::to_string(v).unwrap_or_else(|_| "[]".into()).into());
+        args.push(
+            serde_json::to_string(v)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+        );
     }
     if let Some(v) = patch.handoff_seq {
         sets.push("handoff_seq = ?");

@@ -251,7 +251,11 @@ async fn autopilot_disabled_never_invokes_drive() {
         model: "m/g".into(),
         ..Config::default()
     };
-    assert_eq!(cfg.autopilot.mode, ApMode::Off, "autopilot is off by default");
+    assert_eq!(
+        cfg.autopilot.mode,
+        ApMode::Off,
+        "autopilot is off by default"
+    );
     let (_dir, mut session) = make_session(mock.clone() as Arc<dyn ChatStream>, cfg);
 
     let reg = registry();

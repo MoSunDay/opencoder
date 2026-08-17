@@ -245,9 +245,7 @@ mod tests {
         let conn = store.conn().await.unwrap();
 
         create(&conn, &task("t3")).await.unwrap();
-        complete(&conn, "t3", "first-result", true)
-            .await
-            .unwrap();
+        complete(&conn, "t3", "first-result", true).await.unwrap();
         // Late complete with different result: rejected by the status guard
         // (0 rows affected) and surfaced as an error, not a silent no-op.
         let late = complete(&conn, "t3", "late-result", false).await;

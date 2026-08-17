@@ -42,7 +42,11 @@ async fn sync_connects_and_discovers_tools() {
     opencoder_session::mcp::sync(session_id, &desired).await;
 
     let tools = opencoder_session::mcp::tools_for(session_id);
-    assert!(tools.len() >= 2, "expected at least 2 tools, got {}", tools.len());
+    assert!(
+        tools.len() >= 2,
+        "expected at least 2 tools, got {}",
+        tools.len()
+    );
     assert!(tools.contains_key("mcp__mock__echo"));
     assert!(tools.contains_key("mcp__mock__add"));
 
@@ -78,10 +82,7 @@ async fn call_echo_tool_via_registry() {
         proxy: None,
     };
     let out = echo
-        .execute(
-            serde_json::json!({"text": "hello world"}),
-            &ctx,
-        )
+        .execute(serde_json::json!({"text": "hello world"}), &ctx)
         .await
         .expect("echo execute should succeed");
     assert!(!out.is_error);

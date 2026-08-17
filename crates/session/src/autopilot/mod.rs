@@ -28,8 +28,8 @@ pub mod state;
 mod verify;
 
 pub use decision::{parse_verdict, should_stop};
-pub use state::{ApOutcome, ApPhase, ApState, VerifyVerdict};
 pub use review_pass::review_pass;
+pub use state::{ApOutcome, ApPhase, ApState, VerifyVerdict};
 pub use verify::verify;
 
 #[cfg(test)]
@@ -38,7 +38,9 @@ mod tests;
 use std::collections::HashMap;
 
 use anyhow::Result;
+use opencoder_core::message::now_ms;
 use opencoder_core::{Role, ToolArc};
+use opencoder_store::SessionPatch;
 
 use crate::autopilot::phases::{run_act_phase, run_plan_phase};
 use crate::runner::SessionEvent;
@@ -84,10 +86,10 @@ pub async fn drive(
 
     loop {
         if is_cancelled(session) {
-            return finish(session, on_event, ApOutcome::Cancelled);
+            return finish(session, on_event, ApOutcome::Cancelled).await;
         }
         if state.iteration >= max_iterations {
-            return finish(session, on_event, ApOutcome::MaxIterations);
+            return finish(session, on_event, ApOutcome::MaxIterations).await;
         }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Plan,
@@ -101,12 +103,13 @@ pub async fn drive(
                 session,
                 on_event,
                 ApOutcome::Aborted(format!("plan phase failed: {e:#}")),
-            )?;
+            )
+            .await?;
             return Err(e);
         }
 
         if is_cancelled(session) {
-            return finish(session, on_event, ApOutcome::Cancelled);
+            return finish(session, on_event, ApOutcome::Cancelled).await;
         }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Act,
@@ -117,14 +120,15 @@ pub async fn drive(
                 session,
                 on_event,
                 ApOutcome::Aborted(format!("act phase failed: {e:#}")),
-            )?;
+            )
+            .await?;
             return Err(e);
         }
 
         // A cancel during ACT (run_loop broke with Status("interrupted")) must
         // not burn a VERIFY call.
         if is_cancelled(session) {
-            return finish(session, on_event, ApOutcome::Cancelled);
+            return finish(session, on_event, ApOutcome::Cancelled).await;
         }
         on_event(SessionEvent::AutoPilot {
             phase: ApPhase::Verify,
@@ -135,22 +139,43 @@ pub async fn drive(
         // loop-top check; the runner-level cancel still stops the outer run.
         let verdict = verify(session, &state, verify_retries).await;
         match should_stop(verdict, state.iteration, max_iterations) {
-            Some(outcome) => return finish(session, on_event, outcome),
+            Some(outcome) => return finish(session, on_event, outcome).await,
             None => state.iteration += 1, // MoreWork, under cap → loop again
         }
     }
 }
 
-/// Terminal bookkeeping for every outcome: clear the active skill, emit a
-/// final `Done` so surfaces get a uniform end-of-autopilot marker, and return
-/// the outcome. `should_stop` never yields `Cancelled` — that path is handled
-/// by the explicit checks above.
-fn finish(
+/// Clear the autopilot-injected skill both in memory and (best-effort) in
+/// the store. The review skill is activated system-side — the user never
+/// asked for it — so it must never outlive its pass: without the persisted
+/// `clear_skill`, an error mid-pass followed by a resume would resurrect the
+/// skill from the `sessions.skill` column into an otherwise plain session.
+pub(crate) async fn clear_injected_skill(session: &SessionState) {
+    session.set_skill(None);
+    if let Some(store) = &session.store {
+        let _ = store
+            .update_session(
+                &session.id,
+                &SessionPatch {
+                    clear_skill: true,
+                    updated_at: Some(now_ms()),
+                    ..Default::default()
+                },
+            )
+            .await;
+    }
+}
+
+/// Terminal bookkeeping for every outcome: clear the active skill (memory +
+/// store), emit a final `Done` so surfaces get a uniform end-of-autopilot
+/// marker, and return the outcome. `should_stop` never yields `Cancelled` —
+/// that path is handled by the explicit checks above.
+async fn finish(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
     outcome: ApOutcome,
 ) -> Result<ApOutcome> {
-    session.set_skill(None);
+    clear_injected_skill(session).await;
     on_event(SessionEvent::Done);
     Ok(outcome)
 }

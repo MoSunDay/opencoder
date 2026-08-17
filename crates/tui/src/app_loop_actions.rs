@@ -324,12 +324,8 @@ pub(crate) async fn steer_submit_after_mouse(
         chat,
     );
     if outcome == crate::app::steer_fire::SteerSubmitOutcome::StartTurn {
-        crate::app_helpers::start_turn(
-            cmd_tx,
-            cancel,
-            UiCmd::Prompt(String::new(), Vec::new()),
-        )
-        .await;
+        crate::app_helpers::start_turn(cmd_tx, cancel, UiCmd::Prompt(String::new(), Vec::new()))
+            .await;
         *running = true;
         chat.begin_turn();
     }

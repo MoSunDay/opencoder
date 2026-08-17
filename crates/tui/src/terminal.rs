@@ -150,6 +150,13 @@ pub(crate) fn resume_mouse_capture() -> Result<()> {
     Ok(())
 }
 
+/// Whether a Shift release should restore mouse capture: copy mode owns the
+/// capture state (suspended on enter, resumed on exit), so a release inside
+/// copy mode must not steal native selection back from the terminal.
+fn resumes_on_shift_release(copy_mode: bool) -> bool {
+    !copy_mode
+}
+
 /// Handle a key event for mouse-capture toggling and modifier/release filtering.
 ///
 /// Returns `true` if the event was consumed (Shift toggle, other bare modifier,
@@ -157,8 +164,15 @@ pub(crate) fn resume_mouse_capture() -> Result<()> {
 /// Returns `false` for normal key presses that the app should handle.
 ///
 /// When the user holds Shift, mouse capture is suspended so the terminal
-/// performs native text selection; releasing Shift restores it.
-pub(crate) fn consume_modifier_or_release(k: &KeyEvent, shift_held: &mut bool) -> bool {
+/// performs native text selection; releasing Shift restores it. While copy
+/// mode is active it owns the capture state (suspended on enter, resumed on
+/// exit), so shift transitions must not fight over the terminal — state
+/// tracking continues, capture toggling is suppressed.
+pub(crate) fn consume_modifier_or_release(
+    k: &KeyEvent,
+    shift_held: &mut bool,
+    copy_mode: bool,
+) -> bool {
     let is_shift = matches!(
         k.code,
         KeyCode::Modifier(ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift)
@@ -168,13 +182,17 @@ pub(crate) fn consume_modifier_or_release(k: &KeyEvent, shift_held: &mut bool) -
             KeyEventKind::Press | KeyEventKind::Repeat => {
                 if !*shift_held {
                     *shift_held = true;
-                    let _ = suspend_mouse_capture();
+                    if !copy_mode {
+                        let _ = suspend_mouse_capture();
+                    }
                 }
             }
             KeyEventKind::Release => {
                 if *shift_held {
                     *shift_held = false;
-                    let _ = resume_mouse_capture();
+                    if resumes_on_shift_release(copy_mode) {
+                        let _ = resume_mouse_capture();
+                    }
                 }
             }
         }
@@ -241,18 +259,21 @@ mod tests {
         assert!(consume_modifier_or_release(
             &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Press),
             &mut held,
+            false
         ));
         assert!(held, "Shift Left press must set shift_held = true");
 
         assert!(consume_modifier_or_release(
             &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Repeat),
             &mut held,
+            false
         ));
         assert!(held, "Shift Left repeat must keep shift_held = true");
 
         assert!(consume_modifier_or_release(
             &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Release),
             &mut held,
+            false
         ));
         assert!(!held, "Shift Left release must set shift_held = false");
     }
@@ -265,12 +286,14 @@ mod tests {
         assert!(consume_modifier_or_release(
             &shift_event(ModifierKeyCode::RightShift, KeyEventKind::Press),
             &mut held,
+            false
         ));
         assert!(held);
 
         assert!(consume_modifier_or_release(
             &shift_event(ModifierKeyCode::RightShift, KeyEventKind::Release),
             &mut held,
+            false
         ));
         assert!(!held);
     }
@@ -288,6 +311,7 @@ mod tests {
                 KeyEventKind::Press,
             ),
             &mut held,
+            false
         ));
         assert!(!held, "Ctrl press must not set shift_held");
 
@@ -299,6 +323,7 @@ mod tests {
                 KeyEventKind::Press,
             ),
             &mut held,
+            false
         ));
         assert!(held, "non-shift modifier must not alter a held shift");
     }
@@ -311,6 +336,7 @@ mod tests {
         assert!(!consume_modifier_or_release(
             &KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
             &mut held,
+            false
         ));
         assert!(!held);
 
@@ -318,8 +344,45 @@ mod tests {
         assert!(!consume_modifier_or_release(
             &KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
             &mut held,
+            false
         ));
         assert!(held, "normal key must not clear a held shift");
+    }
+
+    /// In copy mode the shift state machine keeps running (events consumed,
+    /// `shift_held` tracks correctly) — only the capture toggling is
+    /// suppressed, so a Shift release inside copy mode cannot resume mouse
+    /// capture and steal native selection back from the terminal.
+    #[test]
+    fn consume_modifier_tracks_shift_in_copy_mode_without_capture_fight() {
+        let mut held = false;
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Press),
+            &mut held,
+            true
+        ));
+        assert!(held, "copy mode must keep tracking shift state");
+
+        assert!(consume_modifier_or_release(
+            &shift_event(ModifierKeyCode::LeftShift, KeyEventKind::Release),
+            &mut held,
+            true
+        ));
+        assert!(!held, "release must clear shift even in copy mode");
+    }
+
+    /// Pure decision: a Shift release restores capture only outside copy mode.
+    #[test]
+    fn resumes_on_shift_release_gates_capture_restore() {
+        assert!(
+            !resumes_on_shift_release(true),
+            "copy mode must keep capture suspended"
+        );
+        assert!(
+            resumes_on_shift_release(false),
+            "normal release restores capture"
+        );
     }
 
     /// Under REPORT_EVENT_TYPES the Release of a non-shift key is filtered out
@@ -335,6 +398,7 @@ mod tests {
                 KeyEventKind::Release,
             ),
             &mut held,
+            false
         ));
         assert!(!held, "release filtering must not set shift_held");
     }

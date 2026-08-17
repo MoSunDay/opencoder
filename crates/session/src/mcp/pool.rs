@@ -77,9 +77,7 @@ pub async fn sync(session_id: &str, desired: &[(String, McpServerConfig)]) {
                 new_conns.push((
                     name,
                     McpConnection {
-                        client: McpClient::new(Arc::new(
-                            transport::MockTransport::pair().0,
-                        )),
+                        client: McpClient::new(Arc::new(transport::MockTransport::pair().0)),
                         tools: vec![],
                         status: ConnStatus::Failed(format!("{e:#}")),
                     },

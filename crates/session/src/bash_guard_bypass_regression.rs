@@ -196,10 +196,7 @@ fn wrapper_readonly_counterparts_stay_allowed() {
     assert_eq!(classify("time ls -la"), BashVerdict::ReadOnly);
     assert_eq!(classify("env -i git status"), BashVerdict::ReadOnly);
     assert_eq!(classify("timeout -k 1 5 cat file"), BashVerdict::ReadOnly);
-    assert_eq!(
-        classify("stdbuf -o0 grep -q x file"),
-        BashVerdict::ReadOnly
-    );
+    assert_eq!(classify("stdbuf -o0 grep -q x file"), BashVerdict::ReadOnly);
 }
 
 // ---------------------------------------------------------------------------

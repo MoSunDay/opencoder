@@ -125,14 +125,15 @@ pub async fn visible_parent_tail(
     id: &str,
     meta: &SessionMeta,
 ) -> Vec<Message> {
-    let messages = if meta.handoff_seq.is_none() && matches!(meta.summary_seq, Some(sk) if sk > 0) {
-        store
-            .load_messages_after(id, meta.summary_seq.unwrap())
-            .await
-    } else {
-        store.load_messages(id).await
-    }
-    .unwrap_or_default();
+    let messages =
+        if meta.handoff_seq.is_none() && matches!(meta.summary_seq, Some(sk) if sk > 0) {
+            store
+                .load_messages_after(id, meta.summary_seq.unwrap())
+                .await
+        } else {
+            store.load_messages(id).await
+        }
+        .unwrap_or_default();
     match (meta.handoff_seq, meta.handoff_plan.is_some()) {
         (Some(hs), true) => {
             let hs = hs as usize;

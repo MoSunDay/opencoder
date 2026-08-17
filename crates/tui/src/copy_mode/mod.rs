@@ -10,12 +10,18 @@
 //! the selection fight.
 //!
 //! While active, the body is re-rendered full-width with render decoration
-//! stripped ([`clean_text`]): no rounded border, no scrollbar column, no
-//! `[turn cost]` row, no border indicators; per row the indent gutter and
-//! code-frame prefixes (`│ `, `▎ `) are removed and pure-decoration rows
-//! (role headers `❯ User:`/`❯ Say:`, separators, `┌ lang`/`└───` code
-//! frames) are dropped. The app itself never touches the clipboard —
-//! copying is the terminal's own job via its native selection shortcuts.
+//! stripped — no rounded border, no scrollbar column, no `[turn cost]` row,
+//! no border indicators; per row the indent gutter and code-frame prefixes
+//! (`│ `, `▎ `) are removed and pure-decoration rows (role headers
+//! `❯ User:`/`❯ Say:`, thematic breaks, `┌ lang`/`└───` code frames, plan
+//! headers) are dropped. Stripping is *structured*: [`clean`] matches the
+//! exact span shapes the renderers declare as constants, and the scroll
+//! geometry runs on the cleaned line set ([`CleanModel`]), so dropped rows
+//! leave no blank band and the first visible row is never over-skipped.
+//! The app itself never touches the clipboard — copying is the terminal's
+//! own job via its native selection shortcuts.
+
+pub mod clean;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
@@ -96,63 +102,19 @@ pub(crate) fn handle_key(
 
 // ── Clean-view layer ─────────────────────────────────────────────────────
 
-/// Concatenate a rendered `Line`'s span contents into plain text.
-pub fn plain_text(line: &Line<'_>) -> String {
-    line.spans.iter().map(|s| s.content.as_ref()).collect()
-}
-
-/// `true` when `t` consists solely of `≥ 3` copies of one rule character
-/// (`─ ━ ═ ┅ -`) — a pure-decoration separator row.
-fn is_separator(t: &str) -> bool {
-    let mut chars = t.chars();
-    match chars.next() {
-        Some(c @ ('─' | '━' | '═' | '┅' | '-')) => {
-            t.chars().count() >= 3 && t.chars().all(|x| x == c)
-        }
-        _ => false,
-    }
-}
-
-/// Strip one render-decoration slot from `t`: first the fixed indent gutter
-/// (4 spaces for user/assistant/image blocks, 2 for plan blocks), then the
-/// code-frame `│ ` (or bare `│` on empty code rows) and blockquote `▎ `
-/// prefixes. Deeper leading indentation beyond the fixed slot is preserved.
-fn strip_slots(t: &str) -> &str {
-    let t = t
-        .strip_prefix("    ")
-        .or_else(|| t.strip_prefix("  "))
-        .unwrap_or(t);
-    let t = t
-        .strip_prefix("\u{2502} ")
-        .or_else(|| t.strip_prefix("\u{2502}"))
-        .unwrap_or(t);
-    t.strip_prefix("\u{258e} ").unwrap_or(t)
-}
-
-/// Clean one rendered row for the copy-mode view. Returns `None` for
-/// pure-decoration rows that are dropped entirely (role headers,
-/// separators, code-frame borders); otherwise the row with its gutter /
-/// prefix slots stripped. Semantic headers (`▸ tool`, `💭 Thinking`) and
-/// any remaining indentation are kept — only decoration goes.
-pub fn clean_text(text: &str) -> Option<String> {
-    let t = strip_slots(text).trim_end();
-    if t == "\u{276f} User:" || t == "\u{276f} Say:" {
-        return None;
-    }
-    if t.starts_with('\u{250c}') || t.starts_with('\u{2514}') {
-        return None; // `┌ lang` top / `└───` bottom code-frame borders
-    }
-    if is_separator(t) {
-        return None;
-    }
-    Some(t.to_string())
-}
-
 /// Render the transcript for copy mode: full width, no block/border, no
-/// scrollbar, no `[turn cost]` row, no border indicators — every visible
-/// row cleaned via [`clean_text`] so terminal-native selection spans clean
-/// text. Reuses the shared viewport cache; the width check naturally
-/// rebuilds it when toggling in/out of copy mode (full width vs inner).
+/// scrollbar, no `[turn cost]` row, no border indicators — every visible row
+/// is already clean text so terminal-native selection spans it directly.
+/// Reuses the shared viewport cache; the width check naturally rebuilds it
+/// when toggling in/out of copy mode (full width vs inner).
+///
+/// Scrolling geometry runs on the *cleaned* line set (`ViewportCache::
+/// cleaned`), so follow/clamp counts and the visible window both measure
+/// post-decoration rows: a window full of dropped decoration rows renders
+/// the following content rows instead of leaving a blank band, and `top_skip`
+/// is always the in-line offset of the first *clean* row (the old
+/// "first row was dropped, discard top_skip" patch is gone because the
+/// window math can no longer land on a dropped row).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_clean(
     f: &mut Frame,
@@ -171,24 +133,18 @@ pub(crate) fn render_clean(
     if needs_rebuild {
         *viewport = Some(ViewportCache::build(chat, area.width, anim_tick, now_ms));
     }
-    let cache = viewport.as_ref().expect("viewport built above");
+    let cache = viewport.as_mut().expect("viewport built above");
+    let cleaned = cache.cleaned(area.width);
     let content_h = area.height as usize;
-    let max_rows = cache.total_rows().saturating_sub(content_h);
+    let max_rows = cleaned.total_rows().saturating_sub(content_h);
     if follow {
         *scroll = max_rows as u32;
     }
     *scroll = (*scroll as usize).min(max_rows) as u32;
-    let (start, end, top_skip) = cache.visible_window(*scroll as usize, content_h);
-    let window = &cache.lines()[start..end];
-    // A dropped leading row makes the wrapped-row `top_skip` meaningless
-    // (it would skip rows of the wrong line) — drop the skip in that case.
-    let top_skip = match window.first().map(|l| clean_text(&plain_text(l))) {
-        Some(Some(_)) => top_skip,
-        _ => 0,
-    };
-    let lines: Vec<Line<'static>> = window
+    let (start, end, top_skip) = cleaned.visible_window(*scroll as usize, content_h);
+    let lines: Vec<Line<'static>> = cleaned.texts()[start..end]
         .iter()
-        .filter_map(|l| clean_text(&plain_text(l)).map(Line::raw))
+        .map(|t| Line::raw(t.clone()))
         .collect();
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), area);
@@ -335,82 +291,169 @@ mod tests {
         assert!(active, "Esc must reach the overlay, not exit copy mode");
     }
 
-    #[test]
-    fn clean_text_drops_headers_separators_and_code_frames() {
-        assert_eq!(clean_text("\u{276f} User:"), None);
-        assert_eq!(clean_text("\u{276f} Say:"), None);
-        assert_eq!(clean_text("\u{2500}\u{2500}\u{2500}\u{2500}"), None);
-        assert_eq!(clean_text("\u{2501}\u{2501}\u{2501}"), None);
-        assert_eq!(clean_text("\u{250c} rust "), None);
-        assert_eq!(clean_text("\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}"), None);
+    // ── Render-level fixtures ─────────────────────────────────────────────
+
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::Terminal;
+
+    /// Draw `view` through [`render_clean`] on a 40×8 terminal (follow mode)
+    /// and return the terminal for buffer inspection.
+    fn draw_clean(view: &ChatView) -> Terminal<TestBackend> {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut scroll = 0u32;
+        let mut viewport = None;
+        terminal
+            .draw(|f| {
+                render_clean(f, f.area(), view, &mut scroll, true, 0, 0, &mut viewport);
+            })
+            .unwrap();
+        terminal
+    }
+
+    /// Per-row cell contents of a drawn buffer.
+    fn buf_rows(buf: &Buffer) -> Vec<String> {
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// All cell symbols joined into one string.
+    fn buf_text(buf: &Buffer) -> String {
+        buf.content
+            .iter()
+            .flat_map(|c| c.symbol().chars())
+            .collect()
+    }
+
+    fn no_code_frame_glyphs(text: &str) {
+        for deco in ['\u{250c}', '\u{2514}', '\u{2502}'] {
+            assert!(
+                !text.contains(deco),
+                "code frame {deco:?} must be stripped: {text}"
+            );
+        }
     }
 
     #[test]
-    fn clean_text_strips_gutter_and_prefixes_keeps_deeper_indent() {
-        // 4-space (user/assistant) and 2-space (plan) gutters go…
-        assert_eq!(clean_text("    hello"), Some("hello".into()));
-        assert_eq!(clean_text("  plan line"), Some("plan line".into()));
-        // …but indentation beyond the fixed slot survives.
-        assert_eq!(clean_text("      nested"), Some("  nested".into()));
-        // Code-frame `│ ` prefix and bare `│` empty row, blockquote `▎ `.
-        assert_eq!(
-            clean_text("\u{2502} fn main() {}"),
-            Some("fn main() {}".into())
+    fn render_clean_shows_code_text_without_frame() {
+        use opencoder_session::SessionEvent;
+
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta(
+            "```rust\nfn main() {}\n```".into(),
+        ));
+        v.apply(&SessionEvent::Done);
+
+        let terminal = draw_clean(&v);
+        let text = buf_text(terminal.backend().buffer());
+        assert!(
+            text.contains("fn main() {}"),
+            "code text must survive: {text}"
         );
-        assert_eq!(clean_text("\u{2502}"), Some(String::new()));
-        assert_eq!(clean_text("\u{258e} quoted"), Some("quoted".into()));
-        // Gutter + code prefix compose (code inside an indented block).
-        assert_eq!(clean_text("    \u{2502} code"), Some("code".into()));
-        // Trailing padding from the border filler is trimmed.
-        assert_eq!(clean_text("hi   "), Some("hi".into()));
+        no_code_frame_glyphs(&text);
+        assert!(
+            !text.contains("\u{276f} Say:"),
+            "role header must be dropped: {text}"
+        );
     }
 
     #[test]
-    fn clean_text_keeps_semantic_headers_and_plain_rows() {
-        assert_eq!(
-            clean_text("\u{25b8} bash ls -la"),
-            Some("\u{25b8} bash ls -la".into())
+    fn render_clean_keeps_separator_like_code_rows() {
+        use opencoder_session::SessionEvent;
+
+        // YAML frontmatter inside a fenced block: every `---` row carries a
+        // `│ ` code prefix span, so it is content — the old text heuristic
+        // killed it as a "separator".
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta(
+            "```yaml\n---\ntitle: x\n---\n```".into(),
+        ));
+        v.apply(&SessionEvent::Done);
+
+        let terminal = draw_clean(&v);
+        let text = buf_text(terminal.backend().buffer());
+        assert!(
+            text.contains("---"),
+            "frontmatter fences must survive: {text}"
         );
-        assert_eq!(
-            clean_text("\u{1f4ad} Thinking"),
-            Some("\u{1f4ad} Thinking".into())
+        assert!(
+            text.contains("title: x"),
+            "frontmatter body must survive: {text}"
         );
-        assert_eq!(clean_text("[image: a.png]"), Some("[image: a.png]".into()));
-        assert_eq!(clean_text(""), Some(String::new()));
-        // Two dashes are not a separator (e.g. an em-dash-less "--" flag text).
-        assert_eq!(clean_text("--verbose"), Some("--verbose".into()));
+        no_code_frame_glyphs(&text);
+    }
+
+    #[test]
+    fn render_clean_keeps_text_leading_spaces_beyond_gutter() {
+        use ratatui::text::Span;
+
+        // A plan-body row (2-space gutter span) whose text itself starts
+        // with two spaces: only the gutter span goes — the old heuristic
+        // stripped 4 first and ate the text's own indentation.
+        let mut v = ChatView::default();
+        v.push_marker(Line::from(vec![Span::raw("  "), Span::raw("  nested")]));
+
+        let terminal = draw_clean(&v);
+        let rows = buf_rows(terminal.backend().buffer());
+        assert_eq!(rows[0].trim_end(), "  nested", "own lead kept, gutter gone");
+    }
+
+    #[test]
+    fn render_clean_no_blank_band_under_trailing_decoration() {
+        use opencoder_session::SessionEvent;
+
+        // Follow-mode clamp must use the *cleaned* row count: with the tail
+        // of the transcript full of dropped decoration rows (frames, role
+        // header, trailing blank), the old decorated-geometry scroll left a
+        // blank band instead of pinning the last content row.
+        let body: String = (1..=10).map(|i| format!("line{i}\n")).collect();
+        let mut v = ChatView::default();
+        v.apply(&SessionEvent::TextDelta(format!("```rust\n{body}```")));
+        v.apply(&SessionEvent::Done);
+
+        let terminal = draw_clean(&v);
+        let rows = buf_rows(terminal.backend().buffer());
+        assert!(
+            rows[0].starts_with("line4"),
+            "window must start at clean row 3 (line4), got {:?}",
+            rows[0]
+        );
+        assert!(
+            rows[6].starts_with("line10"),
+            "last content row must pin at row 6, got {:?}",
+            rows[6]
+        );
+        assert!(
+            rows[7].trim_end().is_empty(),
+            "only the single structural blank may trail, got {:?}",
+            rows[7]
+        );
     }
 
     #[test]
     fn render_composer_clean_shows_text_without_chrome() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
-        let backend = TestBackend::new(40, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
             .draw(|f| render_composer_clean(f, f.area(), "hello\nworld"))
             .unwrap();
-        let buf = terminal.backend().buffer();
+        let rows = buf_rows(terminal.backend().buffer());
         // Text rows land flush at column 0: no border, no prompt glyph.
-        let row0: String = (0..40)
-            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
-            .collect();
-        let row1: String = (0..40)
-            .map(|x| buf.cell((x, 1)).unwrap().symbol().to_string())
-            .collect();
-        assert!(row0.starts_with("hello"), "row0 flush left: {row0:?}");
-        assert!(row1.starts_with("world"), "row1 flush left: {row1:?}");
-        let all: String = (0..8)
-            .flat_map(|y| (0..40).map(move |x| (x, y)))
-            .flat_map(|(x, y)| {
-                buf.cell((x, y))
-                    .unwrap()
-                    .symbol()
-                    .chars()
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        assert!(
+            rows[0].starts_with("hello"),
+            "row0 flush left: {:?}",
+            rows[0]
+        );
+        assert!(
+            rows[1].starts_with("world"),
+            "row1 flush left: {:?}",
+            rows[1]
+        );
+        let all = rows.concat();
         assert!(!all.contains('\u{276f}'), "no prompt glyph: {all:?}");
         for deco in ['\u{250c}', '\u{2514}', '\u{2500}'] {
             assert!(
@@ -422,88 +465,26 @@ mod tests {
 
     #[test]
     fn render_notepad_clean_shows_file_text_without_chrome() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "alpha-line\nbeta-line\n").unwrap();
         let mut view = crate::notepad::NotepadView::new(dir.path().to_path_buf());
         view.editor.load(&dir.path().join("a.txt"));
 
-        let backend = TestBackend::new(40, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
             .draw(|f| render_notepad_clean(f, f.area(), &view))
             .unwrap();
-        let buf = terminal.backend().buffer();
+        let rows = buf_rows(terminal.backend().buffer());
         // File text flush at column 0 — the decorated editor would put a
         // line-number gutter there instead.
-        let row0: String = (0..40)
-            .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
-            .collect();
-        let row1: String = (0..40)
-            .map(|x| buf.cell((x, 1)).unwrap().symbol().to_string())
-            .collect();
-        assert!(row0.starts_with("alpha-line"), "row0 flush left: {row0:?}");
-        assert!(row1.starts_with("beta-line"), "row1 flush left: {row1:?}");
-        let all: String = (0..8)
-            .flat_map(|y| (0..40).map(move |x| (x, y)))
-            .flat_map(|(x, y)| {
-                buf.cell((x, y))
-                    .unwrap()
-                    .symbol()
-                    .chars()
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        assert!(rows[0].starts_with("alpha-line"), "row0: {:?}", rows[0]);
+        assert!(rows[1].starts_with("beta-line"), "row1: {:?}", rows[1]);
+        let all = rows.concat();
         for deco in ['\u{250c}', '\u{2514}', '\u{2502}'] {
             assert!(
                 !all.contains(deco),
                 "decoration {deco:?} must be absent: {all:?}"
             );
         }
-    }
-
-    #[test]
-    fn render_clean_shows_code_text_without_frame() {
-        use opencoder_session::SessionEvent;
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
-
-        let mut v = ChatView::default();
-        v.apply(&SessionEvent::TextDelta(
-            "```rust\nfn main() {}\n```".into(),
-        ));
-        v.apply(&SessionEvent::Done);
-
-        let backend = TestBackend::new(40, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut scroll = 0u32;
-        let mut viewport = None;
-        terminal
-            .draw(|f| {
-                render_clean(f, f.area(), &v, &mut scroll, true, 0, 0, &mut viewport);
-            })
-            .unwrap();
-        let buf = terminal.backend().buffer();
-        let text: String = buf
-            .content
-            .iter()
-            .flat_map(|c| c.symbol().chars())
-            .collect();
-        assert!(
-            text.contains("fn main() {}"),
-            "code text must survive: {text}"
-        );
-        for deco in ['\u{250c}', '\u{2514}', '\u{2502}'] {
-            assert!(
-                !text.contains(deco),
-                "code frame {deco:?} must be stripped: {text}"
-            );
-        }
-        assert!(
-            !text.contains("\u{276f} Say:"),
-            "role header must be dropped: {text}"
-        );
     }
 }

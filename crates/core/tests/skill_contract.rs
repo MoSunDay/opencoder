@@ -254,8 +254,8 @@ fn body_with_source_emits_path_annotation_then_body() {
 fn seeded_review_skill_requires_five_question_recap() {
     // The built-in review skill is embedded via include_str! and seeded on
     // first run; its REVIEW block must carry the five-question recap fields
-    // (goal / done+verify / blockers / next_todos) so a dropped field in the
-    // markdown asset turns this test red.
+    // (goal / progress / done+verify / blockers / next_todos) so a dropped
+    // field in the markdown asset turns this test red.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
@@ -264,15 +264,27 @@ fn seeded_review_skill_requires_five_question_recap() {
         body.contains("description:"),
         "frontmatter description missing"
     );
-    for field in ["goal:", "done:", "verify:", "blockers:", "next_todos:"] {
+    for field in [
+        "goal:",
+        "progress:",
+        "done:",
+        "verify:",
+        "blockers:",
+        "next_todos:",
+    ] {
         assert!(body.contains(field), "review skill missing `{field}`");
     }
+    assert!(
+        body.contains("progress: <completed 数>/<总数>（<0-100>%"),
+        "review REVIEW block must quantify progress (completed/total + percent)"
+    );
 }
 
 #[test]
 fn seeded_say_and_replay_skill_requires_five_question_recap() {
-    // Same guard for the say-and-replay REPLAY block: goal / done+verify /
-    // encountered + blocked / remaining must all survive asset edits.
+    // Same guard for the say-and-replay REPLAY block: goal / progress /
+    // done+verify / encountered + blocked / remaining must all survive
+    // asset edits.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body =
@@ -285,10 +297,25 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
         body.contains("description:"),
         "frontmatter description missing"
     );
-    for field in ["goal:", "verify:", "encountered:", "blocked:", "remaining:"] {
+    for field in [
+        "goal:",
+        "progress:",
+        "verify:",
+        "encountered:",
+        "blocked:",
+        "remaining:",
+    ] {
         assert!(
             body.contains(field),
             "say-and-replay skill missing `{field}`"
         );
     }
+    assert!(
+        body.contains("（<0-100>%"),
+        "say-and-replay progress must carry an explicit percent, not a bare ratio"
+    );
+    assert!(
+        body.contains("百分比"),
+        "say-and-replay field semantics must explain the percent convention"
+    );
 }

@@ -10,6 +10,31 @@ use ratatui::text::{Line, Span};
 
 use crate::theme;
 
+// ── Exact render shapes (single source of truth) ──────────────────────────
+// The decoration glyphs below are spelled out ONLY here. The renderer builds
+// its lines from these constants, and copy-mode's structured cleaner
+// (`crate::copy_mode::clean`) matches lines against the very same constants —
+// if a shape ever drifts, the cleaner follows at compile time instead of
+// silently mis-classifying rows at runtime.
+
+/// Leading part of a fenced-code top frame; `flush_code` appends `{label} `
+/// (an empty label yields `"┌  "`).
+pub(crate) const CODE_TOP_PREFIX: &str = "\u{250c} ";
+/// Full bottom frame of a fenced-code block: `└` + 19 × `─`.
+pub(crate) const CODE_BOTTOM: &str =
+    "\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}";
+/// A thematic-break (`---`) row: exactly 19 × `─`.
+pub(crate) const RULE_LINE: &str =
+    "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}";
+/// Prefix span of every non-empty fenced-code row.
+pub(crate) const CODE_ROW_PREFIX: &str = "\u{2502} ";
+/// The entire span of an empty fenced-code row.
+pub(crate) const CODE_ROW_EMPTY: &str = "\u{2502}";
+/// Blockquote prefix. Unlike the code shapes this is `push_str`-ed into the
+/// running text span, so it appears at the start of a content span rather
+/// than as its own span.
+pub(crate) const QUOTE_PREFIX: &str = "\u{258e} ";
+
 /// Render a markdown string into styled ratatui lines.
 pub fn render(text: &str) -> Vec<Line<'static>> {
     let text = crate::terminal_text::sanitize_multiline(text);
@@ -87,8 +112,9 @@ impl MdRenderer {
                 Event::Rule => {
                     self.flush();
                     self.lines.push(Line::from(Span::styled(
-                        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-                        Style::default().fg(theme::muted()))));
+                        RULE_LINE,
+                        Style::default().fg(theme::muted()),
+                    )));
                 }
                 Event::Start(tag) => self.start_tag(tag),
                 Event::End(tag) => self.end_tag(tag),
@@ -134,7 +160,7 @@ impl MdRenderer {
                 .push(Style::default().add_modifier(Modifier::CROSSED_OUT)),
             Tag::BlockQuote(_) => {
                 self.style_stack.push(Style::default().fg(theme::muted()));
-                self.push_str("\u{258e} ".to_string());
+                self.push_str(QUOTE_PREFIX.to_string());
             }
             Tag::List(None) => self.list_stack.push((ListKind::Unordered, 0)),
             Tag::List(Some(_)) => self.list_stack.push((ListKind::Ordered, 0)),
@@ -213,7 +239,7 @@ impl MdRenderer {
             self.code_lang.clone()
         };
         self.lines.push(Line::from(Span::styled(
-            format!("\u{250c} {label} "),
+            format!("{CODE_TOP_PREFIX}{label} "),
             Style::default().fg(theme::muted()),
         )));
         // A fenced code block can arrive as a single `Event::Text` whose
@@ -235,19 +261,20 @@ impl MdRenderer {
             let t = row.strip_suffix('\r').unwrap_or(row);
             if t.is_empty() {
                 self.lines.push(Line::from(Span::styled(
-                    "\u{2502}",
+                    CODE_ROW_EMPTY,
                     Style::default().fg(theme::muted()),
                 )));
             } else {
                 self.lines.push(Line::from(vec![
-                    Span::styled("\u{2502} ", Style::default().fg(theme::muted())),
+                    Span::styled(CODE_ROW_PREFIX, Style::default().fg(theme::muted())),
                     Span::raw(t.to_string()),
                 ]));
             }
         }
         self.lines.push(Line::from(Span::styled(
-            "\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-            Style::default().fg(theme::muted()))));
+            CODE_BOTTOM,
+            Style::default().fg(theme::muted()),
+        )));
         self.lines.push(Line::from(""));
         self.code_buf.clear();
     }

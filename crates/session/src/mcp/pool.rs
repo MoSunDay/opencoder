@@ -115,19 +115,66 @@ async fn connect_server(name: &str, cfg: &McpServerConfig) -> anyhow::Result<Mcp
     })
 }
 
+/// Merge per-server tool lists into one `full_name → ToolArc` map.
+///
+/// Bug #14: server names are sanitized to a shared prefix when tool names
+/// are built (`a-b` / `a.b` / `a_b` → `mcp__a_b__…`), so two distinct
+/// servers can advertise colliding full names. The first registrant wins;
+/// later duplicates are dropped with a `warn!` instead of silently
+/// overwriting (which cross-wired tools and bypassed `inject_to` scoping).
+/// `kept_by` tracks which server contributed each surviving name so the log
+/// names both sides. Input order decides "first" — callers sort by server
+/// name to keep that deterministic.
+fn merge_tools(per_server: Vec<(String, Vec<ToolArc>)>) -> HashMap<String, ToolArc> {
+    let mut out: HashMap<String, ToolArc> = HashMap::new();
+    let mut kept_by: HashMap<String, String> = HashMap::new();
+    for (server, tools) in per_server {
+        for tool in tools {
+            let name = tool.name().to_string();
+            match kept_by.get(&name) {
+                Some(owner) => tracing::warn!(
+                    tool = %name,
+                    server = server.as_str(),
+                    kept_by = owner.as_str(),
+                    "MCP tool name collision after server-name normalization; dropping duplicate"
+                ),
+                None => {
+                    // Clone (not move): `server` may still be needed by a
+                    // later tool of the same server hitting the warn above.
+                    kept_by.insert(name.clone(), server.clone());
+                    out.insert(name, tool);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Return all MCP tool wrappers for `session_id` as a `name → ToolArc` map.
 pub fn tools_for(session_id: &str) -> HashMap<String, ToolArc> {
-    let pool = MCP_POOL.lock().unwrap();
-    let Some(session) = pool.get(session_id) else {
-        return HashMap::new();
+    // Snapshot under the lock, merge outside it.
+    let per_server: Vec<(String, Vec<ToolArc>)> = {
+        let pool = MCP_POOL.lock().unwrap();
+        let Some(session) = pool.get(session_id) else {
+            return HashMap::new();
+        };
+        let mut servers: Vec<(String, Vec<ToolArc>)> = session
+            .connections
+            .iter()
+            .filter(|(_, c)| matches!(c.status, ConnStatus::Connected { .. }))
+            .map(|(name, c)| {
+                (
+                    name.clone(),
+                    c.tools.iter().map(Arc::clone).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        // HashMap iteration order is process-randomized; sort by server name
+        // so "first registrant wins" in `merge_tools` is stable across runs.
+        servers.sort_by(|a, b| a.0.cmp(&b.0));
+        servers
     };
-    session
-        .connections
-        .values()
-        .filter(|c| matches!(c.status, ConnStatus::Connected { .. }))
-        .flat_map(|c| c.tools.iter())
-        .map(|t| (t.name().to_string(), Arc::clone(t)))
-        .collect()
+    merge_tools(per_server)
 }
 
 /// Return per-server status for system-prompt injection.
@@ -176,6 +223,76 @@ pub fn is_mcp_tool_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::protocol::ToolInfo;
+    use transport::MockTransport;
+
+    /// Build real `ToolArc`s for one fake server (no I/O — `build_tools`
+    /// only wraps; the mock client's peer may be dropped unused).
+    fn server_tools(server: &str, tool: &str, desc: &str) -> Vec<ToolArc> {
+        let (client, _peer) = MockTransport::pair();
+        build_tools(
+            McpClient::new(Arc::new(client)),
+            server,
+            vec![ToolInfo {
+                name: tool.into(),
+                description: Some(desc.into()),
+                input_schema: serde_json::json!({"type": "object"}),
+            }],
+        )
+    }
+
+    /// Bug #14: `a-b` and `a_b` normalize to the same `mcp__a_b__` prefix,
+    /// so their same-named tools collide. `merge_tools` must keep exactly
+    /// one — the first registrant in input order — instead of silently
+    /// overwriting, and must not panic.
+    // `McpClient::new` spawns a reader task, so a reactor must exist.
+    #[tokio::test]
+    async fn merge_tools_drops_duplicate_after_normalization() {
+        let merged = merge_tools(vec![
+            ("a-b".to_string(), server_tools("a-b", "echo", "from a-b")),
+            ("a_b".to_string(), server_tools("a_b", "echo", "from a_b")),
+        ]);
+        assert_eq!(
+            merged.len(),
+            1,
+            "exactly one survivor, got {:?}",
+            merged.keys().collect::<Vec<_>>()
+        );
+        let tool = merged.get("mcp__a_b__echo").expect("normalized full name");
+        assert_eq!(tool.description(), "from a-b", "first registrant wins");
+    }
+
+    /// Same inputs, reversed order: the other server's tool survives —
+    /// proving first-wins follows input order (callers sort by server name),
+    /// not tool identity.
+    // `McpClient::new` spawns a reader task, so a reactor must exist.
+    #[tokio::test]
+    async fn merge_tools_first_registrant_follows_input_order() {
+        let merged = merge_tools(vec![
+            ("a_b".to_string(), server_tools("a_b", "echo", "from a_b")),
+            ("a-b".to_string(), server_tools("a-b", "echo", "from a-b")),
+        ]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged["mcp__a_b__echo"].description(),
+            "from a_b",
+            "first registrant wins"
+        );
+    }
+
+    /// Disjoint tool names across servers all survive — the guard only
+    /// drops true full-name duplicates.
+    // `McpClient::new` spawns a reader task, so a reactor must exist.
+    #[tokio::test]
+    async fn merge_tools_keeps_disjoint_names() {
+        let merged = merge_tools(vec![
+            ("a-b".to_string(), server_tools("a-b", "echo", "from a-b")),
+            ("c".to_string(), server_tools("c", "echo", "from c")),
+        ]);
+        assert_eq!(merged.len(), 2);
+        assert!(merged.contains_key("mcp__a_b__echo"));
+        assert!(merged.contains_key("mcp__c__echo"));
+    }
 
     #[test]
     fn tools_for_empty_session_returns_empty() {

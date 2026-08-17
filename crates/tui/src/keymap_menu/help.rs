@@ -26,7 +26,6 @@ pub const HELP: &str = "\
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
   Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Ctrl+G          复制模式: 交还终端原生拖拽选择（正文去装饰全宽显示）, 终端快捷键复制, Esc/Ctrl+G 退出
-  Ctrl+Shift+T    折叠/展开底部输入框（扩大或恢复输出区域）
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务
   Ctrl+C          中断运行中的任务（同 Esc Esc）
@@ -189,6 +188,19 @@ mod tests {
         assert!(HELP.contains("去装饰"));
         assert!(!HELP.contains("OSC52"));
         assert!(!HELP.contains("应用内选择模式"));
+    }
+
+    #[test]
+    fn help_no_stale_hide_composer_shortcut() {
+        // hide_composer（折叠/展开底部输入框）功能已从代码中完全移除，
+        // 帮助页不得再宣传该快捷键，误导用户按键无响应。
+        // 按首 token 精确匹配，避免误伤合法的 "Ctrl+Shift+Tab" 前缀。
+        assert!(!HELP
+            .lines()
+            .any(|l| l.split_whitespace().next() == Some("Ctrl+Shift+T")));
+        assert!(!HELP.contains("折叠/展开"));
+        // 邻行防误删：Ctrl+G 复制模式仍在。
+        assert!(HELP.contains("Ctrl+G"));
     }
 
     #[test]

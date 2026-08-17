@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use anyhow::{bail, Context, Result};
+use opencoder_core::resolve_agent;
 
 use crate::types::*;
 
@@ -45,6 +46,21 @@ pub fn validate_spec(spec: &WorkflowSpec) -> Result<()> {
             if call.name.trim().is_empty() || !call.arguments_contains.is_object() {
                 bail!("TODO {} has an invalid required tool call", todo.id);
             }
+        }
+        // Bug #16d: the same agent checks execution.rs applies at runtime,
+        // enforced at spec-submission time so a typo'd agent name fails fast
+        // instead of suspending the workflow on the first dispatch.
+        let agent = resolve_agent(&todo.agent)
+            .with_context(|| format!("TODO {} has unknown agent {}", todo.id, todo.agent))?;
+        if !agent.is_primary() {
+            bail!(
+                "TODO {} agent {} must be a primary agent",
+                todo.id,
+                todo.agent
+            );
+        }
+        if agent.name == "workflow" {
+            bail!("TODO {} cannot use the workflow agent", todo.id);
         }
     }
     reject_cycles(spec)
@@ -286,6 +302,54 @@ mod tests {
         let error = validate_spec(&workflow).unwrap_err();
 
         assert!(format!("{error}").contains("invalid required tool call"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_unknown_agent() {
+        let mut todo = valid_todo("a", &[]);
+        todo.agent = "ghost-agent".into();
+        let workflow = valid_spec(vec![todo]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("TODO a has unknown agent ghost-agent"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_workflow_agent() {
+        let mut todo = valid_todo("a", &[]);
+        todo.agent = "workflow".into();
+        let workflow = valid_spec(vec![todo]);
+
+        let error = validate_spec(&workflow).unwrap_err();
+
+        assert!(format!("{error}").contains("TODO a cannot use the workflow agent"));
+    }
+
+    #[test]
+    fn validate_spec_rejects_non_primary_agents() {
+        for agent in ["explore", "build"] {
+            let mut todo = valid_todo("a", &[]);
+            todo.agent = agent.into();
+            let workflow = valid_spec(vec![todo]);
+
+            let error = validate_spec(&workflow).unwrap_err();
+
+            assert!(
+                format!("{error}")
+                    .contains(&format!("TODO a agent {agent} must be a primary agent")),
+                "subagent {agent} must be rejected at submission time"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_spec_accepts_act_agent() {
+        let mut todo = valid_todo("a", &[]);
+        todo.agent = "act".into();
+        let workflow = valid_spec(vec![todo]);
+
+        validate_spec(&workflow).unwrap();
     }
 
     #[test]

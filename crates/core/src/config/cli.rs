@@ -91,7 +91,12 @@ impl InjectionTarget {
         }
     }
 
-    fn apply_tag(&mut self, tag: &str) {
+    /// Apply one tag in place. Returns `true` when the tag was recognized
+    /// (`parent` / `explore` / `build`, plus the legacy aliases `subagents`
+    /// / `all`); `false` for unknown tags, which are ignored here and warned
+    /// about by the deserializing callers (warn-not-error keeps old configs
+    /// with typo'd tags like `"subagent"` loading — forward compatible).
+    fn apply_tag(&mut self, tag: &str) -> bool {
         match tag {
             "parent" => self.parent = true,
             "explore" => self.explore = true,
@@ -99,8 +104,9 @@ impl InjectionTarget {
             // legacy single-string aliases
             "subagents" => *self = Self::subagents(),
             "all" => *self = Self::all(),
-            _ => {}
+            _ => return false,
         }
+        true
     }
 }
 
@@ -126,6 +132,17 @@ impl Serialize for InjectionTarget {
     }
 }
 
+/// Warn once per unknown `inject_to` tag. A bare helper so the string and
+/// array visitors share the exact message (warn, not error: a typo'd tag in
+/// an old config must not break loading — it is silently ignored, but now
+/// visibly so).
+fn warn_unknown_tag(tag: &str) {
+    tracing::warn!(
+        tag = %tag,
+        "unknown inject_to tag, ignored (known: parent, explore, build, subagents, all)"
+    );
+}
+
 struct TargetVisitor;
 
 impl<'de> de::Visitor<'de> for TargetVisitor {
@@ -137,14 +154,25 @@ impl<'de> de::Visitor<'de> for TargetVisitor {
 
     fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
         let mut target = InjectionTarget::none();
-        target.apply_tag(s);
+        if !target.apply_tag(s) {
+            warn_unknown_tag(s);
+        }
         Ok(target)
     }
 
     fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut target = InjectionTarget::none();
+        let mut len = 0usize;
         while let Some(tag) = seq.next_element::<String>()? {
-            target.apply_tag(&tag);
+            len += 1;
+            if !target.apply_tag(&tag) {
+                warn_unknown_tag(&tag);
+            }
+        }
+        if len == 0 {
+            // `[]` produces an all-false target: the CLI stays registered but
+            // is injected nowhere — too quiet to leave unsaid.
+            tracing::warn!("inject_to array is empty, CLI will not be injected anywhere");
         }
         Ok(target)
     }
@@ -226,6 +254,46 @@ mod tests {
         assert!(t.explore);
         assert!(!t.parent);
         assert!(!t.build);
+    }
+
+    // --- Bug #15: unknown tags / empty arrays must not fail silently ---
+    // The accompanying `tracing::warn!` output is not asserted here (no
+    // tracing-capture harness in this crate); the warn-ability is pinned by
+    // `apply_tag` returning `false` for unknown tags.
+
+    #[test]
+    fn apply_tag_reports_known_and_unknown_tags() {
+        for known in ["parent", "explore", "build", "subagents", "all"] {
+            let mut t = InjectionTarget::none();
+            assert!(t.apply_tag(known), "`{known}` must be recognized");
+        }
+        for unknown in ["subagent", "", "Parent", "primary", "agents"] {
+            let mut t = InjectionTarget::none();
+            assert!(!t.apply_tag(unknown), "`{unknown}` must be rejected");
+        }
+    }
+
+    #[test]
+    fn apply_tag_legacy_alias_expands_to_explore_and_build() {
+        // single-string form
+        let mut t = InjectionTarget::none();
+        assert!(t.apply_tag("subagents"));
+        assert!(
+            !t.parent && t.explore && t.build,
+            "subagents = explore+build"
+        );
+        // same alias inside a tag array
+        let arr: InjectionTarget = serde_json::from_str(r#"["subagents"]"#).unwrap();
+        assert_eq!(arr, InjectionTarget::subagents());
+    }
+
+    #[test]
+    fn empty_inject_to_array_yields_all_false_target() {
+        let t: InjectionTarget = serde_json::from_str("[]").unwrap();
+        assert_eq!(t, InjectionTarget::none());
+        // a lone unknown tag behaves the same (all-false), just warned
+        let t: InjectionTarget = serde_json::from_str(r#"["typo"]"#).unwrap();
+        assert_eq!(t, InjectionTarget::none());
     }
 
     #[test]

@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 
 use crate::chat::ChatView;
-use crate::skill_menu::{SkillMenu, SkillOutcome, handle_skill_key};
+use crate::skill_menu::{handle_skill_key, SkillMenu, SkillOutcome};
 use crate::worker::UiCmd;
 
 use super::LoopFlow;

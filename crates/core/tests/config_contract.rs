@@ -460,7 +460,11 @@ fn autopilot_config_roundtrips_through_save() {
     });
     Config::save(dir.path(), &patch2).unwrap();
     let cfg2 = Config::load(dir.path()).unwrap();
-    assert_eq!(cfg2.autopilot.mode, ApMode::Ap, "mode preserved by deep merge");
+    assert_eq!(
+        cfg2.autopilot.mode,
+        ApMode::Ap,
+        "mode preserved by deep merge"
+    );
     assert_eq!(cfg2.autopilot.max_iterations, 20, "max_iterations patched");
     assert_eq!(cfg2.autopilot.verify_retries, 2, "verify_retries preserved");
 }

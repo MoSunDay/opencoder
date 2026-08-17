@@ -79,17 +79,15 @@ fn json_flag_is_not_a_global_or_validate_flag() {
     let cli = Cli::parse_from(["opencoder", "--json", "todos", "list"]);
     assert!(cli.command.is_none());
     assert_eq!(cli.prompt, vec!["--json", "todos", "list"]);
-    assert!(
-        Cli::try_parse_from([
-            "opencoder",
-            "todos",
-            "validate",
-            "--file",
-            "case.json",
-            "--json"
-        ])
-        .is_err()
-    );
+    assert!(Cli::try_parse_from([
+        "opencoder",
+        "todos",
+        "validate",
+        "--file",
+        "case.json",
+        "--json"
+    ])
+    .is_err());
     assert!(Cli::try_parse_from(["opencoder", "todos", "interrupt", "wf-1", "--json"]).is_err());
 }
 

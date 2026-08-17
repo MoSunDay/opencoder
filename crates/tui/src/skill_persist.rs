@@ -155,16 +155,24 @@ pub(crate) async fn apply_skill_selection(
             *skill_handle.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
     }
-    let _ = store
-        .update_session(
-            session_id,
-            &SessionPatch {
-                skill: skill_body,
-                updated_at: Some(now_ms()),
-                ..Default::default()
-            },
-        )
-        .await;
+    // Store semantics: `skill: None` in a patch means "don't touch", so a
+    // clear MUST go through the explicit `clear_skill` flag — a plain
+    // `skill: None` write would silently no-op and the skill would
+    // resurrect on resume (fake persistence).
+    let patch = if skill_body.is_some() {
+        SessionPatch {
+            skill: skill_body,
+            updated_at: Some(now_ms()),
+            ..Default::default()
+        }
+    } else {
+        SessionPatch {
+            clear_skill: true,
+            updated_at: Some(now_ms()),
+            ..Default::default()
+        }
+    };
+    let _ = store.update_session(session_id, &patch).await;
 }
 
 #[cfg(test)]
@@ -367,5 +375,90 @@ mod tests {
             stored.ends_with("the alpha body"),
             "resolve_persist must persist the skill for resume: {stored}"
         );
+    }
+
+    /// The `$`-menu clear row routes through `apply_skill_selection(None)`.
+    /// The clear must reach the store via `clear_skill: true` — a plain
+    /// `skill: None` patch is a "don't touch" no-op, so before the fix the
+    /// skill resurrected on resume despite the in-memory clear (fake
+    /// persistence). Seeds the store with an active skill first, exactly
+    /// like a resumed sticky session.
+    #[tokio::test]
+    async fn apply_skill_selection_none_persists_clear() {
+        let store = fresh_store().await;
+        // A persisted sticky skill, as a resume or `$pick` would leave it.
+        let _ = store
+            .update_session(
+                "s",
+                &SessionPatch {
+                    skill: Some("stale sticky body".into()),
+                    updated_at: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await;
+        let skill_handle = handle(Some("stale sticky body"));
+        let mut active_skill = Some("review".to_string());
+        let mut active_skill_body = Some("stale sticky body".to_string());
+        let mut sys_tokens = 42u64;
+        let mut chat = crate::chat::ChatView::default();
+
+        apply_skill_selection(
+            &None,
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            std::path::Path::new("/tmp"),
+            &skill_handle,
+            &store,
+            "s",
+        )
+        .await;
+
+        // In-memory sticky state is wiped.
+        assert!(active_skill.is_none());
+        assert!(active_skill_body.is_none());
+        assert!(skill_handle.lock().unwrap().is_none());
+        // ...and the clear is durable: the store row no longer carries the
+        // skill, so a resume must not resurrect it.
+        let persisted = store.get_session("s").await.unwrap().unwrap();
+        assert!(
+            persisted.skill.is_none(),
+            "clear must be persisted (clear_skill), got {:?}",
+            persisted.skill
+        );
+        let _ = &mut chat;
+    }
+
+    /// The set path (pick a skill from the `$` menu) still persists the body.
+    #[tokio::test]
+    async fn apply_skill_selection_some_persists_body() {
+        let store = fresh_store().await;
+        let skill_handle = handle(None);
+        let mut active_skill = None;
+        let mut active_skill_body = None;
+        let mut sys_tokens = 0u64;
+
+        apply_skill_selection(
+            &Some(("alpha".to_string(), "the alpha body".to_string())),
+            &mut active_skill,
+            &mut active_skill_body,
+            &mut sys_tokens,
+            "act",
+            std::path::Path::new("/tmp"),
+            &skill_handle,
+            &store,
+            "s",
+        )
+        .await;
+
+        assert_eq!(active_skill.as_deref(), Some("alpha"));
+        assert_eq!(
+            skill_handle.lock().unwrap().as_deref(),
+            Some("the alpha body")
+        );
+        let persisted = store.get_session("s").await.unwrap().unwrap();
+        assert_eq!(persisted.skill.as_deref(), Some("the alpha body"));
     }
 }

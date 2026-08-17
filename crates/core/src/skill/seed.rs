@@ -22,7 +22,10 @@ use super::skills_dir;
 const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     (
         "task-plan",
-        &[("SKILL.md", include_str!("../../assets/skills/task-plan/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/task-plan/SKILL.md"),
+        )],
     ),
     (
         "do-and-done",
@@ -50,23 +53,38 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "repo-local-dreaming",
-        &[("SKILL.md", include_str!("../../assets/skills/repo-local-dreaming/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/repo-local-dreaming/SKILL.md"),
+        )],
     ),
     (
         "say-and-replay",
-        &[("SKILL.md", include_str!("../../assets/skills/say-and-replay/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/say-and-replay/SKILL.md"),
+        )],
     ),
     (
         "review",
-        &[("SKILL.md", include_str!("../../assets/skills/review/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/review/SKILL.md"),
+        )],
     ),
     (
         "summary",
-        &[("SKILL.md", include_str!("../../assets/skills/summary/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/summary/SKILL.md"),
+        )],
     ),
     (
         "submit",
-        &[("SKILL.md", include_str!("../../assets/skills/submit/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../assets/skills/submit/SKILL.md"),
+        )],
     ),
 ];
 

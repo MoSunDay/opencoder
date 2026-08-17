@@ -44,8 +44,14 @@ pub async fn serve(
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     let addr = listener.local_addr()?;
-    tracing::info!("opencoder {} listening on http://{addr}", opencoder_core::version::VERSION_LONG);
-    println!("opencoder {} listening on http://{addr}", opencoder_core::version::VERSION_LONG);
+    tracing::info!(
+        "opencoder {} listening on http://{addr}",
+        opencoder_core::version::VERSION_LONG
+    );
+    println!(
+        "opencoder {} listening on http://{addr}",
+        opencoder_core::version::VERSION_LONG
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -86,7 +92,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/config", patch(api_ops::patch_config))
         .route(
             "/api/envs",
-            get(api_envs::list).post(api_envs::create).patch(api_envs::patch),
+            get(api_envs::list)
+                .post(api_envs::create)
+                .patch(api_envs::patch),
         )
         .route("/api/envs/:name/recapture", post(api_envs::recapture))
         .route("/api/envs/:name", delete(api_envs::delete))

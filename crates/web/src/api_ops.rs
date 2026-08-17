@@ -21,10 +21,7 @@ use crate::AppState;
 // ── fork ──────────────────────────────────────────────────────────────────
 
 /// POST /api/sessions/:id/fork — clone a session (meta + messages).
-pub async fn fork_session(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
+pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),
@@ -39,10 +36,7 @@ pub async fn fork_session(
 // ── compact ───────────────────────────────────────────────────────────────
 
 /// POST /api/sessions/:id/compact — queue a manual compaction command.
-pub async fn post_compact(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
+pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),
@@ -221,10 +215,7 @@ fn load_config(state: &AppState) -> Result<Config, Box<Response>> {
     Config::load(&state.workdir).map_err(|e| Box::new(error_500(format!("config: {e:#}"))))
 }
 
-fn build_client(
-    state: &AppState,
-    config: &Config,
-) -> Result<Arc<dyn ChatStream>, Box<Response>> {
+fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>, Box<Response>> {
     if let Some(c) = state.client_override.clone() {
         return Ok(c);
     }

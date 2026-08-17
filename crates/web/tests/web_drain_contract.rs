@@ -464,7 +464,10 @@ async fn drain_cmd_events_persisted_for_sse_replay() {
             .any(|r| r.sse_kind.as_deref() == Some("status")),
         "the compact drain command's Status event must be persisted for SSE \
          replay; got kinds {:?}",
-        replayed.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+        replayed
+            .iter()
+            .map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
     );
     // … and the compact's terminal Done must also be replayable (run's idle
     // Done plus the command's own Done ⇒ at least two `done` events past the
@@ -477,6 +480,9 @@ async fn drain_cmd_events_persisted_for_sse_replay() {
         done_count >= 2,
         "both the idle run Done and the compact command Done must be persisted \
          (got {done_count} `done` events past cursor {cursor}); kinds {:?}",
-        replayed.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>()
+        replayed
+            .iter()
+            .map(|r| r.sse_kind.clone())
+            .collect::<Vec<_>>()
     );
 }

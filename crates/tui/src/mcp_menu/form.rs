@@ -227,6 +227,8 @@ impl McpForm {
             cmd,
             &args,
             url,
+            // Unedited names are filtered inside `save_mcp_json` (old != name).
+            self.original_name.as_deref(),
         )))
     }
 }
@@ -336,6 +338,7 @@ fn current_buf_cursor(form: &mut McpForm) -> (&mut String, &mut usize) {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::collections::HashMap;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -372,6 +375,37 @@ mod tests {
             _ => panic!("expected Save"),
         }
         assert!(next.is_none());
+    }
+
+    #[test]
+    fn renaming_existing_server_nulls_old_key() {
+        let entry = McpEntry {
+            name: "a".to_string(),
+            enabled: true,
+            inject_to: InjectionTarget::parent_only(),
+            command: Some("npx".to_string()),
+            args: vec!["-y".to_string()],
+            url: None,
+            env: HashMap::new(),
+        };
+        let mut form = McpForm::from_existing(&entry);
+        form.name = "b".to_string();
+        form.name_cursor = 1;
+        match form.build_save() {
+            Some(McpOutcome::Save(json)) => {
+                assert!(
+                    json["mcp_servers"]["a"].is_null(),
+                    "rename must null the old key"
+                );
+                assert!(
+                    json["mcp_servers"]["b"].is_object(),
+                    "rename must save under the new key"
+                );
+                assert_eq!(json["mcp_servers"]["b"]["command"], "npx");
+                assert_eq!(json["mcp_servers"]["b"]["args"][0], "-y");
+            }
+            _ => panic!("expected Save"),
+        }
     }
 
     #[test]

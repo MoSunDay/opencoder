@@ -16,6 +16,7 @@ fn draw(
     terminal: &mut Terminal<TestBackend>,
     cli_menu: Option<&CliMenu>,
     mcp_menu: Option<&McpMenu>,
+    copy_mode: bool,
 ) {
     let chat = ChatView::default();
     let mut scroll = 0u32;
@@ -41,23 +42,23 @@ fn draw(
         &mut queue_scroll,
         0,
         0,
-        None,          // mode_flash
-        None,          // skill_menu
-        None,          // task_picker
-        None,          // command_menu
-        None,          // model_menu
+        None, // mode_flash
+        None, // skill_menu
+        None, // task_picker
+        None, // command_menu
+        None, // model_menu
         mcp_menu,
-        None,          // envs_menu
+        None, // envs_menu
         cli_menu,
-        None,          // skill_toggle_menu
-        None,          // ap_menu
-        None,          // cache_salt_menu
-        None,          // keymap_menu
-        None,          // question_menu
+        None, // skill_toggle_menu
+        None, // ap_menu
+        None, // cache_salt_menu
+        None, // keymap_menu
+        None, // question_menu
         &mut hits,
         &mut viewport,
         false,
-        false,
+        copy_mode,
         &[],
         false,
         None,
@@ -94,7 +95,7 @@ fn cli_content_dialog_keeps_cursor_inside_dialog() {
     form.content_cursor = 8;
     form.content_dialog = Some(ContentDialog::new("hello\nworld".into(), 8));
     let menu = CliMenu::Form(form);
-    draw(&mut terminal, Some(&menu), None);
+    draw(&mut terminal, Some(&menu), None, false);
     terminal.backend_mut().assert_cursor_position((7, 9));
 }
 
@@ -105,14 +106,14 @@ fn cli_content_dialog_keeps_cursor_inside_dialog() {
 #[test]
 fn cli_form_field_moves_cursor_off_composer() {
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-    draw(&mut terminal, None, None);
+    draw(&mut terminal, None, None, false);
     let composer = cursor(&mut terminal);
 
     let mut form = CliForm::new_blank();
     form.name = "abc".into();
     form.name_cursor = 3;
     let menu = CliMenu::Form(form);
-    draw(&mut terminal, Some(&menu), None);
+    draw(&mut terminal, Some(&menu), None, false);
     let pos = cursor(&mut terminal);
 
     assert_ne!(
@@ -130,14 +131,14 @@ fn cli_form_field_moves_cursor_off_composer() {
 #[test]
 fn mcp_form_field_moves_cursor_off_composer() {
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-    draw(&mut terminal, None, None);
+    draw(&mut terminal, None, None, false);
     let composer = cursor(&mut terminal);
 
     let mut form = McpForm::new_blank();
     form.name = "abc".into();
     form.name_cursor = 3;
     let menu = McpMenu::Form(form);
-    draw(&mut terminal, None, Some(&menu));
+    draw(&mut terminal, None, Some(&menu), false);
     let pos = cursor(&mut terminal);
 
     assert_ne!(
@@ -147,5 +148,30 @@ fn mcp_form_field_moves_cursor_off_composer() {
     assert!(
         pos.1 < composer.1,
         "caret must sit above the composer inside the /mcp form (got {pos:?}, composer {composer:?})"
+    );
+}
+
+/// Copy mode owns text selection: while active the composer must not place
+/// the hardware cursor (the caret block fights terminal-native selection
+/// and can land mid-selection). The frame therefore leaves the cursor
+/// untouched — pinned here as "position identical to a never-drawn
+/// backend", i.e. (0, 0) on a fresh TestBackend.
+#[test]
+fn copy_mode_suppresses_composer_hardware_cursor() {
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    draw(&mut terminal, None, None, false);
+    let with_cursor = cursor(&mut terminal);
+    assert_ne!(
+        with_cursor,
+        (0, 0),
+        "sanity: the composer normally places the caret (got {with_cursor:?})"
+    );
+
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    draw(&mut terminal, None, None, true);
+    assert_eq!(
+        cursor(&mut terminal),
+        (0, 0),
+        "copy mode must not place the hardware cursor"
     );
 }

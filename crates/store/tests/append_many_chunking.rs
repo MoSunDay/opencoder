@@ -58,7 +58,11 @@ async fn multi_batch_append_persists_all_in_order() {
 
     // Read back: all 250 present, in insertion order.
     let loaded = store.load_messages("s1").await.unwrap();
-    assert_eq!(loaded.len(), 250, "all messages persisted across chunk boundary");
+    assert_eq!(
+        loaded.len(),
+        250,
+        "all messages persisted across chunk boundary"
+    );
     for (i, m) in loaded.iter().enumerate() {
         assert_eq!(m.id, format!("m{i}"), "order preserved at index {i}");
     }

@@ -327,6 +327,28 @@ pub(crate) fn gutter_width(line_count: usize) -> u16 {
     line_count.to_string().len().saturating_add(2) as u16
 }
 
+/// Plain text of every visual row of `text` soft-wrapped at `width`, in
+/// order — the shared source for copy-mode's clean notepad view, so the
+/// wrap model can never disagree with the decorated renderer. Pure: derives
+/// from the buffer text only, no editor state.
+pub fn row_texts(text: &str, width: u16) -> Vec<String> {
+    let layout = EditorLayout::new(text, width.max(1));
+    let rows = layout.rows();
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::with_capacity(rows.len());
+    for (i, row) in rows.iter().enumerate() {
+        let mut s: String = chars[row.range.start..row.range.end].iter().collect();
+        // The wrap ranges skip the hard newlines that terminate logical
+        // lines; re-insert them so the concatenated rows reconstruct the
+        // buffer exactly (renderers trim them back off — see copy_mode).
+        if let Some(next) = rows.get(i + 1) {
+            s.extend(chars[row.range.end..next.range.start].iter());
+        }
+        out.push(s);
+    }
+    out
+}
+
 /// Check if this key, when in Normal mode, is a plain focus-cycle key that
 /// should NOT be sent to the vim engine.
 pub fn is_focus_cycle_key(k: &crossterm::event::KeyEvent) -> bool {
@@ -348,6 +370,20 @@ pub fn should_cycle_focus(vim: &VimState, k: &crossterm::event::KeyEvent) -> boo
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn row_texts_round_trips_and_wraps_in_order() {
+        // Concatenated rows reconstruct the buffer exactly (no chars lost to
+        // the wrap), narrow width forces multiple visual rows, and rows come
+        // back in order.
+        let rows = row_texts("alpha beta gamma\ndelta", 6);
+        assert_eq!(rows.concat(), "alpha beta gamma\ndelta");
+        assert!(rows.len() > 3, "must wrap: {rows:?}");
+        assert_eq!(rows[0], "alpha ");
+
+        // Empty buffer yields a single empty row (matches the wrap model).
+        assert_eq!(row_texts("", 10), vec![String::new()]);
+    }
 
     #[test]
     fn load_file_into_vim() {

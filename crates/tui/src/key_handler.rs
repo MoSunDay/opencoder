@@ -38,10 +38,10 @@ pub(crate) enum KeyAction {
     Cancel,
     /// Enter the plan-text editor (Shift+I in plan mode when idle).
     EnterPlanEdit,
-    // Kept for the app.rs `KeyAction::SetSkill` plumbing (skill set/clear +
-    // persistence). No longer constructed by the menu after the "clear skill"
-    // row was removed, but the match arm in app.rs still handles it.
-    #[allow(dead_code)]
+    /// Activate a skill picked from the `$` menu, or clear the sticky skill
+    /// (None) via the menu's dedicated clear row. app.rs routes both through
+    /// `apply_skill_selection`, which persists set (skill=…) and clear
+    /// (clear_skill) to the store.
     SetSkill(Option<(String, String)>),
     OpenKeymap,
     Clip,
@@ -88,6 +88,10 @@ pub(crate) fn handle_key(
                 crate::undo::snapshot(undo_state, input, *cursor_idx, false);
                 KeyAction::None
             }
+            // The dedicated clear row: deactivate the sticky skill instead
+            // of picking one. Routed through the same `SetSkill(None)`
+            // plumbing as a pick, so app.rs persists the clear.
+            MenuOutcome::Clear => KeyAction::SetSkill(None),
             MenuOutcome::Idle => KeyAction::None,
         };
     }

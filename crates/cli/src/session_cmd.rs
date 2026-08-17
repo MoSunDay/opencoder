@@ -5,12 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 
 use opencoder_core::Config;
 use opencoder_store::{
-    LibsqlStore, SessionFilter, SessionMeta, Store, export_bundle, import_bundle, read_bundle,
-    write_bundle,
+    export_bundle, import_bundle, read_bundle, write_bundle, LibsqlStore, SessionFilter,
+    SessionMeta, Store,
 };
 
 use crate::{Cli, ConfigSub, SessionSub};
@@ -225,8 +225,7 @@ pub(crate) async fn open_store(workdir: &Path) -> Result<LibsqlStore> {
 
 /// One-line active-env note for `config show` (None when no env is active).
 pub fn active_env_banner() -> Option<String> {
-    opencoder_core::config::envs::active_env()
-        .map(|name| format!("active env: {name}"))
+    opencoder_core::config::envs::active_env().map(|name| format!("active env: {name}"))
 }
 
 #[cfg(test)]
@@ -236,8 +235,7 @@ mod tests {
 
     #[test]
     fn active_env_banner_tracks_active_env() {
-        let workdir = std::env::temp_dir()
-            .join(format!("oc-cli-envs-{}", ulid::Ulid::new()));
+        let workdir = std::env::temp_dir().join(format!("oc-cli-envs-{}", ulid::Ulid::new()));
         std::fs::create_dir_all(&workdir).unwrap();
         let _iso = opencoder_core::scoped_config_home(workdir.clone());
 

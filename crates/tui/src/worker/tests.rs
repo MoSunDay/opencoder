@@ -252,7 +252,10 @@ async fn edit_annotation_sets_requirement() {
         &evt_tx,
     )
     .await;
-    assert!(!should_break, "EditAnnotation must not break the worker loop");
+    assert!(
+        !should_break,
+        "EditAnnotation must not break the worker loop"
+    );
     assert_eq!(
         sess.requirement.as_deref(),
         Some("需要 tab:\tand CR\r\nraw"),
@@ -274,8 +277,14 @@ async fn edit_annotation_blank_clears_requirement() {
         &evt_tx,
     )
     .await;
-    assert!(!should_break, "EditAnnotation must not break the worker loop");
-    assert_eq!(sess.requirement, None, "blank submit must clear the requirement");
+    assert!(
+        !should_break,
+        "EditAnnotation must not break the worker loop"
+    );
+    assert_eq!(
+        sess.requirement, None,
+        "blank submit must clear the requirement"
+    );
 }
 
 #[tokio::test]

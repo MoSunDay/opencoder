@@ -58,7 +58,10 @@ fn env_layer_sits_between_project_and_global() {
     assert_eq!(cfg.provider.api_key.as_deref(), Some("gk"));
 
     // project shadows env
-    write_json(&work.path().join("opencoder.json"), r#"{"model":"project/m"}"#);
+    write_json(
+        &work.path().join("opencoder.json"),
+        r#"{"model":"project/m"}"#,
+    );
     assert_eq!(Config::load(work.path()).unwrap().model, "project/m");
 
     // deactivation restores the base chain verbatim
@@ -192,7 +195,10 @@ fn recapture_replaces_stale_env_files() {
     let work = tempfile::tempdir().unwrap();
     let _iso = scoped_config_home(home.path().to_path_buf());
     base_world(home.path(), work.path()); // env "work" already exists
-    write_json(&env_file(home.path(), "work", "mcp.json"), r#"{"old":{"enabled":true}}"#);
+    write_json(
+        &env_file(home.path(), "work", "mcp.json"),
+        r#"{"old":{"enabled":true}}"#,
+    );
 
     // base chain changes; recapture must replace config.json AND drop the
     // stale env mcp.json (its source is gone)
@@ -249,10 +255,16 @@ fn project_files_still_win_save_target_while_env_active() {
     let work = tempfile::tempdir().unwrap();
     let _iso = scoped_config_home(home.path().to_path_buf());
     base_world(home.path(), work.path());
-    write_json(&work.path().join("opencoder.json"), r#"{"model":"project/m"}"#);
+    write_json(
+        &work.path().join("opencoder.json"),
+        r#"{"model":"project/m"}"#,
+    );
     set_active_env(Some("work")).unwrap();
     // project file holds editable keys -> it stays the save target
-    assert_eq!(Config::save_target(work.path()), work.path().join("opencoder.json"));
+    assert_eq!(
+        Config::save_target(work.path()),
+        work.path().join("opencoder.json")
+    );
 }
 
 #[test]

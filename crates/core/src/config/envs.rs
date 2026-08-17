@@ -79,13 +79,11 @@ pub fn active_env() -> Option<String> {
 /// env to exist; the marker is written last so readers never see a marker
 /// pointing at a half-built env.
 pub fn set_active_env(name: Option<&str>) -> io::Result<()> {
-    let root = envs_home().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "cannot resolve ~/.opencoder")
-    })?;
+    let root = envs_home()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve ~/.opencoder"))?;
     match name {
         Some(n) => {
-            validate_env_name(n)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+            validate_env_name(n).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
             match env_dir(n) {
                 Some(dir) if dir.is_dir() => {}
                 _ => {
@@ -178,8 +176,20 @@ fn capture_into(dir: &Path, working_dir: &Path) -> Result<()> {
             obj.remove(key);
         }
     }
+    let config_target = dir.join("config.json");
     if merged.as_object().is_some_and(|o| !o.is_empty()) {
-        write_private_json(&dir.join("config.json"), &merged)?;
+        write_private_json(&config_target, &merged)?;
+    } else {
+        // Full replace: an emptied base chain must not leave the env's
+        // previous capture behind — a stale config.json (possibly embedding
+        // an old api_key) would keep resolving once the env is activated.
+        // `NotFound` is the norm (fresh dir from `create_env(capture=true)`
+        // over an empty base chain); anything else is a real error.
+        match std::fs::remove_file(&config_target) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     // Domain files: snapshot the effective base file (project > global);
     // remove stale env copies that no longer have a source.
@@ -290,5 +300,53 @@ mod tests {
         assert!(!home.path().join(".opencoder/envs/beta").exists());
         assert!(active_env().is_none(), "marker cleared by delete");
         assert!(delete_env("beta").is_err(), "unknown env");
+    }
+
+    /// Regression (#9): `recapture_env` is a full replace. When the base
+    /// chain no longer yields any config.json content, the env's previous
+    /// capture (which may embed a stale api_key) must be deleted — not left
+    /// behind to keep resolving once the env is activated.
+    #[test]
+    fn recapture_removes_stale_config_json_when_base_chain_emptied() {
+        let (home, _g) = scoped();
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(
+            work.path().join("opencoder.json"),
+            serde_json::json!({
+                "model": "openai/gpt-4o",
+                "provider": { "api_key": "sk-stale-placeholder" }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        create_env("gamma", work.path(), true).unwrap();
+        let env_config = home.path().join(".opencoder/envs/gamma/config.json");
+        assert!(env_config.is_file(), "capture writes env config.json");
+        assert!(
+            std::fs::read_to_string(&env_config)
+                .unwrap()
+                .contains("sk-stale-placeholder"),
+            "captured config.json carries the base-chain content"
+        );
+
+        // Empty the base chain entirely, then re-capture.
+        std::fs::remove_file(work.path().join("opencoder.json")).unwrap();
+        recapture_env("gamma", work.path()).unwrap();
+        assert!(
+            !env_config.exists(),
+            "recapture over an empty base chain must delete the env's stale config.json"
+        );
+    }
+
+    /// `NotFound` is the norm, not an error: recapturing an env whose
+    /// config.json never existed (fresh dir, empty base chain) must succeed —
+    /// same tolerance `create_env(capture = true)` relies on for new dirs.
+    #[test]
+    fn recapture_into_env_without_config_json_is_not_an_error() {
+        let (_home, _g) = scoped();
+        let work = tempfile::tempdir().unwrap();
+        create_env("delta", work.path(), false).unwrap();
+        // Empty base chain + no prior config.json in the env dir.
+        recapture_env("delta", work.path()).unwrap();
     }
 }

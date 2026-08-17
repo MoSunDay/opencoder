@@ -114,10 +114,7 @@ fn extract_command_substitutions(cmd: &str) -> Vec<String> {
             }
         }
         // <(...) or >(...)
-        if i + 1 < chars.len()
-            && (chars[i] == '<' || chars[i] == '>')
-            && chars[i + 1] == '('
-        {
+        if i + 1 < chars.len() && (chars[i] == '<' || chars[i] == '>') && chars[i + 1] == '(' {
             if let Some(end) = find_matching_paren(&chars, i + 1) {
                 let inner: String = chars[i + 2..end].iter().collect();
                 if !inner.trim().is_empty() {
@@ -191,9 +188,7 @@ pub fn classify(command: &str) -> BashVerdict {
     for inner in extract_command_substitutions(trimmed) {
         match classify(&inner) {
             BashVerdict::WriteBlocked(reason) => {
-                return BashVerdict::WriteBlocked(format!(
-                    "nested command substitution: {reason}"
-                ));
+                return BashVerdict::WriteBlocked(format!("nested command substitution: {reason}"));
             }
             BashVerdict::ReadOnly => {}
         }
@@ -585,9 +580,7 @@ pub(crate) fn strip_wrappers(cmd: &str) -> &str {
             };
             strip_wrappers(after_duration)
         }
-        "strace" | "ltrace" | "perf" | "valgrind" => {
-            strip_wrappers(skip_option_tokens(rest, &[]))
-        }
+        "strace" | "ltrace" | "perf" | "valgrind" => strip_wrappers(skip_option_tokens(rest, &[])),
         _ => stripped,
     }
 }

@@ -82,19 +82,10 @@ impl Store for ErrorStore {
     async fn admit_input(&self, input: &SessionInput) -> anyhow::Result<i64> {
         self.inner.admit_input(input).await
     }
-    async fn pending_inputs(
-        &self,
-        sid: &str,
-        d: Delivery,
-    ) -> anyhow::Result<Vec<SessionInput>> {
+    async fn pending_inputs(&self, sid: &str, d: Delivery) -> anyhow::Result<Vec<SessionInput>> {
         self.inner.pending_inputs(sid, d).await
     }
-    async fn promote_inputs(
-        &self,
-        sid: &str,
-        up_to: i64,
-        d: Delivery,
-    ) -> anyhow::Result<Vec<i64>> {
+    async fn promote_inputs(&self, sid: &str, up_to: i64, d: Delivery) -> anyhow::Result<Vec<i64>> {
         self.inner.promote_inputs(sid, up_to, d).await
     }
     async fn promote_next_queued(&self, sid: &str) -> anyhow::Result<Option<i64>> {
@@ -112,11 +103,7 @@ impl Store for ErrorStore {
     async fn append_events(&self, events: &[SessionEventRecord]) -> anyhow::Result<Vec<i64>> {
         self.inner.append_events(events).await
     }
-    async fn events_after(
-        &self,
-        sid: &str,
-        after: i64,
-    ) -> anyhow::Result<Vec<SessionEventRecord>> {
+    async fn events_after(&self, sid: &str, after: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
         self.inner.events_after(sid, after).await
     }
     async fn last_event_seq(&self, sid: &str) -> anyhow::Result<i64> {
@@ -125,12 +112,7 @@ impl Store for ErrorStore {
     async fn create_subagent_task(&self, r: &SubagentTaskRecord) -> anyhow::Result<()> {
         self.inner.create_subagent_task(r).await
     }
-    async fn complete_subagent_task(
-        &self,
-        id: &str,
-        result: &str,
-        ok: bool,
-    ) -> anyhow::Result<()> {
+    async fn complete_subagent_task(&self, id: &str, result: &str, ok: bool) -> anyhow::Result<()> {
         self.inner.complete_subagent_task(id, result, ok).await
     }
     async fn list_subagent_tasks(&self, sid: &str) -> anyhow::Result<Vec<SubagentTaskRecord>> {
@@ -174,7 +156,9 @@ async fn seed(store: &Arc<dyn Store>, id: &str) {
 /// Decode a handler response into (status code, JSON body).
 async fn decode(resp: axum::response::Response) -> (StatusCode, Value) {
     let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v: Value = serde_json::from_slice(&body).unwrap();
     (status, v)
 }

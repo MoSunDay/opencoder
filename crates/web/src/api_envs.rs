@@ -126,7 +126,11 @@ pub struct PatchBody {
 /// PATCH /api/envs — activate (`{"active": name}`) or deactivate
 /// (`{"active": null}`). 404 unknown env; always fans ReloadConfig.
 pub async fn patch(State(state): State<Arc<AppState>>, Json(body): Json<PatchBody>) -> Response {
-    let target = body.active.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let target = body
+        .active
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     if let Some(name) = target {
         if !env_exists(name) {
             return error_404(&format!("unknown env: {name}"));
@@ -144,10 +148,7 @@ pub async fn patch(State(state): State<Arc<AppState>>, Json(body): Json<PatchBod
 /// POST /api/envs/:name/recapture — re-snapshot the base chain into the env.
 /// ReloadConfig fans out only when the env is active (otherwise the effective
 /// config cannot have changed).
-pub async fn recapture(
-    State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-) -> Response {
+pub async fn recapture(State(state): State<Arc<AppState>>, Path(name): Path<String>) -> Response {
     if !env_exists(&name) {
         return error_404(&format!("unknown env: {name}"));
     }

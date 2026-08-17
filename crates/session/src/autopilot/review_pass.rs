@@ -3,6 +3,10 @@
 //! skill, inject a synthetic review prompt, run a single `run_loop`, then
 //! clear the skill and finish. Unlike [`crate::autopilot::drive`] there is no
 //! ACT/VERIFY loop — exactly one review turn, then control returns.
+//!
+//! Act-only gate: the runner dispatch layer admits this pass only after the
+//! ACT agent completes the initial task (see `runner::run_with_registry`);
+//! plan-mode and other non-act primary sessions never dispatch it.
 
 use std::collections::HashMap;
 
@@ -37,10 +41,15 @@ pub async fn review_pass(
     let mut msg = Message::user(new_id(), review_prompt(&goal));
     msg.synthetic = true;
     session.record(msg).await;
-    run_loop(session, registry, on_event, false).await?;
-    // One-shot: clear the review skill and emit the uniform end marker. A
-    // cancel mid-review surfaces via run_loop's own interruption handling.
-    session.set_skill(None);
+    let run = run_loop(session, registry, on_event, false).await;
+    // One-shot: clear the review skill and emit the uniform end marker on
+    // BOTH outcomes — an LLM failure mid-review (e.g. 429 exhaustion) must
+    // not leave the system-injected skill stuck on the session, in memory
+    // or persisted (a resume would otherwise resurrect it). Mirrors the
+    // drive() error path, which runs the same terminal bookkeeping before
+    // propagating. A cancel mid-review surfaces via run_loop's own
+    // interruption handling.
+    super::clear_injected_skill(session).await;
     on_event(SessionEvent::Done);
-    Ok(())
+    run
 }

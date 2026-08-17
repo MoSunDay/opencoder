@@ -17,8 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::response::IntoResponse;
 use opencoder_store::{
-    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput,
-    SessionListItem, SessionMeta, SessionPatch, Store, SubagentTaskRecord,
+    Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, Store, SubagentTaskRecord,
 };
 use opencoder_web::handle::SessionHandle;
 
@@ -47,17 +47,10 @@ impl Store for DrainFlippingStore {
         }
         self.inner.get_session(id).await
     }
-    async fn list_sessions(
-        &self,
-        f: &SessionFilter,
-    ) -> anyhow::Result<Vec<SessionListItem>> {
+    async fn list_sessions(&self, f: &SessionFilter) -> anyhow::Result<Vec<SessionListItem>> {
         self.inner.list_sessions(f).await
     }
-    async fn update_session(
-        &self,
-        id: &str,
-        patch: &SessionPatch,
-    ) -> anyhow::Result<()> {
+    async fn update_session(&self, id: &str, patch: &SessionPatch) -> anyhow::Result<()> {
         // Simulate a drain starting DURING the write (the TOCTOU window).
         self.handle.draining.store(true, Ordering::SeqCst);
         self.inner.update_session(id, patch).await
@@ -94,28 +87,16 @@ impl Store for DrainFlippingStore {
     async fn admit_input(&self, input: &SessionInput) -> anyhow::Result<i64> {
         self.inner.admit_input(input).await
     }
-    async fn pending_inputs(
-        &self,
-        sid: &str,
-        d: Delivery,
-    ) -> anyhow::Result<Vec<SessionInput>> {
+    async fn pending_inputs(&self, sid: &str, d: Delivery) -> anyhow::Result<Vec<SessionInput>> {
         self.inner.pending_inputs(sid, d).await
     }
-    async fn promote_inputs(
-        &self,
-        sid: &str,
-        up_to: i64,
-        d: Delivery,
-    ) -> anyhow::Result<Vec<i64>> {
+    async fn promote_inputs(&self, sid: &str, up_to: i64, d: Delivery) -> anyhow::Result<Vec<i64>> {
         self.inner.promote_inputs(sid, up_to, d).await
     }
     async fn promote_next_queued(&self, sid: &str) -> anyhow::Result<Option<i64>> {
         self.inner.promote_next_queued(sid).await
     }
-    async fn claim_next_queue(
-        &self,
-        sid: &str,
-    ) -> anyhow::Result<Option<(i64, SessionInput)>> {
+    async fn claim_next_queue(&self, sid: &str) -> anyhow::Result<Option<(i64, SessionInput)>> {
         self.inner.claim_next_queue(sid).await
     }
     async fn delete_input(&self, input_id: i64) -> anyhow::Result<()> {
@@ -124,46 +105,25 @@ impl Store for DrainFlippingStore {
     async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> anyhow::Result<()> {
         self.inner.swap_input_order(sid, a, b).await
     }
-    async fn append_events(
-        &self,
-        events: &[SessionEventRecord],
-    ) -> anyhow::Result<Vec<i64>> {
+    async fn append_events(&self, events: &[SessionEventRecord]) -> anyhow::Result<Vec<i64>> {
         self.inner.append_events(events).await
     }
-    async fn events_after(
-        &self,
-        sid: &str,
-        after: i64,
-    ) -> anyhow::Result<Vec<SessionEventRecord>> {
+    async fn events_after(&self, sid: &str, after: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
         self.inner.events_after(sid, after).await
     }
     async fn last_event_seq(&self, sid: &str) -> anyhow::Result<i64> {
         self.inner.last_event_seq(sid).await
     }
-    async fn create_subagent_task(
-        &self,
-        r: &SubagentTaskRecord,
-    ) -> anyhow::Result<()> {
+    async fn create_subagent_task(&self, r: &SubagentTaskRecord) -> anyhow::Result<()> {
         self.inner.create_subagent_task(r).await
     }
-    async fn complete_subagent_task(
-        &self,
-        id: &str,
-        result: &str,
-        ok: bool,
-    ) -> anyhow::Result<()> {
+    async fn complete_subagent_task(&self, id: &str, result: &str, ok: bool) -> anyhow::Result<()> {
         self.inner.complete_subagent_task(id, result, ok).await
     }
-    async fn list_subagent_tasks(
-        &self,
-        sid: &str,
-    ) -> anyhow::Result<Vec<SubagentTaskRecord>> {
+    async fn list_subagent_tasks(&self, sid: &str) -> anyhow::Result<Vec<SubagentTaskRecord>> {
         self.inner.list_subagent_tasks(sid).await
     }
-    async fn get_subagent_task(
-        &self,
-        id: &str,
-    ) -> anyhow::Result<Option<SubagentTaskRecord>> {
+    async fn get_subagent_task(&self, id: &str) -> anyhow::Result<Option<SubagentTaskRecord>> {
         self.inner.get_subagent_task(id).await
     }
     async fn cancel_subagent_task(&self, id: &str) -> anyhow::Result<()> {
@@ -218,7 +178,12 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
 }
 
 /// Seed a session row with explicit (possibly NULL) agent/model.
-async fn seed_as(state: &opencoder_web::AppState, sid: &str, agent: Option<&str>, model: Option<&str>) {
+async fn seed_as(
+    state: &opencoder_web::AppState,
+    sid: &str,
+    agent: Option<&str>,
+    model: Option<&str>,
+) {
     state
         .store
         .create_session(&SessionMeta {
@@ -248,11 +213,11 @@ async fn meta(state: &opencoder_web::AppState, sid: &str) -> SessionMeta {
 }
 
 /// Decode a handler response into (status, json).
-async fn decode(
-    resp: axum::response::Response,
-) -> (axum::http::StatusCode, serde_json::Value) {
+async fn decode(resp: axum::response::Response) -> (axum::http::StatusCode, serde_json::Value) {
     let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     (status, v)
 }
@@ -377,7 +342,8 @@ async fn post_agent_rolls_back_null_agent_by_clearing() {
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert_eq!(v["ok"], false);
     assert_eq!(
-        meta(&state, "s3").await.agent, None,
+        meta(&state, "s3").await.agent,
+        None,
         "refused switch must not persist: NULL old agent must be restored as NULL"
     );
     let map = state.handles.lock().await;
@@ -407,7 +373,8 @@ async fn post_model_rolls_back_null_model_by_clearing() {
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert_eq!(v["ok"], false);
     assert_eq!(
-        meta(&state, "s4").await.model, None,
+        meta(&state, "s4").await.model,
+        None,
         "refused switch must not persist: NULL old model must be restored as NULL"
     );
     let map = state.handles.lock().await;
@@ -423,7 +390,15 @@ async fn post_model_rolls_back_null_model_by_clearing() {
 async fn post_agent_clears_agent_when_capture_read_failed() {
     let (state, real) = state_with_drain_flip_failing_get("s5").await;
     seed_as(&state, "s5", Some("act"), Some("m")).await;
-    assert_eq!(real.get_session("s5").await.unwrap().unwrap().agent.as_deref(), Some("act"));
+    assert_eq!(
+        real.get_session("s5")
+            .await
+            .unwrap()
+            .unwrap()
+            .agent
+            .as_deref(),
+        Some("act")
+    );
 
     let resp = opencoder_web::api::post_agent(
         axum::extract::State(state.clone()),
@@ -439,7 +414,8 @@ async fn post_agent_clears_agent_when_capture_read_failed() {
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert_eq!(v["ok"], false);
     assert_eq!(
-        real.get_session("s5").await.unwrap().unwrap().agent, None,
+        real.get_session("s5").await.unwrap().unwrap().agent,
+        None,
         "failed capture must still roll back: best-effort clear to NULL"
     );
 }
@@ -450,7 +426,15 @@ async fn post_agent_clears_agent_when_capture_read_failed() {
 async fn post_model_clears_model_when_capture_read_failed() {
     let (state, real) = state_with_drain_flip_failing_get("s6").await;
     seed_as(&state, "s6", Some("act"), Some("m")).await;
-    assert_eq!(real.get_session("s6").await.unwrap().unwrap().model.as_deref(), Some("m"));
+    assert_eq!(
+        real.get_session("s6")
+            .await
+            .unwrap()
+            .unwrap()
+            .model
+            .as_deref(),
+        Some("m")
+    );
 
     let resp = opencoder_web::api::post_model(
         axum::extract::State(state.clone()),
@@ -467,7 +451,8 @@ async fn post_model_clears_model_when_capture_read_failed() {
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert_eq!(v["ok"], false);
     assert_eq!(
-        real.get_session("s6").await.unwrap().unwrap().model, None,
+        real.get_session("s6").await.unwrap().unwrap().model,
+        None,
         "failed capture must still roll back: best-effort clear to NULL"
     );
 }

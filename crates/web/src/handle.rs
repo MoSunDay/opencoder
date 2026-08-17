@@ -144,10 +144,7 @@ pub(crate) struct DropGuardStream<S> {
 
 impl<S: futures::Stream> DropGuardStream<S> {
     /// Wrap `stream` so `on_drop` runs once when the stream is dropped.
-    pub(crate) fn new(
-        stream: S,
-        on_drop: impl FnOnce() + Send + Sync + 'static,
-    ) -> Self {
+    pub(crate) fn new(stream: S, on_drop: impl FnOnce() + Send + Sync + 'static) -> Self {
         DropGuardStream {
             inner: Box::pin(stream),
             on_drop: Some(Box::new(on_drop)),
@@ -181,9 +178,15 @@ impl<S> Drop for DropGuardStream<S> {
 /// handle. `Err(current)` from `fetch_update` means the counter was already 0
 /// (f returned `None`) — report 0, never a wrapped value.
 fn release_subscriber_slot(h: &SessionHandle) -> usize {
-    match h.subscribers.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-        if v == 0 { None } else { Some(v - 1) }
-    }) {
+    match h
+        .subscribers
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+            if v == 0 {
+                None
+            } else {
+                Some(v - 1)
+            }
+        }) {
         Ok(prev) => prev,
         Err(current) => current,
     }
@@ -580,11 +583,9 @@ async fn drain_to_completion(
             // normal eviction path (last subscriber leaves while idle) reclaims
             // it later. Also only remove when the entry is still THIS instance —
             // it may have been deleted + recreated meanwhile (e.g. DELETE).
-            let still_current = map
-                .get(session_id)
-                .is_some_and(|h| Arc::ptr_eq(h, &handle));
-            let live = handle.subscribers.load(Ordering::SeqCst) > 0
-                || handle.tx.receiver_count() > 0;
+            let still_current = map.get(session_id).is_some_and(|h| Arc::ptr_eq(h, &handle));
+            let live =
+                handle.subscribers.load(Ordering::SeqCst) > 0 || handle.tx.receiver_count() > 0;
             if live {
                 warn!(
                     session_id,
@@ -706,23 +707,15 @@ mod tests {
         // Simulate subscriber A creating the handle (creator).
         {
             let mut map = handles.lock().await;
-            let handle = map
-                .entry(id.clone())
-                .or_insert_with(SessionHandle::new);
-            handle
-                .subscribers
-                .fetch_add(1, Ordering::SeqCst);
+            let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
+            handle.subscribers.fetch_add(1, Ordering::SeqCst);
         }
 
         // Simulate subscriber B joining (non-creator).
         {
             let mut map = handles.lock().await;
-            let handle = map
-                .entry(id.clone())
-                .or_insert_with(SessionHandle::new);
-            handle
-                .subscribers
-                .fetch_add(1, Ordering::SeqCst);
+            let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
+            handle.subscribers.fetch_add(1, Ordering::SeqCst);
         }
 
         // Creator A leaves first (created=true, prev=2 → not the last, kept).

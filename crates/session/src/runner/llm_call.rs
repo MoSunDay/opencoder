@@ -442,11 +442,7 @@ mod tests {
         config
     }
 
-    fn session_for(
-        agent_name: &str,
-        config: Config,
-        client: Arc<dyn ChatStream>,
-    ) -> SessionState {
+    fn session_for(agent_name: &str, config: Config, client: Arc<dyn ChatStream>) -> SessionState {
         SessionState::new(
             "test-inject-target",
             resolve_agent(agent_name).unwrap(),

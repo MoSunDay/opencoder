@@ -196,3 +196,59 @@ async fn switch_agent_to_plan_resets_plan_input_count() {
         "switching to plan must reset the plan-input counter, mirroring control_cmd::apply"
     );
 }
+
+/// The `SwitchAndStart` no-plan fallback (empty transcript, `handoff` returns
+/// None) still clears the sticky skill durably: the in-memory
+/// `sess.set_skill(None)` must be mirrored by a persisted `clear_skill`, or
+/// a resume would resurrect the deactivated skill from `sessions.skill`.
+#[tokio::test]
+async fn switch_and_start_without_plan_persists_skill_clear() {
+    let store = mem_store().await;
+    store
+        .create_session(&SessionMeta {
+            id: "no-plan-clear".into(),
+            agent: Some("plan".into()),
+            skill: Some("stale sticky body".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // No assistant text -> handoff() finds no plan -> fallback branch.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![text_done("ok")]));
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
+    let mut sess = SessionState::new(
+        "no-plan-clear",
+        resolve_agent("plan").expect("plan agent"),
+        Config::default(),
+        mock,
+        std::env::temp_dir(),
+    )
+    .with_store(store.clone());
+    sess.set_skill(Some("stale sticky body".into()));
+    sess.messages = vec![Message::user("u1", "just a prompt")];
+
+    let quit = process_cmd(
+        UiCmd::SwitchAndStart("act".into(), "".into()),
+        &mut sess,
+        &tx,
+    )
+    .await;
+    assert!(!quit, "SwitchAndStart must not break the worker loop");
+    let _ = rx.recv().await; // AgentSwitch forwarded event
+
+    assert!(
+        sess.skill_prompt_cloned().is_none(),
+        "in-memory sticky skill cleared"
+    );
+    let meta = store
+        .get_session("no-plan-clear")
+        .await
+        .unwrap()
+        .expect("session row exists");
+    assert!(
+        meta.skill.is_none(),
+        "fallback path must persist the clear, got {:?}",
+        meta.skill
+    );
+}

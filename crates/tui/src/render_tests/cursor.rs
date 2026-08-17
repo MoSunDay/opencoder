@@ -102,6 +102,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
                 f,
                 Rect::new(0, 0, 12, 6),
                 input,
+                false, // copy_mode
                 0,
                 8,
                 2,
@@ -169,6 +170,7 @@ fn composer_badge_renders_and_cursor_aligns() {
                 f,
                 Rect::new(0, 0, 12, 6),
                 input,
+                false, // copy_mode
                 0,
                 8,
                 2,

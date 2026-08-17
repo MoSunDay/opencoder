@@ -51,31 +51,29 @@ pub(crate) async fn handle_envs_outcome(
     match handle_envs_key(envs_menu, k) {
         EnvsOutcome::Idle => {}
         EnvsOutcome::Cancel => *envs_menu = None,
-        EnvsOutcome::Activate(name) => {
-            match opencoder_core::set_active_env(Some(&name)) {
-                Ok(()) => {
-                    *envs_menu = None;
-                    refresh_after_env_change(
-                        format!("activated \u{2192} {name}"),
-                        client,
-                        config,
-                        model_label,
-                        compaction_threshold,
-                        context_limit,
-                        frame_ms,
-                        frame_ticker,
-                        cmd_tx,
-                        chat,
-                        workdir,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    err_marker(chat, format!("activate failed: {e}"));
-                    *envs_menu = Some(EnvsMenu::List(EnvsList::discover()));
-                }
+        EnvsOutcome::Activate(name) => match opencoder_core::set_active_env(Some(&name)) {
+            Ok(()) => {
+                *envs_menu = None;
+                refresh_after_env_change(
+                    format!("activated \u{2192} {name}"),
+                    client,
+                    config,
+                    model_label,
+                    compaction_threshold,
+                    context_limit,
+                    frame_ms,
+                    frame_ticker,
+                    cmd_tx,
+                    chat,
+                    workdir,
+                )
+                .await;
             }
-        }
+            Err(e) => {
+                err_marker(chat, format!("activate failed: {e}"));
+                *envs_menu = Some(EnvsMenu::List(EnvsList::discover()));
+            }
+        },
         EnvsOutcome::Deactivate => match opencoder_core::set_active_env(None) {
             Ok(()) => {
                 *envs_menu = None;
@@ -220,8 +218,7 @@ async fn refresh_after_env_change(
             if new_frame_ms != *frame_ms {
                 *frame_ms = new_frame_ms;
                 *frame_ticker = tokio::time::interval(Duration::from_millis(new_frame_ms));
-                frame_ticker
-                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                frame_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             }
             let _ = cmd_tx.send(UiCmd::ReloadConfig(Box::new(reloaded))).await;
             chat.push_marker(Line::from(Span::styled(

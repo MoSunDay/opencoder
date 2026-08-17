@@ -81,6 +81,12 @@ pub(super) async fn run_subagent(
         parent.client.clone(),
         parent.working_dir.clone(),
     );
+    // Autopilot is top-level orchestration only: the child inherits the
+    // parent's config (which may carry `autopilot.mode = "ap"|"review"`),
+    // but a subagent running its own PLAN->ACT->VERIFY loop or review pass
+    // after the scoped task would double-drive and desync the parent's
+    // result backfill. Force it off.
+    child.config.autopilot.mode = opencoder_core::ApMode::Off;
     child.steer_gate = Some(steer_gate.clone());
     // Derive a child token from the parent's hard-cancel token. A parent
     // double-Esc (parent cancelled) cascades to the child via the parent-child
@@ -182,9 +188,10 @@ pub(super) async fn run_subagent(
     // `flusher` without aborting the task — leaving a detached task holding
     // `Arc<Store>`. The guard aborts on drop unless the normal completion path
     // takes the handle out to await it.
-    let mut flusher_guard = FlushAbortOnDrop::new(tokio::spawn(
-        crate::event_sink::run_flusher(flush_store, ev_rx),
-    ));
+    let mut flusher_guard = FlushAbortOnDrop::new(tokio::spawn(crate::event_sink::run_flusher(
+        flush_store,
+        ev_rx,
+    )));
     let res = Box::pin(run_with_registry(
         &mut child,
         prompt.clone(),
@@ -494,10 +501,12 @@ mod tests {
         let handle = tokio::spawn(async {});
         let mut guard = FlushAbortOnDrop::new(handle);
         tokio::time::sleep(Duration::from_millis(5)).await;
-        let taken = guard.take().expect("handle must be present after construction");
+        let taken = guard
+            .take()
+            .expect("handle must be present after construction");
         drop(guard); // disarmed — must NOT abort
-        // Awaiting must succeed — if take() had failed and drop(guard) had
-        // aborted the task, this would panic with a JoinError.
+                     // Awaiting must succeed — if take() had failed and drop(guard) had
+                     // aborted the task, this would panic with a JoinError.
         taken.await.unwrap();
     }
 }

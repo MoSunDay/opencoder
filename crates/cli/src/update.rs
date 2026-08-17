@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::Cli;
 use crate::run;
+use crate::Cli;
 
 /// Built-in prompt that delegates the entire self-update workflow to the agent:
 /// clone the latest main, rebuild, and atomically swap the PATH binary.

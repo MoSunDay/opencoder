@@ -104,7 +104,10 @@ async fn field_and_clear_combinations_are_rejected() {
     for (name, patch) in cases {
         let store = mem().await;
         let result = store.update_session("s1", &patch).await;
-        assert!(result.is_err(), "{name}: conflicting field+clear must error");
+        assert!(
+            result.is_err(),
+            "{name}: conflicting field+clear must error"
+        );
     }
 }
 

@@ -87,7 +87,11 @@ pub(crate) fn effective_path_with(
         }
     }
     let global = global_domain_path(key)?;
-    if global.exists() { Some(global) } else { None }
+    if global.exists() {
+        Some(global)
+    } else {
+        None
+    }
 }
 
 /// Write target for a domain patch: the project file if it already exists,

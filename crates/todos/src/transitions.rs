@@ -204,6 +204,14 @@ pub fn rewind(
             todo.status = TodoStatus::Invalidated;
             todo.accepted_generation = None;
             todo.last_error = Some(reason.clone());
+            // Reset attempt bookkeeping so the recovery pass can re-dispatch:
+            // `dispatch` refuses any todo with attempt >= max_attempts, which
+            // would otherwise deadlock the rewind recovery forever. The
+            // session pointers are kept so the parent may still choose
+            // Resume for a re-attempt.
+            todo.attempt = 0;
+            todo.candidate = None;
+            todo.next_context_mode = None;
         }
         state.active_todo_ids.remove(&id);
     }
@@ -211,6 +219,9 @@ pub fn rewind(
     milestone.status = TodoStatus::Recovering;
     milestone.accepted_generation = None;
     milestone.last_error = Some(reason.clone());
+    milestone.attempt = 0;
+    milestone.candidate = None;
+    milestone.next_context_mode = None;
     state.incidents.push(serde_json::json!({
         "milestone_todo_id": milestone_id,
         "reason": reason,
@@ -647,5 +658,63 @@ mod tests {
             rewind(&workflow, state(&workflow), "t1", "not a milestone".into()).unwrap_err();
 
         assert!(format!("{error:#}").contains("unknown milestone TODO t1"));
+    }
+
+    #[test]
+    fn rewind_rewinds_attempt_bookkeeping_so_recovery_can_redispatch() {
+        let workflow = spec_of(vec![dep_todo("a", &[], 1), dep_todo("b", &["a"], 1)]);
+        let mut workflow_state = state(&workflow);
+        // Milestone a burned its only attempt when it was originally accepted.
+        {
+            let a = workflow_state.todos.get_mut("a").unwrap();
+            a.status = TodoStatus::Passed;
+            a.attempt = 1;
+            a.accepted_generation = Some(7);
+        }
+        workflow_state.milestones.insert("a".into());
+        // Descendant b exhausted its only attempt and failed. Without the
+        // attempt reset, re-dispatching it after the rewind bails with
+        // "exhausted max_attempts" and the recovery deadlocks.
+        {
+            let b = workflow_state.todos.get_mut("b").unwrap();
+            b.status = TodoStatus::Failed;
+            b.attempt = 1;
+            b.active_session_id = Some("b-s1".into());
+            b.session_history = vec!["b-s1".into()];
+            b.candidate = Some(candidate_value());
+            b.next_context_mode = Some(ContextMode::Resume);
+        }
+
+        let next = rewind(
+            &workflow,
+            workflow_state,
+            "a",
+            "ground truth drifted".into(),
+        )
+        .unwrap();
+
+        assert_eq!(next.todos["a"].status, TodoStatus::Recovering);
+        assert_eq!(next.todos["a"].attempt, 0);
+        let b = &next.todos["b"];
+        assert_eq!(b.status, TodoStatus::Invalidated);
+        assert_eq!(b.attempt, 0);
+        assert_eq!(b.candidate, None);
+        assert_eq!(b.next_context_mode, None);
+        // Session pointers survive so the parent may still choose Resume.
+        assert_eq!(b.active_session_id.as_deref(), Some("b-s1"));
+        assert_eq!(b.session_history, vec!["b-s1".to_string()]);
+
+        // Recovery: the milestone re-runs to a fresh acceptance...
+        let recovered = dispatch_new(&workflow, next, "a");
+        let recovered = candidate(recovered, "a", candidate_value()).unwrap();
+        let recovered = accepting(recovered, "a").unwrap();
+        let recovered = accepted(recovered, "a", true).unwrap();
+        assert_eq!(recovered.todos["a"].status, TodoStatus::Passed);
+
+        // ...and the invalidated descendant dispatches again instead of
+        // deadlocking on its pre-rewind attempt count.
+        let redispatched = dispatch_new(&workflow, recovered, "b");
+        assert_eq!(redispatched.todos["b"].status, TodoStatus::Running);
+        assert_eq!(redispatched.todos["b"].attempt, 1);
     }
 }

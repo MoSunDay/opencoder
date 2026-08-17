@@ -10,7 +10,11 @@ use tempfile::TempDir;
 fn msgs(seed: &str, n: usize) -> Vec<Message> {
     (0..n)
         .map(|i| {
-            let role = if i % 2 == 0 { Role::User } else { Role::Assistant };
+            let role = if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            };
             let text = format!("{seed} msg {i}");
             match role {
                 Role::User => Message::user(format!("{seed}-{i}"), text),
@@ -51,7 +55,10 @@ async fn load_messages_after_skip_semantics() {
     // skip=3 -> last 7, ordered
     let tail7 = store.load_messages_after("s1", 3).await.unwrap();
     assert_eq!(tail7.len(), 7, "skip=3 drops first 3");
-    assert_eq!(tail7[0].id, "m-3", "ordering preserved (first is 4th appended)");
+    assert_eq!(
+        tail7[0].id, "m-3",
+        "ordering preserved (first is 4th appended)"
+    );
 
     // skip=10 -> empty (everything skipped)
     let empty = store.load_messages_after("s1", 10).await.unwrap();
@@ -59,12 +66,18 @@ async fn load_messages_after_skip_semantics() {
 
     // skip beyond count -> empty (no panic)
     let over = store.load_messages_after("s1", 99).await.unwrap();
-    assert!(over.is_empty(), "skip > count returns nothing without panic");
+    assert!(
+        over.is_empty(),
+        "skip > count returns nothing without panic"
+    );
 
     // Consistency with a full load for skip=0.
     let full = store.load_messages("s1").await.unwrap();
     assert_eq!(all.len(), full.len());
-    assert_eq!(all.last().map(|m| m.id.as_str()), full.last().map(|m| m.id.as_str()));
+    assert_eq!(
+        all.last().map(|m| m.id.as_str()),
+        full.last().map(|m| m.id.as_str())
+    );
 }
 
 #[tokio::test]
@@ -78,7 +91,11 @@ async fn load_messages_after_negative_offset_returns_all() {
     // (whose behavior is SQLite-version-dependent). It should return ALL
     // rows, not error, not be empty.
     let got = store.load_messages_after("s1", -5).await.unwrap();
-    assert_eq!(got.len(), inserted.len(), "negative offset clamps to 0 -> all rows");
+    assert_eq!(
+        got.len(),
+        inserted.len(),
+        "negative offset clamps to 0 -> all rows"
+    );
     assert_eq!(
         got.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
         inserted.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),

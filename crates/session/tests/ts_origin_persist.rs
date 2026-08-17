@@ -61,8 +61,14 @@ async fn ts_origin_persists_null_model_and_agent() {
         .await
         .unwrap()
         .expect("session row should exist after record");
-    assert_eq!(meta.model, None, "ts-origin session must persist model: None");
-    assert_eq!(meta.agent, None, "ts-origin session must persist agent: None");
+    assert_eq!(
+        meta.model, None,
+        "ts-origin session must persist model: None"
+    );
+    assert_eq!(
+        meta.agent, None,
+        "ts-origin session must persist agent: None"
+    );
     assert_eq!(
         meta.title.as_deref(),
         Some("hello world"),
@@ -122,5 +128,8 @@ async fn ts_origin_resume_keeps_null_model() {
     assert_eq!(store.load_messages("ts-resume").await.unwrap().len(), 2);
 
     let meta2 = store.get_session("ts-resume").await.unwrap().unwrap();
-    assert_eq!(meta2.model, None, "model stays None after post-resume record");
+    assert_eq!(
+        meta2.model, None,
+        "model stays None after post-resume record"
+    );
 }

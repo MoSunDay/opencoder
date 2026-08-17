@@ -257,7 +257,11 @@ async fn blocked_admit_does_not_stall_ui_loop() {
     );
     assert_eq!(queue_items, vec![(real, "first".to_string())]);
     assert_eq!(
-        wrapper.pending_inputs("s1", Delivery::Queue).await.unwrap().len(),
+        wrapper
+            .pending_inputs("s1", Delivery::Queue)
+            .await
+            .unwrap()
+            .len(),
         1,
         "the admitted row is durably queued in the store"
     );
@@ -298,7 +302,10 @@ async fn consumed_before_completion_does_not_resurrect() {
         AdmitReconcile::DroppedConsumed,
         "the drain already consumed this seq: the temp row must drop, not resurrect"
     );
-    assert!(queue_items.is_empty(), "queue mirror must not resurrect the row");
+    assert!(
+        queue_items.is_empty(),
+        "queue mirror must not resurrect the row"
+    );
 }
 
 #[tokio::test]
@@ -340,7 +347,7 @@ async fn second_submit_lines_up_behind_blocked_first() {
         match tokio::time::timeout_at(deadline, done_rx.recv()).await {
             Ok(Some(done)) => completions.push(done),
             Ok(None) => break, // actor gone
-            Err(_) => break,  // deadline hit
+            Err(_) => break,   // deadline hit
         }
     }
     assert_eq!(completions.len(), 2, "both admits must complete");
@@ -364,7 +371,11 @@ async fn second_submit_lines_up_behind_blocked_first() {
         vec![(r1, "first".to_string()), (r2, "second".to_string())]
     );
     assert_eq!(
-        wrapper.pending_inputs("s1", Delivery::Queue).await.unwrap().len(),
+        wrapper
+            .pending_inputs("s1", Delivery::Queue)
+            .await
+            .unwrap()
+            .len(),
         2,
         "both rows are durably queued in submit order"
     );

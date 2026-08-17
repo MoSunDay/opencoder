@@ -213,7 +213,11 @@ fn dep_gated_skills_do_not_clobber_existing() {
 
     // Pre-write a user-modified chrome-headless skill too.
     std::fs::create_dir_all(root.join("chrome-headless")).unwrap();
-    std::fs::write(root.join("chrome-headless/SKILL.md"), "my custom chrome skill").unwrap();
+    std::fs::write(
+        root.join("chrome-headless/SKILL.md"),
+        "my custom chrome skill",
+    )
+    .unwrap();
 
     seed_dep_gated_skills_in(root).unwrap();
 
@@ -287,8 +291,7 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
     // asset edits.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
-    let body =
-        std::fs::read_to_string(root.path().join("say-and-replay/SKILL.md")).unwrap();
+    let body = std::fs::read_to_string(root.path().join("say-and-replay/SKILL.md")).unwrap();
     assert!(
         body.contains("name: say-and-replay"),
         "frontmatter name missing"
@@ -317,5 +320,46 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
     assert!(
         body.contains("百分比"),
         "say-and-replay field semantics must explain the percent convention"
+    );
+}
+
+#[test]
+fn seeded_task_plan_skill_requires_question_tool_guidance() {
+    // task-plan runs in plan mode, where the `question` tool is the only
+    // sanctioned clarification channel. The skill must keep: (a) the
+    // conditional protocol (interactive -> ask; headless -> explicit
+    // assumptions), (b) the anti-lazy guard (facts come from the repo, not
+    // from the user), and (c) the `assumptions:` landing spot in the STATUS
+    // block, so ambiguity never turns into silently invented acceptance
+    // criteria.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body = std::fs::read_to_string(root.path().join("task-plan/SKILL.md")).unwrap();
+    assert!(body.contains("name: task-plan"), "frontmatter name missing");
+    assert!(
+        body.contains("question"),
+        "task-plan skill must reference the question tool"
+    );
+    assert!(
+        body.contains("澄清协议"),
+        "task-plan skill must carry a clarification protocol section"
+    );
+    // Conditional branches, mirroring do-and-done's pause protocol wording.
+    assert!(
+        body.contains("`question` 工具可用"),
+        "task-plan clarification must cover the interactive branch"
+    );
+    assert!(
+        body.contains("不可用"),
+        "task-plan clarification must cover the headless branch"
+    );
+    assert!(
+        body.contains("assumptions:"),
+        "headless branch must land assumptions in the STATUS block"
+    );
+    // Anti-lazy guard: repo facts are looked up, not asked.
+    assert!(
+        body.contains("不把提问当侦察手段"),
+        "task-plan must forbid using question as a substitute for repo lookup"
     );
 }

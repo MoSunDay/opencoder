@@ -76,7 +76,11 @@ impl SessionUiState {
             // still in flight on the admitter actor; a switch-back restore must show
             // only rows the store actually owns (the authoritative mirror re-reads the
             // store at the next turn boundary / resume path).
-            queue_items: queue_items.iter().filter(|(s, _)| *s >= 0).cloned().collect(),
+            queue_items: queue_items
+                .iter()
+                .filter(|(s, _)| *s >= 0)
+                .cloned()
+                .collect(),
             active_skill: active_skill.clone(),
             active_skill_body: active_skill_body.clone(),
             agent_name: chat.agent.clone(),

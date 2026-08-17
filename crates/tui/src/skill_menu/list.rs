@@ -4,7 +4,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use opencoder_core::Config;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::state::{SkillMenu, SkillOutcome};
 
@@ -34,7 +34,10 @@ impl SkillList {
                 enabled: config.skills.get(&s.name).is_some_and(|c| c.enabled),
             })
             .collect();
-        Self { entries, selected: 0 }
+        Self {
+            entries,
+            selected: 0,
+        }
     }
 
     /// Discover `~/.opencoder/skills` and build the toggle list.
@@ -42,16 +45,22 @@ impl SkillList {
         Self::from_discovered(&opencoder_core::discover_skills(), config)
     }
 
-    pub fn selected_entry(&self) -> Option<&SkillEntry> { self.entries.get(self.selected) }
+    pub fn selected_entry(&self) -> Option<&SkillEntry> {
+        self.entries.get(self.selected)
+    }
 
     fn move_up(&mut self) {
         let n = self.entries.len();
-        if n > 0 { self.selected = (self.selected + n - 1) % n; }
+        if n > 0 {
+            self.selected = (self.selected + n - 1) % n;
+        }
     }
 
     fn move_down(&mut self) {
         let n = self.entries.len();
-        if n > 0 { self.selected = (self.selected + 1) % n; }
+        if n > 0 {
+            self.selected = (self.selected + 1) % n;
+        }
     }
 }
 
@@ -87,29 +96,48 @@ pub fn handle_key(mut list: SkillList, k: KeyEvent) -> (SkillOutcome, Option<Ski
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use opencoder_core::{Skill, config::SkillConfig};
+    use opencoder_core::{config::SkillConfig, Skill};
     use std::path::PathBuf;
 
-    fn key(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::NONE) }
+    fn key(c: KeyCode) -> KeyEvent {
+        KeyEvent::new(c, KeyModifiers::NONE)
+    }
 
     fn skill(name: &str, desc: &str) -> Skill {
-        Skill { name: name.into(), description: desc.into(), body: String::new(), source: PathBuf::new() }
+        Skill {
+            name: name.into(),
+            description: desc.into(),
+            body: String::new(),
+            source: PathBuf::new(),
+        }
     }
 
     fn cfg_with(name: &str, enabled: bool) -> Config {
-        let mut cfg = Config::default(); cfg.skills.insert(name.into(), SkillConfig { enabled }); cfg }
+        let mut cfg = Config::default();
+        cfg.skills.insert(name.into(), SkillConfig { enabled });
+        cfg
+    }
 
     #[test]
     fn from_discovered_merges_config_and_defaults_off() {
-        let list = SkillList::from_discovered(&[skill("alpha", "a"), skill("beta", "b")], &cfg_with("beta", true));
-        assert!(!list.entries[0].enabled, "alpha: missing from config -> OFF");
+        let list = SkillList::from_discovered(
+            &[skill("alpha", "a"), skill("beta", "b")],
+            &cfg_with("beta", true),
+        );
+        assert!(
+            !list.entries[0].enabled,
+            "alpha: missing from config -> OFF"
+        );
         assert!(list.entries[1].enabled, "beta: config ON honored");
         assert_eq!(list.entries[0].description, "a", "description carried over");
     }
 
     #[test]
     fn move_up_down_wrap() {
-        let mut list = SkillList::from_discovered(&[skill("a", "1"), skill("b", "2"), skill("c", "3")], &Config::default());
+        let mut list = SkillList::from_discovered(
+            &[skill("a", "1"), skill("b", "2"), skill("c", "3")],
+            &Config::default(),
+        );
         list.move_up();
         assert_eq!(list.selected, 2, "up from 0 wraps to last");
         list.move_down();
@@ -118,8 +146,14 @@ mod tests {
 
     #[test]
     fn toggle_json_shape_on_and_off() {
-        assert_eq!(toggle_skill_json("demo", true), json!({"skills": {"demo": {"enabled": true}}}));
-        assert_eq!(toggle_skill_json("demo", false), json!({"skills": {"demo": {"enabled": false}}}));
+        assert_eq!(
+            toggle_skill_json("demo", true),
+            json!({"skills": {"demo": {"enabled": true}}})
+        );
+        assert_eq!(
+            toggle_skill_json("demo", false),
+            json!({"skills": {"demo": {"enabled": false}}})
+        );
     }
 
     #[test]
@@ -131,7 +165,9 @@ mod tests {
             _ => panic!("expected Save"),
         }
         match next {
-            Some(SkillMenu::List(l)) => assert!(l.entries[0].enabled && l.selected_entry().unwrap().enabled),
+            Some(SkillMenu::List(l)) => {
+                assert!(l.entries[0].enabled && l.selected_entry().unwrap().enabled)
+            }
             _ => panic!("expected List to stay open"),
         }
     }
@@ -139,12 +175,20 @@ mod tests {
     #[test]
     fn enter_esc_close_and_empty_list_keys_are_noops() {
         for code in [KeyCode::Enter, KeyCode::Esc] {
-            let (outcome, next) = handle_key(SkillList::from_discovered(&[skill("srv", "d")], &Config::default()), key(code));
+            let (outcome, next) = handle_key(
+                SkillList::from_discovered(&[skill("srv", "d")], &Config::default()),
+                key(code),
+            );
             assert!(matches!(outcome, SkillOutcome::Cancel) && next.is_none());
         }
         for code in [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right] {
-            let (outcome, next) = handle_key(SkillList::from_discovered(&[], &Config::default()), key(code));
-            assert!(matches!(outcome, SkillOutcome::Idle) && matches!(next, Some(SkillMenu::List(_))));
+            let (outcome, next) = handle_key(
+                SkillList::from_discovered(&[], &Config::default()),
+                key(code),
+            );
+            assert!(
+                matches!(outcome, SkillOutcome::Idle) && matches!(next, Some(SkillMenu::List(_)))
+            );
         }
     }
 }

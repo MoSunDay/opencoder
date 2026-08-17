@@ -102,10 +102,35 @@ pub(super) fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value)
     }
 }
 
+/// The legacy domain keys (`mcp_servers` / `cli` / `skills`) present in a
+/// parsed config.json object with non-`null` values, in fixed order. Pure
+/// input inspection — callers decide what to do with the result.
+fn legacy_domain_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&'static str> {
+    ["mcp_servers", "cli", "skills"]
+        .into_iter()
+        .filter(|k| obj.get(*k).is_some_and(|v| !v.is_null()))
+        .collect()
+}
+
 /// Apply a parsed config JSON `value` onto `cfg`, field by field. Only the
 /// keys present in `value` are overwritten; everything else is left as-is.
 pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
     if let Some(obj) = value.as_object() {
+        // Legacy domain keys are hard-cut below (silent, pinned by test);
+        // surface a one-shot migration hint so the drop is visible. Every
+        // production caller feeds config.json-shaped candidates here —
+        // `merged_with` strips domain keys via `domain::split_patch` first,
+        // so programmatic patches never trip this warn.
+        let legacy = legacy_domain_keys(obj);
+        if !legacy.is_empty() {
+            tracing::warn!(
+                keys = ?legacy,
+                source = "config.json",
+                "config.json carries migrated domain keys that are now ignored; \
+                 move them into their own domain files \
+                 (mcp.json / cli.json / skills.json)"
+            );
+        }
         if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
             cfg.model = model.to_string();
         }
@@ -188,8 +213,8 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         // NOTE: `mcp_servers` / `cli` / `skills` are hard-cut from
         // config.json (see `config::domain`); a legacy config.json still
-        // carrying them is ignored here — users migrate those keys into
-        // mcp.json / cli.json / skills.json.
+        // carrying them is ignored here (warned once above) — users migrate
+        // those keys into mcp.json / cli.json / skills.json.
         if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
             if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
                 cfg.compaction.auto = v;
@@ -277,8 +302,50 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_into;
+    use super::{legacy_domain_keys, merge_into};
     use crate::config::Config;
+
+    /// Table-driven check of the pure key inspector feeding the migration
+    /// warn (#10): empty object → empty; all three present (object values)
+    /// → all three in fixed order; `null` values never count; unrelated
+    /// keys → empty.
+    #[test]
+    fn legacy_domain_keys_table() {
+        let as_map = |v: serde_json::Value| v.as_object().unwrap().clone();
+
+        assert!(legacy_domain_keys(&as_map(serde_json::json!({}))).is_empty());
+
+        let all = as_map(serde_json::json!({
+            "skills": {},
+            "cli": {},
+            "mcp_servers": {}
+        }));
+        // Order is fixed (mcp_servers, cli, skills) regardless of JSON order.
+        assert_eq!(
+            legacy_domain_keys(&all),
+            vec!["mcp_servers", "cli", "skills"]
+        );
+
+        let nulled = as_map(serde_json::json!({
+            "mcp_servers": null,
+            "cli": null,
+            "skills": null
+        }));
+        assert!(
+            legacy_domain_keys(&nulled).is_empty(),
+            "`null` values are deletions, not legacy content"
+        );
+
+        let unrelated = as_map(serde_json::json!({
+            "model": "openai/gpt-4o",
+            "theme": "dark"
+        }));
+        assert!(legacy_domain_keys(&unrelated).is_empty());
+
+        // Partial presence keeps the fixed relative order.
+        let partial = as_map(serde_json::json!({ "skills": [], "cli": null }));
+        assert_eq!(legacy_domain_keys(&partial), vec!["skills"]);
+    }
 
     /// Regression: `tool_guard.max_consecutive_failures` is a `u32` but the
     /// merged JSON value is read as `u64`. An unclamped `v as u32` cast would

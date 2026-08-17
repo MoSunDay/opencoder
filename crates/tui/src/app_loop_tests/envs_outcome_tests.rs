@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::app::app_loop::*;
 use crate::chat::{ChatBlock, ChatView};
-use crate::envs_menu::{EnvsList, EnvsMenu, EnvField, EnvNameForm};
+use crate::envs_menu::{EnvField, EnvNameForm, EnvsList, EnvsMenu};
 use crate::worker::UiCmd;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::Config;
@@ -47,7 +47,11 @@ fn env_world() -> (tempfile::TempDir, tempfile::TempDir) {
         r#"{"model":"prov/base","provider":{"base_url":"https://g.example","api_key":"gk"},"theme":"dark"}"#,
     )
     .unwrap();
-    std::fs::write(g.join("envs/alpha/config.json"), r#"{"model":"prov/alpha"}"#).unwrap();
+    std::fs::write(
+        g.join("envs/alpha/config.json"),
+        r#"{"model":"prov/alpha"}"#,
+    )
+    .unwrap();
     (home, work)
 }
 
@@ -56,8 +60,13 @@ async fn run_handler(
     envs_menu: &mut Option<EnvsMenu>,
     k: KeyEvent,
     workdir: &std::path::Path,
-) -> (Arc<dyn opencoder_llm::ChatStream>, Config, String, ChatView, tokio::sync::mpsc::Receiver<UiCmd>)
-{
+) -> (
+    Arc<dyn opencoder_llm::ChatStream>,
+    Config,
+    String,
+    ChatView,
+    tokio::sync::mpsc::Receiver<UiCmd>,
+) {
     let mut client: Arc<dyn opencoder_llm::ChatStream> = Arc::new(MockChatClient::new());
     let mut config = Config::default();
     let mut model_label = String::new();
@@ -68,8 +77,18 @@ async fn run_handler(
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<UiCmd>(64);
     let mut chat = ChatView::default();
     let _ = handle_envs_outcome(
-        envs_menu, k, &mut client, &mut config, &mut model_label, &mut ct, &mut cl,
-        &mut frame_ms, &mut ticker, &cmd_tx, &mut chat, workdir,
+        envs_menu,
+        k,
+        &mut client,
+        &mut config,
+        &mut model_label,
+        &mut ct,
+        &mut cl,
+        &mut frame_ms,
+        &mut ticker,
+        &cmd_tx,
+        &mut chat,
+        workdir,
     )
     .await;
     (client, config, model_label, chat, cmd_rx)
@@ -95,11 +114,11 @@ async fn activate_env_refreshes_config_and_notifies_worker() {
     assert_eq!(opencoder_core::active_env().as_deref(), Some("alpha"));
     assert_eq!(model_label, "prov/alpha", "label follows the env layer");
     assert_eq!(config.model, "prov/alpha");
-    assert!(marker_text(&chat).contains("activated"), "activation marker");
-    assert!(matches!(
-        cmd_rx.recv().await,
-        Some(UiCmd::ReloadConfig(_))
-    ));
+    assert!(
+        marker_text(&chat).contains("activated"),
+        "activation marker"
+    );
+    assert!(matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))));
 }
 
 /// Enter on the base row while an env is active deactivates: marker cleared,
@@ -124,10 +143,7 @@ async fn deactivate_via_base_row_restores_base_config() {
     assert_eq!(model_label, "prov/base", "base model restored");
     assert_eq!(config.model, "prov/base");
     assert!(marker_text(&chat).contains("deactivated"));
-    assert!(matches!(
-        cmd_rx.recv().await,
-        Some(UiCmd::ReloadConfig(_))
-    ));
+    assert!(matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))));
 }
 
 /// `n` → name form → Enter creates the env (default capture) and reopens the
@@ -143,16 +159,16 @@ async fn create_from_form_captures_and_reopens_list() {
     form.field = EnvField::Name;
     let mut menu = Some(EnvsMenu::Form(form));
 
-    let (_, _, _, chat, mut cmd_rx) =
-        run_handler(&mut menu, enter_key(), work.path()).await;
+    let (_, _, _, chat, mut cmd_rx) = run_handler(&mut menu, enter_key(), work.path()).await;
 
     let dir = home.path().join(".opencoder/envs/beta");
     assert!(dir.is_dir(), "env dir created");
-    let captured: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("config.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(captured["model"], "prov/base", "capture copies the base chain");
+    let captured: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(
+        captured["model"], "prov/base",
+        "capture copies the base chain"
+    );
     assert_eq!(captured["provider"]["api_key"], "gk");
     assert!(matches!(menu, Some(EnvsMenu::List(_))), "list reopened");
     assert!(marker_text(&chat).contains("created"));
@@ -181,10 +197,7 @@ async fn delete_active_env_clears_marker_and_refreshes() {
     assert_eq!(model_label, "prov/base", "refresh back to base");
     assert_eq!(config.model, "prov/base");
     assert!(marker_text(&chat).contains("deleted"));
-    assert!(matches!(
-        cmd_rx.recv().await,
-        Some(UiCmd::ReloadConfig(_))
-    ));
+    assert!(matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))));
 }
 
 /// `e` recaptures the base chain into the ACTIVE env → effective config
@@ -207,17 +220,17 @@ async fn recapture_active_env_refreshes() {
         selected: 1,
         confirm_delete: None,
     }));
-    let (_, config, model_label, chat, mut cmd_rx) =
-        run_handler(&mut menu, KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()), work.path())
-        .await;
+    let (_, config, model_label, chat, mut cmd_rx) = run_handler(
+        &mut menu,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+        work.path(),
+    )
+    .await;
 
     assert_eq!(model_label, "prov/base2", "recaptured env follows new base");
     assert_eq!(config.model, "prov/base2");
     assert!(marker_text(&chat).contains("recaptured"));
-    assert!(matches!(
-        cmd_rx.recv().await,
-        Some(UiCmd::ReloadConfig(_))
-    ));
+    assert!(matches!(cmd_rx.recv().await, Some(UiCmd::ReloadConfig(_))));
     // the env snapshot on disk was replaced
     let snap: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.path().join(".opencoder/envs/alpha/config.json")).unwrap(),

@@ -707,9 +707,8 @@ impl Config {
         let (remainder, domains) = domain::split_patch(patch);
         let mut last_domain: Option<PathBuf> = None;
         for (key, value) in &domains {
-            let target = domain::save_domain(working_dir, key, value).map_err(|e| {
-                CoreError::Config(format!("save domain file for `{key}`: {e}"))
-            })?;
+            let target = domain::save_domain(working_dir, key, value)
+                .map_err(|e| CoreError::Config(format!("save domain file for `{key}`: {e}")))?;
             last_domain = Some(target);
         }
         if remainder.as_object().is_some_and(|o| !o.is_empty()) {

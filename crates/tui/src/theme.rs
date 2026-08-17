@@ -293,6 +293,19 @@ pub fn agent_chip_fg(agent: &str) -> Color {
     }
 }
 
+/// Background colour of the plan/act mode-flash chip: warning colour for
+/// plan, accent for act — the same mapping as [`agent_chip_fg`], so the
+/// chip and the flash can never render different hues. Lives in the theme
+/// module (migrated from render.rs) to keep render.rs within its line
+/// budget.
+pub fn mode_flash_bg(is_plan: bool) -> Color {
+    if is_plan {
+        warn_color()
+    } else {
+        accent()
+    }
+}
+
 // ── Style shortcuts ─────────────────────────────────────────────────────────
 
 /// Bold text in the given colour.

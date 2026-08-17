@@ -41,11 +41,13 @@ fn config() -> Config {
 }
 
 fn mock_reply(text: &str) -> Arc<dyn ChatStream> {
-    Arc::new(MockChatClient::new().with_default(vec![LlmEvent::Completed {
-        text: text.into(),
-        tool_calls: vec![],
-        usage: None,
-    }]))
+    Arc::new(
+        MockChatClient::new().with_default(vec![LlmEvent::Completed {
+            text: text.into(),
+            tool_calls: vec![],
+            usage: None,
+        }]),
+    )
 }
 
 fn session(store: Arc<dyn Store>, mock: Arc<dyn ChatStream>) -> (tempfile::TempDir, SessionState) {
@@ -389,9 +391,5 @@ async fn runner_consumes_batch_steers_with_failing_store() {
         .pending_inputs("recovery-sess", Delivery::Steer)
         .await
         .unwrap();
-    assert_eq!(
-        pending.len(),
-        2,
-        "P1-3: both steers unpromoted for retry"
-    );
+    assert_eq!(pending.len(), 2, "P1-3: both steers unpromoted for retry");
 }

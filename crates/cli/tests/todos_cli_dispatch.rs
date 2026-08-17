@@ -30,7 +30,10 @@ fn todos_cli(workdir: &std::path::Path, args: &[&str]) -> Cli {
 /// Dispatch the parsed Cli against its todos subcommand (borrows both).
 async fn dispatch_todos(cli: &Cli) -> anyhow::Result<()> {
     let Some(Command::Todos { sub }) = cli.command.as_ref() else {
-        panic!("args did not parse into a todos subcommand: {:?}", cli.command);
+        panic!(
+            "args did not parse into a todos subcommand: {:?}",
+            cli.command
+        );
     };
     dispatch(cli, sub).await
 }
@@ -118,7 +121,10 @@ async fn list_on_empty_workdir_outputs_nothing_and_exits_zero() {
     assert!(matches!(
         cli.command,
         Some(opencoder_cli::Command::Todos {
-            sub: opencoder_cli::TodosSub::List { json: false, limit: 100 }
+            sub: opencoder_cli::TodosSub::List {
+                json: false,
+                limit: 100
+            }
         })
     ));
     dispatch_todos(&cli)
@@ -133,7 +139,10 @@ async fn validate_reports_file_path_on_bad_spec() {
     std::fs::write(&spec_path, "{ this is not json").unwrap();
     // --file is resolved by dispatch relative to the process CWD, so tests
     // pass an absolute path; the error message still names the file's leaf.
-    let cli = todos_cli(dir.path(), &["validate", "--file", spec_path.to_str().unwrap()]);
+    let cli = todos_cli(
+        dir.path(),
+        &["validate", "--file", spec_path.to_str().unwrap()],
+    );
     let err = dispatch_todos(&cli).await.unwrap_err();
     let chain = chain(&err);
     assert!(
@@ -147,7 +156,10 @@ async fn validate_accepts_good_spec() {
     let dir = tempfile::tempdir().unwrap();
     let spec_path = dir.path().join("good.json");
     std::fs::write(&spec_path, good_spec_json()).unwrap();
-    let cli = todos_cli(dir.path(), &["validate", "--file", spec_path.to_str().unwrap()]);
+    let cli = todos_cli(
+        dir.path(),
+        &["validate", "--file", spec_path.to_str().unwrap()],
+    );
     dispatch_todos(&cli)
         .await
         .expect("a schema-complete single-todo spec must validate");
@@ -182,10 +194,16 @@ fn terminal_outcome_maps_completed_interrupted_and_ended() {
     assert_eq!(todos_terminal_outcome(&completed), TodosOutcome::Completed);
 
     let interrupted = state_from("suspended", Some("local interrupt requested"));
-    assert_eq!(todos_terminal_outcome(&interrupted), TodosOutcome::Interrupted);
+    assert_eq!(
+        todos_terminal_outcome(&interrupted),
+        TodosOutcome::Interrupted
+    );
 
     let failed = state_from("failed", Some("todo exhausted attempts"));
-    assert_eq!(todos_terminal_outcome(&failed), TodosOutcome::Ended("failed"));
+    assert_eq!(
+        todos_terminal_outcome(&failed),
+        TodosOutcome::Ended("failed")
+    );
 
     // Suspended under a DIFFERENT reason (e.g. the doom-loop guard) is a
     // generic terminal end, NOT a user Ctrl-C: it must not map to Interrupted.
@@ -218,7 +236,10 @@ async fn run_with_unresolvable_config_fails_cleanly() {
     let spec_path = dir.path().join("case.json");
     std::fs::write(&spec_path, good_spec_json()).unwrap();
     let _guard = opencoder_core::scoped_config_home(dir.path().join("cfg-home"));
-    let cli = todos_cli(dir.path(), &["run", "--file", spec_path.to_str().unwrap(), "--json"]);
+    let cli = todos_cli(
+        dir.path(),
+        &["run", "--file", spec_path.to_str().unwrap(), "--json"],
+    );
     let err = dispatch_todos(&cli)
         .await
         .expect_err("unresolvable endpoint config must fail the run");

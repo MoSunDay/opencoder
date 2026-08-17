@@ -2,8 +2,9 @@
 //! `run` entry point, focused on the one-shot review pass
 //! (`autopilot.mode = "review"`): exactly one `Review` marker + one review
 //! turn (never a PLAN/ACT/VERIFY loop), the switch to the plan agent,
-//! review-skill activation from `~/.opencoder/skills` and its cleanup, plus
-//! the `ap` regression (phases still cycle under `max_iterations = 1`).
+//! review-skill activation from `~/.opencoder/skills` and its cleanup, the
+//! act-only dispatch gate (plan mode skips the pass), plus the `ap`
+//! regression (phases still cycle under `max_iterations = 1`).
 //!
 //! Split out of `autopilot.rs` to keep both files within the per-file line
 //! budget; helpers are deliberately duplicated (the shared `tests/common`
@@ -18,6 +19,7 @@ use opencoder_session::autopilot::ApPhase;
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
+use opencoder_store::{LibsqlStore, SessionMeta, Store as StoreTrait};
 
 /// A completed idle turn (no tool calls).
 fn completed(text: &str) -> LlmEvent {
@@ -46,7 +48,13 @@ fn mode_config(mode: ApMode, max_iterations: u32) -> Config {
 fn make_session(mock: Arc<dyn ChatStream>, config: Config) -> (tempfile::TempDir, SessionState) {
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    let s = SessionState::new("ap-mode-sess", agent, config, mock, dir.path().to_path_buf());
+    let s = SessionState::new(
+        "ap-mode-sess",
+        agent,
+        config,
+        mock,
+        dir.path().to_path_buf(),
+    );
     (dir, s)
 }
 
@@ -69,9 +77,7 @@ fn phase_label(phase: &ApPhase) -> &'static str {
 /// True when any message of the captured request contains `needle`
 /// (messages are JSON values; stringified for the substring scan).
 fn any_message_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages
-        .iter()
-        .any(|m| m.to_string().contains(needle))
+    req.messages.iter().any(|m| m.to_string().contains(needle))
 }
 
 // ── HOME isolation: skill discovery reads the process $HOME ───────────────
@@ -170,7 +176,15 @@ async fn review_mode_runs_exactly_one_review_pass() {
     // (iii) a terminal Done follows the review marker.
     let review_idx = events
         .iter()
-        .position(|ev| matches!(ev, SessionEvent::AutoPilot { phase: ApPhase::Review, .. }))
+        .position(|ev| {
+            matches!(
+                ev,
+                SessionEvent::AutoPilot {
+                    phase: ApPhase::Review,
+                    ..
+                }
+            )
+        })
         .expect("review marker present");
     assert!(
         events[review_idx..]
@@ -211,8 +225,10 @@ async fn review_mode_activates_then_clears_review_skill() {
             .push_script(vec![completed("initial")])
             .push_script(vec![completed("review-0")]),
     );
-    let (_dir, mut session) =
-        make_session(mock.clone() as Arc<dyn ChatStream>, mode_config(ApMode::Review, 10));
+    let (_dir, mut session) = make_session(
+        mock.clone() as Arc<dyn ChatStream>,
+        mode_config(ApMode::Review, 10),
+    );
 
     let reg = registry();
     let (_buf, mut on_event) = collector();
@@ -245,6 +261,90 @@ async fn review_mode_activates_then_clears_review_skill() {
     );
 }
 
+/// mode=Review under the plan agent (plan mode): the dispatch layer must NOT
+/// admit the review pass — a review assesses EXECUTED work, so a primary
+/// session that never ran the act agent gets exactly its initial turn: one
+/// LLM call, zero AutoPilot events, no skill activation, and no synthetic
+/// review prompt in the transcript. The mock queues a single script, so an
+/// erroneously dispatched pass would exhaust it and fail the run outright.
+#[tokio::test]
+async fn review_mode_skips_pass_in_plan_mode() {
+    // Exactly one script: the initial (plan) turn. No review turn is queued —
+    // if the pass were dispatched the mock would run dry and error out.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![completed("planned")]));
+    let (_dir, mut session) = {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = resolve_agent("plan").unwrap();
+        let s = SessionState::new(
+            "ap-plan-mode-sess",
+            agent,
+            mode_config(ApMode::Review, 10),
+            mock.clone() as Arc<dyn ChatStream>,
+            dir.path().to_path_buf(),
+        );
+        (dir, s)
+    };
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    run_with_registry(&mut session, "plan it".into(), vec![], &reg, &mut on_event)
+        .await
+        .unwrap();
+    let events = buf.lock().unwrap().clone();
+
+    // (i) exactly one LLM call — the initial turn, nothing else.
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "only the initial turn may call the LLM"
+    );
+    // (ii) zero AutoPilot events and no agent switch — no pass was dispatched.
+    assert!(
+        !events
+            .iter()
+            .any(|ev| matches!(ev, SessionEvent::AutoPilot { .. })),
+        "plan mode must not emit any AutoPilot event"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(_))),
+        "no agent switch may happen without the pass"
+    );
+    // (iii) no skill activation or residue.
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "no skill may be activated in plan mode"
+    );
+    assert!(
+        session.active_skill_names.lock().unwrap().is_empty(),
+        "no skill name may leak into the latent-tool filter"
+    );
+    // (iv) no synthetic review prompt landed in the transcript.
+    assert!(
+        !session.messages.iter().any(|m| m.synthetic),
+        "no synthetic message may be recorded without the pass"
+    );
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|m| message_text(m).contains("Review the work completed")),
+        "no synthetic review prompt may land in the transcript"
+    );
+}
+
+/// Concatenated text blocks of a transcript message (for transcript scans).
+fn message_text(m: &opencoder_core::Message) -> String {
+    m.blocks
+        .iter()
+        .filter_map(|b| match b {
+            opencoder_core::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
 // ── ap mode regression through the run entry ──────────────────────────────
 
 /// mode=Ap still cycles Plan -> Act -> Verify even when clamped to a single
@@ -258,8 +358,7 @@ async fn ap_mode_with_max_iterations_one_still_cycles_phases() {
             .push_script(vec![completed("act-0")])
             .push_script(vec![completed("no")]),
     );
-    let (_dir, mut session) =
-        make_session(mock as Arc<dyn ChatStream>, mode_config(ApMode::Ap, 1));
+    let (_dir, mut session) = make_session(mock as Arc<dyn ChatStream>, mode_config(ApMode::Ap, 1));
 
     let reg = registry();
     let (buf, mut on_event) = collector();
@@ -280,5 +379,70 @@ async fn ap_mode_with_max_iterations_one_still_cycles_phases() {
         phases,
         vec!["plan", "act", "verify"],
         "mode=Ap must run one full phase cycle under max_iterations=1"
+    );
+}
+
+/// mode=Review with an attached store: an LLM failure during the review turn
+/// (e.g. 429 exhaustion) must still run the terminal bookkeeping before the
+/// error propagates — skill cleared in memory AND persisted
+/// (`sessions.skill` -> NULL) — or a resume after the error would resurrect
+/// the system-injected review skill that the user never asked for.
+#[tokio::test]
+async fn review_mode_error_still_clears_and_persists_skill() {
+    let home = tempfile::tempdir().unwrap();
+    seed_review_skill(home.path());
+    let _guard = lock_home(home.path());
+
+    // Initial turn completes; the review turn dies with a stream error.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![completed("initial")])
+            .push_script(vec![LlmEvent::Error("429 rate limited".into())]),
+    );
+    let (_dir, mut session) =
+        make_session(mock as Arc<dyn ChatStream>, mode_config(ApMode::Review, 10));
+
+    // Attach a store whose session row carries a stale skill body — exactly
+    // what a resume (or any skill-persisting path) would have written.
+    let store: Arc<dyn StoreTrait> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    store
+        .create_session(&SessionMeta {
+            id: "ap-mode-sess".into(),
+            agent: Some("act".into()),
+            skill: Some("STALE-SKILL-BODY".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    session.store = Some(store.clone());
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    let res = run_with_registry(&mut session, "do it".into(), vec![], &reg, &mut on_event).await;
+    assert!(res.is_err(), "the review-turn LLM error must propagate");
+
+    // In-memory clear held despite the error...
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "review skill must be cleared even when the review turn errors"
+    );
+    // ...the uniform end marker is still emitted...
+    assert!(
+        buf.lock()
+            .unwrap()
+            .iter()
+            .any(|ev| matches!(ev, SessionEvent::Done)),
+        "terminal Done event must be emitted on a review-turn error"
+    );
+    // ...and the clear is durable: the store row no longer carries a skill.
+    let stored = store
+        .get_session("ap-mode-sess")
+        .await
+        .unwrap()
+        .expect("session row exists");
+    assert!(
+        stored.skill.is_none(),
+        "the skill clear must be persisted, got {:?}",
+        stored.skill
     );
 }

@@ -124,7 +124,10 @@ async fn reserved_budget_actually_shrinks_usable_window() {
         should_compact(&s)
     }
     // reserved=200 → usable=9800 → ~5.7k < 9800 → no compact
-    assert!(!mk(200), "with small reserved, ~5.7k tokens should NOT trip");
+    assert!(
+        !mk(200),
+        "with small reserved, ~5.7k tokens should NOT trip"
+    );
     // reserved=5000 → usable=5000 → ~5.7k >= 5000 → compact
     assert!(mk(5_000), "with large reserved, ~5.7k tokens MUST trip");
 }

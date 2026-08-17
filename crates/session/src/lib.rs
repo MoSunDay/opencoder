@@ -24,8 +24,8 @@ pub use control_cmd::{
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
 pub use runner::{run, run_once, run_with_images, SessionEvent};
-pub use tools::question::QuestionHub;
 pub use subagent_steer_gate::{SteerReservation, SubagentSteerGate};
+pub use tools::question::QuestionHub;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -256,12 +256,12 @@ impl SessionState {
     /// externally before the run loop starts). Prevents `persist()` from
     /// auto-creating a duplicate row with conflicting metadata.
     /// Share an externally owned question hub (tests, alternate frontends).
-pub fn with_question_hub(mut self, hub: Arc<QuestionHub>) -> Self {
-    self.question_hub = hub;
-    self
-}
+    pub fn with_question_hub(mut self, hub: Arc<QuestionHub>) -> Self {
+        self.question_hub = hub;
+        self
+    }
 
-pub fn mark_session_created(mut self) -> Self {
+    pub fn mark_session_created(mut self) -> Self {
         self.session_created = true;
         self
     }
@@ -274,7 +274,6 @@ pub fn mark_session_created(mut self) -> Self {
         self.ts_origin = true;
         self
     }
-
 
     /// Attach a cancellation token so the run loop stops at the next turn boundary.
     pub fn with_cancel(mut self, cancel: CancellationToken) -> Self {
@@ -362,8 +361,16 @@ pub fn mark_session_created(mut self) -> Self {
             let meta = SessionMeta {
                 id: self.id.clone(),
                 title: first_user_text(self.messages.as_slice()),
-                agent: if self.ts_origin { None } else { Some(self.agent.name.clone()) },
-                model: if self.ts_origin { None } else { Some(self.config.model.clone()) },
+                agent: if self.ts_origin {
+                    None
+                } else {
+                    Some(self.agent.name.clone())
+                },
+                model: if self.ts_origin {
+                    None
+                } else {
+                    Some(self.config.model.clone())
+                },
                 workdir_hash: None,
                 created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
                 updated_at: now,

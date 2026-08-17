@@ -122,15 +122,11 @@ async fn over_budget_with_nothing_to_compact_errors_before_llm_call() {
     s.messages.clear();
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ev_collector = events.clone();
-    let outcome = run(
-        &mut s,
-        "x".repeat(2_000),
-        move |ev| {
-            if let Ok(mut g) = ev_collector.lock() {
-                g.push(ev);
-            }
-        },
-    )
+    let outcome = run(&mut s, "x".repeat(2_000), move |ev| {
+        if let Ok(mut g) = ev_collector.lock() {
+            g.push(ev);
+        }
+    })
     .await;
 
     let collected = events.lock().unwrap().clone();
@@ -143,12 +139,8 @@ async fn over_budget_with_nothing_to_compact_errors_before_llm_call() {
 
     // 2) A `SessionEvent::Error` must be emitted naming the over-budget /
     // cannot-compact condition (NOT a downstream "mock exhausted" / 400).
-    let err_msg = first_error(&collected).unwrap_or_else(|| {
-        panic!(
-            "expected a SessionEvent::Error event, got: {:?}",
-            collected
-        )
-    });
+    let err_msg = first_error(&collected)
+        .unwrap_or_else(|| panic!("expected a SessionEvent::Error event, got: {:?}", collected));
     assert!(
         err_msg.contains("context window"),
         "error must explain the over-budget/no-compact condition, got: {err_msg}"

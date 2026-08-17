@@ -112,8 +112,7 @@ async fn handle_cli_outcome_save_toggle_delete_write_cli_domain_file() {
     let toggled = read_json(&global_cli);
     assert_eq!(toggled["mycli"]["enabled"], true);
     assert_eq!(
-        toggled["mycli"]["content"],
-        "",
+        toggled["mycli"]["content"], "",
         "a toggle patch must not drop sibling fields"
     );
 
@@ -138,7 +137,10 @@ async fn handle_cli_outcome_save_toggle_delete_write_cli_domain_file() {
         &workdir,
     )
     .await;
-    assert!(cli_menu.is_none(), "the list closes after a confirmed delete");
+    assert!(
+        cli_menu.is_none(),
+        "the list closes after a confirmed delete"
+    );
 
     let deleted = read_json(&global_cli);
     assert!(

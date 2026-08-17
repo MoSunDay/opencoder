@@ -113,9 +113,7 @@ async fn health_ok_carries_version_and_commit() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
-        .await
-        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["ok"], true);
     let version = body["version"].as_str().unwrap();
@@ -306,7 +304,9 @@ async fn switch_agent_refused_while_draining() {
     seed(&state, &sid, None, "act", "m").await;
     // Install a live handle with the draining flag set (mid-turn).
     let handle = opencoder_web::handle::SessionHandle::new();
-    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    handle
+        .draining
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     state.handles.lock().await.insert(sid.clone(), handle);
 
     let resp = app
@@ -321,9 +321,7 @@ async fn switch_agent_refused_while_draining() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
-    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
-        .await
-        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], false);
     assert!(
@@ -352,7 +350,9 @@ async fn interrupt_cancels_running_drain_token() {
     let sid = "int-sess";
     let cancel = tokio_util::sync::CancellationToken::new();
     let handle = opencoder_web::handle::SessionHandle::new();
-    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    handle
+        .draining
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     *handle.cancel.lock().await = cancel.clone();
     state.handles.lock().await.insert(sid.into(), handle);
 
@@ -455,7 +455,9 @@ async fn switch_model_refused_while_draining() {
     let sid = Uuid::new_v4().to_string();
     seed(&state, &sid, None, "act", "old-model").await;
     let handle = opencoder_web::handle::SessionHandle::new();
-    handle.draining.store(true, std::sync::atomic::Ordering::SeqCst);
+    handle
+        .draining
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     state.handles.lock().await.insert(sid.clone(), handle);
 
     let resp = app
@@ -470,9 +472,7 @@ async fn switch_model_refused_while_draining() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
-    let bytes = axum::body::to_bytes(resp.into_body(), 4096)
-        .await
-        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], false);
     assert!(

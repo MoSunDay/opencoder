@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use opencoder_core::{message::now_ms, resolve_agent, Config, Role};
+use opencoder_core::{message::now_ms, resolve_agent, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_session::SessionEvent;
 use opencoder_store::{SessionMeta, Store, TASK_TYPE_TODO};
@@ -65,6 +65,10 @@ pub async fn execute(
         .mark_session_created()
     };
     session.cancel = Some(cancel);
+    // Snapshot the transcript size before this run: on Resume the session
+    // carries the previous attempt's messages, and only assistant messages
+    // produced by THIS run are valid candidates.
+    let watermark = session.messages.len();
     let prompt = focused_prompt(workflow, state, todo, context_mode)?;
     let event_seq = store.last_event_seq(&session.id).await?;
     opencoder_session::run(&mut session, prompt, |_| {}).await?;
@@ -81,17 +85,26 @@ pub async fn execute(
                 .with_context(|| format!("decode persisted TODO event {kind}"))
         })
         .collect::<Result<Vec<_>>>()?;
-    let raw = session
-        .messages
-        .iter()
-        .rev()
-        .find(|message| message.role == Role::Assistant)
-        .map(|message| message.text())
+    let raw = latest_new_assistant(&session.messages, watermark)
         .context("TODO agent returned no final candidate")?;
     let candidate = parse_candidate(&raw)
         .with_context(|| format!("TODO {} returned invalid candidate JSON: {raw}", todo.id))?;
     let gate = evaluate_gate(todo, &events);
     Ok(TodoExecution { candidate, gate })
+}
+
+/// Latest assistant text among messages appended after `watermark` (the
+/// message-count snapshot taken before the run). Resume-mode sessions keep
+/// the previous attempt's assistant transcript, so the watermark prevents a
+/// stale candidate from being recycled when the current run produced no new
+/// assistant message.
+fn latest_new_assistant(messages: &[Message], watermark: usize) -> Option<String> {
+    messages
+        .iter()
+        .skip(watermark)
+        .rev()
+        .find(|message| message.role == Role::Assistant)
+        .map(|message| message.text())
 }
 
 fn parse_candidate(raw: &str) -> Result<Candidate> {
@@ -287,6 +300,56 @@ mod tests {
             },
             metadata: serde_json::Value::Null,
         }
+    }
+
+    fn assistant_text(id: &str, text: &str) -> Message {
+        let mut message = Message::assistant(id);
+        message.blocks = vec![opencoder_core::ContentBlock::text(text)];
+        message
+    }
+
+    #[test]
+    fn latest_new_assistant_ignores_pre_watermark_history() {
+        let messages = vec![
+            Message::user("u1", "previous attempt"),
+            assistant_text("a1", BLOCKED_CANDIDATE),
+        ];
+
+        // Watermark at the transcript tail: nothing new was produced, so the
+        // previous attempt's assistant message must NOT be recycled.
+        assert_eq!(latest_new_assistant(&messages, messages.len()), None);
+    }
+
+    #[test]
+    fn latest_new_assistant_prefers_post_watermark_message() {
+        let stale = assistant_text("a1", BLOCKED_CANDIDATE);
+        let fresh = assistant_text("a2", r#"{"status":"candidate"}"#);
+        let mut messages = vec![Message::user("u1", "previous attempt"), stale.clone()];
+        let watermark = messages.len();
+        messages.push(Message::user("u2", "this run"));
+        messages.push(fresh.clone());
+
+        assert_eq!(
+            latest_new_assistant(&messages, watermark),
+            Some(r#"{"status":"candidate"}"#.to_string())
+        );
+        // Degenerate watermark keeps the historical "latest assistant" rule.
+        assert_eq!(
+            latest_new_assistant(&messages, 0),
+            Some(r#"{"status":"candidate"}"#.to_string())
+        );
+        assert_eq!(stale.role, Role::Assistant);
+        assert_eq!(fresh.role, Role::Assistant);
+    }
+
+    #[test]
+    fn latest_new_assistant_skips_new_user_only_tail() {
+        let messages = vec![
+            assistant_text("a1", BLOCKED_CANDIDATE),
+            Message::user("u2", "this run added no assistant message"),
+        ];
+
+        assert_eq!(latest_new_assistant(&messages, 1), None);
     }
 
     fn tool_start() -> SessionEvent {

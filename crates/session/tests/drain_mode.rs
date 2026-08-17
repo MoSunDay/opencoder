@@ -350,11 +350,7 @@ async fn drain_mode_pending_steer_with_fired_turn_cancel_promotes_it() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input(
-            "dr-steer-tc",
-            Delivery::Steer,
-            "steered prompt",
-        ))
+        .admit_input(&mk_input("dr-steer-tc", Delivery::Steer, "steered prompt"))
         .await
         .unwrap();
 
@@ -412,11 +408,7 @@ async fn drain_mode_pending_queue_with_fired_turn_cancel_consumes_it() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input(
-            "dr-queue-tc",
-            Delivery::Queue,
-            "queued prompt",
-        ))
+        .admit_input(&mk_input("dr-queue-tc", Delivery::Queue, "queued prompt"))
         .await
         .unwrap();
 

@@ -26,7 +26,10 @@ async fn summary_images_round_trip() {
 
     // A freshly created session has no persisted summary images -> empty vec.
     let m0 = store.get_session("s1").await.unwrap().unwrap();
-    assert!(m0.summary_images.is_empty(), "fresh session has no summary images");
+    assert!(
+        m0.summary_images.is_empty(),
+        "fresh session has no summary images"
+    );
 
     // Persist a set of image URLs.
     store
@@ -95,5 +98,8 @@ async fn summary_images_null_reads_as_empty() {
         .unwrap();
     let m = store.get_session("s1").await.unwrap().unwrap();
     assert_eq!(m.summary, Some("text".into()));
-    assert!(m.summary_images.is_empty(), "NULL column reads back as empty vec");
+    assert!(
+        m.summary_images.is_empty(),
+        "NULL column reads back as empty vec"
+    );
 }

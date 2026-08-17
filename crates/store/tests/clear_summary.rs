@@ -45,7 +45,10 @@ async fn clear_summary_nulls_all_compaction_fields() {
     let before = store.get_session("s1").await.unwrap().unwrap();
     assert_eq!(before.summary_seq, Some(10));
     assert_eq!(before.summary.as_deref(), Some("compacted history"));
-    assert_eq!(before.summary_images, vec!["img1.png".to_string(), "img2.png".to_string()]);
+    assert_eq!(
+        before.summary_images,
+        vec!["img1.png".to_string(), "img2.png".to_string()]
+    );
 
     // Clear them via the dedicated flag (None still means "don't touch").
     let patch = SessionPatch {
@@ -57,7 +60,10 @@ async fn clear_summary_nulls_all_compaction_fields() {
     let after = store.get_session("s1").await.unwrap().unwrap();
     assert_eq!(after.summary_seq, None, "summary_seq must be cleared");
     assert_eq!(after.summary, None, "summary text must be cleared");
-    assert!(after.summary_images.is_empty(), "summary_images must be cleared");
+    assert!(
+        after.summary_images.is_empty(),
+        "summary_images must be cleared"
+    );
     // An unrelated field is untouched.
     assert_eq!(after.title.as_deref(), Some("s1"));
 }
@@ -83,12 +89,25 @@ async fn clear_summary_coexists_with_handoff_update() {
 
     let after = store.get_session("s2").await.unwrap().unwrap();
     // Handoff got the new value.
-    assert_eq!(after.handoff_seq, Some(28), "handoff_seq takes the new value");
+    assert_eq!(
+        after.handoff_seq,
+        Some(28),
+        "handoff_seq takes the new value"
+    );
     assert_eq!(after.handoff_plan.as_deref(), Some("## Plan\n1. execute"));
     // Compaction metadata is gone despite also being present before the update.
-    assert_eq!(after.summary_seq, None, "stale summary_seq cleared in the same patch");
-    assert_eq!(after.summary, None, "stale summary cleared in the same patch");
-    assert!(after.summary_images.is_empty(), "stale summary_images cleared in the same patch");
+    assert_eq!(
+        after.summary_seq, None,
+        "stale summary_seq cleared in the same patch"
+    );
+    assert_eq!(
+        after.summary, None,
+        "stale summary cleared in the same patch"
+    );
+    assert!(
+        after.summary_images.is_empty(),
+        "stale summary_images cleared in the same patch"
+    );
 }
 
 /// Fix 3: `create()` now binds `summary_images_json`. A session created with a

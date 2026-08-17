@@ -249,8 +249,11 @@ pub(super) async fn run_app(
                     task_picker.as_ref(),
                     command_menu.as_ref(),
                     model_menu.as_ref(),
-                    mcp_menu.as_ref(), envs_menu.as_ref(),
-                    cli_menu.as_ref(), skill_toggle_menu.as_ref(), ap_menu.as_ref(),
+                    mcp_menu.as_ref(),
+                    envs_menu.as_ref(),
+                    cli_menu.as_ref(),
+                    skill_toggle_menu.as_ref(),
+                    ap_menu.as_ref(),
                     cache_salt_menu.as_ref(),
                     keymap_menu.as_ref(),
                     question_menu.as_ref(),
@@ -290,11 +293,11 @@ pub(super) async fn run_app(
                 dirty = true;
                 match ev {
                     Event::Key(k) => {
-                        if consume_modifier_or_release(&k, &mut shift_held) {
+                        if consume_modifier_or_release(&k, &mut shift_held, copy_mode) {
                             dirty = true;
                             continue;
                         }
-                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
+                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap, plan_edit.is_some() || notepad.is_some()) { dirty = true; render_pending = true; continue; }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -393,8 +396,14 @@ pub(super) async fn run_app(
                             let _ = app_loop::handle_ap_outcome(&mut ap_menu, k, &mut config, &cmd_tx, &mut chat, &workdir).await; continue; }
                         // Question dialog: answers resolve on the hub, mid-turn.
                         if question_menu.is_some() {
+                            // Wrap width mirrors the popup renderer so Up/Down
+                            // cursor movement tracks the drawn wrapped rows.
+                            let q_width = terminal
+                                .size()
+                                .map(|r| crate::question_menu::input_wrap_width(r.width))
+                                .unwrap_or(55);
                             crate::question_menu::route_question_key(
-                                &mut question_menu, k, &question_hub,
+                                &mut question_menu, k, &question_hub, q_width,
                             );
                             dirty = true;
                             continue;
@@ -532,7 +541,7 @@ pub(super) async fn run_app(
                                             let trigger = skill_trigger(skill_name);
                                             let disp = skill_token_display(skill_name);
                                             let input = mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(disp.clone()), &snapshot_image_uris(&pending_images));
-                                            queue_admitter::submit(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, input, disp);
+                                            queue_admitter::admit_running(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut chat, input, disp);
                                         }
                                     }
                                 } else if running {
@@ -540,7 +549,10 @@ pub(super) async fn run_app(
                                     // actor — no db_lock wait on this loop.
                                     let disp = queued_item_display(&text, &clean);
                                     let input = mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(disp.clone()), &snapshot_image_uris(&pending_images));
-                                    queue_admitter::submit(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, input, disp);
+                                    queue_admitter::admit_running(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut chat, input, disp);
+                                    // History regardless of admit outcome: a failed submit
+                                    // flashes "recover with ↑" — that must be true.
+                                    push_history(&mut history, &mut hist_idx, &text);
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
@@ -775,9 +787,9 @@ pub(super) async fn run_app(
     Ok(session_id)
 }
 pub(crate) use crate::app_helpers::{
-    apply_force_redraw, handle_mouse, initial_chat_view,
-    mk_input_with_images, on_resize_event, poll_idle_resize, pre_key_intercept, push_history,
-    push_user, snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    apply_force_redraw, handle_mouse, initial_chat_view, mk_input_with_images, on_resize_event,
+    poll_idle_resize, pre_key_intercept, push_history, push_user, snapshot_image_uris, start_turn,
+    sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::{queued_item_display, skill_token_display, skill_trigger};
 #[cfg(test)]

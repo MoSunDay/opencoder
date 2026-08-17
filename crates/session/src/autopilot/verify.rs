@@ -123,8 +123,7 @@ fn build_snapshot(session: &SessionState, state: &ApState) -> Vec<Message> {
 /// or blocks); the iteration cap is a belt-and-braces bound, not an expected
 /// trip count.
 fn repair_window_pairing(kept: Vec<Message>) -> Vec<Message> {
-    let footprint =
-        |ms: &[Message]| ms.len() + ms.iter().map(|m| m.blocks.len()).sum::<usize>();
+    let footprint = |ms: &[Message]| ms.len() + ms.iter().map(|m| m.blocks.len()).sum::<usize>();
     let mut msgs = kept;
     for _ in 0..=footprint(&msgs) {
         let before = footprint(&msgs);
@@ -377,7 +376,11 @@ mod tests {
         };
         let session = session_with(
             Some(2048), // budget 48: [m1(5), m2(~15)] kept, pad(~104) outside
-            vec![Message::user("m0", "x".repeat(400)), Message::user("m1", "hi"), tail],
+            vec![
+                Message::user("m0", "x".repeat(400)),
+                Message::user("m1", "hi"),
+                tail,
+            ],
         );
         let snapshot = build_snapshot(&session, &ApState::new("goal".into()));
         assert!(pairs_are_intact(&snapshot));

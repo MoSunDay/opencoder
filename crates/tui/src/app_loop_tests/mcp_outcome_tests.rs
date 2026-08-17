@@ -292,7 +292,10 @@ async fn handle_mcp_outcome_save_toggle_delete_write_mcp_domain_file() {
         &workdir,
     )
     .await;
-    assert!(mcp_menu.is_none(), "the list closes after a confirmed delete");
+    assert!(
+        mcp_menu.is_none(),
+        "the list closes after a confirmed delete"
+    );
 
     let deleted = read_json(&global_mcp);
     assert!(

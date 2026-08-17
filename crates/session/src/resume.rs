@@ -562,6 +562,11 @@ async fn replay_child(
     )
     .await?;
 
+    // Same force-off as `run_subagent`: a replayed child session runs a
+    // scoped task, never autopilot passes — even when the resumed config
+    // carries `autopilot.mode = "ap"|"review"` for the parent.
+    child.config.autopilot.mode = opencoder_core::ApMode::Off;
+
     // resume() leaves `cancel` as `None`; without a token the run loop's
     // interrupt check is skipped entirely, so a parent cancel or the replay
     // timeout could never break the child out of its loop. Install one.

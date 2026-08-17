@@ -80,7 +80,10 @@ fn config() -> Config {
 }
 
 /// Acquire (or create) the handle for `sid` from the shared map.
-async fn handle_for(state: &opencoder_web::AppState, sid: &str) -> Arc<opencoder_web::handle::SessionHandle> {
+async fn handle_for(
+    state: &opencoder_web::AppState,
+    sid: &str,
+) -> Arc<opencoder_web::handle::SessionHandle> {
     let mut map = state.handles.lock().await;
     map.entry(sid.to_string())
         .or_insert_with(opencoder_web::handle::SessionHandle::new)
@@ -291,7 +294,10 @@ async fn drain_completion_restores_cmd_rx_before_clearing_draining() {
     // Once idle, cmd_rx must be back in the handle for the next drain.
     {
         let guard = handle.cmd_rx.lock().unwrap();
-        assert!(guard.is_some(), "cmd_rx must be restored after drain goes idle");
+        assert!(
+            guard.is_some(),
+            "cmd_rx must be restored after drain goes idle"
+        );
     }
 
     // A second drain runs cleanly end-to-end.
@@ -318,5 +324,8 @@ async fn drain_completion_restores_cmd_rx_before_clearing_draining() {
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    assert!(!handle2.draining.load(Ordering::SeqCst), "second drain must finish");
+    assert!(
+        !handle2.draining.load(Ordering::SeqCst),
+        "second drain must finish"
+    );
 }

@@ -1020,7 +1020,10 @@ async fn clear_context_compound_runs_rest_as_prompt() {
 
     // Pre-populate some messages so there is history to clear.
     let msgs = vec![Message::user("u1", "old question")];
-    store.append_messages("clear-compound", &msgs).await.unwrap();
+    store
+        .append_messages("clear-compound", &msgs)
+        .await
+        .unwrap();
 
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("fresh reply")]))
         as Arc<dyn ChatStream>;
@@ -1047,7 +1050,10 @@ async fn clear_context_compound_runs_rest_as_prompt() {
         .messages
         .iter()
         .any(|m| m.role == Role::User && m.text().contains("review") && !m.synthetic);
-    assert!(has_review, "trailing arg 'review' recorded as a real user prompt");
+    assert!(
+        has_review,
+        "trailing arg 'review' recorded as a real user prompt"
+    );
     // The raw command must not leak as user text.
     let user_texts: Vec<String> = session
         .messages

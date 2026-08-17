@@ -73,12 +73,9 @@ pub fn build_tools(
             Arc::new(McpTool {
                 full_name,
                 tool_name,
-                description: info
-                    .description
-                    .clone()
-                    .unwrap_or_else(|| {
-                        format!("MCP tool `{}` from server `{}`", info.name, server_name)
-                    }),
+                description: info.description.clone().unwrap_or_else(|| {
+                    format!("MCP tool `{}` from server `{}`", info.name, server_name)
+                }),
                 parameters: info.input_schema,
                 client: Arc::clone(&client),
             }) as ToolArc
@@ -98,7 +95,7 @@ pub fn is_mcp_tool(name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::mcp::transport::{McpTransport, MockTransport};
-    
+
     fn mock_client() -> (Arc<McpClient>, MockTransport) {
         let (a, b) = MockTransport::pair();
         (McpClient::new(Arc::new(a)), b)
@@ -190,10 +187,7 @@ mod tests {
             max_output: 4096,
             proxy: None,
         };
-        let out = tools[0]
-            .execute(serde_json::json!({}), &ctx)
-            .await
-            .unwrap();
+        let out = tools[0].execute(serde_json::json!({}), &ctx).await.unwrap();
         assert!(out.is_error);
         assert_eq!(out.content, "division by zero");
     }

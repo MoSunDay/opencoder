@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
+use opencoder_store::Store;
 use tokio::task::JoinSet;
 
-use crate::{execution, parent, runner::Runtime, transitions, types::*};
+use crate::{execution, parent, persistence, runner::Runtime, transitions, types::*};
 
 pub async fn execute(
     runtime: &Runtime,
@@ -58,8 +61,25 @@ async fn apply_result(
     let execution = match result {
         Ok(execution) => execution,
         Err(error) => {
-            let interrupted = runtime.cancel.is_cancelled();
             let reason = format!("{error:#}");
+            // An external interrupt (`runner::interrupt` from another process)
+            // persists Suspended directly to the store. The local cancel token
+            // is only flipped by `poll_interrupt` on its 250ms cadence, so a
+            // token-only check has a window where the external interrupt is
+            // already durable but still looks like a plain execution failure —
+            // which would mark the todo Failed once attempts are exhausted
+            // and clobber the externally written Suspended state. Re-check the
+            // store before taking the local failure path.
+            if externally_suspended(&runtime.store, state).await {
+                tracing::info!(
+                    workflow_id = %state.workflow_id,
+                    todo_id = todo_id,
+                    reason = %reason,
+                    "todo execution error superseded by externally suspended workflow; keeping persisted state"
+                );
+                return Ok(());
+            }
+            let interrupted = runtime.cancel.is_cancelled();
             *state = transitions::execution_failed(
                 spec,
                 state.clone(),
@@ -93,12 +113,7 @@ async fn apply_result(
             serde_json::json!({"todo_id":todo_id,"gate":execution.gate}),
         )
         .await?;
-    if state
-        .todos
-        .get(todo_id)
-        .map(|todo| todo.status)
-        != Some(TodoStatus::CandidateReady)
-    {
+    if state.todos.get(todo_id).map(|todo| todo.status) != Some(TodoStatus::CandidateReady) {
         return Ok(());
     }
     *state = transitions::accepting(state.clone(), todo_id)?;
@@ -119,6 +134,32 @@ async fn apply_result(
     )
     .await?;
     apply_acceptance(runtime, spec, state, todo_id, execution.gate, decision).await
+}
+
+/// True when an external writer (e.g. `runner::interrupt` from another
+/// process) already persisted a Suspended verdict for this workflow. While a
+/// batch is applying results the local in-memory state can lag behind such a
+/// write (the local token is only flipped by `poll_interrupt`'s 250ms poll),
+/// so execution errors must not be mapped onto local transitions that would
+/// overwrite it.
+///
+/// A bare generation bump without Suspended is deliberately NOT treated as an
+/// interrupt: that is the external-change conflict case, which must keep the
+/// local failure path so the runtime still observes the conflict and persists
+/// a suspension instead of silently continuing.
+async fn externally_suspended(store: &Arc<dyn Store>, state: &WorkflowState) -> bool {
+    match persistence::load(store, &state.workflow_id).await {
+        Ok(Some((_, latest))) => latest.status == WorkflowStatus::Suspended,
+        Ok(None) => false,
+        Err(error) => {
+            tracing::warn!(
+                workflow_id = %state.workflow_id,
+                error = %error,
+                "could not re-check store for external workflow suspension; treating as local"
+            );
+            false
+        }
+    }
 }
 
 fn assignments(

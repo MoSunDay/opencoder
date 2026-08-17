@@ -694,3 +694,81 @@ async fn replay_cancelled_tasks_abandons_when_new_input_submitted() {
         "no dangling tool_use after abandon: {dangling:?}"
     );
 }
+
+/// A replayed child must never enter autopilot, even when the resumed
+/// config carries `autopilot.mode = "ap"` for the parent: the child's
+/// `run_with_registry` runs a scoped task only. Without the force-off in
+/// `replay_child`, the child's post-task `drive` would consume the single
+/// scripted turn's follow-up scripts (mock exhausted -> replay error ->
+/// error result backfilled) instead of completing cleanly.
+#[tokio::test]
+async fn replayed_child_never_enters_autopilot() {
+    let store = mem_store().await;
+    store
+        .create_session(&session_meta("parent", "act"))
+        .await
+        .unwrap();
+    store
+        .create_session(&session_meta("child-ap", "explore"))
+        .await
+        .unwrap();
+    store
+        .append_message("parent", &Message::user("u1", "please explore"))
+        .await
+        .unwrap();
+    store
+        .append_message("parent", &parent_task_turn(&["task-ap"]))
+        .await
+        .unwrap();
+    store
+        .append_message("child-ap", &Message::user("cu1", "explore the codebase"))
+        .await
+        .unwrap();
+    store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-ap".into(),
+            parent_session_id: "parent".into(),
+            child_session_id: "child-ap".into(),
+            parent_message_id: Some("a1".into()),
+            agent: "explore".into(),
+            prompt: "explore the codebase".into(),
+            result: None,
+            status: SubagentStatus::Running,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        })
+        .await
+        .unwrap();
+
+    // Autopilot ON via the resumed config; exactly ONE script for the
+    // child's continuation turn — a child that entered drive after it would
+    // exhaust the mock and fail the replay.
+    let mut ap_cfg = config("m");
+    ap_cfg.autopilot = opencoder_core::AutoPilotConfig {
+        mode: opencoder_core::ApMode::Ap,
+        ..Default::default()
+    };
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_event("child done")]));
+    let _session = resume_and_replay(
+        store.clone(),
+        "parent",
+        ap_cfg,
+        mock.clone() as Arc<dyn ChatStream>,
+        PathBuf::from("/tmp"),
+        None,
+    )
+    .await
+    .expect("replay completes cleanly; the child never drives");
+
+    // The task completed with the child's real output (not an error backfill).
+    let tasks = store.list_subagent_tasks("parent").await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        matches!(tasks[0].status, SubagentStatus::Completed),
+        "task must complete, got {:?}",
+        tasks[0].status
+    );
+    assert!(tasks[0].ok == Some(true));
+    assert_eq!(mock.call_count(), 1, "exactly the child's one turn ran");
+}

@@ -51,12 +51,17 @@ impl PreparedHome {
         let guard = HOME_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join(".opencoder").join("skills");
-        for (name, description) in [("alpha", "Alpha pack summary"), ("beta", "Beta pack summary")] {
+        for (name, description) in [
+            ("alpha", "Alpha pack summary"),
+            ("beta", "Beta pack summary"),
+        ] {
             let pack = skills.join(name);
             std::fs::create_dir_all(&pack).unwrap();
             std::fs::write(
                 pack.join("SKILL.md"),
-                format!("---\nname: {name}\ndescription: {description}\n---\n{name}-BODY-CONTENT\n"),
+                format!(
+                    "---\nname: {name}\ndescription: {description}\n---\n{name}-BODY-CONTENT\n"
+                ),
             )
             .unwrap();
         }
@@ -160,9 +165,7 @@ fn any_user_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
 }
 
 fn any_message_contains(req: &opencoder_llm::ChatRequest, needle: &str) -> bool {
-    req.messages
-        .iter()
-        .any(|m| m.to_string().contains(needle))
+    req.messages.iter().any(|m| m.to_string().contains(needle))
 }
 
 /// 1. Prefix-cache stability: flipping the skills-catalog config AND the
@@ -178,12 +181,11 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
             .push_script(vec![done_turn("two")])
             .push_script(vec![done_turn("three")]),
     );
-    let (mut s, _workdir) = session_on("prefix-cache", "act", config_with_skills(&[]), mock.clone());
+    let (mut s, _workdir) =
+        session_on("prefix-cache", "act", config_with_skills(&[]), mock.clone());
 
     // Turn 1: no enabled catalog, no active skill → no reminder anywhere.
-    run(&mut s, "first question".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "first question".into(), |_| {}).await.unwrap();
     let requests = mock.requests();
     assert_eq!(requests.len(), 1);
     assert!(!any_message_contains(&requests[0], "[skills]"));
@@ -198,9 +200,7 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
         "> Source: {}\n\nalpha-BODY-CONTENT",
         home.skill_file("alpha").display()
     )));
-    run(&mut s, "second question".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "second question".into(), |_| {}).await.unwrap();
 
     let requests = mock.requests();
     assert_eq!(requests.len(), 2);
@@ -223,9 +223,7 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
     // Toggle everything back OFF: three-way byte stability.
     s.config.skills.clear();
     s.set_skill(None);
-    run(&mut s, "third question".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "third question".into(), |_| {}).await.unwrap();
     let requests = mock.requests();
     assert_eq!(requests.len(), 3);
     assert_eq!(system_content(first), system_content(&requests[2]));
@@ -242,12 +240,20 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
 async fn skills_catalog_reminder_is_last_payload_message_and_never_persisted() {
     let home = PreparedHome::new();
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
-    let (mut s, _workdir) =
-        session_on("catalog", "act", config_with_skills(&["alpha"]), mock.clone());
+    let (mut s, _workdir) = session_on(
+        "catalog",
+        "act",
+        config_with_skills(&["alpha"]),
+        mock.clone(),
+    );
 
-    run(&mut s, "please inventory the available skills".into(), |_| {})
-        .await
-        .unwrap();
+    run(
+        &mut s,
+        "please inventory the available skills".into(),
+        |_| {},
+    )
+    .await
+    .unwrap();
 
     let requests = mock.requests();
     assert_eq!(requests.len(), 1);
@@ -364,9 +370,7 @@ async fn subagent_and_workflow_payloads_carry_no_skill_context() {
             home.skill_file("alpha").display()
         )));
 
-        run(&mut s, "scoped task".into(), |_| {})
-            .await
-            .unwrap();
+        run(&mut s, "scoped task".into(), |_| {}).await.unwrap();
 
         let req = &mock.requests()[0];
         assert!(

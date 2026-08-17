@@ -251,3 +251,64 @@ fn suspended_active_todo_becomes_recoverable_and_runnable() {
         vec!["step-1"]
     );
 }
+
+/// Bug #16c: a persisted Running status means another runner may be driving
+/// the workflow (or a previous runner crashed mid-flight). resume must
+/// refuse with actionable guidance instead of double-driving; interrupt is
+/// the takeover path and unlocks the resume.
+#[tokio::test]
+async fn resume_rejects_running_workflow_until_interrupted() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let workflow = spec();
+    let mut state = opencoder_todos::domain::initial_state(
+        &workflow,
+        "run-takeover".into(),
+        "parent-takeover".into(),
+    );
+    state.status = WorkflowStatus::Running;
+    opencoder_todos::parent::create_session(&store, &state, &Config::default())
+        .await
+        .unwrap();
+    opencoder_todos::persistence::create(&store, &workflow, &state)
+        .await
+        .unwrap();
+    let mock = Arc::new(
+        MockChatClient::new().push_script(done(r#"{"operation":"suspend","reason":"park"}"#)),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let temp = tempfile::tempdir().unwrap();
+    let runtime = Runtime {
+        store: store.clone(),
+        client,
+        config: Config::default(),
+        workdir: temp.path().to_path_buf(),
+        debug_root: None,
+        cancel: CancellationToken::new(),
+    };
+
+    let error = runtime.resume("run-takeover").await.unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("still running"), "{message}");
+    assert!(
+        message.contains("opencoder todos interrupt run-takeover"),
+        "the refusal must point at the takeover command: {message}"
+    );
+    // The refused resume leaves the persisted state untouched.
+    assert_eq!(
+        opencoder_todos::persistence::load(&store, "run-takeover")
+            .await
+            .unwrap()
+            .unwrap()
+            .1
+            .status,
+        WorkflowStatus::Running
+    );
+
+    // Interrupt parks the workflow; resume then drives it to a decision.
+    opencoder_todos::interrupt(&store, "run-takeover", "take over after crash")
+        .await
+        .unwrap();
+    let resumed = runtime.resume("run-takeover").await.unwrap();
+    assert_eq!(resumed.status, WorkflowStatus::Suspended);
+    assert_eq!(resumed.terminal_reason.as_deref(), Some("park"));
+}

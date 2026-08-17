@@ -21,14 +21,22 @@ pub fn reconcile_interrupted(mut state: WorkflowState) -> WorkflowState {
     state
 }
 
-pub fn dispatch(
+/// Pure validation half of [`dispatch`]: every rule `dispatch` enforces
+/// before mutating state, without side effects. Extracted so the
+/// parent-decision loop can dry-run a dispatch request (and re-ask the
+/// model with a correction) before anything durable happens.
+pub fn validate_dispatch(
     spec: &WorkflowSpec,
-    mut state: WorkflowState,
-    requests: &[(DispatchTodo, String)],
-) -> Result<WorkflowState> {
-    let runnable = domain::runnable(spec, &state)?;
+    state: &WorkflowState,
+    requests: &[DispatchTodo],
+    assignments: &[(DispatchTodo, String)],
+) -> Result<()> {
+    if requests.len() != assignments.len() {
+        bail!("dispatch requests and assignments disagree");
+    }
+    let runnable = domain::runnable(spec, state)?;
     let mut seen = std::collections::HashSet::new();
-    for (request, session_id) in requests {
+    for (request, _session_id) in assignments {
         if !seen.insert(request.todo_id.as_str()) {
             bail!("TODO {} was dispatched more than once", request.todo_id);
         }
@@ -40,10 +48,7 @@ pub fn dispatch(
             .iter()
             .find(|todo| todo.id == request.todo_id)
             .expect("validated spec");
-        let todo = state
-            .todos
-            .get_mut(&request.todo_id)
-            .expect("validated state");
+        let todo = state.todos.get(&request.todo_id).expect("validated state");
         if todo.attempt >= spec_todo.max_attempts {
             bail!("TODO {} exhausted max_attempts", request.todo_id);
         }
@@ -67,6 +72,25 @@ pub fn dispatch(
                 );
             }
         }
+    }
+    Ok(())
+}
+
+pub fn dispatch(
+    spec: &WorkflowSpec,
+    mut state: WorkflowState,
+    requests: &[(DispatchTodo, String)],
+) -> Result<WorkflowState> {
+    let requested: Vec<DispatchTodo> = requests
+        .iter()
+        .map(|(request, _)| request.clone())
+        .collect();
+    validate_dispatch(spec, &state, &requested, requests)?;
+    for (request, session_id) in requests {
+        let todo = state
+            .todos
+            .get_mut(&request.todo_id)
+            .expect("validated state");
         todo.attempt += 1;
         if request.context_mode != ContextMode::Resume {
             todo.active_session_id = Some(session_id.clone());

@@ -447,3 +447,310 @@ async fn local_cancel_after_external_write_adopts_external_state() {
     );
     assert_eq!(interrupts[0].payload["reason"], "external stop");
 }
+
+// ---------------------------------------------------------------------------
+// Bug #16a: a successful TODO result that lands after the todo's status has
+// moved on (external interrupt, or a sibling acceptance rewinding a
+// milestone) must be discarded instead of tripping `candidate`'s Running
+// guard, suspending the round, or clobbering the external verdict.
+// ---------------------------------------------------------------------------
+
+/// Scripted ChatStream that can hold ONE distinguished call open until
+/// released and then still complete it successfully — the piece
+/// `MockChatClient::push_hang` cannot do (its release ends the stream
+/// empty, which fails the execution). Calls whose transcript contains
+/// `park_marker` park on `notify`; every other call pops the FIFO queue and
+/// an empty queue fails the call like an exhausted mock.
+struct ParkingChatClient {
+    queue: std::sync::Mutex<std::collections::VecDeque<Vec<LlmEvent>>>,
+    parked_events: Vec<LlmEvent>,
+    park_marker: String,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl ChatStream for ParkingChatClient {
+    fn chat_stream(
+        &self,
+        req: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        let transcript = req
+            .messages
+            .iter()
+            .filter_map(|message| message["content"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        if transcript.contains(&self.park_marker) {
+            let notify = self.notify.clone();
+            let events = self.parked_events.clone();
+            tokio::spawn(async move {
+                notify.notified().await;
+                for event in events {
+                    if tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        } else {
+            let Some(events) = self.queue.lock().unwrap().pop_front() else {
+                return Err(anyhow::anyhow!(
+                    "parking client exhausted: no script queued"
+                ));
+            };
+            tokio::spawn(async move {
+                for event in events {
+                    if tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        Ok(rx)
+    }
+
+    fn backend(&self) -> &'static str {
+        "parking-mock"
+    }
+}
+
+fn candidate_script(summary: &str) -> Vec<LlmEvent> {
+    done(&format!(
+        r#"{{"status":"candidate","summary":"{summary}","result":"ok","verification":"checked","evidence_refs":[],"recovery_context":{{"summary":"{summary}","refs":[]}}}}"#
+    ))
+}
+
+/// Wait until the given TODO's child session has produced an assistant
+/// message containing `marker` — i.e. the sibling's execution has finished
+/// recording its candidate while the parked TODO is still in flight.
+async fn wait_for_session_message(
+    store: &Arc<dyn Store>,
+    workflow_id: &str,
+    todo_id: &str,
+    marker: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let session_id = store
+            .list_todo_items(workflow_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|item| item.todo_id == todo_id)
+            .and_then(|item| item.active_session_id);
+        if let Some(session_id) = session_id {
+            let transcript = store
+                .load_messages(&session_id)
+                .await
+                .unwrap()
+                .iter()
+                .map(|message| message.text())
+                .collect::<String>();
+            if transcript.contains(marker) {
+                return;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "TODO {todo_id} never produced the marker message"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Bug #16a regression (external half): the child session SUCCEEDS after an
+/// external store-level interrupt has already persisted Suspended and marked
+/// the in-flight TODO Interrupted. The successful result must be discarded —
+/// no `todo_candidate_ready` commit over the external verdict, no
+/// runtime_error suspension — and drive must adopt the external state.
+#[tokio::test]
+async fn external_interrupt_after_successful_todo_discards_result_cleanly() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let mut workflow = spec();
+    workflow.todos[0].instructions = "hold-me-then-succeed".into();
+    let client: Arc<dyn ChatStream> = Arc::new(ParkingChatClient {
+        queue: std::sync::Mutex::new(std::collections::VecDeque::from(vec![dispatch(
+            "step-1", "new",
+        )])),
+        parked_events: done(CANDIDATE),
+        park_marker: "hold-me-then-succeed".into(),
+        notify: notify.clone(),
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let run_runtime = Arc::new(runtime(&store, client, temp.path()));
+    let spawned = {
+        let rt = run_runtime.clone();
+        tokio::spawn(async move {
+            rt.run_new_with_id(workflow, "run-ok-interrupt".into())
+                .await
+        })
+    };
+
+    wait_until_running(&store, "run-ok-interrupt").await;
+    opencoder_todos::interrupt(&store, "run-ok-interrupt", "external stop")
+        .await
+        .unwrap();
+    // Release the held call: the child session finishes SUCCESSFULLY after
+    // the external verdict is already durable.
+    notify.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), spawned)
+        .await
+        .expect("run task finished after discarding the late result")
+        .unwrap();
+    let finished = outcome.expect("a discarded result must not fail the drive loop");
+    assert_eq!(finished.status, WorkflowStatus::Suspended);
+    assert_eq!(finished.terminal_reason.as_deref(), Some("external stop"));
+
+    // The externally written verdict stays intact.
+    let state = load(&store, "run-ok-interrupt").await;
+    assert_eq!(state.status, WorkflowStatus::Suspended);
+    assert_eq!(state.terminal_reason.as_deref(), Some("external stop"));
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Interrupted);
+    assert_eq!(state.todos["step-1"].attempt, 1);
+
+    let events = kinds(&store, "run-ok-interrupt").await;
+    assert!(
+        !events.iter().any(|kind| kind == "todo_candidate_ready"),
+        "the superseded result must not be committed as a candidate"
+    );
+    assert!(
+        !events.iter().any(|kind| kind == "runtime_error"),
+        "discarding the result must not suspend the round with a runtime error"
+    );
+}
+
+/// Bug #16a regression (local half): when a sibling acceptance rewinds the
+/// milestone mid-batch, the descendant still holding an in-flight execution
+/// is Invalidated; its late successful result must be discarded instead of
+/// tripping `candidate`'s Running guard and failing the whole round.
+#[tokio::test]
+async fn rewound_sibling_discards_late_successful_result() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let notify = Arc::new(tokio::sync::Notify::new());
+    let workflow = WorkflowSpec {
+        schema_version: 1,
+        id: "wf-test".into(),
+        name: "test".into(),
+        objective: "finish three items".into(),
+        constraints: Vec::new(),
+        todos: vec![
+            TodoSpec {
+                id: "a".into(),
+                title: "milestone".into(),
+                requirement_background: "required".into(),
+                instructions: "a instructions".into(),
+                depends_on: Vec::new(),
+                agent: "act".into(),
+                max_attempts: 2,
+                acceptance: AcceptanceSpec {
+                    criteria: "candidate exists".into(),
+                    required_tool_calls: Vec::new(),
+                },
+                metadata: serde_json::Value::Null,
+            },
+            TodoSpec {
+                id: "c".into(),
+                title: "sibling".into(),
+                requirement_background: "required".into(),
+                instructions: "c instructions".into(),
+                depends_on: vec!["a".into()],
+                agent: "act".into(),
+                max_attempts: 2,
+                acceptance: AcceptanceSpec {
+                    criteria: "candidate exists".into(),
+                    required_tool_calls: Vec::new(),
+                },
+                metadata: serde_json::Value::Null,
+            },
+            TodoSpec {
+                id: "b".into(),
+                title: "late descendant".into(),
+                requirement_background: "required".into(),
+                instructions: "hold-me-late-descendant".into(),
+                depends_on: vec!["a".into()],
+                agent: "act".into(),
+                max_attempts: 2,
+                acceptance: AcceptanceSpec {
+                    criteria: "candidate exists".into(),
+                    required_tool_calls: Vec::new(),
+                },
+                metadata: serde_json::Value::Null,
+            },
+        ],
+        metadata: serde_json::Value::Null,
+    };
+    let dispatch_both = done(
+        r#"{"operation":"dispatch","todos":[{"todo_id":"c","context_mode":"new"},{"todo_id":"b","context_mode":"new"}],"reason":"parallel"}"#,
+    );
+    let client: Arc<dyn ChatStream> = Arc::new(ParkingChatClient {
+        queue: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
+            dispatch("a", "new"),
+            candidate_script("a done"),
+            done(r#"{"operation":"accept","reason":"ok","mark_milestone":true}"#),
+            dispatch_both,
+            candidate_script("c done"),
+            done(
+                r#"{"operation":"rewind","milestone_todo_id":"a","reason":"ground truth drifted"}"#,
+            ),
+            done(r#"{"operation":"suspend","reason":"park after rewind"}"#),
+        ])),
+        parked_events: candidate_script("b done"),
+        park_marker: "hold-me-late-descendant".into(),
+        notify: notify.clone(),
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let run_runtime = Arc::new(runtime(&store, client, temp.path()));
+    let spawned = {
+        let rt = run_runtime.clone();
+        tokio::spawn(async move {
+            rt.run_new_with_id(workflow, "run-rewind-discard".into())
+                .await
+        })
+    };
+
+    // Let the sibling c finish its candidate first; only then release b's
+    // held call, so b's successful result lands after the rewind.
+    wait_for_session_message(&store, "run-rewind-discard", "c", "c done").await;
+    notify.notify_one();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(10), spawned)
+        .await
+        .expect("run task finished after the rewind discard")
+        .unwrap();
+    let finished = outcome.expect("a discarded result must not fail the drive loop");
+    assert_eq!(finished.status, WorkflowStatus::Suspended);
+    assert_eq!(
+        finished.terminal_reason.as_deref(),
+        Some("park after rewind")
+    );
+    assert_eq!(finished.todos["a"].status, TodoStatus::Recovering);
+    assert_eq!(finished.todos["b"].status, TodoStatus::Invalidated);
+    assert_eq!(finished.todos["c"].status, TodoStatus::Invalidated);
+
+    // Exactly two candidates entered the state machine: the milestone "a"
+    // and the sibling that got accepted; the invalidated descendant's late
+    // result never became a candidate and the round did not blow up.
+    let records = store
+        .todo_events_after("run-rewind-discard", 0)
+        .await
+        .unwrap();
+    let candidate_ids: std::collections::HashSet<&str> = records
+        .iter()
+        .filter(|event| event.kind == "todo_candidate_ready")
+        .map(|event| event.payload["todo_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(candidate_ids.len(), 2);
+    assert!(candidate_ids.contains("a"));
+    assert!(
+        candidate_ids.contains("b") ^ candidate_ids.contains("c"),
+        "exactly one of the two batched descendants may become a candidate; \
+         the invalidated one's late result must be discarded"
+    );
+    let events = kinds(&store, "run-rewind-discard").await;
+    assert!(events.contains(&"workflow_rewound".into()));
+    assert!(
+        !events.iter().any(|kind| kind == "runtime_error"),
+        "the discarded late result must not suspend the round"
+    );
+}

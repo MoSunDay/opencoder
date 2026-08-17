@@ -40,10 +40,16 @@ pub fn env_dir(name: &str) -> Option<PathBuf> {
 }
 
 /// Validate an env name: non-empty, ≤ [`MAX_NAME_LEN`] chars, `[A-Za-z0-9._-]`
-/// only, and not `.`/`..` (no path traversal into the marker/env root).
+/// only, not `.`/`..` (no path traversal into the env root), and not the
+/// marker reserved name `active` (an env dir named `envs/active/` would
+/// collide with the marker file `envs/active` — it could never activate and
+/// would break marker writes).
 pub fn validate_env_name(name: &str) -> std::result::Result<(), String> {
     if name.is_empty() {
         return Err("名称不能为空".to_string());
+    }
+    if name == ACTIVE_MARKER {
+        return Err("名称 active 与激活标记保留名冲突，请换一个名称".to_string());
     }
     if name.len() > MAX_NAME_LEN {
         return Err(format!("名称过长（>{MAX_NAME_LEN} 字符）"));
@@ -104,7 +110,10 @@ pub fn set_active_env(name: Option<&str>) -> io::Result<()> {
     }
 }
 
-/// List env names (directories under `envs/`), sorted.
+/// List env names (directories under `envs/`), sorted. The marker reserved
+/// name `active` is skipped: a leftover `envs/active/` directory (historical
+/// bug predating the validation) can never be a legal env, so it must not
+/// surface in menus or listings.
 pub fn list_envs() -> Vec<String> {
     let Some(root) = envs_home() else {
         return Vec::new();
@@ -115,6 +124,7 @@ pub fn list_envs() -> Vec<String> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| name != ACTIVE_MARKER)
         .collect();
     names.sort();
     names
@@ -261,9 +271,64 @@ mod tests {
     fn validate_env_name_accepts_and_rejects() {
         assert!(validate_env_name("work").is_ok());
         assert!(validate_env_name("MyEnv-2.b").is_ok());
-        for bad in ["", ".", "..", "a/b", "../x", "a b", "中文", &"x".repeat(49)] {
+        for bad in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "../x",
+            "a b",
+            "中文",
+            "active",
+            &"x".repeat(49),
+        ] {
             assert!(validate_env_name(bad).is_err(), "{bad:?} should be invalid");
         }
+    }
+
+    /// The marker file `envs/active` collides with an env *directory* named
+    /// `active`: the env could never activate (`read_to_string` on a dir
+    /// fails) and would break marker writes. The marker match is exact-path
+    /// (case-sensitive), so only the lowercase reserved name is rejected.
+    #[test]
+    fn validate_env_name_rejects_marker_reserved_name() {
+        assert!(validate_env_name("active").is_err());
+        // 大小写不同不与 marker 路径冲突（精确匹配小写 active），仍应放行。
+        assert!(validate_env_name("Active").is_ok());
+        assert!(validate_env_name("ACTIVE").is_ok());
+        assert!(validate_env_name("work").is_ok());
+    }
+
+    /// `create_env("active", ..)` must fail *before* creating anything, and
+    /// the other mutations (set/delete/recapture) all gate on the same
+    /// validation, so a marker-colliding directory can never appear.
+    #[test]
+    fn create_env_rejects_active_name_without_touching_fs() {
+        let (home, _g) = scoped();
+        let work = tempfile::tempdir().unwrap();
+        assert!(create_env("active", work.path(), false).is_err());
+        assert!(
+            !home.path().join(".opencoder/envs/active").exists(),
+            "rejected name must not leave a directory behind"
+        );
+        // Same validation gates set/delete/recapture -> consistent behavior.
+        assert!(set_active_env(Some("active")).is_err());
+        assert!(delete_env("active").is_err());
+        assert!(recapture_env("active", work.path()).is_err());
+    }
+
+    /// Legacy tolerance: a leftover `envs/active/` directory (created before
+    /// the validation existed) can never be a legal env, so `list_envs` must
+    /// filter it out while real envs stay listed.
+    #[test]
+    fn list_envs_filters_legacy_active_directory() {
+        let (home, _g) = scoped();
+        let root = home.path().join(".opencoder").join("envs");
+        std::fs::create_dir_all(root.join("active")).unwrap();
+        std::fs::create_dir_all(root.join("beta")).unwrap();
+        let names = list_envs();
+        assert!(!names.contains(&"active".to_string()));
+        assert_eq!(names, vec!["beta".to_string()]);
     }
 
     #[test]

@@ -104,6 +104,30 @@ async fn apply_result(
             return Ok(());
         }
     };
+    // Bug #16a: the TODO's status may have moved on while it executed — a
+    // sibling acceptance can rewind a milestone and invalidate it, and an
+    // external interrupt can have flipped the persisted workflow to
+    // Suspended. The execution result itself is not wrong, so discard it
+    // instead of failing the whole round over `candidate`'s Running guard
+    // (which would suspend the workflow or clobber the external verdict).
+    let current = state.todos.get(todo_id).map(|todo| todo.status);
+    if current != Some(TodoStatus::Running) {
+        tracing::info!(
+            workflow_id = %state.workflow_id,
+            todo_id = todo_id,
+            status = ?current,
+            "discarding execution result for TODO that is no longer running"
+        );
+        return Ok(());
+    }
+    if externally_suspended(&runtime.store, state).await {
+        tracing::info!(
+            workflow_id = %state.workflow_id,
+            todo_id = todo_id,
+            "todo execution result superseded by externally suspended workflow; keeping persisted state"
+        );
+        return Ok(());
+    }
     *state = transitions::candidate(state.clone(), todo_id, execution.candidate)?;
     runtime
         .commit(
@@ -138,10 +162,10 @@ async fn apply_result(
 
 /// True when an external writer (e.g. `runner::interrupt` from another
 /// process) already persisted a Suspended verdict for this workflow. While a
-/// batch is applying results the local in-memory state can lag behind such a
-/// write (the local token is only flipped by `poll_interrupt`'s 250ms poll),
-/// so execution errors must not be mapped onto local transitions that would
-/// overwrite it.
+/// batch is running or applying results the local in-memory state can lag
+/// behind such a write (the local token is only flipped by `poll_interrupt`'s
+/// 250ms poll), so both execution errors and successful results must not be
+/// mapped onto local transitions that would overwrite it.
 ///
 /// A bare generation bump without Suspended is deliberately NOT treated as an
 /// interrupt: that is the external-change conflict case, which must keep the
@@ -160,6 +184,23 @@ async fn externally_suspended(store: &Arc<dyn Store>, state: &WorkflowState) -> 
             false
         }
     }
+}
+
+/// Dry-run the parent's dispatch decision against the exact validation
+/// `transitions::dispatch` applies inside `execute` — no sessions are
+/// created and nothing is mutated. `runner::drive_inner` uses this to
+/// reject a malformed model decision and re-ask the parent with a
+/// correction prompt before any durable state changes.
+pub(crate) fn validate_request(
+    spec: &WorkflowSpec,
+    state: &WorkflowState,
+    requests: &[DispatchTodo],
+) -> Result<()> {
+    if requests.is_empty() {
+        anyhow::bail!("parent dispatch cannot be empty");
+    }
+    let assignments = assignments(state, requests)?;
+    transitions::validate_dispatch(spec, state, requests, &assignments)
 }
 
 fn assignments(

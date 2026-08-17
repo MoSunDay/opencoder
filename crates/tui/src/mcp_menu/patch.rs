@@ -55,6 +55,41 @@ pub fn delete_mcp_json(name: &str) -> Value {
     json!({ "mcp_servers": { name: Value::Null } })
 }
 
+/// Normalize an MCP server name the same way the session runtime does when
+/// it builds tool names (`mcp__{normalized}__{tool}`): `-` and `.` both
+/// become `_`, so `a-b` / `a.b` / `a_b` all share the `mcp__a_b__…` prefix.
+/// Mirrors `McpTool::sanitize_server_name` in
+/// `crates/session/src/mcp/tool.rs` — deliberately duplicated (a one-liner
+/// both sides, cross-referenced by comments) instead of adding a cross-crate
+/// dependency; both copies carry pinning tests.
+pub fn normalized_server_name(name: &str) -> String {
+    name.replace(['-', '.'], "_")
+}
+
+/// Would saving server `new` collide — after normalization — with a
+/// differently-named server already present in `existing`? Returns the
+/// conflicting existing name when so.
+///
+/// Exclusion rules (bug #14: a clash would silently shadow the other
+/// server's tools and bypass its `inject_to` scope at registration time):
+/// - `renamed_from` is the pre-edit key vacated by the *same* patch (the
+///   null delete marker of a rename); it gives way and never counts.
+/// - An entry whose original name equals `new` is an update-in-place, not a
+///   collision — callers pass the already-configured key set as `existing`,
+///   so the server being re-saved is in there under its own name.
+pub fn colliding_server(
+    new: &str,
+    renamed_from: Option<&str>,
+    existing: &[String],
+) -> Option<String> {
+    let normalized = normalized_server_name(new);
+    existing
+        .iter()
+        .filter(|name| Some(name.as_str()) != renamed_from && name.as_str() != new)
+        .find(|name| normalized_server_name(name) == normalized)
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +231,51 @@ mod tests {
     fn delete_emits_null_for_key_removal() {
         let v = delete_mcp_json("old");
         assert!(v["mcp_servers"]["old"].is_null());
+    }
+
+    #[test]
+    fn normalized_server_name_is_table_driven() {
+        for (raw, norm) in [
+            ("a-b", "a_b"),
+            ("a.b", "a_b"),
+            ("a_b", "a_b"),
+            ("plain", "plain"),
+            ("x-y.z_w", "x_y_z_w"),
+            ("A-B.C", "A_B_C"),
+            ("", ""),
+        ] {
+            assert_eq!(normalized_server_name(raw), norm, "raw = {raw:?}");
+        }
+    }
+
+    #[test]
+    fn colliding_server_detects_normalized_twin() {
+        // `a_b` vs existing `a-b`: same normalized prefix, distinct names.
+        assert_eq!(
+            colliding_server("a_b", None, &["a-b".to_string()]),
+            Some("a-b".to_string())
+        );
+    }
+
+    #[test]
+    fn colliding_server_ignores_vacated_rename_key() {
+        // Rename `a.b` → `a-b`: the old key is nulled by the same patch, so
+        // it gives way and the rename lands on its own normalized slot.
+        assert_eq!(
+            colliding_server("a-b", Some("a.b"), &["a-b".to_string(), "a.b".to_string()],),
+            None
+        );
+    }
+
+    #[test]
+    fn colliding_server_ignores_disjoint_names() {
+        assert_eq!(colliding_server("x", None, &["y".to_string()]), None);
+    }
+
+    #[test]
+    fn colliding_server_ignores_same_original_name() {
+        // Re-saving `a-b` while `a-b` is already configured: existing always
+        // contains the server's own key, which must not self-collide.
+        assert_eq!(colliding_server("a-b", None, &["a-b".to_string()]), None);
     }
 }

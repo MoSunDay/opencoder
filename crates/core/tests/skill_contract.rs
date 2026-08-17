@@ -249,3 +249,46 @@ fn body_with_source_emits_path_annotation_then_body() {
         "body content must follow annotation: {annotated}"
     );
 }
+
+#[test]
+fn seeded_review_skill_requires_five_question_recap() {
+    // The built-in review skill is embedded via include_str! and seeded on
+    // first run; its REVIEW block must carry the five-question recap fields
+    // (goal / done+verify / blockers / next_todos) so a dropped field in the
+    // markdown asset turns this test red.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
+    assert!(body.contains("name: review"), "frontmatter name missing");
+    assert!(
+        body.contains("description:"),
+        "frontmatter description missing"
+    );
+    for field in ["goal:", "done:", "verify:", "blockers:", "next_todos:"] {
+        assert!(body.contains(field), "review skill missing `{field}`");
+    }
+}
+
+#[test]
+fn seeded_say_and_replay_skill_requires_five_question_recap() {
+    // Same guard for the say-and-replay REPLAY block: goal / done+verify /
+    // encountered + blocked / remaining must all survive asset edits.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body =
+        std::fs::read_to_string(root.path().join("say-and-replay/SKILL.md")).unwrap();
+    assert!(
+        body.contains("name: say-and-replay"),
+        "frontmatter name missing"
+    );
+    assert!(
+        body.contains("description:"),
+        "frontmatter description missing"
+    );
+    for field in ["goal:", "verify:", "encountered:", "blocked:", "remaining:"] {
+        assert!(
+            body.contains(field),
+            "say-and-replay skill missing `{field}`"
+        );
+    }
+}

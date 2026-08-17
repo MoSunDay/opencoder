@@ -1,16 +1,23 @@
 ---
 name: review
-description: Read-only post-completion assessment that meets the repo go-live standard (rules/01-03). Re-runs the regression gates itself for fresh evidence, checks the test-count baseline didn't drop, scans the diff for green-washing (#[ignore], deleted tests, weakened asserts), verifies test quality + layering + structural coverage, reviews the full diff for scope-creep/secrets/debug output, then rules on go-live readiness. Never edits code or commits.
+description: Read-only post-completion assessment that meets the repo go-live standard (rules/01-03). Opens with a mandatory five-question recap — restates the original goal, replays each completed item with verify-method + evidence, lists encountered blockers (resolved and open), and names next TODOs. Then re-runs the regression gates itself for fresh evidence, checks the test-count baseline didn't drop, scans the diff for green-washing (#[ignore], deleted tests, weakened asserts), verifies test quality + layering + structural coverage, reviews the full diff for scope-creep/secrets/debug output, then rules on go-live readiness. Never edits code or commits.
 ---
 
 # review —— 上线前评审契约（符合 rules/01-03 go-live 标准）
 
 ## 角色
-**只读**评估契约。在「自认为做完」之后、提交/上线之前介入。回答四个问题：
-1. 是否完成了目标？通过了验证？
-2. 验证的方式和证据是什么？（没有证据 = 没有通过）
-3. 全局看是否还有问题？改动是否影响到了其它模块？
-4. 是否达到了上线（go-live）的标准？
+**只读**评估契约。在「自认为做完」之后、提交/上线之前介入。**先答五问、再评 gate**：
+
+五问（复述回顾，必答——任一缺失或空泛即 not ready）：
+1. 原始需求目标是什么？（逐字 / 贴近复述，不判定）
+2. 做了哪些事情？（逐条完成点回放）
+3. 过程中遇到了什么卡点？（含已解除的 + 解除方式）
+4. 每个完成点怎么验证的？证据是什么？（没有证据 = 没有通过）
+5. 下一步 TODO 是什么？
+
+gate 判定（go-live 标准）：
+1. 全局看是否还有问题？改动是否影响到了其它模块？
+2. 是否达到了上线（go-live）的标准？
 
 > **只读**：本 skill 不修改代码、不提交、不推送。需要修改时回到 `do-and-done` / 实现循环；需要提交时用 `submit` skill。
 
@@ -111,6 +118,13 @@ cargo build --workspace                      # 零错误
 ## 固定输出 —— REVIEW 块（每次评审必须输出）
 ```
 ## REVIEW
+goal: <复述原始需求目标 + 验收标准 —— 取自用户原始 prompt；对照 STATUS goal 标注是否偏航>
+done:                          ← 逐条完成点回放（verify+evidence 缺一不计入）
+  - <完成点> | verify: <怎么验证的：命令 / 方法> | evidence: <当次证据：输出尾段 / file:line>
+blockers:                      ← 遇到的卡点（含已解除；无则 none）
+  - <卡点> | status: <resolved | open> | resolution: <解除方式；open 则写 pending>
+next_todos:                    ← 下一步 TODO（ready → 后续建议或 none；not ready → 与 gaps 对应的修复 TODO）
+  - <TODO> | accept: <验收标准>
 goal_met: yes | partial | no
 baseline: <迭代开始 X passed> → 当次 <Y passed>（Y ≥ X + 新增 ? ✅ : ❌）
 validation:
@@ -136,6 +150,7 @@ gaps: <若 not ready，逐条列出阻塞项与建议；ready 则 none>
 ```
 
 ## 结论规则
+- 五问任一缺失或空泛（`goal` / `done` / `blockers` / `next_todos` 缺字段，或完成点无 `verify`+`evidence`）→ 视同证据不充分，`verdict: not ready`。
 - 任一 go-live gate ❌ → `verdict: not ready`，并在 `gaps` 列清阻塞项与建议。
 - 全部 ✅ 或附理由 N/A → `verdict: go-live ready`。
 - **绝不**伪绿：没实跑的测试不算通过；没看的回归面不算覆盖；推测的影响不算评估；N/A 无理由视为 ❌。

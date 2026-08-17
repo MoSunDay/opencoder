@@ -1,4 +1,4 @@
-Commit: (working-tree)
+Commit: 7e7da28 (并入并行会话的全仓提交；改动归属本计划第一轮)
 
 # Bug 扫除第一轮：10 项 P1 功能级修复（08-14→08-17 新能力）
 
@@ -33,7 +33,7 @@ Commit: (working-tree)
 ## 回归 gate（rules/02）
 
 `cargo clippy --workspace --all-targets -- -D warnings` 零警告 ✓
-`cargo test --workspace`：全绿，**唯一例外** `tui notepad::editor::tests::row_texts_round_trips_and_wraps_in_order`——并行会话在其 WIP 文件 `tui/notepad/editor.rs`（+27 行）新增的测试，本轮开始时不存在、非本轮触碰，归属该会话。
+`cargo test --workspace`：全绿 ✓（期间并行会话 WIP 文件 `tui/notepad/editor.rs` 的新增测试短暂失败，属其在途工作，本轮提交前已由该会话自行修复复绿，非本轮触碰。）
 
 ## 备注
 

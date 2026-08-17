@@ -57,7 +57,9 @@ async fn call(
     };
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, v)
 }
@@ -152,7 +154,10 @@ async fn create_with_capture_seeds_env_from_base_chain() {
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     // The captured env carries the project-layer model (WYSIWYG capture).
-    assert_eq!(env_config_model(&state.workdir.join(".opencoder"), "snap"), "prov/mo");
+    assert_eq!(
+        env_config_model(&state.workdir.join(".opencoder"), "snap"),
+        "prov/mo"
+    );
 }
 
 #[tokio::test]
@@ -185,7 +190,10 @@ async fn patch_activates_and_deactivates() {
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["active"], "on");
-    assert_eq!(opencoder_core::config::envs::active_env().as_deref(), Some("on"));
+    assert_eq!(
+        opencoder_core::config::envs::active_env().as_deref(),
+        Some("on")
+    );
 
     let (_, v) = call(app(state.clone()), "GET", "/api/envs", None).await;
     assert_eq!(v["active"], "on");
@@ -216,15 +224,12 @@ async fn recapture_updates_env_files_from_current_base() {
     .await;
     // Base drifts; recapture pulls the new value into the env snapshot.
     seed_base(&state.workdir, "new/mo");
-    let (status, v) = call(
-        app(state.clone()),
-        "POST",
-        "/api/envs/rc/recapture",
-        None,
-    )
-    .await;
+    let (status, v) = call(app(state.clone()), "POST", "/api/envs/rc/recapture", None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert_eq!(env_config_model(&state.workdir.join(".opencoder"), "rc"), "new/mo");
+    assert_eq!(
+        env_config_model(&state.workdir.join(".opencoder"), "rc"),
+        "new/mo"
+    );
 
     let (status, v) = call(
         app(state.clone()),
@@ -255,24 +260,17 @@ async fn delete_removes_env_and_clears_active_marker() {
     )
     .await;
 
-    let (status, v) = call(
-        app(state.clone()),
-        "DELETE",
-        "/api/envs/ghost",
-        None,
-    )
-    .await;
+    let (status, v) = call(app(state.clone()), "DELETE", "/api/envs/ghost", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
 
-    let (status, v) = call(
-        app(state.clone()),
-        "DELETE",
-        "/api/envs/gone",
-        None,
-    )
-    .await;
+    let (status, v) = call(app(state.clone()), "DELETE", "/api/envs/gone", None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    assert!(!state.workdir.join(".opencoder").join("envs").join("gone").exists());
+    assert!(!state
+        .workdir
+        .join(".opencoder")
+        .join("envs")
+        .join("gone")
+        .exists());
     assert_eq!(opencoder_core::config::envs::active_env(), None);
     let (_, v) = call(app(state.clone()), "GET", "/api/envs", None).await;
     assert_eq!(v["envs"].as_array().map(Vec::len), Some(0));

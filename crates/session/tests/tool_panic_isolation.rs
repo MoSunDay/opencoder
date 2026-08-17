@@ -146,9 +146,9 @@ async fn panicking_tool_does_not_crash_run_loop() {
     );
 
     let saw_text = session.messages.iter().any(|m| {
-        m.blocks.iter().any(|b| {
-            matches!(b, ContentBlock::Text { text } if text == "all done")
-        })
+        m.blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Text { text } if text == "all done"))
     });
     assert!(
         saw_text,

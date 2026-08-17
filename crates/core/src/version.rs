@@ -74,7 +74,10 @@ mod tests {
     /// the same captured inputs. Guards against `build.rs`/format drift.
     #[test]
     fn baked_long_version_matches_format_contract() {
-        assert_eq!(VERSION_LONG, format_version(VERSION, GIT_COMMIT, is_dirty()));
+        assert_eq!(
+            VERSION_LONG,
+            format_version(VERSION, GIT_COMMIT, is_dirty())
+        );
     }
 
     /// The whole point of this module: the version must carry the commit id.

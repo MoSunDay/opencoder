@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_core::{ApMode, Config};
 
-use super::list::{AP_CHOICES, ap_mode_json, mode_index};
+use super::list::{ap_mode_json, mode_index, AP_CHOICES};
 
 /// The `/ap` modal. `app.rs` holds `Option<ApMenu>`; while `Some`, all keys
 /// route through [`handle_ap_key`].
@@ -94,19 +94,40 @@ mod tests {
         assert_eq!(ApMenu::new(&cfg_with(ApMode::Ap)).selected, 1);
         let review = ApMenu::new(&cfg_with(ApMode::Review));
         assert_eq!(review.selected, 2);
-        assert_eq!(review.current, ApMode::Review, "current mode is remembered for view");
+        assert_eq!(
+            review.current,
+            ApMode::Review,
+            "current mode is remembered for view"
+        );
     }
 
     /// ↑/↓ move with wrap-around and keep the menu open (Idle).
     #[test]
     fn up_down_move_with_wrap() {
         let mut slot = Some(ApMenu::new(&cfg_with(ApMode::Ap)));
-        assert!(matches!(handle_ap_key(&mut slot, key(KeyCode::Down)), ApOutcome::Idle));
+        assert!(matches!(
+            handle_ap_key(&mut slot, key(KeyCode::Down)),
+            ApOutcome::Idle
+        ));
         assert_eq!(slot.as_ref().unwrap().selected, 2, "down: ap -> review");
-        assert!(matches!(handle_ap_key(&mut slot, key(KeyCode::Down)), ApOutcome::Idle));
-        assert_eq!(slot.as_ref().unwrap().selected, 0, "down from review wraps to off");
-        assert!(matches!(handle_ap_key(&mut slot, key(KeyCode::Up)), ApOutcome::Idle));
-        assert_eq!(slot.as_ref().unwrap().selected, 2, "up from off wraps to review");
+        assert!(matches!(
+            handle_ap_key(&mut slot, key(KeyCode::Down)),
+            ApOutcome::Idle
+        ));
+        assert_eq!(
+            slot.as_ref().unwrap().selected,
+            0,
+            "down from review wraps to off"
+        );
+        assert!(matches!(
+            handle_ap_key(&mut slot, key(KeyCode::Up)),
+            ApOutcome::Idle
+        ));
+        assert_eq!(
+            slot.as_ref().unwrap().selected,
+            2,
+            "up from off wraps to review"
+        );
         assert!(slot.is_some(), "movement keeps the menu open");
     }
 
@@ -142,8 +163,16 @@ mod tests {
     #[test]
     fn empty_slot_is_idle() {
         let mut slot: Option<ApMenu> = None;
-        for code in [KeyCode::Enter, KeyCode::Esc, KeyCode::Up, KeyCode::Char('x')] {
-            assert!(matches!(handle_ap_key(&mut slot, key(code)), ApOutcome::Idle));
+        for code in [
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Up,
+            KeyCode::Char('x'),
+        ] {
+            assert!(matches!(
+                handle_ap_key(&mut slot, key(code)),
+                ApOutcome::Idle
+            ));
         }
         assert!(slot.is_none());
     }
@@ -152,7 +181,10 @@ mod tests {
     #[test]
     fn unmapped_key_is_idle_and_keeps_menu() {
         let mut slot = Some(ApMenu::new(&cfg_with(ApMode::Ap)));
-        assert!(matches!(handle_ap_key(&mut slot, key(KeyCode::Char('x'))), ApOutcome::Idle));
+        assert!(matches!(
+            handle_ap_key(&mut slot, key(KeyCode::Char('x'))),
+            ApOutcome::Idle
+        ));
         assert_eq!(slot.as_ref().unwrap().selected, 1, "cursor unmoved");
     }
 }

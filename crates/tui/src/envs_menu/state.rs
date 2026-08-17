@@ -21,7 +21,10 @@ pub enum EnvsOutcome {
     /// Clear the marker; base configuration becomes effective again.
     Deactivate,
     /// Create env `name`, optionally seeded from a base-chain capture.
-    Create { name: String, capture: bool },
+    Create {
+        name: String,
+        capture: bool,
+    },
     /// Re-capture the base chain into env `name`.
     Recapture(String),
     /// Delete env `name` (clears the marker first when it is active).

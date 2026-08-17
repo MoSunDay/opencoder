@@ -91,7 +91,11 @@ impl ChatStream for CancelOnKStream {
             fire_turn_cancel(&self.turn_cancel);
             return Ok(rx);
         }
-        let ev = if i == DONE_AT { done_turn() } else { bash_turn(i) };
+        let ev = if i == DONE_AT {
+            done_turn()
+        } else {
+            bash_turn(i)
+        };
         tokio::spawn(async move {
             let _ = tx.send(ev).await;
         });
@@ -101,15 +105,17 @@ impl ChatStream for CancelOnKStream {
 
 #[tokio::test]
 async fn turn_cancel_clears_doom_signatures() {
-    let turn_cancel: Arc<Mutex<CancellationToken>> =
-        Arc::new(Mutex::new(CancellationToken::new()));
+    let turn_cancel: Arc<Mutex<CancellationToken>> = Arc::new(Mutex::new(CancellationToken::new()));
     let stream = Arc::new(CancelOnKStream::new(turn_cancel.clone()));
     let stream_for_count = Arc::clone(&stream);
 
     let mut session = SessionState::new(
         "doom-clear-on-cancel".to_string(),
         resolve_agent("act").unwrap(),
-        Config { model: "m/g".into(), ..Config::default() },
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
         stream,
         std::env::temp_dir(),
     )
@@ -118,13 +124,9 @@ async fn turn_cancel_clears_doom_signatures() {
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ev_clone = events.clone();
 
-    let result = run(
-        &mut session,
-        "go".into(),
-        move |ev: SessionEvent| {
-            ev_clone.lock().unwrap().push(ev);
-        },
-    )
+    let result = run(&mut session, "go".into(), move |ev: SessionEvent| {
+        ev_clone.lock().unwrap().push(ev);
+    })
     .await;
 
     let guard = events.lock().unwrap();

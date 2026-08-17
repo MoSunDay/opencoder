@@ -184,7 +184,8 @@ impl Store for DelayedSteerStore {
 fn session(store: Arc<dyn Store>, mock: Arc<dyn ChatStream>) -> (tempfile::TempDir, SessionState) {
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    let s = SessionState::new(SID, agent, config(), mock, dir.path().to_path_buf()).with_store(store);
+    let s =
+        SessionState::new(SID, agent, config(), mock, dir.path().to_path_buf()).with_store(store);
     (dir, s)
 }
 

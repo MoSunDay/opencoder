@@ -18,10 +18,14 @@ use ratatui::Frame;
 /// Outcome of a keystroke while the skill menu is open. The caller maps this to
 /// its own `KeyAction`: `Quit` propagates, `Pick` activates a skill (inserting a
 /// `$name` token), and `Idle` leaves the menu open.
+#[derive(Debug)]
 pub enum MenuOutcome {
     Idle,
     Quit,
     Pick((String, String)),
+    /// The dedicated "clear" row was confirmed: deactivate the sticky skill
+    /// (in memory + store) instead of activating a new one.
+    Clear,
 }
 
 /// Handle one keystroke against an open skill menu, mutating `menu` in place.
@@ -46,6 +50,10 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
         KeyCode::Backspace => m.on_backspace(),
         KeyCode::Char(c) => m.on_char(c),
         KeyCode::Enter | KeyCode::Tab => {
+            if m.is_clear_selected() {
+                *menu = None;
+                return MenuOutcome::Clear;
+            }
             if let Some(s) = m.selected_skill() {
                 let name = s.name.clone();
                 let body = s.body.clone();
@@ -63,10 +71,13 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
     MenuOutcome::Idle
 }
 
-/// One display row of the picker. `Skill(i)` references `SkillMenu::skills[i]`.
+/// One display row of the picker. `Skill(i)` references `SkillMenu::skills[i]`;
+/// `Clear` is the trailing "deactivate the sticky skill" action (only shown
+/// on an unfiltered list so typing never has to dodge it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
     Skill(usize),
+    Clear,
 }
 
 /// Picker state for the `$` skill menu.
@@ -96,6 +107,11 @@ impl SkillMenu {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// Whether the dedicated clear row is under the highlight.
+    pub fn is_clear_selected(&self) -> bool {
+        matches!(self.rows.get(self.selected), Some(Row::Clear))
     }
 
     /// The skill under the highlight, if any.
@@ -156,6 +172,10 @@ impl SkillMenu {
             for (i, _s) in skills.iter().enumerate() {
                 rows.push(Row::Skill(i));
             }
+            // Trailing clear action: the sticky-skill contract is "active
+            // until re-picked or cleared" — this row is the lightweight
+            // in-picker clear path.
+            rows.push(Row::Clear);
             return rows;
         }
         // Fuzzy subsequence match on name (primary) or description (fallback).
@@ -246,23 +266,34 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
                     Span::styled(s.description.clone(), Style::default().fg(theme::subtle())),
                 ]))
             }
+            Row::Clear => ListItem::new(Line::from(vec![
+                Span::styled(
+                    "\u{2715} clear".to_string(),
+                    Style::default()
+                        .fg(theme::warn_color())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" \u{2014} "),
+                Span::styled(
+                    "deactivate the sticky skill".to_string(),
+                    Style::default().fg(theme::subtle()),
+                ),
+            ])),
         })
         .collect();
 
-    let no_skills_row = if menu.skills.is_empty() {
-        Some(ListItem::new(Line::from(Span::styled(
+    // The trailing Clear row keeps the list non-empty even with zero
+    // skills installed, so the hint is gated on skills.is_empty() and
+    // prepended (the clear row stays reachable — a sticky skill can outlive
+    // the removal of its SKILL.md).
+    let mut items: Vec<ListItem> = Vec::new();
+    if menu.skills.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
             "  no skills \u{2014} add *.md or <name>/SKILL.md under ~/.opencoder/skills",
             Style::default().fg(theme::muted()),
-        ))))
-    } else {
-        None
-    };
-
-    let items = if skill_rows.is_empty() {
-        no_skills_row.into_iter().collect()
-    } else {
-        skill_rows
-    };
+        ))));
+    }
+    items.extend(skill_rows);
 
     let list = List::new(items)
         .block(block)
@@ -325,17 +356,30 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
                     Span::styled(s.description.clone(), Style::default().fg(theme::subtle())),
                 ]))
             }
+            Row::Clear => ListItem::new(Line::from(vec![
+                Span::styled(
+                    "\u{2715} clear".to_string(),
+                    Style::default()
+                        .fg(theme::warn_color())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" \u{2014} "),
+                Span::styled(
+                    "deactivate the sticky skill".to_string(),
+                    Style::default().fg(theme::subtle()),
+                ),
+            ])),
         })
         .collect();
 
-    let items = if skill_rows.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled(
+    let mut items: Vec<ListItem> = Vec::new();
+    if menu.skills.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
             "  no skills \u{2014} add *.md under ~/.opencoder/skills",
             Style::default().fg(theme::muted()),
-        )))]
-    } else {
-        skill_rows
-    };
+        ))));
+    }
+    items.extend(skill_rows);
 
     let list = List::new(items)
         .block(block)
@@ -382,8 +426,10 @@ mod tests {
     #[test]
     fn opens_with_all_visible_and_first_selected() {
         let m = menu_of(&["alpha", "beta"]);
-        assert_eq!(m.visible_count(), 2);
+        // 2 skills + the trailing clear row on an unfiltered list.
+        assert_eq!(m.visible_count(), 3);
         assert_eq!(m.selected_skill().unwrap().name, "alpha");
+        assert!(!m.is_clear_selected(), "first row is a skill, not clear");
     }
 
     #[test]
@@ -393,10 +439,15 @@ mod tests {
         assert_eq!(m.selected_skill().unwrap().name, "b");
         m.move_down();
         assert_eq!(m.selected_skill().unwrap().name, "c");
+        // One more down lands on the trailing clear row (not a skill).
+        m.move_down();
+        assert!(m.selected_skill().is_none());
+        assert!(m.is_clear_selected());
+        // Wrapping skips past it back to the first skill.
         m.move_down();
         assert_eq!(m.selected_skill().unwrap().name, "a");
         m.move_up();
-        assert_eq!(m.selected_skill().unwrap().name, "c");
+        assert!(m.is_clear_selected(), "up from the first skill hits clear");
     }
 
     #[test]
@@ -420,7 +471,8 @@ mod tests {
         m.on_char('a');
         assert_eq!(m.visible_count(), 3); // alpha, beta, gamma all contain 'a'
         m.on_backspace();
-        assert_eq!(m.visible_count(), 3); // filter cleared, all visible
+        // Filter cleared: all skills visible again + the trailing clear row.
+        assert_eq!(m.visible_count(), 4);
     }
 
     #[test]
@@ -477,8 +529,9 @@ mod tests {
         let names: Vec<&str> = m
             .rows
             .iter()
-            .map(|r| match r {
-                Row::Skill(i) => m.skills[*i].name.as_str(),
+            .filter_map(|r| match r {
+                Row::Skill(i) => Some(m.skills[*i].name.as_str()),
+                Row::Clear => None,
             })
             .collect();
         assert!(
@@ -522,10 +575,46 @@ mod tests {
     }
 
     #[test]
-    fn tab_on_empty_menu_just_closes() {
+    fn tab_on_empty_menu_confirms_clear_row() {
+        // With zero skills the clear row is the only selectable row, so Tab
+        // confirms it: the sticky-skill clear path stays reachable even when
+        // no SKILL.md is installed (a sticky skill outlives its file).
         let mut menu = Some(SkillMenu::new(vec![]));
         let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
-        assert!(matches!(outcome, MenuOutcome::Idle));
+        assert!(matches!(outcome, MenuOutcome::Clear));
         assert!(menu.is_none());
+    }
+
+    #[test]
+    fn clear_row_shown_only_on_unfiltered_list() {
+        let mut m = menu_of(&["alpha"]);
+        assert!(!m.is_clear_selected());
+        assert_eq!(m.visible_count(), 2, "skill + trailing clear row");
+        for c in "al".chars() {
+            m.on_char(c);
+        }
+        assert_eq!(m.visible_count(), 1, "query filters out the clear row");
+        assert!(m.selected_skill().is_some());
+        assert!(
+            !m.rows.iter().any(|r| matches!(r, Row::Clear)),
+            "typing must never confirm the clear row by accident"
+        );
+    }
+
+    #[test]
+    fn enter_on_clear_row_returns_clear_outcome() {
+        let mut menu = Some(menu_of(&["alpha", "beta"]));
+        // Walk down to the trailing clear row (last position).
+        let m = menu.as_mut().unwrap();
+        for _ in 0..2 {
+            m.move_down();
+        }
+        assert!(m.is_clear_selected());
+        let outcome = handle_menu_key(&mut menu, key(KeyCode::Enter));
+        assert!(
+            matches!(outcome, MenuOutcome::Clear),
+            "Enter on the clear row must yield Clear, got {outcome:?}"
+        );
+        assert!(menu.is_none(), "menu must close after a clear confirm");
     }
 }

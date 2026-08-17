@@ -344,7 +344,7 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
 
         let mut spans = vec![Span::styled(
             agent_txt,
-            Style::default().fg(crate::render::agent_chip_fg(agent)),
+            Style::default().fg(crate::theme::agent_chip_fg(agent)),
         )];
         if let Some(tag) = skill_tag {
             spans.push(Span::styled(tag, Style::default().fg(theme::accent())));

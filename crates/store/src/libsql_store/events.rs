@@ -24,9 +24,7 @@ pub async fn append_many(conn: &Connection, events: &[SessionEventRecord]) -> Re
     // misaligned with no error. Reject the mixed batch up front instead.
     for ev in events {
         if ev.session_id != session_id {
-            anyhow::bail!(
-                "append_events: all events in a batch must share the same session_id"
-            );
+            anyhow::bail!("append_events: all events in a batch must share the same session_id");
         }
     }
     super::tx::run_tx(conn, "BEGIN", || async move {

@@ -29,20 +29,50 @@ pub(crate) enum OnboardingOutcome {
     Exit,
 }
 
-/// Strict local readiness check. Endpoint resolution catches missing secrets;
-/// URL/header parsing catches values that reqwest would otherwise reject only
-/// after the user's first task; client construction validates proxy settings.
-pub(crate) fn build_ready_client(config: &Config) -> Result<ChatClient> {
-    let ep = crate::app_helpers::startup_endpoint(config).context("model credentials")?;
-    let url = reqwest::Url::parse(&ep.base_url).context("invalid base_url")?;
+/// Why startup client construction failed, split by whether the onboarding
+/// wizard can actually fix it.
+pub(crate) enum StartupFailure {
+    /// endpoint/凭据解析失败——向导能修（缺 provider/api_key/base_url 等）。
+    Credentials(anyhow::Error),
+    /// endpoint 已解析但客户端构建失败（proxy env 非法、header 值非法、
+    /// base_url 非 http(s) 等）——向导修不了，进应用后按 turn 报错。
+    Unbuildable(anyhow::Error),
+}
+
+impl StartupFailure {
+    /// Collapse back to a plain error for wizard form display: inside the
+    /// wizard both classes surface the same way (Save keeps failing).
+    fn into_error(self) -> anyhow::Error {
+        match self {
+            StartupFailure::Credentials(e) | StartupFailure::Unbuildable(e) => e,
+        }
+    }
+}
+
+/// Strict local readiness check. Endpoint resolution catches missing secrets
+/// ([`StartupFailure::Credentials`]); URL/header parsing catches values that
+/// reqwest would otherwise reject only after the user's first task, and client
+/// construction validates proxy settings — both map to
+/// [`StartupFailure::Unbuildable`] since the wizard cannot fix them.
+pub(crate) fn build_ready_client(config: &Config) -> Result<ChatClient, StartupFailure> {
+    let ep = crate::app_helpers::startup_endpoint(config)
+        .context("model credentials")
+        .map_err(StartupFailure::Credentials)?;
+    let url = reqwest::Url::parse(&ep.base_url)
+        .context("invalid base_url")
+        .map_err(StartupFailure::Unbuildable)?;
     if !matches!(url.scheme(), "http" | "https") || url.cannot_be_a_base() || !url.has_host() {
-        return Err(anyhow!("base_url must be an absolute http(s) URL"));
+        return Err(StartupFailure::Unbuildable(anyhow!(
+            "base_url must be an absolute http(s) URL"
+        )));
     }
     for (name, value) in &ep.headers {
         reqwest::header::HeaderName::from_bytes(name.as_bytes())
-            .with_context(|| format!("invalid header name `{name}`"))?;
+            .with_context(|| format!("invalid header name `{name}`"))
+            .map_err(StartupFailure::Unbuildable)?;
         reqwest::header::HeaderValue::from_str(value)
-            .with_context(|| format!("invalid value for header `{name}`"))?;
+            .with_context(|| format!("invalid value for header `{name}`"))
+            .map_err(StartupFailure::Unbuildable)?;
     }
     ChatClient::new_with_read_timeout(
         &ep.base_url,
@@ -51,6 +81,29 @@ pub(crate) fn build_ready_client(config: &Config) -> Result<ChatClient> {
         config.stream_idle_timeout(),
         config.network.proxy.as_deref(),
     )
+    .map_err(StartupFailure::Unbuildable)
+}
+
+/// Fallback `ChatStream` used when the model client is unbuildable but the
+/// session should still start (e.g. an invalid proxy env that the onboarding
+/// wizard cannot fix). Every turn submission fails immediately with the
+/// recorded reason, surfacing the root cause as a turn-level error instead of
+/// trapping the user in the wizard.
+pub(crate) struct UnbuildableClient {
+    pub reason: String,
+}
+
+impl opencoder_llm::ChatStream for UnbuildableClient {
+    fn chat_stream(
+        &self,
+        _req: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<opencoder_llm::LlmEvent>> {
+        anyhow::bail!("model client unavailable: {}", self.reason)
+    }
+
+    fn backend(&self) -> &'static str {
+        "unavailable"
+    }
 }
 
 /// Drive first-run setup until a valid global model is saved or the user exits.
@@ -126,13 +179,16 @@ fn finalize_config(
     patch: &serde_json::Value,
 ) -> Result<(Config, ChatClient)> {
     let candidate = current.merged_with(patch);
-    build_ready_client(&candidate).context("candidate model is unusable")?;
+    build_ready_client(&candidate)
+        .map_err(StartupFailure::into_error)
+        .context("candidate model is unusable")?;
     Config::save_global(patch).context("save global config")?;
     let mut reloaded = Config::load(workdir).context("reload effective config")?;
     if let Some(model) = cli_model {
         reloaded.model = model.to_string();
     }
     let client = build_ready_client(&reloaded)
+        .map_err(StartupFailure::into_error)
         .context("project, CLI, or environment override is unusable")?;
     Ok((reloaded, client))
 }
@@ -201,22 +257,107 @@ mod tests {
     #[test]
     fn readiness_rejects_missing_key_and_invalid_url() {
         let missing = Config::default();
-        let error = build_ready_client(&missing)
+        let failure = build_ready_client(&missing)
             .err()
             .expect("missing key must fail");
-        assert!(error.to_string().contains("credentials"));
+        match failure {
+            // Missing provider/api_key is exactly what the wizard fixes.
+            StartupFailure::Credentials(error) => {
+                assert!(error.to_string().contains("credentials"));
+            }
+            StartupFailure::Unbuildable(_) => {
+                panic!("missing key must classify as wizard-fixable Credentials")
+            }
+        }
 
         let mut invalid = ready_config();
         invalid.providers.get_mut("demo").unwrap().base_url = "not a url".into();
-        let error = build_ready_client(&invalid)
+        let failure = build_ready_client(&invalid)
             .err()
             .expect("invalid URL must fail");
-        assert!(error.to_string().contains("base_url"));
+        match failure {
+            StartupFailure::Unbuildable(error) => {
+                assert!(error.to_string().contains("base_url"));
+            }
+            StartupFailure::Credentials(_) => {
+                panic!("unparseable base_url must classify as Unbuildable")
+            }
+        }
     }
 
     #[test]
     fn readiness_accepts_complete_config_without_network_call() {
         assert!(build_ready_client(&ready_config()).is_ok());
+    }
+
+    /// Regression (defect #8): an endpoint parsed but an unbuildable client
+    /// (invalid proxy env) must NOT be classified as wizard-fixable — the
+    /// wizard cannot fix a proxy, so routing it there traps the user.
+    #[test]
+    fn startup_failure_classifies_invalid_proxy_as_unbuildable() {
+        let mut config = ready_config();
+        config.network.proxy = Some("::not a proxy::".into());
+        let failure = build_ready_client(&config)
+            .err()
+            .expect("invalid proxy must fail client construction");
+        match failure {
+            StartupFailure::Unbuildable(error) => {
+                let text = error.to_string();
+                assert!(
+                    text.contains("proxy") || text.contains("http client"),
+                    "unexpected proxy failure text: {text}"
+                );
+            }
+            StartupFailure::Credentials(_) => {
+                panic!("invalid proxy must classify as Unbuildable, not Credentials")
+            }
+        }
+    }
+
+    /// Non-http(s) base_url schemes reach the app, not the wizard.
+    #[test]
+    fn startup_failure_classifies_non_http_base_url_as_unbuildable() {
+        let mut config = ready_config();
+        config.providers.get_mut("demo").unwrap().base_url = "ftp://x".into();
+        let failure = build_ready_client(&config)
+            .err()
+            .expect("non-http(s) base_url must fail");
+        match failure {
+            StartupFailure::Unbuildable(error) => {
+                assert!(error.to_string().contains("http(s)"));
+            }
+            StartupFailure::Credentials(_) => {
+                panic!("non-http(s) base_url must classify as Unbuildable")
+            }
+        }
+    }
+
+    #[test]
+    fn unbuildable_client_fails_every_stream_with_reason() {
+        use opencoder_llm::{ChatRequest, ChatStream};
+
+        let client = UnbuildableClient {
+            reason: "invalid proxy '::not a proxy::'".into(),
+        };
+        let request = ChatRequest {
+            model: "demo/model-x".into(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            tool_choice: None,
+            temperature: None,
+            max_tokens: None,
+            reasoning_effort: None,
+            cache_salt: None,
+        };
+        let error = client
+            .chat_stream(request)
+            .expect_err("unbuildable client must refuse every turn");
+        let text = error.to_string();
+        assert!(text.contains("model client unavailable"), "got: {text}");
+        assert!(text.contains("invalid proxy"), "got: {text}");
+
+        let stream: &dyn ChatStream = &client;
+        assert_eq!(stream.backend(), "unavailable");
     }
 
     #[test]

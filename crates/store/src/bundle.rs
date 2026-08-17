@@ -354,9 +354,18 @@ mod tests {
             .await
             .unwrap()
             .expect("session must be present after import");
-        assert_eq!(meta.summary_seq, None, "summary_seq must be reset on import");
-        assert_eq!(meta.handoff_seq, None, "handoff_seq must be reset on import");
-        assert_eq!(meta.handoff_plan, None, "handoff_plan must be reset on import");
+        assert_eq!(
+            meta.summary_seq, None,
+            "summary_seq must be reset on import"
+        );
+        assert_eq!(
+            meta.handoff_seq, None,
+            "handoff_seq must be reset on import"
+        );
+        assert_eq!(
+            meta.handoff_plan, None,
+            "handoff_plan must be reset on import"
+        );
         assert_eq!(meta.summary, None, "summary must be reset on import");
     }
 
@@ -485,7 +494,11 @@ mod tests {
             "failed import must roll back the session row"
         );
         assert!(
-            store.load_messages("sess-rollback").await.unwrap().is_empty(),
+            store
+                .load_messages("sess-rollback")
+                .await
+                .unwrap()
+                .is_empty(),
             "messages committed before the failure must be cascaded away"
         );
 
@@ -496,10 +509,7 @@ mod tests {
             .await
             .expect("retry must succeed after rollback");
         assert_eq!(id, "sess-rollback");
-        assert_eq!(
-            store.load_messages("sess-rollback").await.unwrap().len(),
-            2
-        );
+        assert_eq!(store.load_messages("sess-rollback").await.unwrap().len(), 2);
         assert!(store.get_session("sess-rollback").await.unwrap().is_some());
     }
 

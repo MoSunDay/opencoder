@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::FutureExt;
-use std::panic::AssertUnwindSafe;
 use opencoder_core::{
     message::now_ms, resolve_agent, AgentKind, ContentBlock, Message, MessageUsage, Role, ToolArc,
     ToolOutput,
@@ -12,6 +11,7 @@ use opencoder_core::{
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionEventRecord, SubagentStatus, SubagentTaskRecord};
 use serde_json::Value;
+use std::panic::AssertUnwindSafe;
 
 use crate::compaction;
 use crate::mcp;
@@ -19,21 +19,27 @@ use crate::tools::registry as build_registry;
 use crate::SessionState;
 
 mod dedup;
+mod drain;
 mod event;
 mod execute;
 mod llm_call;
 mod steer;
 mod subagent;
+#[cfg(test)]
+#[path = "test_fixtures.rs"]
+mod test_fixtures;
 
 pub use event::SessionEvent;
 use event::{Sink, DOOM_THRESHOLD};
+
+use drain::{
+    drain_mode_step, entry_drain_mode, idle_drain, reabsorb_tail, DrainModeAction, IdleAction,
+    MAX_CONSUME_STREAK,
+};
 use execute::execute_call;
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
-use steer::{
-    claim_steers, drain_mode_step, has_pending_queues, has_pending_steers, idle_drain,
-    is_turn_cancelled, reset_turn_cancel, DrainModeAction, IdleAction,
-};
+use steer::{claim_steers, is_turn_cancelled, reset_turn_cancel};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -174,13 +180,8 @@ pub async fn run_with_registry(
     user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
-    // claimed at turn boundaries to supply the actual user input. When an
-    // active skill is set and the user submitted no text (pure-skill submit
-    // after token stripping or image-only), inject a synthetic trigger so the
-    // model records a user turn and acts on the skill body in the system
-    // prompt instead of treating the input passively. For text-bearing turns
-    // the user's own words drive execution.
-    let has_skill = session.skill_prompt_cloned().is_some();
+    // claimed at turn boundaries to supply the actual user input (trigger
+    // injection + pending-first priority: see drain::entry_drain_mode).
     let has_text = !user_text.trim().is_empty();
     let has_images = !images.is_empty();
     if has_text || has_images {
@@ -188,43 +189,28 @@ pub async fn run_with_registry(
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
     }
-    if has_skill && !has_text {
-        let mut msg = Message::user(new_id(), crate::skill_resolve::SKILL_TRIGGER);
-        msg.synthetic = true;
-        session.record(msg).await;
-    }
-    let drain_mode = !has_text && !has_images && !has_skill && !handoff_pending;
+    let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
     run_loop(session, registry, &mut on_event, drain_mode).await?;
 
-    // P1-4: Bounded re-absorb — if a steer was admitted during the idle
-    // window (between run_loop's last pending_inputs poll and its return),
-    // re-run with drain_mode to absorb it. Without this, the TUI (which has
-    // no web-style reaper) would strand the steer until the next manual
-    // submit. Max 3 re-checks to bound latency.
-    let mut rechecks = 0u32;
-    const MAX_RECHECKS: u32 = 3;
-    // Check BOTH steers and queued inputs: a queue follow-up admitted
-    // during the idle window (TUI has no web-style reaper) would otherwise be
-    // stranded until the next manual submit, exactly like a bare steer.
-    while rechecks < MAX_RECHECKS
-        && (has_pending_steers(session).await || has_pending_queues(session).await)
-    {
-        rechecks += 1;
-        run_loop(session, registry, &mut on_event, true).await?;
-    }
+    // P1-4: bounded re-absorb of steers/queues admitted during run_loop's
+    // idle window (see drain::reabsorb_tail).
+    reabsorb_tail(session, registry, &mut on_event).await?;
 
     // Autopilot mode dispatch: after the initial task completes, `ap` hands
     // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a
     // one-shot review pass (plan agent + review skill, no ACT/VERIFY), and
-    // `off` does nothing.
+    // `off` does nothing. The review pass is act-only: a review assesses
+    // EXECUTED work, so it is dispatched solely for primary sessions running
+    // the act agent — plan mode (or any other non-act primary) falls through
+    // to the same no-op as `off` instead of reviewing an unexecuted plan.
     match session.config.autopilot.mode {
         opencoder_core::ApMode::Ap => {
             crate::autopilot::drive(session, registry, &mut on_event).await?;
         }
-        opencoder_core::ApMode::Review => {
+        opencoder_core::ApMode::Review if session.agent.kind == AgentKind::Act => {
             crate::autopilot::review_pass(session, registry, &mut on_event).await?;
         }
-        opencoder_core::ApMode::Off => {}
+        opencoder_core::ApMode::Off | opencoder_core::ApMode::Review => {}
     }
     Ok(())
 }
@@ -243,6 +229,11 @@ pub(crate) async fn run_loop(
     // streak so their distinct PIDs are preserved.
     let mut bash_timeout_first: Option<(String, Value)> = None;
     let mut skip_llm = false;
+    // Consecutive drain-mode ConsumeNext steps without an intervening LLM
+    // turn or steer absorption. A persistent claim failure mixed with
+    // successful pending reads would otherwise hot-spin the loop; capping
+    // the streak forces Done so the frontend resync can restart slowly.
+    let mut consume_streak: u32 = 0;
 
     loop {
         // Interrupt check: if a cancellation was requested (web POST /interrupt),
@@ -273,6 +264,9 @@ pub(crate) async fn run_loop(
             steer_epoch = Some(gate.epoch());
         }
         if !steer_prompts.is_empty() {
+            // Steer absorption is loop progress — reset the drain consume
+            // streak so the cap only counts back-to-back no-progress steps.
+            consume_streak = 0;
             // Track whether the last steer was a sentinel ClearContext so we
             // can go idle without an LM call.
             let mut clear_sentinel = false;
@@ -287,7 +281,8 @@ pub(crate) async fn run_loop(
                     if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
                         // P1-3: unpromote the failed item and all remaining
                         // unprocessed items so the next run re-absorbs them.
-                        let remaining: Vec<i64> = steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
+                        let remaining: Vec<i64> =
+                            steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
                         if let Some(store) = &session.store {
                             let _ = store.unpromote_inputs(&session.id, &remaining).await;
                         }
@@ -333,8 +328,22 @@ pub(crate) async fn run_loop(
         // (web drain_to_completion). Bare commands loop via continue.
         if drain_mode && steer_prompts.is_empty() {
             match drain_mode_step(session, &mut *on_event, steer_epoch).await? {
-                DrainModeAction::Proceed => drain_mode = false,
-                DrainModeAction::ConsumeNext => continue,
+                DrainModeAction::Proceed => {
+                    drain_mode = false;
+                    consume_streak = 0;
+                }
+                DrainModeAction::ConsumeNext => {
+                    consume_streak += 1;
+                    if consume_streak >= MAX_CONSUME_STREAK {
+                        tracing::warn!(
+                            streak = consume_streak,
+                            "drain consume streak exceeded cap; going idle"
+                        );
+                        on_event(SessionEvent::Done);
+                        break;
+                    }
+                    continue;
+                }
                 DrainModeAction::Idle => {
                     on_event(SessionEvent::Done);
                     break;
@@ -584,14 +593,9 @@ pub(crate) async fn run_loop(
                     // tasks in `Running`). Catch it and convert to an error
                     // ToolResult, matching how execute_call itself reports
                     // failures (is_error: true).
-                    let out = match AssertUnwindSafe(execute_call(
-                        tc,
-                        session_ref,
-                        registry,
-                        &sink,
-                    ))
-                    .catch_unwind()
-                    .await
+                    let out = match AssertUnwindSafe(execute_call(tc, session_ref, registry, &sink))
+                        .catch_unwind()
+                        .await
                     {
                         Ok(o) => o,
                         Err(payload) => ToolOutput::err(format!(

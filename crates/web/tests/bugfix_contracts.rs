@@ -23,9 +23,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use futures::StreamExt;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{
-    EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store,
-};
+use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
 use opencoder_web::handle::SseEvt;
 use serde_json::json;
 
@@ -158,10 +156,7 @@ impl Store for FailingStore {
     async fn last_message_seq(&self, sid: &str) -> anyhow::Result<i64> {
         self.inner.last_message_seq(sid).await
     }
-    async fn admit_input(
-        &self,
-        input: &opencoder_store::SessionInput,
-    ) -> anyhow::Result<i64> {
+    async fn admit_input(&self, input: &opencoder_store::SessionInput) -> anyhow::Result<i64> {
         self.inner.admit_input(input).await
     }
     async fn pending_inputs(
@@ -194,17 +189,10 @@ impl Store for FailingStore {
     async fn swap_input_order(&self, sid: &str, a: i64, b: i64) -> anyhow::Result<()> {
         self.inner.swap_input_order(sid, a, b).await
     }
-    async fn append_events(
-        &self,
-        events: &[SessionEventRecord],
-    ) -> anyhow::Result<Vec<i64>> {
+    async fn append_events(&self, events: &[SessionEventRecord]) -> anyhow::Result<Vec<i64>> {
         self.inner.append_events(events).await
     }
-    async fn events_after(
-        &self,
-        sid: &str,
-        after: i64,
-    ) -> anyhow::Result<Vec<SessionEventRecord>> {
+    async fn events_after(&self, sid: &str, after: i64) -> anyhow::Result<Vec<SessionEventRecord>> {
         self.inner.events_after(sid, after).await
     }
     async fn last_event_seq(&self, sid: &str) -> anyhow::Result<i64> {
@@ -216,12 +204,7 @@ impl Store for FailingStore {
     ) -> anyhow::Result<()> {
         self.inner.create_subagent_task(r).await
     }
-    async fn complete_subagent_task(
-        &self,
-        id: &str,
-        result: &str,
-        ok: bool,
-    ) -> anyhow::Result<()> {
+    async fn complete_subagent_task(&self, id: &str, result: &str, ok: bool) -> anyhow::Result<()> {
         self.inner.complete_subagent_task(id, result, ok).await
     }
     async fn list_subagent_tasks(
@@ -248,12 +231,9 @@ async fn post_interrupt_no_handle_returns_ok_false() {
     let state = state().await;
 
     // No handle for "ghost" -> ok:false, not a 5xx.
-    let resp = opencoder_web::api::post_interrupt(
-        State(state.clone()),
-        Path("ghost".to_string()),
-    )
-    .await
-    .into_response();
+    let resp = opencoder_web::api::post_interrupt(State(state.clone()), Path("ghost".to_string()))
+        .await
+        .into_response();
     assert_eq!(
         resp.status(),
         axum::http::StatusCode::OK,
@@ -275,17 +255,17 @@ async fn post_interrupt_no_handle_returns_ok_false() {
     let live = opencoder_web::handle::SessionHandle::new();
     live.draining.store(true, Ordering::SeqCst);
     state.handles.lock().await.insert("live".to_string(), live);
-    let resp = opencoder_web::api::post_interrupt(
-        State(state.clone()),
-        Path("live".to_string()),
-    )
-    .await
-    .into_response();
+    let resp = opencoder_web::api::post_interrupt(State(state.clone()), Path("live".to_string()))
+        .await
+        .into_response();
     let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
         .await
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["ok"], true, "actively draining handle must signal ok:true");
+    assert_eq!(
+        v["ok"], true,
+        "actively draining handle must signal ok:true"
+    );
 }
 
 /// Bug #4: a Store failure on POST /sessions must surface as a structured 500.
@@ -309,7 +289,10 @@ async fn create_session_returns_500_on_store_failure() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["ok"], false, "error body must signal ok:false");
     assert!(
-        v["error"].as_str().unwrap_or_default().contains("disk failure"),
+        v["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("disk failure"),
         "error must surface the store failure: {}",
         v["error"]
     );

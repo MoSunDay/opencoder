@@ -204,12 +204,7 @@ fn client_subcommand_parses() {
     );
 
     // Bug 12: --session + --continue are mutually exclusive in top-level Cli
-    let cli3 = Cli::try_parse_from([
-        "opencoder",
-        "--session",
-        "01ABC",
-        "--continue",
-    ]);
+    let cli3 = Cli::try_parse_from(["opencoder", "--session", "01ABC", "--continue"]);
     assert!(
         cli3.is_err(),
         "--session and --continue must conflict in top-level Cli"
@@ -438,6 +433,5 @@ fn ts_subcommand_parses_delete_target_and_rejects_mixed_actions() {
         Some(Command::Ts { delete, .. }) => assert_eq!(delete.as_deref(), Some("01HZ")),
         _ => panic!("expected Ts delete"),
     }
-    assert!(opencoder_cli::Cli::try_parse_from(["opencode", "ts", "-d", "01HZ", "-c"])
-        .is_err());
+    assert!(opencoder_cli::Cli::try_parse_from(["opencode", "ts", "-d", "01HZ", "-c"]).is_err());
 }

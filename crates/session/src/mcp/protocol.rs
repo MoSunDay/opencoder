@@ -179,8 +179,7 @@ mod tests {
         }"#;
         let resp: JsonRpcResponse = serde_json::from_str(raw).unwrap();
         assert_eq!(resp.id, Some(1));
-        let result: InitializeResult =
-            serde_json::from_value(resp.result.unwrap()).unwrap();
+        let result: InitializeResult = serde_json::from_value(resp.result.unwrap()).unwrap();
         assert_eq!(result.protocol_version, "2024-11-05");
         assert!(result.server_info.is_object());
     }

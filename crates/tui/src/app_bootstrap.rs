@@ -29,10 +29,11 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }
-    let (config, concrete_client, active_terminal) =
+    let (config, client, active_terminal): (Config, Arc<dyn ChatStream>, Option<ActiveTerminal>) =
         match crate::onboarding::build_ready_client(&config) {
-            Ok(client) => (config, client, None),
-            Err(startup_error) => {
+            Ok(concrete_client) => (config, Arc::new(concrete_client), None),
+            // The wizard can fix endpoint/credential problems: run it as before.
+            Err(crate::onboarding::StartupFailure::Credentials(startup_error)) => {
                 let mut terminal = ActiveTerminal::enter()?;
                 match crate::onboarding::run(
                     &mut terminal.terminal,
@@ -44,14 +45,29 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
                 .await?
                 {
                     crate::onboarding::OnboardingOutcome::Ready { config, client } => {
-                        (*config, client, Some(terminal))
+                        (*config, Arc::new(client), Some(terminal))
                     }
                     crate::onboarding::OnboardingOutcome::Exit => return Ok(()),
                 }
             }
+            // Unbuildable (invalid proxy env/header/base_url scheme) cannot be
+            // fixed from the wizard — entering it would loop Save-fail forever.
+            // Enter the app instead with a stub client that fails every turn
+            // with this reason, so the user sees the root cause per turn.
+            Err(crate::onboarding::StartupFailure::Unbuildable(error)) => {
+                let reason = format!("{error:#}");
+                tracing::warn!(
+                    reason = %reason,
+                    "model client unbuildable; entering the UI with turn-level errors"
+                );
+                (
+                    config,
+                    Arc::new(crate::onboarding::UnbuildableClient { reason }),
+                    None,
+                )
+            }
         };
     crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
-    let client: Arc<dyn ChatStream> = Arc::new(concrete_client);
 
     let store: Arc<dyn Store> = open_store(&workdir).await?;
     // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)

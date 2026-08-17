@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use opencoder_core::ContentBlock;
 use opencoder_core::Config;
+use opencoder_core::ContentBlock;
 use opencoder_llm::{ChatRequest, ChatStream, LlmEvent};
 use opencoder_store::{Delivery, LibsqlStore, SessionMeta, Store};
 use tokio::sync::mpsc;
@@ -217,7 +217,10 @@ async fn steer_mid_drain_fires_turn_cancel_and_recovers() {
     // The runner must have emitted a `steer_consumed` event (the second steer
     // was absorbed at the next turn boundary) and a terminal `done`.
     let events = state.store.events_after(sid, 0).await.unwrap();
-    let kinds: Vec<&str> = events.iter().filter_map(|r| r.sse_kind.as_deref()).collect();
+    let kinds: Vec<&str> = events
+        .iter()
+        .filter_map(|r| r.sse_kind.as_deref())
+        .collect();
     assert!(
         kinds.contains(&"steer_consumed"),
         "expected a steer_consumed event after the turn_cancel; got kinds {:?}",

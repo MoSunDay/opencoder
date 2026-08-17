@@ -627,7 +627,10 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
         .list_sessions(&SessionFilter::default())
         .await
         .unwrap();
-    let skilled = items.iter().find(|s| s.id == "skilled").expect("skilled row");
+    let skilled = items
+        .iter()
+        .find(|s| s.id == "skilled")
+        .expect("skilled row");
     assert_eq!(
         skilled.skill.as_deref(),
         Some("## do-and-done\nfull body"),

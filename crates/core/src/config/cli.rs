@@ -259,12 +259,16 @@ mod tests {
         let mut cfg = CliConfig::default();
         merge(
             &mut cfg,
-            serde_json::json!({ "inject_to": "subagents" }).as_object().unwrap(),
+            serde_json::json!({ "inject_to": "subagents" })
+                .as_object()
+                .unwrap(),
         );
         assert_eq!(cfg.inject_to, InjectionTarget::subagents());
         merge(
             &mut cfg,
-            serde_json::json!({ "inject_to": ["parent", "build"] }).as_object().unwrap(),
+            serde_json::json!({ "inject_to": ["parent", "build"] })
+                .as_object()
+                .unwrap(),
         );
         assert!(cfg.inject_to.parent);
         assert!(!cfg.inject_to.explore);

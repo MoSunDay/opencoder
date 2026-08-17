@@ -148,7 +148,10 @@ async fn list_with_subagents_reports_zero_counts_for_children() {
         .unwrap();
     let p1 = listed.iter().find(|i| i.id == "p1").unwrap();
     let c1 = listed.iter().find(|i| i.id == "c1").unwrap();
-    assert_eq!(p1.subagent_running, 1, "parent aggregates its in-flight task");
+    assert_eq!(
+        p1.subagent_running, 1,
+        "parent aggregates its in-flight task"
+    );
     assert_eq!(
         c1.subagent_running, 0,
         "child session (a subagent itself) has no tasks as parent"
@@ -185,7 +188,6 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
 
 #[tokio::test]
 async fn subagent_task_crud_roundtrip() {
-
     let (_dir, store) = fresh().await;
     // Seed session rows so the FK constraints on parent/child resolve.
     make_session(&store, "parent-sess", 0).await;
@@ -233,7 +235,6 @@ async fn subagent_task_crud_roundtrip() {
 
 #[tokio::test]
 async fn subagent_task_list_filters_by_parent() {
-
     let (_dir, store) = fresh().await;
 
     for (tid, parent) in [("t-a", "sess-a"), ("t-b", "sess-b"), ("t-c", "sess-a")] {

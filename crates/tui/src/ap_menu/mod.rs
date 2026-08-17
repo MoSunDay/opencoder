@@ -7,6 +7,6 @@ pub mod list;
 pub mod state;
 pub mod view;
 
-pub use list::{AP_CHOICES, ApChoice, ap_mode_json, chip_label, mode_index};
-pub use state::{ApMenu, ApOutcome, handle_ap_key};
+pub use list::{ap_mode_json, chip_label, mode_index, ApChoice, AP_CHOICES};
+pub use state::{handle_ap_key, ApMenu, ApOutcome};
 pub use view::render_ap_popup;

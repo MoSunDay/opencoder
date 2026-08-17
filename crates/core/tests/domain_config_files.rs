@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use opencoder_core::{Config, scoped_config_home};
+use opencoder_core::{scoped_config_home, Config};
 
 /// `<home>/.opencoder/<name>` — the global domain-file location.
 fn global_domain_file(home: &Path, name: &str) -> PathBuf {

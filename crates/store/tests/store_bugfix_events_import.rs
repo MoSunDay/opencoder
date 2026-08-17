@@ -61,8 +61,14 @@ async fn append_events_rejects_mixed_session_ids() {
     let dir = tempfile::tempdir().unwrap();
     let store = LibsqlStore::open(dir.path().join("ev.db")).await.unwrap();
     // Both sessions must exist for the session_events FK constraint.
-    store.create_session(&make_session_meta("sess-a")).await.unwrap();
-    store.create_session(&make_session_meta("sess-b")).await.unwrap();
+    store
+        .create_session(&make_session_meta("sess-a"))
+        .await
+        .unwrap();
+    store
+        .create_session(&make_session_meta("sess-b"))
+        .await
+        .unwrap();
 
     let mixed = vec![event("sess-a", 0, 0), event("sess-b", 1, 1)];
     let err = store.append_events(&mixed).await;

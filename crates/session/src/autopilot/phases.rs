@@ -88,7 +88,11 @@ pub async fn run_act_phase(
         // (HANDOFF_PREFIX), so no separate execute_prompt is injected.
         run_loop(session, registry, on_event, false).await
     } else {
-        session.set_skill(None);
+        // No plan found (fallback execute prompt): the handoff branch above
+        // persists its clear via the combined patch; this branch must clear
+        // durably too, or a crash/resume mid-ACT would resurrect the
+        // system-injected review skill from the `sessions.skill` column.
+        super::clear_injected_skill(session).await;
         switch_agent(session, "act", on_event);
         let mut msg = Message::user(new_id(), execute_prompt());
         msg.synthetic = true;

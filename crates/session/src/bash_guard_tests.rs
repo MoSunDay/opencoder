@@ -469,10 +469,7 @@ fn classify_detects_write_after_newline() {
 /// splits on `&` but neither segment mutates, so plan mode must NOT over-block.
 #[test]
 fn classify_bare_ampersand_between_readonly_stays_readonly() {
-    assert_eq!(
-        classify("echo a & echo b"),
-        BashVerdict::ReadOnly
-    );
+    assert_eq!(classify("echo a & echo b"), BashVerdict::ReadOnly);
 }
 
 // ---------------------------------------------------------------------------

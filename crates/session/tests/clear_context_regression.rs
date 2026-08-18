@@ -83,6 +83,10 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     .mark_session_created();
     session.messages = msgs.clone();
     session.plan_input_count = 1;
+    // The plan phase's assistant turn was recorded while the plan agent was
+    // active, so the phase-bounded snapshot carries it (record() captures it
+    // in the real flow; `handoff` reads ONLY the snapshot).
+    session.plan_snapshot = Some("I will implement X by...".into());
 
     run(&mut session, "/act_clear_context review".into(), |_| {})
         .await
@@ -221,9 +225,11 @@ async fn act_mode_after_plan_inputs_still_preserves_plan() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = msgs.clone();
-    // Simulate: planned in plan mode (inputs recorded), then `/act` switched
-    // without a handoff — the counter survives the switch.
+    // Simulate: planned in plan mode (inputs recorded + the plan captured in
+    // the phase snapshot, which survives a plain `/act` switch exactly like
+    // the counter), then `/act` switched without a handoff.
     session.plan_input_count = 2;
+    session.plan_snapshot = Some("## Plan\n1. migrate schema".into());
 
     run(&mut session, "/act_clear_context".into(), |_| {})
         .await
@@ -311,6 +317,8 @@ async fn apply_clear_context_act_mode_with_plan_inputs_preserves_plan() {
     a.blocks.push(ContentBlock::text("## Plan\n1. do X"));
     session.messages.push(a);
     session.plan_input_count = 2;
+    // Recorded by the plan agent during the phase (survives the `/act` switch).
+    session.plan_snapshot = Some("## Plan\n1. do X".into());
 
     let mut evs = Vec::new();
     opencoder_session::control_cmd::apply(

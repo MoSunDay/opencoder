@@ -305,9 +305,8 @@ impl ChatView {
     }
 
     /// Fold an agent switch into the view state: finalize any open assistant
-    /// block, reflect the new agent, and re-derive `plan_submitted` for plan
-    /// entries (consuming `pending_plan_arm` so a stale arm can never re-arm
-    /// a later plan-mode entry).
+    /// block, reflect the new agent, and reset `plan_submitted` on plan
+    /// entries (a fresh plan phase has no delivered requirement yet).
     ///
     /// Split out of the `AgentSwitch` event arm so the optimistic switch path
     /// (`app_loop::handle_switch_agent`) can fold synchronously at flip time.
@@ -320,20 +319,22 @@ impl ChatView {
         self.finalize_assistant();
         self.agent = sanitize_single_line(to).into_owned();
         if to == "plan" {
-            // A compound `/plan <content>` submitted from act mode arms
-            // the handoff *deferred*: the switch that lands here otherwise
-            // resets `plan_submitted`, so re-arm it from the pending flag
-            // the submit path left behind.
-            self.plan_submitted = self.pending_plan_arm;
+            // Entering plan starts a FRESH phase: any stale arm from a
+            // previous phase collapses here. The ONLY path back to armed is
+            // the consumption-time re-arm (TurnDone(plan) reads the
+            // persisted `plan_input_count`, which increments when a real
+            // requirement is delivered to the plan agent).
+            self.plan_submitted = false;
         }
-        self.pending_plan_arm = false;
     }
 
     /// Record that a user requirement was delivered to the current agent.
     /// In plan mode this arms the plan→act handoff, so Shift+Tab collapses the
-    /// planning transcript (only the final plan carries over). Every delivery
-    /// path — Enter-submit, Tab-queue while running — must call this; a
-    /// requirement given via the queue panel is still a requirement.
+    /// planning transcript (only the final plan carries over). Only the
+    /// Enter idle-submit path calls this — the submit immediately starts the
+    /// run that consumes the input. Steer/queue submits must NOT arm here:
+    /// they arm at consumption (see [`ChatView::fold_agent_switch`]) so a
+    /// stranded, never-consumed row can never arm a handoff.
     pub fn note_requirement_submitted(&mut self) {
         if self.agent == "plan" {
             self.plan_submitted = true;

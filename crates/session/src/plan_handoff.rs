@@ -28,8 +28,9 @@ verify. Do not re-plan; proceed directly with implementation.\n\n";
 /// user left in the plan-mode input box) is appended to the plan when
 /// non-empty, so it is submitted as part of the same directive.
 ///
-/// The "final plan" is the last assistant message carrying non-empty text —
-/// per the plan agent prompt that is where the actionable plan lives. Returns
+/// The plan text comes exclusively from the phase-bounded
+/// `SessionState::plan_snapshot` (captured by `record` while the plan agent
+/// answers, rescued by compaction). Returns
 /// `Some(display_text)` when a reset happened (the display text is the plan +
 /// optional extra, suitable for rendering in the UI, WITHOUT the LLM directive
 /// prefix); returns `None` when no plan could be found (the caller should leave
@@ -38,12 +39,19 @@ verify. Do not re-plan; proceed directly with implementation.\n\n";
 /// The durable store is NOT modified: it stays append-only so the full raw
 /// transcript is preserved for audit, exactly like compaction.
 pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
-    // Live transcript first (always the newest plan); fall back to the
-    // compaction-captured snapshot when the plan assistant message was
-    // folded into the user-role summary head and slid out of the retained
-    // tail. The snapshot is plan-provenance-safe: only compaction in plan
-    // mode sets it, and handoff/plan-phase reset clear it.
-    let plan = final_plan_text(&session.messages).or_else(|| session.plan_snapshot.clone())?;
+    // Phase-bounded single source: the snapshot captured while the plan agent
+    // actually produced assistant text in THIS phase — written by
+    // `SessionState::record` on every plan-mode assistant turn, rescued by
+    // compaction before folding the plan into the summary head, cleared on
+    // phase reset / handoff. The old "last non-empty assistant text in the
+    // whole transcript" scan is deliberately gone: it had no phase boundary,
+    // so a plan requirement whose turn failed or was cancelled BEFORE the
+    // LLM produced anything extracted the *earlier act-phase answer* instead,
+    // wrapped it as a "plan", collapsed the transcript and persisted an
+    // irreversible `handoff_seq` boundary — perceived as "Shift+Tab wiped
+    // all context and kept no plan". An empty snapshot means the phase
+    // produced no plan: return `None`, keep the context untouched.
+    let plan = session.plan_snapshot.clone()?;
 
     // Total store messages that predate the handoff (the plan-mode history to
     // trim on resume). The in-memory head may hold a synthetic message absent
@@ -98,12 +106,11 @@ pub fn handoff_message(display: &str) -> Message {
     msg
 }
 
-/// Extract the final plan: the newest assistant message with non-empty text.
-/// Newest-first scan so the most recent plan (after any clarifying Q&A) wins;
-/// empty / tool-only assistant turns are skipped. Note this only sees the
-/// LIVE transcript — once compaction folds the plan into the user-role
-/// summary head it returns `None`, which is why compaction captures a
-/// `plan_snapshot` (see `crate::compaction`) that `handoff` falls back to.
+/// Extract the newest assistant text from the LIVE transcript. Used ONLY by
+/// compaction (plan mode) to capture the `plan_snapshot` before folding the
+/// plan into the user-role summary head — `handoff` itself never scans the
+/// transcript (phase-bounded snapshot only, see [`handoff`]), so a failed or
+/// cancelled plan turn can no longer hand a stale act-phase answer forward.
 pub fn final_plan_text(messages: &[Message]) -> Option<String> {
     messages
         .iter()

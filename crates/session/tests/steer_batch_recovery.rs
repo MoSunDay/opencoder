@@ -83,6 +83,8 @@ async fn seed_session(store: &Arc<dyn Store>) {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -374,7 +376,10 @@ async fn runner_consumes_batch_steers_with_failing_store() {
     );
 
     // The first steer (r0) was consumed (SteerConsumed emitted) before
-    // the error occurred; the second was never reached.
+    // the error occurred; the second was never reached. F3: the post-error
+    // bounded re-absorb re-claims the unpromoted batch head (r0) once and
+    // fails against the still-failing store, so r0 is emitted twice —
+    // r1 is never consumed.
     let consumed = events
         .lock()
         .unwrap()
@@ -382,8 +387,8 @@ async fn runner_consumes_batch_steers_with_failing_store() {
         .filter(|ev| matches!(ev, SessionEvent::SteerConsumed { .. }))
         .count();
     assert_eq!(
-        consumed, 1,
-        "first steer consumed before error; second not reached"
+        consumed, 2,
+        "r0 consumed then retried by the F3 re-absorb; r1 not reached"
     );
 
     // P1-3: both steers are unpromoted (still pending for retry).

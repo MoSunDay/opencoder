@@ -25,7 +25,7 @@ pub fn print_exit_tips() {
             "  \x1b[33m-tmux not installed\x1b[0m — need sessions that survive disconnects?",
         ));
         lines.push(String::from(
-            "    Install: apt install tmux  -  then use: opencode ts (persistent TUI)",
+            "    Install: apt install tmux  -  then use: opencoder ts (persistent TUI)",
         ));
         lines.push(String::from(""));
     }
@@ -38,7 +38,7 @@ pub fn print_exit_tips() {
             "    - ssh-pty: persistent SSH sessions via send/read",
         ));
         lines.push(String::from(""));
-        lines.push(String::from("    Setup:  opencode install-tools"));
+        lines.push(String::from("    Setup:  opencoder install-tools"));
         lines.push(String::from(
             "    Then in TUI: press $ and type the skill name to activate.",
         ));

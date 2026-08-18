@@ -7,6 +7,7 @@ pub mod event_sink;
 pub mod fork;
 pub mod mcp;
 pub mod plan_handoff;
+pub mod plan_phase;
 pub mod prompt;
 pub mod resume;
 pub mod runner;
@@ -192,11 +193,11 @@ pub struct SessionState {
     /// reconstruct the synthetic plan instruction on resume and to render the
     /// plan card.
     pub handoff_plan: Option<String>,
-    /// Number of user requirements submitted in the current plan-mode phase.
-    /// Reset to 0 when switching *to* plan mode (via `/plan` or agent switch)
-    /// or after a plan→act handoff. When > 0, subsequent plan prompts get a
-    /// read-only reminder appended so the model stays focused on planning.
+    /// Requirements submitted in the current plan-mode phase (lifecycle in
+    /// [`crate::plan_phase`]). When > 0, plan prompts get a read-only tag.
     pub plan_input_count: usize,
+    /// Pre-compaction plan snapshot; see [`crate::plan_phase`].
+    pub plan_snapshot: Option<String>,
     /// User-edited task description text, persisted via the /requirement
     /// slash command so it survives session resume.
     pub requirement: Option<String>,
@@ -240,8 +241,9 @@ impl SessionState {
             summary_images: Vec::new(),
             handoff_seq: None,
             handoff_plan: None,
-            plan_input_count: 0,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
             question_hub: QuestionHub::new(),
         }
     }
@@ -382,6 +384,8 @@ impl SessionState {
                 skill: self.skill_prompt_cloned(),
                 task_type: None,
                 requirement: None,
+                plan_snapshot: self.plan_snapshot.clone(),
+                plan_input_count: self.plan_input_count as i64,
             };
             store.create_session(&meta).await?;
             self.session_created = true;
@@ -435,7 +439,9 @@ impl SessionState {
         self.summary = None;
         self.summary_seq = None;
         self.persisted_count = self.messages.len();
+        // Plan phase ended (lifecycle: `crate::plan_phase`).
         self.plan_input_count = 0;
+        self.plan_snapshot = None;
     }
 
     /// When in plan mode and this is not the first requirement in the current
@@ -791,3 +797,4 @@ mod store_message_count_tests {
         assert_eq!(s.store_message_count(), 3);
     }
 }
+

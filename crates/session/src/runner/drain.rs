@@ -10,6 +10,7 @@ use anyhow::Result;
 use opencoder_core::{Message, Role, ToolArc};
 use opencoder_store::Delivery;
 
+use super::input_recovery::mark_input_recorded;
 use super::new_id;
 use super::run_loop;
 use super::steer::{cancel_guard, has_pending_steers};
@@ -102,6 +103,7 @@ pub(super) async fn drain_one_queued(
             // real prompt in the new mode — record it and break.
             if let Some(rest) = rest {
                 crate::skill_resolve::record_compound(session, &rest, &imgs).await;
+                mark_input_recorded(session, seq).await;
                 return Ok(DrainOutcome::Prompt);
             }
             // Bare ClearContext with a preserved result breaks to execute it;
@@ -111,13 +113,17 @@ pub(super) async fn drain_one_queued(
                     session.handoff_plan.as_deref().unwrap_or(""),
                 )
             {
+                mark_input_recorded(session, seq).await;
                 return Ok(DrainOutcome::Prompt);
             }
             // Bare command: applied, no LLM turn needed.
+            mark_input_recorded(session, seq).await;
             return Ok(DrainOutcome::ControlCmd);
         }
         // Real prompt: resolve `$skill` tokens, record, break.
+        // F2: per-item marking (mirrors the steer loop) — never lost on failure.
         crate::skill_resolve::record_compound(session, &q, &imgs).await;
+        mark_input_recorded(session, seq).await;
         return Ok(DrainOutcome::Prompt);
     }
     // Queue empty.

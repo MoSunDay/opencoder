@@ -324,6 +324,10 @@ async fn active_skill_source_path_rides_tail_reminder_and_keeps_system_clean() {
         "must name the skill's source file: {tail}"
     );
     assert!(
+        tail.contains("as a `[skill loaded]` message"),
+        "activation section points at the injected message: {tail}"
+    );
+    assert!(
         !tail.contains("alpha-BODY-CONTENT"),
         "the reminder carries the path, not the body: {tail}"
     );

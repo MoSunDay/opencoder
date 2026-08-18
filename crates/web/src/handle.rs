@@ -464,6 +464,8 @@ async fn apply_drain_cmd(
                                 agent: Some("act".into()),
                                 handoff_seq: session.handoff_seq,
                                 handoff_plan: session.handoff_plan.clone(),
+                                clear_plan_snapshot: true,
+                                plan_input_count: Some(session.plan_input_count as i64),
                                 updated_at: Some(opencoder_core::message::now_ms()),
                                 ..Default::default()
                             },
@@ -527,6 +529,42 @@ async fn process_drain_cmds(
             apply_drain_cmd(session, cmd, tx, sink, sid, workdir).await;
         }
     }
+}
+
+/// F3: bounded drain-restart budget. When a drain run fails while steer/queue
+/// inputs are still pending, the drain retries up to this many times so a
+/// transient failure (LLM 5xx, store hiccup) does not silently strand inputs
+/// the admit POST already promised to consume. Bounded so a persistently
+/// failing store/config cannot hot-loop.
+const MAX_DRAIN_RESTARTS: u32 = 2;
+
+/// Count inputs still awaiting consumption in either delivery channel. A
+/// store read error counts as zero: an unreadable store must not be mistaken
+/// for "client still owed inputs" and resurrect a failing drain.
+async fn pending_input_count(store: &Arc<dyn Store>, sid: &str) -> usize {
+    store
+        .pending_inputs(sid, Delivery::Steer)
+        .await
+        .unwrap_or_default()
+        .len()
+        + store
+            .pending_inputs(sid, Delivery::Queue)
+            .await
+            .unwrap_or_default()
+            .len()
+}
+
+/// Pure restart policy for the drain loop: retry only when the attempt
+/// failed, the client is still owed pending inputs, the drain was not
+/// hard-cancelled (POST /stop semantics must be preserved), and the retry
+/// budget remains.
+fn should_restart_drain(
+    result: &Result<()>,
+    pending: usize,
+    cancelled: bool,
+    attempt: u32,
+) -> bool {
+    result.is_err() && pending > 0 && !cancelled && attempt < MAX_DRAIN_RESTARTS
 }
 
 /// Drive the session runner to completion, broadcasting events.
@@ -608,15 +646,47 @@ async fn drain_to_completion(
     let sid = session_id.to_string();
     let (sink, flusher) =
         opencoder_session::spawn_event_flusher(Some(store.clone()), session_id.to_string());
-    let result = run(&mut session, String::new(), |ev| {
-        let (sse, _kind) = sse_from_session_event(&sid, &ev);
-        let _ = tx.send(sse);
-        let _ = sink.push(&ev);
-    })
-    .await;
+    // F3: bounded restart loop. The admit POST already answered success, so
+    // pending steer/queue rows are a durable promise — abandoning the drain on
+    // the first Err would strand them with nothing left to consume them.
+    // Retry while inputs remain pending, the hard-cancel token has not fired
+    // (POST /stop must win: run breaks cleanly on cancel and a cancelled
+    // drain is never resurrected), and the budget lasts — bounded so a
+    // persistently failing store/config cannot hot-loop. Sink / flusher / tx
+    // stay alive across retries so retried runs still persist + broadcast
+    // events; the drops below run exactly once, after the loop.
+    let mut result = Ok(());
+    for attempt in 0..=MAX_DRAIN_RESTARTS {
+        result = run(&mut session, String::new(), |ev| {
+            let (sse, _kind) = sse_from_session_event(&sid, &ev);
+            let _ = tx.send(sse);
+            let _ = sink.push(&ev);
+        })
+        .await;
 
-    // After run completes, process any queued drain commands.
-    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
+        // After each attempt, process queued drain commands so a restart
+        // still sees a settled command queue.
+        process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
+
+        let cancelled = session.cancel.as_ref().is_some_and(|t| t.is_cancelled());
+        if !should_restart_drain(
+            &result,
+            pending_input_count(&store, &sid).await,
+            cancelled,
+            attempt,
+        ) {
+            break;
+        }
+        if let Err(e) = &result {
+            warn!(
+                session_id,
+                attempt,
+                error = %e,
+                "drain failed with pending inputs; bounded restart"
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
 
     drop(sink);
     drop(guard);
@@ -630,146 +700,5 @@ async fn drain_to_completion(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::Ordering;
-
-    #[tokio::test]
-    async fn release_subscriber_evicts_creator_handle_when_last_and_idle() {
-        let handles = new_handle_map();
-        let id = "sess-evict".to_string();
-        let h = SessionHandle::new();
-        h.subscribers.store(1, Ordering::SeqCst);
-        h.draining.store(false, Ordering::SeqCst);
-        handles.lock().await.insert(id.clone(), h);
-
-        release_events_subscriber(handles.clone(), id.clone(), true);
-
-        // The eviction runs in a spawned task; poll until it settles.
-        for _ in 0..200 {
-            if !handles.lock().await.contains_key(&id) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-        }
-        assert!(
-            !handles.lock().await.contains_key(&id),
-            "creator handle should be evicted when last subscriber leaves and idle"
-        );
-    }
-
-    #[tokio::test]
-    async fn release_subscriber_keeps_handle_while_draining() {
-        let handles = new_handle_map();
-        let id = "sess-drain".to_string();
-        let h = SessionHandle::new();
-        h.subscribers.store(1, Ordering::SeqCst);
-        h.draining.store(true, Ordering::SeqCst);
-        handles.lock().await.insert(id.clone(), h);
-
-        release_events_subscriber(handles.clone(), id.clone(), true);
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        assert!(
-            handles.lock().await.contains_key(&id),
-            "handle must survive while a drain is running"
-        );
-    }
-
-    #[tokio::test]
-    async fn release_subscriber_keeps_handle_while_others_remain() {
-        let handles = new_handle_map();
-        let id = "sess-guest".to_string();
-        let h = SessionHandle::new();
-        // Two subscribers; a single non-creator release (prev == 2) is NOT the
-        // last subscriber, so the handle must survive.
-        h.subscribers.store(2, Ordering::SeqCst);
-        h.draining.store(false, Ordering::SeqCst);
-        handles.lock().await.insert(id.clone(), h);
-
-        release_events_subscriber(handles.clone(), id.clone(), false);
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        assert!(
-            handles.lock().await.contains_key(&id),
-            "handle must survive when a non-creator leaves but another subscriber remains"
-        );
-    }
-
-    // Bug #4: eviction must not depend on the `created` flag. If the creator
-    // disconnects first while a second (non-creator) subscriber remains, that
-    // second subscriber must still evict the handle when it becomes the last
-    // one leaving. The old `created &&` condition skipped eviction for the
-    // non-creator, leaking the handle forever.
-    #[tokio::test]
-    async fn session_handle_evicted_when_creator_leaves_first() {
-        let handles = new_handle_map();
-        let id = "test-session".to_string();
-
-        // Simulate subscriber A creating the handle (creator).
-        {
-            let mut map = handles.lock().await;
-            let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
-            handle.subscribers.fetch_add(1, Ordering::SeqCst);
-        }
-
-        // Simulate subscriber B joining (non-creator).
-        {
-            let mut map = handles.lock().await;
-            let handle = map.entry(id.clone()).or_insert_with(SessionHandle::new);
-            handle.subscribers.fetch_add(1, Ordering::SeqCst);
-        }
-
-        // Creator A leaves first (created=true, prev=2 → not the last, kept).
-        release_events_subscriber(handles.clone(), id.clone(), true);
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        {
-            let map = handles.lock().await;
-            assert!(
-                map.contains_key(&id),
-                "handle should survive when creator leaves but another subscriber remains"
-            );
-        }
-
-        // Subscriber B leaves last (created=false, prev=1 → must be evicted).
-        release_events_subscriber(handles.clone(), id.clone(), false);
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        {
-            let map = handles.lock().await;
-            assert!(
-                !map.contains_key(&id),
-                "handle should be evicted when last subscriber leaves, even if not the creator"
-            );
-        }
-    }
-
-    // Bug: `release_events_subscriber` looks the handle up by session id, so a
-    // release aimed at an OLD (already-removed) instance can land on a freshly
-    // created same-id handle whose counter is 0. A blind `fetch_sub` wraps to
-    // `usize::MAX`, corrupting the count and disabling last-subscriber
-    // eviction forever. The decrement must saturate at 0.
-    #[tokio::test]
-    async fn release_subscriber_does_not_underflow_fresh_instance() {
-        let handles = new_handle_map();
-        let id = "sess-underflow".to_string();
-        let h = SessionHandle::new();
-        // Fresh instance: no subscriber ever attached (count 0), not draining.
-        h.subscribers.store(0, Ordering::SeqCst);
-        h.draining.store(false, Ordering::SeqCst);
-        handles.lock().await.insert(id.clone(), h.clone());
-
-        // A stale release for the old same-id instance fires on this handle.
-        release_events_subscriber(handles.clone(), id.clone(), true);
-
-        // The release runs in a spawned task; poll until it settles (counter
-        // either changed or the sleep guarantees the task ran).
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert_eq!(
-            h.subscribers.load(Ordering::SeqCst),
-            0,
-            "subscriber counter must saturate at 0, not wrap to usize::MAX"
-        );
-        assert!(
-            handles.lock().await.contains_key(&id),
-            "a zero-count release must not evict the handle"
-        );
-    }
-}
+#[path = "handle_tests.rs"]
+mod tests;

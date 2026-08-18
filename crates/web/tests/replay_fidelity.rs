@@ -91,6 +91,8 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();

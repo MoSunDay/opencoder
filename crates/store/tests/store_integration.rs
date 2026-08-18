@@ -71,6 +71,8 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         skill: None,
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     };
     store.create_session(&meta).await.unwrap();
 }
@@ -464,6 +466,8 @@ async fn bundle_export_import_roundtrip() {
         skill: None,
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     };
     store.create_session(&parent_meta).await.unwrap();
     let msgs = conv("parent", 4);
@@ -486,6 +490,8 @@ async fn bundle_export_import_roundtrip() {
         skill: None,
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     };
     store.create_session(&child_meta).await.unwrap();
     let child_msgs = conv("child", 2);
@@ -661,6 +667,8 @@ async fn session_handoff_and_skill_fields_round_trip() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();

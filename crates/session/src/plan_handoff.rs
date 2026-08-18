@@ -38,7 +38,12 @@ verify. Do not re-plan; proceed directly with implementation.\n\n";
 /// The durable store is NOT modified: it stays append-only so the full raw
 /// transcript is preserved for audit, exactly like compaction.
 pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
-    let plan = final_plan_text(&session.messages)?;
+    // Live transcript first (always the newest plan); fall back to the
+    // compaction-captured snapshot when the plan assistant message was
+    // folded into the user-role summary head and slid out of the retained
+    // tail. The snapshot is plan-provenance-safe: only compaction in plan
+    // mode sets it, and handoff/plan-phase reset clear it.
+    let plan = final_plan_text(&session.messages).or_else(|| session.plan_snapshot.clone())?;
 
     // Total store messages that predate the handoff (the plan-mode history to
     // trim on resume). The in-memory head may hold a synthetic message absent
@@ -95,7 +100,10 @@ pub fn handoff_message(display: &str) -> Message {
 
 /// Extract the final plan: the newest assistant message with non-empty text.
 /// Newest-first scan so the most recent plan (after any clarifying Q&A) wins;
-/// empty / tool-only assistant turns are skipped.
+/// empty / tool-only assistant turns are skipped. Note this only sees the
+/// LIVE transcript — once compaction folds the plan into the user-role
+/// summary head it returns `None`, which is why compaction captures a
+/// `plan_snapshot` (see `crate::compaction`) that `handoff` falls back to.
 pub fn final_plan_text(messages: &[Message]) -> Option<String> {
     messages
         .iter()

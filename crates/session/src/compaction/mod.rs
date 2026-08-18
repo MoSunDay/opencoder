@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Context, Result};
-use opencoder_core::{message::now_ms, ContentBlock, Message, Role, ToolArc};
+use opencoder_core::{message::now_ms, AgentKind, ContentBlock, Message, Role, ToolArc};
 use opencoder_llm::{estimate_messages, lower_messages, ChatRequest, LlmEvent};
 use opencoder_store::SessionPatch;
 
@@ -145,6 +145,17 @@ pub async fn compact(
             });
         }
     }
+    // Plan snapshot capture: in plan mode the final plan is an assistant
+    // message that may live in the head being folded into the user-role
+    // summary. Snapshot it BEFORE `session.messages` is replaced so a later
+    // plan→act handoff still finds the plan (`final_plan_text` only scans
+    // the live tail). On miss, keep any existing snapshot — an earlier
+    // compaction may already hold the newest plan text.
+    if session.agent.kind == AgentKind::Plan {
+        if let Some(plan) = crate::plan_handoff::final_plan_text(&session.messages) {
+            session.plan_snapshot = Some(plan);
+        }
+    }
     let tail_msgs: Vec<Message> = session.messages[split..].to_vec();
     session.messages = vec![summary_msg].into_iter().chain(tail_msgs).collect();
 
@@ -165,22 +176,27 @@ pub async fn compact(
     session.after_compaction(summary.clone(), new_skip);
     session.summary_images = preserved.clone();
     if let Some(store) = &session.store {
+        let mut patch = SessionPatch {
+            summary: Some(summary.clone()),
+            summary_seq: Some(new_skip),
+            // Persist the head images that survived compaction so resume
+            // can rebuild the summary message WITHOUT reloading the
+            // soft-deleted compacted head (the fix for long-session
+            // resume stalls).
+            summary_images: Some(preserved.clone()),
+            updated_at: Some(now_ms()),
+            clear_handoff: true,
+            // Mirror the plan phase so a resumed plan session keeps its
+            // arming (counter) and compaction-captured plan snapshot.
+            plan_input_count: Some(session.plan_input_count as i64),
+            ..Default::default()
+        };
+        match &session.plan_snapshot {
+            Some(snap) => patch.plan_snapshot = Some(snap.clone()),
+            None => patch.clear_plan_snapshot = true,
+        }
         store
-            .update_session(
-                &session.id,
-                &SessionPatch {
-                    summary: Some(summary.clone()),
-                    summary_seq: Some(new_skip),
-                    // Persist the head images that survived compaction so resume
-                    // can rebuild the summary message WITHOUT reloading the
-                    // soft-deleted compacted head (the fix for long-session
-                    // resume stalls).
-                    summary_images: Some(preserved.clone()),
-                    updated_at: Some(now_ms()),
-                    clear_handoff: true,
-                    ..Default::default()
-                },
-            )
+            .update_session(&session.id, &patch)
             .await
             .context("persist compaction metadata")?;
     }

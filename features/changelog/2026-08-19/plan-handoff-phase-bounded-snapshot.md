@@ -1,4 +1,4 @@
-Commit: (working-tree, post-860831d)
+Commit: ecce7b0
 
 # plan→act 交接改为阶段有界快照 + 武装移到消费时刻（杜绝偶发清空全部上下文）
 

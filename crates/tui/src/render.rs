@@ -636,7 +636,7 @@ fn render_composer(
     // glyph, no attachment badge — so terminal-native selection spans
     // exactly the typed text (mirrors the body's clean view).
     if copy_mode {
-        crate::copy_mode::render_composer_clean(f, area, input);
+        crate::copy_mode::render_composer_clean(f, area, input, plan_mode.is_some());
         return;
     }
     if disabled {

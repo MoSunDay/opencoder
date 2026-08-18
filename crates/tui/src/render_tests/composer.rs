@@ -139,8 +139,9 @@ fn plan_editor_has_no_info_top_title() {
 
 /// Copy mode integrates at the `render_composer` seam: with `copy_mode`
 /// set, the function early-exits into the clean renderer — text flush at
-/// column 0, no border, no prompt glyph — regardless of the other
-/// decoration parameters (plan label, titles, badges).
+/// column 0 (row 1 when `plan_mode` reserves row 0 for the COPY MODE
+/// chip), no border, no prompt glyph — regardless of the other decoration
+/// parameters (plan label, titles, badges).
 #[test]
 fn composer_copy_mode_param_early_exits_to_clean_view() {
     let backend = TestBackend::new(40, 8);
@@ -168,9 +169,16 @@ fn composer_copy_mode_param_early_exits_to_clean_view() {
     let row0: String = (0..40)
         .map(|x| buf.cell((x, 0)).unwrap().symbol().to_string())
         .collect();
+    let row1: String = (0..40)
+        .map(|x| buf.cell((x, 1)).unwrap().symbol().to_string())
+        .collect();
     assert!(
-        row0.starts_with("plain text"),
-        "text flush at col 0: {row0:?}"
+        row0.trim_end().is_empty(),
+        "row0 reserved for the chip: {row0:?}"
+    );
+    assert!(
+        row1.starts_with("plain text"),
+        "text flush at col 0 from row 1: {row1:?}"
     );
     let all: String = (0..6)
         .flat_map(|y| (0..40).map(move |x| (x, y)))
@@ -263,13 +271,18 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
 
     let buf = terminal.backend().buffer();
     let row0 = row_text(buf, 0, 60);
-    assert!(
-        row0.starts_with("annotated text line"),
-        "editor text flush at col 0 in copy mode; got: {row0:?}"
-    );
+    let row1 = row_text(buf, 1, 60);
     assert!(
         row0.contains("COPY MODE"),
         "chip must stay visible over the clean view; got: {row0:?}"
+    );
+    assert!(
+        !row0.contains("annotated text line"),
+        "row0 is chip-only: text must not collide with the chip; got: {row0:?}"
+    );
+    assert!(
+        row1.starts_with("annotated text line"),
+        "editor text flush at col 0 from row 1 in copy mode; got: {row1:?}"
     );
     let all: String = (0..12)
         .flat_map(|y| row_text(buf, y, 60).chars().collect::<Vec<_>>())

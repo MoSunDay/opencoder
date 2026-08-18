@@ -194,3 +194,91 @@ fn composer_copy_mode_param_early_exits_to_clean_view() {
         );
     }
 }
+
+/// Full-frame regression for the `/annotation` editor + copy mode: with the
+/// annotation overlay open (`plan_mode` = mode label, `edit_title` = "edit
+/// annotation") and copy mode active, the frame must show the editor text
+/// undecorated — flush at column 0, no border rows, no prompt glyph, no
+/// editor titles — plus the COPY MODE chip. This pins the integration of the
+/// global Ctrl+G toggle with the overlay's clean view end-to-end through
+/// `render` (the unit seam `composer_copy_mode_param_early_exits_to_clean_view`
+/// only exercises `render_composer` in isolation).
+#[test]
+fn full_frame_annotation_editor_copy_mode_hides_border() {
+    let backend = TestBackend::new(60, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let chat = ChatView::default();
+    let mut scroll = 0u32;
+    let mut queue_scroll = 0u32;
+    let mut hits = MouseHits::default();
+    let mut viewport: Option<ViewportCache> = None;
+    render(
+        &mut terminal,
+        &chat,
+        "annotated text line",
+        0,
+        &Line::raw("t"),
+        false,
+        0,
+        0,
+        1000,
+        4000,
+        "ready",
+        &[],
+        &[],
+        &mut scroll,
+        true,
+        &mut queue_scroll,
+        0,
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &mut hits,
+        &mut viewport,
+        false,
+        true,                     // copy_mode
+        &[],
+        false,
+        Some("NORMAL"),           // plan_mode (annotation editor open)
+        Some("edit annotation"),  // edit_title
+        0,
+        0,
+        true,
+        opencoder_core::ApMode::default(),
+        "act",
+        None,
+    )
+    .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let row0 = row_text(buf, 0, 60);
+    assert!(
+        row0.starts_with("annotated text line"),
+        "editor text flush at col 0 in copy mode; got: {row0:?}"
+    );
+    assert!(
+        row0.contains("COPY MODE"),
+        "chip must stay visible over the clean view; got: {row0:?}"
+    );
+    let all: String = (0..12)
+        .flat_map(|y| row_text(buf, y, 60).chars().collect::<Vec<_>>())
+        .collect();
+    assert!(!all.contains("edit annotation"), "titles gone: {all:?}");
+    for deco in ['\u{276f}', '\u{250c}', '\u{2514}', '\u{2500}', '\u{251c}', '\u{2523}'] {
+        assert!(
+            !all.contains(deco),
+            "decoration {deco:?} must be absent in copy mode: {all:?}"
+        );
+    }
+}

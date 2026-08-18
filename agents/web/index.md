@@ -1,4 +1,4 @@
-Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
+Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 
 # web 模块
 
@@ -28,7 +28,7 @@ POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出�
 POST `/api/sessions/:id/subagents/:task_id/steer`：先校验 task 属于父 session 且为 `Running`，再从 live handle 的 child gate 取得 reservation 后写入 child session。gate 缺失/关闭返回 409 且不落 input；若写入后被强制关闭则删除该 row 后返回 409；成功提交后触发目标 child turn cancel，保持 Web 的立即打断语义。
 - 8 个 feature-parity 端点（`src/api_ops.rs`，于 `src/lib.rs::build_app()` 注册）：fork（`POST /api/sessions/:id/fork`，调共享实现 `opencoder_session::fork::fork_session`，404 语义在 handler 层判定）、compact、handoff、skill、config GET/PATCH（PATCH 经 `DrainCmd::ReloadConfig` 热重载）、bg list/stop。
 - `/api/envs` 环境配置管理（`src/api_envs.rs`，5 路由）：`GET`（列表 + active）、`POST {name, capture_current=true}`（400 非法名 / 409 重名）、`PATCH {active: name|null}`（404 未知环境）、`POST /:name/recapture`、`DELETE /:name`（active 环境删除先清标记）。所有会改变有效配置的变更向全部 live session 扇出 `DrainCmd::ReloadConfig`（与 `PATCH /api/config` 同机制——快照 handles keys 后逐个 send_cmd）；recapture/delete 仅在影响 active 环境时扇出。`GET /api/config` 自动反映环境层（`Config::load` 解析）。
-- SPA 前端 `GET /`（`src/html.rs`）：`src/assets/`（index.html、styles.css、render.js、app.js）经 `include_str!` + `LazyLock` 在编译期拼为单一内联 HTML 文档（单二进制，无静态文件服务）。SPA 覆盖全部 17 种 SSE 事件类型、interrupt、steer/queue 投递、model/agent 切换、image 上传、fork/compact。
+- SPA 前端 `GET /`（`src/html.rs`）：`src/assets/`（index.html、styles.css、render.js、app.js）经 `include_str!` + `LazyLock` 在编译期拼为单一内联 HTML 文档（单二进制，无静态文件服务）。SPA 监听 18 种 SSE 事件类型（`SessionEvent` 共 21 个细粒度 kind，其余仅持久化/回放）、interrupt、steer/queue 投递、model/agent 切换、image 上传、fork/compact。
 
 ## 依赖与接口
 - 依赖：axum 0.7（ws feature）、tokio-stream（sync feature，BroadcastStream）、tokio-util（CancellationToken）、opencoder-session/store/llm/core。

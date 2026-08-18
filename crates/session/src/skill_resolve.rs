@@ -16,7 +16,9 @@
 use std::collections::HashSet;
 
 use opencoder_core::message::now_ms;
-use opencoder_core::{body_with_source, discover_skills, extract_skill_tokens, Message, Skill};
+use opencoder_core::{
+    body_with_source, discover_skills, extract_skill_tokens, AgentKind, Message, Skill,
+};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
@@ -155,6 +157,11 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
     session.maybe_tag_plan_prompt(&mut text);
     let m = Message::user_with_images(new_id(), text, images);
     session.record(m).await;
+    // Keep the persisted plan-phase counter in step with the increment that
+    // just happened (queue/steer twin of the idle path in runner::run).
+    if session.agent.kind == AgentKind::Plan {
+        session.persist_plan_phase().await;
+    }
 }
 
 #[cfg(test)]

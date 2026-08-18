@@ -25,8 +25,9 @@ pub mod clean;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
-use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::chat::ChatView;
@@ -74,19 +75,13 @@ fn next_state(k: &KeyEvent, active: bool, keymap: &KeyBindings) -> (bool, bool) 
 /// enter/exit side effects. Returns `true` if the key was consumed (the
 /// caller should mark the frame dirty and `continue`).
 ///
-/// While an overlay (plan editor / notepad) is open (`overlay_active`), copy
-/// mode yields entirely: no toggle, no swallowing, so the overlay receives
-/// every key — otherwise Ctrl+G would be a silent dead zone (the copy chip
-/// is not rendered in those views).
-pub(crate) fn handle_key(
-    k: &KeyEvent,
-    copy_mode: &mut bool,
-    keymap: &KeyBindings,
-    overlay_active: bool,
-) -> bool {
-    if overlay_active {
-        return false;
-    }
+/// The toggle is global: it fires even while a plan-edit/notepad overlay is
+/// open — the overlay's clean full-screen view comes from
+/// `render_composer_clean` / `render_notepad_clean`, so Ctrl+G is never a
+/// dead key. While active every key is swallowed; the toggle key and `Esc`
+/// exit, and the overlay is left intact underneath (layered modality: the
+/// first Esc leaves copy mode, the next one reaches the overlay).
+pub(crate) fn handle_key(k: &KeyEvent, copy_mode: &mut bool, keymap: &KeyBindings) -> bool {
     let prev = *copy_mode;
     let (next, consumed) = next_state(k, prev, keymap);
     if consumed {
@@ -169,11 +164,41 @@ pub(crate) fn render_composer_clean(f: &mut Frame, area: Rect, input: &str) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
+/// Draw the "COPY MODE" status chip into `area`: the notepad fullscreen
+/// branch in render.rs returns before the shared status-chip pass runs, so
+/// without this copy mode over the notepad would be invisible. Minimal
+/// replica of render.rs's private `render_status_chip` styling, pinned to
+/// the last row (right-aligned) so file text at column 0 stays selectable.
+fn render_copy_chip(f: &mut Frame, area: Rect) {
+    let text = "COPY MODE: Ctrl+G/Esc";
+    let chip_w = (crate::composer::str_width(text) as u16).saturating_add(2);
+    let w = chip_w.min(area.width);
+    let chip_rect = Rect {
+        x: area.x + area.width.saturating_sub(w).saturating_sub(1),
+        y: area.bottom().saturating_sub(1),
+        width: w,
+        height: 1,
+    };
+    f.render_widget(Clear, chip_rect);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!(" {text} "),
+            Style::default()
+                .fg(Color::Black)
+                .bg(crate::theme::warn_color())
+                .add_modifier(Modifier::BOLD),
+        ))),
+        chip_rect,
+    );
+}
+
 /// Render the notepad for copy mode: the editor buffer's visual rows fill
 /// the whole `area` — no tree panel, no block/border, no line-number
 /// gutter, no cmdline row — so terminal-native selection copies pure file
 /// text. Wrapping comes from [`crate::notepad::editor::row_texts`], the
-/// same layout model the decorated editor renders from.
+/// same layout model the decorated editor renders from. A COPY MODE chip
+/// is pinned to the last row so the mode stays visible (render.rs's shared
+/// chip pass never runs for the notepad fullscreen branch).
 pub(crate) fn render_notepad_clean(f: &mut Frame, area: Rect, view: &crate::notepad::NotepadView) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -187,6 +212,7 @@ pub(crate) fn render_notepad_clean(f: &mut Frame, area: Rect, view: &crate::note
         .map(|r| Line::raw(r.trim_end_matches('\n').to_owned()))
         .collect();
     f.render_widget(Paragraph::new(lines), area);
+    render_copy_chip(f, area);
 }
 
 #[cfg(test)]
@@ -249,46 +275,35 @@ mod tests {
         );
     }
 
-    /// While an overlay (plan edit / notepad) is open, the copy-mode toggle
-    /// key must not fire: the state stays unchanged and the key passes through
-    /// so the overlay can handle it.
+    /// The toggle is global: `handle_key` has no overlay knowledge anymore,
+    /// so Ctrl+G flips copy mode on and back off even while the caller has
+    /// a plan-edit/notepad overlay open (the overlay survives underneath).
     #[test]
-    fn overlay_active_ignores_toggle_key() {
+    fn toggle_fires_even_with_overlay_open() {
         let kb = keybindings();
         let mut active = false;
-        assert!(!handle_key(&ctrl('g'), &mut active, &kb, true));
-        assert!(!active, "overlay must block the copy-mode toggle");
-
-        let mut active = true;
-        assert!(!handle_key(&ctrl('g'), &mut active, &kb, true));
-        assert!(
-            active,
-            "overlay must not toggle an already-active copy mode"
-        );
+        assert!(handle_key(&ctrl('g'), &mut active, &kb));
+        assert!(active, "toggle must fire even with an overlay open");
+        assert!(handle_key(&ctrl('g'), &mut active, &kb));
+        assert!(!active, "toggle must exit an active copy mode");
     }
 
+    /// While copy mode is active every key is swallowed (consumed, state
+    /// kept); Esc is consumed and exits — the overlay underneath stays open
+    /// and receives the *next* Esc (layered modality).
     #[test]
-    fn overlay_inactive_toggles_normally() {
-        let kb = keybindings();
-        let mut active = false;
-        assert!(handle_key(&ctrl('g'), &mut active, &kb, false));
-        assert!(active, "toggle must fire when no overlay is open");
-    }
-
-    /// With an overlay open, even an already-active copy mode must not swallow
-    /// keys — the overlay receives them (otherwise Ctrl+G is a dead zone).
-    #[test]
-    fn overlay_active_does_not_swallow_when_copy_mode_active() {
+    fn active_swallows_keys_and_esc_exits() {
         let kb = keybindings();
         let mut active = true;
-        assert!(!handle_key(&plain('x'), &mut active, &kb, true));
-        assert!(
-            active,
-            "copy mode must stay armed for after the overlay closes"
-        );
+        assert!(handle_key(&plain('x'), &mut active, &kb));
+        assert!(active, "plain keys are swallowed while copy mode is active");
         let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert!(!handle_key(&esc, &mut active, &kb, true));
-        assert!(active, "Esc must reach the overlay, not exit copy mode");
+        assert!(handle_key(&esc, &mut active, &kb));
+        assert!(!active, "Esc must be consumed and exit copy mode");
+        assert!(
+            !handle_key(&plain('x'), &mut active, &kb),
+            "exited copy mode passes keys through again"
+        );
     }
 
     // ── Render-level fixtures ─────────────────────────────────────────────
@@ -484,6 +499,40 @@ mod tests {
             assert!(
                 !all.contains(deco),
                 "decoration {deco:?} must be absent: {all:?}"
+            );
+        }
+    }
+
+    /// The notepad fullscreen branch in render.rs returns before the shared
+    /// status-chip pass, so the clean view must paint its own COPY MODE
+    /// cue — otherwise copy mode over the notepad is invisible.
+    #[test]
+    fn render_notepad_clean_shows_copy_mode_chip() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "alpha-line\nbeta-line\n").unwrap();
+        let mut view = crate::notepad::NotepadView::new(dir.path().to_path_buf());
+        view.editor.load(&dir.path().join("a.txt"));
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal
+            .draw(|f| render_notepad_clean(f, f.area(), &view))
+            .unwrap();
+        let rows = buf_rows(terminal.backend().buffer());
+        assert!(
+            rows[7].contains("COPY MODE: Ctrl+G/Esc"),
+            "last row must carry the COPY MODE chip: {:?}",
+            rows[7]
+        );
+        assert!(
+            rows[0].starts_with("alpha-line"),
+            "file text must stay flush at column 0: {:?}",
+            rows[0]
+        );
+        let all = rows.concat();
+        for deco in ['\u{250c}', '\u{2514}', '\u{2502}'] {
+            assert!(
+                !all.contains(deco),
+                "chip must not reintroduce chrome {deco:?}: {all:?}"
             );
         }
     }

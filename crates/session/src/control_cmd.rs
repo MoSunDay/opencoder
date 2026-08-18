@@ -102,7 +102,11 @@ pub async fn apply(
             if let Some(a) = resolve_agent(name) {
                 session.agent = a;
                 if name == "plan" {
-                    session.plan_input_count = 0;
+                    // Fresh plan phase: drop the counter AND any snapshot
+                    // captured in a previous phase, then persist the reset so
+                    // a resumed session does not inherit stale arming.
+                    session.reset_plan_phase();
+                    session.persist_plan_phase().await;
                 }
                 persist_agent(session, name).await?;
                 on_event(SessionEvent::AgentSwitch(name.clone()));
@@ -203,6 +207,11 @@ async fn persist_clear(session: &SessionState) -> Result<()> {
                     handoff_plan: session.handoff_plan.clone(),
                     clear_summary: true,
                     clear_skill: true,
+                    // The plan phase ended at this boundary: the snapshot was
+                    // consumed (or the sentinel path never had one) and the
+                    // counter reset in `after_handoff` — mirror both.
+                    clear_plan_snapshot: true,
+                    plan_input_count: Some(session.plan_input_count as i64),
                     updated_at: Some(now_ms()),
                     ..Default::default()
                 },

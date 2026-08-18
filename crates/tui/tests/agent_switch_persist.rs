@@ -123,6 +123,10 @@ async fn switch_and_start_handoff_persists_act_mode() {
         Message::user("u1", "implement feature X"),
         assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
     ];
+    // A real plan phase delivered one requirement to the plan agent: the
+    // worker's plan-provenance gate requires `plan_input_count > 0` before it
+    // folds the transcript into a handoff.
+    sess.plan_input_count = 1;
 
     let quit = process_cmd(
         UiCmd::SwitchAndStart("act".into(), "".into()),
@@ -214,7 +218,8 @@ async fn switch_and_start_without_plan_persists_skill_clear() {
         .await
         .unwrap();
 
-    // No assistant text -> handoff() finds no plan -> fallback branch.
+    // No plan-phase input (gate skips handoff) and no assistant text
+    // (handoff() would find no plan either way) -> fallback branch.
     let mock = Arc::new(MockChatClient::new().push_script(vec![text_done("ok")]));
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
     let mut sess = SessionState::new(

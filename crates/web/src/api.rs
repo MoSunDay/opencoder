@@ -53,6 +53,8 @@ pub async fn create_session(
         skill: None,
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     };
     if let Err(e) = state.store.create_session(&meta).await {
         return error_500(format!("create_session: {e:#}"));
@@ -294,6 +296,8 @@ async fn ensure_session_row(
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .map_err(|e| format!("create_session: {e:#}"))

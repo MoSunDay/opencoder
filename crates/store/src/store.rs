@@ -76,6 +76,20 @@ pub trait Store: Send + Sync {
     async fn unpromote_inputs(&self, _session_id: &str, _seqs: &[i64]) -> Result<()> {
         Ok(())
     }
+    /// Mark promoted inputs as durably consumed (recorded into the transcript
+    /// or applied as a control command). Idempotent. Best-effort callers may
+    /// ignore errors: an unmarked row is recoverable by
+    /// [`recover_orphan_inputs`]. Default no-op so test fakes keep compiling.
+    async fn mark_inputs_recorded(&self, _session_id: &str, _seqs: &[i64]) -> Result<()> {
+        Ok(())
+    }
+    /// Recover orphaned inputs (promoted but never recorded, e.g. after a
+    /// crash or hard-cancel between promote and consume) back to pending so
+    /// the next drain re-claims them. Idempotent; returns the number of
+    /// recovered rows. Default no-op returning 0 so test fakes keep compiling.
+    async fn recover_orphan_inputs(&self, _session_id: &str) -> Result<u64> {
+        Ok(0)
+    }
     /// Delete a pending input by its row id. Used by the TUI queue panel
     /// to let users remove a queued/steered prompt before it's consumed.
     async fn delete_input(&self, input_id: i64) -> Result<()>;

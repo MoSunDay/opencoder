@@ -39,6 +39,8 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         skill: None,
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     };
     store.create_session(&meta).await.unwrap();
 }
@@ -234,7 +236,7 @@ async fn v5_to_v6_migration_adds_display_text() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 9, "schema version must be 9 (latest) after v5 migration");
+        assert_eq!(v, 10, "schema version must be 10 (latest) after v5 migration");
     }
     let again = store2.pending_inputs("s1", Delivery::Queue).await.unwrap();
     assert_eq!(again.len(), 2, "re-open keeps data intact");

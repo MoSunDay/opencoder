@@ -194,6 +194,16 @@ impl Store for LibsqlStore {
         let conn = self.conn().await?;
         inputs::unpromote(&conn, session_id, seqs).await
     }
+    async fn mark_inputs_recorded(&self, session_id: &str, seqs: &[i64]) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        inputs::mark_recorded(&conn, session_id, seqs).await
+    }
+    async fn recover_orphan_inputs(&self, session_id: &str) -> Result<u64> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        inputs::recover_orphans(&conn, session_id).await
+    }
     async fn delete_input(&self, input_id: i64) -> Result<()> {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;

@@ -70,9 +70,11 @@ pub async fn promote(
         drop(rows);
         let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
         for s in &seqs {
+            // recorded is reset on (re)promotion: a row recovering from an
+            // orphaned promote (see recover_orphans) starts unconsumed again.
             let n = conn
                 .execute(
-                    "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+                    "UPDATE session_inputs SET promoted_seq = ?, recorded = 0 WHERE seq = ?",
                     params![promoted_seq, s],
                 )
                 .await?;
@@ -103,6 +105,40 @@ pub async fn unpromote(conn: &Connection, session_id: &str, seqs: &[i64]) -> Res
         Ok::<_, anyhow::Error>(())
     })
     .await
+}
+
+/// Mark promoted inputs as durably consumed (recorded into the transcript or
+/// applied as a control command). Idempotent. Best-effort callers may ignore
+/// errors: an unmarked row is recoverable by [`recover_orphans`].
+pub async fn mark_recorded(conn: &Connection, session_id: &str, seqs: &[i64]) -> Result<()> {
+    if seqs.is_empty() {
+        return Ok(());
+    }
+    super::tx::run_tx(conn, "BEGIN", || async move {
+        for s in seqs {
+            conn.execute(
+                "UPDATE session_inputs SET recorded = 1 WHERE session_id = ? AND seq = ?",
+                params![session_id, s],
+            )
+            .await
+            .context("mark input recorded")?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+}
+
+/// Recover orphaned inputs: rows promoted but never recorded (crash or
+/// hard-cancel between promote and consume). Flip them back to pending so the
+/// next drain re-claims them. Idempotent. Returns the number of recovered rows.
+pub async fn recover_orphans(conn: &Connection, session_id: &str) -> Result<u64> {
+    conn.execute(
+        "UPDATE session_inputs SET promoted_seq = NULL, recorded = 0 \
+         WHERE session_id = ? AND promoted_seq IS NOT NULL AND recorded = 0",
+        params![session_id],
+    )
+    .await
+    .context("recover orphan inputs")
 }
 
 /// Promote exactly one (oldest) queued input. Returns its seq, or None if none pending.

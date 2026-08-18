@@ -120,6 +120,8 @@ async fn seed_session(store: &Arc<dyn Store>) {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -287,6 +289,8 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -437,6 +441,8 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_tail_reminder() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -522,6 +528,8 @@ async fn skill_only_empty_prompt_records_user_trigger_message() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -599,6 +607,8 @@ async fn image_only_turn_with_skill_records_both_user_image_and_trigger() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
         .unwrap();

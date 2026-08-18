@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   handoff_plan TEXT,
   skill        TEXT,
   task_type    TEXT NOT NULL DEFAULT 'parent',
-  requirement  TEXT
+  requirement  TEXT,
+  plan_snapshot TEXT,
+  plan_input_count INTEGER NOT NULL DEFAULT 0
 )";
 const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (
@@ -57,7 +59,8 @@ CREATE TABLE IF NOT EXISTS session_inputs (
   images_json  TEXT NOT NULL DEFAULT '[]',
   display_text TEXT,
   admitted_seq INTEGER NOT NULL,
-  promoted_seq INTEGER
+  promoted_seq INTEGER,
+  recorded     INTEGER NOT NULL DEFAULT 0
 )";
 const CREATE_EVENTS: &str = "\
 CREATE TABLE IF NOT EXISTS session_events (
@@ -300,6 +303,37 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         conn.execute(CREATE_TODO_EVENTS, ()).await?;
         conn.execute(CREATE_INDEX_TODO_STATUS, ()).await?;
         conn.execute(CREATE_INDEX_TODO_EVENTS, ()).await?;
+    }
+    if from < 10 {
+        // v10: plan-phase persistence. `plan_snapshot` preserves the final
+        // plan text across compaction so plan->act handoff still finds it;
+        // `plan_input_count` re-arms plan-phase affordances after resume.
+        add_column_if_absent(conn, "sessions", "plan_snapshot", "TEXT").await?;
+        add_column_if_absent(
+            conn,
+            "sessions",
+            "plan_input_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .await?;
+    }
+    if from < 10 {
+        // v10: `recorded` marks a promoted input as durably consumed (written
+        // into the transcript or applied as a control command). A promoted row
+        // with recorded=0 is an orphan (crash / hard-cancel between promote
+        // and consume) that `recover_orphan_inputs` can flip back to pending.
+        add_column_if_absent(conn, "session_inputs", "recorded", "INTEGER NOT NULL DEFAULT 0")
+            .await?;
+        // One-time backfill: rows already promoted when the column lands
+        // predate the marker and are historical audit rows already reflected
+        // in the transcript, so treat them as consumed. Pending rows keep
+        // recorded=0.
+        conn.execute(
+            "UPDATE session_inputs SET recorded = 1 WHERE promoted_seq IS NOT NULL AND recorded = 0",
+            (),
+        )
+        .await
+        .context("backfill recorded")?;
     }
     Ok(())
 }

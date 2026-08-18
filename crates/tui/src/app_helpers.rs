@@ -87,7 +87,7 @@ pub(crate) async fn initial_chat_view(
     session: &SessionState,
     store: &Arc<dyn Store>,
 ) -> crate::chat::ChatView {
-    if !session.messages.is_empty() {
+    let mut view = if !session.messages.is_empty() {
         crate::session_ui::replay_into_chat(
             &session.agent.name,
             &session.messages,
@@ -100,7 +100,14 @@ pub(crate) async fn initial_chat_view(
             agent: crate::terminal_text::sanitize_single_line(&session.agent.name).into_owned(),
             ..Default::default()
         }
+    };
+    // Re-arm `plan_submitted` from the persisted plan-phase counter so the
+    // plan→act handoff survives a restart (`--continue` / `--session`).
+    // Mirrors the /task session-switch path in app_task::switch_session.
+    if session.agent.name == "plan" && session.plan_input_count > 0 {
+        view.plan_submitted = true;
     }
+    view
 }
 
 /// Pre-`handle_key` intercepts that run while no modal is open: Esc or Ctrl+L

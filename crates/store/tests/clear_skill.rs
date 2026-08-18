@@ -26,6 +26,8 @@ fn meta(id: &str) -> SessionMeta {
         skill: Some("reviewer".into()),
         task_type: None,
         requirement: None,
+        plan_snapshot: None,
+        plan_input_count: 0,
     }
 }
 

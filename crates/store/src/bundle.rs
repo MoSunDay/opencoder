@@ -44,6 +44,11 @@ pub async fn export_bundle(store: &dyn Store, session_id: &str) -> Result<Sessio
 
     let messages = store.load_messages(session_id).await?;
     let events = store.events_after(session_id, 0).await?;
+    // Orphaned (promoted-but-unrecorded) rows are invisible to
+    // `pending_inputs`; recover first so the bundle exports them instead of
+    // silently dropping them. Best-effort — an export of a live session may
+    // race an active drain either way.
+    let _ = store.recover_orphan_inputs(session_id).await;
     let steer_inputs = store.pending_inputs(session_id, Delivery::Steer).await?;
     let queue_inputs = store.pending_inputs(session_id, Delivery::Queue).await?;
     let mut inputs = steer_inputs;
@@ -251,6 +256,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             },
             messages: vec![msg],
             events: vec![],
@@ -339,6 +346,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             },
             messages: vec![Message::user("u1", "hi"), Message::assistant("a1")],
             events: vec![],
@@ -397,6 +406,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             },
             messages: vec![],
             events: vec![],
@@ -421,6 +432,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             },
             messages: vec![],
             events: vec![],
@@ -534,6 +547,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             },
             messages: vec![Message::user("u1", "hi"), Message::assistant("a1")],
             events: vec![SessionEventRecord {

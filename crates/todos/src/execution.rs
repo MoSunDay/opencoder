@@ -136,6 +136,8 @@ pub async fn prepare_session(
             skill: None,
             task_type: Some(TASK_TYPE_TODO.into()),
             requirement: Some(todo.instructions.clone()),
+            plan_snapshot: None,
+            plan_input_count: 0,
         })
         .await
 }

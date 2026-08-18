@@ -203,8 +203,9 @@ pub async fn resume(
         summary_images,
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
-        plan_input_count: 0,
         requirement: meta.requirement.clone(),
+        plan_snapshot: meta.plan_snapshot.clone(),
+        plan_input_count: meta.plan_input_count.max(0) as usize,
         question_hub: crate::QuestionHub::new(),
     };
     Ok(s)

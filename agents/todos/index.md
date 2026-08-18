@@ -1,4 +1,4 @@
-Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
+Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 
 # todos 模块
 
@@ -29,7 +29,8 @@ Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
 4. dispatch 前先创建 TODO Session 并原子写入 active Session 引用；一个批次中的 TODO 通过 `JoinSet` 并发执行。批结果逐项应用：执行错误经 `transitions::execution_failed` 落 NeedsRevision/Failed/Interrupted 并提交，兄弟 TODO 结果恒持久化，仅致命（转换/提交失败）错误挂起整个 run。
 5. 子 Session 只收到当前 TODO、必要恢复摘要和工具合同，产出结构化 Candidate；解析器接受纯 JSON 或全文中唯一一个完整 JSON fence，并拒绝多个 fence 或未 fenced 的外围说明，工具门禁从事件记录独立计算。
 6. 父 Session 验收 Candidate。通过后推进依赖；修订时选择 resume/fork；回退时推进 world epoch 并失效里程碑后的状态。
-7. interrupt 或运行错误持久化为 `suspended`；resume 先把中断中的 TODO 归约为可恢复状态，再继续父决策循环。
+7. interrupt 或运行错误持久化为 `suspended`；resume 先把中断中的 TODO 归约为可恢复状态，再继续父决策循环；`resume` 拒绝 `status==Running` 的工作流防双驱动（错误信息含 `opencoder todos interrupt <id>` 接管指引）。
+8. 容错硬化：非 Running 状态的迟到结果（外部中断/同批 rewind 后）记日志丢弃不炸整轮；父决策 JSON 解析失败或 dispatch 校验失败时限次纠错重问（同 session，超限 suspend/bail）；`validate_spec` 在提交期校验每个 todo 的 agent 可解析、is_primary、非 workflow（原在执行期）。
 
 ## 依赖与接口
 

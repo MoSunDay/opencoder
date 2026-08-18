@@ -207,8 +207,13 @@ pub(crate) async fn handle_switch_agent(
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
     // Optimistically reflect the switch so the status chip is correct even if
     // AgentSwitch is dropped under channel pressure. Covers non-turning switches
-    // (Alt+Tab) that emit no TurnDone to reconcile against.
-    chat.agent = crate::terminal_text::sanitize_single_line(&name).into_owned();
+    // (Alt+Tab) that emit no TurnDone to reconcile against. Folding the full
+    // switch (not just copying the name) also collapses a stale
+    // `plan_submitted` synchronously — the second tap of a rapid Shift+Tab
+    // act→plan→act double-tap then takes the pure-switch branch below instead
+    // of firing a bogus handoff off an `AgentSwitch("plan")` event that has
+    // not yet round-tripped back to the UI.
+    chat.fold_agent_switch(&name);
     if !no_handoff && plan_to_act && chat.plan_submitted {
         // Idle: handoff immediately, carrying any input text.
         let extra = std::mem::take(input);

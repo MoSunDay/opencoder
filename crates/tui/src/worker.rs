@@ -294,12 +294,15 @@ pub async fn process_cmd(
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 // Mirror control_cmd::apply: switching to plan resets the
-                // plan-input counter so the "submit your plan" reminder logic
-                // starts from a fresh phase. Without this the TUI key-handler
-                // path (Alt+Tab / Ctrl+T) inherited a stale nonzero count,
-                // unlike the `/plan` slash-command path.
+                // plan phase (input counter + snapshot) so the "submit your
+                // plan" reminder logic starts fresh. Without this the TUI
+                // key-handler path (Alt+Tab / Ctrl+T) inherited a stale
+                // nonzero count, unlike the `/plan` slash-command path. The
+                // reset is persisted so a resume does not re-arm stale
+                // plan-phase state.
                 if name == "plan" {
-                    sess.plan_input_count = 0;
+                    sess.reset_plan_phase();
+                    sess.persist_plan_phase().await;
                 }
                 let ev = SessionEvent::AgentSwitch(name.clone());
                 persist_event(&sess.store, &sess.id, &ev).await;
@@ -325,7 +328,34 @@ pub async fn process_cmd(
             // from only the final plan, not the full read-only planning noise.
             // Mirrors compaction — in-memory mutation + TranscriptReset so the
             // UI rebuilds clean; the append-only store keeps the raw history.
-            if let Some(plan_display) = opencoder_session::plan_handoff::handoff(sess, &extra) {
+            //
+            // Plan-provenance gate (defense-in-depth, mirrors the ClearContext
+            // gate in control_cmd::apply): only a session that recorded real
+            // plan-mode input in this phase (`plan_input_count > 0`; every
+            // delivery path increments it via `maybe_tag_plan_prompt`, and it
+            // resets on entering plan / handoff / resume) may fold its
+            // transcript. The UI-side `plan_submitted` flag is sticky across a
+            // plan→act handoff and can be stale when a rapid Shift+Tab
+            // act→plan→act double-tap queues `SwitchAndStart` before the UI
+            // folds the interleaved `AgentSwitch("plan")`; `handoff`'s
+            // "last non-empty assistant text" extraction would then fabricate
+            // a plan out of the act-mode answer, wipe the transcript, and
+            // persist a `handoff_seq` resume boundary that irrecoverably
+            // drops all context. Gate failure degrades to a pure switch: no
+            // handoff, no TranscriptReset/PlanHandoff, no handoff_seq write —
+            // the skill clear and the empty turn below still run so the UI's
+            // TurnDone protocol is honored.
+            let plan_display = if sess.plan_input_count > 0 {
+                opencoder_session::plan_handoff::handoff(sess, &extra)
+            } else {
+                let ev = SessionEvent::Status(
+                    "handoff skipped \u{2014} no plan input this phase; context preserved".into(),
+                );
+                let _ = sink.push(&ev);
+                forward_event(&ui_tx, ev);
+                None
+            };
+            if let Some(plan_display) = plan_display {
                 // Persist the handoff boundary so resume reconstructs the
                 // focused post-handoff transcript (mirrors compaction).
                 if let Some(store) = &sess.store {
@@ -336,6 +366,12 @@ pub async fn process_cmd(
                                 handoff_seq: sess.handoff_seq,
                                 handoff_plan: sess.handoff_plan.clone(),
                                 clear_skill: true,
+                                // The plan phase ended: the snapshot was
+                                // consumed and the counter reset by the
+                                // handoff — mirror both so resume starts
+                                // the act phase un-armed.
+                                clear_plan_snapshot: true,
+                                plan_input_count: Some(sess.plan_input_count as i64),
                                 updated_at: Some(now_ms()),
                                 ..Default::default()
                             },

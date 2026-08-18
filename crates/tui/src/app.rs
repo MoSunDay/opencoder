@@ -297,7 +297,7 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
-                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap, plan_edit.is_some() || notepad.is_some()) { dirty = true; render_pending = true; continue; }
+                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -584,11 +584,15 @@ pub(super) async fn run_app(
                                 if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(text.trim()) { chat.pending_plan_arm = true; }
                                 let raw = text.trim().to_string();
                                 if !raw.is_empty() {
-                                    steer_fire::admit_keyboard_steer(
+                                    let seq = steer_fire::admit_keyboard_steer(
                                         &store, &session_id, &raw, &raw,
                                         &mut pending_images, &mut chat,
                                     )
                                     .await;
+                                    // Store failure must not vanish silently; ↑ history still holds the text.
+                                    if let Some(flash) = steer_fire::flash_on_admit_failure(seq) {
+                                        mode_flash = Some((flash.to_string(), anim_tick));
+                                    }
                                 }
                                 push_history(&mut history, &mut hist_idx, &text);
                                 // Enter admits without interrupting (`>` interrupts instead).

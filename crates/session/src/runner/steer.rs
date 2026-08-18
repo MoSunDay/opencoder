@@ -34,42 +34,59 @@ pub(super) async fn cancel_guard(token: Option<CancellationToken>) {
 /// `admitted_seq` (a different column scoped per session). No-op when no store
 /// is attached or none pending. Idempotent (promote only touches NULL
 /// promoted_seq).
+///
+/// Split cancel semantics, mirroring `claim_one_queued`: the read-only
+/// `pending_inputs` poll IS cancel-guarded (a contended db_lock must not block
+/// the hard cancel, and abandoning a read is harmless -- the rows stay
+/// pending). The mutating `promote_inputs` is NOT raced with cancel:
+/// `promote_inputs` runs BEGIN -> UPDATE promoted_seq -> COMMIT in a manual
+/// transaction, and a biased select dropping that future mid-transaction could
+/// leave the UPDATE already committed while we return empty -- the rows would
+/// be permanently promoted (invisible to future `promoted_seq IS NULL`
+/// queries) yet never claimed: permanent data loss. So promote always runs to
+/// completion once a non-empty pending read returns; the run loop picks up the
+/// cancel at its next boundary.
 pub(super) async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String, Vec<String>)> {
     let Some(store) = session.store.clone() else {
         return Vec::new();
     };
     let sid = session.id.clone();
-    // Snapshot the hard cancel token so we can race the DB op without holding a
+    // Snapshot the hard cancel token so we can race the read without holding a
     // borrow on `session` across the `select!`.
     let hard = session.cancel.clone();
-    tokio::select! {
+    // Read-only poll, cancel-guarded: on hard cancel we abandon only the read
+    // -- nothing has been mutated, so the rows remain pending and recoverable.
+    let pending = tokio::select! {
         biased;
         _ = cancel_guard(hard) => Vec::new(),
-        v = async {
-            let pending = match store.pending_inputs(&sid, Delivery::Steer).await {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(error = %e, "claim_steers: pending_inputs failed");
-                    return Vec::new();
-                }
-            };
-            if pending.is_empty() {
-                return Vec::new();
+        v = store.pending_inputs(&sid, Delivery::Steer) => match v {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(error = %e, "claim_steers: pending_inputs failed");
+                Vec::new()
             }
-            let max_seq = pending.iter().map(|i| i.admitted_seq).max().unwrap_or(0);
-            let promoted_seqs = match store
-                .promote_inputs(&sid, max_seq, Delivery::Steer)
-                .await
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(error = %e, "claim_steers: promote_inputs failed");
-                    return Vec::new();
-                }
-            };
-            match_promoted(&pending, &promoted_seqs)
-        } => v,
+        },
+    };
+    if pending.is_empty() {
+        return Vec::new();
     }
+    // No cancel-guard here. promote_inputs runs BEGIN -> UPDATE promoted_seq
+    // -> COMMIT; racing the hard cancel via a biased select could drop the
+    // future mid-COMMIT, leaving the rows permanently promoted (invisible to
+    // future queries) yet never claimed -- permanent data loss. Abandoning the
+    // read above can only ever leave rows PENDING, never promoted-but-unclaimed.
+    let max_seq = pending.iter().map(|i| i.admitted_seq).max().unwrap_or(0);
+    let promoted_seqs = match store
+        .promote_inputs(&sid, max_seq, Delivery::Steer)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "claim_steers: promote_inputs failed");
+            return Vec::new();
+        }
+    };
+    match_promoted(&pending, &promoted_seqs)
 }
 
 /// Match promoted PK seqs to their authoritative input data by identity.
@@ -269,5 +286,42 @@ mod tests {
             steers.is_empty(),
             "already-promoted steer must not be re-claimed"
         );
+    }
+
+    #[tokio::test]
+    async fn pre_fired_hard_cancel_leaves_steer_pending_not_lost() {
+        let (mut session, store, _token) = session_with_pending().await;
+        // Attach the hard cancel token (the fixture only wires turn_cancel),
+        // then pre-fire it BEFORE claim_steers runs. With a biased select the
+        // pre-fired cancel wins the race against the pending_inputs read: the
+        // read is abandoned and claim_steers returns empty. The invariant this
+        // pins down: abandoning can only ever leave rows PENDING -- promote
+        // never runs, so the row is still visible to future
+        // `promoted_seq IS NULL` queries and recoverable. It must NEVER end up
+        // promoted-but-unclaimed (silently lost), which the old shape risked by
+        // racing promote_inputs against the cancel inside the same select.
+        session = session.with_cancel(CancellationToken::new());
+        session.cancel.as_ref().unwrap().cancel();
+
+        let steers = claim_steers(&mut session).await;
+        assert!(
+            steers.is_empty(),
+            "pre-fired hard cancel must abandon the read and claim nothing"
+        );
+
+        let still_pending = store
+            .pending_inputs(&session.id, Delivery::Steer)
+            .await
+            .unwrap();
+        assert_eq!(
+            still_pending.len(),
+            1,
+            "steer row must remain pending (recoverable), not lost"
+        );
+        assert!(
+            still_pending[0].promoted_seq.is_none(),
+            "row must keep promoted_seq NULL so a later claim_steers can still pick it up"
+        );
+        assert_eq!(still_pending[0].prompt, "interrupt!");
     }
 }

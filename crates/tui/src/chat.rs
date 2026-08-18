@@ -157,20 +157,7 @@ impl ChatView {
                     });
                 }
             }
-            SessionEvent::AgentSwitch(to) => {
-                self.finalize_assistant();
-                self.agent = sanitize_single_line(to).into_owned();
-                if to == "plan" {
-                    // A compound `/plan <content>` submitted from act mode arms
-                    // the handoff *deferred*: the switch event that lands here
-                    // otherwise resets `plan_submitted`, so re-arm it from the
-                    // pending flag the submit path left behind. Consume the
-                    // flag on every switch so a stale arm can never re-arm a
-                    // later plan-mode entry.
-                    self.plan_submitted = self.pending_plan_arm;
-                }
-                self.pending_plan_arm = false;
-            }
+            SessionEvent::AgentSwitch(to) => self.fold_agent_switch(to),
             SessionEvent::ModelSwitch(m) => {
                 self.finalize_assistant();
                 // Strip a provider prefix defensively so the marker shows the
@@ -315,6 +302,31 @@ impl ChatView {
                 self.status = format!("autopilot: {:?} #{}", phase, iteration);
             }
         }
+    }
+
+    /// Fold an agent switch into the view state: finalize any open assistant
+    /// block, reflect the new agent, and re-derive `plan_submitted` for plan
+    /// entries (consuming `pending_plan_arm` so a stale arm can never re-arm
+    /// a later plan-mode entry).
+    ///
+    /// Split out of the `AgentSwitch` event arm so the optimistic switch path
+    /// (`app_loop::handle_switch_agent`) can fold synchronously at flip time.
+    /// Without that, `plan_submitted` stays stale-true across a rapid
+    /// Shift+Tab act→plan→act double-tap until the worker's `AgentSwitch`
+    /// event round-trips back to the UI — and a second tap inside that window
+    /// would fire a bogus plan→act handoff that drains the input box and
+    /// collapses the transcript around a fabricated plan.
+    pub fn fold_agent_switch(&mut self, to: &str) {
+        self.finalize_assistant();
+        self.agent = sanitize_single_line(to).into_owned();
+        if to == "plan" {
+            // A compound `/plan <content>` submitted from act mode arms
+            // the handoff *deferred*: the switch that lands here otherwise
+            // resets `plan_submitted`, so re-arm it from the pending flag
+            // the submit path left behind.
+            self.plan_submitted = self.pending_plan_arm;
+        }
+        self.pending_plan_arm = false;
     }
 
     /// Record that a user requirement was delivered to the current agent.

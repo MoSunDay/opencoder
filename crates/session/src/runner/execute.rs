@@ -36,6 +36,19 @@ enum TaskSignal {
 /// not expected to fire in normal operation.
 pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// Extract a human-readable message from a caught panic payload
+/// (`Box<dyn Any + Send>`). Panics are typically constructed from `&str` or
+/// `String`; anything else degrades to a generic note.
+pub(super) fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(m) = payload.downcast_ref::<&'static str>() {
+        (*m).to_string()
+    } else if let Some(m) = payload.downcast_ref::<String>() {
+        m.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
 pub(super) async fn execute_call(
     tc: &CompletedToolCall,
     session: &SessionState,
@@ -629,6 +642,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             })
             .await
             .unwrap();
@@ -649,6 +664,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             })
             .await
             .unwrap();
@@ -727,6 +744,8 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
+                plan_snapshot: None,
+                plan_input_count: 0,
             })
             .await
             .unwrap();

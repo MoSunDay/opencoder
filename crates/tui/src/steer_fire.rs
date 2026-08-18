@@ -60,6 +60,20 @@ pub(crate) async fn admit_keyboard_steer(
     Some(seq)
 }
 
+/// Flash shown when a keyboard steer submit fails at the store layer.
+/// Mirrors `queue_admitter::apply_done`'s failure flash; the raw text stays
+/// recoverable via ↑ history because `push_history` runs on every submit.
+pub(crate) const STEER_SUBMIT_FAILED_FLASH: &str =
+    "⚠ steer submit failed — recover text with ↑ history";
+
+/// Map an admit outcome to the failure flash (None on success).
+pub(crate) fn flash_on_admit_failure(seq: Option<i64>) -> Option<&'static str> {
+    match seq {
+        Some(_) => None,
+        None => Some(STEER_SUBMIT_FAILED_FLASH),
+    }
+}
+
 /// Resolve the steer action and fire the appropriate interrupt.
 ///
 /// Returns the resolved [`steer_dispatch::Action`] so the caller can handle
@@ -532,5 +546,20 @@ mod tests {
             chat.steer_items.is_empty(),
             "steer panel must not be mutated on store failure"
         );
+    }
+
+    // F4 seam: a None admit outcome must map to a non-empty failure flash
+    // (never a silent drop); a successful seq maps to None (no flash).
+    #[test]
+    fn flash_on_admit_failure_none_on_success() {
+        assert_eq!(flash_on_admit_failure(Some(7)), None);
+    }
+
+    #[test]
+    fn flash_on_admit_failure_some_on_store_failure() {
+        let flash = flash_on_admit_failure(None).expect("failure must produce a flash");
+        assert!(!flash.is_empty());
+        assert!(flash.contains("steer"), "flash must name the steer path");
+        assert_eq!(flash, STEER_SUBMIT_FAILED_FLASH);
     }
 }

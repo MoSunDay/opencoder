@@ -53,6 +53,10 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
         assistant_with_text("a1", "let me explore the codebase first..."),
         assistant_with_text("a2", "## Plan\n1. do X\n2. do Y"),
     ];
+    // A real plan phase delivered one requirement to the plan agent: the
+    // worker's plan-provenance gate requires `plan_input_count > 0` before it
+    // folds the transcript into a handoff.
+    session.plan_input_count = 1;
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
     let quit = process_cmd(
@@ -248,6 +252,10 @@ async fn switch_and_start_appends_input_to_plan_handoff() {
         Message::user("u1", "implement feature X"),
         assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
     ];
+    // A real plan phase delivered one requirement to the plan agent: the
+    // worker's plan-provenance gate requires `plan_input_count > 0` before it
+    // folds the transcript into a handoff.
+    session.plan_input_count = 1;
 
     let extra = "Don't forget to add tests for the new module.";
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
@@ -334,6 +342,10 @@ async fn switch_and_start_clears_skill_prompt() {
         Message::user("u1", "implement feature X"),
         assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
     ];
+    // A real plan phase delivered one requirement to the plan agent: the
+    // worker's plan-provenance gate requires `plan_input_count > 0` before it
+    // folds the transcript into a handoff.
+    session.plan_input_count = 1;
 
     let (tx, _rx) = mpsc::channel::<UiEvent>(64);
     let quit = process_cmd(

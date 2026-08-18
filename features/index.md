@@ -1,4 +1,4 @@
-Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
+Commit: a3b194219b48609bbb078ffd214da477d626bdf4
 
 # OpenCoder 能力地图
 
@@ -12,6 +12,7 @@ OpenCoder 当前提供以下用户/调用方可感知的能力。每项链接到
 - **`/envs` 环境配置管理**：每个环境是 `~/.opencoder/envs/<name>/` 完整配置快照（config.json + mcp/cli/skills.json，0o600），激活后插入解析链 **project > env > ~/.opencoder > XDG**；激活期间交互式编辑（`/model` 等）落进环境层（save_target 截断）。TUI `/envs` 弹窗（列表/新建/重捕获/删除）、web `/api/envs` REST、CLI `config show` stderr 提示行。详见 [changelog](changelog/2026-08-16/envs-config-management.md)。
 - **持久化 TODO 工作流**：`opencoder todos validate/run/resume/show/events/list/interrupt` 执行预编译通用 TODO 合同；父 Workflow Session 管理全局依赖、状态、并发、验收和回退，每个 TODO 使用独立 Primary Session 聚焦完成。Store 是权威状态，`--debug` 才生成可索引文件投影。详见 [TODO 工作流](todos/index.md)。
 - **plan 模式结构化提问**：模型经 `question` 工具向用户提问（仅 plan agent 注入 schema），TUI 弹出对话框（预设选项 + 自定义输入），作答作为 tool result 同轮回填驱动继续规划；headless/web 无监听时固定文案兜底不挂起。详见 [changelog](changelog/2026-08-14/plan-question-tool.md)。
+- **plan 计划跨压缩/重启存活**：plan 模式压缩前捕获计划快照 + `plan_input_count` 落库（schema v10），压缩/重启后 plan→act handoff 仍交出完整计划并重新武装溯源门。详见 [changelog](changelog/2026-08-18/plan-phase-persistence.md)。
 - **会话恢复**：CLI `--session <id>` / `--continue` / `--fork`，跨进程从 libsql 重建历史；title 由 small_model 异步生成。详见 [agents/session](../agents/session/index.md)。
 - **Session 二进制导出/导入**：`opencoder session export <id> -o <file>` 导出 session（含 subagent 树）为 `.opencoder` 二进制文件（`OPENCODR` magic）；`opencoder session import <file>` 幂等导入到新环境，`--session <id>` 可继续执行。不导出 Config（API key 安全）。详见 [agents/store](../agents/store/index.md) / [bundle changelog](changelog/2026-07-06/compact-clear-display-session-bundle.md)。
 - **模型与压缩配置化**：`providers` 命名表（`base_url/api_key/model/headers`）+ `model = "{provider}/{id}"` 选择、`small_model`、`context_limit`、`max_tokens`、`reasoning_effort`、`compaction.{auto,context_threshold,reserved,tail_turns,buffer}`、自定义 HTTP `headers`（`{ENV_VAR}` 解析）全可经 opencoder.json / 环境变量 / CLI flag 配置；压缩首轮即可由 token 估算触发。TUI `/config`（生成参数）与 `/model`（Provider CRUD + headers）分治。详见 [agents/session](../agents/session/index.md)、[agents/core](../agents/core/index.md)、[压缩提示词+token 追踪修复](changelog/2026-07-11/compaction-prompt-and-token-tracking.md)。

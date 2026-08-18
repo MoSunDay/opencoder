@@ -33,5 +33,6 @@ notepad/plan-edit overlay 打开时的按键行为变化：Ctrl+G 由"透传死�
 | `copy_mode::tests::render_notepad_clean_shows_copy_mode_chip`（新） | unit（TestBackend e2e） | 净化 notepad 末行含 "COPY MODE: Ctrl+G/Esc" chip；文件文本仍 flush 左 0 列；chip 不引入制表符 |
 | `copy_mode::tests::render_notepad_clean_shows_file_text_without_chrome`（既有，保留通过） | unit | chip 加入后旧断言（rows[0]=alpha-line、无 `┌ └ │`）不回归 |
 | `copy_mode::tests::next_state` 四件套（既有） | unit | 纯函数契约未动：toggle 翻转/活跃吞键/Esc 退出/非 toggle 透传 |
+| `render_tests::composer::full_frame_annotation_editor_copy_mode_hides_border`（新，post-hoc） | integration（TestBackend 全帧） | `/annotation` 编辑器 overlay + copy 模式全帧端到端：编辑文本 col 0 裸排、无 border/prompt glyph/编辑器标题、COPY MODE chip 仍可见——补上 `composer_copy_mode_param_early_exits_to_clean_view` 单元缝隙未覆盖的 `render` 集成面 |
 
 无 `#[ignore]` / 无弱断言；删测试均有等语义新测试接替（旧语义本身即被修复的 bug）。

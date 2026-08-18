@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, Message, Role};
-use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
+use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionState};
 use opencoder_store::{LibsqlStore, Store};
 
@@ -265,4 +265,64 @@ async fn legacy_body_without_source_prefix_is_not_injected() {
 
     assert_eq!(injected_count(&s), 0);
     assert!(!any_user_contains(&mock.requests()[0], "[skill loaded]"));
+}
+
+/// 6. Frontmatter-only skill → empty body: no marker-only `[skill loaded]`
+/// message is recorded or sent; the transient tail's path pointer remains
+/// the only trace of the skill.
+#[tokio::test]
+async fn empty_body_skill_is_not_injected() {
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
+    let (mut s, _wd) = session_on("inj-empty", "act", mock.clone());
+    s.set_skill(Some(sourced_body("/skills/e/SKILL.md", "")));
+
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    assert_eq!(injected_count(&s), 0, "no marker-only transcript message");
+    let marker = "[skill loaded] /skills/e/SKILL.md";
+    assert!(
+        !any_user_contains(&mock.requests()[0], marker),
+        "no payload injection (tail's generic marker mention excluded: {})",
+        last_user_content(&mock.requests()[0])
+    );
+    // The transient tail's path pointer remains the only trace.
+    assert!(last_user_content(&mock.requests()[0]).contains("/skills/e/SKILL.md"));
+}
+
+/// 7. End-to-end BOM frontmatter: a SKILL.md saved as UTF-8 with BOM (plus
+/// blank lines before the fence) parses its frontmatter, and only the
+/// post-fence body is injected — the `name:`/`description:` comment block
+/// never reaches the transcript or payload.
+#[tokio::test]
+async fn bom_frontmatter_end_to_end_injects_only_body() {
+    let root = tempfile::tempdir().unwrap();
+    let skill_md = root.path().join("bom-skill").join("SKILL.md");
+    std::fs::create_dir_all(skill_md.parent().unwrap()).unwrap();
+    std::fs::write(
+        &skill_md,
+        "\u{FEFF}\n\n---\nname: bom-skill\ndescription: saved with BOM\n---\nBOM-BODY-ONLY\n",
+    )
+    .unwrap();
+
+    let skill = opencoder_core::discover_in(root.path())
+        .into_iter()
+        .next()
+        .expect("skill discovered despite BOM");
+    assert_eq!(skill.body, "BOM-BODY-ONLY", "frontmatter stripped, body only");
+
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
+    let (mut s, _wd) = session_on("inj-bom", "act", mock.clone());
+    s.set_skill(Some(opencoder_core::body_with_source(&skill)));
+
+    run(&mut s, "go".into(), |_| {}).await.unwrap();
+
+    let path = skill.source.display().to_string();
+    let inj = injected(&s, &path).expect("body injected once parsed");
+    let text = inj.text();
+    assert!(text.contains("BOM-BODY-ONLY"), "{text}");
+    assert!(!text.contains("name: bom-skill"), "no frontmatter leak: {text}");
+    assert!(!text.contains("---"), "no fence leak: {text}");
+    let req = &mock.requests()[0];
+    assert!(any_user_contains(req, "BOM-BODY-ONLY"));
+    assert!(!any_user_contains(req, "name: bom-skill"));
 }

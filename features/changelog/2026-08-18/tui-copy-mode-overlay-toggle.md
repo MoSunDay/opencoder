@@ -1,4 +1,4 @@
-Commit: (working-tree, post-860831d)
+Commit: a3b194219b48609bbb078ffd214da477d626bdf4
 
 # Ctrl+G copy 模式全局 toggle 修复：overlay 打开不再是死键 + notepad 净化视图补 COPY MODE chip
 
@@ -33,6 +33,14 @@ notepad/plan-edit overlay 打开时的按键行为变化：Ctrl+G 由"透传死�
 | `copy_mode::tests::render_notepad_clean_shows_copy_mode_chip`（新） | unit（TestBackend e2e） | 净化 notepad 末行含 "COPY MODE: Ctrl+G/Esc" chip；文件文本仍 flush 左 0 列；chip 不引入制表符 |
 | `copy_mode::tests::render_notepad_clean_shows_file_text_without_chrome`（既有，保留通过） | unit | chip 加入后旧断言（rows[0]=alpha-line、无 `┌ └ │`）不回归 |
 | `copy_mode::tests::next_state` 四件套（既有） | unit | 纯函数契约未动：toggle 翻转/活跃吞键/Esc 退出/非 toggle 透传 |
-| `render_tests::composer::full_frame_annotation_editor_copy_mode_hides_border`（新，post-hoc） | integration（TestBackend 全帧） | `/annotation` 编辑器 overlay + copy 模式全帧端到端：编辑文本 col 0 裸排、无 border/prompt glyph/编辑器标题、COPY MODE chip 仍可见——补上 `composer_copy_mode_param_early_exits_to_clean_view` 单元缝隙未覆盖的 `render` 集成面 |
+| `render_tests::composer::full_frame_annotation_editor_copy_mode_hides_border`（新，post-hoc；见下方 2026-08-19 复验） | integration（TestBackend 全帧） | `/annotation` 编辑器 overlay + copy 模式全帧端到端：编辑文本 col 0 裸排、无 border/prompt glyph/编辑器标题、COPY MODE chip 仍可见——补上 `composer_copy_mode_param_early_exits_to_clean_view` 单元缝隙未覆盖的 `render` 集成面 |
 
 无 `#[ignore]` / 无弱断言；删测试均有等语义新测试接替（旧语义本身即被修复的 bug）。
+
+## Post-hoc 复验（2026-08-19）
+
+用户复报「/annotation 中 Ctrl+G 死键、边框没隐藏」。同工作树 pty 实测（tmux + `target/debug/opencoder tui`）**无法复现**：`/annotation` 编辑器内 Ctrl+G 正常进出 copy 模式、边框隐藏、文本 col 0 裸排。根因不在源码，而在**部署**：PATH 上两个 shim（`/usr/local/bin/opencoder` 与 `~/.cargo/bin/opencoder`，后者即 `opencode` 符号链接目标）均为修复提交 a3b1942 之前的陈旧构建（23:10 < 23:21:42），旧版 `handle_key` 仍带 `overlay_active` 死键守卫。处置：
+
+- `cargo clean --release` + `cargo build --release`（根包 `opencoder` 产出二进制；注意 `-p opencoder-cli` 只构建 lib 不重链 bin），版本串核对为 `a3b1942-dirty` 后经临时文件 + `mv -f` 原子替换两个 shim（绕开 ETXTBSY，不打扰在跑会话）。装后 pty 复测 `/annotation` + Ctrl+G 通过，`:wq` 退出正常。在跑的旧会话持有旧 inode，需重启 TUI/ts 会话才能用上新二进制。
+- 本表 `full_frame_annotation_editor_copy_mode_hides_border` 在 a3b1942 中**漏加**（changelog 先行、代码未落），本轮补齐于 `crates/tui/src/render_tests/composer.rs`，断言与表中描述一致（代码已随并行会话提交 285d7a8 落盘）。
+- 遗留教训（已具备检索价值）：改完源码必须重建**根包**并核对 `--version` 提交哈希，再替换 PATH shim；版本哈希来自 `crates/core/build.rs` 编译期捕获，陈旧 rlib 会带着旧哈希（必要时 `touch crates/core/build.rs` 或 clean 强制刷新）。

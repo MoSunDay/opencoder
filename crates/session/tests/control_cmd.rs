@@ -248,6 +248,9 @@ async fn clear_context_survives_resume() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = msgs.clone();
+    // Phase-bounded snapshot `record` would have captured for the plan-mode
+    // assistant output.
+    session.plan_snapshot = Some("old answer".into());
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
@@ -340,6 +343,7 @@ async fn clear_context_executes_preserved_result() {
     // (An act-mode session with plan_input_count == 0 takes the sentinel
     // path instead — see clear_context_regression.rs.)
     session.plan_input_count = 1;
+    session.plan_snapshot = Some("I will implement X by...".into());
 
     run(&mut session, "/act_clear_context".into(), |_| {})
         .await

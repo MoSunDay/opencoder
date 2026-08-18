@@ -12,7 +12,7 @@ pub(crate) fn tmux_bin() -> Result<PathBuf> {
     which_tmux().ok_or_else(|| {
         anyhow!(
             "tmux is not installed. Install it (e.g. `apt install tmux`) or use \
-             `opencode tui` for a non-persistent session."
+             `opencoder tui` for a non-persistent session."
         )
     })
 }

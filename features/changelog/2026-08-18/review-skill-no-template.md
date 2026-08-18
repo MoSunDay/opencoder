@@ -18,9 +18,9 @@ Commit: (working-tree, post-860831d)
 
 ## Validation（当次实跑）
 
-- `cargo test -p opencoder-core --test skill_contract`：**16 passed / 0 failed**。
-- `cargo test --workspace`：全绿（合计见下）。
-- `cargo clippy --workspace --all-targets -- -D warnings`：零警告。
+- `cargo test -p opencoder-core --test skill_contract`：**16 passed / 0 failed**（本轮变更时点；随 285d7a8 同批并入的 frontmatter 容错再 +2，HEAD 口径 18 passed）。
+- `cargo test --workspace`（HEAD 285d7a8 当次实跑，分 crate 前台汇总）：**187 套件 / 2971 passed / 0 failed**——core 253 / llm+client 147 / store 107 / session 676 / web 107 / tui 1501 / todos+cli+root 180。
+- `cargo clippy --workspace --all-targets -- -D warnings`：变更范围内（core/session/store/web）零警告；tui 报 3 处来自并发迭代未完成工作区（worker.rs dead_code + steer_fire.rs field_reassign×2），与本轮 review 资产变更无关。
 
 ## 测试覆盖表
 

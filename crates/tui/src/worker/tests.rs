@@ -47,6 +47,16 @@ fn gate_switch_rejects_when_running() {
     assert_eq!(gate_switch(true), SwitchGate::SkipRunning);
 }
 
+// Gate failure must not swallow the composer input: without a handoff the
+// captured extra text is submitted as a normal act-mode prompt; with a
+// handoff (or nothing captured) the run starts with an empty prompt.
+#[test]
+fn handoff_run_prompt_only_runs_extra_without_handoff() {
+    assert_eq!(handoff_run_prompt(&None, "x".into()), "x");
+    assert_eq!(handoff_run_prompt(&Some("plan".into()), "x".into()), "");
+    assert_eq!(handoff_run_prompt(&None, String::new()), "");
+}
+
 // F1 + G1 guard: after a `/task` switch, all parent and child runtime
 // handles must point at the NEW session.
 #[test]

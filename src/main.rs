@@ -150,7 +150,7 @@ fn join(parts: Vec<String>) -> String {
 fn require(p: &str) -> Result<()> {
     if p.is_empty() {
         return Err(anyhow::anyhow!(
-            "no prompt provided. Usage: opencode \"your prompt\"  |  opencode run \"...\""
+            "no prompt provided. Usage: opencoder \"your prompt\"  |  opencoder run \"...\""
         ));
     }
     Ok(())
@@ -173,5 +173,30 @@ async fn maybe_wrap_tui_in_tmux(cli: &Cli) -> Result<bool> {
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn require_empty_prompt_error_advertises_opencoder_usage() {
+        let err = require("").unwrap_err().to_string();
+        assert!(
+            err.contains("Usage: opencoder \"your prompt\"") && err.contains("opencoder run"),
+            "must advertise the opencoder binary name: {err}"
+        );
+        // Word-boundary: `opencoder` contains `opencode`, so assert on the
+        // trailing delimiter to prove the old bare name is gone.
+        assert!(
+            !err.contains("opencode ") && !err.contains("opencode:"),
+            "stale bare `opencode` name in usage copy: {err}"
+        );
+    }
+
+    #[test]
+    fn require_nonempty_prompt_passes() {
+        assert!(require("do the thing").is_ok());
     }
 }

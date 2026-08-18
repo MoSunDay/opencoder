@@ -21,6 +21,7 @@
 
 use crate::SessionState;
 use opencoder_core::message::now_ms;
+use opencoder_core::{AgentKind, Message, Role};
 
 impl SessionState {
     /// Reset the current plan phase: no requirements submitted, no plan
@@ -57,6 +58,24 @@ impl SessionState {
     }
 }
 
+/// Candidate plan snapshot for a recorded message: `Some(text)` when the
+/// session is in plan mode and the message is a real (non-synthetic)
+/// assistant turn carrying non-empty text — i.e. the current plan phase just
+/// produced plan content. Pure by design: `SessionState::record` applies it
+/// (and persists the mirror) so the snapshot is phase-bounded — it can only
+/// ever hold text produced while the plan agent was actually answering in
+/// this phase, never an earlier act-mode reply scraped from the transcript.
+pub fn plan_snapshot_update(kind: &AgentKind, msg: &Message) -> Option<String> {
+if *kind != AgentKind::Plan {
+return None;
+}
+if msg.role != Role::Assistant || msg.synthetic {
+return None;
+}
+let text = msg.text();
+(!text.trim().is_empty()).then_some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,6 +94,35 @@ mod tests {
             client,
             PathBuf::from("."),
         )
+    }
+
+    fn assistant_text(id: &str, text: &str) -> Message {
+        let mut m = Message::assistant(id);
+        m.blocks.push(opencoder_core::ContentBlock::text(text));
+        m
+    }
+
+    #[test]
+    fn snapshot_update_captures_plan_assistant_text() {
+        let kind = resolve_agent("plan").unwrap().kind;
+        assert_eq!(
+            plan_snapshot_update(&kind, &assistant_text("a1", "## Plan")),
+            Some("## Plan".to_string())
+        );
+    }
+
+    #[test]
+    fn snapshot_update_rejects_act_kind_user_and_synthetic() {
+        let plan = resolve_agent("plan").unwrap().kind;
+        let act = resolve_agent("act").unwrap().kind;
+        let user = Message::user("u1", "text");
+        let mut synthetic = assistant_text("a2", "summary head");
+        synthetic.synthetic = true;
+        let empty = Message::assistant("a3");
+        assert_eq!(plan_snapshot_update(&act, &assistant_text("a1", "x")), None);
+        assert_eq!(plan_snapshot_update(&plan, &user), None);
+        assert_eq!(plan_snapshot_update(&plan, &synthetic), None);
+        assert_eq!(plan_snapshot_update(&plan, &empty), None);
     }
 
     #[test]

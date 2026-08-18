@@ -50,9 +50,11 @@ async fn handoff_keeps_only_final_plan() {
         Message::user("u1", "build a foo"),
         assistant_with_text("a1", "exploring the codebase..."),
         Message::user("u2", "yes use option A"),
-        // The finalized plan — newest assistant message, must win.
+        // The finalized plan — captured phase-bounded by `record` when the
+        // assistant output landed.
         assistant_with_text("a2", "## Plan\n1. do X\n2. do Y"),
     ];
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let reset = plan_handoff::handoff(&mut session, "");
 
@@ -107,6 +109,9 @@ async fn handoff_skips_empty_assistant_turns() {
         Message::assistant("a1"),
         assistant_with_text("a2", "Final plan: ship it"),
     ];
+    // `record` captured the non-empty assistant turn (empty turns are
+    // filtered at capture time, not handoff time).
+    session.plan_snapshot = Some("Final plan: ship it".into());
 
     let reset = plan_handoff::handoff(&mut session, "");
 
@@ -127,8 +132,19 @@ async fn handoff_does_not_touch_store() {
     // `record` (which persists). handoff must collapse the in-memory transcript
     // while leaving the durable store (the jsonl/audit surface) untouched.
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let mut session = empty_session();
-    session.store = Some(store.clone());
+    // Plan agent: `record` captures the phase-bounded snapshot as it
+    // persists — the wiring the handoff now relies on.
+    let agent = resolve_agent("plan").unwrap();
+    let mock = Arc::new(MockChatClient::new());
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "handoff-store-test",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone());
     session.record(Message::user("u1", "build a thing")).await;
     session
         .record(assistant_with_text(
@@ -136,6 +152,11 @@ async fn handoff_does_not_touch_store() {
             "## Plan\n1. step one\n2. step two",
         ))
         .await;
+    assert_eq!(
+        session.plan_snapshot.as_deref(),
+        Some("## Plan\n1. step one\n2. step two"),
+        "record captures the phase-bounded plan snapshot"
+    );
 
     let before = store.load_messages(&session.id).await.unwrap();
     assert_eq!(before.len(), 2, "two messages persisted before handoff");
@@ -176,6 +197,7 @@ async fn handoff_appends_extra_input_to_plan() {
 2. do Y",
         ),
     ];
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let reset = plan_handoff::handoff(
         &mut session,
@@ -217,6 +239,7 @@ async fn handoff_ignores_whitespace_only_extra() {
 1. do X",
         ),
     ];
+    session.plan_snapshot = Some("## Plan\n1. do X".into());
 
     let reset = plan_handoff::handoff(
         &mut session,
@@ -261,6 +284,7 @@ async fn handoff_display_excludes_directive_prefix() {
         Message::user("u1", "build a foo"),
         assistant_with_text("a1", "## Plan\n1. do X\n2. do Y"),
     ];
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let display = plan_handoff::handoff(&mut session, "").unwrap();
 
@@ -296,6 +320,7 @@ async fn handoff_display_includes_extra() {
         Message::user("u1", "build a foo"),
         assistant_with_text("a1", "## Plan\n1. do X"),
     ];
+    session.plan_snapshot = Some("## Plan\n1. do X".into());
 
     let display = plan_handoff::handoff(
         &mut session,
@@ -472,23 +497,27 @@ async fn handoff_falls_back_to_compaction_snapshot() {
     );
 }
 
-/// Precedence: a live assistant plan always wins over an older snapshot —
-/// the snapshot is a fallback, never an override of fresher in-memory text.
+/// Precedence: the phase-bounded snapshot is the ONLY handoff source. A live
+/// assistant text that was never captured (e.g. appended after the boundary,
+/// or replayed from a foreign history) must NOT be handed off — scanning the
+/// transcript for "the newest assistant text" is exactly what fabricated
+/// plans when the plan phase produced no output.
 #[tokio::test]
-async fn handoff_prefers_live_assistant_over_stale_snapshot() {
+async fn handoff_uses_snapshot_only_not_uncaptured_live_text() {
     let mut session = empty_session();
     session.messages = vec![
         Message::user("u1", "build a foo"),
-        assistant_with_text("a1", "## Plan\n1. the NEW final plan"),
+        assistant_with_text("a1", "## Plan\n1. the UNCAPPED live plan"),
     ];
-    session.plan_snapshot = Some("## Plan\n0. the OLD stale plan".into());
+    session.plan_snapshot = Some("## Plan\n0. the captured plan".into());
 
     let display = plan_handoff::handoff(&mut session, "").unwrap();
+    assert_eq!(display, "## Plan\n0. the captured plan");
+    let body = session.messages[0].text();
     assert!(
-        display.contains("the NEW final plan"),
-        "live assistant text must win: {display}"
+        !body.contains("UNCAPPED live plan"),
+        "uncaptured live text must not leak into the handoff: {body}"
     );
-    assert!(!display.contains("OLD stale plan"));
 }
 
 /// Neither live plan nor snapshot: unchanged no-op contract.

@@ -225,7 +225,7 @@ fn prompt_file_flag_parsed() {
 
 #[test]
 fn ts_subcommand_parses_list_flag() {
-    let cli = parse(&["opencode", "ts", "-l"]);
+    let cli = parse(&["opencoder", "ts", "-l"]);
     match cli.command {
         Some(Command::Ts {
             list,
@@ -244,7 +244,7 @@ fn ts_subcommand_parses_list_flag() {
 
 #[test]
 fn ts_subcommand_parses_resume_target() {
-    let cli = parse(&["opencode", "ts", "-r", "01HZ"]);
+    let cli = parse(&["opencoder", "ts", "-r", "01HZ"]);
     match cli.command {
         Some(Command::Ts {
             list,
@@ -264,7 +264,7 @@ fn ts_subcommand_parses_resume_target() {
 #[test]
 fn ts_subcommand_defaults_to_no_flags() {
     // Bare `opencode ts` -> Ts with every flag at its default.
-    let cli = parse(&["opencode", "ts"]);
+    let cli = parse(&["opencoder", "ts"]);
     match cli.command {
         Some(Command::Ts {
             list,
@@ -286,7 +286,7 @@ fn ts_subcommand_rejects_new_flag() {
     // `--new` was removed: creating is now the default behavior, so clap must
     // reject it as an unknown argument.
     use clap::error::ErrorKind;
-    let res = opencoder_cli::Cli::try_parse_from(["opencode", "ts", "--new"]);
+    let res = opencoder_cli::Cli::try_parse_from(["opencoder", "ts", "--new"]);
     assert!(res.is_err(), "--new should be rejected");
     let kind = res.unwrap_err().kind();
     assert!(
@@ -330,7 +330,7 @@ fn client_subcommand_parses_agent_model_interrupt() {
 #[test]
 fn ts_has_rs_alias() {
     // `rs` is an alias for the `ts` command, so `rs -l` works.
-    let cli = parse(&["opencode", "rs", "-l"]);
+    let cli = parse(&["opencoder", "rs", "-l"]);
     match cli.command {
         Some(Command::Ts { list, .. }) => assert!(list),
         _ => panic!("expected Ts via rs alias"),
@@ -339,7 +339,7 @@ fn ts_has_rs_alias() {
 
 #[test]
 fn rs_alias_long_list_flag() {
-    let cli = parse(&["opencode", "rs", "--list"]);
+    let cli = parse(&["opencoder", "rs", "--list"]);
     match cli.command {
         Some(Command::Ts { list, .. }) => assert!(list),
         _ => panic!("expected Ts via rs alias"),
@@ -348,7 +348,7 @@ fn rs_alias_long_list_flag() {
 
 #[test]
 fn rs_alias_resume_target() {
-    let cli = parse(&["opencode", "rs", "-r", "01HZ"]);
+    let cli = parse(&["opencoder", "rs", "-r", "01HZ"]);
     match cli.command {
         Some(Command::Ts { resume, .. }) => assert_eq!(resume.as_deref(), Some("01HZ")),
         _ => panic!("expected Ts via rs alias"),
@@ -357,7 +357,7 @@ fn rs_alias_resume_target() {
 
 #[test]
 fn rs_alias_defaults() {
-    let cli = parse(&["opencode", "rs"]);
+    let cli = parse(&["opencoder", "rs"]);
     match cli.command {
         Some(Command::Ts {
             list,
@@ -409,7 +409,7 @@ fn install_tools_subcommand() {
 
 #[test]
 fn ts_subcommand_parses_clean_flag() {
-    let cli = parse(&["opencode", "ts", "-c"]);
+    let cli = parse(&["opencoder", "ts", "-c"]);
     match cli.command {
         Some(Command::Ts {
             list,
@@ -428,10 +428,10 @@ fn ts_subcommand_parses_clean_flag() {
 
 #[test]
 fn ts_subcommand_parses_delete_target_and_rejects_mixed_actions() {
-    let cli = parse(&["opencode", "ts", "-d", "01HZ"]);
+    let cli = parse(&["opencoder", "ts", "-d", "01HZ"]);
     match cli.command {
         Some(Command::Ts { delete, .. }) => assert_eq!(delete.as_deref(), Some("01HZ")),
         _ => panic!("expected Ts delete"),
     }
-    assert!(opencoder_cli::Cli::try_parse_from(["opencode", "ts", "-d", "01HZ", "-c"]).is_err());
+    assert!(opencoder_cli::Cli::try_parse_from(["opencoder", "ts", "-d", "01HZ", "-c"]).is_err());
 }

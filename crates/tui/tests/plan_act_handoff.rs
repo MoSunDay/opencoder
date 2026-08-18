@@ -57,6 +57,8 @@ async fn switch_and_start_clears_transcript_and_feeds_only_plan_to_act() {
     // worker's plan-provenance gate requires `plan_input_count > 0` before it
     // folds the transcript into a handoff.
     session.plan_input_count = 1;
+    // `plan_snapshot` is the phase-bounded truth source (`SessionState::record` captures it when the plan agent answers); seed it to simulate an already-produced planning phase.
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
     let quit = process_cmd(
@@ -256,6 +258,8 @@ async fn switch_and_start_appends_input_to_plan_handoff() {
     // worker's plan-provenance gate requires `plan_input_count > 0` before it
     // folds the transcript into a handoff.
     session.plan_input_count = 1;
+    // `plan_snapshot` is the phase-bounded truth source (`SessionState::record` captures it when the plan agent answers); seed it to simulate an already-produced planning phase.
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let extra = "Don't forget to add tests for the new module.";
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
@@ -346,6 +350,8 @@ async fn switch_and_start_clears_skill_prompt() {
     // worker's plan-provenance gate requires `plan_input_count > 0` before it
     // folds the transcript into a handoff.
     session.plan_input_count = 1;
+    // `plan_snapshot` is the phase-bounded truth source (`SessionState::record` captures it when the plan agent answers); seed it to simulate an already-produced planning phase.
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let (tx, _rx) = mpsc::channel::<UiEvent>(64);
     let quit = process_cmd(

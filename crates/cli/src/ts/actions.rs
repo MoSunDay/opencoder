@@ -32,7 +32,7 @@ pub(crate) async fn ts_start(cli: &Cli) -> Result<()> {
     if !tmux_available() {
         bail!(
             "tmux is not installed. Install it (e.g. `apt install tmux`), or run \
-             `opencode tui` for a non-persistent session."
+             `opencoder tui` for a non-persistent session."
         );
     }
     // Attach only via the explicit `--session <id>` shortcut: if that exact
@@ -80,7 +80,7 @@ pub(crate) fn explicit_attach_target(session_arg: Option<&str>, exists: bool) ->
 fn spawn_session(workdir: &Path, id: &str) -> Result<()> {
     let name = session_name(id);
     if session_exists(&name)? {
-        bail!("tmux session '{name}' already exists; use `opencode ts -r <id>` to resume");
+        bail!("tmux session '{name}' already exists; use `opencoder ts -r <id>` to resume");
     }
     let exe = std::env::current_exe().context("resolve opencoder executable")?;
     let mut cmd = Command::new(tmux_bin()?);
@@ -141,7 +141,7 @@ fn classify(id: &str, tmux_by_id: &HashMap<String, &ManagedSession>) -> TmuxStat
 /// constant so a regression test can assert it never advertises a removed
 /// flag (e.g. `--new`) and always lists the live commands.
 const LIST_LEGEND: &str =
-    "resume: opencode ts -r <id>   delete: opencode ts -d <id>   clean: opencode ts -c";
+    "resume: opencoder ts -r <id>   delete: opencoder ts -d <id>   clean: opencoder ts -c";
 
 /// `opencode ts -l` -- global unified panel across every workdir.
 ///
@@ -305,7 +305,7 @@ pub(crate) async fn ts_resume(cli: &Cli, target: &str) -> Result<()> {
     // Dead: resolve its durable workdir from the registry.
     let Some(record) = registry.get(&id).await? else {
         bail!(
-            "no global tmux session matching `{}`. Run `opencode ts -l` to list.",
+            "no global tmux session matching `{}`. Run `opencoder ts -l` to list.",
             target
         );
     };

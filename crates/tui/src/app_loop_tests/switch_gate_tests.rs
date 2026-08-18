@@ -310,7 +310,6 @@ async fn switch_act_to_plan_collapses_stale_plan_submitted_synchronously() {
         // Sticky from the previous plan→act handoff: TranscriptReset keeps it
         // and only a folded AgentSwitch("plan") would clear it.
         plan_submitted: true,
-        pending_plan_arm: false,
         ..Default::default()
     };
     let mut running = false;
@@ -349,7 +348,6 @@ async fn switch_act_to_plan_collapses_stale_plan_submitted_synchronously() {
         "the optimistic flip must fold the switch and collapse the sticky \
          plan_submitted flag WITHOUT waiting for the AgentSwitch event"
     );
-    assert!(!chat.pending_plan_arm, "arm flag consumed");
     // Pure-switch routing: exactly one SwitchAgent command, no turn started.
     assert!(matches!(
         cmd_rx.try_recv().unwrap(),
@@ -367,7 +365,6 @@ async fn shift_tab_double_tap_second_strike_is_pure_switch_and_keeps_input() {
     let mut chat = ChatView {
         agent: "act".into(),
         plan_submitted: true, // sticky from the previous handoff
-        pending_plan_arm: false,
         ..Default::default()
     };
     let mut running = false;

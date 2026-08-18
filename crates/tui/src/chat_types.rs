@@ -129,13 +129,6 @@ pub struct ChatView {
     /// hides once the user has interacted, even if the first submission was a
     /// bare control command that does not add a transcript block.
     pub submitted: bool,
-    /// Deferred arming of `plan_submitted` for a compound `/plan <content>`
-    /// submitted while the agent was still `act` (the mode switch lands
-    /// asynchronously via `AgentSwitch("plan")`, which otherwise resets the
-    /// flag). Set by the submit/steer/queue paths in `app.rs`; consumed by the
-    /// `AgentSwitch` handler in `chat.rs` so Shift+Tab after the plan turn
-    /// keeps the plan and starts the task.
-    pub pending_plan_arm: bool,
     /// Pending steer inputs mirrored from the store, owned by this view so the
     /// `SteerConsumed` handler can resolve seq -> prompt text and drop the row
     /// in one place. The single source of truth for steer display state.

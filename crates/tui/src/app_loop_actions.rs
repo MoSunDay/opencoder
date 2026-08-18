@@ -333,24 +333,24 @@ pub(crate) async fn steer_submit_after_mouse(
 }
 
 /// Hard-cancel the running turn (double-Esc / Ctrl+C arm in `app.rs`):
-/// drop a deferred `/plan` arming, cancel tokens, delete pending
-/// steer/queue inputs so they don't resurface on resume, and show the
-/// interrupted marker. Extracted to keep `app.rs` under the line cap.
-#[allow(clippy::too_many_arguments)]
+/// drop a deferred `/plan` arming, cancel tokens, and show the interrupted
+/// marker. Pending steer/queue rows are deliberately KEPT — both in the
+/// store and in the UI mirrors — so they are consumed FIFO on the next
+/// submit's drain or a `>` panel drain. This matches the web
+/// `/interrupt` semantics, where cancelling a run also preserves queued
+/// input. We deliberately do NOT auto-restart the drain after cancel: the
+/// user just explicitly cancelled, so silently resuming work would be
+/// counterintuitive. Extracted to keep `app.rs` under the line cap.
 pub(crate) async fn cancel_running_turn(
-    store: &dyn opencoder_store::Store,
     chat: &mut crate::chat::ChatView,
-    queue_items: &mut Vec<(i64, String)>,
     cancel: &mut CancellationToken,
     child_runtime: &mut crate::worker::ChildRuntimeHandles,
     running: &mut bool,
     cancelled: &mut bool,
     follow: &mut bool,
 ) {
-    chat.pending_plan_arm = false;
     cancel.cancel();
     opencoder_session::fire_child_cancels(&child_runtime.cancels);
-    crate::app_helpers::clear_pending_inputs(store, &mut chat.steer_items, queue_items).await;
     chat.push_marker(ratatui::text::Line::from(ratatui::text::Span::styled(
         "[interrupted] stopping\u{2026}",
         ratatui::style::Style::default().fg(crate::theme::warn_color()),

@@ -493,7 +493,7 @@ pub(super) async fn run_app(
                                     // or it would fire inside the running turn.
                                     queue_admitter::handle_queue(
                                         &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                        &mut pending_images, &mut chat, &session_id,
+                                        &mut pending_images, &session_id,
                                     );
                                     push_history(&mut history, &mut hist_idx, &text);
                                     continue;
@@ -507,9 +507,9 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
-                                // Compound `/plan <content>` while still in `act` mode arms a
-                                // *deferred* plan->act handoff (re-armed on `AgentSwitch`).
-                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
+                                // NOTE: no compound `/plan` arm here — arming is
+                                // consumption-time (TurnDone(plan) reads the persisted
+                                // plan-phase counter).
                                 // Intercept /annotation: open the editor instead of submitting
                                 if let Some(action) = crate::command::parse(&clean) {
                                     // Unified slash-command dispatch: route recognized `/cmd`
@@ -579,9 +579,8 @@ pub(super) async fn run_app(
                                 // verbatim; the runner absorbs it at the turn boundary via
                                 // record_compound, which resolves/activates/persists the
                                 // skill THEN — a `$skill` steer must not arm mid-turn.
-                                // Compound `/plan <content>` still arms the deferred
-                                // plan->act handoff (consumed at TurnDone(plan)).
-                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(text.trim()) { chat.pending_plan_arm = true; }
+                                // No plan arm either: consumption-time only (TurnDone(plan)
+                                // reads the persisted plan-phase counter).
                                 let raw = text.trim().to_string();
                                 if !raw.is_empty() {
                                     let seq = steer_fire::admit_keyboard_steer(
@@ -605,7 +604,7 @@ pub(super) async fn run_app(
                                 // waits on db_lock.
                                 queue_admitter::handle_queue(
                                     &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                    &mut pending_images, &mut chat, &session_id,
+                                    &mut pending_images, &session_id,
                                 );
                                 push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
@@ -655,7 +654,7 @@ pub(super) async fn run_app(
                             }
                             KeyAction::Cancel => {
                                 app_loop::cancel_running_turn(
-                                    store.as_ref(), &mut chat, &mut queue_items, &mut cancel,
+                                    &mut chat, &mut cancel,
                                     &mut child_runtime, &mut running, &mut cancelled, &mut follow,
                                 ).await;
                             }
@@ -730,8 +729,12 @@ pub(super) async fn run_app(
             maybe_done = admit_done_rx.recv(), if admitter_alive => {
                 match maybe_done {
                     Some(done) => {
-                        if let Some(flash) = queue_admitter::apply_done(&mut admit_st, done, &mut queue_items, &mut pending_images) {
-                            mode_flash = Some((flash.to_string(), anim_tick));
+                        let o = crate::idle_rekick::on_admit_done(done, &mut admit_st, &mut queue_items, &mut pending_images, running, &store, &session_id, &cmd_tx, &mut cancel).await;
+                        if let Some(flash) = o.flash { mode_flash = Some((flash.to_string(), anim_tick)); }
+                        match o.flow {
+                            crate::idle_rekick::AdmitDoneFlow::Started => { running = true; follow = true; cancelled = false; chat.begin_turn(); }
+                            crate::idle_rekick::AdmitDoneFlow::WorkerDead => { worker_dead(&mut chat); break; }
+                            _ => {}
                         }
                         dirty = true;
                     }
@@ -768,10 +771,7 @@ pub(super) async fn run_app(
                 }
             }
             _ = anim_ticker.tick() => {
-                if running {
-                    anim_tick = anim_tick.wrapping_add(1);
-                    dirty = true;
-                }
+                if running { anim_tick = anim_tick.wrapping_add(1); dirty = true; }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }
             }
             _ = frame_ticker.tick() => {

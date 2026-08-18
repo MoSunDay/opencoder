@@ -13,16 +13,22 @@ use std::sync::Arc;
 use opencoder_store::{Delivery, SessionInput, Store};
 use tokio::sync::mpsc;
 
-/// Actor request: admit `input`, tag the completion with `temp_seq`.
+/// Actor request: admit `input`, tag the completion with `temp_seq`, and
+/// carry `display` through so a late reconciliation can re-insert the row.
 pub struct AdmitReq {
     pub temp_seq: i64,
     pub input: SessionInput,
+    pub display: String,
 }
 
-/// Actor completion: the store result for the admitted input.
+/// Actor completion: the store result for the admitted input, plus the
+/// display text carried from the request (needed when the optimistic temp
+/// row was already dropped by an authoritative mirror rebuild and must be
+/// re-inserted — see [`reconcile_ok`]).
 pub struct AdmitDone {
     pub temp_seq: i64,
     pub result: anyhow::Result<i64>,
+    pub display: String,
 }
 
 /// One in-flight optimistic submit's image snapshot (restored on failure).
@@ -55,6 +61,7 @@ pub fn spawn_admitter(
                 .send(AdmitDone {
                     temp_seq: req.temp_seq,
                     result,
+                    display: req.display,
                 })
                 .await
                 .is_err()
@@ -82,8 +89,12 @@ pub fn submit(
     let temp_seq = st.next_temp_seq;
     let images = std::mem::take(pending_images);
     st.inflight.push(InflightAdmit { temp_seq, images });
-    queue_items.push((temp_seq, display));
-    match tx.try_send(AdmitReq { temp_seq, input }) {
+    queue_items.push((temp_seq, display.clone()));
+    match tx.try_send(AdmitReq {
+        temp_seq,
+        input,
+        display,
+    }) {
         Ok(()) => true,
         Err(_) => {
             if let Some(snapshot) = take_inflight(st, temp_seq) {
@@ -97,27 +108,25 @@ pub fn submit(
     }
 }
 
-/// Submit-while-running admission with the requirement bookkeeping the Enter
-/// path needs: on success record the delivered requirement (arms the plan→act
-/// handoff in plan mode); on failure [`submit`] has already rolled the temp
-/// row and images back. The caller owns `history`, so a failed admit stays
-/// recoverable via ↑.
-#[allow(clippy::too_many_arguments)]
+/// Submit-while-running admission: on success the temp row stays queued for
+/// the runner to consume at the idle boundary; on failure [`submit`] has
+/// already rolled the temp row and images back. The caller owns `history`, so
+/// a failed admit stays recoverable via ↑.
+///
+/// Deliberately performs NO plan-arm bookkeeping: the input is only ADMITTED,
+/// not delivered. Arming happens at consumption (the plan turn's
+/// `TurnDone(plan)` reads the persisted plan-phase counter), so a stranded
+/// row that a cancelled/idle drain never absorbs cannot arm a
+/// context-clearing handoff.
 pub(crate) fn admit_running(
     tx: &mpsc::Sender<AdmitReq>,
     st: &mut AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
-    chat: &mut crate::chat::ChatView,
     input: SessionInput,
     display: String,
 ) -> bool {
-    if submit(tx, st, queue_items, pending_images, input, display) {
-        chat.note_requirement_submitted();
-        true
-    } else {
-        false
-    }
+    submit(tx, st, queue_items, pending_images, input, display)
 }
 
 /// Deferred queue admission for a submission made while a turn is running
@@ -139,19 +148,17 @@ pub(crate) fn handle_queue(
     st: &mut AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
-    chat: &mut crate::chat::ChatView,
     session_id: &str,
 ) {
     let raw = text.trim();
     if raw.is_empty() {
         return;
     }
-    // Compound `/plan <content>` arming is evaluated on the raw text: when
-    // the runner consumes the item it applies `/plan` (AgentSwitch) and the
-    // TUI's TurnDone(plan) consumes the arm into `plan_submitted`.
-    if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(raw) {
-        chat.pending_plan_arm = true;
-    }
+    // No compound `/plan <content>` arm is set here: the runner consumes the
+    // item (AgentSwitch("plan") + the content recorded as the new phase's
+    // first requirement), and the plan turn's TurnDone(plan) re-arms
+    // `plan_submitted` from the persisted plan-phase counter — consumption
+    // time, never submit time.
     let display = raw.to_string();
     // Snapshot BEFORE submit: submit consumes pending_images into the
     // in-flight stash on the success path.
@@ -162,7 +169,7 @@ pub(crate) fn handle_queue(
         Some(display.clone()),
         &crate::app_helpers::snapshot_image_uris(pending_images),
     );
-    admit_running(tx, st, queue_items, pending_images, chat, input, display);
+    admit_running(tx, st, queue_items, pending_images, input, display);
 }
 
 /// Outcome of reconciling a successful completion against the queue mirror.
@@ -171,18 +178,27 @@ pub enum AdmitReconcile {
     Replaced,
     DroppedConsumed,
     DroppedDuplicate,
+    /// The optimistic temp row was missing (an authoritative mirror rebuild
+    /// already overwrote it), so the real row was appended at the tail.
+    Reinserted,
     Missing,
 }
 
 /// Fold an Ok completion into the queue mirror: rewrite the temp row's seq to
 /// the real one, in place. A `QueueConsumed` for `real_seq` that already
 /// arrived (or an authoritative mirror rebuild that already installed the
-/// row) means the temp row must be dropped, not resurrected.
+/// row) means the temp row must be dropped, not resurrected. If the temp row
+/// is simply gone — a Done-triggered authoritative mirror rebuild can drop
+/// the optimistic temp row before the actor completion lands — the real row
+/// is re-inserted at the END of the mirror so the queued input stays visible
+/// until consumed; tail append preserves FIFO order because every earlier
+/// row was already present when the rebuild happened.
 pub fn reconcile_ok(
     items: &mut Vec<(i64, String)>,
     consumed: &[i64],
     temp_seq: i64,
     real_seq: i64,
+    display: &str,
 ) -> AdmitReconcile {
     let drop_temp = |items: &mut Vec<(i64, String)>| {
         if let Some(pos) = items.iter().position(|(s, _)| *s == temp_seq) {
@@ -202,7 +218,10 @@ pub fn reconcile_ok(
             items[pos].0 = real_seq;
             AdmitReconcile::Replaced
         }
-        None => AdmitReconcile::Missing,
+        None => {
+            items.push((real_seq, display.to_string()));
+            AdmitReconcile::Reinserted
+        }
     }
 }
 
@@ -252,14 +271,19 @@ pub fn apply_done(
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
 ) -> Option<&'static str> {
-    let snapshot = take_inflight(st, done.temp_seq);
-    match done.result {
+    let AdmitDone {
+        temp_seq,
+        result,
+        display,
+    } = done;
+    let snapshot = take_inflight(st, temp_seq);
+    match result {
         Ok(real_seq) => {
-            reconcile_ok(queue_items, &st.consumed, done.temp_seq, real_seq);
+            reconcile_ok(queue_items, &st.consumed, temp_seq, real_seq, &display);
             None
         }
         Err(_) => {
-            reconcile_err(queue_items, done.temp_seq);
+            reconcile_err(queue_items, temp_seq);
             if let Some(images) = snapshot {
                 restore_images(pending_images, images);
             }
@@ -296,7 +320,7 @@ mod tests {
     fn reconcile_ok_replaces_temp_row_in_place() {
         let mut items = vec![(-1, "a".to_string()), (5, "b".to_string())];
         assert_eq!(
-            reconcile_ok(&mut items, &[], -1, 9),
+            reconcile_ok(&mut items, &[], -1, 9, "a"),
             AdmitReconcile::Replaced
         );
         assert_eq!(
@@ -310,7 +334,7 @@ mod tests {
     fn reconcile_ok_drops_duplicate() {
         let mut items = vec![(-1, "a".to_string()), (9, "b".to_string())];
         assert_eq!(
-            reconcile_ok(&mut items, &[], -1, 9),
+            reconcile_ok(&mut items, &[], -1, 9, "a"),
             AdmitReconcile::DroppedDuplicate
         );
         assert_eq!(
@@ -324,20 +348,27 @@ mod tests {
     fn reconcile_ok_drops_consumed() {
         let mut items = vec![(-1, "a".to_string())];
         assert_eq!(
-            reconcile_ok(&mut items, &[9], -1, 9),
+            reconcile_ok(&mut items, &[9], -1, 9, "a"),
             AdmitReconcile::DroppedConsumed
         );
         assert!(items.is_empty(), "consumed seq must not be resurrected");
     }
 
     #[test]
-    fn reconcile_ok_missing_leaves_items_unchanged() {
+    fn reconcile_ok_missing_reinserts_real_row_at_tail() {
+        // Done-triggered authoritative mirror rebuild dropped the optimistic
+        // temp row (-1) before the actor completion landed — the real row must
+        // be re-inserted at the tail so the queued input stays visible.
         let mut items = vec![(5, "b".to_string())];
         assert_eq!(
-            reconcile_ok(&mut items, &[], -1, 9),
-            AdmitReconcile::Missing
+            reconcile_ok(&mut items, &[], -1, 9, "queued-A"),
+            AdmitReconcile::Reinserted
         );
-        assert_eq!(items, vec![(5, "b".to_string())]);
+        assert_eq!(
+            items,
+            vec![(5, "b".to_string()), (9, "queued-A".to_string())],
+            "missing temp row: real row appended at the tail (FIFO preserved)"
+        );
     }
 
     #[test]
@@ -440,60 +471,45 @@ mod tests {
         assert!(st.inflight.is_empty(), "stash rolled back");
     }
 
-    /// The Enter-while-running path must count a successful admit as a
-    /// delivered requirement: in plan mode this arms the plan→act handoff.
+    /// A successful admit-while-running must NOT arm the plan→act handoff:
+    /// the input is only ADMITTED. Arming is consumption-time (TurnDone(plan)
+    /// reads the persisted plan-phase counter), so a stranded row that a
+    /// cancelled/idle drain never absorbs cannot arm a context-clearing
+    /// handoff.
     #[test]
-    fn admit_running_success_notes_requirement() {
+    fn admit_running_success_does_not_arm_plan_handoff() {
         let (tx, _rx) = mpsc::channel(1);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![];
-        let mut chat = crate::chat::ChatView {
-            agent: "plan".into(),
-            ..Default::default()
-        };
         assert!(admit_running(
             &tx,
             &mut st,
             &mut queue_items,
             &mut pending_images,
-            &mut chat,
             mk_input("p"),
             "d".into()
         ));
-        assert!(
-            chat.plan_submitted,
-            "successful admit must arm the plan→act handoff"
-        );
         assert_eq!(queue_items, vec![(-1, "d".to_string())]);
     }
 
     /// A failed admit (actor gone / channel saturated) must not count as a
     /// delivered requirement and must leave the mirror fully rolled back.
     #[test]
-    fn admit_running_failure_skips_requirement_and_rolls_back() {
+    fn admit_running_failure_rolls_back() {
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![("img.png".to_string(), "alt".to_string())];
-        let mut chat = crate::chat::ChatView {
-            agent: "plan".into(),
-            ..Default::default()
-        };
         assert!(!admit_running(
             &tx,
             &mut st,
             &mut queue_items,
             &mut pending_images,
-            &mut chat,
             mk_input("p"),
             "d".into()
         ));
-        assert!(
-            !chat.plan_submitted,
-            "failed admit must not arm the handoff"
-        );
         assert!(queue_items.is_empty(), "temp row rolled back");
         assert_eq!(
             pending_images,
@@ -529,7 +545,7 @@ mod tests {
         let real_seq = done.result.unwrap();
         assert!(real_seq > 0);
         assert_eq!(
-            reconcile_ok(&mut queue_items, &st.consumed, -1, real_seq),
+            reconcile_ok(&mut queue_items, &st.consumed, -1, real_seq, "d"),
             AdmitReconcile::Replaced
         );
         assert_eq!(queue_items, vec![(real_seq, "d".to_string())]);
@@ -671,15 +687,12 @@ mod tests {
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![];
-        let mut chat = crate::chat::ChatView::default();
-
         handle_queue(
             "$alpha fix the bug",
             &tx,
             &mut st,
             &mut queue_items,
             &mut pending_images,
-            &mut chat,
             "s",
         );
 
@@ -720,15 +733,12 @@ mod tests {
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];
         let mut pending_images = vec![];
-        let mut chat = crate::chat::ChatView::default();
-
         handle_queue(
             "$alpha",
             &tx,
             &mut st,
             &mut queue_items,
             &mut pending_images,
-            &mut chat,
             "s",
         );
 

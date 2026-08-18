@@ -4,7 +4,10 @@
 //!   persist + push onto the pending panel WITHOUT interrupting the running
 //!   turn. The steer is absorbed at the next idle/turn boundary by the runner.
 //!   Deliberately takes no turn_cancel, so it is structurally incapable of
-//!   firing an interrupt.
+//!   firing an interrupt. The admit does NOT arm the plan→act handoff:
+//!   arming happens at consumption time (TurnDone(plan) reads the persisted
+//!   plan-phase counter), so a stranded, never-consumed steer row can never
+//!   arm a context-clearing handoff.
 //!
 //! - **Mouse `>` button** (`MouseOutcome::SteerSubmit`) ->
 //!   [`fire_steer_interrupt`]: `steer_dispatch::resolve` + `fire_turn_cancel`,
@@ -57,6 +60,11 @@ pub(crate) async fn admit_keyboard_steer(
     let seq = store.admit_input(&input).await.ok()?;
     pending_images.clear();
     chat.steer_items.push((seq, display.to_string()));
+    // Deliberately NO `note_requirement_submitted` here: the steer is only
+    // ADMITTED, not delivered. It arms the plan→act handoff at consumption
+    // (TurnDone(plan) reads the persisted plan-phase counter), so a stranded
+    // row that a cancelled/idle drain never absorbs cannot arm a
+    // context-clearing handoff.
     Some(seq)
 }
 
@@ -546,6 +554,98 @@ mod tests {
             chat.steer_items.is_empty(),
             "steer panel must not be mutated on store failure"
         );
+    }
+
+    // Consumption-time arming: a keyboard steer is only ADMITTED here — it
+    // must NOT arm the plan→act handoff. The arm happens when the runner
+    // absorbs the steer and the plan turn's TurnDone(plan) re-arms from the
+    // persisted plan-phase counter. A stranded, never-consumed steer row can
+    // therefore never arm a context-clearing handoff.
+    #[tokio::test]
+    async fn keyboard_steer_in_plan_mode_does_not_arm_plan_submitted() {
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "steer-plan".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut chat = ChatView {
+            agent: "plan".into(),
+            ..Default::default()
+        };
+        let mut pending_images = Vec::new();
+
+        let seq = admit_keyboard_steer(
+            &store,
+            "steer-plan",
+            "also cover the CLI flag",
+            "also cover the CLI flag",
+            &mut pending_images,
+            &mut chat,
+        )
+        .await
+        .expect("admit must succeed");
+
+        assert!(
+            !chat.plan_submitted,
+            "a plan-mode steer admit must NOT arm the Shift+Tab handoff — arming is consumption-time"
+        );
+        assert_eq!(
+            chat.steer_items,
+            vec![(seq, "also cover the CLI flag".to_string())],
+            "steer must be mirrored on the pending panel"
+        );
+        let pending = store
+            .pending_inputs("steer-plan", Delivery::Steer)
+            .await
+            .unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "admitted steer must still be pending in the store"
+        );
+        assert_eq!(pending[0].seq, Some(seq));
+    }
+
+    // Fix ④ counterpart: in act mode the same call is a self-guarded no-op for
+    // the handoff arm — `plan_submitted` must stay false.
+    #[tokio::test]
+    async fn keyboard_steer_in_act_mode_does_not_arm_plan_submitted() {
+        let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "steer-act".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let mut chat = ChatView {
+            agent: "act".into(),
+            ..Default::default()
+        };
+        let mut pending_images = Vec::new();
+
+        let seq = admit_keyboard_steer(
+            &store,
+            "steer-act",
+            "stop exploring",
+            "stop exploring",
+            &mut pending_images,
+            &mut chat,
+        )
+        .await
+        .expect("admit must succeed");
+
+        assert!(
+            !chat.plan_submitted,
+            "act-mode steer must not arm the plan handoff"
+        );
+        assert_eq!(chat.steer_items.len(), 1, "panel mirror is agent-agnostic");
+        assert!(seq > 0);
     }
 
     // F4 seam: a None admit outcome must map to a non-empty failure flash

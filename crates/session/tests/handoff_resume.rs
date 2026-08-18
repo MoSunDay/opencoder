@@ -78,6 +78,9 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = plan_msgs.clone();
+    // The handoff only reads the phase-bounded snapshot that `record`
+    // captured when the plan-mode assistant output landed.
+    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 
     let display = plan_handoff::handoff(&mut session, "").expect("plan present");
     assert_eq!(

@@ -271,23 +271,6 @@ pub(crate) fn snapshot_image_uris(pending: &[(String, String)]) -> Vec<String> {
     pending.iter().map(|(u, _)| u.clone()).collect()
 }
 
-/// Drop every pending steer/queue input from the store and reset both
-/// in-memory mirrors. Used on double-Esc hard-abort (`KeyAction::Cancel`)
-/// so buffered inputs don't resurface on resume. `delete_input` only
-/// touches rows whose `promoted_seq IS NULL`, so fanning out over both
-/// mirrors is safe even if the runner already promoted/consumed some.
-pub(crate) async fn clear_pending_inputs(
-    store: &dyn Store,
-    steer_items: &mut Vec<(i64, String)>,
-    queue_items: &mut Vec<(i64, String)>,
-) {
-    for (seq, _) in steer_items.iter().chain(queue_items.iter()) {
-        let _ = store.delete_input(*seq).await;
-    }
-    steer_items.clear();
-    queue_items.clear();
-}
-
 /// Begin a new worker turn with a fresh, uncancelled cancellation token.
 ///
 /// The loop's `cancel` handle and the worker's `sess.cancel` must point at the

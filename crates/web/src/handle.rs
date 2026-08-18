@@ -354,6 +354,15 @@ pub async fn admit_and_drain(
                 return;
             }
             if !handle_w.draining.swap(true, Ordering::SeqCst) {
+                // POST /interrupt (or session DELETE) fired the drain's
+                // hard-cancel token while it ran: the user's stop wins —
+                // never resurrect a cancelled run. Pending rows stay durably
+                // admitted; the next user prompt starts a fresh drain that
+                // consumes them.
+                if handle_w.cancel.lock().await.is_cancelled() {
+                    handle_w.draining.store(false, Ordering::SeqCst);
+                    return;
+                }
                 let token = CancellationToken::new();
                 *handle_w.cancel.lock().await = token.clone();
                 if let Ok(mut g) = handle_w.turn_cancel.lock() {

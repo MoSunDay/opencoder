@@ -17,6 +17,7 @@ pub mod fmt;
 pub mod frame;
 pub mod image_chunk;
 pub mod image_render;
+pub mod idle_rekick;
 pub mod image_util;
 pub mod input;
 pub mod key_handler;

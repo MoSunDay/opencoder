@@ -402,12 +402,14 @@ mod tests {
             .await
             .unwrap();
         let mut session = make_session(Some(store.clone()));
-        // Start in plan mode with some history.
+        // Start in plan mode with some history. Routed through `record` so the
+        // assistant text lands in the phase-bounded `plan_snapshot` (the only
+        // plan source `handoff` accepts).
         session.agent = resolve_agent("plan").unwrap();
-        session.messages.push(Message::user("u1", "hello"));
+        session.record(Message::user("u1", "hello")).await;
         let mut a = Message::assistant("a1");
         a.blocks.push(ContentBlock::text("plan text"));
-        session.messages.push(a);
+        session.record(a).await;
 
         let evs = collect_events(&mut session, ControlCmd::ClearContext);
 

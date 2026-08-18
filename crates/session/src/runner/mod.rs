@@ -177,7 +177,12 @@ pub async fn run_with_registry(
     // the TUI resolves before calling run). Covers both compound commands
     // (`/plan $review do it`) and plain prompts (`$review do it`). After
     // stripping, text may be empty if only `$skill` tokens were provided.
+    let prev_skill = session.skill_prompt_cloned();
     user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
+    // Consumption-time activation must also reach the store (queue/steer
+    // drains persist inside record_compound; this is the direct-prompt
+    // twin), so a resume after this turn replays the resolved skill.
+    crate::skill_resolve::persist_active_skill(session, &prev_skill).await;
     // A non-empty prompt records a real user message. An empty prompt means
     // "drain mode": the web drain relies on admitted steers/queues being
     // claimed at turn boundaries to supply the actual user input (trigger

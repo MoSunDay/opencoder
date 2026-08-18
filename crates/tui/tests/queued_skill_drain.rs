@@ -1,23 +1,64 @@
-//! Regression: a Tab-queued `$skill + text` submission keeps its skill
-//! through the drain (the report: "queued 也是如果 skill插入+ 其他需求，
-//! skill 插入信息会消失").
+//! P0 regression: a `$skill` submission queued while a turn is running
+//! activates at **consumption** time (the idle-boundary drain), never at
+//! submit time.
 //!
-//! The TUI admits only the token-stripped clean text to the store (the LLM
-//! must never see the token), activating the skill in-memory + persisting
-//! `sessions.skill` at queue time (`resolve_persist`, see skill_persist.rs).
-//! This test pins the full chain through the worker: queue admit → submit →
-//! idle-boundary drain → the drained turn's request carries the skill as a
-//! transient `[active skill]` tail reminder (the LAST user message, naming
-//! the skill's source file) while the system prompt stays skill-free, and
-//! the queued user message is the clean text.
+//! The TUI admits the raw text (`$haiku fix the bug`, token included) to the
+//! queue and touches neither the shared `skill_prompt` Arc nor
+//! `sessions.skill`. The still-running kickoff turn therefore carries no
+//! `[active skill]` reminder (and no latent-tool unlock); only after the
+//! drain consumes the item does `record_compound` resolve + activate +
+//! persist the skill, so the drained turn's request ends with the tail
+//! reminder and the recorded user message is token-stripped.
 use std::sync::Arc;
 
-use opencoder_core::{message::now_ms, resolve_agent, Config};
+use opencoder_core::{resolve_agent, Config};
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, SessionPatch, Store};
+use opencoder_store::{Delivery, LibsqlStore, SessionInput, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
+
+/// Serializes tests that mutate process-global HOME (skill discovery reads
+/// `~/.opencoder/skills`). `&'static` mutex => `MutexGuard<'static>`.
+static HOME_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct HomeGuard {
+    prev_home: Option<std::ffi::OsString>,
+    prev_xdg: Option<std::ffi::OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+fn lock_home(home: &std::path::Path) -> HomeGuard {
+    let _lock = HOME_MUTEX.lock().unwrap();
+    let prev_home = std::env::var_os("HOME");
+    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("HOME", home);
+    std::env::set_var("XDG_CONFIG_HOME", home);
+    HomeGuard {
+        prev_home,
+        prev_xdg,
+        _lock,
+    }
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        match self.prev_home.take() {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        match self.prev_xdg.take() {
+            Some(h) => std::env::set_var("XDG_CONFIG_HOME", h),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
+}
+
+fn write_haiku_skill(home: &std::path::Path) {
+    let dir = home.join(".opencoder").join("skills").join("haiku");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), "Always answer in haiku form.").unwrap();
+}
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
@@ -31,7 +72,13 @@ fn text_done(text: &str) -> LlmEvent {
     }
 }
 
-/// Extract the system message content from a ChatRequest's messages.
+fn message_contents(req: &opencoder_llm::ChatRequest) -> Vec<&str> {
+    req.messages
+        .iter()
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .collect()
+}
+
 fn system_content(req: &opencoder_llm::ChatRequest) -> String {
     req.messages
         .iter()
@@ -41,8 +88,26 @@ fn system_content(req: &opencoder_llm::ChatRequest) -> String {
         .to_string()
 }
 
+fn queue_input(session_id: &str, prompt: &str) -> SessionInput {
+    SessionInput {
+        seq: None,
+        id: "q-1".into(),
+        session_id: session_id.into(),
+        delivery: Delivery::Queue,
+        prompt: prompt.into(),
+        images: Vec::new(),
+        display_text: Some(prompt.into()),
+        admitted_seq: 0,
+        promoted_seq: None,
+    }
+}
+
 #[tokio::test]
-async fn queued_combined_submission_drains_with_skill() {
+async fn queued_skill_fires_at_consumption_not_during_kickoff() {
+    let home = tempfile::tempdir().unwrap();
+    let _guard = lock_home(home.path());
+    write_haiku_skill(home.path());
+
     let store = mem_store().await;
     store
         .create_session(&SessionMeta {
@@ -69,38 +134,26 @@ async fn queued_combined_submission_drains_with_skill() {
     )
     .with_store(store.clone());
 
-    // Mirror `KeyAction::Queue`'s `resolve_persist` on `$haiku fix the bug`:
-    // activate the skill through the shared Arc (same handle the worker's
-    // `run_one_llm_call` reads) and persist `sessions.skill`, then admit only
-    // the token-stripped clean text.
-    let skill_body = "> Source: /skills/haiku/SKILL.md\n\nAlways answer in haiku form.";
-    let skill_handle = sess.skill_prompt.clone();
-    *skill_handle.lock().unwrap() = Some(skill_body.to_string());
+    // New TUI admission: the queue row keeps the RAW text — the `$haiku`
+    // token is still in the prompt/display, and NO skill was activated or
+    // persisted at queue time.
     store
-        .update_session(
-            "q-skill",
-            &SessionPatch {
-                skill: Some(skill_body.to_string()),
-                updated_at: Some(now_ms()),
-                ..Default::default()
-            },
-        )
+        .admit_input(&queue_input("q-skill", "$haiku fix the bug"))
         .await
         .unwrap();
-    store
-        .admit_input(&SessionInput {
-            seq: None,
-            id: "q-1".into(),
-            session_id: "q-skill".into(),
-            delivery: Delivery::Queue,
-            prompt: "fix the bug".into(),
-            images: Vec::new(),
-            display_text: None,
-            admitted_seq: 0,
-            promoted_seq: None,
-        })
-        .await
-        .unwrap();
+    assert!(
+        store
+            .get_session("q-skill")
+            .await
+            .unwrap()
+            .and_then(|m| m.skill)
+            .is_none(),
+        "no skill persisted while the item merely sits queued"
+    );
+    assert!(
+        sess.skill_prompt_cloned().is_none(),
+        "queue admission must not touch the in-memory skill handle"
+    );
 
     // Submit the kickoff; the run drains the queued follow-up at the first
     // idle boundary (no tool calls in turn 1).
@@ -114,48 +167,73 @@ async fn queued_combined_submission_drains_with_skill() {
         requests.len()
     );
 
-    // Effect: the drained turn's system prompt stays skill-free; the skill
-    // arrives as the transient tail reminder — the LAST user message of the
-    // request names the skill's source file.
-    let drained_system = system_content(&requests[1]);
+    // CORE P0: the kickoff turn — running while the `$skill` item sat queued
+    // — must carry NO active-skill reminder anywhere, and no skill body in
+    // the system prompt.
+    for content in message_contents(&requests[0]) {
+        assert!(
+            !content.contains("[active skill]"),
+            "queued $skill must not fire inside the running turn: {content}"
+        );
+    }
     assert!(
-        !drained_system.contains("haiku"),
-        "skill bodies never ship in the system prompt: {drained_system}"
+        !system_content(&requests[0]).contains("haiku"),
+        "skill bodies never ship in the system prompt: {}",
+        system_content(&requests[0])
     );
-    let last_user: Option<&serde_json::Value> = requests[1]
+
+    // The drained turn resolves the skill at consumption: its request ends
+    // with the transient tail reminder naming the skill's source file.
+    let drained = &requests[1];
+    assert!(
+        !system_content(drained).contains("haiku"),
+        "drained system prompt stays skill-free"
+    );
+    let last_user = drained
         .messages
         .iter()
         .rev()
-        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"));
-    let tail = last_user
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("");
     assert!(
-        tail.contains("[active skill]") && tail.contains("/skills/haiku/SKILL.md"),
-        "drained queued turn must end with the skill tail reminder: {tail}"
+        last_user.contains("[active skill]") && last_user.contains("haiku/SKILL.md"),
+        "drained queued turn must end with the skill tail reminder: {last_user}"
     );
 
-    // The queued user message is the clean text (token stripped at admit —
-    // the store/LLM never see the token).
-    let user_msgs: Vec<&serde_json::Value> = requests[1]
+    // The recorded user message is the clean text; the token never reaches
+    // the model even though the queue row kept it.
+    let user_msgs: Vec<&str> = drained
         .messages
         .iter()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
         .collect();
     assert!(
-        user_msgs.iter().any(|m| {
-            m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("fix the bug"))
-        }),
+        user_msgs.iter().any(|c| c.contains("fix the bug")),
         "queued clean text must reach the model: {user_msgs:?}"
     );
     assert!(
-        user_msgs.iter().all(|m| {
-            !m.get("content")
-                .and_then(|c| c.as_str())
-                .is_some_and(|c| c.contains("$"))
-        }),
+        user_msgs.iter().all(|c| !c.contains("$haiku")),
         "the $skill token must never reach the LLM: {user_msgs:?}"
+    );
+
+    // Consumption-time persistence: sessions.skill landed with the drained
+    // item's resolution (survives resume).
+    let persisted = store
+        .get_session("q-skill")
+        .await
+        .unwrap()
+        .and_then(|m| m.skill);
+    assert_eq!(
+        persisted,
+        sess.skill_prompt_cloned(),
+        "consumption-time activation persisted verbatim"
+    );
+    assert!(
+        persisted
+            .as_deref()
+            .is_some_and(|b| b.starts_with("> Source: ")),
+        "persisted body carries the source prefix: {persisted:?}"
     );
 }

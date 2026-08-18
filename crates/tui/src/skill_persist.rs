@@ -1,14 +1,17 @@
 //! Persisting the active skill so it survives resume/restart.
 //!
-//! When a `$skill` token is submitted inline — most importantly when it is
-//! **queued** via Tab while a turn is running — `resolve_and_warn` activates the
-//! skill in-memory (`SessionState::skill_prompt`) but, unlike the skill-menu
-//! (`SetSkill`) path, it never wrote the skill body to the store. A combined
-//! submission like `$skill fix the bug` therefore queued/persisted only the
-//! clean task text, so on resume the queued task ran **without** the skill.
+//! [`resolve_persist`] composes in-memory activation (`SessionState::
+//! skill_prompt`) with a best-effort `update_session(skill=…)` ([`persist_skill`],
+//! mirroring the `SetSkill` path).
 //!
-//! [`persist_skill`] mirrors the `SetSkill` path: a best-effort
-//! `update_session(skill=…)` whenever the skill body changed.
+//! **Timing contract (P0):** this composition is now the *idle-Submit* path
+//! only. Submissions made while a turn is running (Steer / Tab-queue /
+//! BackTab-compound) admit the **raw** text — `$name` tokens included — and
+//! defer everything to consumption: the runner's `record_compound` resolves,
+//! activates and persists the skill at the idle boundary (see
+//! `opencoder_session::skill_resolve::persist_active_skill`). Resolving here
+//! would write the `skill_prompt` Arc shared with the in-flight LLM call and
+//! make a queued `$skill` fire inside the still-running turn.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -55,9 +58,11 @@ pub(crate) async fn persist_skill(
 }
 
 /// Resolve `$skill` tokens in `text` (activating the skill in-memory) **and**
-/// persist the result to the store when it changed — the single composition
-/// `run_app` relies on for every Submit / Steer / Queue. Extracted so the
-/// three call sites stay byte-identical and the wiring itself is testable.
+/// persist the result to the store when it changed. `run_app`'s **idle**
+/// Submit path relies on this: the turn starts immediately, so eager
+/// activation is the correct timing. Running-path submissions (Steer /
+/// Queue / BackTab-compound) bypass this entirely and defer to the runner's
+/// consumption-time resolution.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resolve_persist(
     text: &str,
@@ -255,10 +260,12 @@ mod tests {
     /// Regression for the reported bug: a **queued** `$skill fix the bug`
     /// submission. `extract_skill_tokens` strips the token and yields the clean
     /// task text; the resolved skill body lands in `skill_prompt`. Previously
-    /// that body was in-memory only, so on resume the queued task ran with no
-    /// skill. Now `persist_skill` carries it into the store row.
+    /// that body was in-memory only, so on resume the task ran with no skill.
+    /// Now `persist_skill` carries it into the store row. (Premise narrowed to
+    /// the IDLE submit: running-path queue/steer rows keep the raw token and
+    /// persist at consumption — see queue_admitter::handle_queue.)
     #[tokio::test]
-    async fn persist_skill_survives_combined_queued_skill_submission() {
+    async fn persist_skill_survives_combined_idle_skill_submission() {
         use opencoder_core::extract_skill_tokens;
 
         let store = fresh_store().await;
@@ -273,8 +280,9 @@ mod tests {
 
         persist_skill(&store, "s", &None, &skill_handle).await;
 
-        // The clean text is what a queue row would store; the skill lives on the
-        // session row — exactly what resume reads back via meta.skill.
+        // The clean text is what the idle submit sends as the prompt; the skill
+        // lives on the session row — exactly what resume reads back via
+        // meta.skill.
         assert_eq!(
             store
                 .get_session("s")
@@ -302,7 +310,7 @@ mod tests {
 
     /// End-to-end composition: `$alpha fix the bug` through `resolve_persist`
     /// activates the skill in-memory AND persists it to the store — the exact
-    /// wiring `run_app`'s Submit/Steer/Queue branches rely on. Pins that the
+    /// wiring `run_app`'s IDLE Submit branch relies on. Pins that the
     /// three call sites' "snapshot -> resolve -> persist" sequence is correct,
     /// not just the two halves in isolation.
     #[tokio::test]

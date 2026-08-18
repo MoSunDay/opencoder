@@ -120,69 +120,49 @@ pub(crate) fn admit_running(
     }
 }
 
-/// The moved `KeyAction::Queue` arm body (old app.rs 584-614, minus the
-/// trailing `push_history`/`follow`, which stay in app.rs). `store` remains
-/// for `resolve_persist`; the admit itself goes through [`submit`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn handle_queue(
+/// Deferred queue admission for a submission made while a turn is running
+/// (Tab-queue, and a Submit that reaches the running state via BackTab's
+/// compound `/plan …`): the **raw** text is admitted verbatim, `$name` tokens
+/// included. Skill resolution, activation and persistence all happen at
+/// CONSUMPTION time — the runner's `record_compound` at the idle boundary —
+/// never at submit time. (Eager resolution here used to write the
+/// `skill_prompt` Arc shared with the in-flight LLM call, so a queued
+/// `$skill` armed the `[active skill]` reminder and latent tools in the
+/// *still running* turn: the skill "fired" immediately.)
+///
+/// The queue panel shows the same raw text (what the user typed); the user
+/// message the LLM eventually sees is recorded token-stripped by
+/// `record_compound`, so the token never reaches the model.
+pub(crate) fn handle_queue(
     text: &str,
     tx: &mpsc::Sender<AdmitReq>,
     st: &mut AdmitUiState,
     queue_items: &mut Vec<(i64, String)>,
     pending_images: &mut Vec<(String, String)>,
     chat: &mut crate::chat::ChatView,
-    active_skill: &mut Option<String>,
-    active_skill_body: &mut Option<String>,
-    sys_tokens: &mut u64,
-    agent_name: &str,
-    workdir: &std::path::Path,
-    skill_handle: &Arc<std::sync::Mutex<Option<String>>>,
-    store: &Arc<dyn Store>,
     session_id: &str,
 ) {
-    let (clean, _unresolved) = crate::skill_persist::resolve_persist(
-        text,
-        active_skill,
-        active_skill_body,
-        sys_tokens,
-        agent_name,
-        workdir,
-        skill_handle,
-        chat,
-        store,
-        session_id,
-    )
-    .await;
-    let clean = clean.trim();
-    let clean = crate::control_helpers::forward_skill_if_compound(text, clean);
-    if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) {
+    let raw = text.trim();
+    if raw.is_empty() {
+        return;
+    }
+    // Compound `/plan <content>` arming is evaluated on the raw text: when
+    // the runner consumes the item it applies `/plan` (AgentSwitch) and the
+    // TUI's TurnDone(plan) consumes the arm into `plan_submitted`.
+    if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(raw) {
         chat.pending_plan_arm = true;
     }
-    if !clean.is_empty() {
-        let display = crate::skill_display::queued_item_display(text, &clean);
-        // Snapshot BEFORE submit: submit consumes pending_images into the
-        // in-flight stash on the success path.
-        let input = crate::app_helpers::mk_input_with_images(
-            session_id,
-            Delivery::Queue,
-            &clean,
-            Some(display.clone()),
-            &crate::app_helpers::snapshot_image_uris(pending_images),
-        );
-        admit_running(tx, st, queue_items, pending_images, chat, input, display);
-    } else if let Some(skill_name) = active_skill.as_deref() {
-        // Pure-skill submit: admit the trigger so the active skill is acted on.
-        let trigger = crate::skill_display::skill_trigger(skill_name);
-        let display = crate::skill_display::skill_token_display(skill_name);
-        let input = crate::app_helpers::mk_input_with_images(
-            session_id,
-            Delivery::Queue,
-            &trigger,
-            Some(display.clone()),
-            &crate::app_helpers::snapshot_image_uris(pending_images),
-        );
-        admit_running(tx, st, queue_items, pending_images, chat, input, display);
-    }
+    let display = raw.to_string();
+    // Snapshot BEFORE submit: submit consumes pending_images into the
+    // in-flight stash on the success path.
+    let input = crate::app_helpers::mk_input_with_images(
+        session_id,
+        Delivery::Queue,
+        raw,
+        Some(display.clone()),
+        &crate::app_helpers::snapshot_image_uris(pending_images),
+    );
+    admit_running(tx, st, queue_items, pending_images, chat, input, display);
 }
 
 /// Outcome of reconciling a successful completion against the queue mirror.
@@ -676,5 +656,93 @@ mod tests {
             vec![("img.png".to_string(), "alt".to_string())]
         );
         assert!(st.inflight.is_empty());
+    }
+    #[tokio::test]
+    async fn handle_queue_admits_raw_text_and_defers_skill() {
+        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "s".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
+        let mut st = AdmitUiState::default();
+        let mut queue_items = vec![];
+        let mut pending_images = vec![];
+        let mut chat = crate::chat::ChatView::default();
+
+        handle_queue(
+            "$alpha fix the bug",
+            &tx,
+            &mut st,
+            &mut queue_items,
+            &mut pending_images,
+            &mut chat,
+            "s",
+        );
+
+        // Queue-panel mirror shows what the user typed, token included.
+        assert!(queue_items.iter().any(|(_, d)| d.contains("$alpha")));
+        let done = done_rx.recv().await.unwrap();
+        apply_done(&mut st, done, &mut queue_items, &mut pending_images);
+        let rows = store.pending_inputs("s", Delivery::Queue).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].prompt, "$alpha fix the bug",
+            "raw text queued verbatim — the runner resolves the token at consumption"
+        );
+        assert_eq!(rows[0].display_text.as_deref(), Some("$alpha fix the bug"));
+        // No skill side effects at queue time: sessions.skill stays NULL.
+        assert!(
+            store
+                .get_session("s")
+                .await
+                .unwrap()
+                .and_then(|m| m.skill)
+                .is_none(),
+            "queueing must not persist a skill; that happens at consumption"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_queue_pure_skill_admits_token_not_trigger() {
+        let store = Arc::new(LibsqlStore::open_memory().await.unwrap());
+        store
+            .create_session(&SessionMeta {
+                id: "s".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let (tx, mut done_rx) = spawn_admitter(Arc::clone(&store) as Arc<dyn Store>);
+        let mut st = AdmitUiState::default();
+        let mut queue_items = vec![];
+        let mut pending_images = vec![];
+        let mut chat = crate::chat::ChatView::default();
+
+        handle_queue(
+            "$alpha",
+            &tx,
+            &mut st,
+            &mut queue_items,
+            &mut pending_images,
+            &mut chat,
+            "s",
+        );
+
+        let done = done_rx.recv().await.unwrap();
+        apply_done(&mut st, done, &mut queue_items, &mut pending_images);
+        let rows = store.pending_inputs("s", Delivery::Queue).await.unwrap();
+        assert_eq!(
+            rows[0].prompt, "$alpha",
+            "pure-skill queue item admits the token verbatim; the runner's \
+             record_compound injects SKILL_TRIGGER at consumption"
+        );
+        assert!(
+            queue_items.iter().all(|(_, d)| !d.contains("skill is now active")),
+            "no synthetic trigger text is queued at submit time"
+        );
     }
 }

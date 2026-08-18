@@ -329,6 +329,31 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 /// transcript and resets on compaction) so the context meter reflects the
 /// real request size — including the global `~/.opencoder/AGENTS.md` content,
 /// which ships in the system prompt and consumes context like any other part.
+/// Refresh the local active-skill mirrors from the shared `skill_prompt`
+/// handle after the runner activated (or cleared) a skill at **consumption**
+/// time (queue/steer drain resolved a `$name` token at the idle boundary).
+/// The runner shares only the body, so the display name is derived from the
+/// body's `> Source: .../skills/<name>/SKILL.md` prefix; `sys_tokens` is
+/// re-estimated from the new body. No-op while both sides agree.
+pub(crate) fn refresh_skill_mirrors(
+    skill_handle: &Arc<Mutex<Option<String>>>,
+    active_skill: &mut Option<String>,
+    active_skill_body: &mut Option<String>,
+    sys_tokens: &mut u64,
+    agent_name: &str,
+    workdir: &Path,
+) {
+    let body = skill_handle.lock().ok().and_then(|g| g.clone());
+    if body == *active_skill_body {
+        return;
+    }
+    *active_skill = body
+        .as_deref()
+        .and_then(crate::skill_display::skill_name_from_body);
+    *active_skill_body = body;
+    *sys_tokens = sys_tokens_for(agent_name, workdir, active_skill_body.as_deref());
+}
+
 pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {
     let agent = match resolve_agent(agent_name) {
         Some(a) => a,

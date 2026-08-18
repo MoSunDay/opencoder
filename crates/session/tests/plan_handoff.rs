@@ -361,6 +361,8 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
             skill: None,
             task_type: None,
             requirement: None,
+            plan_snapshot: None,
+            plan_input_count: 0,
         }
     }
 
@@ -431,4 +433,70 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
             .map(|t| (&t.task_id, t.status))
             .collect::<Vec<_>>()
     );
+}
+
+/// Snapshot fallback: when compaction folded the plan (an assistant message)
+/// into the user-role summary head, `final_plan_text` misses and `handoff`
+/// must fall back to the compaction-captured `plan_snapshot` — the regression
+/// behind "long plan session + Shift+Tab does a plain swap with full context".
+#[tokio::test]
+async fn handoff_falls_back_to_compaction_snapshot() {
+    let mut session = empty_session();
+    // Post-compaction shape: synthetic user summary + a trailing user message,
+    // no assistant text anywhere in the live tail.
+    session.messages = vec![
+        Message::user("s1", "[Conversation summary so far] explored, planned"),
+        Message::user("u9", "one more question"),
+    ];
+    session.plan_snapshot = Some("## Plan\n1. snapshot step".into());
+
+    let reset = plan_handoff::handoff(&mut session, "");
+
+    let display = reset.expect("snapshot fallback must trigger the handoff");
+    assert_eq!(display, "## Plan\n1. snapshot step");
+    assert_eq!(session.messages.len(), 1, "transcript collapsed");
+    let only = &session.messages[0];
+    assert!(only.synthetic, "handoff message is synthetic");
+    assert!(
+        only.text().contains("snapshot step"),
+        "handoff body carries the snapshotted plan"
+    );
+    assert_eq!(
+        session.handoff_plan.as_deref(),
+        Some("## Plan\n1. snapshot step"),
+        "handoff boundary records the snapshot display"
+    );
+    assert_eq!(
+        session.plan_snapshot, None,
+        "snapshot is consumed by the handoff"
+    );
+}
+
+/// Precedence: a live assistant plan always wins over an older snapshot —
+/// the snapshot is a fallback, never an override of fresher in-memory text.
+#[tokio::test]
+async fn handoff_prefers_live_assistant_over_stale_snapshot() {
+    let mut session = empty_session();
+    session.messages = vec![
+        Message::user("u1", "build a foo"),
+        assistant_with_text("a1", "## Plan\n1. the NEW final plan"),
+    ];
+    session.plan_snapshot = Some("## Plan\n0. the OLD stale plan".into());
+
+    let display = plan_handoff::handoff(&mut session, "").unwrap();
+    assert!(
+        display.contains("the NEW final plan"),
+        "live assistant text must win: {display}"
+    );
+    assert!(!display.contains("OLD stale plan"));
+}
+
+/// Neither live plan nor snapshot: unchanged no-op contract.
+#[tokio::test]
+async fn handoff_without_plan_or_snapshot_is_noop() {
+    let mut session = empty_session();
+    session.messages = vec![Message::user("u1", "hello")];
+    assert!(plan_handoff::handoff(&mut session, "").is_none());
+    assert_eq!(session.messages.len(), 1, "transcript untouched");
+    assert_eq!(session.plan_snapshot, None);
 }

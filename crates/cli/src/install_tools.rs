@@ -79,7 +79,7 @@ fn format_result(exit_code: i32, status: &ToolDepStatus) -> Vec<String> {
         ));
     } else if ok {
         lines.push(String::from(
-            "  some deps still missing \u{2014} re-run opencode install-tools or install manually",
+            "  some deps still missing \u{2014} re-run opencoder install-tools or install manually",
         ));
     }
     lines
@@ -120,6 +120,10 @@ mod tests {
         assert_eq!(lines.len(), 3);
         assert!(lines[1].contains("tmux: no") && lines[1].contains("sentinel: no"));
         assert!(lines[2].contains("some deps still missing"));
+        assert!(
+            lines[2].contains("opencoder install-tools"),
+            "tail must name the real binary"
+        );
     }
 
     #[test]

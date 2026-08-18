@@ -1,4 +1,4 @@
-Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
+Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 
 # OpenCoder 逻辑地图
 
@@ -20,7 +20,7 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 
 - `Store` trait（`crates/store/src/store.rs`）：sessions/messages/session_inputs/session_events/subagent_tasks 的统一 CRUD 口子，是切换 SQLite 实现的唯一接缝。
 - `ChatStream` trait（`crates/llm/src/stream.rs`）：`ChatClient`（真）与 `MockChatClient`（测试）共同实现，使 session 运行时可零 token 确定性测试。
-- drain 语义（`crates/session/src/runner/mod.rs::run_loop`）：每个 turn 边界提升 steer；idle 时消费恰好一条 queue。doom-loop 守卫（`DOOM_THRESHOLD=20`，见 `runner/event.rs`）打破连续空 turn 循环。
+- drain 语义（`crates/session/src/runner/mod.rs::run_loop`）：每个 turn 边界提升 steer；idle 边界逐条消费 queue，单 run FIFO 排空至 Done。doom-loop 守卫（`DOOM_THRESHOLD=20`，定义于 `runner/event.rs`）：滑动窗口内 20 个相同 `name:input` 工具签名 → Error + Err 终止 run。
 
 业务能力见 [features/index.md](features/index.md)。
 

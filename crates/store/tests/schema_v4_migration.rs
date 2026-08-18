@@ -99,8 +99,8 @@ async fn schema_v3_to_v4_adds_images_json_column() {
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
         assert_eq!(
-            v, 9,
-            "schema version must be 9 (current) after v3 migration"
+            v, 10,
+            "schema version must be 10 (current) after v3 migration"
         );
     }
 
@@ -120,7 +120,7 @@ async fn schema_v3_to_v4_adds_images_json_column() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 9, "schema version stays 9 after idempotent re-open");
+    assert_eq!(v, 10, "schema version stays 10 after idempotent re-open");
 }
 
 // ===========================================================================
@@ -226,6 +226,6 @@ async fn schema_v4_to_v5_adds_task_type_and_backfills_subagents() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 9, "schema version must be 9 after v4 migration");
+        assert_eq!(v, 10, "schema version must be 10 after v4 migration");
     }
 }

@@ -22,6 +22,7 @@ mod dedup;
 mod drain;
 mod event;
 mod execute;
+mod input_recovery;
 mod llm_call;
 mod steer;
 mod subagent;
@@ -36,7 +37,7 @@ use drain::{
     drain_mode_step, entry_drain_mode, idle_drain, reabsorb_tail, DrainModeAction, IdleAction,
     MAX_CONSUME_STREAK,
 };
-use execute::execute_call;
+use execute::{execute_call, panic_message};
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
 use steer::{claim_steers, is_turn_cancelled, reset_turn_cancel};
@@ -50,19 +51,6 @@ fn emit(sink: &Sink<'_>, ev: SessionEvent) {
         (**g)(ev);
     } else {
         tracing::warn!(event = ?ev, "emit: sink mutex poisoned, event dropped");
-    }
-}
-
-/// Extract a human-readable message from a caught panic payload
-/// (`Box<dyn Any + Send>`). Panics are typically constructed from `&str` or
-/// `String`; anything else degrades to a generic note.
-fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(m) = payload.downcast_ref::<&'static str>() {
-        (*m).to_string()
-    } else if let Some(m) = payload.downcast_ref::<String>() {
-        m.clone()
-    } else {
-        "non-string panic payload".to_string()
     }
 }
 
@@ -162,6 +150,8 @@ pub async fn run_with_registry(
             return Ok(());
         }
     }
+    // F2: recover promoted-but-unrecorded inputs before entry_drain_mode polls.
+    input_recovery::recover_orphaned_inputs(session).await;
     // Replay cancelled subagent tasks from a prior interrupted run BEFORE the
     // new input enters the loop: resume each child, backfill the parent
     // tool_result, flip to Completed. No-op for children (no `task` tool).
@@ -193,9 +183,19 @@ pub async fn run_with_registry(
         session.maybe_tag_plan_prompt(&mut user_text);
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
+        // Persist the incremented plan-phase counter so a restart keeps the
+        // plan→act handoff armed (TUI Shift+Tab, /act_clear_context gate).
+        if session.agent.kind == AgentKind::Plan {
+            session.persist_plan_phase().await;
+        }
     }
     let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
-    run_loop(session, registry, &mut on_event, drain_mode).await?;
+    if let Err(run_err) = run_loop(session, registry, &mut on_event, drain_mode).await {
+        // F3: a failed run must not strand inputs admitted during it — best-effort
+        // bounded re-absorb, never masking the original error.
+        let _ = reabsorb_tail(session, registry, &mut on_event).await;
+        return Err(run_err);
+    }
 
     // P1-4: bounded re-absorb of steers/queues admitted during run_loop's
     // idle window (see drain::reabsorb_tail).
@@ -288,9 +288,7 @@ pub(crate) async fn run_loop(
                         // unprocessed items so the next run re-absorbs them.
                         let remaining: Vec<i64> =
                             steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
-                        if let Some(store) = &session.store {
-                            let _ = store.unpromote_inputs(&session.id, &remaining).await;
-                        }
+                        input_recovery::unpromote_batch(session, &remaining).await;
                         return Err(e);
                     }
                     clear_sentinel = matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
@@ -304,11 +302,15 @@ pub(crate) async fn run_loop(
                         crate::skill_resolve::record_compound(session, &rest, imgs).await;
                         steer_recorded = true;
                     }
+                    // F2: mark per-item (not per-batch): a mid-batch failure
+                    // leaves earlier items marked, failed+remaining unpromoted.
+                    input_recovery::mark_input_recorded(session, *seq).await;
                     continue;
                 }
                 clear_sentinel = false;
                 // Resolve `$skill` tokens, apply plan tag, record as real user turn.
                 crate::skill_resolve::record_compound(session, p, imgs).await;
+                input_recovery::mark_input_recorded(session, *seq).await;
                 steer_recorded = true;
             }
             // Sentinel ClearContext: go idle without an LM call.
@@ -421,6 +423,10 @@ pub(crate) async fn run_loop(
             tool_failures.clear();
             bash_timeout_first = None;
         }
+
+        // Skill full-body injection: idempotent persistent `[skill loaded]`
+        // message so the model never burns a tool call reading the SKILL.md.
+        crate::skill_context::ensure_full_body_loaded(session).await;
 
         on_event(SessionEvent::LlmRoundStart {
             started_at_ms: now_ms(),

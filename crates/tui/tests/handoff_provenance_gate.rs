@@ -13,11 +13,14 @@
 //! synchronously (see `app_loop_tests::switch_gate_tests`); this file is the
 //! defense-in-depth layer: even when a stale `SwitchAndStart` reaches the
 //! worker, `plan_input_count > 0` (the session-side source of truth) must
-//! hold before the transcript is folded.
+//! hold before the transcript is folded. On gate failure the handoff degrades
+//! to a pure switch plus a normal act-mode submission of the captured input
+//! text (`worker::handoff_run_prompt`) — an empty capture degrades to an
+//! empty turn instead.
 
 use std::sync::Arc;
 
-use opencoder_core::{resolve_agent, Config, Message};
+use opencoder_core::{resolve_agent, Config, Message, Role};
 use opencoder_llm::{LlmEvent, MockChatClient};
 use opencoder_session::{resume, SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
@@ -45,8 +48,9 @@ fn text_done(text: &str) -> LlmEvent {
 /// The bug's exact FIFO sequence: `SwitchAgent("plan")` (which resets the
 /// plan-input counter) immediately followed by a stale `SwitchAndStart`
 /// fired off the not-yet-folded UI flag. The gate must degrade it to a pure
-/// switch: transcript intact, no resume boundary, input carried into nothing
-/// destructive — but the UI protocol (TurnDone) still completes.
+/// switch: transcript intact, no resume boundary, and the captured composer
+/// text submitted as a normal act-mode prompt (`worker::handoff_run_prompt`)
+/// — only an empty capture degrades all the way to an empty turn.
 #[tokio::test]
 async fn stale_double_tap_switch_and_start_preserves_context() {
     let store = mem_store().await;
@@ -133,20 +137,32 @@ async fn stale_double_tap_switch_and_start_preserves_context() {
         events
             .iter()
             .any(|e| matches!(e, UiEvent::TurnDone(ref a) if a == "act")),
-        "TurnDone(act) must still be emitted for the empty turn"
+        "TurnDone(act) must still be emitted for the degraded turn"
     );
 
-    // (4) In-memory transcript intact verbatim: with no new user message the
-    // empty turn settles idle without an LLM call — history untouched.
+    // (4) In-memory transcript intact verbatim, plus exactly the capture:
+    // gate failure degrades to a plain act-mode submission of `extra`
+    // (`worker::handoff_run_prompt`), so the input is not swallowed.
     assert_eq!(
         sess.messages.len(),
-        2,
-        "history must be preserved verbatim, no synthetic messages"
+        4,
+        "history preserved verbatim + one submitted user turn + its answer"
     );
+    assert!(sess.messages[0].text().contains("refactor the parser module"));
     assert!(sess.messages[1].text().contains("task complete"));
     assert!(
-        mock.requests().is_empty(),
-        "the degraded empty turn must not waste an LLM call"
+        matches!(sess.messages[2].role, Role::User) && sess.messages[2].text().contains("draft text"),
+        "captured input-box text must be submitted as a normal user prompt"
+    );
+    assert!(
+        matches!(sess.messages[3].role, Role::Assistant) && sess.messages[3].text().contains("acknowledged"),
+        "the submitted prompt consumes the scripted mock answer"
+    );
+    assert_eq!(
+        mock.requests().len(),
+        1,
+        "gate failure degrades to a plain submission: exactly one LLM call — \
+         the input must not be swallowed (zero) nor double-sent"
     );
 
     // (5) No resume boundary persisted; mode switch itself still persisted.
@@ -213,6 +229,8 @@ async fn plan_phase_input_still_hands_off() {
     ];
     // Real plan-phase requirement delivered via maybe_tag_plan_prompt.
     sess.plan_input_count = 1;
+    // `plan_snapshot` is the phase-bounded truth source (`SessionState::record` captures it when the plan agent answers); seed it to simulate an already-produced planning phase.
+    sess.plan_snapshot = Some("## Plan\n1. do X".into());
 
     let quit = process_cmd(
         UiCmd::SwitchAndStart("act".into(), "".into()),

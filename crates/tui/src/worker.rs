@@ -166,6 +166,21 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
     }
 }
 
+/// Pure prompt selection for the run that follows a `SwitchAndStart`
+/// plan→act decision: when NO handoff happened (`plan_display` is `None` —
+/// provenance gate failure or no plan text found) the captured input-box text
+/// (`extra`, taken from the composer by `handle_switch_agent`) is submitted as
+/// a normal act-mode prompt instead of being silently dropped. When a handoff
+/// DID happen, the plan (with `extra` folded in by `plan_handoff::handoff`)
+/// already carries the requirement, so the run starts with an empty prompt.
+pub(crate) fn handoff_run_prompt(plan_display: &Option<String>, extra: String) -> String {
+    if plan_display.is_none() && !extra.is_empty() {
+        extra
+    } else {
+        String::new()
+    }
+}
+
 /// Minimum free capacity reserved by the ordered UI forwarder. Parent
 /// TextDelta may be shed below this threshold because `AssistantFinal` repairs
 /// it. Every other event is delivered with async backpressure in original
@@ -343,8 +358,10 @@ pub async fn process_cmd(
             // persist a `handoff_seq` resume boundary that irrecoverably
             // drops all context. Gate failure degrades to a pure switch: no
             // handoff, no TranscriptReset/PlanHandoff, no handoff_seq write —
-            // the skill clear and the empty turn below still run so the UI's
-            // TurnDone protocol is honored.
+            // the skill clear and the follow-up run below still execute so
+            // the UI's TurnDone protocol is honored. The captured input-box
+            // text is NOT discarded on gate failure: with no handoff it is
+            // submitted as a normal act-mode prompt (`handoff_run_prompt`).
             let plan_display = if sess.plan_input_count > 0 {
                 opencoder_session::plan_handoff::handoff(sess, &extra)
             } else {
@@ -355,6 +372,11 @@ pub async fn process_cmd(
                 forward_event(&ui_tx, ev);
                 None
             };
+            // Wire the pure selector: no handoff (gate failure or no plan
+            // text) with captured composer text -> run it as a normal
+            // act-mode prompt instead of silently discarding the input.
+            // `extra` has no later use in this arm, so it is moved here.
+            let run_prompt = handoff_run_prompt(&plan_display, extra);
             if let Some(plan_display) = plan_display {
                 // Persist the handoff boundary so resume reconstructs the
                 // focused post-handoff transcript (mirrors compaction).
@@ -405,7 +427,7 @@ pub async fn process_cmd(
             let message_floor = sess.messages.len();
             let tx = ui_tx.clone();
             let sink_for_run = sink.clone();
-            let res = run_session(sess, String::new(), move |sev| {
+            let res = run_session(sess, run_prompt, move |sev| {
                 let _ = sink_for_run.push(&sev);
                 forward_event(&tx, sev);
             })

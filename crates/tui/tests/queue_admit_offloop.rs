@@ -252,7 +252,7 @@ async fn blocked_admit_does_not_stall_ui_loop() {
 
     // The optimistic temp row reconciles to the real seq, in place.
     assert_eq!(
-        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, real),
+        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, real, "first"),
         AdmitReconcile::Replaced
     );
     assert_eq!(queue_items, vec![(real, "first".to_string())]);
@@ -298,7 +298,7 @@ async fn consumed_before_completion_does_not_resurrect() {
 
     queue_admitter::note_consumed(&mut st, real);
     assert_eq!(
-        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, real),
+        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, real, "first"),
         AdmitReconcile::DroppedConsumed,
         "the drain already consumed this seq: the temp row must drop, not resurrect"
     );
@@ -359,11 +359,11 @@ async fn second_submit_lines_up_behind_blocked_first() {
 
     // Reconcile in arrival order; each temp row rewrites in place.
     assert_eq!(
-        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, r1),
+        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -1, r1, "first"),
         AdmitReconcile::Replaced
     );
     assert_eq!(
-        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -2, r2),
+        queue_admitter::reconcile_ok(&mut queue_items, &st.consumed, -2, r2, "second"),
         AdmitReconcile::Replaced
     );
     assert_eq!(

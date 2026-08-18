@@ -117,6 +117,16 @@ pub(crate) fn trip_reason(
     None
 }
 
+/// The stderr message printed after the terminal is restored, just before the
+/// supervisor exits the process. Pure so the user-facing copy (binary name,
+/// `--continue` hint) is unit-testable without spawning threads.
+pub(crate) fn exit_message(reason: Trip) -> String {
+    format!(
+        "opencoder: input collector {reason:?} — terminal restored, exiting. \
+         Reopen with `opencoder --continue` to resume this session."
+    )
+}
+
 /// Best-effort signal → flag registration. Returns `None` on failure; the
 /// heartbeat watchdog still covers tty death if a registration fails.
 fn watch_signal(signum: i32) -> Option<Arc<AtomicBool>> {
@@ -155,11 +165,7 @@ pub(crate) fn spawn(heartbeat: Heartbeat, active: Arc<AtomicBool>) {
             // interface. Once `restore()` has left the alternate screen stderr
             // is safely visible (or harmlessly discarded if the tty is gone).
             TerminalGuard::restore();
-            let _ = writeln!(
-                std::io::stderr(),
-                "opencode: input collector {reason:?} — terminal restored, exiting. \
-                 Reopen with `opencode --continue` to resume this session."
-            );
+            let _ = writeln!(std::io::stderr(), "{}", exit_message(reason));
             std::process::exit(0);
         }
     });
@@ -168,6 +174,28 @@ pub(crate) fn spawn(heartbeat: Heartbeat, active: Arc<AtomicBool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exit_message_leads_with_opencoder_and_resume_hint() {
+        for reason in [Trip::Signal, Trip::InputWedge] {
+            let msg = exit_message(reason);
+            assert!(msg.starts_with("opencoder:"), "must lead with binary name: {msg}");
+            assert!(
+                msg.contains("opencoder --continue"),
+                "must advertise the resume hint: {msg}"
+            );
+            assert!(
+                msg.contains(&format!("{reason:?}")),
+                "must name the trip reason: {msg}"
+            );
+            // Word-boundary check: the old bare `opencode` name must be gone.
+            // (`opencoder` contains `opencode`, so plain contains() would lie.)
+            assert!(
+                !msg.contains("opencode ") && !msg.contains("opencode:"),
+                "stale bare `opencode` name in copy: {msg}"
+            );
+        }
+    }
 
     #[test]
     fn heartbeat_advances_on_bump() {

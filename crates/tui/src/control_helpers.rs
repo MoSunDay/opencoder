@@ -38,10 +38,8 @@ pub(crate) fn plan_compound_for_submit(input: &str) -> Option<String> {
 }
 
 /// True when `clean` is a **compound** `/plan <content>` prompt (real trailing
-/// content or a `$skill` token), as opposed to a bare mode toggle. A compound
-/// `/plan` delivered from act mode arms the *deferred* plan->act handoff: the
-/// submit/steer/queue paths set `ChatView::pending_plan_arm`, which the
-/// `AgentSwitch("plan")` event consumes to re-arm `plan_submitted`.
+/// content or a `$skill` token), as opposed to a bare mode toggle.
+#[allow(dead_code)]
 pub(crate) fn is_compound_plan_cmd(clean: &str) -> bool {
     plan_compound_for_submit(clean).is_some()
 }

@@ -320,14 +320,12 @@ pub(crate) async fn fold_ui_events(
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
                     let agent = chat.agent.clone();
                     let saved_plan_submitted = chat.plan_submitted;
-                    let saved_pending_plan_arm = chat.pending_plan_arm;
                     let saved_annotation_text = chat.annotation_text.clone();
                     let saved_submitted = chat.submitted;
                     let saved_first_prompt = chat.first_prompt.clone();
                     *chat =
                         crate::session_ui::replay_into_chat(&agent, msgs, store, session_id).await;
                     chat.plan_submitted = saved_plan_submitted;
-                    chat.pending_plan_arm = saved_pending_plan_arm;
                     chat.annotation_text = saved_annotation_text;
                     chat.submitted = saved_submitted;
                     chat.first_prompt = saved_first_prompt;
@@ -401,11 +399,26 @@ pub(crate) async fn fold_ui_events(
                                 *running = false;
                             }
                         } else {
-                            // Error: go idle without auto-restart to avoid
-                            // error loops. Queue mirror is maintained per-item
-                            // by QueueConsumed events as before.
+                            // Error: re-sync both mirrors from the store (the
+                            // same authoritative rebuild Done does) so pending
+                            // rows stay visible; they are consumed on the next
+                            // submit's drain or a `>` panel drain. Unlike Done
+                            // we do NOT arm drain_pending and keep running
+                            // false — auto-restarting after an error would
+                            // risk error loops.
+                            *queue_items = crate::queue_panel::pending_mirror(
+                                store
+                                    .pending_inputs(session_id, opencoder_store::Delivery::Queue)
+                                    .await
+                                    .unwrap_or_default(),
+                            );
+                            chat.steer_items = crate::queue_panel::pending_mirror(
+                                store
+                                    .pending_inputs(session_id, opencoder_store::Delivery::Steer)
+                                    .await
+                                    .unwrap_or_default(),
+                            );
                             *running = false;
-                            chat.steer_items.clear();
                         }
                     }
                 }
@@ -417,16 +430,23 @@ pub(crate) async fn fold_ui_events(
                 // Reconcile the status chip from the authoritative agent.
                 // The ordered forwarder reliably delivers AgentSwitch before
                 // TurnDone. Keep this authoritative assignment for compatibility
-                // with older producers and restored UI state. A missing older
-                // AgentSwitch("plan") would leave a stale
-                // pending_plan_arm behind, spuriously re-arming plan_submitted
-                // on a *later* plan-mode entry. The event channel is FIFO, so
-                // an unconsumed arm at TurnDone(plan) means exactly that the
-                // switch event was dropped — consume the arm against the
-                // authoritative agent here (before `agent` is moved below).
-                if agent == "plan" && chat.pending_plan_arm {
-                    chat.plan_submitted = true;
-                    chat.pending_plan_arm = false;
+                // with older producers and restored UI state.
+                //
+                // Consumption-time plan arm: a TurnDone(plan) means a turn
+                // actually RAN in the plan phase, so re-arm `plan_submitted`
+                // from the persisted plan-phase counter — the authoritative
+                // record of delivered requirements (incremented when a real
+                // requirement is recorded for the plan agent; bare commands
+                // and skill-only submissions never increment it). This covers
+                // steers, queued inputs and compound `/plan <content>` (the
+                // counter persists at record time, before this TurnDone),
+                // and it can NEVER arm from a stranded, never-consumed
+                // admit. A store failure keeps the current flag (fail-open).
+                if agent == "plan" {
+                    if let Ok(Some(meta)) = store.get_session(session_id).await {
+                        chat.plan_submitted =
+                            meta.agent.as_deref() == Some("plan") && meta.plan_input_count > 0;
+                    }
                 }
                 chat.agent = crate::terminal_text::sanitize_single_line(&agent).into_owned();
                 // Safety net for older producers that could omit

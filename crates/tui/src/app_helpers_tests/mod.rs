@@ -149,63 +149,6 @@ fn paste_non_file_text_returned_verbatim() {
     assert_eq!(paste_payload("hello world", dir.path()), "hello world");
 }
 
-#[tokio::test]
-async fn clear_pending_inputs_drops_store_rows_and_mirrors() {
-    use opencoder_store::LibsqlStore;
-    let store = LibsqlStore::open_memory().await.unwrap();
-    let sid = "s1";
-    store
-        .create_session(&SessionMeta {
-            id: sid.into(),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    let s_seq = store
-        .admit_input(&mk_input_with_images(
-            sid,
-            Delivery::Steer,
-            "steer-1",
-            None,
-            &[],
-        ))
-        .await
-        .unwrap();
-    let q_seq = store
-        .admit_input(&mk_input_with_images(
-            sid,
-            Delivery::Queue,
-            "queue-1",
-            None,
-            &[],
-        ))
-        .await
-        .unwrap();
-    let mut steer_items = vec![(s_seq, String::from("steer-1"))];
-    let mut queue_items = vec![(q_seq, String::from("queue-1"))];
-
-    clear_pending_inputs(&store, &mut steer_items, &mut queue_items).await;
-
-    assert!(steer_items.is_empty(), "steer mirror cleared");
-    assert!(queue_items.is_empty(), "queue mirror cleared");
-    assert!(
-        store
-            .pending_inputs(sid, Delivery::Steer)
-            .await
-            .unwrap()
-            .is_empty(),
-        "steer rows deleted from store"
-    );
-    assert!(
-        store
-            .pending_inputs(sid, Delivery::Queue)
-            .await
-            .unwrap()
-            .is_empty(),
-        "queue rows deleted from store"
-    );
-}
-
 /// Ctrl+T is now a pure act<->plan mode toggle and must NOT be consumed by
 /// `pre_key_intercept` (so it falls through to `handle_key`, which switches
 /// mode without collapsing thinking or clearing the input). Ctrl+L owns the

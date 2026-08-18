@@ -528,6 +528,21 @@ async fn handoff_persists_boundary_when_plan_exists() {
         )
         .await
         .unwrap();
+    // Phase-bounded handoff (`plan_handoff::handoff`): the plan comes from
+    // the snapshot `record` persists while the plan agent answers; the drain
+    // restores it from the sessions row via `resume`. Seed that mirror
+    // exactly as a real plan-mode session would have left it.
+    state
+        .store
+        .update_session(
+            sid,
+            &opencoder_store::SessionPatch {
+                plan_snapshot: Some("## Plan\n1. do X\n2. do Y".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let resp = app
         .oneshot(
             Request::builder()

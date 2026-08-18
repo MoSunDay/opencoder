@@ -289,3 +289,57 @@ async fn apply_skill_tokens_combined_mixed_resolved_and_unresolved() {
         "known body must follow annotation despite unknown peer: {handle_body}"
     );
 }
+
+#[test]
+fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
+    use crate::app_helpers::refresh_skill_mirrors;
+    use std::sync::{Arc, Mutex};
+
+    let workdir = std::env::temp_dir();
+    let skill_handle: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let (mut active_skill, mut active_skill_body, mut sys_tokens) = (None, None, 0u64);
+
+    // Stale local state (e.g. after a task switch or before any skill): the
+    // runner activated a skill at consumption time — mirror it.
+    let body = "> Source: /skills/haiku/SKILL.md\n\nAlways answer in haiku form.".to_string();
+    *skill_handle.lock().unwrap() = Some(body.clone());
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+    );
+    assert_eq!(active_skill.as_deref(), Some("haiku"), "name from Source prefix");
+    assert_eq!(active_skill_body.as_deref(), Some(body.as_str()));
+    assert!(
+        sys_tokens > 0,
+        "sys_tokens re-estimated from the new skill body"
+    );
+
+    // No drift: an unchanged handle is a no-op (tokens not re-estimated).
+    sys_tokens = 0;
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+    );
+    assert_eq!(sys_tokens, 0, "no-op when handle matches the mirror");
+
+    // Runner cleared the skill (plan handoff): mirrors clear too.
+    *skill_handle.lock().unwrap() = None;
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+    );
+    assert_eq!(active_skill, None);
+    assert_eq!(active_skill_body, None);
+}

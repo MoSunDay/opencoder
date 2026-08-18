@@ -1,47 +1,35 @@
-//! Pure helpers for formatting pure-skill (`$name`) submissions.
+//! Pure helpers around pure-skill (`$name`) submissions and persisted skill
+//! bodies.
 //!
-//! Extracted from `app_helpers` to keep that module within the line budget.
-//! The trigger text is what the store admits (the LLM needs the full
-//! instruction); the display token is what the queue/steer panels show the
-//! user so they see the original `$name` they submitted.
+//! The trigger text is what the idle Submit sends (the LLM needs the full
+//! instruction); queued/steered submissions defer entirely — the raw text
+//! (token included) is admitted and the runner's `record_compound` resolves
+//! it at the idle boundary.
 
 /// Build the synthetic prompt sent when a user submits ONLY a skill token
-/// (`$name` with no accompanying text) — i.e. a pure-skill submission. The
-/// skill itself is surfaced via the context-tail reminder; this trigger text
-/// just records a user turn and tells the model to begin acting on the
-/// skill. Used by the Submit (idle), Steer (running), and Queue (running)
-/// paths so a pure-skill submission is never silently dropped regardless of
-/// the submit verb.
+/// (`$name` with no accompanying text) while idle — i.e. a pure-skill
+/// submission. The skill itself is surfaced via the context-tail reminder;
+/// this trigger text just records a user turn and tells the model to begin
+/// acting on the skill. (The running paths no longer build triggers here:
+/// a queued/steered `$name` is admitted verbatim and `record_compound`
+/// injects its own `SKILL_TRIGGER` at consumption.)
 pub(crate) fn skill_trigger(skill_name: &str) -> String {
     format!("The `{skill_name}` skill is now active. Begin executing its instructions immediately.")
 }
 
-/// Display string for a pure-skill submission in the queue/steer panels and
-/// transcript markers. The full trigger (see [`skill_trigger`]) is still
-/// admitted to the store for the LLM; this returns the original `$name`
-/// token so the user sees what they actually submitted rather than the
-/// synthetic trigger description.
-pub(crate) fn skill_token_display(skill_name: &str) -> String {
-    format!("${skill_name}")
-}
-
-/// Display string for a queued/steered combined submission (`$skill text`) in
-/// the side panels and the `queued:`/`steer:` consumed markers.
-///
-/// The store row admits only the token-stripped `clean` text (the LLM and the
-/// web drain must never see the token), so the queue panel — the only place a
-/// queued item is surfaced, it is not echoed in the transcript — would show
-/// just `text`, making the inserted `$skill` silently vanish. Mirroring the
-/// Submit transcript (which records the raw input), the UI shows exactly what
-/// the user typed whenever the token stripping changed anything; plain text
-/// has no tokens, so `text` and `clean` coincide and this is a pass-through.
-pub(crate) fn queued_item_display(text: &str, clean: &str) -> String {
-    let raw = text.trim();
-    if raw == clean {
-        clean.to_string()
-    } else {
-        raw.to_string()
-    }
+/// Derive a display skill name from a persisted body's `> Source:` prefix
+/// (`.../skills/<name>/SKILL.md` -> `<name>`). Used to re-sync the TUI's
+/// local `active_skill` mirror after the runner activated a skill at
+/// consumption time (queue/steer drain): the runner shares only the body
+/// through the `skill_prompt` Arc, never the name. For multi-skill joined
+/// bodies the first block's name wins (display only — the full body still
+/// drives the tail reminder and latent-tool unlocks).
+pub(crate) fn skill_name_from_body(body: &str) -> Option<String> {
+    let path = opencoder_session::skill_context::source_path_from_body(body)?;
+    std::path::Path::new(path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
@@ -49,31 +37,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_text_passes_through_clean() {
-        assert_eq!(
-            queued_item_display("fix the bug", "fix the bug"),
-            "fix the bug"
-        );
+    fn skill_trigger_names_the_active_skill() {
+        assert!(skill_trigger("repo-memory").contains("`repo-memory`"));
+        assert!(skill_trigger("x").contains("`x`"));
     }
 
     #[test]
-    fn combined_skill_keeps_token_visible() {
-        assert_eq!(
-            queued_item_display("$repo-memory fix the bug", "fix the bug"),
-            "$repo-memory fix the bug"
-        );
+    fn name_derived_from_source_prefix() {
+        let body = "> Source: /skills/haiku/SKILL.md\n\nAlways answer in haiku form.";
+        assert_eq!(skill_name_from_body(body).as_deref(), Some("haiku"));
     }
 
     #[test]
-    fn whitespace_only_difference_uses_clean() {
-        assert_eq!(queued_item_display("  fix  ", "fix"), "fix");
+    fn multi_skill_body_uses_first_block() {
+        let body = "> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS";
+        assert_eq!(skill_name_from_body(body).as_deref(), Some("review"));
     }
 
     #[test]
-    fn mid_text_token_preserved() {
-        assert_eq!(
-            queued_item_display("do $a then $b", "do  then "),
-            "do $a then $b"
-        );
+    fn body_without_source_prefix_has_no_name() {
+        assert_eq!(skill_name_from_body("just instructions"), None);
+        assert_eq!(skill_name_from_body(""), None);
     }
 }

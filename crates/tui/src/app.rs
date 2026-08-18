@@ -3,7 +3,7 @@ use crossterm::event::Event;
 use opencoder_core::Config;
 use opencoder_llm::{estimate, ChatStream};
 use opencoder_session::SessionState;
-use opencoder_store::{Delivery, Store};
+use opencoder_store::Store;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
@@ -483,6 +483,23 @@ pub(super) async fn run_app(
                             &mut queue_scroll,
                         ) {
                             KeyAction::Submit(text) => {
+                                if running {
+                                    // Submit while running is reachable only via BackTab's
+                                    // compound `/plan …` (Enter/Tab map to Steer/Queue when
+                                    // running), so no bare slash command can land here.
+                                    // Deferred: the raw text (tokens included) queues verbatim;
+                                    // the runner's record_compound resolves/activates/
+                                    // persists the skill at the idle boundary — never now,
+                                    // or it would fire inside the running turn.
+                                    queue_admitter::handle_queue(
+                                        &text, &admit_tx, &mut admit_st, &mut queue_items,
+                                        &mut pending_images, &mut chat, &session_id,
+                                    );
+                                    push_history(&mut history, &mut hist_idx, &text);
+                                    continue;
+                                }
+                                // Idle submit: the turn starts now, so eager skill
+                                // activation (and persistence) is the correct timing.
                                 let (clean, _unresolved) = resolve_persist(
                                     &text, &mut active_skill, &mut active_skill_body,
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
@@ -516,43 +533,24 @@ pub(super) async fn run_app(
                                         if !text.is_empty() {
                                             push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                         }
-                                        if !running {
-                                            // Skill-only submit: send a trigger prompt naming the active skill so
-                                            // the model records a user turn and acts on the injected skill body.
-                                            let skill_name = active_skill.as_deref().unwrap_or("");
-                                            let trigger = skill_trigger(skill_name);
-                                            let image_uris = snapshot_image_uris(&pending_images);
-                                            if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, image_uris)).await
-                                            {
-                                                worker_dead(&mut chat);
-                                                break;
-                                            }
-                                            pending_images.clear();
-                                            task_elapsed_ms = 0;
-                                            running = true;
-                                            follow = true;
-                                            chat.note_requirement_submitted();
-                                            chat.begin_turn();
-                                            body_refresh_pending = true;
-                                        } else {
-                                            // Skill-only submit while running: hand the trigger to the
-                                            // off-loop admitter (submit drains/restores pending_images).
-                                            let skill_name = active_skill.as_deref().unwrap_or("");
-                                            let trigger = skill_trigger(skill_name);
-                                            let disp = skill_token_display(skill_name);
-                                            let input = mk_input_with_images(&session_id, Delivery::Queue, &trigger, Some(disp.clone()), &snapshot_image_uris(&pending_images));
-                                            queue_admitter::admit_running(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut chat, input, disp);
+                                        // Skill-only submit: send a trigger prompt naming the active skill so
+                                        // the model records a user turn and acts on the injected skill body.
+                                        let skill_name = active_skill.as_deref().unwrap_or("");
+                                        let trigger = skill_trigger(skill_name);
+                                        let image_uris = snapshot_image_uris(&pending_images);
+                                        if !start_turn(&cmd_tx, &mut cancel, UiCmd::Prompt(trigger, image_uris)).await
+                                        {
+                                            worker_dead(&mut chat);
+                                            break;
                                         }
+                                        pending_images.clear();
+                                        task_elapsed_ms = 0;
+                                        running = true;
+                                        follow = true;
+                                        chat.note_requirement_submitted();
+                                        chat.begin_turn();
+                                        body_refresh_pending = true;
                                     }
-                                } else if running {
-                                    // Enter while running: optimistic admit via the off-loop
-                                    // actor — no db_lock wait on this loop.
-                                    let disp = queued_item_display(&text, &clean);
-                                    let input = mk_input_with_images(&session_id, Delivery::Queue, &clean, Some(disp.clone()), &snapshot_image_uris(&pending_images));
-                                    queue_admitter::admit_running(&admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &mut chat, input, disp);
-                                    // History regardless of admit outcome: a failed submit
-                                    // flashes "recover with ↑" — that must be true.
-                                    push_history(&mut history, &mut hist_idx, &text);
                                 } else {
                                     push_user(&mut chat, &mut history, &mut hist_idx, &text);
                                     chat.context_used += estimate(&clean) as u64;
@@ -577,28 +575,17 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Steer(text) => {
-                                let (clean, _unresolved) = resolve_persist(
-                                    &text, &mut active_skill, &mut active_skill_body,
-                                    &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
-                                    &store, &session_id,
-                                ).await;
-                                let clean = clean.trim();
-                                let clean = crate::control_helpers::forward_skill_if_compound(&text, clean);
-                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(&clean) { chat.pending_plan_arm = true; }
-                                if !clean.is_empty() {
-                                    let display = queued_item_display(&text, &clean);
+                                // Deferred steer: the raw text (tokens included) is admitted
+                                // verbatim; the runner absorbs it at the turn boundary via
+                                // record_compound, which resolves/activates/persists the
+                                // skill THEN — a `$skill` steer must not arm mid-turn.
+                                // Compound `/plan <content>` still arms the deferred
+                                // plan->act handoff (consumed at TurnDone(plan)).
+                                if chat.agent != "plan" && crate::control_helpers::is_compound_plan_cmd(text.trim()) { chat.pending_plan_arm = true; }
+                                let raw = text.trim().to_string();
+                                if !raw.is_empty() {
                                     steer_fire::admit_keyboard_steer(
-                                        &store, &session_id, &clean, &display,
-                                        &mut pending_images, &mut chat,
-                                    )
-                                    .await;
-                                } else if let Some(skill_name) = active_skill.as_deref() {
-                                    // Pure-skill submit (only a `$name` token): admit the trigger
-                                    // as a steer so the injected skill body is acted on, not dropped.
-                                    let trigger = skill_trigger(skill_name);
-                                    let display = skill_token_display(skill_name);
-                                    steer_fire::admit_keyboard_steer(
-                                        &store, &session_id, &trigger, &display,
+                                        &store, &session_id, &raw, &raw,
                                         &mut pending_images, &mut chat,
                                     )
                                     .await;
@@ -608,16 +595,14 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Queue(text) => {
-                                // Tab-queue: the full admit flow (skill resolution, optimistic
-                                // mirror row, off-loop store write, requirement note) lives in
-                                // queue_admitter — this loop never waits on db_lock.
+                                // Tab-queue: raw-text deferred admission — skill resolution
+                                // happens at consumption (idle boundary, record_compound).
+                                // The off-loop actor owns the store write; this loop never
+                                // waits on db_lock.
                                 queue_admitter::handle_queue(
                                     &text, &admit_tx, &mut admit_st, &mut queue_items,
-                                    &mut pending_images, &mut chat, &mut active_skill,
-                                    &mut active_skill_body, &mut sys_tokens, &agent_name,
-                                    &workdir, &skill_handle, &store, &session_id,
-                                )
-                                .await;
+                                    &mut pending_images, &mut chat, &session_id,
+                                );
                                 push_history(&mut history, &mut hist_idx, &text);
                                 follow = true;
                             }
@@ -761,7 +746,20 @@ pub(super) async fn run_app(
                 .await;
                 match np_flow {
                     app_loop::LoopFlow::Quit => break,
-                    app_loop::LoopFlow::Proceed => dirty = true,
+                    app_loop::LoopFlow::Proceed => {
+                        // Consumption-time skill activation (runner record_compound
+                        // at the idle boundary) rewrote the shared handle; mirror
+                        // it so sys_tokens and the /task snapshots stay truthful.
+                        // Only when idle: mid-run the turn owns the handle and the
+                        // next TurnDone re-syncs.
+                        if !running {
+                            crate::app_helpers::refresh_skill_mirrors(
+                                &skill_handle, &mut active_skill, &mut active_skill_body,
+                                &mut sys_tokens, &agent_name, &workdir,
+                            );
+                        }
+                        dirty = true;
+                    }
                     app_loop::LoopFlow::Redraw => continue,
                 }
             }
@@ -787,11 +785,11 @@ pub(super) async fn run_app(
     Ok(session_id)
 }
 pub(crate) use crate::app_helpers::{
-    apply_force_redraw, handle_mouse, initial_chat_view, mk_input_with_images, on_resize_event,
-    poll_idle_resize, pre_key_intercept, push_history, push_user, snapshot_image_uris, start_turn,
-    sys_tokens_for, worker_dead, MouseOutcome,
+    apply_force_redraw, handle_mouse, initial_chat_view, on_resize_event, poll_idle_resize,
+    pre_key_intercept, push_history, push_user, snapshot_image_uris, start_turn, sys_tokens_for,
+    worker_dead, MouseOutcome,
 };
-pub(crate) use crate::skill_display::{queued_item_display, skill_token_display, skill_trigger};
+pub(crate) use crate::skill_display::skill_trigger;
 #[cfg(test)]
 #[path = "app_tests/mod.rs"]
 mod tests;

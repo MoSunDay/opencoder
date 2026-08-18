@@ -15,7 +15,9 @@
 
 use std::collections::HashSet;
 
+use opencoder_core::message::now_ms;
 use opencoder_core::{body_with_source, discover_skills, extract_skill_tokens, Message, Skill};
+use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
 use crate::SessionState;
@@ -27,6 +29,38 @@ use crate::SessionState;
 /// reminder). The plan-mode read-only tag is deliberately NOT applied to
 /// this trigger, matching the idle path.
 pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin executing it now.";
+
+/// Persist the session's active skill to the store when it differs from
+/// `prev` (the body captured *before* a resolution step). Mirrors the TUI's
+/// `skill_persist::persist_skill`: best-effort — store errors are swallowed
+/// because the in-memory write keeps the in-flight turn correct — and a
+/// `None -> Some` transition only writes `skill`, never `clear_skill` (skill
+/// *clearing* stays owned by the explicit clear paths: control_cmd, plan
+/// handoff, the TUI `$` menu).
+///
+/// This is what makes consumption-time activation survive resume: the queue /
+/// steer drain resolves `$name` tokens at the idle boundary and this call
+/// lands the body in `sessions.skill` right then, so a restart replays the
+/// drained item's post-state instead of a skill-less session.
+pub async fn persist_active_skill(session: &SessionState, prev: &Option<String>) {
+    let Some(store) = session.store.clone() else {
+        return;
+    };
+    let cur = session.skill_prompt_cloned();
+    if cur.as_deref() == prev.as_deref() {
+        return;
+    }
+    let _ = store
+        .update_session(
+            &session.id,
+            &SessionPatch {
+                skill: cur,
+                updated_at: Some(now_ms()),
+                ..Default::default()
+            },
+        )
+        .await;
+}
 
 /// Resolve `$name` skill tokens in `text` against an *explicit* skill slice,
 /// activating resolved skills on the session. Returns the text with tokens
@@ -66,6 +100,7 @@ pub fn resolve_inline_skills_with(
     }
     if !bodies.is_empty() {
         session.set_skill(Some(bodies.join("\n\n")));
+        session.set_active_skill_names(resolved_names.clone());
     }
     // Rebuild `clean` so ONLY resolved tokens are stripped — unresolved `$name`
     // bytes stay as literal text, preventing content loss.
@@ -94,7 +129,9 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 /// mentioned (that amplified the drain self-continuation loop).
 pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[String]) {
     let skills = discover_skills();
+    let prev_skill = session.skill_prompt_cloned();
     let (mut text, unresolved) = resolve_inline_skills_with(session, rest, &skills);
+    persist_active_skill(session, &prev_skill).await;
     // "Resolved now": THIS input carried at least one `$name` token that
     // extraction found and discovery matched (so it was stripped and
     // activated above). Scoped to this call — not the sticky skill — so a
@@ -263,6 +300,41 @@ mod tests {
         );
         // plan_input_count NOT incremented (trigger skips the plan tag).
         assert_eq!(s.plan_input_count, 0, "trigger skips plan-mode counter");
+    }
+
+    #[tokio::test]
+    async fn record_compound_persists_resolved_skill_to_store() {
+        let home = tempfile::tempdir().unwrap();
+        let _guard = lock_home(home.path());
+        opencoder_core::seed_builtin_skills();
+        let store: std::sync::Arc<dyn opencoder_store::Store> = std::sync::Arc::new(
+            opencoder_store::LibsqlStore::open_memory().await.unwrap(),
+        );
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "sess-skill".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut s = make_session().with_store(store.clone());
+
+        record_compound(&mut s, "$review do it", &[]).await;
+
+        let persisted = store
+            .get_session("sess-skill")
+            .await
+            .unwrap()
+            .and_then(|m| m.skill);
+        assert_eq!(
+            persisted,
+            s.skill_prompt_cloned(),
+            "consumption-time activation lands in sessions.skill verbatim"
+        );
+        assert!(
+            persisted.as_deref().is_some_and(|b| b.starts_with("> Source: ")),
+            "persisted body carries the source prefix: {persisted:?}"
+        );
     }
 
     #[tokio::test]

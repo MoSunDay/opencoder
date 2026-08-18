@@ -2,10 +2,13 @@
 //!
 //! The `display_text` column preserves the verbatim display original of a
 //! submitted input (which may contain the `$skill` token) so the TUI queue/
-//! steer panel can restore it after resume/reload, while `prompt` keeps the
-//! clean token-stripped text that is fed to the LLM. Covers round-trip, NULL
-//! fallback for old rows, the v5 -> v6 migration, the claim contract (LLM
-//! only ever sees `prompt`), and bundle export/import fidelity.
+//! steer panel can restore it after resume/reload. Since the queued-`$skill`
+//! timing fix, TUI-admitted queue/steer rows keep the token in `prompt` too
+//! (deferral: the raw text is admitted and the runner resolves it at
+//! consumption); what NEVER contains the token is the user *message* recorded
+//! for the LLM — `record_compound` strips resolved tokens when the drained
+//! item is recorded. Covers round-trip, NULL fallback for old rows, the v5 ->
+//! v6 migration, the claim contract, and bundle export/import fidelity.
 
 use opencoder_store::{
     export_bundle, import_bundle, read_bundle, write_bundle, Delivery, LibsqlStore, SessionInput,

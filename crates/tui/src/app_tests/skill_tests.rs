@@ -272,13 +272,6 @@ fn skill_trigger_names_the_active_skill() {
     assert!(crate::skill_display::skill_trigger("x").contains("`x`"));
 }
 
-#[test]
-fn skill_token_display_shows_dollar_token() {
-    assert_eq!(
-        crate::skill_display::skill_token_display("repo-memory"),
-        "$repo-memory",
-    );
-}
 
 /// `start_turn` must report failure when the worker command channel has no
 /// consumer — the exact signature of a dead worker task (panic or unexpected

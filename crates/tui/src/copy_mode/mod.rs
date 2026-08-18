@@ -151,17 +151,37 @@ pub(crate) fn render_clean(
 /// exactly the typed text. Mirrors [`render_clean`] for the input pane;
 /// the shared `composer::wrap_rows` model keeps wrapping identical to the
 /// decorated composer.
-pub(crate) fn render_composer_clean(f: &mut Frame, area: Rect, input: &str) {
+///
+/// When `reserve_chip_row` is set (overlay editors: annotation/plan), the
+/// first row is left blank because render.rs pins the COPY MODE chip to
+/// `area.y`; text starts on the second row so a long first line's tail is
+/// never overpainted and stays selectable. The plain composer passes false
+/// — its input rows are short and the transcript is the copy target.
+pub(crate) fn render_composer_clean(
+    f: &mut Frame,
+    area: Rect,
+    input: &str,
+    reserve_chip_row: bool,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let text_area = if reserve_chip_row && area.height > 1 {
+        Rect {
+            y: area.y + 1,
+            height: area.height - 1,
+            ..area
+        }
+    } else {
+        area
+    };
     let rows = crate::composer::wrap_rows(input, area.width, 0);
     let chars: Vec<char> = input.chars().collect();
     let lines: Vec<Line<'static>> = rows
         .iter()
         .map(|vr| Line::raw(chars[vr.start..vr.end].iter().collect::<String>()))
         .collect();
-    f.render_widget(Paragraph::new(lines), area);
+    f.render_widget(Paragraph::new(lines), text_area);
 }
 
 /// Draw the "COPY MODE" status chip into `area`: the notepad fullscreen
@@ -454,7 +474,7 @@ mod tests {
     fn render_composer_clean_shows_text_without_chrome() {
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
-            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld"))
+            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", false))
             .unwrap();
         let rows = buf_rows(terminal.backend().buffer());
         // Text rows land flush at column 0: no border, no prompt glyph.
@@ -468,6 +488,33 @@ mod tests {
             "row1 flush left: {:?}",
             rows[1]
         );
+        let all = rows.concat();
+        assert!(!all.contains('\u{276f}'), "no prompt glyph: {all:?}");
+        for deco in ['\u{250c}', '\u{2514}', '\u{2500}'] {
+            assert!(
+                !all.contains(deco),
+                "border {deco:?} must be absent: {all:?}"
+            );
+        }
+    }
+
+    /// Overlay editors (annotation/plan) reserve row 0 for the COPY MODE
+    /// chip render.rs pins to the composer's first row: text must start on
+    /// row 1 so a long first line's tail is never overpainted.
+    #[test]
+    fn render_composer_clean_reserved_row0_stays_blank_for_chip() {
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        terminal
+            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", true))
+            .unwrap();
+        let rows = buf_rows(terminal.backend().buffer());
+        assert!(
+            rows[0].trim_end().is_empty(),
+            "row0 reserved for the chip, must be blank: {:?}",
+            rows[0]
+        );
+        assert!(rows[1].starts_with("hello"), "row1: {:?}", rows[1]);
+        assert!(rows[2].starts_with("world"), "row2: {:?}", rows[2]);
         let all = rows.concat();
         assert!(!all.contains('\u{276f}'), "no prompt glyph: {all:?}");
         for deco in ['\u{250c}', '\u{2514}', '\u{2500}'] {

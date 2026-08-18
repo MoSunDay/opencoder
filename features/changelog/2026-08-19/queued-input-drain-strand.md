@@ -1,4 +1,4 @@
-Commit: (working-tree, post-860831d)
+Commit: ecce7b0
 
 # steer/queue 提交"落库但永不消费"的 drain 滞留（TUI idle 重启 + Web watcher 尊重 interrupt）
 

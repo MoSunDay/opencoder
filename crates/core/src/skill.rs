@@ -219,15 +219,10 @@ pub fn parse_skill(path: &Path, fallback_name: &str) -> Option<Skill> {
     if description.is_empty() {
         description = first_body_line(body_trim);
     }
-    let body_owned = if body_trim.is_empty() {
-        raw.trim().to_string()
-    } else {
-        body_trim.to_string()
-    };
     Some(Skill {
         name,
         description,
-        body: body_owned,
+        body: body_trim.to_string(),
         source: path.to_path_buf(),
     })
 }
@@ -235,15 +230,21 @@ pub fn parse_skill(path: &Path, fallback_name: &str) -> Option<Skill> {
 /// Split off a leading `---\n...\n---` block. Returns `(pairs, body)` where
 /// `pairs` is the frontmatter key/value lines and `body` is everything after.
 /// Tolerant: only treats a block as frontmatter when the very first line is
-/// exactly `---`.
+/// exactly `---`; a leading UTF-8 BOM and blank lines before the first `---`
+/// are tolerated.
 fn split_frontmatter(raw: &str) -> (Vec<(String, String)>, String) {
-    let mut lines = raw.lines();
+    // Strip a UTF-8 BOM (editors saving "UTF-8 with BOM") and skip blank
+    // lines before the block: without this the frontmatter fails the
+    // first-line `---` check and the WHOLE file — frontmatter comments
+    // included — lands in the body.
+    let stripped = raw.strip_prefix('\u{FEFF}').unwrap_or(raw);
+    let mut lines = stripped.lines().skip_while(|l| l.trim().is_empty());
     let first = match lines.next() {
         Some(l) => l,
         None => return (Vec::new(), String::new()),
     };
     if first.trim() != "---" {
-        return (Vec::new(), raw.to_string());
+        return (Vec::new(), stripped.to_string());
     }
     let mut pairs = Vec::new();
     for line in lines.by_ref() {

@@ -1,4 +1,4 @@
-Commit: (working-tree, post-860831d)
+Commit: a3b194219b48609bbb078ffd214da477d626bdf4
 
 # plan 阶段状态落库：压缩前计划快照 + plan_input_count 持久化，resume 后 handoff 仍可武装
 
@@ -34,7 +34,7 @@ plan→act handoff 依赖两份易失状态，重启/压缩后双双失效：
 | resume 重新武装溯源门 | `resume_restores_plan_phase_arming` | 同上 |
 | patch 往返 / set-clear 互斥 / 默认值 | `plan_snapshot_round_trip_via_patch` 等 3 项 | `crates/store/tests/plan_phase.rs` |
 
-- 全量回归：用户豁免当次复跑（已测）；同工作树验证记录见 [skill-full-body-injection](skill-full-body-injection.md)：`cargo test --workspace` 2943 passed / 0 failed，clippy 零警告。
+- 全量回归：`cargo test --workspace` **2960 passed / 0 failed**（187 个测试二进制 ok），clippy `-D warnings` 零警告，`cargo build --workspace` 通过（终局 gate 当次实跑取证）。
 - 连锁适配：约 30 个测试文件的 `SessionMeta` 字面量补两个新字段（+2 行/文件），无行为变化。
 - 行数：新文件 117–280 行 ≤400。
 

@@ -100,6 +100,36 @@ fn skill_fields_are_complete() {
 }
 
 #[test]
+fn parse_skill_frontmatter_only_file_has_empty_body() {
+    // Frontmatter-only file: body must be the empty string, NOT the raw
+    // file text (the old `raw.trim()` fallback shipped the `---` comment
+    // block as if it were instructions).
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("fm-only.md");
+    write(&p, "---\nname: fm-only\ndescription: just meta\n---\n");
+    let sk = parse_skill(&p, "fm-only").expect("parse");
+    assert_eq!(sk.name, "fm-only");
+    assert_eq!(sk.description, "just meta");
+    assert_eq!(sk.body, "", "frontmatter-only: body stays empty");
+}
+
+#[test]
+fn parse_skill_strips_bom_and_blank_lines_before_frontmatter() {
+    // "UTF-8 with BOM" editors plus stray blank lines must not hide the
+    // frontmatter: metadata parses and only the post-fence body remains.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("bom.md");
+    write(
+        &p,
+        "\u{FEFF}\n\n---\nname: bom\ndescription: bd\n---\nreal body\n",
+    );
+    let sk = parse_skill(&p, "bom").expect("parse");
+    assert_eq!(sk.name, "bom", "BOM + blank lines must not hide frontmatter");
+    assert_eq!(sk.description, "bd");
+    assert_eq!(sk.body, "real body", "body is post-fence text only");
+}
+
+#[test]
 fn seed_in_writes_all_packs_on_fresh_dir() {
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
@@ -257,9 +287,11 @@ fn body_with_source_emits_path_annotation_then_body() {
 #[test]
 fn seeded_review_skill_requires_five_question_recap() {
     // The built-in review skill is embedded via include_str! and seeded on
-    // first run; its REVIEW block must carry the five-question recap fields
-    // (goal / progress / done+verify / blockers / next_todos) so a dropped
-    // field in the markdown asset turns this test red.
+    // first run. It is organized entirely around the five mandatory
+    // questions (restate goal / replay done+progress / blockers / per-item
+    // verify+evidence / next TODOs) with no fixed output template —
+    // answering the five questions well IS the output. A dropped question
+    // or evidence rule in the markdown asset turns this test red.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
@@ -268,19 +300,39 @@ fn seeded_review_skill_requires_five_question_recap() {
         body.contains("description:"),
         "frontmatter description missing"
     );
-    for field in [
-        "goal:",
-        "progress:",
-        "done:",
-        "verify:",
-        "blockers:",
-        "next_todos:",
+    for section in [
+        "问一：原始需求目标",
+        "问二：做了哪些事情",
+        "问三：过程中遇到了什么卡点",
+        "问四：每个完成点怎么验证的",
+        "问五：下一步 TODO",
     ] {
-        assert!(body.contains(field), "review skill missing `{field}`");
+        assert!(body.contains(section), "review skill missing `{section}`");
     }
+    // Q2 quantifies progress as completed/total + floor percent, counting
+    // only items that carry both verify and evidence.
     assert!(
-        body.contains("progress: <completed 数>/<总数>（<0-100>%"),
-        "review REVIEW block must quantify progress (completed/total + percent)"
+        body.contains("completed/total"),
+        "review must quantify progress as completed/total"
+    );
+    assert!(
+        body.contains("向下取整"),
+        "review percent convention must be floor rounding"
+    );
+    // Q4: no evidence = not passed, and stale summaries do not count —
+    // evidence must come from a fresh run.
+    assert!(
+        body.contains("没有证据 = 没有通过"),
+        "review must enforce evidence-or-not-passed"
+    );
+    assert!(
+        body.contains("当次实跑"),
+        "review evidence must come from the current run"
+    );
+    // The verdict rules go-live readiness from the five answers.
+    assert!(
+        body.contains("go-live ready | not ready"),
+        "review must rule go-live readiness"
     );
 }
 

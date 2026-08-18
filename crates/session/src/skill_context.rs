@@ -196,6 +196,12 @@ pub async fn ensure_full_body_loaded(session: &mut SessionState) {
         .and_then(|rest| rest.split_once("\n\n"))
         .map(|(_, body)| body)
         .unwrap_or(prompt);
+    // A skill whose parsed body is empty (frontmatter-only file) carries
+    // nothing beyond the path the transient tail already points at;
+    // injecting would record a marker-only message.
+    if body.trim().is_empty() {
+        return;
+    }
     let text = format!(
         "{}\n\n{}",
         full_body_marker(path),

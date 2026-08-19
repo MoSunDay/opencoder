@@ -1841,6 +1841,7 @@ name = "opencoder-todos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "opencoder-core",
  "opencoder-llm",
  "opencoder-session",

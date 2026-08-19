@@ -26,6 +26,19 @@ use super::env::global_opencode_home;
 /// Marker file under `envs/`: one line, the active env's name.
 const ACTIVE_MARKER: &str = "active";
 
+/// Human name for a JSON value's kind, used in "not an object" warnings.
+/// Pure. Mirrors the kind naming used by `Config::load`'s own warnings.
+fn json_kind_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
 /// Env name length cap (keeps paths and TUI rows sane).
 const MAX_NAME_LEN: usize = 48;
 
@@ -173,12 +186,32 @@ fn capture_into(dir: &Path, working_dir: &Path) -> Result<()> {
     let mut candidates = super::env::config_candidates_with(working_dir, None);
     candidates.reverse();
     for p in candidates {
-        if let Ok(raw) = std::fs::read_to_string(&p) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if v.is_object() {
+        // Corrupted candidates warn + skip (never hard-fail the capture):
+        // a broken file must not block env management, but silently ignoring
+        // it hides why the captured env "lost" those keys. `NotFound` stays
+        // silent — candidates may legitimately not exist.
+        match std::fs::read_to_string(&p) {
+            Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) if v.is_object() => {
                     super::merge::merge_json(&mut merged, &v);
                 }
-            }
+                Ok(v) => tracing::warn!(
+                    path = %p.display(),
+                    kind = json_kind_name(&v),
+                    "env capture: config candidate is valid JSON but not an object; skipping"
+                ),
+                Err(e) => tracing::warn!(
+                    path = %p.display(),
+                    error = %e,
+                    "env capture: config candidate is unparseable; skipping"
+                ),
+            },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!(
+                path = %p.display(),
+                error = %e,
+                "env capture: config candidate exists but is unreadable; skipping"
+            ),
         }
     }
     if let Some(obj) = merged.as_object_mut() {
@@ -413,5 +446,37 @@ mod tests {
         create_env("delta", work.path(), false).unwrap();
         // Empty base chain + no prior config.json in the env dir.
         recapture_env("delta", work.path()).unwrap();
+    }
+
+    /// Corrupted candidates (unparseable JSON, or valid JSON that is not an
+    /// object) must not fail the capture — resilience kept — but the merged
+    /// output carries only the valid candidate's keys.
+    #[test]
+    fn capture_skips_corrupted_candidates_and_keeps_valid_keys() {
+        let (home, _g) = scoped();
+        let work = tempfile::tempdir().unwrap();
+        // Valid project candidate (highest priority).
+        std::fs::write(
+            work.path().join("opencoder.json"),
+            r#"{ "model": "openai/gpt-4o", "fps": 30 }"#,
+        )
+        .unwrap();
+        // Corrupted: unparseable JSON.
+        std::fs::create_dir_all(work.path().join(".opencoder")).unwrap();
+        std::fs::write(work.path().join(".opencoder/config.json"), "{ not json").unwrap();
+        // Corrupted: valid JSON but an array, not an object.
+        std::fs::create_dir_all(home.path().join(".opencoder")).unwrap();
+        std::fs::write(home.path().join(".opencoder/config.json"), "[1,2,3]").unwrap();
+
+        create_env("capture", work.path(), true).unwrap();
+        let env_config = home.path().join(".opencoder/envs/capture/config.json");
+        let raw = std::fs::read_to_string(&env_config).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["model"], "openai/gpt-4o", "valid keys must survive");
+        assert_eq!(v["fps"], 30);
+        assert!(
+            v.as_object().map(|o| o.len()).unwrap_or_default() == 2,
+            "corrupted candidates must contribute nothing; got: {raw}"
+        );
     }
 }

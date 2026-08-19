@@ -389,6 +389,31 @@ fn save_refuses_malformed_model_value() {
 }
 
 #[test]
+fn save_refuses_empty_model_value() {
+    // `is_suspicious_model("")` is now true: an empty model would resolve to
+    // `model: ""` in every request (guaranteed failure), so `Config::save`
+    // must refuse to persist it just like other malformed values.
+    let _g = ENV_LOCK.lock().unwrap();
+    let (_home_guard, dir) = isolated_home();
+
+    let res = Config::save(dir.path(), &serde_json::json!({ "model": "" }));
+    assert!(
+        res.is_err(),
+        "save must reject an empty `model` value, not write it"
+    );
+    let msg = format!("{}", res.unwrap_err());
+    assert!(
+        msg.contains("model"),
+        "error should name the model field; got: {msg}"
+    );
+    // Refused before any write: no config file materialised.
+    assert!(
+        !dir.path().join("opencoder.json").exists(),
+        "rejected empty model must not produce a config file"
+    );
+}
+
+#[test]
 fn save_can_remove_reasoning_effort_via_null() {
     // Setting reasoning_effort to null in the patch must REMOVE the field
     // (merge_json treats null as delete) so it is omitted from request bodies.

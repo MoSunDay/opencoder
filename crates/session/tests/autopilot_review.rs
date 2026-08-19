@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, ApMode, AutoPilotConfig, Config};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
-use opencoder_session::autopilot::ApPhase;
+use opencoder_session::autopilot::{review_pass, ApPhase};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
@@ -445,4 +445,64 @@ async fn review_mode_error_still_clears_and_persists_skill() {
         "the skill clear must be persisted, got {:?}",
         stored.skill
     );
+}
+
+/// A cancel tripped BEFORE the pass starts is a complete no-op: no review
+/// marker, no agent switch, no synthetic review prompt, no LLM call — just
+/// the uniform terminal Done (mirroring drive's loop-top cancel path).
+#[tokio::test]
+async fn review_pass_cancelled_at_entry_is_a_no_op() {
+    let mock = Arc::new(MockChatClient::new());
+    let (_dir, mut session) = make_session(
+        mock.clone() as Arc<dyn ChatStream>,
+        mode_config(ApMode::Review, 10),
+    );
+    session
+        .record(opencoder_core::Message::user("u1", "do the thing"))
+        .await;
+    let messages_before = session.messages.len();
+    let token = tokio_util::sync::CancellationToken::new();
+    session = session.with_cancel(token.clone());
+    token.cancel();
+
+    let reg = registry();
+    let (buf, mut on_event) = collector();
+    review_pass(&mut session, &reg, &mut on_event)
+        .await
+        .expect("a cancelled entry returns Ok, mirroring drive's cancel path");
+
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "cancelled entry must not call the LLM"
+    );
+    assert_eq!(session.agent.name, "act", "agent must not switch to plan");
+    assert_eq!(
+        session.messages.len(),
+        messages_before,
+        "no synthetic review prompt may be recorded"
+    );
+    assert!(
+        !session.messages.iter().any(|m| m.synthetic),
+        "no synthetic message of any kind"
+    );
+    let events = buf.lock().unwrap().clone();
+    assert!(
+        events
+            .iter()
+            .all(|ev| !matches!(ev, SessionEvent::AutoPilot { .. })),
+        "no AutoPilot marker on a cancelled entry, got {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|ev| !matches!(ev, SessionEvent::AgentSwitch(_))),
+        "no AgentSwitch on a cancelled entry, got {events:?}"
+    );
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one event — the uniform Done, got {events:?}"
+    );
+    assert!(matches!(events[0], SessionEvent::Done));
 }

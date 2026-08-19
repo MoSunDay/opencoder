@@ -28,6 +28,7 @@ fn autopilot_config(max_iterations: u32, verify_retries: u32) -> Config {
             mode: ApMode::Ap,
             max_iterations,
             verify_retries,
+            ..AutoPilotConfig::default()
         },
         ..Config::default()
     }

@@ -1,8 +1,10 @@
 use super::{is_suspicious_model, scoped_config_home, Config};
 
 #[test]
-fn empty_model_is_not_suspicious() {
-    assert!(!is_suspicious_model(""));
+fn empty_model_is_suspicious() {
+    // Empty model resolves to a request with `model: ""` — every call would
+    // fail; treat it as malformed so `Config::save` refuses to persist it.
+    assert!(is_suspicious_model(""));
 }
 
 #[test]
@@ -120,6 +122,47 @@ fn has_editable_key_recognizes_theme() {
 fn has_editable_key_recognizes_enable_tmux_session() {
     let v = serde_json::json!({ "enable_tmux_session": true });
     assert!(super::merge::has_editable_key(&v));
+}
+
+/// Every key `merge_into` applies but `has_editable_key` used to miss: a
+/// config file carrying ONLY one of these keys must count as editable, or a
+/// save routed through `save_target` would create a brand-new opencoder.json
+/// instead of merging into the file the user already has.
+#[test]
+fn has_editable_key_recognizes_timeout_and_agent_keys() {
+    for v in [
+        serde_json::json!({ "stream_idle_timeout_secs": 60 }),
+        serde_json::json!({ "task_timeout_secs": 300 }),
+        serde_json::json!({ "replay_timeout_secs": 90 }),
+        serde_json::json!({ "subagent_drain_secs": 5 }),
+        serde_json::json!({ "agent": { "default": "plan" } }),
+        serde_json::json!({ "agent": { "unknown_future_key": 1 } }),
+        serde_json::json!({ "output_streamline": { "enabled": false } }),
+        serde_json::json!({ "tool_guard": { "max_consecutive_failures": 5 } }),
+    ] {
+        assert!(
+            super::merge::has_editable_key(&v),
+            "should be editable: {v}"
+        );
+    }
+}
+
+/// Negative side of the same coin: EMPTY object values (nothing merge_into
+/// would apply) and unrelated keys stay non-editable.
+#[test]
+fn has_editable_key_ignores_empty_agent_and_object_keys() {
+    for v in [
+        serde_json::json!({ "agent": {} }),
+        serde_json::json!({ "output_streamline": {} }),
+        serde_json::json!({ "tool_guard": {} }),
+        serde_json::json!({ "output_streamline": "not-an-object" }),
+        serde_json::json!({ "totally_unrelated": 42 }),
+    ] {
+        assert!(
+            !super::merge::has_editable_key(&v),
+            "should NOT be editable: {v}"
+        );
+    }
 }
 
 #[test]
@@ -429,4 +472,98 @@ mod inject_to_filtering {
             1
         );
     }
+}
+
+// --- MCP server name-collision guard (bug #14, save-time net) ---
+// `Config::save` must refuse to persist two `mcp_servers` entries whose
+// names normalize (`[-.]` -> `_`) to the same tool prefix: registration
+// would silently shadow one server's tools with the other's. The TUI form
+// pre-checks this (`crates/tui/src/mcp_menu/patch.rs::colliding_server`);
+// these tests pin the core-level second net that also covers the web API.
+
+/// All candidate mcp.json locations a `Config::save(working_dir, …)` may
+/// write: the project file and the scoped-home global one. With the scoped
+/// home set to `home`, the env layer is absent, so the write target is the
+/// project file when it exists, else `<home>/mcp.json`.
+fn mcp_json_candidates(
+    working_dir: &std::path::Path,
+    home: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    vec![
+        working_dir.join(".opencoder").join("mcp.json"),
+        home.join("mcp.json"),
+    ]
+}
+
+#[test]
+fn save_rejects_mcp_servers_normalized_collision() {
+    let dir = tempfile::tempdir().unwrap();
+    let _home = scoped_config_home(dir.path().to_path_buf());
+    let res = Config::save(
+        dir.path(),
+        &serde_json::json!({ "mcp_servers": {
+            "a-b": { "command": "npx", "args": ["s1"] },
+            "a.b": { "command": "npx", "args": ["s2"] },
+        }}),
+    );
+    let err = format!(
+        "{}",
+        res.expect_err("colliding mcp server names must be refused")
+    );
+    assert!(err.contains("a-b") && err.contains("a.b"), "err = {err}");
+    assert!(err.contains("mcp__a_b__"), "normalized form missing: {err}");
+    // Nothing half-written: no candidate mcp.json may carry either server.
+    for path in mcp_json_candidates(dir.path(), dir.path()) {
+        if path.exists() {
+            let raw = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !raw.contains("a-b") && !raw.contains("a.b"),
+                "{} polluted with refused servers: {raw}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn save_allows_rename_via_null_delete_marker() {
+    let dir = tempfile::tempdir().unwrap();
+    let _home = scoped_config_home(dir.path().to_path_buf());
+    Config::save(
+        dir.path(),
+        &serde_json::json!({ "mcp_servers": { "a-b": { "command": "npx" } } }),
+    )
+    .expect("initial single server saves");
+    // Rename `a-b` -> `a.b` in one patch: the null deletes the old key, so
+    // the merged map holds one server on the shared normalized slot — Ok.
+    Config::save(
+        dir.path(),
+        &serde_json::json!({ "mcp_servers": { "a.b": { "command": "npx" }, "a-b": null } }),
+    )
+    .expect("rename with null delete marker must not trip the guard");
+    let cfg = Config::load(dir.path()).unwrap();
+    assert_eq!(cfg.mcp_servers.len(), 1, "exactly one server after rename");
+    assert!(cfg.mcp_servers.contains_key("a.b"));
+}
+
+#[test]
+fn save_allows_intra_patch_rename_on_fresh_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let _home = scoped_config_home(dir.path().to_path_buf());
+    Config::save(
+        dir.path(),
+        &serde_json::json!({ "mcp_servers": { "a.b": { "command": "npx" }, "a-b": null } }),
+    )
+    .expect("single save whose null marker deletes a key that never existed");
+    let cfg = Config::load(dir.path()).unwrap();
+    assert!(cfg.mcp_servers.contains_key("a.b"));
+    assert!(!cfg.mcp_servers.contains_key("a-b"));
+}
+
+#[test]
+fn save_without_mcp_servers_key_is_unaffected() {
+    let dir = tempfile::tempdir().unwrap();
+    let _home = scoped_config_home(dir.path().to_path_buf());
+    Config::save(dir.path(), &serde_json::json!({ "model": "prov/model" }))
+        .expect("non-mcp patches must not trip the guard");
 }

@@ -32,8 +32,11 @@ pub(super) async fn run_one_llm_call(
     let system = build_system(&session.agent, &session.working_dir, runtime.as_deref());
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
-    // Transient skill-context reminder: derived per call, never persisted.
-    // Keeps the system prompt byte-stable for prefix caching.
+    // Transient skill-context reminder: derived per call, appended LAST and
+    // never persisted, so activating a skill never mutates the payload's
+    // persisted prefix. The system prompt itself is rebuilt on every call
+    // and re-reads AGENTS.md from disk, so it is NOT byte-stable across
+    // calls when AGENTS.md changes on disk.
     if let Some(tail) = crate::skill_context::tail_reminder(session) {
         to_send.push(tail);
     }

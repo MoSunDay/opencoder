@@ -26,8 +26,8 @@ fn build_system_contains_no_skill_section() {
     let dir = std::path::Path::new("/tmp/project");
     let msg = build_system(&agent, dir, None);
     // Skill bodies never ship in the system prompt (they moved to a
-    // transient tail reminder; see `skill_context`), keeping the prompt
-    // byte-stable for provider prefix caching.
+    // transient tail reminder; see `skill_context`), so skill activation
+    // never rewrites the payload's first bytes.
     assert!(!msg.text().contains("Active skill"));
 }
 
@@ -209,6 +209,49 @@ fn project_instructions_case_insensitive_uppercase_ext() {
 }
 
 #[test]
+fn project_instructions_prefers_exact_agents_md_name_over_variants() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("agents.md"), "Lowercase variant body.").unwrap();
+    std::fs::write(working.path().join("AGENTS.MD"), "Upper-ext variant body.").unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "Exact-name body wins.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        // Exactly one file is loaded per directory: the exact `AGENTS.md`
+        // name wins over case-insensitive variants, regardless of
+        // read_dir order.
+        assert!(text.contains("Exact-name body wins."));
+        assert!(!text.contains("Lowercase variant body."));
+        assert!(!text.contains("Upper-ext variant body."));
+        assert_eq!(text.matches("## Project instructions").count(), 1);
+    });
+}
+
+#[test]
+fn project_instructions_without_exact_name_picks_smallest_variant() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    // No exact `AGENTS.md`: the lexicographically smallest matching file
+    // name is chosen (OsString byte order: 'M' (0x4D) < 'm' (0x6D), so
+    // `AGENTS.MD` sorts before `agents.md`).
+    std::fs::write(working.path().join("agents.md"), "Lowercase variant body.").unwrap();
+    std::fs::write(working.path().join("AGENTS.MD"), "Upper-ext variant body.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("## Project instructions"));
+        assert!(text.contains("Upper-ext variant body."));
+        assert!(!text.contains("Lowercase variant body."));
+    });
+}
+
+#[test]
 fn project_instructions_dedup_when_git_root_is_working_dir() {
     let home = tempfile::TempDir::new().unwrap();
 
@@ -240,6 +283,65 @@ fn project_instructions_appears_before_environment() {
         let instr_pos = text.find("## Project instructions").unwrap();
         let env_pos = text.find("# Environment").unwrap();
         assert!(instr_pos < env_pos);
+    });
+}
+
+#[test]
+fn project_instructions_small_file_not_truncated() {
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+    std::fs::write(working.path().join("AGENTS.md"), "Small rule file.").unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+        assert!(text.contains("Small rule file."));
+        assert!(!text.contains("[AGENTS.md truncated"));
+    });
+}
+
+#[test]
+fn project_instructions_truncated_past_200kb_with_boundary_safe_cut() {
+    let cap: usize = 200 * 1024;
+    let home = tempfile::TempDir::new().unwrap();
+    let working = tempfile::TempDir::new().unwrap();
+
+    // Single-byte prefix ending 2 bytes before the cap, then 4-byte emoji
+    // that STRADDLE the cap boundary (forcing a char-boundary walk-back),
+    // then distinctive trailing content that must never leak into the prompt.
+    let mut content = "Q".repeat(cap - 2);
+    content.push_str(&"🎉".repeat(64));
+    content.push_str("TRAILING_BEYOND_CAP_MARKER");
+    assert!(content.len() > cap);
+    std::fs::write(working.path().join("AGENTS.md"), &content).unwrap();
+
+    with_home(home.path(), || {
+        let agent = resolve_agent("act").unwrap();
+        let msg = build_system(&agent, working.path(), None);
+        let text = msg.text();
+
+        let marker = format!(
+            "[AGENTS.md truncated: original size {} bytes exceeds 200KB limit]",
+            content.len()
+        );
+        assert!(text.contains(&marker));
+
+        // Extract exactly the instructions section from the prompt.
+        let header = "## Project instructions\n";
+        let start = text.find(header).unwrap() + header.len();
+        let end = text.find("\n\n# Environment").unwrap();
+        let section = &text[start..end];
+
+        // The head is the cap-sized prefix cut at a char boundary: the emoji
+        // straddling byte `cap` is dropped, leaving only the Q-run.
+        let head_len = cap - 2;
+        assert_eq!(&section[..head_len], "Q".repeat(head_len));
+        assert_eq!(section.len(), head_len + "\n\n".len() + marker.len());
+        // Nothing beyond the cap (emoji run, trailing marker) leaks through.
+        assert!(!section.contains('🎉'));
+        assert!(!text.contains('🎉'));
+        assert!(!text.contains("TRAILING_BEYOND_CAP_MARKER"));
     });
 }
 

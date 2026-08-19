@@ -13,6 +13,7 @@ pub mod resume;
 pub mod resume_helpers;
 pub mod runner;
 pub mod skill_context;
+pub mod skill_lifecycle;
 pub mod skill_resolve;
 pub mod streamline;
 pub mod subagent_steer_gate;
@@ -20,8 +21,8 @@ pub mod tool_guard;
 pub mod tools;
 
 pub use control_cmd::{
-    apply as apply_control_cmd, is_clear_context_handoff, parse as parse_control_cmd,
-    split_control_prefix, ControlCmd,
+    apply as apply_control_cmd, clear_seed_text, is_clear_context_handoff, is_clear_context_seed,
+    parse as parse_control_cmd, seed_message, split_control_prefix, ControlCmd,
 };
 pub use event_sink::{run_flusher, spawn_event_flusher, EventSink};
 pub use resume::{generate_title, resume, resume_and_replay};
@@ -138,10 +139,13 @@ pub struct SessionState {
     /// skill at LLM-call time; bodies carrying the `body_with_source`
     /// `> Source:` prefix yield the `[active skill]` path reminder (the
     /// model lazily reads the SKILL.md). `None` means no skill is active.
-    /// Set from the TUI `$` picker.
+    /// Set from the TUI `$` picker. One-shot lifetime: an activation lives
+    /// only for the run that triggered it — `skill_lifecycle` clears it
+    /// (memory + store) when that run ends, so later runs start skill-less.
     pub skill_prompt: Arc<Mutex<Option<String>>>,
     /// Names of skills currently activated via `$name` tokens. Used to
-    /// unlock latent tools (ssh_pty) in the runner filter.
+    /// unlock latent tools (ssh_pty) in the runner filter. Shares the
+    /// one-shot lifetime of `skill_prompt` (cleared together at run end).
     pub active_skill_names: Arc<Mutex<HashSet<String>>>,
     /// Number of messages already persisted to `store` (loaded on resume).
     persisted_count: usize,
@@ -304,6 +308,8 @@ impl SessionState {
     }
 
     /// Snapshot the active skill instructions (clones the inner String).
+    /// One-shot: the value is only meaningful while the run that activated
+    /// the skill is still in flight (see `skill_lifecycle`).
     pub fn skill_prompt_cloned(&self) -> Option<String> {
         self.skill_prompt.lock().unwrap().clone()
     }
@@ -319,7 +325,9 @@ impl SessionState {
         *self.active_skill_names.lock().unwrap() = names;
     }
 
-    /// Update the active skill instructions in place. `None` clears the skill.
+    /// Update the active skill instructions in place. `None` clears the
+    /// skill. One-shot semantics: whatever is set here is cleared at the end
+    /// of the run that observes it (`skill_lifecycle::clear_on_run_end`).
     pub fn set_skill(&self, body: Option<String>) {
         *self.skill_prompt.lock().unwrap() = body;
     }
@@ -470,12 +478,22 @@ impl SessionState {
     /// plan phase, append a read-only reminder so the model stays focused on
     /// planning across multi-turn plan conversations. Also increments the
     /// counter so the next call knows this requirement already occurred.
+    ///
+    /// Recording a new requirement also RETIRES any `plan_snapshot` carried
+    /// from an earlier phase (the `ecce7b0` guard): the snapshot survives the
+    /// plain act→plan switch, but once a new requirement is submitted the old
+    /// plan is stale — if this turn then fails or is cancelled before the
+    /// model answers, `handoff` must not hand the old plan forward as if it
+    /// answered the new requirement. A successful turn re-captures a fresh
+    /// snapshot via `record`. Callers persist the mirror right after this
+    /// (`runner::run_with_registry` and `skill_resolve::record_compound`).
     pub fn maybe_tag_plan_prompt(&mut self, text: &mut String) {
         if self.agent.kind == AgentKind::Plan {
             if self.plan_input_count > 0 {
                 text.push_str("\n（当前处于只读的 plan 模式，聚焦计划生成）");
             }
             self.plan_input_count += 1;
+            self.plan_snapshot = None;
         }
     }
 }

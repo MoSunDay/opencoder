@@ -92,10 +92,13 @@ pub async fn resume(
             } else {
                 messages = Vec::new();
             }
-            // Distinguish a ClearContext fresh-start marker from a plan->act
-            // handoff: the sentinel stored by control_cmd::ClearContext.
+            // Distinguish the ClearContext boundary flavours from a plan->act
+            // handoff: the blank sentinel / last-say seed markers stored by
+            // control_cmd::ClearContext.
             let mut head_msg = if crate::control_cmd::is_clear_context_handoff(plan_display) {
                 crate::control_cmd::fresh_start_message()
+            } else if crate::control_cmd::is_clear_context_seed(plan_display) {
+                crate::control_cmd::seed_message(crate::control_cmd::clear_seed_text(plan_display))
             } else {
                 crate::plan_handoff::handoff_message(plan_display)
             };
@@ -211,6 +214,11 @@ pub async fn resume(
         client,
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
+        // Restore the persisted skill. Under one-shot semantics a normally
+        // COMPLETED run has already cleared `sessions.skill` (NULL row ->
+        // nothing resurrects); a non-NULL value means the session crashed
+        // MID-run, and the resumed run must continue the skill —
+        // `skill_lifecycle::clear_on_run_end` clears it when that run ends.
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
         active_skill_names: Arc::new(Mutex::new(crate::resume_helpers::infer_skill_names(
             &meta.skill,

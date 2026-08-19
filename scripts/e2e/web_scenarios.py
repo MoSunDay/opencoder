@@ -68,27 +68,48 @@ def _wait_health(base: str, deadline: float) -> bool:
     return False
 
 
+def _collect_bounded(proc: subprocess.Popen, secs: float = 5.0) -> tuple[str, str]:
+    """Bounded-output collect for a possibly-live Popen. Never blocks
+    indefinitely: on timeout the process is killed and reaped, then whatever
+    was buffered is returned. Each stream is truncated for the failure note
+    (a pipe .read() on a live process can block forever when it never exits
+    and never fills the pipe buffer)."""
+    try:
+        out, err = proc.communicate(timeout=secs)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    return (out or "")[:2000], (err or "")[:2000]
+
+
 def _boot_serve(bin_path: str, cfg: dict, label: str) -> tuple | None:
     """Boot one `opencode serve` on a fresh port with `cfg` written to its
     workdir; wait for /api/health. Returns (proc, base, port, webdir) or None
-    when the server never became ready (stdout/stderr captured into a note)."""
+    when the server never became ready (stdout/stderr captured into a note).
+    A failed boot (health timeout or instant death, e.g. a bind race on the
+    chosen port) is retried ONCE on a fresh port — the workdir config does
+    not depend on the port, so reuse is safe."""
     webdir = lib.seed_workdir(cfg)
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    print(f"== {label}: booting serve on port {port} (token auth on) ==")
-    proc = subprocess.Popen(
-        [bin_path, "--workdir", webdir, "serve",
-         "--host", "127.0.0.1", "--port", str(port),
-         "--token", _E2E_TOKEN],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-    if not _wait_health(base, time.time() + 30):
-        out = proc.stdout.read(2000) if proc.stdout else ""
-        err = proc.stderr.read(2000) if proc.stderr else ""
+    for attempt in (1, 2):
+        port = _free_port()
+        base = f"http://127.0.0.1:{port}"
+        retry_note = "" if attempt == 1 else " — retry with fresh port"
+        print(f"== {label}: booting serve on port {port} (token auth on){retry_note} ==")
+        proc = subprocess.Popen(
+            [bin_path, "--workdir", webdir, "serve",
+             "--host", "127.0.0.1", "--port", str(port),
+             "--token", _E2E_TOKEN],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if _wait_health(base, time.time() + 30):
+            return proc, base, port, webdir
+        out, err = _collect_bounded(proc)
         print(f"  note: {label} serve did not become ready; stdout={out!r} stderr={err!r}")
-        _shutdown(proc)
-        return None
-    return proc, base, port, webdir
+        _shutdown(proc)  # no-op when communicate() already reaped the process
+        if attempt == 2:
+            return None
+        print(f"  note: {label} retrying boot once on a fresh port (TOCTOU bind race / slow start)")
+    return None  # unreachable: both attempts return inside the loop
 
 
 def _shutdown(proc: subprocess.Popen) -> None:

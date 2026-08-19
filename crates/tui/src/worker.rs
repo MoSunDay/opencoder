@@ -144,14 +144,18 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
-/// Gate for agent-mode switch actions (Shift+Tab / `/act` / `/plan` /
-/// `/act_clear_context` / SwitchAgentNoClear). Busy (`running` or a live
-/// subagent — callers precompute `running || subagents_running > 0`) means the
-/// worker is mid-`run_session`; applying a mode switch then would start the
-/// *next* turn with a stale agent while the current model is still answering
-/// under the old system prompt — the mode "switch" would complete at an
-/// arbitrary partial boundary. Refuse until idle (clean turn boundary). Pure
-/// so the running-guard is unit-testable independent of the async event loop.
+/// Gate for agent-mode switch actions. Busy (`running` or a live subagent —
+/// callers precompute `running || subagents_running > 0`) means the worker is
+/// mid-`run_session`; applying a mode switch then would start the *next*
+/// turn with a stale agent while the current model is still answering under
+/// the old system prompt — the mode "switch" would complete at an arbitrary
+/// partial boundary. Refuse until idle (clean turn boundary). Pure so the
+/// running-guard is unit-testable independent of the async event loop.
+///
+/// This gate now serves only the slash paths (`/act` `/plan`
+/// `/act_clear_context` → `dispatch_mode_switch`); the Shift+Tab / t+Tab key
+/// path uses the direction-aware gate inside `handle_switch_agent`
+/// (plan→act intercepted while busy, act→plan allowed as a pure switch).
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,
@@ -299,13 +303,16 @@ pub async fn process_cmd(
             false
         }
         UiCmd::SwitchAgent(name) => {
-            // DEFENSE-IN-DEPTH: this arm is only reachable at a clean turn
-            // boundary. The worker loop is single-threaded and `run_session`
-            // is synchronous within `process_cmd(UiCmd::Prompt)` — a switch
-            // queued during a live turn is not consumed until that `process_cmd`
-            // returns, so `sess.agent` is never flipped mid-`run_session`.
-            // The app-loop running-gate (`gate_switch` / `handle_switch_agent`)
-            // additionally refuses to SEND a switch while `running` is true.
+            // DEFENSE-IN-DEPTH: this arm only ever applies a switch at a
+            // clean turn boundary. The worker loop is single-threaded and
+            // `run_session` is synchronous within `process_cmd(UiCmd::Prompt)`
+            // — a switch queued during a live turn is not consumed until that
+            // `process_cmd` returns, so `sess.agent` is never flipped mid-
+            // `run_session`. The app-loop direction-aware gate
+            // (`handle_switch_agent`) refuses to SEND a plan→act switch
+            // (handoff or no_handoff) while a turn/subagent is live;
+            // act→plan is a pure state switch and MAY be enqueued mid-turn,
+            // relying on the turn-boundary-only consumption above.
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
                 // Mirror control_cmd::apply: switching to plan resets the

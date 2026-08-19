@@ -1,16 +1,21 @@
-//! Running-gate tests for mode switches (Shift+Tab / SwitchAgentNoClear /
-//! `/act` `/plan` `/act_clear_context`). A turn in flight (`running`) must
-//! defer any mode switch to the next clean idle boundary — applying it
-//! mid-`run_session` would start the next turn with a stale agent at an
-//! arbitrary partial boundary. Split out of `app_loop_tests/mod.rs` to keep
-//! the aggregator under the 800-line iteration cap (rules/02).
+//! Direction-aware running-gate tests for mode switches (Shift+Tab /
+//! SwitchAgentNoClear / `/act` `/plan` `/act_clear_context`). plan→act while
+//! a turn is in flight (`running`) or a subagent is live is intercepted with
+//! an explicit busy hint — applying the handoff mid-`run_session` would start
+//! the next turn with a stale agent at an arbitrary partial boundary, and
+//! there is no deferred auto-fire (re-press at a clean idle boundary).
+//! act→plan while running is a pure state switch: the single-threaded worker
+//! consumes the queued `UiCmd::SwitchAgent` only at the next turn boundary.
+//! Split out of `app_loop_tests/mod.rs` to keep the aggregator under the
+//! 800-line iteration cap (rules/02).
 
 use super::plan_view;
 use super::*;
 
-/// Broadened running-gate: ANY mode switch while a turn is running is a
-/// no-op — including act→plan and plan→act WITHOUT a submitted plan (which
-/// would otherwise be a pure switch + could start a new turn mid-flight).
+/// Direction-aware running gate, plan→act side: a turn in flight makes the
+/// switch intercepted with an explicit busy hint — even plan→act WITHOUT a
+/// submitted plan (which would otherwise be a pure switch). The agent stays
+/// in plan mode and the user re-presses at a clean idle boundary.
 #[tokio::test]
 async fn switch_while_running_is_noop_even_without_submitted_plan() {
     let mut chat = ChatView {
@@ -25,7 +30,7 @@ async fn switch_while_running_is_noop_even_without_submitted_plan() {
     let mut mode_flash: Option<(String, u32)> = None;
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
-    let mut sys_tokens = 42u64; // sentinel — must not be touched on the noop
+    let mut sys_tokens = 42u64; // sentinel — must not be touched on the block
     let workdir = Path::new(".");
     let active_skill_body: Option<String> = None;
 
@@ -53,26 +58,30 @@ async fn switch_while_running_is_noop_even_without_submitted_plan() {
         "no command should be sent while running"
     );
     assert!(running, "running must stay true (turn still active)");
-    assert_eq!(input, "keep me", "input must be untouched on no-op");
-    assert_eq!(sys_tokens, 42, "sys_tokens must be untouched on the noop");
+    assert_eq!(input, "keep me", "input must be untouched on the block");
+    assert_eq!(sys_tokens, 42, "sys_tokens must be untouched on the block");
     assert_eq!(
         chat.agent, "plan",
-        "agent must stay in the current mode on the noop"
+        "agent must stay in the current mode on the block"
     );
     assert!(
         mode_flash
             .as_ref()
-            .map(|(t, _)| t.contains("busy"))
+            .map(|(t, _)| t.contains("busy") && t.contains("blocked"))
             .unwrap_or(false),
-        "mode flash should hint the switch is deferred; got {:?}",
+        "mode flash should state the plan switch is blocked while busy; got {:?}",
         mode_flash
     );
 }
 
-/// act→plan while running is likewise a no-op (broadened running-gate covers
-/// switches in both directions).
+/// act→plan while running is a PURE state switch (direction-aware gate):
+/// exactly one `UiCmd::SwitchAgent("plan")` is enqueued — never
+/// `SwitchAndStart` — the optimistic fold flips the agent immediately, the
+/// in-flight turn is untouched (running stays true, input/cursor preserved),
+/// and the context-meter baseline is refreshed to the plan-mode system
+/// prompt (the meter reflects the mode the NEXT turn will run under).
 #[tokio::test]
-async fn switch_act_to_plan_while_running_is_noop() {
+async fn switch_act_to_plan_while_running_switches_state_only() {
     let mut chat = ChatView {
         agent: "act".into(),
         ..Default::default()
@@ -107,26 +116,45 @@ async fn switch_act_to_plan_while_running_is_noop() {
     .await;
 
     assert!(matches!(outcome, SwitchOutcome::Proceed));
+    // Exactly one pure switch command — a new turn must NEVER be started.
+    let mut cmds = Vec::new();
+    while let Ok(c) = cmd_rx.try_recv() {
+        cmds.push(c);
+    }
+    assert_eq!(cmds.len(), 1, "exactly one command queued");
+    match &cmds[0] {
+        UiCmd::SwitchAgent(n) => assert_eq!(n, "plan"),
+        _other => panic!("expected pure SwitchAgent, never SwitchAndStart"),
+    }
     assert!(
-        cmd_rx.try_recv().is_err(),
-        "no command should be sent while running"
+        running,
+        "running must stay true — the in-flight turn is unaffected"
     );
-    assert!(running, "running must stay true (turn still active)");
-    assert_eq!(chat.agent, "act", "agent must stay in act mode on the noop");
-    assert_eq!(sys_tokens, 7, "sys_tokens must be untouched on the noop");
+    assert_eq!(chat.agent, "plan", "agent must flip to plan (pure switch)");
+    assert_eq!(
+        input, "in flight",
+        "input must be untouched by the pure switch"
+    );
+    assert_eq!(cursor_idx, 9, "cursor must be untouched");
     assert!(
         mode_flash
             .as_ref()
-            .map(|(t, _)| t.contains("busy"))
+            .map(|(t, _)| t.contains("plan mode"))
             .unwrap_or(false),
-        "mode flash should hint the switch is deferred; got {:?}",
+        "mode flash should announce plan mode; got {:?}",
         mode_flash
+    );
+    assert_eq!(
+        sys_tokens,
+        sys_tokens_for("plan", Path::new("."), None),
+        "sys_tokens must refresh to the plan-mode system-prompt baseline"
     );
 }
 
-/// SwitchAgentNoClear (t+Tab chord, no_handoff=true) while a turn is running
-/// must ALSO be a no-op — even plan→act with a submitted plan, where the
-/// non-handoff path would otherwise leak a direct UiCmd::SwitchAgent mid-turn.
+/// SwitchAgentNoClear (t+Tab chord, no_handoff=true) on the plan→act side
+/// while a turn is running is intercepted with the busy hint — even with a
+/// submitted plan, where the non-handoff path would otherwise leak a direct
+/// UiCmd::SwitchAgent mid-turn. No deferred auto-fire: re-press when idle.
 #[tokio::test]
 async fn switch_no_clear_while_running_is_noop() {
     let mut chat = plan_view();
@@ -167,15 +195,15 @@ async fn switch_no_clear_while_running_is_noop() {
     assert!(running, "running must stay true (turn still active)");
     assert_eq!(
         chat.agent, "plan",
-        "agent must stay in plan mode on the noop"
+        "agent must stay in plan mode on the intercepted switch"
     );
-    assert_eq!(sys_tokens, 99, "sys_tokens must be untouched on the noop");
+    assert_eq!(sys_tokens, 99, "sys_tokens must be untouched on the block");
     assert!(
         mode_flash
             .as_ref()
-            .map(|(t, _)| t.contains("busy"))
+            .map(|(t, _)| t.contains("busy") && t.contains("blocked"))
             .unwrap_or(false),
-        "mode flash should hint the switch is deferred; got {:?}",
+        "mode flash should state the plan switch is blocked while busy; got {:?}",
         mode_flash
     );
 }
@@ -229,9 +257,10 @@ async fn switch_no_clear_idle_skips_handoff() {
 
 /// A subagent task is live (subagents_running > 0) but the loop `running`
 /// flag is false - this happens when a SubagentEnd was dropped under channel
-/// saturation and Done/TurnDone already cleared `running`. The gate must
-/// STILL block the mode switch (no silent mode change while a tracked
-/// subagent exists).
+/// saturation and Done/TurnDone already cleared `running`. The direction-
+/// aware gate must STILL intercept a plan→act switch (no silent handoff or
+/// mode change while a tracked subagent exists); act→plan stays a pure
+/// switch (see `switch_act_to_plan_while_subagent_live_pure_switches`).
 #[tokio::test]
 async fn switch_while_subagent_running_is_noop_even_when_running_false() {
     let mut chat = ChatView {
@@ -435,5 +464,122 @@ async fn shift_tab_double_tap_second_strike_is_pure_switch_and_keeps_input() {
     assert!(
         cmds.iter().all(|c| matches!(c, UiCmd::SwitchAgent(_))),
         "double-tap must queue pure switches only"
+    );
+}
+
+/// Direction-aware gate, act→plan with a LIVE subagent (running=false,
+/// subagents_running=1): still a pure state switch. The single-threaded
+/// worker consumes `UiCmd::SwitchAgent` at the next turn boundary, so a
+/// tracked subagent alone never blocks leaving act mode.
+#[tokio::test]
+async fn switch_act_to_plan_while_subagent_live_pure_switches() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        subagents_running: 1,
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = true;
+    let mut input = "keep me".to_string();
+    let mut cursor_idx = 7;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let outcome = handle_switch_agent(
+        "plan".into(),
+        false,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+    )
+    .await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    let mut cmds = Vec::new();
+    while let Ok(c) = cmd_rx.try_recv() {
+        cmds.push(c);
+    }
+    assert_eq!(cmds.len(), 1, "exactly one pure switch queued");
+    match &cmds[0] {
+        UiCmd::SwitchAgent(n) => assert_eq!(n, "plan"),
+        _other => panic!("expected pure SwitchAgent, never SwitchAndStart"),
+    }
+    assert!(!running, "no turn started (pure switch)");
+    assert_eq!(chat.agent, "plan", "agent must flip to plan");
+    assert_eq!(
+        input, "keep me",
+        "input must be untouched by the pure switch"
+    );
+}
+
+/// Direction-aware gate, act→plan with no_handoff=true (t+Tab chord) while
+/// running: identical pure state switch as the plain act→plan path — exactly
+/// one `UiCmd::SwitchAgent("plan")`, no turn start, running untouched.
+#[tokio::test]
+async fn switch_act_to_plan_no_clear_while_running_switches_state_only() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = true;
+    let mut follow = true;
+    let mut input = "in flight".to_string();
+    let mut cursor_idx = 9;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let outcome = handle_switch_agent(
+        "plan".into(),
+        true,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+    )
+    .await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    let mut cmds = Vec::new();
+    while let Ok(c) = cmd_rx.try_recv() {
+        cmds.push(c);
+    }
+    assert_eq!(cmds.len(), 1, "exactly one pure switch queued");
+    match &cmds[0] {
+        UiCmd::SwitchAgent(n) => assert_eq!(n, "plan"),
+        _other => panic!("expected pure SwitchAgent, never SwitchAndStart"),
+    }
+    assert!(
+        running,
+        "running must stay true — the in-flight turn is unaffected"
+    );
+    assert_eq!(chat.agent, "plan", "agent must flip to plan (pure switch)");
+    assert_eq!(
+        input, "in flight",
+        "input must be untouched by the pure switch"
     );
 }

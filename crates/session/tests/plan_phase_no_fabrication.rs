@@ -90,7 +90,10 @@ async fn failed_plan_phase_hands_off_nothing_even_with_act_history() {
     assert_eq!(session.messages.len(), 3, "transcript must stay intact");
     assert!(session.handoff_seq.is_none(), "no resume boundary written");
     let meta = store.get_session("no-fabricate").await.unwrap().unwrap();
-    assert!(meta.handoff_seq.is_none(), "store keeps no handoff boundary");
+    assert!(
+        meta.handoff_seq.is_none(),
+        "store keeps no handoff boundary"
+    );
 }
 
 #[tokio::test]
@@ -132,7 +135,11 @@ async fn recorded_plan_output_is_handed_off_from_the_snapshot() {
         .expect("a recorded plan must hand off");
     assert!(display.contains("## Plan\n1. do Y"));
     assert!(display.contains("and start now"));
-    assert_eq!(session.messages.len(), 1, "transcript collapsed to the plan");
+    assert_eq!(
+        session.messages.len(),
+        1,
+        "transcript collapsed to the plan"
+    );
     assert!(session.handoff_seq.is_some(), "resume boundary written");
     assert_eq!(session.plan_snapshot, None, "snapshot consumed by handoff");
 

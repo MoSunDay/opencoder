@@ -179,7 +179,10 @@ mod tests {
     fn exit_message_leads_with_opencoder_and_resume_hint() {
         for reason in [Trip::Signal, Trip::InputWedge] {
             let msg = exit_message(reason);
-            assert!(msg.starts_with("opencoder:"), "must lead with binary name: {msg}");
+            assert!(
+                msg.starts_with("opencoder:"),
+                "must lead with binary name: {msg}"
+            );
             assert!(
                 msg.contains("opencoder --continue"),
                 "must advertise the resume hint: {msg}"

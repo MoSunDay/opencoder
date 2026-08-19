@@ -148,14 +148,18 @@ async fn stale_double_tap_switch_and_start_preserves_context() {
         4,
         "history preserved verbatim + one submitted user turn + its answer"
     );
-    assert!(sess.messages[0].text().contains("refactor the parser module"));
+    assert!(sess.messages[0]
+        .text()
+        .contains("refactor the parser module"));
     assert!(sess.messages[1].text().contains("task complete"));
     assert!(
-        matches!(sess.messages[2].role, Role::User) && sess.messages[2].text().contains("draft text"),
+        matches!(sess.messages[2].role, Role::User)
+            && sess.messages[2].text().contains("draft text"),
         "captured input-box text must be submitted as a normal user prompt"
     );
     assert!(
-        matches!(sess.messages[3].role, Role::Assistant) && sess.messages[3].text().contains("acknowledged"),
+        matches!(sess.messages[3].role, Role::Assistant)
+            && sess.messages[3].text().contains("acknowledged"),
         "the submitted prompt consumes the scripted mock answer"
     );
     assert_eq!(

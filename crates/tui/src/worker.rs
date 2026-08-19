@@ -369,7 +369,7 @@ pub async fn process_cmd(
             // the UI's TurnDone protocol is honored. The captured input-box
             // text is NOT discarded on gate failure: with no handoff it is
             // submitted as a normal act-mode prompt (`handoff_run_prompt`).
-            let plan_display = if sess.plan_input_count > 0 {
+            let plan_display = if sess.plan_input_count > 0 || sess.plan_snapshot.is_some() {
                 opencoder_session::plan_handoff::handoff(sess, &extra)
             } else {
                 let ev = SessionEvent::Status(

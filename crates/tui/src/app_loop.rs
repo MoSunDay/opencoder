@@ -445,18 +445,23 @@ pub(crate) async fn fold_ui_events(
                 //
                 // Consumption-time plan arm: a TurnDone(plan) means a turn
                 // actually RAN in the plan phase, so re-arm `plan_submitted`
-                // from the persisted plan-phase counter — the authoritative
-                // record of delivered requirements (incremented when a real
-                // requirement is recorded for the plan agent; bare commands
-                // and skill-only submissions never increment it). This covers
-                // steers, queued inputs and compound `/plan <content>` (the
-                // counter persists at record time, before this TurnDone),
-                // and it can NEVER arm from a stranded, never-consumed
-                // admit. A store failure keeps the current flag (fail-open).
+                // from the persisted plan-phase state — the authoritative
+                // record of delivered requirements (the counter increments
+                // when a real requirement is recorded for the plan agent;
+                // bare commands and skill-only submissions never increment
+                // it) plus the phase-bounded snapshot. This covers steers,
+                // queued inputs and compound `/plan <content>` (the counter
+                // persists at record time, before this TurnDone), and it can
+                // NEVER arm from a stranded, never-consumed admit. The
+                // session row's agent column is NOT consulted: ts-origin
+                // sessions keep it NULL by design, which used to disarm
+                // Shift+Tab here — the TurnDone(plan) event itself proves a
+                // plan turn just ran. A store failure keeps the current flag
+                // (fail-open).
                 if agent == "plan" {
                     if let Ok(Some(meta)) = store.get_session(session_id).await {
                         chat.plan_submitted =
-                            meta.agent.as_deref() == Some("plan") && meta.plan_input_count > 0;
+                            meta.plan_input_count > 0 || meta.plan_snapshot.is_some();
                     }
                 }
                 chat.agent = crate::terminal_text::sanitize_single_line(&agent).into_owned();
@@ -680,6 +685,18 @@ pub(crate) mod tests;
 #[cfg(test)]
 #[path = "app_loop_bugfix_tests.rs"]
 mod bugfix_tests;
+
+#[cfg(test)]
+#[path = "app_loop_act_clear_repro_tests.rs"]
+mod act_clear_repro_tests;
+
+#[cfg(test)]
+#[path = "app_loop_act_clear_ts_origin_tests.rs"]
+mod act_clear_ts_origin_tests;
+
+#[cfg(test)]
+#[path = "app_loop_legacy_resume_tests.rs"]
+mod legacy_resume_tests;
 
 #[path = "app_loop_model.rs"]
 mod app_loop_model;

@@ -124,7 +124,10 @@ fn parse_skill_strips_bom_and_blank_lines_before_frontmatter() {
         "\u{FEFF}\n\n---\nname: bom\ndescription: bd\n---\nreal body\n",
     );
     let sk = parse_skill(&p, "bom").expect("parse");
-    assert_eq!(sk.name, "bom", "BOM + blank lines must not hide frontmatter");
+    assert_eq!(
+        sk.name, "bom",
+        "BOM + blank lines must not hide frontmatter"
+    );
     assert_eq!(sk.description, "bd");
     assert_eq!(sk.body, "real body", "body is post-fence text only");
 }
@@ -162,6 +165,13 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     let rlm = root.path().join("repo-local-memory");
     assert!(rlm.join("EXAMPLES.md").exists());
     assert!(rlm.join("TEMPLATES.md").exists());
+    // Codex-standard task-plan uses progressive disclosure: its detailed
+    // launch and optional Any Home protocols are bundled under references/.
+    let task_plan = root.path().join("task-plan");
+    assert!(task_plan.join("references/any-home-plan-run.md").exists());
+    assert!(task_plan
+        .join("references/launch-closure-plan-checklist.md")
+        .exists());
 }
 
 #[test]
@@ -171,6 +181,10 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     let user_file = root.path().join("do-and-done").join("SKILL.md");
     std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
     std::fs::write(&user_file, "user-authored\n").unwrap();
+    let user_reference = root
+        .path()
+        .join("task-plan/references/any-home-plan-run.md");
+    write(&user_reference, "user-reference\n");
 
     seed_builtin_skills_in(root.path()).expect("seed");
 
@@ -178,6 +192,10 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     assert_eq!(
         std::fs::read_to_string(&user_file).unwrap(),
         "user-authored\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&user_reference).unwrap(),
+        "user-reference\n"
     );
     // ...while the other packs are still written.
     assert!(root.path().join("review").join("SKILL.md").exists());
@@ -285,13 +303,9 @@ fn body_with_source_emits_path_annotation_then_body() {
 }
 
 #[test]
-fn seeded_review_skill_requires_five_question_recap() {
-    // The built-in review skill is embedded via include_str! and seeded on
-    // first run. It is organized entirely around the five mandatory
-    // questions (restate goal / replay done+progress / blockers / per-item
-    // verify+evidence / next TODOs) with no fixed output template —
-    // answering the five questions well IS the output. A dropped question
-    // or evidence rule in the markdown asset turns this test red.
+fn seeded_review_skill_requires_codex_evidence_review() {
+    // Review follows the Codex say-and-replay evidence model, then adds the
+    // blast-radius and go-live decision responsibilities of a release review.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
@@ -301,37 +315,33 @@ fn seeded_review_skill_requires_five_question_recap() {
         "frontmatter description missing"
     );
     for section in [
-        "问一：原始需求目标",
-        "问二：做了哪些事情",
-        "问三：过程中遇到了什么卡点",
-        "问四：每个完成点怎么验证的",
-        "问五：下一步 TODO",
+        "重建需求与完成标准",
+        "建立评审维度与完成度",
+        "以当次证据审查当前状态",
+        "审查全局影响与发布责任",
+        "梳理卡点与对齐事项",
+        "裁决上线状态",
     ] {
         assert!(body.contains(section), "review skill missing `{section}`");
     }
-    // Q2 quantifies progress as completed/total + floor percent, counting
-    // only items that carry both verify and evidence.
     assert!(
-        body.contains("completed/total"),
-        "review must quantify progress as completed/total"
+        body.contains("需求完成百分比"),
+        "review must quantify requirement completion"
     );
     assert!(
-        body.contains("向下取整"),
-        "review percent convention must be floor rounding"
-    );
-    // Q4: no evidence = not passed, and stale summaries do not count —
-    // evidence must come from a fresh run.
-    assert!(
-        body.contains("没有证据 = 没有通过"),
-        "review must enforce evidence-or-not-passed"
+        body.contains("怎么验证") && body.contains("证据是什么"),
+        "review must separate verification method from evidence"
     );
     assert!(
-        body.contains("当次实跑"),
-        "review evidence must come from the current run"
+        body.contains("当次新鲜证据"),
+        "review evidence must identify freshness"
     );
-    // The verdict rules go-live readiness from the five answers.
     assert!(
-        body.contains("go-live ready | not ready"),
+        body.contains("授权、审批、权限、凭证"),
+        "review must proactively surface delivery blockers"
+    );
+    assert!(
+        body.contains("`go-live ready`") && body.contains("`not ready`"),
         "review must rule go-live readiness"
     );
 }
@@ -376,42 +386,54 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
 }
 
 #[test]
-fn seeded_task_plan_skill_requires_question_tool_guidance() {
-    // task-plan runs in plan mode, where the `question` tool is the only
-    // sanctioned clarification channel. The skill must keep: (a) the
-    // conditional protocol (interactive -> ask; headless -> explicit
-    // assumptions), (b) the anti-lazy guard (facts come from the repo, not
-    // from the user), and (c) the `assumptions:` landing spot in the STATUS
-    // block, so ambiguity never turns into silently invented acceptance
-    // criteria.
+fn seeded_task_plan_skill_requires_launch_closure_contract() {
+    // Task-plan follows the Codex launch-closure model: reconstruct scope,
+    // grade evidence without cross-level inference, plan real/production-
+    // equivalent validation, audit omissions, and disclose hard blockers.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("task-plan/SKILL.md")).unwrap();
     assert!(body.contains("name: task-plan"), "frontmatter name missing");
+    for contract in [
+        "建立规划上下文",
+        "证据成熟度",
+        "建立合约与保鲜矩阵",
+        "线上 / 生产等价验证方案",
+        "做遗漏复查",
+        "gating item",
+    ] {
+        assert!(body.contains(contract), "task-plan missing `{contract}`");
+    }
+    let references = root.path().join("task-plan/references");
+    let checklist =
+        std::fs::read_to_string(references.join("launch-closure-plan-checklist.md")).unwrap();
     assert!(
-        body.contains("question"),
-        "task-plan skill must reference the question tool"
+        checklist.contains("持续保鲜与稳定性"),
+        "launch checklist must preserve evidence maturity checks"
     );
     assert!(
-        body.contains("澄清协议"),
-        "task-plan skill must carry a clarification protocol section"
+        references.join("any-home-plan-run.md").exists(),
+        "optional Any Home protocol must be bundled"
     );
-    // Conditional branches, mirroring do-and-done's pause protocol wording.
+}
+
+#[test]
+fn seeded_workflow_skills_consume_launch_closure_plan() {
+    // The Codex-standard task-plan no longer emits the legacy fixed STATUS
+    // block. Direct consumers must follow its closure-plan/evidence contract
+    // instead of waiting for fields the planner will never produce.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    for skill in ["do-and-done", "summary", "submit"] {
+        let body = std::fs::read_to_string(root.path().join(skill).join("SKILL.md")).unwrap();
+        assert!(
+            !body.contains("STATUS 块"),
+            "{skill} still requires the retired STATUS block"
+        );
+    }
+    let executor = std::fs::read_to_string(root.path().join("do-and-done/SKILL.md")).unwrap();
     assert!(
-        body.contains("`question` 工具可用"),
-        "task-plan clarification must cover the interactive branch"
-    );
-    assert!(
-        body.contains("不可用"),
-        "task-plan clarification must cover the headless branch"
-    );
-    assert!(
-        body.contains("assumptions:"),
-        "headless branch must land assumptions in the STATUS block"
-    );
-    // Anti-lazy guard: repo facts are looked up, not asked.
-    assert!(
-        body.contains("不把提问当侦察手段"),
-        "task-plan must forbid using question as a substitute for repo lookup"
+        executor.contains("闭环计划") && executor.contains("go-live ready"),
+        "executor must drive the closure plan through fresh review"
     );
 }

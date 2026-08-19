@@ -17,7 +17,7 @@ description: Task retrospective at any checkpoint (done/paused/handoff). Produce
 - 被问「这次任务需求是什么 / 做了啥 / 怎么验证的 / 还有啥能改进」。
 
 ## 输入
-- 本次任务的初始 prompt / task-plan 的 STATUS 块（goal / todos / evidence）—— 需求来源。
+- 本次任务的初始 prompt / task-plan 的问题范围、闭环计划与证据——需求来源。
 - 工作区实际状态：`git status`、`git diff`、`git log --oneline <base>..HEAD`。
 - 会话历史：做了哪些工具调用、改了哪些文件、跑了哪些验证。
 - 已有的验证证据（测试输出、构建结果）—— **优先引用真实证据，不臆造**。
@@ -50,10 +50,10 @@ description: Task retrospective at any checkpoint (done/paused/handoff). Produce
 ## 原则
 - **事实优先**：需求、改动、验证都从 git / 命令输出取证，不靠记忆臆断。
 - **诚实**：没做的、没验证的、有风险的，如实标出，绝不粉饰。
-- **不重复造清单**：复用 task-plan 的 STATUS 块与 review 的 gate 结论，summary 只做回顾与梳理。
+- **不重复造清单**：复用 task-plan 的闭环计划与 review 的上线结论，summary 只做回顾与梳理。
 - **精炼**：回顾是给人快速建立全貌的，避免冗长；关键证据给命令 + 结果摘要即可。
 
 ## 与其它 skill 的衔接
 - 完成实现（`do-and-done`）后，summary 产出回顾；review 做 go-live 评审；submit 做提交。
-- summary 是只读回顾，不替代 review 的 gate 强制，也不替代 submit 的提交动作。
+- summary 是只读回顾，不替代 review 的证据评审与 go-live 裁决，也不替代 submit 的提交动作。
 - 触及区 memory（`agents/*`、`features/*`）若需更新，按 `repo-local-memory` 处理，summary 本身不改文件。

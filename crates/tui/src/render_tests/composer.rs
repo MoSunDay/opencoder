@@ -255,11 +255,11 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         &mut hits,
         &mut viewport,
         false,
-        true,                     // copy_mode
+        true, // copy_mode
         &[],
         false,
-        Some("NORMAL"),           // plan_mode (annotation editor open)
-        Some("edit annotation"),  // edit_title
+        Some("NORMAL"),          // plan_mode (annotation editor open)
+        Some("edit annotation"), // edit_title
         0,
         0,
         true,
@@ -288,7 +288,9 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         .flat_map(|y| row_text(buf, y, 60).chars().collect::<Vec<_>>())
         .collect();
     assert!(!all.contains("edit annotation"), "titles gone: {all:?}");
-    for deco in ['\u{276f}', '\u{250c}', '\u{2514}', '\u{2500}', '\u{251c}', '\u{2523}'] {
+    for deco in [
+        '\u{276f}', '\u{250c}', '\u{2514}', '\u{2500}', '\u{251c}', '\u{2523}',
+    ] {
         assert!(
             !all.contains(deco),
             "decoration {deco:?} must be absent in copy mode: {all:?}"

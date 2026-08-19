@@ -272,7 +272,6 @@ fn skill_trigger_names_the_active_skill() {
     assert!(crate::skill_display::skill_trigger("x").contains("`x`"));
 }
 
-
 /// `start_turn` must report failure when the worker command channel has no
 /// consumer — the exact signature of a dead worker task (panic or unexpected
 /// exit). The main loop relies on this `false` to surface a marker and exit

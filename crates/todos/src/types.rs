@@ -213,6 +213,7 @@ pub enum ContextMode {
 pub enum AcceptanceDecision {
     Accept {
         reason: String,
+        #[serde(default)]
         mark_milestone: bool,
     },
     Revise {
@@ -226,4 +227,22 @@ pub enum AcceptanceDecision {
         milestone_todo_id: String,
         reason: String,
     },
+}
+
+#[cfg(test)]
+mod acceptance_decision_tests {
+    use super::AcceptanceDecision;
+
+    #[test]
+    fn accept_defaults_omitted_milestone_to_false() {
+        let decision: AcceptanceDecision =
+            serde_json::from_str(r#"{"operation":"accept","reason":"tool gate passed"}"#).unwrap();
+        assert!(matches!(
+            decision,
+            AcceptanceDecision::Accept {
+                mark_milestone: false,
+                ..
+            }
+        ));
+    }
 }

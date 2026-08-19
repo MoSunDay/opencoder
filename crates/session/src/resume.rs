@@ -177,6 +177,30 @@ pub async fn resume(
         )
     };
 
+    // Legacy plan-phase backfill: sessions created before the plan-phase
+    // columns existed persist counter=0 / snapshot=NULL in the store even when
+    // the plan agent produced a real plan. Recover both from the (already
+    // handoff/compaction-trimmed) transcript so a resumed plan session re-arms
+    // the Shift+Tab / `/act_clear_context` handoff. Phase-bounded: only a
+    // plan-agent assistant answer is accepted (`newest_plan_agent_text`).
+    // The session row's agent column is NULL for ts-origin sessions by
+    // design, so NULL is allowed through the gate; an explicit non-plan
+    // agent refuses the backfill.
+    let (plan_input_count, plan_snapshot) = if meta.plan_input_count <= 0
+        && meta.plan_snapshot.is_none()
+        && meta.agent.as_deref().is_none_or(|a| a == "plan")
+    {
+        match crate::plan_handoff::newest_plan_agent_text(&messages) {
+            Some(plan) => (1, Some(plan)),
+            None => (0, None),
+        }
+    } else {
+        (
+            meta.plan_input_count.max(0) as usize,
+            meta.plan_snapshot.clone(),
+        )
+    };
+
     let s = SessionState {
         id: id.to_string(),
         messages,
@@ -188,7 +212,9 @@ pub async fn resume(
         last_usage: opencoder_llm::Usage::default(),
         store: Some(store),
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
-        active_skill_names: Arc::new(Mutex::new(infer_skill_names(&meta.skill))),
+        active_skill_names: Arc::new(Mutex::new(crate::resume_helpers::infer_skill_names(
+            &meta.skill,
+        ))),
         persisted_count: n,
         session_created: true,
         ts_origin: false,
@@ -204,8 +230,8 @@ pub async fn resume(
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         requirement: meta.requirement.clone(),
-        plan_snapshot: meta.plan_snapshot.clone(),
-        plan_input_count: meta.plan_input_count.max(0) as usize,
+        plan_snapshot,
+        plan_input_count,
         question_hub: crate::QuestionHub::new(),
     };
     Ok(s)
@@ -733,62 +759,4 @@ async fn generate_title_inner(session: &SessionState, store: &Arc<dyn Store>) ->
         )
         .await?;
     Ok(())
-}
-
-/// Infer active skill names from a skill prompt body by matching known
-/// skill body prefixes. Used on resume to restore latent tool unlocking.
-fn infer_skill_names(body: &Option<String>) -> std::collections::HashSet<String> {
-    use std::collections::HashSet;
-    let mut names = HashSet::new();
-    if let Some(b) = body {
-        let prefix = b.chars().take(200).collect::<String>();
-        if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
-            names.insert("ssh-pty".to_string());
-        }
-    }
-    names
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn infer_skill_names_none_body() {
-        let names = infer_skill_names(&None);
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn infer_skill_names_empty_body() {
-        let names = infer_skill_names(&Some(String::new()));
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn infer_skill_names_detects_ssh_pty() {
-        let body = Some("Use ssh_pty to connect to the server".to_string());
-        let names = infer_skill_names(&body);
-        assert_eq!(names, HashSet::from(["ssh-pty".to_string()]));
-    }
-
-    #[test]
-    fn infer_skill_names_detects_ssh_pty_dash() {
-        let body = Some("Active skill: ssh-pty".to_string());
-        let names = infer_skill_names(&body);
-        assert_eq!(names, HashSet::from(["ssh-pty".to_string()]));
-    }
-
-    #[test]
-    fn infer_skill_names_ignores_after_200_chars() {
-        // Content after the first 200 chars should be ignored.
-        let padding = "x".repeat(200);
-        let body = Some(format!("{padding}ssh_pty"));
-        let names = infer_skill_names(&body);
-        assert!(
-            names.is_empty(),
-            "skill names past 200 chars should be ignored"
-        );
-    }
 }

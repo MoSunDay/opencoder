@@ -71,10 +71,12 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 }
 
 /// Regression for the removal of deferred handoff: plan→act Shift+Tab while
-/// the plan turn is running is now a complete no-op — no command sent, input
-/// untouched, running stays true, and a flash hint is shown. The same no-op
-/// covers act→plan and plan→act without a submitted plan while a turn is
-/// running (any mode switch is deferred to the next clean idle boundary).
+/// the plan turn is running is intercepted — no command sent, input
+/// untouched, running stays true, and a busy flash hint is shown (the user
+/// re-presses at a clean idle boundary; no deferred auto-fire). The
+/// direction-aware gate intercepts every plan→act variant this way (with or
+/// without a submitted plan, handoff or no_handoff); act→plan while running
+/// is instead a pure state switch (see switch_gate_tests).
 #[tokio::test]
 async fn switch_plan_to_act_while_running_is_noop() {
     let mut chat = plan_view();

@@ -15,7 +15,7 @@ use opencoder_llm::{lower_messages, ChatRequest, ChatStream, LlmEvent};
 
 use crate::autopilot::decision::parse_verdict;
 use crate::autopilot::prompts::{verify_system_prompt, verify_user_prompt};
-use crate::autopilot::state::{ApState, VerifyVerdict};
+use crate::autopilot::state::{ApState, VerifyFailure, VerifyVerdict};
 use crate::dangling_tools::{tool_use_ids, tool_use_ids_without_result};
 use crate::runner::new_id;
 use crate::SessionState;
@@ -28,15 +28,26 @@ const VERIFY_RESERVED_TOKENS: u64 = 2_000;
 const MSG_OVERHEAD: usize = 4;
 
 /// Run up to `retries` isolated one-shot VERIFY calls against a throwaway
-/// snapshot of the current transcript. Returns the first parseable verdict, or
-/// [`VerifyVerdict::Malformed`] if none parse.
+/// snapshot of the current transcript. Returns the first parseable verdict,
+/// or `Err` with the cause of the LAST failed attempt once the budget is
+/// exhausted — [`VerifyFailure::Unreachable`] (transport error before any
+/// answer) is distinguished from [`VerifyFailure::Unparseable`] (an answer
+/// arrived but parsed to nothing) so the terminal `Aborted` reason names the
+/// actual failure instead of folding both into "unparseable".
 ///
 /// `session.messages` is read-only here (immutable borrow) — nothing is
-/// recorded or persisted. A transient LLM error counts as a malformed attempt
-/// and is retried within the budget.
-pub async fn verify(session: &SessionState, state: &ApState, retries: u32) -> VerifyVerdict {
+/// recorded or persisted. Transient LLM errors and unparseable answers are
+/// both retried within the budget.
+pub async fn verify(
+    session: &SessionState,
+    state: &ApState,
+    retries: u32,
+) -> Result<VerifyVerdict, VerifyFailure> {
     let msgs = lower_messages(&build_snapshot(session, state));
 
+    // Cause of the most recent failed attempt — the freshest diagnosis when
+    // the budget runs out (a mixed run reports the last kind).
+    let mut last_failure: Option<VerifyFailure> = None;
     for _ in 0..retries {
         let req = ChatRequest {
             model: session.config.small_model_or_primary().to_string(),
@@ -51,15 +62,33 @@ pub async fn verify(session: &SessionState, state: &ApState, retries: u32) -> Ve
         match drain_one_shot(&session.client, req).await {
             Ok(text) => match parse_verdict(&text) {
                 // Affirmative ("yes") → the goal is fully achieved.
-                Some(true) => return VerifyVerdict::Complete,
+                Some(true) => return Ok(VerifyVerdict::Complete),
                 // Negative ("no") → more work is still needed.
-                Some(false) => return VerifyVerdict::MoreWork,
-                None => continue, // malformed → retry within budget
+                Some(false) => return Ok(VerifyVerdict::MoreWork),
+                None => {
+                    last_failure = Some(VerifyFailure::Unparseable { attempts: retries });
+                    continue; // malformed → retry within budget
+                }
             },
-            Err(_) => continue, // transient error → retry within budget
+            Err(e) => {
+                last_failure = Some(VerifyFailure::Unreachable {
+                    attempts: retries,
+                    last_error: e.to_string(),
+                });
+                continue; // transient error → retry within budget
+            }
         }
     }
-    VerifyVerdict::Malformed
+    // Exhausted without a parseable verdict. `retries` is clamped to >= 1 by
+    // every caller (drive), so `last_failure` is always set here; the
+    // `unwrap_or` is a belt-and-braces default for degenerate direct calls.
+    let failure = last_failure.unwrap_or(VerifyFailure::Unparseable { attempts: 0 });
+    tracing::warn!(
+        attempts = retries,
+        cause = ?failure,
+        "autopilot VERIFY budget exhausted without a parseable verdict"
+    );
+    Err(failure)
 }
 
 /// Build the ephemeral snapshot: judge system prompt + a truncated clone of the
@@ -487,5 +516,53 @@ mod tests {
         assert_eq!(session.messages.len(), msgs.len());
         assert_eq!(session.messages.first().unwrap().id, "pad");
         assert_eq!(session.messages.last().unwrap().id, "tail");
+    }
+
+    /// A transcript that comfortably fits the PRIMARY window but overflows a
+    /// configured narrow judge (`small_model`) window: the snapshot must be
+    /// truncated to fit `verify_context_limit`, or every VERIFY call would
+    /// 400 on the judge's provider and degrade to Malformed retries.
+    #[test]
+    fn narrow_verify_context_limit_truncates_snapshot_to_judge_window() {
+        // 40 x 400-char user messages ≈ 40 * (100 + 4) ≈ 4160 estimated
+        // tokens: well under the 98_000-token primary budget, over the
+        // 4_000-token judge window (budget 4_000 - 2_000 reserved = 2_000).
+        let msgs: Vec<Message> = (0..40)
+            .map(|i| Message::user(&format!("m{i}"), "x".repeat(400)))
+            .collect();
+        let mut session = session_with(Some(100_000), msgs.clone());
+        session.config.autopilot.verify_context_limit = Some(4_000);
+        let snapshot = build_snapshot(&session, &ApState::new("goal".into()));
+
+        assert!(
+            snapshot.len() < msgs.len() + 2,
+            "judge window must actually truncate: snapshot {} vs transcript {}",
+            snapshot.len(),
+            msgs.len()
+        );
+        assert!(
+            opencoder_llm::estimate_messages(&snapshot) <= 4_000,
+            "snapshot must fit the judge window: estimated {} tokens",
+            opencoder_llm::estimate_messages(&snapshot)
+        );
+    }
+
+    /// Regression anchor: with `verify_context_limit` unset the primary
+    /// `context_limit` keeps governing the budget exactly as before the
+    /// knob existed.
+    #[test]
+    fn unset_verify_context_limit_keeps_primary_budget() {
+        let msgs: Vec<Message> = (0..40)
+            .map(|i| Message::user(&format!("m{i}"), "x".repeat(400)))
+            .collect();
+        let session = session_with(Some(100_000), msgs.clone());
+        assert_eq!(session.config.autopilot.verify_context_limit, None);
+        let snapshot = build_snapshot(&session, &ApState::new("goal".into()));
+        assert_eq!(
+            snapshot.len(),
+            msgs.len() + 2,
+            "no judge cap: whole transcript must be cloned verbatim"
+        );
+        assert_eq!(ids_of(&snapshot[1..msgs.len() + 1]), ids_of(&msgs));
     }
 }

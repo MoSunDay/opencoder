@@ -16,6 +16,19 @@ use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
+/// True when any user message of the captured request carries a skill
+/// artifact — the persistent `[skill loaded]` full-body injection or the
+/// transient `[active skill]` tail reminder. Under one-shot `$skill`
+/// semantics (see `skill_one_shot.rs`) this is THE activation proof: the
+/// skill lives exactly for the run that consumed the token.
+fn request_carries_skill(req: &opencoder_llm::ChatRequest) -> bool {
+    req.messages
+        .iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .any(|t| t.contains("[skill loaded]") || t.contains("[active skill]"))
+}
+
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())
 }
@@ -214,8 +227,9 @@ async fn queue_compound_plan_arg_switches_then_runs() {
 }
 
 /// `/plan $review` with a discoverable review skill: switches to plan AND
-/// activates the skill body on the session, while the `$review` token is
-/// stripped from the recorded prompt.
+/// activates the skill for the run (proven by the LLM request carrying the
+/// skill body), while the `$review` token is stripped from the recorded
+/// prompt. One-shot: the skill is cleared when the run ends.
 #[tokio::test]
 async fn compound_plan_with_dollar_activates_skill() {
     let home = tempfile::tempdir().unwrap();
@@ -225,14 +239,14 @@ async fn compound_plan_with_dollar_activates_skill() {
 
     let store = mem_store().await;
     seed(&store, "compound-skill", "act").await;
-    let mock =
-        Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")])) as Arc<dyn ChatStream>;
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "compound-skill",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -243,12 +257,17 @@ async fn compound_plan_with_dollar_activates_skill() {
         .unwrap();
 
     assert_eq!(session.agent.name, "plan", "switched to plan");
-    // The review skill body was activated.
-    let skill = session.skill_prompt_cloned();
-    assert!(skill.is_some(), "skill activated by $review token");
+    // One-shot semantics: activation is proven by the run's own LLM request
+    // carrying the skill body/reminder, and the skill is cleared once the
+    // run ends (see tests/skill_one_shot.rs for the full contract).
+    let requests = mock.requests();
     assert!(
-        !skill.as_ref().unwrap().is_empty(),
-        "skill body is non-empty"
+        requests.len() == 1 && request_carries_skill(&requests[0]),
+        "the run's LLM request must carry the activated review skill"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: skill cleared after the run ends"
     );
     // The recorded prompt has the `$review` token stripped, keeps the text.
     let has_explain = session
@@ -279,13 +298,14 @@ async fn queue_compound_pure_skill_injects_trigger() {
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff")])
             .push_script(vec![done_turn("skill reply")]),
-    ) as Arc<dyn ChatStream>;
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "pure-skill-queue",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -303,8 +323,17 @@ async fn queue_compound_pure_skill_injects_trigger() {
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
     assert_eq!(session.agent.name, "plan", "switched to plan");
-    let skill = session.skill_prompt_cloned();
-    assert!(skill.is_some(), "skill activated");
+    // One-shot semantics: the drain turn's LLM request carries the skill;
+    // after the run ends the skill is cleared.
+    let requests = mock.requests();
+    assert!(
+        requests.len() == 2 && request_carries_skill(&requests[1]),
+        "the drain turn's LLM request must carry the activated skill"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: skill cleared after the run ends"
+    );
 
     // The trigger message is in the transcript (not an empty string).
     let user_msgs: Vec<String> = session
@@ -338,14 +367,14 @@ async fn idle_compound_plan_pure_skill_injects_trigger() {
 
     let store = mem_store().await;
     seed(&store, "idle-pure-skill", "act").await;
-    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("skill reply")]))
-        as Arc<dyn ChatStream>;
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("skill reply")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "idle-pure-skill",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -356,7 +385,17 @@ async fn idle_compound_plan_pure_skill_injects_trigger() {
         .unwrap();
 
     assert_eq!(session.agent.name, "plan", "switched to plan");
-    assert!(session.skill_prompt_cloned().is_some(), "skill activated");
+    // One-shot semantics: the run's own LLM request carries the skill; the
+    // skill is cleared once the run ends.
+    let requests = mock.requests();
+    assert!(
+        requests.len() == 1 && request_carries_skill(&requests[0]),
+        "the LLM request must carry the activated skill"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: skill cleared after the run ends"
+    );
 
     let user_msgs: Vec<String> = session
         .messages

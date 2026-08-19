@@ -41,6 +41,42 @@ fn providers_map_resolves_endpoint_by_prefix() {
     assert_eq!(ep.api_key, "sk-deepseek-xxx");
 }
 
+/// The missing-key error must be actionable: name the provider and list all
+/// three configuration avenues (registry entry, top-level provider, env var).
+#[test]
+fn api_key_error_names_provider_and_all_config_avenues() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::remove_var("OPENAI_API_KEY");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "zhipuai-coding-plan/glm-5.2",
+            "providers": {
+                "zhipuai-coding-plan": { "base_url": "https://bigmodel.cn/v4" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+
+    let err = cfg.api_key_for("zhipuai-coding-plan").unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("zhipuai-coding-plan"),
+        "error must name the provider; got: {msg}"
+    );
+    assert!(
+        msg.contains("OPENAI_API_KEY"),
+        "error must mention the env var; got: {msg}"
+    );
+    assert!(
+        msg.contains("providers.zhipuai-coding-plan.api_key")
+            && msg.contains("provider.api_key"),
+        "error must mention the registry entry and top-level provider keys; got: {msg}"
+    );
+}
+
 #[test]
 fn providers_map_base_url_for_and_api_key_for() {
     let _g = ENV_LOCK.lock().unwrap();
@@ -112,6 +148,116 @@ fn provider_api_key_missing_falls_back_to_env() {
     assert_eq!(ep.base_url, "https://api.deepseek.com/v1");
     assert_eq!(ep.api_key, "env-fallback-key");
     std::env::remove_var("OPENAI_API_KEY");
+}
+
+/// Bug fix: `OPENAI_BASE_URL` must sync the *active* provider registry entry.
+/// `OPENCODER_MODEL` can switch the active provider (via its `provider/model`
+/// prefix); applying the env base_url only to the legacy top-level
+/// `provider.base_url` left the registry entry's file-level base_url stale,
+/// silently ignoring the env override at endpoint resolution.
+#[test]
+fn openai_base_url_env_overrides_active_provider_registry_entry() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::set_var("OPENCODER_MODEL", "zhipuai-coding-plan/glm-5.2");
+    std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "zhipuai-coding-plan": {
+                    "base_url": "https://old-registry.example/v4",
+                    "api_key": "zk"
+                },
+                "deepseek": { "base_url": "https://api.deepseek.com/v1" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    // Env overlay is applied at load; clean up before asserting.
+    std::env::remove_var("OPENCODER_MODEL");
+    std::env::remove_var("OPENAI_BASE_URL");
+
+    assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2");
+    // The registry entry for the now-active provider picks up the env value…
+    assert_eq!(
+        cfg.providers["zhipuai-coding-plan"].base_url,
+        "https://env.example/v1",
+        "active provider registry entry must sync OPENAI_BASE_URL"
+    );
+    // …and the legacy top-level provider field keeps the old behavior…
+    assert_eq!(cfg.provider.base_url, "https://env.example/v1");
+    // …while a non-active provider's entry stays untouched.
+    assert_eq!(
+        cfg.providers["deepseek"].base_url,
+        "https://api.deepseek.com/v1"
+    );
+    // Endpoint resolution (what ChatClient actually uses) sees the env value.
+    let ep = cfg.resolve_endpoint().unwrap();
+    assert_eq!(ep.base_url, "https://env.example/v1");
+}
+
+/// Second case: the active provider has NO registry entry — only the legacy
+/// top-level `provider.base_url` is written, and nothing panics.
+#[test]
+fn openai_base_url_env_without_registry_entry_updates_legacy_only() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::set_var("OPENCODER_MODEL", "unknown-svc/model-x");
+    std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "model": "deepseek/deepseek-chat",
+            "providers": {
+                "deepseek": { "base_url": "https://api.deepseek.com/v1" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    std::env::remove_var("OPENCODER_MODEL");
+    std::env::remove_var("OPENAI_BASE_URL");
+
+    assert_eq!(
+        cfg.provider.base_url, "https://env.example/v1",
+        "legacy top-level base_url still takes the env override"
+    );
+    // No entry for "unknown-svc": the untouched provider map must not panic
+    // (previously a `.get_mut` on a missing key silently no-oped anyway, but
+    // this pins the contract).
+    assert!(!cfg.providers.contains_key("unknown-svc"));
+    assert_eq!(
+        cfg.providers["deepseek"].base_url,
+        "https://api.deepseek.com/v1",
+        "non-active registry entries stay at their file-level values"
+    );
+}
+
+/// Trailing-slash normalization applies to the registry sync too.
+#[test]
+fn openai_base_url_env_registry_sync_normalizes_trailing_slash() {
+    let _g = ENV_LOCK.lock().unwrap();
+    std::env::set_var("OPENCODER_MODEL", "zhipuai-coding-plan/glm-5.2");
+    std::env::set_var("OPENAI_BASE_URL", "https://env.example/v1/");
+    let (_home_guard, dir) = isolated_home();
+    fs::write(
+        dir.path().join("opencoder.json"),
+        r#"{
+            "providers": {
+                "zhipuai-coding-plan": { "base_url": "https://old.example/v4" }
+            }
+        }"#,
+    )
+    .unwrap();
+    let cfg = Config::load(dir.path()).unwrap();
+    std::env::remove_var("OPENCODER_MODEL");
+    std::env::remove_var("OPENAI_BASE_URL");
+
+    assert_eq!(cfg.providers["zhipuai-coding-plan"].base_url, "https://env.example/v1");
+    assert_eq!(cfg.provider.base_url, "https://env.example/v1");
 }
 
 #[test]

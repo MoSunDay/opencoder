@@ -167,22 +167,19 @@ pub(crate) enum SwitchOutcome {
 }
 
 /// Handle `KeyAction::SwitchAgent` (and `SwitchAgentNoClear`): switch agent
-/// mode behind a direction-aware running gate.
+/// mode behind a BIDIRECTIONAL running gate — the same contract as the
+/// slash paths' `worker::gate_switch`. Busy (a turn in flight OR a live
+/// subagent) blocks BOTH directions with an explicit busy hint: nothing is
+/// sent, agent/input/sys_tokens/running stay untouched, and the user
+/// re-presses at a clean idle boundary (no deferred auto-fire).
 ///
-/// plan→act while running (a turn in flight OR a live subagent) is
-/// **intercepted with an explicit busy hint** — no deferred auto-fire; the
-/// user re-presses at a clean idle boundary, where a submitted plan hands
-/// off immediately (transcript fold + immediate execution, carrying any
-/// input text). `no_handoff` (SwitchAgentNoClear / t+Tab chord) skips the
-/// plan→act handoff entirely — transcript preserved in full — but is
-/// intercepted the same way while running.
-///
-/// act→plan while running is a **pure state switch**: optimistic
-/// `fold_agent_switch` + `UiCmd::SwitchAgent` enqueue. The worker is
-/// single-threaded and consumes the command only at the next turn boundary,
-/// so the in-flight turn finishes under the old agent (`sess.agent` never
-/// flips mid-`run_session`), and the worker resets the plan phase when it
-/// applies the switch.
+/// When idle: a submitted plan→act hands off immediately (transcript fold +
+/// immediate execution, carrying any input text); `no_handoff`
+/// (SwitchAgentNoClear / t+Tab chord) skips that handoff entirely —
+/// transcript preserved in full. The optimistic `fold_agent_switch` keeps
+/// the status chip correct even if the AgentSwitch event is dropped under
+/// channel pressure and collapses a stale `plan_submitted` synchronously
+/// (rapid double-tap hygiene).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
@@ -201,16 +198,16 @@ pub(crate) async fn handle_switch_agent(
     active_skill_body: &Option<String>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
-    if plan_to_act && (*running || chat.subagents_running > 0) {
-        // plan→act carries handoff semantics (transcript fold + immediate
-        // execution). A turn in flight OR a live subagent makes that unsafe:
-        // the worker is mid-run_session and a handoff would start the next
-        // turn with a stale agent at an arbitrary partial boundary.
-        // Intercept with an explicit hint — the user re-presses at a clean
-        // idle boundary (no deferred auto-fire). sys_tokens / input /
-        // running are untouched (the agent stays in plan mode).
+    if *running || chat.subagents_running > 0 {
+        // Busy (a turn in flight OR a live subagent): the worker is
+        // mid-run_session and any mode switch — either direction — would
+        // apply at an arbitrary partial boundary (and a plan→act handoff
+        // would start the next turn with a stale agent). Intercept with an
+        // explicit hint — the user re-presses at a clean idle boundary (no
+        // deferred auto-fire). sys_tokens / input / running are untouched
+        // (the mode is unchanged).
         *mode_flash = Some((
-            "\u{23f3} busy \u{2014} plan switch blocked, retry when idle".into(),
+            "\u{23f3} busy \u{2014} mode switch blocked, retry when idle".into(),
             anim_tick,
         ));
         return SwitchOutcome::Proceed;

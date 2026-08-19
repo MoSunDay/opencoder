@@ -17,6 +17,10 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("fps")
         || obj.contains_key("theme")
         || obj.contains_key("enable_tmux_session")
+        || obj.contains_key("stream_idle_timeout_secs")
+        || obj.contains_key("task_timeout_secs")
+        || obj.contains_key("replay_timeout_secs")
+        || obj.contains_key("subagent_drain_secs")
     {
         return true;
     }
@@ -37,6 +41,15 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     // NOTE: `mcp_servers` / `cli` / `skills` are deliberately NOT editable
     // config.json keys — they are hard-cut into their own domain files
     // (mcp.json / cli.json / skills.json); see `config::domain`.
+    if obj
+        .get("agent")
+        .and_then(|v| v.as_object())
+        // `agent.default` (string) is the only subkey merge_into applies, but
+        // any non-empty `agent` object signals user-intended config here.
+        .is_some_and(|a| !a.is_empty())
+    {
+        return true;
+    }
     if obj
         .get("compaction")
         .and_then(|v| v.as_object())
@@ -69,6 +82,18 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         .is_some_and(|o| !o.is_empty())
     {
         return true;
+    }
+    // `output_streamline` / `tool_guard` carry only editable subkeys (bool /
+    // u32 knobs), so like `keymap` any non-empty object routes a save into
+    // config.json instead of silently creating a second config file.
+    for key in ["output_streamline", "tool_guard"] {
+        if root
+            .get(key)
+            .and_then(|v| v.as_object())
+            .is_some_and(|o| !o.is_empty())
+        {
+            return true;
+        }
     }
     false
 }

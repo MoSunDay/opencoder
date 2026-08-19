@@ -136,11 +136,10 @@ pub(super) fn config_candidates_with(working_dir: &Path, active: Option<&str>) -
 }
 
 pub(super) fn apply_env(cfg: &mut Config) {
-    if let Some(b) = env_get("OPENAI_BASE_URL") {
-        if !b.is_empty() {
-            cfg.provider.base_url = b.trim_end_matches('/').to_string();
-        }
-    }
+    // Model selection FIRST: `OPENCODER_MODEL` may switch the active provider,
+    // and the `OPENAI_BASE_URL` handling below syncs the *now-current*
+    // provider registry entry — applying base_url before the switch would
+    // leave the newly-active entry with a stale base_url.
     if let Some(m) = env_get("OPENCODER_MODEL") {
         if !m.is_empty() {
             cfg.model = m;
@@ -151,9 +150,35 @@ pub(super) fn apply_env(cfg: &mut Config) {
             cfg.small_model = Some(m);
         }
     }
+    if let Some(b) = env_get("OPENAI_BASE_URL") {
+        if !b.is_empty() {
+            let normalized = b.trim_end_matches('/').to_string();
+            cfg.provider.base_url = normalized.clone();
+            // Sync the active provider registry entry too (same derivation as
+            // `Config::provider_id`): without this, a provider selected via
+            // `OPENCODER_MODEL` would keep its stale file-level base_url and
+            // silently ignore the env override at endpoint resolution.
+            let pid = cfg
+                .model
+                .split_once('/')
+                .map(|(p, _)| p)
+                .unwrap_or("openai")
+                .to_string();
+            if let Some(entry) = cfg.providers.get_mut(&pid) {
+                entry.base_url = normalized;
+            }
+        }
+    }
     if let Some(v) = env_get("OPENCODER_CONTEXT_LIMIT") {
-        if let Ok(n) = v.parse::<u64>() {
-            cfg.context_limit = Some(n);
+        match parse_context_limit(&v) {
+            Some(n) => cfg.context_limit = Some(n),
+            // Empty = not set by the user (some shells export empty strings);
+            // a non-empty non-u64 value is a real typo worth surfacing once.
+            None if !v.is_empty() => tracing::warn!(
+                value = %v,
+                "invalid OPENCODER_CONTEXT_LIMIT (expected a plain u64, e.g. `8192`); ignoring"
+            ),
+            None => {}
         }
     }
     if let Some(raw) = env_get("OPENCODER_CACHE_SALT") {
@@ -185,5 +210,44 @@ pub(super) fn resolve_env(raw: &str) -> String {
         std::env::var(name).unwrap_or_default()
     } else {
         trimmed.to_string()
+    }
+}
+
+/// Parse an `OPENCODER_CONTEXT_LIMIT` value: a plain `u64` literal, nothing
+/// else. Deliberately strict — no trimming, no exponents, no sign — so a
+/// typo like `" 8192"` or `"1e5"` is reported (warned by [`apply_env`])
+/// instead of being silently coerced into a wrong window size. Pure.
+pub(super) fn parse_context_limit(raw: &str) -> Option<u64> {
+    raw.parse::<u64>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_context_limit;
+
+    #[test]
+    fn parse_context_limit_accepts_plain_u64() {
+        assert_eq!(parse_context_limit("8192"), Some(8192));
+        assert_eq!(parse_context_limit("0"), Some(0));
+        assert_eq!(
+            parse_context_limit("18446744073709551615"),
+            Some(u64::MAX),
+            "u64::MAX literal is still a plain u64"
+        );
+    }
+
+    #[test]
+    fn parse_context_limit_rejects_garbage() {
+        assert_eq!(parse_context_limit("abc"), None, "non-numeric");
+        assert_eq!(parse_context_limit(""), None, "empty is not a number");
+        assert_eq!(parse_context_limit("-1"), None, "negative");
+        assert_eq!(parse_context_limit("1e5"), None, "exponent notation");
+        assert_eq!(parse_context_limit(" 8192"), None, "leading space: no trimming");
+        assert_eq!(parse_context_limit("8192 "), None, "trailing space: no trimming");
+        assert_eq!(
+            parse_context_limit("18446744073709551616"),
+            None,
+            "u64 overflow"
+        );
     }
 }

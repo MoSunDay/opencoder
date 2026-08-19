@@ -124,12 +124,35 @@ pub async fn post_handoff(
 
 // ── config ────────────────────────────────────────────────────────────────
 
+/// Apply a prompt-body `model` override to the drain config. A malformed
+/// value ("" / "x" / "ab/c") returns the ready 400 naming it — never silently
+/// applied, since it would resolve to a broken model id downstream. The 400
+/// also fires before endpoint resolution, so it can't be masked by an
+/// api-key failure. Wording mirrors the CLI `--model` rejection.
+pub(crate) fn apply_prompt_model(
+    config: &mut Config,
+    model: Option<String>,
+) -> Option<Response> {
+    match model {
+        Some(m) if !opencoder_core::config::is_suspicious_model(&m) => config.model = m,
+        Some(m) => {
+            return Some(error_400(format!(
+                "invalid model `{m}`: malformed, expected \"provider/model\" with each side at least 2 chars"
+            )))
+        }
+        None => {}
+    }
+    None
+}
+
 /// GET /api/config — return the current on-disk config as JSON.
 pub async fn get_config(State(state): State<Arc<AppState>>) -> Response {
     match Config::load(&state.workdir) {
         Ok(cfg) => {
             let val = serde_json::to_value(&cfg).unwrap_or_else(|_| json!({}));
-            Json(val).into_response()
+            // Never echo provider secrets back: mask every `api_key` before
+            // the response leaves the process.
+            Json(opencoder_core::config::redact::redact_json(&val)).into_response()
         }
         Err(e) => error_500(format!("config load: {e:#}")),
     }
@@ -140,6 +163,14 @@ pub async fn patch_config(
     State(state): State<Arc<AppState>>,
     Json(patch): Json<serde_json::Value>,
 ) -> Response {
+    // Pre-flight the core MCP name-collision guard (bug #14) so a bad
+    // patch is a 4xx client error, not the save-time guard surfacing as a
+    // 500. The probe mirrors the save's domain routing read-only; the
+    // check-then-save window is accepted — `Config::save` re-checks before
+    // writing and refuses the file, so a race cannot corrupt the config.
+    if let Some(msg) = opencoder_core::config::mcp_name_conflict_in_patch(&state.workdir, &patch) {
+        return error_400(msg);
+    }
     if let Err(e) = Config::save(&state.workdir, &patch) {
         return error_500(format!("config save: {e:#}"));
     }
@@ -233,6 +264,14 @@ fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>
         Ok(c) => Ok(Arc::new(c) as Arc<dyn ChatStream>),
         Err(e) => Err(Box::new(error_500(format!("client: {e:#}")))),
     }
+}
+
+fn error_400(msg: String) -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
 }
 
 fn error_404(msg: &str) -> Response {

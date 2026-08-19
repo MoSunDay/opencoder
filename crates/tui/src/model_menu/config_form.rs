@@ -241,6 +241,16 @@ impl ConfigForm {
             .ok_or_else(|| "context_threshold is not a number".to_string())?;
         let context_size = parse_field(&self.context_size_input)
             .ok_or_else(|| "context_size is not a number".to_string())?;
+        self.fps_input
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .ok_or_else(|| "fps is not a number".to_string())?;
+        self.ap_max_iter_input
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .ok_or_else(|| "ap_max_iter is not a number".to_string())?;
         if threshold < 1000 {
             return Err("context_threshold must be >= 1000".into());
         }

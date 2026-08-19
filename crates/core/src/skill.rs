@@ -70,20 +70,22 @@ pub struct Skill {
 }
 
 /// Default discovery root: the binary's own global config home
-/// (`~/.opencoder/skills`). Returns `~/.opencoder/skills` only as an absolute
-/// fallback when no home directory can be resolved, so discovery never panics.
-pub fn skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".opencoder").join("skills"))
-        .unwrap_or_else(|| PathBuf::from(".opencoder").join("skills"))
+/// (`~/.opencoder/skills`). `None` when no home directory can be resolved
+/// (no `HOME`, no passwd entry): callers must skip skill features gracefully
+/// — the old behavior of falling back to a *relative* `./.opencoder/skills`
+/// made seeding write into whatever the current working directory happened
+/// to be, so it is deliberately gone.
+pub fn skills_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".opencoder").join("skills"))
 }
 
 /// Scan `~/.opencoder/skills` and return every skill found, sorted by name.
 ///
 /// A missing or unreadable directory is not an error — it yields an empty
 /// `Vec`, so the TUI picker simply reports "no skills" instead of crashing.
+/// A missing home directory likewise yields an empty `Vec`.
 pub fn discover() -> Vec<Skill> {
-    discover_cached(&skills_dir())
+    skills_dir().map(|root| discover_cached(&root)).unwrap_or_default()
 }
 
 /// Cached variant of [`discover_in`] for hot paths: returns the previously

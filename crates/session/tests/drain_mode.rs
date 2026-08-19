@@ -284,18 +284,32 @@ async fn drain_mode_queue_skill_consumed() {
 
     let evs = drain_run(&mut session).await;
 
-    assert!(
-        session.skill_prompt_cloned().is_some(),
-        "skill activated by $review token"
-    );
-    assert!(
-        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
-        "Done emitted"
-    );
+    // One-shot `$skill` semantics (see skill_one_shot.rs): the skill lives
+    // exactly for the run that consumed the token. Activation is proven by
+    // the captured LLM request carrying a skill artifact ([skill loaded]
+    // body injection or [active skill] tail reminder); the run-end hook
+    // clears the skill afterwards.
     assert_eq!(
         mock.requests().len(),
         1,
         "exactly 1 LLM call (skill prompt)"
+    );
+    assert!(
+        mock.requests().iter().any(|req| req
+            .messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+            .any(|t| t.contains("[skill loaded]") || t.contains("[active skill]"))),
+        "skill activated by $review token (request carries skill artifact)"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot skill cleared after run end"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+        "Done emitted"
     );
     let user_msgs: Vec<String> = session
         .messages

@@ -12,7 +12,7 @@ Commit: (working-tree, post-33b5ba2)
 ## 核心语义
 - **激活标记**：`~/.opencoder/envs/active` 纯文本文件（单行环境名）。目录被删除的 stale 标记读取时静默视为未激活（fallback 基础链）。
 - **解析插入**：`config_candidates_with(workdir, active)` 在项目候选与全局候选之间插入 `~/.opencoder/envs/<name>/config.json`；三域文件同理获得 env 候选（`effective_path_with`：项目 > env > 全局，整体遮蔽不变）。
-- **写目标截断**：激活期间 `save_target` 候选截断为 3 个（2 项目 + env）——`/model`、`/config` 等交互式编辑落进 env 而非全局；取消激活后恢复原行为。新建（候选全无）时仍落全局。
+- **写目标截断**：激活期间 `save_target` 候选截断为 3 个（2 项目 + env）——`/model`、`/config` 等交互式编辑落进 env 而非全局；取消激活后恢复原行为。新建（候选全无）时落 env 层 `config.json`（激活期）或项目根 `opencoder.json`（未激活），均不落全局。
 - **捕获（capture）语义**：以 `active=None` 的基础链快照——不含 env-var overlay；config.json 快照剥离三域键；三域文件按域逐一快照；env 内 stale 域文件（基础链已无对应文件）删除。**WYSIWYG：含项目层**（捕获的就是当前会话看到的有效配置）。
 - **删除顺序**：先清 active 标记再删目录（激活态删除不会留下 stale 标记）。
 - env 文件含 API key 可能，一律 0o600 owner-only 权限写入。

@@ -93,6 +93,41 @@ pub fn runtime_sections(mcp: Option<&str>, cli: Option<&str>) -> Option<String> 
     (!sections.is_empty()).then(|| sections.join("\n\n"))
 }
 
+/// Maximum number of bytes of a single AGENTS.md file included in the
+/// system prompt. Files whose (trimmed) content exceeds this are truncated
+/// to the first `AGENTS_MD_MAX_BYTES` bytes plus a marker line carrying the
+/// original size.
+pub(crate) const AGENTS_MD_MAX_BYTES: usize = 200 * 1024;
+
+/// Truncate `s` to at most `max` bytes without splitting a UTF-8 character:
+/// slice on the byte limit, then walk back to the nearest char boundary.
+fn truncate_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Apply the AGENTS_MD_MAX_BYTES cap to one trimmed instruction body.
+/// Within the limit the body passes through unchanged; past it, keep the
+/// first `AGENTS_MD_MAX_BYTES` bytes (char-boundary safe) and append a
+/// marker noting the original size.
+fn cap_instructions(trimmed: &str) -> String {
+    if trimmed.len() <= AGENTS_MD_MAX_BYTES {
+        return trimmed.to_string();
+    }
+    let head = truncate_bytes(trimmed, AGENTS_MD_MAX_BYTES);
+    format!(
+        "{head}\n\n[AGENTS.md truncated: original size {} bytes exceeds {}KB limit]",
+        trimmed.len(),
+        AGENTS_MD_MAX_BYTES / 1024
+    )
+}
+
 /// Load and concatenate project instruction files (AGENTS.md) from up to
 /// three locations, in increasing priority:
 ///   1. Global:    `~/.opencoder/AGENTS.md`
@@ -126,7 +161,7 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
-                    parts.push(trimmed.to_string());
+                    parts.push(cap_instructions(trimmed));
                 }
             }
         }
@@ -139,17 +174,29 @@ fn load_instructions(working_dir: &Path) -> Option<String> {
     }
 }
 
+/// Find the AGENTS.md file inside `dir`, matching the file name
+/// case-insensitively.
+///
+/// Deterministic regardless of `read_dir` order: collect every matching
+/// regular file first, then pick (1) an entry named exactly `AGENTS.md` if
+/// present, otherwise (2) the lexicographically smallest matching file name
+/// (`OsString` byte order; e.g. `AGENTS.MD` < `agents.md` because `b'M'` <
+/// `b'm'` in ASCII). Never returns based on directory iteration order.
 fn find_agents_md(dir: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        if entry.file_name().eq_ignore_ascii_case("AGENTS.md") {
-            let path = entry.path();
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
+    let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_name().eq_ignore_ascii_case("AGENTS.md"))
+        .filter(|entry| entry.path().is_file())
+        .map(|entry| entry.file_name())
+        .collect();
+    // read_dir order is filesystem-dependent; sort to impose our own rule.
+    names.sort();
+    let chosen = names
+        .iter()
+        .find(|name| name.as_os_str() == std::ffi::OsStr::new("AGENTS.md"))
+        .or_else(|| names.first())?;
+    Some(dir.join(chosen))
 }
 
 /// Walk up from `start` to find the nearest directory containing a `.git`
@@ -259,7 +306,7 @@ pub fn _ts() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::mcp_section;
+    use super::{cap_instructions, mcp_section, truncate_bytes, AGENTS_MD_MAX_BYTES};
     use crate::mcp::ConnStatus;
 
     #[test]
@@ -303,5 +350,44 @@ mod tests {
         assert!(s.contains("2 tool"));
         assert!(s.contains("bad"));
         assert!(s.contains("timeout"));
+    }
+
+    #[test]
+    fn truncate_bytes_returns_input_when_within_limit() {
+        assert_eq!(truncate_bytes("hello", 10), "hello");
+        assert_eq!(truncate_bytes("hello", 5), "hello");
+        assert_eq!(truncate_bytes("", 0), "");
+    }
+
+    #[test]
+    fn truncate_bytes_cuts_on_char_boundary() {
+        // 'é' is 2 bytes: cutting inside it must walk back to the boundary.
+        let s = "abcéxyz"; // bytes: a b c [c3 a9] x y z  (len 7)
+        assert_eq!(truncate_bytes(s, 4), "abc"); // byte 4 is mid-'é'
+        assert_eq!(truncate_bytes(s, 5), "abcé");
+        assert_eq!(truncate_bytes(s, 6), "abcéx");
+    }
+
+    #[test]
+    fn cap_instructions_under_limit_passes_through() {
+        let body = "short body";
+        assert_eq!(cap_instructions(body), body);
+    }
+
+    #[test]
+    fn cap_instructions_over_limit_truncates_with_marker() {
+        let body = "x".repeat(AGENTS_MD_MAX_BYTES + 10);
+        let capped = cap_instructions(&body);
+        assert!(capped.starts_with(&"x".repeat(AGENTS_MD_MAX_BYTES)));
+        assert_eq!(
+            capped
+                .strip_prefix(&"x".repeat(AGENTS_MD_MAX_BYTES))
+                .unwrap(),
+            format!(
+                "\n\n[AGENTS.md truncated: original size {} bytes exceeds {}KB limit]",
+                body.len(),
+                AGENTS_MD_MAX_BYTES / 1024
+            )
+        );
     }
 }

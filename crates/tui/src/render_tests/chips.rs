@@ -258,3 +258,119 @@ fn ap_chip_reflects_autopilot_mode() {
         );
     }
 }
+
+/// Mode-flash chip colouring contract: ONLY the definite mode-switch flash
+/// ("→ plan mode", emitted by handle_switch_agent / prep_plan_to_act /
+/// enter_plan_edit) participates in the plan/act two-colour scheme. Every
+/// other flash — the busy hint ("⏳ busy — mode switch blocked, retry when
+/// idle"), "→ act mode", and any future neutral text that merely CONTAINS
+/// "plan" — renders on the accent background. Guards against the old
+/// `text.contains("plan")` substring guess mis-tinting unrelated hints.
+#[test]
+fn mode_flash_chip_two_colour_only_for_definite_switch() {
+    use crate::render::render;
+    use crate::theme::{accent, warn_color};
+    use opencoder_core::ApMode;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
+
+    /// Render one frame with benign defaults and the given mode-flash text.
+    fn draw(mode_flash: &str, terminal: &mut Terminal<TestBackend>) {
+        let chat = ChatView::default();
+        let mut scroll = 0u32;
+        let mut queue_scroll = 0u32;
+        let mut hits = MouseHits::default();
+        render(
+            terminal,
+            &chat,
+            "",
+            0,
+            &Line::raw("title"),
+            false,
+            0,
+            0,
+            200_000,
+            200_000,
+            "idle",
+            &[],
+            &[],
+            &mut scroll,
+            true,
+            &mut queue_scroll,
+            0,
+            0,
+            Some(mode_flash),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &mut hits,
+            &mut None,
+            false,
+            false,
+            &[],
+            false,
+            None,
+            None,
+            0,
+            0,
+            true,
+            ApMode::Off,
+            "act",
+            None,
+        )
+        .unwrap();
+    }
+
+    /// Background colours present on the (unique) row containing `needle`.
+    fn row_bgs(terminal: &Terminal<TestBackend>, needle: &str) -> Vec<Color> {
+        let buf = terminal.backend().buffer();
+        let area = buf.area;
+        let mut rows = (0..area.height)
+            .filter(|&y| row_text(buf, y, area.width).contains(needle))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "needle {needle:?} must hit exactly one row");
+        let y = rows.remove(0);
+        (0..area.width)
+            .filter_map(|x| buf.cell((x, y)).map(|c| c.bg))
+            .collect()
+    }
+
+    let check = |flash: &str, expect_plan: bool| {
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        draw(flash, &mut terminal);
+        let bgs = row_bgs(&terminal, flash);
+        let (want, other) = if expect_plan {
+            (warn_color(), accent())
+        } else {
+            (accent(), warn_color())
+        };
+        assert!(
+            bgs.contains(&want),
+            "flash {flash:?} must render on {want:?} bg; got {bgs:?}"
+        );
+        assert!(
+            !bgs.contains(&other),
+            "flash {flash:?} must NOT render on {other:?} bg; got {bgs:?}"
+        );
+    };
+
+    // Definite mode-switch flashes keep the two-colour scheme.
+    check("\u{2192} plan mode", true);
+    check("\u{2192} act mode", false);
+    // Busy hint: accent — it is not a completed switch.
+    check("\u{23f3} busy \u{2014} mode switch blocked, retry when idle", false);
+    // Neutral future text that merely mentions "plan": accent, NOT plan
+    // colour (the substring `contains("plan")` guess would tint this).
+    check("plan submitted", false);
+}

@@ -16,7 +16,8 @@ use opencoder_core::{Message, ToolArc};
 use super::phases::{activate_review_skill, switch_agent};
 use super::prompts::review_prompt;
 use super::state::ApPhase;
-use crate::runner::{new_id, run_loop, SessionEvent};
+use crate::runner::{new_id, SessionEvent};
+use crate::skill_lifecycle::run_loop_one_shot;
 use crate::SessionState;
 
 /// The single review iteration, surfaced in the `AutoPilot` event so
@@ -31,6 +32,18 @@ pub async fn review_pass(
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<()> {
+    // Pre-flight cancel check, mirroring drive's loop-top guard: a cancel
+    // tripped before the pass starts (e.g. during the initial task's final
+    // LLM call) must not burn a review turn or leave the session on the
+    // plan agent with a residual synthetic prompt. Zero pass side effects —
+    // no AutoPilot marker, no agent switch, no injected message — just the
+    // same terminal bookkeeping (skill clear + Done) drive's cancel path
+    // uses, so surfaces see a uniform end marker either way.
+    if super::is_cancelled(session) {
+        super::clear_injected_skill(session).await;
+        on_event(SessionEvent::Done);
+        return Ok(());
+    }
     on_event(SessionEvent::AutoPilot {
         phase: ApPhase::Review,
         iteration: REVIEW_ITERATION,
@@ -41,7 +54,7 @@ pub async fn review_pass(
     let mut msg = Message::user(new_id(), review_prompt(&goal));
     msg.synthetic = true;
     session.record(msg).await;
-    let run = run_loop(session, registry, on_event, false).await;
+    let run = run_loop_one_shot(session, registry, on_event, false).await;
     // One-shot: clear the review skill and emit the uniform end marker on
     // BOTH outcomes — an LLM failure mid-review (e.g. 429 exhaustion) must
     // not leave the system-injected skill stuck on the session, in memory

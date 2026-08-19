@@ -47,8 +47,9 @@ pub fn handoff(session: &mut SessionState, extra: &str) -> Option<String> {
     // Phase-bounded primary source: the snapshot captured while the plan
     // agent actually produced assistant text in THIS phase — written by
     // `SessionState::record` on every plan-mode assistant turn, rescued by
-    // compaction before folding the plan into the summary head, cleared on
-    // phase reset / handoff. When the snapshot is absent the message-level
+    // compaction before folding the plan into the summary head, retired when
+    // a new requirement is recorded (`maybe_tag_plan_prompt`) or consumed by
+    // handoff. When the snapshot is absent the message-level
     // fallback (`newest_plan_agent_text`) scans the transcript for the
     // newest assistant text TAGGED as plan output. The old untagged
     // "last non-empty assistant text in the whole transcript" scan is

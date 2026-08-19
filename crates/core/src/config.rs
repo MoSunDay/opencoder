@@ -11,8 +11,12 @@ mod env;
 pub mod envs;
 mod keymap;
 mod mcp;
+pub(crate) mod mcp_guard;
 mod merge;
+pub mod redact;
 mod skill;
+
+pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
 pub use autopilot::{ApMode, AutoPilotConfig};
 pub use cli::{CliConfig, InjectionTarget};
@@ -169,11 +173,11 @@ fn is_none_interleaved(v: &Option<bool>) -> bool {
 /// malformed value that would silently break requests. Only logs — never
 /// mutates the user's config. Catches legacy values such as single-char or
 /// placeholder strings so they are not silently written back to config.json.
-/// Pure predicate: is the `model` string malformed (too short on either side
-/// of the `/`, or too short when unscoped)? Exposed for unit testing.
-pub(crate) fn is_suspicious_model(model: &str) -> bool {
+/// Pure predicate: is the `model` string malformed (empty, too short on
+/// either side of the `/`, or too short unscoped)? `pub` for cli/web checks.
+pub fn is_suspicious_model(model: &str) -> bool {
     if model.is_empty() {
-        return false;
+        return true;
     }
     match model.split_once('/') {
         Some((provider, mid)) => provider.len() < 2 || mid.len() < 2,
@@ -619,7 +623,8 @@ impl Config {
             .or_else(|| self.provider.api_key.clone())
             .or_else(|| env::env_get("OPENAI_API_KEY"))
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| CoreError::Config("missing OPENAI_API_KEY".into()))
+            .ok_or_else(|| CoreError::Config(format!("missing API key for provider `{name}`: set \
+                `providers.{name}.api_key`, top-level `provider.api_key`, or the `OPENAI_API_KEY` env var")))
     }
 
     /// One-shot endpoint resolution for the current `model`'s provider prefix.
@@ -758,6 +763,19 @@ impl Config {
             serde_json::json!({})
         };
         merge::merge_json(&mut root, patch);
+        // MCP name-collision guard (bug #14): two `mcp_servers` names that
+        // normalize to the same tool prefix would shadow each other's tools
+        // at registration. Defensive for paths that still carry the key
+        // through config.json (`save_global` / the empty-patch fallback) —
+        // normal saves route `mcp_servers` to mcp.json, guarded in
+        // `domain::save_domain`. Runs before any write: nothing half-done.
+        if let Some(servers) = root.get("mcp_servers").and_then(|v| v.as_object()) {
+            if let Some((offending, existing)) = mcp_guard::mcp_name_collision(servers) {
+                return Err(CoreError::Config(mcp_guard::conflict_message(
+                    &offending, &existing,
+                )));
+            }
+        }
         // Guard: refuse to persist a malformed `model` (e.g. `m/g`). Such a value
         // would make every downstream request fail silently (`model_id()` resolves
         // to a single char). Surface the error so the caller shows it to the user

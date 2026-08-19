@@ -86,10 +86,33 @@ impl Runtime {
     async fn drive(&self, spec: WorkflowSpec, mut state: WorkflowState) -> Result<WorkflowState> {
         let result = self.drive_inner(&spec, &mut state).await;
         if let Err(error) = result {
-            if let Some((_, latest)) = persistence::load(&self.store, &state.workflow_id).await? {
+            // Takeover probe: has an external writer (interrupt / another
+            // runner) already parked this workflow? The probe must never
+            // mask the runtime error it is diagnosing — a store failure
+            // here degrades to a warn + no takeover check, the local
+            // suspension path below still runs and the original error keeps
+            // propagating.
+            let latest = match persistence::load(&self.store, &state.workflow_id).await {
+                Ok(latest) => latest,
+                Err(probe_error) => {
+                    tracing::warn!(
+                        workflow_id = %state.workflow_id,
+                        error = %format!("{probe_error:#}"),
+                        "todo workflow takeover probe failed; continuing with local suspension"
+                    );
+                    None
+                }
+            };
+            if let Some((_, latest)) = latest {
                 if latest.generation != state.generation
                     && latest.status == WorkflowStatus::Suspended
                 {
+                    tracing::info!(
+                        workflow_id = %state.workflow_id,
+                        local_generation = state.generation,
+                        remote_generation = latest.generation,
+                        "todo workflow takeover detected: adopting external suspended state"
+                    );
                     return Ok(latest);
                 }
             }

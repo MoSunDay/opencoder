@@ -133,19 +133,22 @@ async fn clear_context_compound_keeps_rest_with_preserved_plan() {
     assert!(has_reply, "execution reply recorded as an assistant turn");
 }
 
-/// Bug fix: `/act_clear_context` in ACT mode (no plan provenance: act agent,
-/// `plan_input_count == 0`) must take the blank fresh-start sentinel path —
-/// NOT wrap the last assistant text ("task done") in the plan→act directive
-/// prefix, which would fabricate a plan and immediately re-execute the
-/// finished task. (CLEAR_CONTEXT_SENTINEL is pub(crate); assert the literal.)
+/// Contract (updated): `/act_clear_context` in ACT mode (no plan provenance:
+/// act agent, `plan_input_count == 0`) must NEVER fully wipe — the last
+/// assistant reply ("task done") survives as a NEUTRAL continuity seed. The
+/// 653e5bd fabrication guard still holds: the reply is NOT wrapped in the
+/// plan→act "Execute it now" directive and no PlanHandoff fires for it; it
+/// reaches the model only as prior context. The run continues (the seed is
+/// executed), unlike the old blank-sentinel stop.
 #[tokio::test]
-async fn act_mode_clear_context_uses_sentinel_not_fabricated_plan() {
+async fn act_mode_clear_context_seeds_last_say_not_fabricated_plan() {
     let store = mem_store().await;
     seed(&store, "act-no-plan", "act").await;
 
     // Act-mode history whose last assistant text is a plain completion, not
-    // a plan. Pre-fix, `handoff` picked it up and wrapped it in the
-    // "Planning phase complete. ... Execute it now" directive.
+    // a plan. Pre-653e5bd, `handoff` picked it up and wrapped it in the
+    // "Planning phase complete. ... Execute it now" directive; the seed path
+    // now carries it forward as plain context instead.
     let msgs = vec![Message::user("u1", "implement X"), {
         let mut m = Message::assistant("a1");
         m.blocks.push(ContentBlock::text("task done"));
@@ -153,7 +156,8 @@ async fn act_mode_clear_context_uses_sentinel_not_fabricated_plan() {
     }];
     store.append_messages("act-no-plan", &msgs).await.unwrap();
 
-    let mock: Arc<MockChatClient> = Arc::new(MockChatClient::new());
+    let mock: Arc<MockChatClient> =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("continuing from the seed")]));
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "act-no-plan",
@@ -167,30 +171,72 @@ async fn act_mode_clear_context_uses_sentinel_not_fabricated_plan() {
     session.messages = msgs.clone();
     assert_eq!(session.plan_input_count, 0, "no plan inputs recorded");
 
-    run(&mut session, "/act_clear_context".into(), |_| {})
-        .await
-        .unwrap();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, "/act_clear_context".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
 
-    // Fresh-start sentinel path: one blank marker message, sentinel stored.
-    assert_eq!(
-        session.messages.len(),
-        1,
-        "transcript collapses to 1 marker"
+    // Seed path: transcript collapses to the seed message (synthetic user),
+    // then the execution turn appends the reply.
+    assert!(
+        session.messages[0].text().contains("task done"),
+        "seed carries the last say as prior context: {}",
+        session.messages[0].text()
     );
     assert!(
-        session.messages[0].text().contains("Context cleared"),
-        "marker is the blank fresh-start, not a plan directive: {}",
+        session.messages[0].text().contains("prior context"),
+        "seed uses the neutral continuity wrapper: {}",
         session.messages[0].text()
+    );
+    assert!(
+        !session.messages[0].text().contains("Execute it now"),
+        "seed must NOT use the plan→act directive prefix"
     );
     assert_eq!(
         session.handoff_plan.as_deref(),
-        Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
-        "sentinel stored so resume reconstructs the fresh start"
+        Some("<<OPENCODER_CLEAR_SEED>>task done"),
+        "seed marker stored so resume reconstructs the seed"
     );
-    // No fabricated plan reached the model: the sentinel path never executes.
-    assert_eq!(mock.call_count(), 0, "no LLM call for a fabricated plan");
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.role == Role::Assistant && m.text().contains("continuing from the seed")),
+        "seed is executed, not stranded"
+    );
+
+    // The model saw the last say as context — never a fabricated plan
+    // directive, never the raw marker.
     let requests = mock.requests();
-    assert!(requests.is_empty());
+    assert_eq!(requests.len(), 1, "one LLM call to continue from the seed");
+    let body = requests[0].to_body().to_string();
+    assert!(
+        body.contains("task done"),
+        "last say reaches the model: {body}"
+    );
+    assert!(
+        !body.contains("<<OPENCODER_CLEAR_SEED>>"),
+        "raw seed marker must never reach the model: {body}"
+    );
+    assert!(
+        !body.contains("Execute it now"),
+        "no fabricated plan directive: {body}"
+    );
+
+    let evs = events.lock().unwrap();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, opencoder_session::SessionEvent::TranscriptReset(_))),
+        "TranscriptReset emitted"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, opencoder_session::SessionEvent::PlanHandoff(_))),
+        "no PlanHandoff for a non-plan seed"
+    );
 }
 
 /// The gate's second arm: an ACT session that WAS planning earlier in this
@@ -252,11 +298,12 @@ async fn act_mode_after_plan_inputs_still_preserves_plan() {
 }
 
 /// Unit-level (apply()) check of the plan-provenance gate itself: ACT mode,
-/// no plan inputs → sentinel path even though the last assistant text is
-/// non-empty. Mirrors `act_mode_clear_context_uses_sentinel_not_fabricated_plan`
+/// no plan inputs → the last assistant reply survives as a NEUTRAL seed (not
+/// a plan directive), so the seed marker is persisted instead of the blank
+/// sentinel. Mirrors `act_mode_clear_context_seeds_last_say_not_fabricated_plan`
 /// but without the run loop, pinning the gate at the control-command layer.
 #[tokio::test]
-async fn apply_clear_context_act_mode_does_not_fabricate_plan() {
+async fn apply_clear_context_act_mode_seeds_instead_of_fabricating_plan() {
     let mock: Arc<MockChatClient> = Arc::new(MockChatClient::new());
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
@@ -281,15 +328,19 @@ async fn apply_clear_context_act_mode_does_not_fabricate_plan() {
     .await
     .unwrap();
 
-    assert_eq!(session.messages.len(), 1, "collapses to 1 marker");
+    assert_eq!(session.messages.len(), 1, "collapses to 1 seed message");
     assert!(
-        session.messages[0].text().contains("Context cleared"),
-        "blank fresh-start marker, not a plan directive: {}",
+        session.messages[0].text().contains("task done"),
+        "seed carries the last say as prior context: {}",
         session.messages[0].text()
+    );
+    assert!(
+        !session.messages[0].text().contains("Execute it now"),
+        "seed must NOT wrap the reply in the plan directive prefix"
     );
     assert_eq!(
         session.handoff_plan.as_deref(),
-        Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>")
+        Some("<<OPENCODER_CLEAR_SEED>>task done")
     );
     assert!(
         !evs.iter()

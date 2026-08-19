@@ -12,8 +12,8 @@ use opencoder_store::Delivery;
 
 use super::input_recovery::mark_input_recorded;
 use super::new_id;
-use super::run_loop;
 use super::steer::{cancel_guard, has_pending_steers};
+use crate::skill_lifecycle::run_loop_one_shot;
 use crate::{SessionEvent, SessionState};
 
 /// Cap on consecutive drain-mode `ConsumeNext` steps (bare commands / late
@@ -292,12 +292,12 @@ pub(super) async fn reabsorb_tail(
         && (has_pending_steers(session).await || has_pending_queues(session).await)
     {
         rechecks += 1;
-        run_loop(session, registry, on_event, true).await?;
+        run_loop_one_shot(session, registry, on_event, true).await?;
     }
     Ok(())
 }
 
-/// Entry-point drain decision + sticky-skill trigger injection.
+/// Entry-point drain decision + active-skill trigger injection.
 ///
 /// When an active skill is set and the user submitted no text (pure-skill
 /// submit after token stripping or image-only), inject a synthetic trigger so
@@ -305,13 +305,20 @@ pub(super) async fn reabsorb_tail(
 /// prompt instead of treating the input passively. For text-bearing turns the
 /// user's own words drive execution. EXCEPTION: when steers/queues are
 /// already pending, the pending input wins (FIFO) — drain mode pops the queue
-/// instead of re-triggering the sticky skill. Without this, a drain restart
+/// instead of re-triggering the active skill. Without this, a drain restart
 /// (TUI drain_pending / web drain_to_completion) injected a fresh
 /// SKILL_TRIGGER every cycle and never popped the queue: a self-continuing
 /// loop that repeatedly re-activated the same skill.
 ///
-/// Pending rows are polled ONLY on a pure-drain submit that still has a
-/// sticky skill (the `!has_skill` disjunct short-circuits the reads): a
+/// Under one-shot skill semantics (see `skill_lifecycle`) a normally
+/// completed run has already cleared the skill at its end, so this trigger
+/// path only fires for the triggering round itself (the same run that
+/// activated the skill) or for a resumed / pre-set skill_prompt (mid-run
+/// crash recovery, web SetSkill-before-run) — never for a stale skill left
+/// over from an earlier, finished run.
+///
+/// Pending rows are polled ONLY on a pure-drain submit that still has an
+/// active skill (the `!has_skill` disjunct short-circuits the reads): a
 /// text/image-bearing turn never consults the store, so its poll sequence —
 /// and the P1-4 deterministic re-absorb window — stays untouched.
 pub(super) async fn entry_drain_mode(

@@ -24,8 +24,7 @@ pub async fn config_dispatch(cli: &Cli, sub: &Option<ConfigSub>) -> Result<()> {
                 // stderr: stdout stays pure machine-readable JSON.
                 eprintln!("{banner}");
             }
-            let json = serde_json::to_string_pretty(&cfg).context("serialize config")?;
-            println!("{json}");
+            println!("{}", config_show_json(&cfg)?);
             Ok(())
         }
         Some(ConfigSub::Set { model }) => {
@@ -183,14 +182,21 @@ pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<
         .get_session(id)
         .await?
         .ok_or_else(|| anyhow!("session not found: {id}"))?;
-    // A clear-context boundary (`/act_clear_context`) persists an internal
-    // sentinel in handoff_plan so resume can rebuild the fresh-start marker.
-    // That raw marker must never be output — redact it from the JSON surface
-    // (handoff_seq still records that a boundary exists).
+    // A clear-context boundary (`/act_clear_context`) persists internal
+    // markers in handoff_plan so resume can rebuild the fresh-start marker
+    // or the last-say seed message. The blank sentinel is redacted entirely;
+    // a seed marker is stripped to its preserved text. Raw markers must
+    // never be output (handoff_seq still records that a boundary exists).
     let meta = SessionMeta {
         handoff_plan: meta
             .handoff_plan
-            .filter(|p| !opencoder_session::is_clear_context_handoff(p)),
+            .and_then(|p| {
+                if opencoder_session::is_clear_context_seed(&p) {
+                    Some(opencoder_session::clear_seed_text(&p).to_string())
+                } else {
+                    (!opencoder_session::is_clear_context_handoff(&p)).then_some(p)
+                }
+            }),
         ..meta
     };
     let messages = store.load_messages(id).await?;
@@ -228,6 +234,16 @@ pub fn active_env_banner() -> Option<String> {
     opencoder_core::config::envs::active_env().map(|name| format!("active env: {name}"))
 }
 
+/// `config show` body: the serialized config with every `api_key` masked
+/// (first 4 chars + `***`). Pure (value → [`redact_json`] → pretty string) so
+/// the "stdout never carries a full key" contract is unit-testable without
+/// spawning the binary.
+pub(crate) fn config_show_json(cfg: &Config) -> Result<String> {
+    let value = serde_json::to_value(cfg).context("serialize config")?;
+    let redacted = opencoder_core::config::redact::redact_json(&value);
+    serde_json::to_string_pretty(&redacted).context("serialize config")
+}
+
 #[cfg(test)]
 mod tests {
     use super::models_summary;
@@ -248,6 +264,48 @@ mod tests {
         );
         opencoder_core::config::envs::set_active_env(None).unwrap();
         assert_eq!(super::active_env_banner(), None);
+    }
+
+    #[test]
+    fn config_show_json_masks_api_keys() {
+        use std::collections::HashMap;
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "zhipuai".to_string(),
+            opencoder_core::ProviderConfig {
+                base_url: "https://api.example/v1".into(),
+                api_key: Some("sk-test-1234567890abcdef".into()),
+                model: None,
+                headers: Vec::new(),
+            },
+        );
+        providers.insert(
+            "short".to_string(),
+            opencoder_core::ProviderConfig {
+                base_url: "https://api.example/v1".into(),
+                api_key: Some("abcd".into()),
+                model: None,
+                headers: Vec::new(),
+            },
+        );
+        let cfg = Config {
+            providers,
+            ..Config::default()
+        };
+        let out = super::config_show_json(&cfg).unwrap();
+        assert!(
+            out.contains("\"sk-t***\""),
+            "long key must be masked to first 4 chars + ***:\n{out}"
+        );
+        assert!(
+            out.contains("\"***\""),
+            "short key (<=4 chars) must be fully masked:\n{out}"
+        );
+        assert!(
+            !out.contains("sk-test-1234567890abcdef"),
+            "full api_key values must never appear:\n{out}"
+        );
     }
 
     #[test]

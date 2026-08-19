@@ -41,15 +41,56 @@ pub fn is_clear_context_handoff(handoff_plan: &str) -> bool {
     handoff_plan == CLEAR_CONTEXT_SENTINEL
 }
 
+/// Marker prefix stored in `handoff_plan` when [`ControlCmd::ClearContext`]
+/// preserved the last assistant reply as a continuity seed: the persisted
+/// value is this prefix followed by the preserved reply text. Same ASCII
+/// framing rationale as [`CLEAR_CONTEXT_SENTINEL`] — it can never collide
+/// with real plan text.
+pub(crate) const CLEAR_CONTEXT_SEED_PREFIX: &str = "<<OPENCODER_CLEAR_SEED>>";
+
+/// True when a persisted `handoff_plan` is a clear-context seed boundary —
+/// the clear preserved the last assistant reply instead of a plan. Public so
+/// display layers (TUI replay, CLI JSON dump) can strip the marker and render
+/// the preserved text; the LLM must never see the raw marker (resume converts
+/// it back to a [`seed_message`] before rebuilding context).
+pub fn is_clear_context_seed(handoff_plan: &str) -> bool {
+    handoff_plan.starts_with(CLEAR_CONTEXT_SEED_PREFIX)
+}
+
+/// The preserved reply text carried by a clear-context seed boundary (the
+/// marker prefix stripped). Only meaningful when [`is_clear_context_seed`]
+/// holds.
+pub fn clear_seed_text(handoff_plan: &str) -> &str {
+    handoff_plan
+        .strip_prefix(CLEAR_CONTEXT_SEED_PREFIX)
+        .unwrap_or("")
+}
+
+/// Marker value persisted in `handoff_plan` for a seed boundary.
+fn clear_seed_marker(text: &str) -> String {
+    format!("{CLEAR_CONTEXT_SEED_PREFIX}{text}")
+}
+
 /// Body of the fresh-start marker message left after a context clear.
 const CLEAR_CONTEXT_BODY: &str = "[Context cleared - starting fresh in act mode.]";
+
+/// Neutral wrapper for the preserved last say. Deliberately NOT the plan→act
+/// "execute this plan" directive (`plan_handoff::HANDOFF_PREFIX`): the
+/// preserved text is a plain prior answer ("task done"), not a plan, and an
+/// execution directive would fabricate a task out of finished work.
+const CLEAR_SEED_BODY_PREFIX: &str = "[Context cleared. The previous assistant reply below \
+is preserved as continuity context - prior context, not a new instruction.]\n\n";
 
 /// A control command parsed from a slash-command string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlCmd {
     /// Switch the active agent (mode) without resetting context.
     SwitchAgent(String),
-    /// Clear the transcript to a single fresh-start marker and switch to act.
+    /// Clear the transcript and switch to act. Never a full wipe: a finalized
+    /// plan is handed off as the plan→act directive; otherwise the last
+    /// assistant reply survives as a neutral continuity seed; only a
+    /// transcript with no assistant content collapses to the blank
+    /// fresh-start marker.
     ClearContext,
 }
 
@@ -116,11 +157,11 @@ pub async fn apply(
             // Plan-provenance gate: only a session that IS in plan mode, or
             // recorded plan-mode inputs earlier in this phase (the counter
             // survives a plain `/act` switch and resets on handoff), may hand
-            // a plan forward. `handoff`'s plan extraction is "last assistant
-            // message with non-empty text" — in act mode with no plan that is
-            // just the previous answer ("task done"), and wrapping it in the
-            // plan→act directive would fabricate a plan and hijack the fresh
-            // start. When the gate fails we take the blank sentinel path.
+            // a plan forward. `handoff`'s plan extraction is phase-bounded
+            // (snapshot or plan-tagged transcript text) — in act mode with no
+            // plan provenance the previous answer ("task done") must NOT be
+            // wrapped in the plan→act directive (no-fabrication). The clear
+            // is never a full wipe though: see the preserve chain below.
             let from_plan_mode = session.agent.kind == AgentKind::Plan
                 || session.plan_input_count > 0
                 || session.plan_snapshot.is_some();
@@ -131,12 +172,30 @@ pub async fn apply(
             };
 
             if plan_display.is_none() {
-                // No plan to carry forward: blank fresh-start sentinel path.
+                // Preserve chain (never a full blank wipe): keep the last
+                // say — the newest non-empty assistant reply — as a neutral
+                // continuity seed. Only a transcript with NO assistant
+                // content at all (a brand-new session) degrades to the blank
+                // fresh-start sentinel. NOTE: the seed deliberately diverges
+                // from the pre-653e5bd behavior of wrapping the last reply
+                // in the plan→act directive: the preserved reply travels as
+                // prior context in a neutral wrapper, never as an "execute
+                // this plan" instruction, and no PlanHandoff event fires for
+                // it. A failed-turn transcript keeps its earlier reply as the
+                // seed — prior context survives as context, never as a task.
+                //
                 // Total store messages that predate the clear (the history to
                 // trim on resume). Accounts for any in-memory-only summary.
                 let store_msg_count = session.store_message_count();
                 let preserved_images = crate::compaction::collect_head_images(&session.messages);
-                let mut marker = fresh_start_message();
+                let (mut marker, boundary) =
+                    match crate::plan_handoff::final_plan_text(&session.messages) {
+                        Some(last_say) => {
+                            let last_say = last_say.trim().to_string();
+                            (seed_message(&last_say), clear_seed_marker(&last_say))
+                        }
+                        None => (fresh_start_message(), CLEAR_CONTEXT_SENTINEL.to_string()),
+                    };
                 for url in &preserved_images {
                     marker.blocks.push(ContentBlock::Image {
                         url: url.clone(),
@@ -144,9 +203,9 @@ pub async fn apply(
                     });
                 }
                 session.messages = vec![marker];
-                // Record the boundary so resume reconstructs the fresh marker,
-                // not the full cleared history.
-                session.after_handoff(store_msg_count as i64, CLEAR_CONTEXT_SENTINEL.to_string());
+                // Record the boundary (sentinel or seed marker) so resume
+                // reconstructs the marker, not the full cleared history.
+                session.after_handoff(store_msg_count as i64, boundary);
             }
 
             // Clear context always switches to act.
@@ -172,6 +231,16 @@ pub async fn apply(
 /// can reconstruct the exact same message on resume.
 pub fn fresh_start_message() -> Message {
     let mut msg = Message::user(new_id(), CLEAR_CONTEXT_BODY);
+    msg.synthetic = true;
+    msg
+}
+
+/// Build the synthetic seed message carrying the preserved last assistant
+/// reply into the fresh transcript. Exposed so [`crate::resume`] can
+/// reconstruct the exact same message after a seed boundary.
+pub fn seed_message(text: &str) -> Message {
+    let body = format!("{CLEAR_SEED_BODY_PREFIX}{text}");
+    let mut msg = Message::user(new_id(), body);
     msg.synthetic = true;
     msg
 }
@@ -208,9 +277,9 @@ async fn persist_clear(session: &SessionState) -> Result<()> {
                     handoff_plan: session.handoff_plan.clone(),
                     clear_summary: true,
                     clear_skill: true,
-                    // The plan phase ended at this boundary: the snapshot was
-                    // consumed (or the sentinel path never had one) and the
-                    // counter reset in `after_handoff` — mirror both.
+                    // The plan phase ended at this boundary: `after_handoff`
+                    // consumed the snapshot and reset the counter on every
+                    // clear path (plan handoff, seed, sentinel) — mirror both.
                     clear_plan_snapshot: true,
                     plan_input_count: Some(session.plan_input_count as i64),
                     updated_at: Some(now_ms()),

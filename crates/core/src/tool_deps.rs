@@ -30,10 +30,11 @@ fn tmux_available() -> bool {
 }
 
 /// Probe the current environment for the optional tool dependencies.
+/// No home directory → no sentinel (nothing was ever seeded there).
 pub fn check_tool_deps() -> ToolDepStatus {
     ToolDepStatus {
         tmux: tmux_available(),
-        sentinel: skills_dir().join(DEPS_SENTINEL).exists(),
+        sentinel: skills_dir().is_some_and(|d| d.join(DEPS_SENTINEL).exists()),
     }
 }
 

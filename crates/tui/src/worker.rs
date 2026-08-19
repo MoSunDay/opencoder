@@ -152,10 +152,10 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 /// partial boundary. Refuse until idle (clean turn boundary). Pure so the
 /// running-guard is unit-testable independent of the async event loop.
 ///
-/// This gate now serves only the slash paths (`/act` `/plan`
-/// `/act_clear_context` → `dispatch_mode_switch`); the Shift+Tab / t+Tab key
-/// path uses the direction-aware gate inside `handle_switch_agent`
-/// (plan→act intercepted while busy, act→plan allowed as a pure switch).
+/// Unified contract: BOTH directions are refused while busy. The slash paths
+/// (`/act` `/plan` `/act_clear_context` → `dispatch_mode_switch`) and the
+/// Shift+Tab / t+Tab key path (`handle_switch_agent`) share this same
+/// bidirectional gate.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,
@@ -308,20 +308,24 @@ pub async fn process_cmd(
             // `run_session` is synchronous within `process_cmd(UiCmd::Prompt)`
             // — a switch queued during a live turn is not consumed until that
             // `process_cmd` returns, so `sess.agent` is never flipped mid-
-            // `run_session`. The app-loop direction-aware gate
-            // (`handle_switch_agent`) refuses to SEND a plan→act switch
-            // (handoff or no_handoff) while a turn/subagent is live;
-            // act→plan is a pure state switch and MAY be enqueued mid-turn,
-            // relying on the turn-boundary-only consumption above.
+            // `run_session`. The app-loop running gate
+            // (`handle_switch_agent`) refuses to SEND a switch — either
+            // direction, handoff or no_handoff — while a turn/subagent is
+            // live, so this arm is only reachable at a clean idle boundary;
+            // the turn-boundary-only consumption above is the backstop.
             if let Some(a) = resolve_agent(&name) {
                 sess.agent = a;
-                // Mirror control_cmd::apply: switching to plan resets the
-                // plan phase (input counter + snapshot) so the "submit your
-                // plan" reminder logic starts fresh. Without this the TUI
-                // key-handler path (Alt+Tab / Ctrl+T) inherited a stale
-                // nonzero count, unlike the `/plan` slash-command path. The
-                // reset is persisted so a resume does not re-arm stale
-                // plan-phase state.
+                // Mirror control_cmd::apply: switching to plan resets ONLY
+                // the phase input counter so the "submit your plan" reminder
+                // logic starts fresh. The `plan_snapshot` deliberately
+                // survives the switch: a plan→act→plan toggle with no new
+                // requirement still owns the previous phase's plan, and the
+                // snapshot retires only when a new requirement is recorded
+                // (`maybe_tag_plan_prompt`, ecce7b0 guard). Without this
+                // counter reset the TUI key-handler path (Alt+Tab / Ctrl+T)
+                // inherited a stale nonzero count, unlike the `/plan`
+                // slash-command path. The reset is persisted so a resume
+                // does not re-arm stale plan-phase state.
                 if name == "plan" {
                     sess.reset_plan_phase();
                     sess.persist_plan_phase().await;
@@ -355,7 +359,9 @@ pub async fn process_cmd(
             // gate in control_cmd::apply): only a session that recorded real
             // plan-mode input in this phase (`plan_input_count > 0`; every
             // delivery path increments it via `maybe_tag_plan_prompt`, and it
-            // resets on entering plan / handoff / resume) may fold its
+            // resets on entering plan / handoff / resume) or still carries a
+            // phase-bounded `plan_snapshot` (survives the plain act→plan
+            // switch, retired on a new requirement) may fold its
             // transcript. The UI-side `plan_submitted` flag is sticky across a
             // plan→act handoff and can be stale when a rapid Shift+Tab
             // act→plan→act double-tap queues `SwitchAndStart` before the UI

@@ -372,6 +372,44 @@ async fn get_config_returns_json() {
 }
 
 #[tokio::test]
+async fn get_config_masks_api_keys() {
+    let state = state().await;
+    // Isolate config discovery so the handler reads exactly the file we seed
+    // (and never the host's ~/.opencoder/config.json).
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    let full_key = "sk-web-secret-0123456789";
+    let cfg_dir = state.workdir.join(".opencoder");
+    std::fs::create_dir_all(&cfg_dir).unwrap();
+    std::fs::write(
+        cfg_dir.join("config.json"),
+        format!(r#"{{"provider": {{"base_url": "https://x.example/v1", "api_key": "{full_key}"}}}}"#),
+    )
+    .unwrap();
+    let app = app(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        text.contains("\"sk-w***\""),
+        "long api_key must be masked to first 4 chars + ***: {text}"
+    );
+    assert!(
+        !text.contains(full_key),
+        "full api_key must never leak through GET /api/config: {text}"
+    );
+}
+
+#[tokio::test]
 async fn patch_config_merges_and_persists() {
     let state = state().await;
     // Isolate config discovery so save_target never escapes to the real
@@ -580,4 +618,67 @@ async fn handoff_persists_boundary_when_plan_exists() {
         handed_off,
         "manual handoff must persist handoff_seq to the store"
     );
+}
+
+#[tokio::test]
+async fn patch_config_mcp_name_collision_returns_400() {
+    let state = state().await;
+    // Isolate config discovery: the collision probe and (on success) the
+    // domain write must stay inside the scoped home, never ~/.opencoder.
+    let _iso = opencoder_core::scoped_config_home(state.workdir.clone());
+    let app = app(state.clone());
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"mcp_servers":{"a-b":{"command":"x"},"a.b":{"url":"http://y"}}}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    // A bad patch is a client error, not a server fault: 400 with the
+    // conflict names (bug #14 semantics — the two would share the
+    // `mcp__a_b__` tool prefix and shadow each other).
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let err = v["error"].as_str().unwrap_or_default().to_string();
+    assert!(err.contains("a-b") && err.contains("a.b"), "body = {v}");
+    assert!(err.contains("mcp__a_b__"), "body = {v}");
+
+    // The refused patch must not pollute any mcp.json candidate.
+    for path in [
+        state.workdir.join(".opencoder").join("mcp.json"),
+        state.workdir.join("mcp.json"),
+    ] {
+        if path.exists() {
+            let raw = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !raw.contains("a-b") && !raw.contains("a.b"),
+                "{} polluted by refused patch: {raw}",
+                path.display()
+            );
+        }
+    }
+
+    // A follow-up valid single-server patch still succeeds (200 + persisted).
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/config")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"mcp_servers":{"a-b":{"command":"x"}}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let cfg = opencoder_core::Config::load(&state.workdir).unwrap();
+    assert!(cfg.mcp_servers.contains_key("a-b"), "valid patch persisted");
 }

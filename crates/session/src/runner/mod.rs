@@ -14,9 +14,9 @@ use serde_json::Value;
 use std::panic::AssertUnwindSafe;
 
 use crate::compaction;
-use crate::mcp;
 use crate::tools::registry as build_registry;
-use crate::SessionState;
+// run_loop_one_shot: every primary run ends with the one-shot skill clear.
+use crate::{mcp, skill_lifecycle::run_loop_one_shot, SessionState};
 
 mod dedup;
 mod drain;
@@ -113,18 +113,21 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // True when a ClearContext with a preserved plan was applied and the
-    // transcript now holds a handoff message awaiting an LLM execution turn
-    // (user_text was cleared). This keeps `drain_mode` false so run_loop makes
-    // the execution call instead of going idle.
+    // True when a ClearContext with a preserved plan OR seed was applied and
+    // the transcript now holds a synthetic message awaiting an LLM execution
+    // turn (user_text was cleared). This keeps `drain_mode` false so run_loop
+    // makes the execution call instead of going idle. Both preserved flavours
+    // must continue running; only the blank sentinel (nothing preserved)
+    // stops without an LLM turn.
     let mut handoff_pending = false;
     // Control commands (/act, /plan) short-circuit without an LLM turn. A
     // compound input (/plan review) switches then runs the rest. EXCEPTION:
     // /act_clear_context with a preserved result falls through to run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
-        // ClearContext with a preserved result falls through to run_loop to
-        // execute it; sentinel path (no result) stops as before.
+        // ClearContext with a preserved result (plan handoff or last-say
+        // seed) falls through to run_loop to execute it; blank sentinel path
+        // (nothing preserved) stops as before.
         if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
             && !crate::control_cmd::is_clear_context_handoff(
                 session.handoff_plan.as_deref().unwrap_or(""),
@@ -190,7 +193,7 @@ pub async fn run_with_registry(
         }
     }
     let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
-    if let Err(run_err) = run_loop(session, registry, &mut on_event, drain_mode).await {
+    if let Err(run_err) = run_loop_one_shot(session, registry, &mut on_event, drain_mode).await {
         // F3: a failed run must not strand inputs admitted during it — best-effort
         // bounded re-absorb, never masking the original error.
         let _ = reabsorb_tail(session, registry, &mut on_event).await;

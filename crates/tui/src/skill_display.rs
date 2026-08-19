@@ -50,7 +50,8 @@ mod tests {
 
     #[test]
     fn multi_skill_body_uses_first_block() {
-        let body = "> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS";
+        let body =
+            "> Source: /skills/review/SKILL.md\n\nR\n\n> Source: /skills/submit/SKILL.md\n\nS";
         assert_eq!(skill_name_from_body(body).as_deref(), Some("review"));
     }
 

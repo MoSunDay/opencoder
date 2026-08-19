@@ -52,20 +52,26 @@ fn mock_reply() -> Arc<dyn ChatStream> {
     )
 }
 
-fn session(
-    store: Arc<dyn Store>,
-    mock: Arc<dyn ChatStream>,
-) -> (tempfile::TempDir, SessionState) {
+fn session(store: Arc<dyn Store>, mock: Arc<dyn ChatStream>) -> (tempfile::TempDir, SessionState) {
     let dir = tempfile::tempdir().unwrap();
     let agent = resolve_agent("act").unwrap();
-    let s = SessionState::new(SID.to_string(), agent, config(), mock, dir.path().to_path_buf())
-        .with_store(store);
+    let s = SessionState::new(
+        SID.to_string(),
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store);
     (dir, s)
 }
 
 /// Create the session row so input admission (FK) succeeds before the run.
 async fn seed(store: &Arc<dyn Store>) {
-    store.create_session(&session_meta(SID, "act")).await.unwrap();
+    store
+        .create_session(&session_meta(SID, "act"))
+        .await
+        .unwrap();
 }
 
 /// Admit an input of any delivery; returns the row PK seq.
@@ -241,13 +247,11 @@ async fn orphan_recovery_reabsorbs_promoted_unrecorded_input() {
             .any(|t| t.contains("orphaned follow-up")),
         "orphaned input must be re-absorbed as a persisted user message"
     );
-    assert!(
-        store
-            .pending_inputs(SID, Delivery::Queue)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(store
+        .pending_inputs(SID, Delivery::Queue)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 /// F3: a run that fails mid-drain must not strand inputs admitted during it.
@@ -325,14 +329,14 @@ async fn steer_claim_survives_hard_cancel_without_lost_promote() {
     assert!(out.is_ok(), "recovery run should succeed: {out:?}");
     let msgs = store.load_messages(SID).await.unwrap();
     assert!(
-        user_texts(&msgs).iter().any(|t| t.contains("steer after cancel")),
+        user_texts(&msgs)
+            .iter()
+            .any(|t| t.contains("steer after cancel")),
         "steer must be consumed as a persisted user message"
     );
-    assert!(
-        store
-            .pending_inputs(SID, Delivery::Steer)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert!(store
+        .pending_inputs(SID, Delivery::Steer)
+        .await
+        .unwrap()
+        .is_empty());
 }

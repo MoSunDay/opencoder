@@ -44,7 +44,11 @@ pub fn should_compact(session: &SessionState) -> bool {
 /// The global `~/.opencoder/AGENTS.md` ships in the system prompt (see
 /// `build_system`), so its tokens count toward the compaction budget exactly
 /// like any other context the model actually consumes.
-fn estimated_tokens(session: &SessionState) -> u64 {
+///
+/// Also used by the runner's hard-limit gate: when compaction has nothing to
+/// summarize, the request may still proceed if this estimate fits under the
+/// provider context limit (the compaction budget is a threshold, not a cap).
+pub(crate) fn estimated_tokens(session: &SessionState) -> u64 {
     let skill = session.skill_prompt_cloned();
     let mcp_status: Vec<_> = crate::mcp::pool::status_for(&session.id)
         .into_iter()

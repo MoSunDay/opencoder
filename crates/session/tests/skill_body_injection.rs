@@ -31,7 +31,11 @@ fn sourced_body(path: &str, body: &str) -> String {
 
 /// Store-less session on a temp working dir. The TempDir pins the cwd for
 /// the session's life.
-fn session_on(id: &str, agent: &str, client: Arc<MockChatClient>) -> (SessionState, tempfile::TempDir) {
+fn session_on(
+    id: &str,
+    agent: &str,
+    client: Arc<MockChatClient>,
+) -> (SessionState, tempfile::TempDir) {
     let workdir = tempfile::tempdir().unwrap();
     let session = SessionState::new(
         id,
@@ -129,7 +133,10 @@ async fn small_skill_body_rides_payload_and_persists() {
         any_user_contains(req, &format!("[skill loaded] {path}")),
         "marker message rides the payload"
     );
-    assert!(any_user_contains(req, "REV-STEP-1\nREV-STEP-2"), "full body");
+    assert!(
+        any_user_contains(req, "REV-STEP-1\nREV-STEP-2"),
+        "full body"
+    );
     assert!(!system_content(req).contains("REV-STEP"), "system clean");
     assert!(
         !last_user_content(req).contains("REV-STEP"),
@@ -147,11 +154,9 @@ async fn small_skill_body_rides_payload_and_persists() {
     // Durable: survives a store round-trip (resume can replay it).
     let persisted = store.load_messages(&s.id).await.unwrap();
     assert!(
-        persisted
-            .iter()
-            .any(|m| m.synthetic
-                && m.role == Role::User
-                && m.text().starts_with(&format!("[skill loaded] {path}"))),
+        persisted.iter().any(|m| m.synthetic
+            && m.role == Role::User
+            && m.text().starts_with(&format!("[skill loaded] {path}"))),
         "injection persisted to the store"
     );
 
@@ -192,7 +197,9 @@ async fn oversized_skill_body_truncates_with_continuation_notice() {
         "notice names remaining lines + next offset: {}",
         &text[text.len().saturating_sub(220)..]
     );
-    let cut = text.find("\n[INCOMPLETE SKILL]").expect("notice follows prefix");
+    let cut = text
+        .find("\n[INCOMPLETE SKILL]")
+        .expect("notice follows prefix");
     assert!(
         opencoder_llm::estimate(&text[..cut]) <= 20_000,
         "marker + truncated prefix stays within budget"
@@ -308,7 +315,10 @@ async fn bom_frontmatter_end_to_end_injects_only_body() {
         .into_iter()
         .next()
         .expect("skill discovered despite BOM");
-    assert_eq!(skill.body, "BOM-BODY-ONLY", "frontmatter stripped, body only");
+    assert_eq!(
+        skill.body, "BOM-BODY-ONLY",
+        "frontmatter stripped, body only"
+    );
 
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
     let (mut s, _wd) = session_on("inj-bom", "act", mock.clone());
@@ -320,7 +330,10 @@ async fn bom_frontmatter_end_to_end_injects_only_body() {
     let inj = injected(&s, &path).expect("body injected once parsed");
     let text = inj.text();
     assert!(text.contains("BOM-BODY-ONLY"), "{text}");
-    assert!(!text.contains("name: bom-skill"), "no frontmatter leak: {text}");
+    assert!(
+        !text.contains("name: bom-skill"),
+        "no frontmatter leak: {text}"
+    );
     assert!(!text.contains("---"), "no fence leak: {text}");
     let req = &mock.requests()[0];
     assert!(any_user_contains(req, "BOM-BODY-ONLY"));

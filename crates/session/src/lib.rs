@@ -10,6 +10,7 @@ pub mod plan_handoff;
 pub mod plan_phase;
 pub mod prompt;
 pub mod resume;
+pub mod resume_helpers;
 pub mod runner;
 pub mod skill_context;
 pub mod skill_resolve;
@@ -437,6 +438,10 @@ impl SessionState {
         self.handoff_seq = None;
         self.handoff_plan = None;
         self.persisted_count = self.messages.len();
+        // The model-reported usage from before the fold measures the old
+        // transcript; keep it from re-triggering `should_compact` against
+        // the collapsed one (which has nothing left to summarize).
+        self.last_usage = opencoder_llm::Usage::default();
     }
 
     /// Update bookkeeping after a plan→act handoff. Records the handoff
@@ -449,6 +454,13 @@ impl SessionState {
         self.summary = None;
         self.summary_seq = None;
         self.persisted_count = self.messages.len();
+        // The transcript was just collapsed to a fresh start: the reported
+        // usage of the discarded history is stale. Leaving it in place made
+        // `should_compact` fire against the single-message handoff
+        // transcript, which has nothing to summarize, and the runner then
+        // killed the run with "compaction failed: transcript exceeds context
+        // window but compaction found nothing to summarize".
+        self.last_usage = opencoder_llm::Usage::default();
         // Plan phase ended (lifecycle: `crate::plan_phase`).
         self.plan_input_count = 0;
         self.plan_snapshot = None;
@@ -485,8 +497,6 @@ pub(crate) fn cache_salt_for(session: &SessionState) -> Option<String> {
     (session.config.cache_salt == Some(true))
         .then(|| format!("{}:{}", session.agent.name, session.id))
 }
-
-
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

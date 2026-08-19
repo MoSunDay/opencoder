@@ -149,7 +149,11 @@ async fn compaction_snapshots_plan_and_handoff_recovers() {
     // Handoff recovers via the snapshot: transcript reset + plan carried.
     let display = plan_handoff::handoff(&mut session, "").expect("handoff must find the plan");
     assert_eq!(display, PLAN_TEXT);
-    assert_eq!(session.messages.len(), 1, "transcript collapsed to the plan");
+    assert_eq!(
+        session.messages.len(),
+        1,
+        "transcript collapsed to the plan"
+    );
     assert!(session.messages[0].synthetic);
     assert_eq!(session.plan_snapshot, None, "snapshot consumed");
 

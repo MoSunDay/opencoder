@@ -87,7 +87,11 @@ async fn recorded_state_machine_pending_promote_mark() {
         assert_eq!(input_state(&conn, seq).await, (None, 0));
     }
     assert_eq!(
-        store.pending_inputs("s", Delivery::Steer).await.unwrap().len(),
+        store
+            .pending_inputs("s", Delivery::Steer)
+            .await
+            .unwrap()
+            .len(),
         1
     );
 
@@ -197,7 +201,11 @@ async fn recover_orphan_inputs_recovers_only_unrecorded_promoted_rows() {
     store.promote_inputs("s", 2, Delivery::Steer).await.unwrap();
 
     assert_eq!(
-        store.pending_inputs("s", Delivery::Steer).await.unwrap().len(),
+        store
+            .pending_inputs("s", Delivery::Steer)
+            .await
+            .unwrap()
+            .len(),
         1,
         "only the never-promoted row c is pending pre-recovery"
     );

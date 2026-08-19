@@ -322,8 +322,13 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // into the transcript or applied as a control command). A promoted row
         // with recorded=0 is an orphan (crash / hard-cancel between promote
         // and consume) that `recover_orphan_inputs` can flip back to pending.
-        add_column_if_absent(conn, "session_inputs", "recorded", "INTEGER NOT NULL DEFAULT 0")
-            .await?;
+        add_column_if_absent(
+            conn,
+            "session_inputs",
+            "recorded",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .await?;
         // One-time backfill: rows already promoted when the column lands
         // predate the marker and are historical audit rows already reflected
         // in the transcript, so treat them as consumed. Pending rows keep

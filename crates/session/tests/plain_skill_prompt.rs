@@ -262,11 +262,9 @@ async fn queue_pure_skill_prompt_injects_trigger() {
         "pure $review queue item activates the skill at consumption"
     );
     assert!(
-        session
-            .messages
-            .iter()
-            .any(|m| m.role == Role::User && m.synthetic
-                && m.text() == opencoder_session::skill_resolve::SKILL_TRIGGER),
+        session.messages.iter().any(|m| m.role == Role::User
+            && m.synthetic
+            && m.text() == opencoder_session::skill_resolve::SKILL_TRIGGER),
         "SKILL_TRIGGER injected for the pure-skill queue item: {:?}",
         session
             .messages
@@ -342,7 +340,9 @@ async fn queued_skill_persists_at_consumption_not_admit() {
         "consumption-time activation is persisted verbatim"
     );
     assert!(
-        persisted.as_deref().is_some_and(|b| b.starts_with("> Source: ")),
+        persisted
+            .as_deref()
+            .is_some_and(|b| b.starts_with("> Source: ")),
         "persisted body carries the source prefix: {persisted:?}"
     );
 }

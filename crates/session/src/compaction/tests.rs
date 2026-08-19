@@ -231,3 +231,49 @@ async fn compact_honors_cancel_and_leaves_messages_intact() {
         .iter()
         .any(|ev| matches!(ev, SessionEvent::Status(msg) if msg == "interrupted")));
 }
+
+/// Transcript collapses (handoff / clear-context / compaction) must reset the
+/// model-reported usage: the usage measured the discarded transcript, and a
+/// stale value re-triggers `should_compact` against a fresh single-message
+/// transcript that has nothing to summarize (which used to kill the run with
+/// "compaction failed: ... found nothing to summarize").
+#[test]
+fn transcript_collapse_resets_reported_usage() {
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
+    let agent = resolve_agent("act").expect("act agent");
+    let mut s = SessionState::new(
+        "collapse-usage",
+        agent,
+        Config {
+            model: "main/glm-5.2".into(),
+            ..Config::default()
+        },
+        mock,
+        std::env::temp_dir(),
+    );
+    s.last_usage = opencoder_llm::Usage {
+        input_tokens: 500_000,
+        ..Default::default()
+    };
+
+    s.after_handoff(3, "plan".into());
+    assert_eq!(
+        s.last_usage.input_tokens, 0,
+        "handoff must reset stale reported usage"
+    );
+
+    s.last_usage = opencoder_llm::Usage {
+        input_tokens: 500_000,
+        ..Default::default()
+    };
+    s.after_compaction("summary".into(), 3);
+    assert_eq!(
+        s.last_usage.input_tokens, 0,
+        "compaction must reset stale reported usage"
+    );
+}

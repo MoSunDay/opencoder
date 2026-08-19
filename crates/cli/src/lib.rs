@@ -2,6 +2,7 @@ pub mod client;
 pub mod display;
 pub mod exit_tips;
 pub mod install_tools;
+pub mod model_override;
 pub mod run;
 mod run_image;
 pub mod server;
@@ -142,7 +143,7 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         prompt: Vec<String>,
     },
-    /// Print the resolved configuration (defaults < env < project file merged).
+    /// Print the resolved configuration (defaults < config files < env vars < --model).
     Config {
         #[command(subcommand)]
         sub: Option<ConfigSub>,

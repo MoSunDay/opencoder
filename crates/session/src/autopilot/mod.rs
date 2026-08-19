@@ -15,10 +15,11 @@
 //!   Nothing is recorded or persisted — the main transcript is never polluted
 //!   by the judgement exchange.
 //!
-//! The loop stops when VERIFY says "yes" (complete), retries exhaust on
-//! malformed verdicts (aborted), the session is cancelled, or `max_iterations`
-//! is hit. The existing doom-loop / tool-failure / cancel guards inside
-//! `run_loop` still terminate individual phase runs.
+//! The loop stops when VERIFY says "yes" (complete), retries exhaust without
+//! a parseable verdict (aborted — the reason distinguishes an unparseable
+//! judge from an unreachable one), the session is cancelled, or
+//! `max_iterations` is hit. The existing doom-loop / tool-failure / cancel
+//! guards inside `run_loop` still terminate individual phase runs.
 
 mod decision;
 mod phases;
@@ -29,7 +30,7 @@ mod verify;
 
 pub use decision::{parse_verdict, should_stop};
 pub use review_pass::review_pass;
-pub use state::{ApOutcome, ApPhase, ApState, VerifyVerdict};
+pub use state::{ApOutcome, ApPhase, ApState, VerifyFailure, VerifyVerdict};
 pub use verify::verify;
 
 #[cfg(test)]
@@ -38,9 +39,7 @@ mod tests;
 use std::collections::HashMap;
 
 use anyhow::Result;
-use opencoder_core::message::now_ms;
 use opencoder_core::{Role, ToolArc};
-use opencoder_store::SessionPatch;
 
 use crate::autopilot::phases::{run_act_phase, run_plan_phase};
 use crate::runner::SessionEvent;
@@ -150,20 +149,13 @@ pub async fn drive(
 /// asked for it — so it must never outlive its pass: without the persisted
 /// `clear_skill`, an error mid-pass followed by a resume would resurrect the
 /// skill from the `sessions.skill` column into an otherwise plain session.
+/// Delegates to `skill_lifecycle::clear_on_run_end` (the universal run-end
+/// clear, which also wipes `active_skill_names`): since every autopilot
+/// phase loop runs through `run_loop_one_shot`, this explicit call is
+/// idempotent double-insurance covering the paths OUTSIDE a loop (cancel
+/// before a phase, `finish` bookkeeping).
 pub(crate) async fn clear_injected_skill(session: &SessionState) {
-    session.set_skill(None);
-    if let Some(store) = &session.store {
-        let _ = store
-            .update_session(
-                &session.id,
-                &SessionPatch {
-                    clear_skill: true,
-                    updated_at: Some(now_ms()),
-                    ..Default::default()
-                },
-            )
-            .await;
-    }
+    crate::skill_lifecycle::clear_on_run_end(session).await;
 }
 
 /// Terminal bookkeeping for every outcome: clear the active skill (memory +

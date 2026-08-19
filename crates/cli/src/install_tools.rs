@@ -16,12 +16,11 @@ use opencoder_core::{seed_dep_gated_skills, skills_dir, write_install_script};
 /// Path to the installer written into `~/.opencoder/` by
 /// [`write_install_script`]. `skills_dir()` is `~/.opencoder/skills`, so its
 /// parent is the install root — avoids a `dirs` dependency in the cli crate.
-fn install_script_path() -> std::path::PathBuf {
-    let root = skills_dir();
-    match root.parent() {
-        Some(p) => p.join("install-skills-dep.sh"),
-        None => std::path::PathBuf::from("install-skills-dep.sh"),
-    }
+/// `None` when no home directory resolves: nothing was (or can be) written
+/// there, so the orchestrator skips instead of guessing a relative path.
+fn install_script_path() -> Option<std::path::PathBuf> {
+    let root = skills_dir()?;
+    root.parent().map(|p| p.join("install-skills-dep.sh"))
 }
 
 /// Orchestrator: detect deps, run the installer if needed (inherited stdio so
@@ -38,9 +37,17 @@ pub fn install_tools_run() -> anyhow::Result<i32> {
     // Ensure the script exists on disk (idempotent) before we try to run it.
     write_install_script();
 
+    let Some(script) = install_script_path() else {
+        // No home → write_install_script above also wrote nothing. Skip with
+        // a visible reason; exit non-zero so scripts don't read success.
+        println!(
+            "[install_tools] no home directory \u{2014} cannot locate ~/.opencoder; skipping"
+        );
+        return Ok(1);
+    };
+
     println!("[install_tools] running installer \u{2014} a sudo password may be required\u{2026}");
 
-    let script = install_script_path();
     let exit_code = match Command::new(&script).status() {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {

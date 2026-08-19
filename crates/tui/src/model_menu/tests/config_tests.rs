@@ -366,6 +366,54 @@ fn validate_rejects_threshold_above_context_size() {
 }
 
 #[test]
+fn validate_rejects_fps_u32_overflow() {
+    for bad in ["4294967296", "99999999999999"] {
+        let mut f = ConfigForm::new(&cfg());
+        f.fps_input = bad.into();
+        // validate is private, so trigger it via handle_key on Save.
+        f.focus = ConfigField::Save;
+        let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
+        assert!(
+            matches!(outcome, ModelOutcome::Idle),
+            "save should be blocked for fps={bad}"
+        );
+        let f = match next {
+            Some(ModelMenu::Config(f)) => f,
+            _ => panic!("expected Config menu to stay open for fps={bad}"),
+        };
+        let err = f.error.as_deref().unwrap_or_default();
+        assert!(
+            err.contains("fps") && err.contains("not a number"),
+            "expected fps overflow error for fps={bad}, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn validate_rejects_ap_max_iter_u32_overflow() {
+    for bad in ["4294967296", "99999999999999"] {
+        let mut f = ConfigForm::new(&cfg());
+        f.ap_max_iter_input = bad.into();
+        // validate is private, so trigger it via handle_key on Save.
+        f.focus = ConfigField::Save;
+        let (outcome, next) = crate::model_menu::config_form::handle_key(f, enter());
+        assert!(
+            matches!(outcome, ModelOutcome::Idle),
+            "save should be blocked for ap_max_iter={bad}"
+        );
+        let f = match next {
+            Some(ModelMenu::Config(f)) => f,
+            _ => panic!("expected Config menu to stay open for ap_max_iter={bad}"),
+        };
+        let err = f.error.as_deref().unwrap_or_default();
+        assert!(
+            err.contains("ap_max_iter") && err.contains("not a number"),
+            "expected ap_max_iter overflow error for ap_max_iter={bad}, got: {err}"
+        );
+    }
+}
+
+#[test]
 fn config_patch_writes_context_limit() {
     let mut f = ConfigForm::new(&cfg());
     f.context_size_input = "96000".into();

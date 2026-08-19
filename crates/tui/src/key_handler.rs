@@ -139,9 +139,9 @@ pub(crate) fn handle_key(
         }
         // Mode-switch keys stay live in the subagent-focus (input-disabled)
         // view: leaving/switching mode must never be blocked by view state.
-        // All three funnel into handle_switch_agent, which intercepts plan→act
-        // while a turn/subagent is live (busy hint) and treats act→plan as a
-        // pure state switch. The `/plan <content>` compound-submit branch of
+        // All four funnel into handle_switch_agent, whose running gate
+        // blocks BOTH directions while a turn/subagent is live (busy hint).
+        // The `/plan <content>` compound-submit branch of
         // the enabled path is intentionally skipped — input is disabled here.
         // A plain BackTab carries no CTRL/ALT modifier, so it cannot
         // mis-match the switch_mode_clear / switch_mode_keep bindings above
@@ -151,6 +151,13 @@ pub(crate) fn handle_key(
             return KeyAction::SwitchAgent(next.into());
         }
         if bindings.switch_mode_keep.matches(&k) {
+            let next = if agent == "plan" { "act" } else { "plan" };
+            return KeyAction::SwitchAgentNoClear(next.into());
+        }
+        // switch_mode (default ctrl+t): same NoClear semantics as the
+        // enabled path — a customized chord must not go dead just because
+        // a subagent is focused.
+        if bindings.switch_mode.matches(&k) {
             let next = if agent == "plan" { "act" } else { "plan" };
             return KeyAction::SwitchAgentNoClear(next.into());
         }

@@ -13,7 +13,7 @@
 #   C8  --backup on a non-existent destination is a no-op and exits 0
 #
 # Run:    scripts/e2e/test_install.sh
-# Env:    OPENCODER_E2E_SOURCE (default: /data/caches/opencoder-target/release/opencoder)
+# Env:    OPENCODER_E2E_SOURCE (default: repo-local target/release/opencoder)
 # Exit:   0 all contracts pass, 1 otherwise.
 
 set -euo pipefail
@@ -32,7 +32,7 @@ WORK="$(mktemp -d)"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
-SRC="${OPENCODER_E2E_SOURCE:-/data/caches/opencoder-target/release/opencoder}"
+SRC="${OPENCODER_E2E_SOURCE:-$REPO_ROOT/target/release/opencoder}"
 
 echo "== install.sh contract tests =="
 echo "installer: $INSTALL"

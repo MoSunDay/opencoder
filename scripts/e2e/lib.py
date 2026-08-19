@@ -14,15 +14,21 @@ e2e from storage internals (no sqlite coupling, no hash-path derivation).
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
-DEFAULT_BIN = "/data/caches/opencoder-target/release/opencoder"
+# Repo root from this file: scripts/e2e/lib.py -> up three dirnames.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Repo-local default binary (standard cargo layout: target/release/opencoder).
+REPO_DEFAULT_BIN = os.path.join(REPO_ROOT, "target", "release", "opencoder")
 AUTH_PATH = os.path.expanduser("~/.local/share/opencoder/auth.json")
 
 # Tool markers emitted by the headless event printer (see cli/src/run.rs).
@@ -34,12 +40,30 @@ COMPACTION_MARK = "[context compacted]"
 
 
 def resolve_bin(arg: str | None) -> str:
+    """Resolve the opencoder binary path.
+
+    Priority: explicit CLI arg > $OPENCODER_BIN > $CARGO_TARGET_DIR/release/opencoder
+    > repo-local {repo}/target/release/opencoder. Env vars are trusted as-is
+    when set and non-empty (no existence check); only the repo-local fallback
+    is existence-checked — a missing default aborts with a clear message.
+    """
     if arg:
         return arg
     env = os.environ.get("OPENCODER_BIN")
     if env:
         return env
-    return DEFAULT_BIN
+    cargo = os.environ.get("CARGO_TARGET_DIR")
+    if cargo:
+        return os.path.join(cargo, "release", "opencoder")
+    if os.path.exists(REPO_DEFAULT_BIN):
+        return REPO_DEFAULT_BIN
+    print(
+        f"FAIL: default binary not found: {REPO_DEFAULT_BIN}\n"
+        "      build first (cargo build --release) or set OPENCODER_BIN /\n"
+        "      CARGO_TARGET_DIR, or pass an explicit binary path",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def ensure_auth() -> str:
@@ -81,9 +105,25 @@ def make_config(
     }
 
 
+# Workdirs handed out by seed_workdir; removed at interpreter exit (atexit
+# runs after run_all returns — by then any serve process has already been
+# shut down explicitly by the web scenarios). Tolerate missing dirs.
+_SEED_WORKDIRS: list[str] = []
+
+
+def _cleanup_workdirs() -> None:
+    for d in _SEED_WORKDIRS:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(_cleanup_workdirs)
+
+
 def seed_workdir(cfg: dict[str, Any]) -> str:
-    """Create a temp workdir, write opencoder.json, return the path."""
+    """Create a temp workdir, write opencoder.json, return the path.
+    The dir is tracked and removed at interpreter exit (see _cleanup_workdirs)."""
     d = tempfile.mkdtemp(prefix="opencoder_e2e_")
+    _SEED_WORKDIRS.append(d)
     with open(os.path.join(d, "opencoder.json"), "w") as f:
         json.dump(cfg, f)
     return d

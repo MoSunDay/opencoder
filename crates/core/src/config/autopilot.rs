@@ -23,6 +23,15 @@ pub struct AutoPilotConfig {
     pub max_iterations: u32,
     #[serde(default = "default_verify_retries")]
     pub verify_retries: u32,
+    /// Context-window cap for the VERIFY judge (the `small_model`), in
+    /// tokens. `None` (default) keeps using the primary model's
+    /// `context_limit` — the judge snapshot budget is
+    /// `min(context_limit, verify_context_limit) - VERIFY_RESERVED_TOKENS`,
+    /// so a small judge window never receives a snapshot sized for the
+    /// primary model (which would 400 on OpenAI-compatible providers and
+    /// degrade every VERIFY retry to Malformed).
+    #[serde(default)]
+    pub verify_context_limit: Option<u64>,
 }
 
 fn default_max_iterations() -> u32 {
@@ -38,6 +47,7 @@ impl Default for AutoPilotConfig {
             mode: ApMode::Off,
             max_iterations: default_max_iterations(),
             verify_retries: default_verify_retries(),
+            verify_context_limit: None,
         }
     }
 }
@@ -84,6 +94,9 @@ pub(super) fn merge(cfg: &mut AutoPilotConfig, obj: &serde_json::Map<String, ser
     }
     if let Some(v) = obj.get("verify_retries").and_then(|v| v.as_u64()) {
         cfg.verify_retries = v.min(u32::MAX as u64) as u32;
+    }
+    if let Some(v) = obj.get("verify_context_limit").and_then(|v| v.as_u64()) {
+        cfg.verify_context_limit = Some(v);
     }
 }
 
@@ -142,5 +155,33 @@ mod tests {
             ApMode::Off,
             "mode is canonical"
         );
+    }
+
+    /// `verify_context_limit` is opt-in: absent key and Default both leave
+    /// `None` (primary `context_limit` keeps governing the judge budget);
+    /// a present key overwrites (so a later config layer can shrink it).
+    #[test]
+    fn verify_context_limit_defaults_none_and_merges() {
+        assert_eq!(
+            AutoPilotConfig::default().verify_context_limit,
+            None,
+            "opt-in knob: default must not cap the judge window"
+        );
+        assert_eq!(merged(json!({})).verify_context_limit, None);
+        assert_eq!(
+            merged(json!({"verify_context_limit": 300})).verify_context_limit,
+            Some(300)
+        );
+        // Later layers overwrite rather than min-merge: the merge layer
+        // contract is last-writer-wins per key.
+        let mut cfg = AutoPilotConfig {
+            verify_context_limit: Some(4_000),
+            ..AutoPilotConfig::default()
+        };
+        merge(
+            &mut cfg,
+            json!({"verify_context_limit": 300}).as_object().unwrap(),
+        );
+        assert_eq!(cfg.verify_context_limit, Some(300));
     }
 }

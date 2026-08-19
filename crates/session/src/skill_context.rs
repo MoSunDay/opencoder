@@ -1,37 +1,71 @@
 //! Transient skill-context tail reminder.
 //!
-//! Skill bodies no longer ship in the system prompt — appending them there
-//! rewrote the payload's first bytes on every activation, destabilising
-//! provider prompt-prefix caching. Instead every LLM call derives, from
-//! session state alone, one synthetic user message appended at the END of
-//! the request payload: never recorded to the store, never replayed. It
+//! Skill bodies do not ship in the system prompt — appending them there
+//! would rewrite the payload's first bytes on every activation, destroying
+//! whatever prefix-cache hits those bytes enjoyed. Instead every LLM call
+//! derives, from session state alone, one synthetic user message appended
+//! at the END of the request payload: never recorded to the store, never
+//! replayed. (Note: the system prompt as a whole is re-derived per call and
+//! re-reads AGENTS.md from disk, so it is not byte-stable across calls; the
+//! tail design only keeps skill activation from rewriting it.) The tail
 //! carries (a) a catalog of config-enabled skills (lazy-load hint for
 //! `~/.opencoder/skills`) and (b) the active skill's source path (from the
 //! `> Source:` prefix `body_with_source` writes).
 //!
 //! On top of the transient tail, [`ensure_full_body_loaded`] (called by
 //! `run_loop` once per LLM round, after compaction) idempotently injects the
-//! ACTIVE skill's path + body as ONE persistent `synthetic=true` user
-//! message (`[skill loaded] <path>` marker), so the model no longer burns a
-//! tool call reading the SKILL.md. Bodies over ~20K tokens are injected as a
-//! whole-line prefix plus an `[INCOMPLETE SKILL]` continuation notice (same
-//! style as the read tool's `[INCOMPLETE READ]`); the tail reminder then
-//! only points back at that message as a fallback (e.g. after compaction
-//! folded it into a summary, which triggers a fresh injection).
+//! ACTIVE skills' paths + merged body as ONE persistent `synthetic=true`
+//! user message (a `[skill loaded] <path>` marker line per source path —
+//! sorted, set-exact), so the model no longer burns a tool call reading the
+//! SKILL.md. A compound prompt (`$A $B`) is keyed by the WHOLE path set:
+//! re-activating with a different set (add or drop a skill) re-injects,
+//! because a stale single-path marker no longer matches. Bodies over ~20K
+//! tokens are injected as a whole-line prefix plus an `[INCOMPLETE SKILL]`
+//! continuation notice (same style as the read tool's `[INCOMPLETE READ]`);
+//! the tail reminder then only points back at that message as a fallback
+//! (e.g. after compaction folded it into a summary, which triggers a fresh
+//! injection).
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use opencoder_core::{discover_in, skills_dir, AgentMode, Config, Message, Role};
 
 use crate::SessionState;
 
-/// Extract the source-file path from a `> Source: <path>` prefix line
+/// Extract EVERY source-file path a skill prompt carries, in discovery
+/// order (first occurrence wins on duplicates). A compound prompt
+/// (`$A $B`) is stored by `skill_resolve` as
+/// `> Source: <pathA>\n\n<bodyA>\n\n> Source: <pathB>\n\n<bodyB>` — every
+/// paragraph-initial `> Source: <path>` line contributes one path; paths
+/// may contain spaces because a path always runs to end-of-line.
+pub fn source_paths_from_body(body: &str) -> Vec<&str> {
+    let mut paths: Vec<&str> = Vec::new();
+    let mut paragraph_start = true;
+    for line in body.lines() {
+        if line.trim().is_empty() {
+            paragraph_start = true;
+            continue;
+        }
+        if paragraph_start {
+            if let Some(rest) = line.strip_prefix("> Source: ") {
+                let path = rest.trim();
+                if !path.is_empty() && !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+        paragraph_start = false;
+    }
+    paths
+}
+
+/// Extract the FIRST source-file path from a `> Source: <path>` prefix line
 /// (written by `opencoder_core::body_with_source`). `None` when absent or
-/// the path is empty.
+/// the path is empty. Single-skill convenience over
+/// [`source_paths_from_body`].
 pub fn source_path_from_body(body: &str) -> Option<&str> {
-    let rest = body.strip_prefix("> Source: ")?;
-    let path = rest.split('\n').next()?.trim();
-    (!path.is_empty()).then_some(path)
+    source_paths_from_body(body).into_iter().next()
 }
 
 /// Enabled-skill catalog for an explicit discovery root: the intersection of
@@ -48,9 +82,13 @@ pub fn catalog_entries_in(root: &Path, config: &Config) -> Vec<(String, String)>
         .collect()
 }
 
-/// Enabled-skill catalog for the default skills directory.
+/// Enabled-skill catalog for the default skills directory. An unresolvable
+/// home directory yields an empty catalog (skills cannot be listed — and were
+/// never seeded — without one).
 pub fn catalog_entries(config: &Config) -> Vec<(String, String)> {
-    catalog_entries_in(&skills_dir(), config)
+    skills_dir()
+        .map(|root| catalog_entries_in(&root, config))
+        .unwrap_or_default()
 }
 
 /// Pure builder for the reminder text. Empty string when both inputs are
@@ -59,10 +97,13 @@ pub fn catalog_entries(config: &Config) -> Vec<(String, String)> {
 pub fn reminder_text(catalog: &[(String, String)], active_path: Option<&str>) -> String {
     let mut sections: Vec<String> = Vec::new();
     if !catalog.is_empty() {
-        let mut lines = vec![format!(
-            "[skills]\nEnabled skills live under {}:",
-            skills_dir().display()
-        )];
+        // Display path for the reminder: the real skills dir when resolvable,
+        // else the canonical `~/.opencoder/skills` location (still actionable
+        // even when the home directory could not be resolved).
+        let root = skills_dir()
+            .map(|d| d.display().to_string())
+            .unwrap_or_else(|| "~/.opencoder/skills".to_string());
+        let mut lines = vec![format!("[skills]\nEnabled skills live under {root}:")];
         for (name, description) in catalog {
             lines.push(match description.as_str() {
                 "" => format!("- {name}"),
@@ -118,16 +159,66 @@ pub fn full_body_marker(path: &str) -> String {
     format!("[skill loaded] {path}")
 }
 
-/// Whether the transcript already carries the `[skill loaded]` message for
-/// `path` — the idempotence gate for [`ensure_full_body_loaded`] (same
-/// marker-scan precedent as the compaction summary). Matching requires the
-/// newline after the path so `/a/SKILL.md` never matches a marker written
-/// for `/a/SKILL.md.bak`.
-pub fn loaded_marker_matches(messages: &[Message], path: &str) -> bool {
-    let marker = format!("{}\n", full_body_marker(path));
-    messages
+/// Marker block heading the persistent full-body message: one
+/// `[skill loaded] <path>` line per source path, sorted lexicographically
+/// and deduplicated — the canonical form, so `$A $B` and `$B $A` share one
+/// block and matching ([`loaded_marker_matches`]) is plain set equality.
+pub fn full_body_marker_block(paths: &[&str]) -> String {
+    let mut sorted: Vec<&str> = paths.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    sorted
         .iter()
-        .any(|m| m.synthetic && m.role == Role::User && m.text().starts_with(&marker))
+        .map(|p| full_body_marker(p))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Leading `[skill loaded] <path>` marker lines of a message text. Empty
+/// when the text does not begin with a marker; a marker line only counts
+/// when newline-terminated (so `/a/SKILL.md` can never be carved out of a
+/// marker written for `/a/SKILL.md.bak`).
+fn marker_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut rest = text;
+    while let Some(after) = rest.strip_prefix("[skill loaded] ") {
+        let Some((path, tail)) = after.split_once('\n') else {
+            break;
+        };
+        let path = path.trim();
+        if path.is_empty() {
+            break;
+        }
+        paths.push(path.to_string());
+        rest = tail;
+    }
+    paths
+}
+
+/// Whether the transcript already carries a `[skill loaded]` message whose
+/// leading marker block covers EXACTLY `paths` — the idempotence gate for
+/// [`ensure_full_body_loaded`] (same marker-scan precedent as the
+/// compaction summary). Set equality: a marker covering a subset or
+/// superset does NOT match, so any change in the active skill set (adding
+/// `$B` to `$A`, or dropping `$B` again) triggers a fresh injection. Each
+/// marker line must be newline-terminated after its path, keeping the
+/// `/a/SKILL.md` vs `/a/SKILL.md.bak` prefix-collision guard.
+pub fn loaded_marker_matches(messages: &[Message], paths: &[&str]) -> bool {
+    let expected: BTreeSet<&str> = paths
+        .iter()
+        .copied()
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    if expected.is_empty() {
+        return false;
+    }
+    messages.iter().any(|m| {
+        m.synthetic && m.role == Role::User && {
+            let parsed = marker_paths(&m.text());
+            let got: BTreeSet<&str> = parsed.iter().map(String::as_str).collect();
+            got == expected
+        }
+    })
 }
 
 /// Body to inject for a skill sourced at `path`: verbatim when within
@@ -182,15 +273,18 @@ pub async fn ensure_full_body_loaded(session: &mut SessionState) {
     let Some(prompt) = prompt.as_deref() else {
         return;
     };
-    let Some(path) = source_path_from_body(prompt) else {
+    let paths = source_paths_from_body(prompt);
+    if paths.is_empty() {
         return;
     };
-    if loaded_marker_matches(&session.messages, path) {
+    if loaded_marker_matches(&session.messages, &paths) {
         return;
     }
-    // Strip the `> Source: <path>` prefix block: the marker already carries
-    // the path, and the injected lines must mirror the file's own body so
-    // the truncation `offset=` matches what `read(path, offset=…)` returns.
+    // Strip the LEADING `> Source: <path>` prefix block: the marker block
+    // already carries every path, and the injected lines must mirror the
+    // file's own body so the truncation `offset=` matches what
+    // `read(path, offset=…)` returns. A compound prompt keeps its inner
+    // `> Source:` annotation, so bodyB ships together with bodyA.
     let body = prompt
         .strip_prefix("> Source: ")
         .and_then(|rest| rest.split_once("\n\n"))
@@ -202,10 +296,12 @@ pub async fn ensure_full_body_loaded(session: &mut SessionState) {
     if body.trim().is_empty() {
         return;
     }
+    // The oversized-body continuation notice names the FIRST discovered
+    // path (primary entry point of the compound body).
     let text = format!(
         "{}\n\n{}",
-        full_body_marker(path),
-        injectable_body(body, path)
+        full_body_marker_block(&paths),
+        injectable_body(body, paths[0])
     );
     let mut msg = Message::user(crate::runner::new_id(), text);
     msg.synthetic = true;
@@ -298,6 +394,55 @@ mod tests {
         assert!(active_only.starts_with("[active skill]\n"), "{active_only}");
     }
 
+    fn act_session() -> SessionState {
+        SessionState::new(
+            "t",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            client(),
+            Path::new("/tmp").into(),
+        )
+    }
+
+    #[tokio::test]
+    async fn compound_set_growth_reinjectects_merged_body() {
+        let mut s = act_session();
+        s.set_skill(Some(
+            "> Source: /skills/alpha/SKILL.md\n\nALPHA-BODY".into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 1, "first activation injects once");
+        // `$A` -> `$A $B`: the active set changed, so the merged body must
+        // be re-injected — B's body has to enter the context even though
+        // A's old marker is already on record.
+        s.set_skill(Some(
+            "> Source: /skills/alpha/SKILL.md\n\nALPHA-BODY\n\n\
+             > Source: /skills/beta/SKILL.md\n\nBETA-BODY"
+                .into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(
+            s.messages.len(),
+            2,
+            "set change must trigger a fresh injection"
+        );
+        // Content completeness: the fresh message carries BOTH marker
+        // lines (canonical sorted block) and both body sections.
+        let text = s.messages[1].text();
+        assert!(s.messages[1].synthetic && s.messages[1].role == Role::User);
+        assert!(
+            text.starts_with(
+                "[skill loaded] /skills/alpha/SKILL.md\n\
+                 [skill loaded] /skills/beta/SKILL.md\n\n"
+            ),
+            "marker block leads the message: {text}"
+        );
+        assert!(
+            text.contains("ALPHA-BODY") && text.contains("BETA-BODY"),
+            "merged body ships whole: {text}"
+        );
+    }
+
     #[test]
     fn tail_reminder_gating_and_content() {
         let mk = |name: &str| {
@@ -385,6 +530,11 @@ mod tests {
             full_body_marker("/a/SKILL.md"),
             "[skill loaded] /a/SKILL.md"
         );
+        // Marker block: one line per path, sorted + deduped (canonical).
+        assert_eq!(
+            full_body_marker_block(&["/b/SKILL.md", "/a/SKILL.md", "/b/SKILL.md"]),
+            "[skill loaded] /a/SKILL.md\n[skill loaded] /b/SKILL.md"
+        );
         let mk = |text: &str, synthetic: bool| {
             let mut m = Message::user("id", text);
             m.synthetic = synthetic;
@@ -393,13 +543,121 @@ mod tests {
         let hit = mk("[skill loaded] /a/SKILL.md\n\nbody", true);
         assert!(loaded_marker_matches(
             std::slice::from_ref(&hit),
-            "/a/SKILL.md"
+            &["/a/SKILL.md"]
         ));
-        // Path-prefix collision guard: a marker for a LONGER path must not match.
-        assert!(!loaded_marker_matches(&[hit], "/a/SKILL.md.bak"));
-        // Non-synthetic or non-user messages never count.
+        // Path-prefix collision guard: a marker for a LONGER path must not
+        // match (whole-line parsing + set equality).
+        assert!(!loaded_marker_matches(
+            std::slice::from_ref(&hit),
+            &["/a/SKILL.md.bak"]
+        ));
+        // Set-exact gate: subset and superset both fail -> re-inject.
+        let both = mk(
+            "[skill loaded] /a/SKILL.md\n[skill loaded] /b/SKILL.md\n\nbody",
+            true,
+        );
+        let one = std::slice::from_ref(&hit);
+        let two = std::slice::from_ref(&both);
+        assert!(loaded_marker_matches(two, &["/a/SKILL.md", "/b/SKILL.md"]));
+        // Order-insensitive: marker block is canonicalized by sorting.
+        assert!(loaded_marker_matches(two, &["/b/SKILL.md", "/a/SKILL.md"]));
+        assert!(!loaded_marker_matches(two, &["/a/SKILL.md"]), "subset");
+        assert!(
+            !loaded_marker_matches(one, &["/a/SKILL.md", "/b/SKILL.md"]),
+            "superset"
+        );
+        // An unterminated final marker line never counts.
+        let bare = mk("[skill loaded] /a/SKILL.md", true);
+        assert!(!loaded_marker_matches(
+            std::slice::from_ref(&bare),
+            &["/a/SKILL.md"]
+        ));
+        // Non-synthetic or non-user messages never count; neither does an
+        // empty path set.
         let plain = mk("[skill loaded] /a/SKILL.md\n\nbody", false);
-        assert!(!loaded_marker_matches(&[plain], "/a/SKILL.md"));
-        assert!(!loaded_marker_matches(&[], "/a/SKILL.md"));
+        assert!(!loaded_marker_matches(
+            std::slice::from_ref(&plain),
+            &["/a/SKILL.md"]
+        ));
+        assert!(!loaded_marker_matches(&[], &["/a/SKILL.md"]));
+        assert!(!loaded_marker_matches(one, &[]), "empty set never matches");
+        assert!(!loaded_marker_matches(one, &[""]), "blank path ignored");
+    }
+
+    #[test]
+    fn source_paths_from_body_variants() {
+        // Compound prompt as `skill_resolve` stores it: discovery order,
+        // first occurrence wins on duplicates.
+        let compound = "> Source: /s/alpha/SKILL.md\n\nA\n\n> Source: /s/beta/SKILL.md\n\nB";
+        assert_eq!(
+            source_paths_from_body(compound),
+            vec!["/s/alpha/SKILL.md", "/s/beta/SKILL.md"]
+        );
+        assert_eq!(
+            source_paths_from_body("> Source: /s/a x/SKILL.md\n\nbody"),
+            vec!["/s/a x/SKILL.md"],
+            "paths may contain spaces (whole-line parse)"
+        );
+        assert_eq!(
+            source_paths_from_body("> Source: /s/a/SKILL.md\n\nA\n\n> Source: /s/a/SKILL.md\n\nA2"),
+            vec!["/s/a/SKILL.md"],
+            "duplicate path deduped"
+        );
+        assert!(source_paths_from_body("no prefix").is_empty());
+        assert!(source_paths_from_body("> Source: \n\nb").is_empty());
+        // Only paragraph-initial annotations count: a `> Source:` line in
+        // the middle of a body paragraph is body text, not a source marker.
+        assert_eq!(
+            source_paths_from_body("> Source: /s/a/SKILL.md\n\nkeep\n> Source: mid"),
+            vec!["/s/a/SKILL.md"]
+        );
+    }
+
+    #[tokio::test]
+    async fn compound_same_set_is_idempotent() {
+        let mut s = act_session();
+        s.set_skill(Some(
+            "> Source: /skills/alpha/SKILL.md\n\nALPHA-BODY\n\n\
+             > Source: /skills/beta/SKILL.md\n\nBETA-BODY"
+                .into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 1);
+        // Same set (even written in the opposite order) -> no re-injection.
+        s.set_skill(Some(
+            "> Source: /skills/beta/SKILL.md\n\nBETA-BODY\n\n\
+             > Source: /skills/alpha/SKILL.md\n\nALPHA-BODY"
+                .into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 1, "same set is one-shot");
+    }
+
+    #[tokio::test]
+    async fn compound_set_shrink_reinjectects_single_body() {
+        let mut s = act_session();
+        s.set_skill(Some(
+            "> Source: /skills/alpha/SKILL.md\n\nALPHA-BODY\n\n\
+             > Source: /skills/beta/SKILL.md\n\nBETA-BODY"
+                .into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 1);
+        // `$A $B` -> `$A`: the set shrank; the merged-marker message no
+        // longer matches, so a fresh single-path injection must land.
+        s.set_skill(Some(
+            "> Source: /skills/alpha/SKILL.md\n\nALPHA-BODY".into(),
+        ));
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 2, "shrink re-injects");
+        let text = s.messages[1].text();
+        assert!(
+            text.starts_with("[skill loaded] /skills/alpha/SKILL.md\n\nALPHA-BODY"),
+            "single-path marker + body: {text}"
+        );
+        assert!(
+            !text.contains("BETA-BODY"),
+            "shrunk injection carries only A: {text}"
+        );
     }
 }

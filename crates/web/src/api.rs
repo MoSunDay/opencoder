@@ -186,8 +186,8 @@ pub async fn post_prompt(
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
     };
-    if let Some(m) = body.model {
-        config.model = m;
+    if let Some(resp) = crate::api_ops::apply_prompt_model(&mut config, body.model.take()) {
+        return resp;
     }
     if let Some(a) = &body.agent {
         config.agent.default = a.clone();

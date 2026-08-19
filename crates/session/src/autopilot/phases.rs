@@ -11,7 +11,8 @@ use opencoder_store::SessionPatch;
 use crate::autopilot::prompts::{continuation_prompt, execute_prompt};
 use crate::autopilot::state::ApState;
 use crate::plan_handoff;
-use crate::runner::{new_id, run_loop, SessionEvent};
+use crate::runner::{new_id, SessionEvent};
+use crate::skill_lifecycle::run_loop_one_shot;
 use crate::SessionState;
 
 /// Switch the active agent, emitting an `AgentSwitch` event so surfaces stay
@@ -51,7 +52,7 @@ pub async fn run_plan_phase(
     let mut msg = Message::user(new_id(), continuation_prompt(&state.goal));
     msg.synthetic = true;
     session.record(msg).await;
-    run_loop(session, registry, on_event, false).await
+    run_loop_one_shot(session, registry, on_event, false).await
 }
 
 /// ACT phase: reset the transcript via plan→act handoff so ACT only sees the
@@ -86,7 +87,7 @@ pub async fn run_act_phase(
         switch_agent(session, "act", on_event);
         // The handoff message already carries execution directives
         // (HANDOFF_PREFIX), so no separate execute_prompt is injected.
-        run_loop(session, registry, on_event, false).await
+        run_loop_one_shot(session, registry, on_event, false).await
     } else {
         // No plan found (fallback execute prompt): the handoff branch above
         // persists its clear via the combined patch; this branch must clear
@@ -97,6 +98,6 @@ pub async fn run_act_phase(
         let mut msg = Message::user(new_id(), execute_prompt());
         msg.synthetic = true;
         session.record(msg).await;
-        run_loop(session, registry, on_event, false).await
+        run_loop_one_shot(session, registry, on_event, false).await
     }
 }

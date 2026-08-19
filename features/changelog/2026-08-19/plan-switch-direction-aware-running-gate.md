@@ -1,56 +1,55 @@
-Commit: (working-tree, post-3320cbb)
+Commit: (working-tree, post-7a9f188)
 
-# 模式切换 running 门改为方向感知：plan→act running 拦截+明确提示，act→plan running 纯切换，subagent-focus 视图放行模式切换键
+# 模式切换 running 门双向拦截（收回方向感知放行）
 
 ## 背景
 
-原 running 门（见 [mode-switch running-gate](../2026-08-08/mode-switch-running-gate.md)）对**所有方向**一刀切：`running || subagents_running > 0` 时 Shift+Tab / t+Tab 一律 no-op，flash 提示 `⏳ busy — switch when idle`。但两个方向的风险并不对称：
+7d3c056 把 Tab 键路径的 running 门改成「方向感知」：plan→act 运行中拦截（busy 提示），act→plan 运行中放行为**纯状态切换**（乐观 `fold_agent_switch` + `UiCmd::SwitchAgent` 入队，worker 单线程在 turn 边界消费）。这个前提错了：
 
-- **plan→act** 携带交接语义（transcript 折叠 + 立即执行），running 中执行确实不安全，一刀切有理。
-- **act→plan** 只是纯状态切换（一条 `UiCmd::SwitchAgent`）。worker 单线程、`run_session` 在 `process_cmd(Prompt)` 内同步执行——running 中入队的切换必然在下一 turn 边界才被消费，在飞 turn 以旧 agent 跑完，`sess.agent` 不会中途翻转。一刀切拒绝属于过度保守：用户在长 turn 中想回 plan 写需求也被挡。
-
-另外 subagent-focus（input_disabled）视图把 Alt+Tab / Ctrl+Shift+Tab / BackTab 全部屏蔽——用户聚焦子代理观察时无法离开/切换模式，视图状态反过来锁死了全局模式操作。
+- 产品契约是「**只有非 running 才能切模式，双向拦截**」。slash 路径（`/act` `/plan` `/act_clear_context` → `dispatch_mode_switch` → `worker::gate_switch`）从未放过行——运行中一律拒绝（`[switch] busy — retry when idle`）。方向感知门让键路径与 slash 路径**契约分叉**：同一产品动作按入口不同而行为不同。
+- 「worker 在 turn 边界消费、`sess.agent` 不会中途翻转」的论证只覆盖 worker 侧；UI 侧仍会在运行中乐观折叠（chip 翻转、`sys_tokens` 刷成下一模式的基线、stale `plan_submitted` 收敛），面板状态与实际执行 agent 在一轮之内分叉——这正是 [mode-switch running-gate](../2026-08-08/mode-switch-running-gate.md) 要结构性排除的「mid-stream fold 撕裂」。
+- 运行中放行还引入了一条「turn 进行中 UI 已切到 plan、transcript 已按 plan 语义折叠」的窗口：若随后 turn 以 Error/Done 收口或用户立刻提交，UI 状态机与 worker 状态机的相位差没有任何对账点。
 
 ## 根因
 
-- `app_loop::handle_switch_agent` 的门是方向无关的（`if *running || chat.subagents_running > 0` 早退），且注释/flash 都写成"延迟到 idle 边界"的含糊语义（实际从不自动补发）。
-- `key_handler.rs` 的 `input_disabled` 分支只放行 quit/cancel/help/scroll，模式切换键落在兜底 `KeyAction::None`。
+- `app_loop::handle_switch_agent` 的门条件从 `*running || subagents_running > 0` 收窄为 `plan_to_act && (...)`——把「act→plan 只是纯状态切换」当成等价安全的依据，但契约层面两条方向都必须在 idle 边界发生。
+- `worker::gate_switch` 文档与 `UiCmd::SwitchAgent` 臂的 DEFENSE-IN-DEPTH 注释同步改写为「该 gate 仅服务 slash 路径 / act→plan MAY be enqueued mid-turn」，固化了分叉叙事。
 
 ## 变更
 
-- **`crates/tui/src/app_loop.rs`（`handle_switch_agent`）**：门改为方向感知——`plan_to_act && (*running || chat.subagents_running > 0)` 才拦截，flash 改为明确的 `⏳ busy — plan switch blocked, retry when idle`（无自动补发，用户 idle 后重按；sys_tokens/input/running 均不动，agent 留在 plan）。act→plan 无论是否 running 自然落到 `sys_tokens_for` 刷新 + `fold_agent_switch` 乐观折叠 + 纯 `UiCmd::SwitchAgent` 入队；plan→act idle 交接分支只在早退未触发时可达。doc 注释整体重写（删除"deferred to the next clean idle boundary"等过时表述）。
-- **`crates/tui/src/worker.rs`**：`UiCmd::SwitchAgent` 臂 DEFENSE-IN-DEPTH 注释更新契约——app-loop 门现在只在 plan→act（handoff/no_handoff）方向拒绝 running 期间发送；act→plan 纯切换允许 running 中入队，依赖既有单线程"turn 边界才消费"论证。`gate_switch` doc 注明该 gate 现仅服务 slash 路径（`/act` `/plan` `/act_clear_context`），Shift+Tab 键路径用 `handle_switch_agent` 内的方向感知门（行为未变，slash 门仍双向拒绝）。
-- **`crates/tui/src/key_handler.rs`（input_disabled 分支）**：`bindings.help` 之后、兜底 `None` 之前放行三个模式切换绑定（顺序 clear → keep → raw BackTab；plain BackTab 无 CTRL/ALT 修饰符不会误匹配前两个绑定）。三者都汇入 `handle_switch_agent` 由方向感知门裁决；`/plan <content>` 复合提交分支在此视图刻意跳过（输入已禁用）。
+- **`crates/tui/src/app_loop.rs`（`handle_switch_agent`）**：门改回**双向拦截**——`if *running || chat.subagents_running > 0` 即拦截（不看方向）；busy flash 改为方向中性文案 `⏳ busy — mode switch blocked, retry when idle`（刻意不含 "plan" 子串，避免 render.rs `contains("plan")` 的 mode-flash 芯片误染为 plan 色）；拦截时无 cmd 发送、`sys_tokens`/input/cursor/running/agent 全部原样，仅 flash 反馈。**保留**：`sys_tokens_for` 刷新、`fold_agent_switch` 乐观折叠（含双击卫生：折叠同步收敛 stale `plan_submitted`）、idle 时 plan→act 的 `SwitchAndStart` 交接分支、`no_handoff`（t+Tab）语义、`SwitchOutcome::Quit`（worker 死亡）处理。doc 注释重写为双向拦截契约，与 slash 路径 `worker::gate_switch` 对齐（净 -3 行，794/800）。
+- **`crates/tui/src/worker.rs`**：`gate_switch` doc 删除「该 gate 现仅服务 slash 路径 / 键路径用方向感知门」表述，改为双向拦截统一契约（slash 与键路径同门）；`UiCmd::SwitchAgent` 臂 DEFENSE-IN-DEPTH 注释删除「act→plan MAY be enqueued mid-turn」，恢复「app-loop running 门双向拒绝发送，此臂只在干净 turn 边界可达」。
+- **`crates/tui/src/key_handler.rs`**：subagent-focus（`input_disabled`）分支**保留**三个模式切换绑定放行（switch_mode_clear / switch_mode_keep / raw BackTab——「离开视图」白名单仍有效），仅注释更新为双向拦截表述。
+- **`crates/tui/tests/`**：`switch_blocked_while_running.rs` 的共享 harness（`spawn_worker` / `wait_for_calls` / `wait_for_events` / mock 构造器）拆出到 `switch_blocked_harness/mod.rs`（91 行）——act→plan 集成测试改写后契约文件保持 ≤400 行。
+- **`agents/tui/index.md`**：运行中 running-gate 段落同步回双向拦截语义。
 
-## 测试清单
+## 测试覆盖（先红后绿）
 
-| 测试 | 层级 | 断言 |
-|---|---|---|
-| `switch_gate_tests::switch_while_running_is_noop_even_without_submitted_plan`（改） | unit | plan→act 无 plan + running 仍拦截：无 cmd、running 保持、input/sys_tokens 不动、agent 留 plan、flash 同时含 "busy" 与 "blocked" |
-| `switch_gate_tests::switch_act_to_plan_while_running_switches_state_only`（重写改名） | unit | act→plan running：恰好一条 `SwitchAgent("plan")`（绝无 SwitchAndStart）、agent 翻转、running 保持 true、input/cursor 原样、flash 含 "plan mode"、`sys_tokens == sys_tokens_for("plan", …)` |
-| `switch_gate_tests::switch_no_clear_while_running_is_noop`（改） | unit | plan→act no_handoff running 仍拦截；flash 加 "blocked" 断言 |
-| `switch_gate_tests::switch_while_subagent_running_is_noop_even_when_running_false`（改） | unit | plan→act + subagents_running=1 + running=false 仍拦截（doc 换方向感知表述） |
-| `switch_gate_tests::switch_act_to_plan_while_subagent_live_pure_switches`（新） | unit | running=false + subagents_running=1 + act→plan：恰好一条纯切换、agent 翻转、无 turn 启动、input 保留 |
-| `switch_gate_tests::switch_act_to_plan_no_clear_while_running_switches_state_only`（新） | unit | no_handoff=true + running + act→plan：纯切换，无 SwitchAndStart |
-| `key_handler_disabled_mode_tests::handle_key_disabled_allows_backtab_mode_switch`（新） | unit | input_disabled 下 BackTab：plan→`SwitchAgent("act")`、act→`SwitchAgent("plan")` |
-| `key_handler_disabled_mode_tests::handle_key_disabled_backtab_skips_plan_compound_submit`（新） | unit | input 预填 `/plan do the thing` + BackTab → 纯 `SwitchAgent("plan")`，input 原样（复合提交分支跳过） |
-| `key_handler_disabled_mode_tests::handle_key_disabled_allows_bound_mode_switch_keys`（新） | unit | Alt+Tab（Tab/BackTab+ALT 两变体）→ `SwitchAgent`；Ctrl+Shift+Tab（BackTab+CONTROL、Tab+CONTROL\|SHIFT 两变体）→ `SwitchAgentNoClear` |
-| `app_loop_bugfix_tests::plan_running_noop_does_not_corrupt_sys_tokens`（改） | unit | 行为不变（sys_tokens 不动）；doc/断言换新文案（含 "plan switch blocked"） |
-| `app_loop_tests::switch_plan_to_act_while_running_is_noop`（改，doc-only） | unit | 行为不变（plan→act running 仍拦截）；doc 删除"覆盖 act→plan / 延迟 idle"的过时一刀切表述 |
-| `tests/switch_blocked_while_running.rs::plan_backtab_blocked_while_running_then_handoff_after_idle`（新） | integration | 挂起 LLM call 的 plan turn 中 BackTab：无 AgentSwitch/TranscriptReset/PlanHandoff、恰 1 次 LLM 调用；TurnDone 后重按 → agent=="act"（内存+store）、transcript 折叠为单条计划消息、PlanHandoff 卡片、act 请求只见 handoff 消息 |
-| `tests/switch_blocked_while_running.rs::act_to_plan_pure_switch_consumed_at_turn_boundary`（新） | integration | act turn 中入队纯 `SwitchAgent("plan")`：TurnDone(act) 严格先于 AgentSwitch(plan)、恰 1 次 LLM 调用、plan phase 重置、store agent=="plan" |
-| `key_handler_tests.rs` 移除 `handle_key_disabled_blocks_alt_tab` / `handle_key_disabled_blocks_ctrl_shift_tab`（旧断言与新放行语义冲突，被上面的放行测试取代） | unit | — |
+| 功能 | 测试名 | 文件 | 断言要点 |
+|------|--------|------|----------|
+| act→plan 运行中拦截（改写，原 `switch_act_to_plan_while_running_switches_state_only`） | `switch_act_to_plan_while_running_is_noop` | `crates/tui/src/app_loop_tests/switch_gate_tests.rs` | 无 cmd 发送、running 保持 true、agent 留 act、input/cursor/sys_tokens(哨兵 7) 原样、flash 含 "busy"+"blocked" |
+| act→plan 运行中拦截（t+Tab，改写，原 `..._no_clear_while_running_switches_state_only`） | `switch_act_to_plan_no_clear_while_running_is_noop` | 同上 | 同上（no_handoff 不绕门；sys_tokens 哨兵 11） |
+| act→plan 存活 subagent 拦截（改写，原 `..._while_subagent_live_pure_switches`） | `switch_act_to_plan_while_subagent_live_is_noop` | 同上 | running=false + subagents_running=1 仍拦：无 cmd、agent 留 act、sys_tokens(哨兵 42)/input 原样、flash busy/blocked |
+| plan→act 运行中拦截（保留锚） | `switch_while_running_is_noop_even_without_submitted_plan` / `switch_no_clear_while_running_is_noop` / `switch_while_subagent_running_is_noop_even_when_running_false` / `switch_plan_to_act_while_running_is_noop`（mod.rs） | 同上 + `app_loop_tests/mod.rs` | 无 cmd、agent 留 plan、sys_tokens/input 原样、flash busy/blocked（断言文案随新文案中性化） |
+| sys_tokens 不被污染（保留锚，文案断言更新） | `plan_running_noop_does_not_corrupt_sys_tokens` | `crates/tui/src/app_loop_bugfix_tests.rs` | 拦截时 `sys_tokens` 保持 plan 基线哨兵；flash 含 "busy"（tick 对齐）+"mode switch blocked" |
+| idle 双击回归（保留锚） | `switch_act_to_plan_collapses_stale_plan_submitted_synchronously` / `shift_tab_double_tap_second_strike_is_pure_switch_and_keeps_input` | `switch_gate_tests.rs` | tap1 同步收敛 stale `plan_submitted`；tap2 纯 `SwitchAgent`×2、不排空 input、不启 turn |
+| idle 交接 / no_handoff（保留锚） | `switch_plan_to_act_while_idle_triggers_handoff` / `switch_no_clear_idle_skips_handoff` / `switch_plan_to_act_unsubmitted_is_pure_switch` | `app_loop_tests/mod.rs` + `switch_gate_tests.rs` | idle 语义不变：`SwitchAndStart` 交接 / no_handoff 不启 turn 不排空 |
+| 集成：act turn 运行中按键（改写，原 `act_to_plan_pure_switch_consumed_at_turn_boundary`） | `act_backtab_blocked_while_running_then_switch_after_idle` | `crates/tui/tests/switch_blocked_while_running.rs` | 挂起 act turn 中无 AgentSwitch、恰 1 次 LLM 调用；TurnDone(act) 后 idle 重按 → TurnDone(act) 严格先于 AgentSwitch(plan)、agent 内存+store 翻转 plan、plan phase 重置、仍恰 1 次调用 |
+| 集成：plan turn 运行中按键（保留锚） | `plan_backtab_blocked_while_running_then_handoff_after_idle` | 同上 | 拦截窗口无 AgentSwitch/TranscriptReset/PlanHandoff；idle 重按 → 完整 handoff（折叠单条计划消息 + PlanHandoff 卡片 + 恰 2 次调用） |
+| key handler 层（保留锚，仅注释更新） | `handle_key_disabled_allows_backtab_mode_switch` / `handle_key_disabled_backtab_skips_plan_compound_submit` / `handle_key_disabled_allows_bound_mode_switch_keys` | `crates/tui/src/key_handler_disabled_mode_tests.rs` | `input_disabled` 下三绑定仍返回 `KeyAction::SwitchAgent(_)/None`——门在 `handle_switch_agent`，不在 key handler |
 
-- 全量回归：`cargo test -p opencoder-tui` → 1513 passed / 0 failed（1443 unit + 70 integration）；`cargo test -p opencoder-session` 全绿。
-- clippy：`cargo clippy --workspace --all-targets` → 0 warning / 0 error。
-- 行数：均 ≤800（`app_loop.rs` 792 / `switch_gate_tests.rs` 581 / `key_handler_tests.rs` 694 / `app_loop_bugfix_tests.rs` 757；新文件 `key_handler_disabled_mode_tests.rs` 123、`tests/switch_blocked_while_running.rs` 383 均 ≤400）
+- 红（改测试、实现未动）：`cargo test -p opencoder-tui --lib -- switch_gate` → 6 passed / **3 failed**（`switch_act_to_plan_while_running_is_noop` / `switch_act_to_plan_no_clear_while_running_is_noop` / `switch_act_to_plan_while_subagent_live_is_noop`，均 panic 于 "no command should be sent ..."——旧实现入队了纯切换）。
+- 绿（改实现后）：`switch_gate` 9 passed / 0 failed；`plan_running_noop` 1 passed；`--test switch_blocked_while_running` 2 passed / 0 failed。
+- 全量回归：`cargo test -p opencoder-tui` → **1518 passed / 0 failed**（1448 lib + 70 integration，24 个测试二进制）；`cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 0 警告 / EXIT=0。
+- 行数：`app_loop.rs` 794 / 800（净 -3）；`switch_gate_tests.rs` 580 / 800；`switch_blocked_while_running.rs` 351 + 拆出的共享 harness `switch_blocked_harness/mod.rs` 91（均 ≤400，harness 拆分保持契约文件在新文件上限内）。
 
 ## Impact Surface
 
-- TUI 用户：plan turn 运行中按 Shift+Tab/t+Tab 得到明确的"plan switch blocked, retry when idle"提示（无自动补发，idle 后重按即交接）；act turn 运行中按 Shift+Tab/t+Tab 立即切到 plan（chip 即时翻转，worker 在 turn 边界应用并重置 plan phase，不启动新 turn）；聚焦运行中 subagent 视图时 Alt+Tab / Ctrl+Shift+Tab / Shift+Tab 可正常离开或切换模式。
-- 不影响：slash 路径（`/act` `/plan` `/act_clear_context`）仍走 `worker::gate_switch` 双向拒绝；web `POST /agent` drain 中 409 不变；worker `SwitchAgent` 臂行为不变（仅注释/契约更新）。
+- TUI 用户：**任何方向**的模式切换（Shift+Tab / t+Tab / Alt+Tab / Ctrl+Shift+Tab）在 turn 运行中或 subagent 存活时统一收到 `⏳ busy — mode switch blocked, retry when idle` 提示，无 cmd 发送、无自动补发；idle 边界重按即按 idle 语义执行（plan→act 已提交计划 → 交接；否则纯切换）。act turn 运行中「立即切到 plan」的行为收回。
+- **mid-stream fold 撕裂路径随之不可达**：运行中不再乐观折叠/不再入队 `SwitchAgent`，UI（chip/sys_tokens/transcript 折叠相位）与 worker 执行 agent 在一轮内分叉的窗口被结构性关闭；`UiCmd::SwitchAgent` 臂只在干净 turn 边界可达（DEFENSE-IN-DEPTH 注释恢复）。
+- 不影响：slash 路径（`/act` `/plan` `/act_clear_context` → `worker::gate_switch`）本就双向拒绝，现与键路径同契约；subagent-focus 视图三个模式切换键绑定仍放行（裁决仍在 `handle_switch_agent`）；web `POST /agent` drain 中 409 不变；worker `SwitchAgent`/`SwitchAndStart` 臂行为不变（仅注释/契约更新）。
 
 ## Related Docs
 
-- [2026-08-08/mode-switch-running-gate.md](../2026-08-08/mode-switch-running-gate.md)（历史一刀切门，保留原样）
-- `agents/tui/index.md`（运行门/key_handler 段落同步方向感知语义）
+- [2026-08-08/mode-switch-running-gate.md](../2026-08-08/mode-switch-running-gate.md)（双向拦截的原始契约，本轮收回后重新生效）
+- `agents/tui/index.md`（运行门/key_handler 段落同步双向拦截语义）

@@ -24,8 +24,24 @@ pub enum VerifyVerdict {
     MoreWork,
     /// The model said "yes" — the goal is fully achieved.
     Complete,
-    /// Every retry produced an unparseable answer.
-    Malformed,
+}
+
+/// Why [`crate::autopilot::verify`] exhausted its retry budget. The two
+/// causes need different remedies — `Unreachable` points at transport/auth
+/// (network, rate limits, bad key), `Unparseable` at the judge model itself
+/// answering with more than the single requested token. Both surface as
+/// `ApOutcome::Aborted` with a cause-specific reason (no new event/outcome
+/// variants) so logs and CLI output can tell them apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyFailure {
+    /// Every attempt answered, but no answer parsed to a verdict.
+    Unparseable { attempts: u32 },
+    /// Every attempt failed before an answer arrived (transport/API error).
+    Unreachable {
+        attempts: u32,
+        /// The last transport error, verbatim — the freshest diagnosis.
+        last_error: String,
+    },
 }
 
 /// Terminal outcome of [`crate::autopilot::drive`].

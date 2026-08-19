@@ -4,11 +4,15 @@
 //! "missing directory is not an error" guarantee the TUI picker relies on.
 
 use std::fs;
+use std::sync::Mutex;
 
 use opencoder_core::skill::{
     discover_in, parse_skill, seed_builtin_skills_in, seed_dep_gated_skills_in,
 };
 use opencoder_core::{discover_skills, skills_dir, Skill, DEPS_SENTINEL};
+
+// Env mutation is process-global; serialize the HOME-manipulating tests.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn write(path: &std::path::Path, contents: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -17,13 +21,50 @@ fn write(path: &std::path::Path, contents: &str) {
 
 #[test]
 fn skills_dir_points_at_global_home() {
-    // Must end with .opencoder/skills (the binary's own config home).
+    let _g = ENV_LOCK.lock().unwrap();
+    // Isolate HOME so the assertion targets the temp home, not the runner's.
+    let home = tempfile::tempdir().unwrap();
+    let prev_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", home.path());
     let dir = skills_dir();
+    match prev_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let dir = dir.expect("with HOME set, skills_dir must resolve");
     let s = dir.to_string_lossy();
     assert!(
         s.ends_with(".opencoder/skills"),
         "unexpected skills_dir: {s}"
     );
+    assert!(
+        dir.starts_with(home.path()),
+        "skills_dir must live under the resolved home: {s}"
+    );
+}
+
+/// No-HOME contract: `skills_dir` never fabricates a *relative* fallback.
+/// (`dirs::home_dir` may still resolve a passwd home when `HOME` is unset, so
+/// the pinned invariant is "Some(absolute) or None" — the old bug returned a
+/// relative `./.opencoder/skills` here, which made seeding WRITE INTO CWD.)
+#[test]
+fn skills_dir_without_home_is_none_or_absolute_never_cwd() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let prev_home = std::env::var_os("HOME");
+    std::env::remove_var("HOME");
+    let dir = skills_dir();
+    match prev_home {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    if let Some(d) = dir {
+        assert!(
+            d.is_absolute(),
+            "skills_dir must never fall back to a relative cwd path: {}",
+            d.display()
+        );
+    }
 }
 
 #[test]

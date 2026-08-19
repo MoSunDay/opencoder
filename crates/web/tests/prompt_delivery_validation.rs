@@ -50,7 +50,7 @@ async fn post(
             images: Vec::new(),
             delivery: delivery.map(String::from),
             agent: None,
-            model: Some("m/g".into()),
+            model: Some("mm/gg".into()),
             skill: None,
         }),
     )
@@ -139,4 +139,90 @@ async fn blank_delivery_is_a_400() {
     let (status, v) = post(&state, "s-blank", Some("   ")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {v}");
     assert_eq!(v["ok"], false);
+}
+
+/// Call `post_prompt` with an explicit `model` override and return
+/// (status, body).
+async fn post_model(
+    state: &Arc<opencoder_web::AppState>,
+    sid: &str,
+    model: &str,
+) -> (StatusCode, serde_json::Value) {
+    let resp = opencoder_web::api::post_prompt(
+        axum::extract::State(state.clone()),
+        axum::extract::Path(sid.to_string()),
+        axum::Json(opencoder_web::api::PromptBody {
+            prompt: "hi".into(),
+            images: Vec::new(),
+            delivery: None,
+            agent: None,
+            model: Some(model.into()),
+            skill: None,
+        }),
+    )
+    .await
+    .into_response();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    (status, v)
+}
+
+/// A malformed `model` override (empty / one-sided / short sides) must be a
+/// structured 400 naming the invalid value — never silently applied to the
+/// drain's config (where it would resolve to a broken model id).
+#[tokio::test]
+async fn malformed_model_override_is_a_400() {
+    let state = state().await;
+    for bad in ["", "a/b"] {
+        let (status, v) = post_model(&state, "s-bad-model", bad).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "model {bad:?}: {v}");
+        assert_eq!(v["ok"], false);
+        let err = v["error"].as_str().unwrap_or_default();
+        assert!(
+            err.contains("invalid model") && err.contains(bad) && err.contains("provider/model"),
+            "error must name the model {bad:?} and the expected format: {err}"
+        );
+    }
+}
+
+/// The model 400 must take precedence over — and stay distinct from — the
+/// later api-key failure: with no injected client, a VALID model proceeds to
+/// endpoint resolution and fails there with a 500 mentioning the key, while a
+/// malformed model 400s before any of that.
+#[tokio::test]
+async fn model_error_precedes_and_differs_from_api_key_error() {
+    // No client_override + isolated config home (env_get returns None there),
+    // so endpoint resolution deterministically fails on the missing key.
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let workdir = tempfile::tempdir().unwrap().keep();
+    let state = Arc::new(opencoder_web::AppState {
+        client_override: None,
+        store,
+        workdir: workdir.clone(),
+        handles: opencoder_web::handle::new_handle_map(),
+    });
+    let _iso = opencoder_core::scoped_config_home(workdir);
+
+    let (status, v) = post_model(&state, "s-good-model", "ab/cd").await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {v}");
+    let key_err = v["error"].as_str().unwrap_or_default().to_string();
+    assert!(
+        key_err.contains("api_key") || key_err.contains("API key"),
+        "valid model must reach endpoint resolution and fail on the key: {key_err}"
+    );
+    assert!(
+        !key_err.contains("invalid model"),
+        "api-key failure must not be conflated with the model error: {key_err}"
+    );
+
+    let (status, v) = post_model(&state, "s-bad-model2", "ab/c").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {v}");
+    let model_err = v["error"].as_str().unwrap_or_default().to_string();
+    assert!(
+        model_err.contains("invalid model") && model_err.contains("ab/c"),
+        "malformed model must 400 with its own message: {model_err}"
+    );
 }

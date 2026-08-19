@@ -7,8 +7,8 @@ Run:  scripts/e2e-glm.sh [binary]        # or: python3 scripts/e2e_glm.py [binar
 Each scenario asserts an actual business contract (fork copy integrity, bundle
 roundtrip, resume context-load, compaction content-awareness, subagent DB
 tracking, plan read-only, web steer+queue delivery) rather than a surface
-marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios}.py for per-contract
-rationale. Stdlib only; no third-party Python dependency.
+marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios,config_scenarios}.py
+for per-contract rationale. Stdlib only; no third-party Python dependency.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e2e import cli_scenarios, web_scenarios  # noqa: E402
+from e2e import cli_scenarios, config_scenarios, web_scenarios  # noqa: E402
 from e2e.lib import Counter, ensure_auth, resolve_bin  # noqa: E402
 
 
@@ -42,6 +42,9 @@ def main() -> int:
         total += cli_scenarios.run_all(bin_path, api_key)
     if args.only != "cli" and not args.skip_web:
         total += web_scenarios.run_all(bin_path, api_key)
+    # Key-free config/env scenarios (E20): never call the LLM, so they run in
+    # EVERY mode — deliberately outside the cli/web gates above.
+    total += config_scenarios.run_all(bin_path)
 
     print("\n" + "=" * 60)
     print(f"e2e result: {total.passed} passed, {total.failed} failed, {total.skipped} skipped")

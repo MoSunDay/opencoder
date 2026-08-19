@@ -1,9 +1,10 @@
 //! Mode-switch keys in the subagent-focus (input-disabled) view. Leaving or
 //! switching mode must never be blocked by view state: switch_mode_clear /
-//! switch_mode_keep bindings and a raw BackTab all stay live and funnel into
-//! `handle_switch_agent`, whose direction-aware running gate decides
-//! (plan→act intercepted with a busy hint, act→plan pure switch). Split out
-//! of `key_handler_tests.rs` to keep that file under the 800-line cap.
+//! switch_mode_keep / switch_mode bindings and a raw BackTab all stay live
+//! and funnel into `handle_switch_agent`, whose running gate blocks both
+//! directions while busy (plan→act and act→plan alike get the busy hint).
+//! Split out of `key_handler_tests.rs` to keep that file under the 800-line
+//! cap.
 
 use super::*;
 
@@ -120,4 +121,36 @@ fn handle_key_disabled_allows_bound_mode_switch_keys() {
             other => panic!("ctrl+shift+tab must switch mode, got {other:?}"),
         }
     }
+}
+
+/// `switch_mode` (default ctrl+t) must ALSO stay live in the input-disabled
+/// (subagent-focus) view: it returns `SwitchAgentNoClear` exactly like the
+/// enabled path — the whitelist omission made the user-customized chord dead
+/// while a subagent was focused. Both toggle directions are covered.
+#[test]
+fn handle_key_disabled_allows_switch_mode_binding() {
+    let mut input = String::new();
+
+    // plan -> act
+    match disabled_mode_key(
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+        "plan",
+        &mut input,
+    ) {
+        KeyAction::SwitchAgentNoClear(n) => assert_eq!(n, "act"),
+        other => panic!("ctrl+t must switch mode from the disabled view, got {other:?}"),
+    }
+
+    // act -> plan
+    match disabled_mode_key(
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL),
+        "act",
+        &mut input,
+    ) {
+        KeyAction::SwitchAgentNoClear(n) => assert_eq!(n, "plan"),
+        other => panic!("ctrl+t must switch mode from the disabled view, got {other:?}"),
+    }
+
+    // Input stays untouched — no composer mutation from the disabled view.
+    assert!(input.is_empty());
 }

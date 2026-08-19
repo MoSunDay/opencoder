@@ -318,3 +318,125 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].seq, Some(seq_pending));
 }
+
+/// Queue-drain invariant: a row already consumed into the transcript
+/// (`recorded = 1`) must NEVER be re-claimed by `claim_next_queue`, even when
+/// an error-recovery `unpromote_inputs` flipped it back to pending (that path
+/// only clears `promoted_seq`, leaving `recorded` as-is). Re-serving it would
+/// duplicate the prompt in the transcript.
+///
+/// Repro: enqueue two queue rows → claim row 1 → mark it recorded → unpromote
+/// it (recovery path) → the next claim must serve row 2, never row 1 again.
+/// Pre-fix this is red: the claim SELECT only checks `promoted_seq IS NULL`,
+/// so row 1 (pending + recorded=1) is re-served first.
+#[tokio::test]
+async fn claim_next_queue_never_reclaims_recorded_rows() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let seq1 = store
+        .admit_input(&mk_input("s", "q-1", Delivery::Queue))
+        .await
+        .unwrap();
+    let seq2 = store
+        .admit_input(&mk_input("s", "q-2", Delivery::Queue))
+        .await
+        .unwrap();
+
+    // Consume row 1: claim + record, then simulate the error-recovery
+    // unpromote that returns the row to pending without touching recorded.
+    let (claimed1, input1) = store
+        .claim_next_queue("s")
+        .await
+        .unwrap()
+        .expect("first claim serves the oldest pending row");
+    assert_eq!(claimed1, seq1);
+    assert_eq!(input1.id, "q-1");
+    store.mark_inputs_recorded("s", &[seq1]).await.unwrap();
+    store.unpromote_inputs("s", &[seq1]).await.unwrap();
+    {
+        let conn = store.conn().await.unwrap();
+        assert_eq!(
+            input_state(&conn, seq1).await,
+            (None, 1),
+            "fixture: row 1 is pending again but stays recorded=1"
+        );
+    }
+
+    // The second claim must serve row 2 — row 1 is consumed, not pending.
+    let (claimed2, input2) = store
+        .claim_next_queue("s")
+        .await
+        .unwrap()
+        .expect("second claim must serve the genuinely pending row 2");
+    assert_eq!(
+        claimed2, seq2,
+        "claim must skip the recorded=1 row and serve row 2"
+    );
+    assert_eq!(input2.id, "q-2");
+
+    // Row 1 must be untouched by the second claim: still pending, still
+    // recorded — never re-promoted, never reset to recorded=0.
+    {
+        let conn = store.conn().await.unwrap();
+        assert_eq!(
+            input_state(&conn, seq1).await,
+            (None, 1),
+            "the recorded row must not be re-promoted by claim_next_queue"
+        );
+    }
+
+    // Nothing genuinely pending remains: row 1 is consumed, row 2 promoted.
+    assert!(
+        store.claim_next_queue("s").await.unwrap().is_none(),
+        "no further claimable row may exist (row 1 is recorded, row 2 promoted)"
+    );
+}
+
+/// Same invariant for `promote_next_queued`: a consumed (recorded=1) row that
+/// error recovery returned to pending must be skipped, not re-promoted.
+/// Pre-fix this is red: it re-promotes row 1 and returns its seq.
+#[tokio::test]
+async fn promote_next_queued_never_repromotes_recorded_rows() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s", 1).await;
+
+    let seq1 = store
+        .admit_input(&mk_input("s", "q-1", Delivery::Queue))
+        .await
+        .unwrap();
+    let seq2 = store
+        .admit_input(&mk_input("s", "q-2", Delivery::Queue))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.promote_next_queued("s").await.unwrap(),
+        Some(seq1),
+        "first promote serves the oldest pending row"
+    );
+    store.mark_inputs_recorded("s", &[seq1]).await.unwrap();
+    store.unpromote_inputs("s", &[seq1]).await.unwrap();
+
+    // The next promote must target row 2, never the consumed row 1.
+    assert_eq!(
+        store.promote_next_queued("s").await.unwrap(),
+        Some(seq2),
+        "promote_next_queued must skip the recorded=1 row and target row 2"
+    );
+    {
+        let conn = store.conn().await.unwrap();
+        assert_eq!(
+            input_state(&conn, seq1).await,
+            (None, 1),
+            "the recorded row must not be re-promoted by promote_next_queued"
+        );
+    }
+
+    // Nothing left to promote.
+    assert_eq!(
+        store.promote_next_queued("s").await.unwrap(),
+        None,
+        "no further promotable row may exist (row 1 is recorded, row 2 promoted)"
+    );
+}

@@ -686,18 +686,6 @@ pub(crate) mod tests;
 #[path = "app_loop_bugfix_tests.rs"]
 mod bugfix_tests;
 
-#[cfg(test)]
-#[path = "app_loop_act_clear_repro_tests.rs"]
-mod act_clear_repro_tests;
-
-#[cfg(test)]
-#[path = "app_loop_act_clear_ts_origin_tests.rs"]
-mod act_clear_ts_origin_tests;
-
-#[cfg(test)]
-#[path = "app_loop_legacy_resume_tests.rs"]
-mod legacy_resume_tests;
-
 #[path = "app_loop_model.rs"]
 mod app_loop_model;
 

@@ -507,6 +507,10 @@ mod skill_outcome_tests;
 
 mod done_error_mirror_tests;
 
+mod act_clear_repro_tests;
+mod act_clear_ts_origin_tests;
+mod legacy_resume_tests;
+
 mod display_title_tests;
 
 #[cfg(test)]

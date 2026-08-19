@@ -22,10 +22,22 @@ use super::skills_dir;
 const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
     (
         "task-plan",
-        &[(
-            "SKILL.md",
-            include_str!("../../assets/skills/task-plan/SKILL.md"),
-        )],
+        &[
+            (
+                "SKILL.md",
+                include_str!("../../assets/skills/task-plan/SKILL.md"),
+            ),
+            (
+                "references/any-home-plan-run.md",
+                include_str!("../../assets/skills/task-plan/references/any-home-plan-run.md"),
+            ),
+            (
+                "references/launch-closure-plan-checklist.md",
+                include_str!(
+                    "../../assets/skills/task-plan/references/launch-closure-plan-checklist.md"
+                ),
+            ),
+        ],
     ),
     (
         "do-and-done",
@@ -140,18 +152,7 @@ pub fn seed_builtin_skills() {
 /// single source of seeding logic — the public [`seed_builtin_skills`] entry
 /// point merely resolves `~/.opencoder/skills` and forwards here.
 pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
-    for (skill_dir, files) in BUILTIN_SKILLS {
-        let dir = root.join(skill_dir);
-        std::fs::create_dir_all(&dir)?;
-        for (name, content) in *files {
-            let path = dir.join(name);
-            if path.exists() {
-                continue;
-            }
-            std::fs::write(&path, content)?;
-        }
-    }
-    Ok(())
+    seed_skill_packs(root, BUILTIN_SKILLS)
 }
 
 /// Seed the dependency-gated skills (ssh-pty) into
@@ -182,13 +183,22 @@ pub fn seed_dep_gated_skills_in(root: &Path) -> std::io::Result<()> {
     if !root.join(DEPS_SENTINEL).exists() {
         return Ok(());
     }
-    for (skill_dir, files) in DEP_GATED_SKILLS {
+    seed_skill_packs(root, DEP_GATED_SKILLS)
+}
+
+/// Incrementally write embedded skill packs, including nested bundled
+/// resources such as `references/*.md`, without replacing user-owned files.
+fn seed_skill_packs(root: &Path, packs: &[(&str, &[(&str, &str)])]) -> std::io::Result<()> {
+    for (skill_dir, files) in packs {
         let dir = root.join(skill_dir);
         std::fs::create_dir_all(&dir)?;
         for (name, content) in *files {
             let path = dir.join(name);
             if path.exists() {
                 continue;
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
             }
             std::fs::write(&path, content)?;
         }

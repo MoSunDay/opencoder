@@ -311,7 +311,11 @@ fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
         "act",
         &workdir,
     );
-    assert_eq!(active_skill.as_deref(), Some("haiku"), "name from Source prefix");
+    assert_eq!(
+        active_skill.as_deref(),
+        Some("haiku"),
+        "name from Source prefix"
+    );
     assert_eq!(active_skill_body.as_deref(), Some(body.as_str()));
     assert!(
         sys_tokens > 0,

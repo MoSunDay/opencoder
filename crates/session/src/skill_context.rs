@@ -352,7 +352,9 @@ mod tests {
             "notice carries remaining count + 1-based next line: {}",
             &out[out.len().saturating_sub(200)..]
         );
-        let prefix_end = out.find("\n[INCOMPLETE SKILL]").expect("notice after prefix");
+        let prefix_end = out
+            .find("\n[INCOMPLETE SKILL]")
+            .expect("notice after prefix");
         assert!(
             opencoder_llm::estimate(&out[..prefix_end]) <= 20_000,
             "prefix stays within budget"
@@ -379,14 +381,20 @@ mod tests {
 
     #[test]
     fn full_body_marker_and_scan_semantics() {
-        assert_eq!(full_body_marker("/a/SKILL.md"), "[skill loaded] /a/SKILL.md");
+        assert_eq!(
+            full_body_marker("/a/SKILL.md"),
+            "[skill loaded] /a/SKILL.md"
+        );
         let mk = |text: &str, synthetic: bool| {
             let mut m = Message::user("id", text);
             m.synthetic = synthetic;
             m
         };
         let hit = mk("[skill loaded] /a/SKILL.md\n\nbody", true);
-        assert!(loaded_marker_matches(std::slice::from_ref(&hit), "/a/SKILL.md"));
+        assert!(loaded_marker_matches(
+            std::slice::from_ref(&hit),
+            "/a/SKILL.md"
+        ));
         // Path-prefix collision guard: a marker for a LONGER path must not match.
         assert!(!loaded_marker_matches(&[hit], "/a/SKILL.md.bak"));
         // Non-synthetic or non-user messages never count.
@@ -394,5 +402,4 @@ mod tests {
         assert!(!loaded_marker_matches(&[plain], "/a/SKILL.md"));
         assert!(!loaded_marker_matches(&[], "/a/SKILL.md"));
     }
-
 }

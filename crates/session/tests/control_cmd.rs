@@ -634,3 +634,134 @@ async fn clear_context_compound_runs_rest_as_prompt() {
         .count();
     assert_eq!(assistant_turns, 1, "one assistant turn for 'review'");
 }
+
+/// `/act_clear_context` in plan mode keeps the plan even when the phase state
+/// was reset (counter=0, snapshot=None — e.g. after a manual switch back to
+/// plan mode): the handoff falls back to the newest plan-TAGGED assistant
+/// message in the transcript, so the context is not wiped.
+#[tokio::test]
+async fn clear_context_plan_mode_keeps_plan_after_phase_reset() {
+    let store = mem_store().await;
+    seed(&store, "clear-reset", "plan").await;
+
+    // Transcript: an act-mode answer, then a plan-mode answer tagged `plan`.
+    let msgs = vec![
+        Message::user("u1", "do task X"),
+        {
+            let mut m = Message::assistant("a1");
+            m.blocks.push(ContentBlock::text("task done"));
+            m.agent = Some("act".into());
+            m
+        },
+        Message::user("u2", "plan feature Y"),
+        {
+            let mut m = Message::assistant("a2");
+            m.blocks
+                .push(ContentBlock::text("## Plan\n1. do X\n2. do Y"));
+            m.agent = Some("plan".into());
+            m
+        },
+    ];
+    store.append_messages("clear-reset", &msgs).await.unwrap();
+
+    // ClearContext with a preserved plan now EXECUTES it — push a mock
+    // response for the execution turn.
+    let mock =
+        Arc::new(MockChatClient::new().push_script(vec![done_turn("done")])) as Arc<dyn ChatStream>;
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "clear-reset",
+        resolve_agent("plan").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+    // The phase state was reset by a manual switch back to plan mode:
+    // counter and snapshot are both cleared, yet the plan must survive.
+    session.reset_plan_phase();
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, "/act_clear_context".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    {
+        let evs = events.lock().unwrap();
+        assert_eq!(session.agent.name, "act", "switched to act");
+        assert!(session.handoff_seq.is_some(), "handoff_seq set");
+        // The plan-tagged answer was handed forward — NOT the blank sentinel.
+        assert_eq!(
+            session.handoff_plan.as_deref(),
+            Some("## Plan\n1. do X\n2. do Y"),
+            "plan must be handed forward from the transcript fallback"
+        );
+        assert!(
+            session.messages[0].text().contains("## Plan"),
+            "transcript head carries the plan, not the fresh-start marker"
+        );
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::PlanHandoff(p) if p.contains("## Plan"))),
+            "PlanHandoff emitted carrying the plan"
+        );
+    }
+}
+
+/// Anti-fabrication regression: in act mode with NO plan (only an act-tagged
+/// assistant answer in the transcript), `/act_clear_context` must still take
+/// the blank fresh-start path — the message-level fallback never mistakes an
+/// act-mode answer for a plan.
+#[tokio::test]
+async fn clear_context_act_mode_no_plan_still_blank_fresh_start() {
+    let store = mem_store().await;
+    seed(&store, "clear-act", "act").await;
+
+    let msgs = vec![Message::user("u1", "do task X"), {
+        let mut m = Message::assistant("a1");
+        m.blocks.push(ContentBlock::text("task done"));
+        m.agent = Some("act".into());
+        m
+    }];
+    store.append_messages("clear-act", &msgs).await.unwrap();
+
+    let mock = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "clear-act",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+    session.messages = msgs.clone();
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, "/act_clear_context".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    {
+        let evs = events.lock().unwrap();
+        assert_eq!(
+            session.handoff_plan.as_deref(),
+            Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
+            "act mode with no plan must keep the blank fresh-start sentinel"
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, SessionEvent::PlanHandoff(_))),
+            "no PlanHandoff when there is no plan-tagged answer"
+        );
+    }
+}

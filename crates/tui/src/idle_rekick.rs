@@ -34,11 +34,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_store_reports_no_stranded_rows() {
-        let store: Arc<dyn Store> = Arc::new(
-            opencoder_store::LibsqlStore::open_memory()
-                .await
-                .unwrap(),
-        );
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -51,11 +48,8 @@ mod tests {
 
     #[tokio::test]
     async fn pending_queue_row_is_stranded() {
-        let store: Arc<dyn Store> = Arc::new(
-            opencoder_store::LibsqlStore::open_memory()
-                .await
-                .unwrap(),
-        );
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -81,11 +75,8 @@ mod tests {
     }
 
     async fn seeded_store() -> Arc<dyn Store> {
-        let store: Arc<dyn Store> = Arc::new(
-            opencoder_store::LibsqlStore::open_memory()
-                .await
-                .unwrap(),
-        );
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "s".into(),
@@ -128,8 +119,7 @@ mod tests {
         let mut st = crate::queue_admitter::AdmitUiState::default();
         let mut queue_items = vec![(-1, "stranded".to_string())];
         let mut pending_images = vec![];
-        let (cmd_tx, mut cmd_rx) =
-            tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
 
         let o = on_admit_done(
@@ -145,7 +135,11 @@ mod tests {
         )
         .await;
 
-        assert_eq!(o.flow, AdmitDoneFlow::Started, "idle stranded admit must restart the drain");
+        assert_eq!(
+            o.flow,
+            AdmitDoneFlow::Started,
+            "idle stranded admit must restart the drain"
+        );
         // Mirror reconciled to the real seq.
         assert_eq!(queue_items, vec![(1, "stranded".to_string())]);
         // Drain restart commands: ResetCancel (fresh token) then empty Prompt.
@@ -182,8 +176,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let (cmd_tx, mut cmd_rx) =
-            tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
 
         // Running drain: no re-kick.
@@ -230,8 +223,7 @@ mod tests {
     #[tokio::test]
     async fn idle_admit_with_nothing_pending_is_plain_ok() {
         let store = seeded_store().await;
-        let (cmd_tx, mut cmd_rx) =
-            tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<crate::worker::UiCmd>(8);
         let mut cancel = tokio_util::sync::CancellationToken::new();
         let mut st = crate::queue_admitter::AdmitUiState::default();
 
@@ -248,16 +240,16 @@ mod tests {
         )
         .await;
         assert_eq!(o.flow, AdmitDoneFlow::Ok);
-        assert!(cmd_rx.try_recv().is_err(), "no drain restart on an empty store");
+        assert!(
+            cmd_rx.try_recv().is_err(),
+            "no drain restart on an empty store"
+        );
     }
 
     #[tokio::test]
     async fn missing_session_reports_no_stranded_rows() {
-        let store: Arc<dyn Store> = Arc::new(
-            opencoder_store::LibsqlStore::open_memory()
-                .await
-                .unwrap(),
-        );
+        let store: Arc<dyn Store> =
+            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         assert!(!stranded_pending(&store, "no-such-session").await);
     }
 }
@@ -303,8 +295,7 @@ pub(crate) async fn on_admit_done(
 ) -> AdmitDoneOutcome {
     // Capture the outcome before `apply_done` consumes `done`.
     let admit_ok = done.result.is_ok();
-    let flash =
-        crate::queue_admitter::apply_done(st, done, queue_items, pending_images);
+    let flash = crate::queue_admitter::apply_done(st, done, queue_items, pending_images);
     if !admit_ok || running || !stranded_pending(store, session_id).await {
         return AdmitDoneOutcome {
             flash,

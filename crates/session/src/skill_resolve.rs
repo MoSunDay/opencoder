@@ -314,9 +314,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _guard = lock_home(home.path());
         opencoder_core::seed_builtin_skills();
-        let store: std::sync::Arc<dyn opencoder_store::Store> = std::sync::Arc::new(
-            opencoder_store::LibsqlStore::open_memory().await.unwrap(),
-        );
+        let store: std::sync::Arc<dyn opencoder_store::Store> =
+            std::sync::Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-skill".into(),
@@ -339,7 +338,9 @@ mod tests {
             "consumption-time activation lands in sessions.skill verbatim"
         );
         assert!(
-            persisted.as_deref().is_some_and(|b| b.starts_with("> Source: ")),
+            persisted
+                .as_deref()
+                .is_some_and(|b| b.starts_with("> Source: ")),
             "persisted body carries the source prefix: {persisted:?}"
         );
     }

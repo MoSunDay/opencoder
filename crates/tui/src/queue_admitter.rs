@@ -751,7 +751,9 @@ mod tests {
              record_compound injects SKILL_TRIGGER at consumption"
         );
         assert!(
-            queue_items.iter().all(|(_, d)| !d.contains("skill is now active")),
+            queue_items
+                .iter()
+                .all(|(_, d)| !d.contains("skill is now active")),
             "no synthetic trigger text is queued at submit time"
         );
     }

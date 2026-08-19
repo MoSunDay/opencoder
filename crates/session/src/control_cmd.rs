@@ -121,8 +121,9 @@ pub async fn apply(
             // just the previous answer ("task done"), and wrapping it in the
             // plan→act directive would fabricate a plan and hijack the fresh
             // start. When the gate fails we take the blank sentinel path.
-            let from_plan_mode =
-                session.agent.kind == AgentKind::Plan || session.plan_input_count > 0;
+            let from_plan_mode = session.agent.kind == AgentKind::Plan
+                || session.plan_input_count > 0
+                || session.plan_snapshot.is_some();
             let plan_display = if from_plan_mode {
                 crate::plan_handoff::handoff(session, "")
             } else {

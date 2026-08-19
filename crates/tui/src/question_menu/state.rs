@@ -299,13 +299,8 @@ fn handle_custom_focus(menu: &mut QuestionMenu, key: KeyEvent, width: u16) -> Qu
         }
         KeyCode::Down => {
             let item = menu.current_mut();
-            item.custom_cursor = composer::move_cursor_vertical(
-                &item.custom_input,
-                item.custom_cursor,
-                1,
-                width,
-                0,
-            );
+            item.custom_cursor =
+                composer::move_cursor_vertical(&item.custom_input, item.custom_cursor, 1, width, 0);
             QuestionAction::Idle
         }
         KeyCode::Left => {
@@ -353,8 +348,7 @@ fn handle_custom_focus(menu: &mut QuestionMenu, key: KeyEvent, width: u16) -> Qu
         // Enter confirms; Shift+Enter inserts an explicit newline instead.
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
             let item = menu.current_mut();
-            let (text, cursor) =
-                composer::insert_newline(&item.custom_input, item.custom_cursor);
+            let (text, cursor) = composer::insert_newline(&item.custom_input, item.custom_cursor);
             item.custom_input = text;
             item.custom_cursor = cursor;
             item.invalidate();
@@ -452,14 +446,19 @@ fn custom_alt_key(menu: &mut QuestionMenu, code: KeyCode) -> QuestionAction {
 fn line_start(text: &str, cursor: usize) -> usize {
     let chars: Vec<char> = text.chars().collect();
     let cursor = cursor.min(chars.len());
-    (0..cursor).rev().find(|&i| chars[i] == '\n').map_or(0, |i| i + 1)
+    (0..cursor)
+        .rev()
+        .find(|&i| chars[i] == '\n')
+        .map_or(0, |i| i + 1)
 }
 
 /// Char index of the end of the logical line holding `cursor` (before '\n').
 fn line_end(text: &str, cursor: usize) -> usize {
     let chars: Vec<char> = text.chars().collect();
     let cursor = cursor.min(chars.len());
-    (cursor..chars.len()).find(|&i| chars[i] == '\n').unwrap_or(chars.len())
+    (cursor..chars.len())
+        .find(|&i| chars[i] == '\n')
+        .unwrap_or(chars.len())
 }
 
 /// Delete the char under the cursor (forward delete).

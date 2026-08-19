@@ -2,7 +2,6 @@
 //! streaming happens via the SSE `/events` endpoint. Agent/model switches and
 //! interrupt mutate the live session handle.
 
-use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -634,40 +633,11 @@ pub async fn get_events(
         })
         .unwrap_or_default();
 
-    // Dedup live broadcast events against the replayed (persisted) window.
-    //
-    // In this codebase every live event is broadcast with `seq: None`
-    // (persistence runs async via the event flusher; see `sse_from_session_event`),
-    // while persisted/replayed events carry `seq: Some(n)`. We therefore dedup
-    // in two tiers:
-    //  (1) If the live event DOES carry a persisted `seq`: drop it iff
-    //      `seq <= max_replay_seq`. This is exact and never collapses two
-    //      distinct events that merely share kind+payload (the H7 content-key
-    //      collision bug).
-    //  (2) The normal case — `seq: None`: an event broadcast after we
-    //      subscribed may also have been persisted before we queried (the
-    //      subscribe/query overlap window). Fall back to a content fingerprint
-    //      match against replayed events. The set is bounded by the replay size
-    //      and each fingerprint is consumed on first match, so it self-clears
-    //      once the overlap window passes. Pure content dedup is unavoidable
-    //      here because the live copy has no seq to compare; tier (1) removes
-    //      the collision risk whenever a seq is available.
+    // Dedup live broadcast events against the replayed (persisted) window:
+    // two-tier decision (exact seq, then content fingerprint) + overlap-window
+    // seeding and the first-forwarded-`done` TTL live in `sse_dedup`.
     let max_replay_seq: i64 = persisted.iter().filter_map(|e| e.seq).max().unwrap_or(-1);
-    // P0-1: Seed `seen` only from overlap-window events (seq > baseline,
-    // captured above before the `events_after` query), not from the entire
-    // replay window. The old code pre-filled `seen` with every replayed
-    // event's fingerprint. A live `done` (always `{}`, seq: None) colliding
-    // with ANY historical `done` fingerprint was silently dropped, freezing
-    // the UI (busy never resets, send disabled). By seeding only from the true
-    // subscribe->query overlap window, historical `done` events can no longer
-    // suppress live ones.
-    let seen: Arc<std::sync::Mutex<HashSet<(String, String)>>> = Arc::new(std::sync::Mutex::new(
-        persisted
-            .iter()
-            .filter(|e| e.seq.is_some_and(|s| s > baseline))
-            .map(|e| (e.kind.clone(), e.data.to_string()))
-            .collect(),
-    ));
+    let seen = crate::sse_dedup::seed_seen(&persisted, baseline);
 
     let replay = futures::stream::iter(persisted);
     let live = tokio_stream::wrappers::BroadcastStream::new(rx)
@@ -677,21 +647,7 @@ pub async fn get_events(
             move |evt| {
                 let seen = Arc::clone(&seen);
                 async move {
-                    // (1) Exact seq-based dedup when the live event carries a seq.
-                    if let Some(seq) = evt.seq {
-                        if seq <= max_replay_seq {
-                            return None;
-                        }
-                        return Some(evt);
-                    }
-                    // (2) Content overlap dedup for seq-less broadcasts.
-                    let key = (evt.kind.clone(), evt.data.to_string());
-                    if let Ok(mut guard) = seen.lock() {
-                        if guard.remove(&key) {
-                            return None;
-                        }
-                    }
-                    Some(evt)
+                    crate::sse_dedup::forward_live(&evt, &seen, max_replay_seq).then_some(evt)
                 }
             }
         });

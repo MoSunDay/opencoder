@@ -79,7 +79,28 @@ autopilot 模块调查确认 4 项代码缺陷 + 2 处 cosmetic，本轮修复�
 ## 回归
 
 - `cargo test -p opencoder-session --test autopilot --test autopilot_review --test autopilot_skill_persist`：32 通过。
-- `cargo test -p opencoder-session --lib`：385 通过。
-- `cargo test -p opencoder-tui`：全绿（含 2 个新增溢出用例）。
+- `cargo test -p opencoder-session --lib`：385 通过（后续并入 verify_context_limit 迭代后复验 395 通过）。
+- `cargo test -p opencoder-tui`：在隔离 worktree（HEAD + 本轮 2 文件）全绿 1450 通过（含 2 个新增溢出用例）；
+  主树当时正被并发迭代占用，见下「并发说明」。
 - `cargo test -p opencoder-core --test config_autopilot_contract`：4 通过。
-- 全量门（rules/02）：`cargo test --workspace` + `cargo clippy --workspace --all-targets -- -D warnings` 见本轮迭代收尾记录。
+- `cargo clippy`：`-p opencoder-session -p opencoder-tui -p opencoder-cli -p opencoder-core --all-targets -D warnings`
+  全净；早前全 workspace clippy 亦绿（含顺带机械修复 `cli/session_cmd.rs` 的 `map_flatten` lint）。
+- 全量 `cargo test --workspace`（rules/02）：**阻塞于并发迭代面**，见下。
+
+## 顺带修复（回归中发现的既有缺口）
+
+- `crates/session/tests/compound_cmd.rs` 3 个用例：前一轮「one-shot `$skill`」迭代引入 run 结束清 skill
+  （`skill_lifecycle::run_loop_one_shot`）但未同步更新这三个断言「run 后 skill 仍存活」的旧测试（其自身
+  契约测试 `skill_one_shot.rs` 6/6 通过，意图明确）。已按 one-shot 语义修正：激活证明改为「该 run 的 LLM
+  请求携带 `[skill loaded]`/`[active skill]`」，run 结束断言已清除。修正后 5/5 通过。
+- `crates/session/tests/{autopilot,autopilot_skill_persist}.rs` 的 `AutoPilotConfig` 字面量补
+  `..AutoPilotConfig::default()`（并发迭代新增 `verify_context_limit` 字段的 future-proof，仓库既有约定）。
+
+## 并发说明（全量门未闭合的归因）
+
+本轮执行期间同一工作树存在**并发迭代者**（证据：文件在两次读取间被改写、周期性 `cargo test` probe 进程、
+`75d6866` 提交把本任务未提交改动一并卷入并继续在其上开发 `verify_context_limit`/`REVIEW_ITERATION 0-based`/
+tui `UiCmd` 重构）。截至本收尾：
+- `crates/todos/tests/drive_degrade.rs`：并发者 in-flight 测试，编译错→逻辑红，文件持续变动，不属本任务范围。
+- `crates/session/tests/plain_skill_prompt.rs` 与 tui `UiCmd` 编译错：同为并发者 00:04 后未提交的中途态。
+- 本任务全部定向套件 + session lib + tui（隔离验证）+ core 契约 + 4 crate clippy 在并发改动并入后复验全绿。

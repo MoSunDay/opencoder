@@ -53,6 +53,7 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -106,6 +107,7 @@ async fn switch_plan_to_act_while_running_is_noop() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -161,6 +163,7 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -218,6 +221,7 @@ async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -275,6 +279,7 @@ async fn queue_admit_alone_does_not_arm_shift_tab() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 

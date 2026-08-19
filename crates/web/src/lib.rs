@@ -5,6 +5,7 @@ pub mod auth;
 pub mod cmd;
 pub mod handle;
 pub mod html;
+mod sse_dedup;
 
 use std::sync::Arc;
 

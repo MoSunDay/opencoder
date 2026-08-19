@@ -6,7 +6,7 @@ autopilot 从布尔开关升级为三态模式 `config.autopilot.mode: off | ap 
 
 ## 用户可见变更
 - **`/ap` 交互变更**：原先直接翻转 `autopilot.enabled`，现在弹出模式菜单（克隆 `/skill` 菜单的垂直切片）：`off · 关闭` / `ap · 完全自动` / `review · 自动 review`，↑↓ 移动、Enter 选择即保存、Esc 取消；初始高亮当前模式。
-- **新 `review` 模式**：初始任务跑完后自动切 plan agent + 激活 review skill，做**一次性** review turn（合成 review prompt + 单次 run_loop），完成后清 skill 并发 `Done`；不进 ACT/VERIFY 循环。事件面新增 `AutoPilot { phase: Review, iteration: 1 }`（CLI/TUI 走既有 `{phase:?}` 渲染，web SSE 透传）。
+- **新 `review` 模式**：初始任务跑完后自动切 plan agent + 激活 review skill，做**一次性** review turn（合成 review prompt + 单次 run_loop），完成后清 skill 并发 `Done`；不进 ACT/VERIFY 循环。事件面新增 `AutoPilot { phase: Review, iteration: 0 }`（0 起口径，与 drive 的 `ApState::iteration` 一致；CLI/TUI 走既有 `{phase:?}` 渲染，web SSE 透传）。
 - **`ap` 模式**：与旧 `enabled=true` 行为完全一致（PLAN→ACT→VERIFY 自驱循环）。
 - **chip**：ap → `AP`，review → `RV`（新增），off → 无。
 - **旧配置迁移（防静默关闭）**：config 合并层 `mode` 键优先；无 `mode` 但有旧 `enabled` → `true` 映射 `ap` / `false` 映射 `off`；serde 宽松反序列化，残留 `enabled` 键忽略。web `PATCH /api/config` 自动支持 `mode`。

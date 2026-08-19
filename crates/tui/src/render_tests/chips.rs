@@ -333,6 +333,9 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
     }
 
     /// Background colours present on the (unique) row containing `needle`.
+    /// Needles deliberately avoid width-ambiguous leading glyphs (⏳/→ render
+    /// as double-width cells whose trailing skip-cell injects an extra space
+    /// into the concatenated row text).
     fn row_bgs(terminal: &Terminal<TestBackend>, needle: &str) -> Vec<Color> {
         let buf = terminal.backend().buffer();
         let area = buf.area;
@@ -346,10 +349,10 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
             .collect()
     }
 
-    let check = |flash: &str, expect_plan: bool| {
+    let check = |flash: &str, needle: &str, expect_plan: bool| {
         let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
         draw(flash, &mut terminal);
-        let bgs = row_bgs(&terminal, flash);
+        let bgs = row_bgs(&terminal, needle);
         let (want, other) = if expect_plan {
             (warn_color(), accent())
         } else {
@@ -366,11 +369,16 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
     };
 
     // Definite mode-switch flashes keep the two-colour scheme.
-    check("\u{2192} plan mode", true);
-    check("\u{2192} act mode", false);
+    check("\u{2192} plan mode", "plan mode", true);
+    check("\u{2192} act mode", "act mode", false);
     // Busy hint: accent — it is not a completed switch.
-    check("\u{23f3} busy \u{2014} mode switch blocked, retry when idle", false);
+    check(
+        "\u{23f3} busy \u{2014} mode switch blocked, retry when idle",
+        "busy",
+        false,
+    );
     // Neutral future text that merely mentions "plan": accent, NOT plan
     // colour (the substring `contains("plan")` guess would tint this).
-    check("plan submitted", false);
+    check("plan submitted", "plan submitted", false);
 }
+

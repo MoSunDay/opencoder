@@ -95,14 +95,26 @@ pub async fn verify(
 /// transcript + the goal question.
 ///
 /// The transcript is capped to the most recent messages that fit
-/// `context_limit - VERIFY_RESERVED_TOKENS` (estimated tokens), so a long
-/// autopilot run never overflows the small model's window. The goal is
-/// re-stated verbatim in the question, so dropping old turns never loses the
-/// anchor the judge is measured against.
+/// `min(context_limit, verify_context_limit) - VERIFY_RESERVED_TOKENS`
+/// (estimated tokens), so a long autopilot run never overflows the small
+/// model's window — even when that window is narrower than the primary's
+/// (`autopilot.verify_context_limit`). The goal is re-stated verbatim in the
+/// question, so dropping old turns never loses the anchor the judge is
+/// measured against.
 fn build_snapshot(session: &SessionState, state: &ApState) -> Vec<Message> {
+    // The judge runs on the `small_model`, whose window may be NARROWER than
+    // the primary's: cap the budget by `verify_context_limit` when set so
+    // the snapshot is sized for the model that actually receives it.
     let budget = session
         .config
         .context_limit()
+        .min(
+            session
+                .config
+                .autopilot
+                .verify_context_limit
+                .unwrap_or(u64::MAX),
+        )
         .saturating_sub(VERIFY_RESERVED_TOKENS) as usize;
     let mut snapshot = Vec::with_capacity(session.messages.len() + 2);
     snapshot.push(Message::system(new_id(), verify_system_prompt()));
@@ -528,7 +540,7 @@ mod tests {
         // tokens: well under the 98_000-token primary budget, over the
         // 4_000-token judge window (budget 4_000 - 2_000 reserved = 2_000).
         let msgs: Vec<Message> = (0..40)
-            .map(|i| Message::user(&format!("m{i}"), "x".repeat(400)))
+            .map(|i| Message::user(format!("m{i}"), "x".repeat(400)))
             .collect();
         let mut session = session_with(Some(100_000), msgs.clone());
         session.config.autopilot.verify_context_limit = Some(4_000);
@@ -553,7 +565,7 @@ mod tests {
     #[test]
     fn unset_verify_context_limit_keeps_primary_budget() {
         let msgs: Vec<Message> = (0..40)
-            .map(|i| Message::user(&format!("m{i}"), "x".repeat(400)))
+            .map(|i| Message::user(format!("m{i}"), "x".repeat(400)))
             .collect();
         let session = session_with(Some(100_000), msgs.clone());
         assert_eq!(session.config.autopilot.verify_context_limit, None);

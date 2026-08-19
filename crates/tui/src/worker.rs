@@ -14,6 +14,9 @@ use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+/// `Clone` backs the UI-side dedup baseline in `handle_switch_agent`
+/// (the last successfully-enqueued pure switch is cloned into the send).
+#[derive(Debug, Clone)]
 pub enum UiCmd {
     Prompt(String, Vec<String>),
     SwitchAgent(String),
@@ -167,6 +170,42 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
         SwitchGate::SkipRunning
     } else {
         SwitchGate::Run
+    }
+}
+
+/// Whether `next` is a redundant repeat of `prev` for PURE mode-switch
+/// commands: two consecutive `SwitchAgent(name)` with the SAME name collapse
+/// into one (the second carries no new information — the UI chip was already
+/// folded optimistically by `handle_switch_agent`). A different name, a
+/// first-ever send (`prev == None`) and any non-`SwitchAgent` command —
+/// notably `SwitchAndStart`, which STARTS a turn — are never deduplicated.
+/// Pure so the channel-pressure hygiene is unit-testable without a worker.
+pub fn dedup_switch(prev: Option<&UiCmd>, next: &UiCmd) -> bool {
+    matches!(
+        (prev, next),
+        (Some(UiCmd::SwitchAgent(a)), UiCmd::SwitchAgent(b)) if a == b
+    )
+}
+
+/// Best-effort send for IDEMPOTENT UI commands (pure `SwitchAgent`): uses
+/// `try_send` so a FULL worker command channel (worker busy consuming turn
+/// commands mid-`run_session`) can never block the UI event loop —
+/// `TrySendError::Full` is warned and dropped, which is safe only because
+/// re-sending the same command reaches the identical state (the UI chip is
+/// already optimistically folded; re-pressing at idle re-sends). Turn-
+/// starting or exit commands (`Prompt` / `SwitchAndStart` / `ResetCancel` /
+/// `Quit`, routed through `start_turn`) must keep the blocking
+/// `.send().await`: dropping those would desync `running` or swallow the
+/// exit. Returns whether the command was enqueued (callers record successes
+/// as the `dedup_switch` baseline).
+pub fn try_send_idempotent(tx: &mpsc::Sender<UiCmd>, cmd: UiCmd) -> bool {
+    match tx.try_send(cmd) {
+        Ok(()) => true,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!("cmd channel full: dropped idempotent UI switch command");
+            false
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
     }
 }
 

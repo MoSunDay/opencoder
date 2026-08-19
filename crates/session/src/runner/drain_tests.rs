@@ -69,7 +69,7 @@ async fn claim_one_queued_claims_even_when_turn_cancel_fired() {
     // Pre-fire turn_cancel: claim_one_queued must still pop the queue.
     token.lock().unwrap().cancel();
 
-    let result = claim_one_queued(&mut session).await;
+    let result = claim_one_queued(&mut session, &mut |_| {}).await;
     let (seq, prompt, _imgs) =
         result.expect("claim_one_queued must pop the pending queue even when turn_cancel is fired");
     assert_eq!(prompt, "queued");
@@ -181,7 +181,7 @@ async fn claim_one_queued_completes_under_hard_cancel() {
     let hard = CancellationToken::new();
     hard.cancel();
     session.cancel = Some(hard);
-    let (seq, prompt, _) = claim_one_queued(&mut session).await.unwrap();
+    let (seq, prompt, _) = claim_one_queued(&mut session, &mut |_| {}).await.unwrap();
     assert_eq!(prompt, "survives-cancel");
     assert!(seq > 0);
     assert!(store

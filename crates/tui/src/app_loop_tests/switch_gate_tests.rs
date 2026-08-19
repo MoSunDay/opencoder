@@ -49,6 +49,7 @@ async fn switch_while_running_is_noop_even_without_submitted_plan() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -110,6 +111,7 @@ async fn switch_act_to_plan_while_running_is_noop() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -169,6 +171,7 @@ async fn switch_no_clear_while_running_is_noop() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -224,6 +227,7 @@ async fn switch_no_clear_idle_skips_handoff() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -280,6 +284,7 @@ async fn switch_while_subagent_running_is_noop_even_when_running_false() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -352,6 +357,7 @@ async fn switch_act_to_plan_collapses_stale_plan_submitted_synchronously() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -408,6 +414,7 @@ async fn shift_tab_double_tap_second_strike_is_pure_switch_and_keeps_input() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
     assert!(matches!(outcome, SwitchOutcome::Proceed));
@@ -429,6 +436,7 @@ async fn shift_tab_double_tap_second_strike_is_pure_switch_and_keeps_input() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -490,6 +498,7 @@ async fn switch_act_to_plan_while_subagent_live_is_noop() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -551,6 +560,7 @@ async fn switch_act_to_plan_no_clear_while_running_is_noop() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -576,5 +586,174 @@ async fn switch_act_to_plan_no_clear_while_running_is_noop() {
             .unwrap_or(false),
         "mode flash should state the switch is blocked while busy; got {:?}",
         mode_flash
+    );
+}
+
+/// Channel-pressure hygiene (pure-switch branch): when the worker command
+/// channel is FULL (worker busy consuming turn commands, `running` not yet
+/// round-tripped to the UI), an idle pure switch must NOT block the UI event
+/// loop on `send().await` — the switch command is idempotent (the chip was
+/// already folded optimistically), so it is best-effort `try_send`-ed and
+/// dropped on `TrySendError::Full`. `handle_switch_agent` must return
+/// immediately (timeout asserts non-blocking), not panic, and the channel
+/// must still hold exactly the 4 pre-seeded commands.
+#[tokio::test]
+async fn pure_switch_returns_promptly_when_cmd_channel_is_full() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = true;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut mode_flash: Option<(String, u32)> = None;
+    // Bounded capacity 4, mirroring app_bootstrap's worker cmd channel, and
+    // pre-seeded FULL with dummy commands nobody consumes.
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(4);
+    for i in 0..4 {
+        cmd_tx
+            .send(UiCmd::Compact)
+            .await
+            .unwrap_or_else(|_| panic!("seed {i} must fit"));
+    }
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+
+    let switched = tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        handle_switch_agent(
+            "plan".into(),
+            false,
+            &mut chat,
+            &mut running,
+            &mut follow,
+            &mut input,
+            &mut cursor_idx,
+            &mut mode_flash,
+            0,
+            &cmd_tx,
+            &mut cancel,
+            &mut sys_tokens,
+            workdir,
+            &active_skill_body,
+            &mut None, // last_switch_sent dedup baseline
+        ),
+    )
+    .await;
+
+    let outcome = switched.expect(
+        "handle_switch_agent must not block on a full cmd channel \
+         (idempotent switch dropped via try_send)",
+    );
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    // The flash still fires — the drop is invisible to the user beyond the
+    // already-optimistic chip fold.
+    assert!(
+        mode_flash
+            .as_ref()
+            .map(|(t, _)| t.contains("plan mode"))
+            .unwrap_or(false),
+        "mode flash must still be set; got {:?}",
+        mode_flash
+    );
+    assert_eq!(chat.agent, "plan", "chip folds optimistically");
+    assert!(!running, "a pure switch never starts a turn");
+    // Exactly the 4 seeds remain: the dropped switch was not enqueued.
+    for i in 0..4 {
+        assert!(
+            matches!(cmd_rx.try_recv(), Ok(UiCmd::Compact)),
+            "seed {i} must still be queued in order"
+        );
+    }
+    assert!(cmd_rx.try_recv().is_err(), "channel must be empty after seeds");
+}
+
+/// Dedup at the app_loop layer: when the last successfully-enqueued pure
+/// switch already targeted the SAME mode, a consecutive identical press is
+/// dropped locally (no channel traffic, no state change) — the chip was
+/// already optimistically folded, so the repeat carries no new information.
+/// The flash still fires normally, so the drop is invisible to the user.
+#[tokio::test]
+async fn pure_switch_dedup_drops_consecutive_same_name_repeat() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut running = false;
+    let mut follow = true;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(4);
+    let mut cancel = CancellationToken::new();
+    let mut sys_tokens = 0u64;
+    let workdir = Path::new(".");
+    let active_skill_body: Option<String> = None;
+    // The previous pure switch to plan was already enqueued.
+    let mut last_switch_sent = Some(UiCmd::SwitchAgent("plan".into()));
+
+    let outcome = handle_switch_agent(
+        "plan".into(),
+        false,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+        &mut last_switch_sent,
+    )
+    .await;
+
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "a consecutive same-name pure switch must be deduped, not sent"
+    );
+    assert!(
+        mode_flash
+            .as_ref()
+            .map(|(t, _)| t.contains("plan mode"))
+            .unwrap_or(false),
+        "the flash still fires on a deduped repeat; got {:?}",
+        mode_flash
+    );
+    assert_eq!(chat.agent, "plan", "optimistic fold still applies");
+    assert!(!running, "a pure switch never starts a turn");
+
+    // Control: a DIFFERENT target goes through (dedup only collapses
+    // consecutive same-name repeats).
+    let mut other = Some(UiCmd::SwitchAgent("act".into()));
+    let outcome = handle_switch_agent(
+        "plan".into(),
+        false,
+        &mut chat,
+        &mut running,
+        &mut follow,
+        &mut input,
+        &mut cursor_idx,
+        &mut mode_flash,
+        0,
+        &cmd_tx,
+        &mut cancel,
+        &mut sys_tokens,
+        workdir,
+        &active_skill_body,
+        &mut other,
+    )
+    .await;
+    assert!(matches!(outcome, SwitchOutcome::Proceed));
+    assert!(
+        matches!(cmd_rx.try_recv(), Ok(UiCmd::SwitchAgent(n)) if n == "plan"),
+        "a switch whose predecessor targeted a different mode must be sent"
     );
 }

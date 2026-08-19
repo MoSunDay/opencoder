@@ -30,7 +30,7 @@ use crate::keymap_menu::KeymapMenu;
 use crate::model_menu::ModelMenu;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{UiCmd, UiEvent};
+use crate::worker::{dedup_switch, try_send_idempotent, UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
@@ -179,7 +179,7 @@ pub(crate) enum SwitchOutcome {
 /// transcript preserved in full. The optimistic `fold_agent_switch` keeps
 /// the status chip correct even if the AgentSwitch event is dropped under
 /// channel pressure and collapses a stale `plan_submitted` synchronously
-/// (rapid double-tap hygiene).
+/// (rapid double-tap hygiene). Pure-switch send: try_send + same-name dedup.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
@@ -196,6 +196,7 @@ pub(crate) async fn handle_switch_agent(
     sys_tokens: &mut u64,
     workdir: &Path,
     active_skill_body: &Option<String>,
+    last_switch_sent: &mut Option<UiCmd>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
     if *running || chat.subagents_running > 0 {
@@ -233,10 +234,15 @@ pub(crate) async fn handle_switch_agent(
         }
         *running = true;
         *follow = true;
-        chat.begin_turn();
+        chat.begin_turn(); // handoff starts a turn: the pure-switch dedup baseline no longer applies
     } else {
         *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-        let _ = cmd_tx.send(UiCmd::SwitchAgent(name)).await;
+        // Pure switch: idempotent — best-effort try_send (a full cmd channel
+        // must never block the UI loop) + drop consecutive same-name repeats.
+        let next = UiCmd::SwitchAgent(name);
+        if !dedup_switch(last_switch_sent.as_ref(), &next) && try_send_idempotent(cmd_tx, next.clone()) {
+            *last_switch_sent = Some(next);
+        }
     }
     SwitchOutcome::Proceed
 }

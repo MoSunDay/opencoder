@@ -47,6 +47,74 @@ fn gate_switch_rejects_when_running() {
     assert_eq!(gate_switch(true), SwitchGate::SkipRunning);
 }
 
+// ── cmd-channel pressure hygiene (dedup + best-effort try_send) ─────────────
+
+#[test]
+fn dedup_switch_drops_consecutive_same_name() {
+    // Same target twice in a row: the second send carries no new state (the
+    // UI chip was already optimistically folded) — drop it.
+    assert!(dedup_switch(
+        Some(&UiCmd::SwitchAgent("plan".into())),
+        &UiCmd::SwitchAgent("plan".into())
+    ));
+}
+
+#[test]
+fn dedup_switch_allows_different_name() {
+    assert!(!dedup_switch(
+        Some(&UiCmd::SwitchAgent("act".into())),
+        &UiCmd::SwitchAgent("plan".into())
+    ));
+}
+
+#[test]
+fn dedup_switch_allows_first_send() {
+    // No predecessor recorded yet: always send.
+    assert!(!dedup_switch(None, &UiCmd::SwitchAgent("plan".into())));
+}
+
+#[test]
+fn dedup_switch_never_drops_switch_and_start() {
+    let and_start = UiCmd::SwitchAndStart("plan".into(), String::new());
+    // SwitchAndStart starts a turn — it is NOT an idempotent pure switch…
+    assert!(!dedup_switch(
+        Some(&UiCmd::SwitchAgent("plan".into())),
+        &and_start
+    ));
+    // …and a pure switch following a SwitchAndStart is never collapsed
+    // against it either (the helper only dedups SwitchAgent-vs-SwitchAgent).
+    assert!(!dedup_switch(
+        Some(&and_start),
+        &UiCmd::SwitchAgent("plan".into())
+    ));
+}
+
+#[tokio::test]
+async fn try_send_idempotent_enqueues_when_capacity_remains() {
+    let (tx, mut rx) = mpsc::channel::<UiCmd>(1);
+    assert!(try_send_idempotent(&tx, UiCmd::SwitchAgent("plan".into())));
+    assert!(matches!(rx.recv().await, Some(UiCmd::SwitchAgent(_))));
+}
+
+#[tokio::test]
+async fn try_send_idempotent_drops_without_awaiting_when_full() {
+    let (tx, _rx) = mpsc::channel::<UiCmd>(1);
+    tx.send(UiCmd::Compact).await.unwrap(); // fill the only slot
+    // try_send is synchronous: a full channel drops the command instead of
+    // awaiting capacity (the app_loop-level test proves the loop unblocks).
+    assert!(
+        !try_send_idempotent(&tx, UiCmd::SwitchAgent("plan".into())),
+        "full channel must drop the idempotent command, not block"
+    );
+}
+
+#[tokio::test]
+async fn try_send_idempotent_reports_closed_channel() {
+    let (tx, rx) = mpsc::channel::<UiCmd>(1);
+    drop(rx);
+    assert!(!try_send_idempotent(&tx, UiCmd::SwitchAgent("plan".into())));
+}
+
 // Gate failure must not swallow the composer input: without a handoff the
 // captured extra text is submitted as a normal act-mode prompt; with a
 // handoff (or nothing captured) the run starts with an empty prompt.

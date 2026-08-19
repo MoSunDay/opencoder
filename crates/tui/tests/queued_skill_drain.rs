@@ -218,22 +218,24 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
         "the $skill token must never reach the LLM: {user_msgs:?}"
     );
 
-    // Consumption-time persistence: sessions.skill landed with the drained
-    // item's resolution (survives resume).
+    // One-shot `$skill` semantics (see skill_one_shot.rs): the skill lives
+    // exactly for the run that consumed the queued item. Activation at
+    // consumption is proven by the drained request's tail reminder above;
+    // the run-end hook then clears the skill from memory AND the store, so
+    // later runs — and a resume after a clean end — start skill-less.
+    // (Mid-run persistence, the crash-resume path, is pinned at the session
+    // layer by steer_skill_deferral.rs.)
     let persisted = store
         .get_session("q-skill")
         .await
         .unwrap()
         .and_then(|m| m.skill);
     assert_eq!(
-        persisted,
-        sess.skill_prompt_cloned(),
-        "consumption-time activation persisted verbatim"
+        persisted, None,
+        "one-shot clear wiped the persisted skill after run end"
     );
     assert!(
-        persisted
-            .as_deref()
-            .is_some_and(|b| b.starts_with("> Source: ")),
-        "persisted body carries the source prefix: {persisted:?}"
+        sess.skill_prompt_cloned().is_none(),
+        "one-shot clear wiped the in-memory skill handle after run end"
     );
 }

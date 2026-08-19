@@ -372,6 +372,7 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 
@@ -632,6 +633,7 @@ async fn handle_switch_agent_sets_agent_optimistically() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
 

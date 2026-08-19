@@ -88,6 +88,21 @@ fn gate_turn() -> LlmEvent {
     }
 }
 
+/// Turn 2's scripted event: call the second gate tool so the run parks AGAIN
+/// — now PAST the steer absorption boundary, letting the test observe the
+/// consumption-time persistence while the run is still in flight.
+fn gate2_turn() -> LlmEvent {
+    LlmEvent::Completed {
+        text: "turn-2".into(),
+        tool_calls: vec![CompletedToolCall {
+            id: "tu2".into(),
+            name: "gate2".into(),
+            input: serde_json::json!({}),
+        }],
+        usage: None,
+    }
+}
+
 fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
     req.messages.iter().any(|m| {
         m.get("role").and_then(|r| r.as_str()) == Some("user")
@@ -107,15 +122,15 @@ fn last_user_content(req: &opencoder_llm::ChatRequest) -> String {
         .to_string()
 }
 
-/// Blocks inside its `execute` until the test opens the gate, parking turn 1
-/// mid-execution: request #1 is already sent, the steer absorption boundary
-/// has not been reached.
-struct GateTool(tokio::sync::watch::Receiver<bool>);
+/// Blocks inside its `execute` until the test opens the gate, parking a turn
+/// mid-execution: the request is already sent, the next absorption boundary
+/// has not been reached. `name` lets one impl serve several gate slots.
+struct GateTool(&'static str, tokio::sync::watch::Receiver<bool>);
 
 #[async_trait::async_trait]
 impl opencoder_core::Tool for GateTool {
     fn name(&self) -> &str {
-        "gate"
+        self.0
     }
     fn description(&self) -> &str {
         "blocks until opened"
@@ -128,7 +143,7 @@ impl opencoder_core::Tool for GateTool {
         _input: serde_json::Value,
         _ctx: &opencoder_core::ToolContext,
     ) -> anyhow::Result<opencoder_core::ToolOutput> {
-        let mut rx = self.0.clone();
+        let mut rx = self.1.clone();
         while !*rx.borrow_and_update() {
             if rx.changed().await.is_err() {
                 break;
@@ -167,14 +182,20 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
     let mock: Arc<MockChatClient> = Arc::new(
         MockChatClient::new()
             .push_script(vec![gate_turn()])
-            .push_script(vec![done_turn("steered reply")]),
+            .push_script(vec![gate2_turn()])
+            .push_script(vec![done_turn("final reply")]),
     );
 
     let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
+    let (gate2_tx, gate2_rx) = tokio::sync::watch::channel(false);
     let mut registry = std::collections::HashMap::new();
     registry.insert(
         "gate".to_string(),
-        Arc::new(GateTool(gate_rx)) as opencoder_core::ToolArc,
+        Arc::new(GateTool("gate", gate_rx)) as opencoder_core::ToolArc,
+    );
+    registry.insert(
+        "gate2".to_string(),
+        Arc::new(GateTool("gate2", gate2_rx)) as opencoder_core::ToolArc,
     );
 
     let tool_started = Arc::new(AtomicBool::new(false));
@@ -245,10 +266,13 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
 
     // Release the gate: the boundary absorbs the steer and turn 2 runs.
     gate_tx.send(true).unwrap();
-    run_task.await.unwrap().unwrap();
 
+    // Park again inside gate2 (request #2 already sent = the absorption
+    // boundary is behind us: the $review token was resolved at it).
+    while mock.requests().len() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let requests = mock.requests();
-    assert_eq!(requests.len(), 2, "exactly two LLM calls");
 
     // Turn 1 (already sent before the steer existed) stays untouched.
     assert!(!has_active_skill_reminder(&requests[0]));
@@ -285,11 +309,26 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
         "$review token stripped from every user message: {user_texts:?}"
     );
 
-    // Consumption-time persistence: the session row now holds the skill body.
-    let after = store.get_session(sid).await.unwrap().unwrap();
-    let skill = after.skill.expect("skill persisted at absorption");
+    // Consumption-time persistence, observed WHILE the run is still parked:
+    // the absorption boundary resolved the token and wrote the body to
+    // `sessions.skill` (this is the write a mid-run crash + resume replays).
+    let absorbed = store.get_session(sid).await.unwrap().unwrap();
+    let skill = absorbed.skill.expect("skill persisted at absorption");
     assert!(
         skill.contains("> Source: "),
         "persisted body keeps the source prefix: {skill}"
+    );
+
+    // Release gate2: the run completes and the ONE-SHOT run-end clear lands —
+    // memory and store both lose the skill again.
+    gate2_tx.send(true).unwrap();
+    run_task.await.unwrap().unwrap();
+
+    assert_eq!(mock.requests().len(), 3, "exactly three LLM calls");
+    let after = store.get_session(sid).await.unwrap().unwrap();
+    assert!(
+        after.skill.is_none(),
+        "one-shot: the completed run clears the persisted skill: {:?}",
+        after.skill
     );
 }

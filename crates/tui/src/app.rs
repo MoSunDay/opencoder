@@ -139,6 +139,7 @@ pub(super) async fn run_app(
     let mut active_skill_body: Option<String> = None;
     let mut anim_tick: u32 = 0;
     let mut mode_flash: Option<(String, u32)> = None;
+    let mut last_switch_sent: Option<UiCmd> = None; // dedup baseline for pure-switch try_send
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut shift_held = false;
@@ -623,7 +624,7 @@ pub(super) async fn run_app(
                                     app_loop::handle_switch_agent(
                                         name, false, &mut chat, &mut running, &mut follow, &mut input,
                                         &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
-                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body,
+                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body, &mut last_switch_sent,
                                     )
                                     .await,
                                     app_loop::SwitchOutcome::Quit
@@ -631,14 +632,14 @@ pub(super) async fn run_app(
                             }
                             KeyAction::SwitchAgentNoClear(name) => {
                                 // t+Tab chord: skip the plan->act handoff / TranscriptReset —
-                                // transcript preserved in full. Same running-gated handler as
-                                // Shift+Tab so a mode switch mid-turn defers to the next idle
-                                // boundary (no direct UiCmd::SwitchAgent leak).
+                                // transcript preserved in full. Same bidirectional running gate
+                                // as Shift+Tab: while busy the switch is intercepted with the
+                                // busy hint (re-press when idle), never deferred.
                                 if matches!(
                                     app_loop::handle_switch_agent(
                                         name, true, &mut chat, &mut running, &mut follow, &mut input,
                                         &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
-                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body,
+                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body, &mut last_switch_sent,
                                     )
                                     .await,
                                     app_loop::SwitchOutcome::Quit

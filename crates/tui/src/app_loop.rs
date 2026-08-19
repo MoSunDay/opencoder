@@ -167,10 +167,22 @@ pub(crate) enum SwitchOutcome {
 }
 
 /// Handle `KeyAction::SwitchAgent` (and `SwitchAgentNoClear`): switch agent
-/// mode, and for plan→act with a submitted plan, handoff immediately when idle,
-/// no-op when running. `no_handoff` (SwitchAgentNoClear / t+Tab chord) skips
-/// the plan→act handoff entirely — transcript preserved in full — but still
-/// honors the running-gate (deferred to the next clean idle boundary).
+/// mode behind a direction-aware running gate.
+///
+/// plan→act while running (a turn in flight OR a live subagent) is
+/// **intercepted with an explicit busy hint** — no deferred auto-fire; the
+/// user re-presses at a clean idle boundary, where a submitted plan hands
+/// off immediately (transcript fold + immediate execution, carrying any
+/// input text). `no_handoff` (SwitchAgentNoClear / t+Tab chord) skips the
+/// plan→act handoff entirely — transcript preserved in full — but is
+/// intercepted the same way while running.
+///
+/// act→plan while running is a **pure state switch**: optimistic
+/// `fold_agent_switch` + `UiCmd::SwitchAgent` enqueue. The worker is
+/// single-threaded and consumes the command only at the next turn boundary,
+/// so the in-flight turn finishes under the old agent (`sess.agent` never
+/// flips mid-`run_session`), and the worker resets the plan phase when it
+/// applies the switch.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
@@ -189,19 +201,18 @@ pub(crate) async fn handle_switch_agent(
     active_skill_body: &Option<String>,
 ) -> SwitchOutcome {
     let plan_to_act = chat.agent == "plan" && name == "act";
-    if *running || chat.subagents_running > 0 {
-        // A turn is in flight OR a subagent task is live — any mode switch is
-        // a no-op. A stale/replayed session can retain subagents_running > 0
-        // after its parent turn, so we gate on it too.
-        // The worker is mid-`run_session`; applying the switch now would start
-        // the next turn with a stale agent at an arbitrary partial boundary.
-        // sys_tokens is NOT updated here: the agent stays in its current mode,
-        // so the context meter must keep the current-mode baseline. (Updating
-        // it to the target mode's count would corrupt the meter for the
-        // remainder of the running turn.) The same rule covers plan→act with a
-        // submitted plan, act→plan, and plan→act without a submitted plan —
-        // all deferred to the next clean idle boundary.
-        *mode_flash = Some(("\u{23f3} busy \u{2014} switch when idle".into(), anim_tick));
+    if plan_to_act && (*running || chat.subagents_running > 0) {
+        // plan→act carries handoff semantics (transcript fold + immediate
+        // execution). A turn in flight OR a live subagent makes that unsafe:
+        // the worker is mid-run_session and a handoff would start the next
+        // turn with a stale agent at an arbitrary partial boundary.
+        // Intercept with an explicit hint — the user re-presses at a clean
+        // idle boundary (no deferred auto-fire). sys_tokens / input /
+        // running are untouched (the agent stays in plan mode).
+        *mode_flash = Some((
+            "\u{23f3} busy \u{2014} plan switch blocked, retry when idle".into(),
+            anim_tick,
+        ));
         return SwitchOutcome::Proceed;
     }
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());

@@ -120,7 +120,8 @@ pub(crate) fn handle_key(
     }
 
     // Subagent-focus view: disable text input, submit, steer, queue. Only
-    // scroll (handled above) and global keys (Quit, Help) are honoured.
+    // scroll (handled above), mode-switch keys (below), and global keys
+    // (Quit, Help) are honoured.
     if input_disabled {
         if bindings.quit.matches(&k) {
             return KeyAction::Quit;
@@ -135,6 +136,27 @@ pub(crate) fn handle_key(
         }
         if bindings.help.matches(&k) {
             return KeyAction::OpenKeymap;
+        }
+        // Mode-switch keys stay live in the subagent-focus (input-disabled)
+        // view: leaving/switching mode must never be blocked by view state.
+        // All three funnel into handle_switch_agent, which intercepts plan→act
+        // while a turn/subagent is live (busy hint) and treats act→plan as a
+        // pure state switch. The `/plan <content>` compound-submit branch of
+        // the enabled path is intentionally skipped — input is disabled here.
+        // A plain BackTab carries no CTRL/ALT modifier, so it cannot
+        // mis-match the switch_mode_clear / switch_mode_keep bindings above
+        // (keymap `matches` requires exact modifiers besides lenient SHIFT).
+        if bindings.switch_mode_clear.matches(&k) {
+            let next = if agent == "plan" { "act" } else { "plan" };
+            return KeyAction::SwitchAgent(next.into());
+        }
+        if bindings.switch_mode_keep.matches(&k) {
+            let next = if agent == "plan" { "act" } else { "plan" };
+            return KeyAction::SwitchAgentNoClear(next.into());
+        }
+        if k.code == KeyCode::BackTab {
+            let next = if agent == "plan" { "act" } else { "plan" };
+            return KeyAction::SwitchAgent(next.into());
         }
         return KeyAction::None;
     }
@@ -448,6 +470,10 @@ fn move_hist(
 #[cfg(test)]
 #[path = "key_handler_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "key_handler_disabled_mode_tests.rs"]
+mod disabled_mode_tests;
 
 #[cfg(test)]
 #[path = "key_handler_plan_edit_tests.rs"]

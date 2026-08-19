@@ -389,12 +389,27 @@ pub(crate) async fn run_loop(
                         break;
                     }
                     Ok(None) => {
-                        // Over budget (should_compact was true) yet nothing
-                        // could be summarized away (single oversized message /
-                        // empty head). Falling through to run_one_llm_call
-                        // would send an oversized request → guaranteed
-                        // context-length 400 that kills the session. Surface
-                        // the error instead.
+                        // should_compact fired but there is nothing to
+                        // summarize: an empty or single-message transcript.
+                        // Two causes are possible: a stale reported usage
+                        // from before a transcript collapse (clear-context /
+                        // plan→act handoff now reset it), or a single message
+                        // so large that the estimate alone crosses the
+                        // compaction budget.
+                        //
+                        // The compaction budget is a threshold, not a hard
+                        // cap: if the current transcript still fits under the
+                        // provider context limit, proceed unchanged — killing
+                        // the run here would strand a perfectly serviceable
+                        // fresh-start turn. Only fail when the request is
+                        // guaranteed to exceed the hard limit (nothing to
+                        // summarize AND nothing left to ship).
+                        if compaction::estimated_tokens(session) < session.config.context_limit() {
+                            tracing::warn!(
+                                "compaction found nothing to summarize; transcript fits under the hard context limit, proceeding uncompacted"
+                            );
+                            break;
+                        }
                         last_err = Some(anyhow!(
                             "transcript exceeds context window but compaction found nothing to summarize"
                         ));

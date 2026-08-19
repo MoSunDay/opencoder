@@ -116,5 +116,5 @@ git commit -m "<type>(<scope>): <摘要>"
 
 ## 与其它 skill 的衔接
 - 仅在 `review` 给出 `go-live ready` 后执行（gate 已绿）。
-- 消费 `task-plan` 的 STATUS 块汇总变更摘要，作为 changelog/commit message 的素材来源。
+- 消费 `task-plan` 的闭环计划和 `review` 的当次证据汇总，作为 changelog/commit message 的素材来源。
 - 提交完成 → 输出 commit hash + 变更摘要 + （如需 push）待批上报。

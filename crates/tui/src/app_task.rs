@@ -156,7 +156,8 @@ pub(crate) async fn switch_session(
     // session with recorded requirements keeps the plan→act handoff armed
     // across restarts / session switches (it was previously volatile TUI
     // state, silently degrading Shift+Tab to a plain mode swap).
-    let new_plan_armed = new_session.agent.name == "plan" && new_session.plan_input_count > 0;
+    let new_plan_armed = new_session.agent.name == "plan"
+        && (new_session.plan_input_count > 0 || new_session.plan_snapshot.is_some());
     let session_for_worker = new_session;
     let agent_name_for_tokens = session_for_worker.agent.name.clone();
     let workdir_for_tokens = session_for_worker.working_dir.clone();

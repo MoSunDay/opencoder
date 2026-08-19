@@ -21,6 +21,16 @@ const TOKEN: &str = "e2e-bearer-token";
 /// one text delta then completes.
 async fn state_with_mock() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let workdir = tempfile::tempdir().unwrap().keep();
+    // The drain reloads config from a spawned task, so the thread-local test
+    // config guard cannot isolate it. Pin the project-level autopilot mode to
+    // off: a developer's real ~/.opencoder setting must not append a review
+    // turn to this one-round client/server sequence.
+    std::fs::write(
+        workdir.join("opencoder.json"),
+        r#"{"autopilot":{"mode":"off"}}"#,
+    )
+    .unwrap();
     let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![
         LlmEvent::TextDelta("hello from server".into()),
         LlmEvent::Completed {
@@ -31,7 +41,7 @@ async fn state_with_mock() -> Arc<opencoder_web::AppState> {
     ]));
     Arc::new(opencoder_web::AppState {
         store,
-        workdir: std::env::temp_dir(),
+        workdir,
         handles: opencoder_web::handle::new_handle_map(),
         client_override: Some(mock),
     })

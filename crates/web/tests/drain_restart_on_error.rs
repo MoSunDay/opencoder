@@ -161,7 +161,9 @@ async fn start_drain(state: &opencoder_web::AppState, sid: &str, client: Arc<dyn
 async fn wait_until_not_draining(state: &opencoder_web::AppState, sid: &str) {
     let handle = {
         let map = state.handles.lock().await;
-        map.get(sid).cloned().expect("handle present while draining")
+        map.get(sid)
+            .cloned()
+            .expect("handle present while draining")
     };
     // 600 × 10ms = 6s cap: generous vs the 2 × 250ms restart backoff.
     for _ in 0..600 {

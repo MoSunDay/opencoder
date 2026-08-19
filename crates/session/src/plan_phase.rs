@@ -66,16 +66,15 @@ impl SessionState {
 /// ever hold text produced while the plan agent was actually answering in
 /// this phase, never an earlier act-mode reply scraped from the transcript.
 pub fn plan_snapshot_update(kind: &AgentKind, msg: &Message) -> Option<String> {
-if *kind != AgentKind::Plan {
-return None;
+    if *kind != AgentKind::Plan {
+        return None;
+    }
+    if msg.role != Role::Assistant || msg.synthetic {
+        return None;
+    }
+    let text = msg.text();
+    (!text.trim().is_empty()).then_some(text)
 }
-if msg.role != Role::Assistant || msg.synthetic {
-return None;
-}
-let text = msg.text();
-(!text.trim().is_empty()).then_some(text)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,9 +147,8 @@ mod tests {
 
     #[tokio::test]
     async fn persist_plan_phase_round_trip() {
-        let store: Arc<dyn opencoder_store::Store> = Arc::new(
-            opencoder_store::LibsqlStore::open_memory().await.unwrap(),
-        );
+        let store: Arc<dyn opencoder_store::Store> =
+            Arc::new(opencoder_store::LibsqlStore::open_memory().await.unwrap());
         let mut s = make_plan_session();
         s.store = Some(store.clone());
         let meta = opencoder_store::SessionMeta {

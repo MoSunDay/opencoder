@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use crate::{domain, types::*};
 
 pub fn reconcile_interrupted(mut state: WorkflowState) -> WorkflowState {
-    for (_, todo) in state.todos.iter_mut() {
+    for todo in state.todos.values_mut() {
         if matches!(
             todo.status,
             TodoStatus::Running | TodoStatus::CandidateReady | TodoStatus::Accepting

@@ -157,6 +157,7 @@ async fn shift_tab_ts_origin_session_hands_plan_forward() {
         &mut sys_tokens,
         workdir,
         &active_skill_body,
+        &mut None, // last_switch_sent dedup baseline
     )
     .await;
     assert!(matches!(outcome, SwitchOutcome::Proceed));

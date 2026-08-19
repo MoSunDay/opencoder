@@ -357,7 +357,9 @@ pub(crate) fn render<B: Backend>(
             render_status_chip(f, composer_area, label, theme::local_color());
         }
         if let Some(text) = mode_flash {
-            let is_plan = text.contains("plan");
+            // Two-colour ONLY for the definite "→ plan mode" switch flash;
+            // every other flash (busy hint, text containing "plan") = accent.
+            let is_plan = text.starts_with("\u{2192} plan mode");
             render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_plan));
         }
         if shift_held {

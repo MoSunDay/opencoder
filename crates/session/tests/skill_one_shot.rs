@@ -15,7 +15,7 @@ use std::sync::Arc;
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{resume, run, SessionState};
-use opencoder_store::{LibsqlStore, SessionPatch, SessionMeta, Store};
+use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
 use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,10 @@ fn write_alpha_skill(home: &std::path::Path) {
 /// Assert the one-shot postcondition: no skill in memory (body + names) and
 /// none persisted on the session row.
 async fn assert_cleared(session: &SessionState, store: &Arc<dyn Store>, id: &str) {
-    assert!(session.skill_prompt_cloned().is_none(), "memory skill cleared");
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "memory skill cleared"
+    );
     assert!(
         session.active_skill_names_cloned().is_empty(),
         "active_skill_names cleared"
@@ -291,13 +294,13 @@ async fn second_run_has_no_skill_reminder() {
         .unwrap();
     let first = mock.requests()[0].clone();
     assert!(
-        user_texts(&first).iter().any(|t| t.contains("[active skill]")),
+        user_texts(&first)
+            .iter()
+            .any(|t| t.contains("[active skill]")),
         "run 1 carried the tail reminder"
     );
 
-    run(&mut s, "plain follow up".into(), |_| {})
-        .await
-        .unwrap();
+    run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
     let second = mock.requests()[1].clone();
     assert!(
         !user_texts(&second)
@@ -386,7 +389,9 @@ async fn resume_mid_run_keeps_skill_then_completion_clears() {
     // The resumed run did use the skill before its own end cleared it.
     let first = mock.requests()[0].clone();
     assert!(
-        user_texts(&first).iter().any(|t| t.contains("[active skill]")),
+        user_texts(&first)
+            .iter()
+            .any(|t| t.contains("[active skill]")),
         "resumed run carried the skill"
     );
 

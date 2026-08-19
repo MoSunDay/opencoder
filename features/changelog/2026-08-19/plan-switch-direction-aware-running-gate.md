@@ -17,7 +17,7 @@ Commit: (working-tree, post-7a9f188)
 
 ## 变更
 
-- **`crates/tui/src/app_loop.rs`（`handle_switch_agent`）**：门改回**双向拦截**——`if *running || chat.subagents_running > 0` 即拦截（不看方向）；busy flash 改为方向中性文案 `⏳ busy — mode switch blocked, retry when idle`（刻意不含 "plan" 子串，避免 render.rs `contains("plan")` 的 mode-flash 芯片误染为 plan 色）；拦截时无 cmd 发送、`sys_tokens`/input/cursor/running/agent 全部原样，仅 flash 反馈。**保留**：`sys_tokens_for` 刷新、`fold_agent_switch` 乐观折叠（含双击卫生：折叠同步收敛 stale `plan_submitted`）、idle 时 plan→act 的 `SwitchAndStart` 交接分支、`no_handoff`（t+Tab）语义、`SwitchOutcome::Quit`（worker 死亡）处理。doc 注释重写为双向拦截契约，与 slash 路径 `worker::gate_switch` 对齐（净 -3 行，794/800）。
+- **`crates/tui/src/app_loop.rs`（`handle_switch_agent`）**：门改回**双向拦截**——`if *running || chat.subagents_running > 0` 即拦截（不看方向）；busy flash 改为方向中性文案 `⏳ busy — mode switch blocked, retry when idle`（刻意不含 "plan" 子串，避免 render.rs `contains("plan")` 的 mode-flash 芯片误染为 plan 色）；拦截时无 cmd 发送、`sys_tokens`/input/cursor/running/agent 全部原样，仅 flash 反馈。**保留**：`sys_tokens_for` 刷新、`fold_agent_switch` 乐观折叠（含双击卫生：折叠同步收敛 stale `plan_submitted`）、idle 时 plan→act 的 `SwitchAndStart` 交接分支、`no_handoff`（t+Tab）语义、`SwitchOutcome::Quit`（worker 死亡）处理。doc 注释重写为双向拦截契约，与 slash 路径 `worker::gate_switch` 对齐（净 -3 行；P1-1 时点 794/800，批次三收尾后实测 800/800）。
 - **`crates/tui/src/worker.rs`**：`gate_switch` doc 删除「该 gate 现仅服务 slash 路径 / 键路径用方向感知门」表述，改为双向拦截统一契约（slash 与键路径同门）；`UiCmd::SwitchAgent` 臂 DEFENSE-IN-DEPTH 注释删除「act→plan MAY be enqueued mid-turn」，恢复「app-loop running 门双向拒绝发送，此臂只在干净 turn 边界可达」。
 - **`crates/tui/src/key_handler.rs`**：subagent-focus（`input_disabled`）分支**保留**三个模式切换绑定放行（switch_mode_clear / switch_mode_keep / raw BackTab——「离开视图」白名单仍有效），仅注释更新为双向拦截表述。
 - **`crates/tui/tests/`**：`switch_blocked_while_running.rs` 的共享 harness（`spawn_worker` / `wait_for_calls` / `wait_for_events` / mock 构造器）拆出到 `switch_blocked_harness/mod.rs`（91 行）——act→plan 集成测试改写后契约文件保持 ≤400 行。
@@ -41,7 +41,7 @@ Commit: (working-tree, post-7a9f188)
 - 红（改测试、实现未动）：`cargo test -p opencoder-tui --lib -- switch_gate` → 6 passed / **3 failed**（`switch_act_to_plan_while_running_is_noop` / `switch_act_to_plan_no_clear_while_running_is_noop` / `switch_act_to_plan_while_subagent_live_is_noop`，均 panic 于 "no command should be sent ..."——旧实现入队了纯切换）。
 - 绿（改实现后）：`switch_gate` 9 passed / 0 failed；`plan_running_noop` 1 passed；`--test switch_blocked_while_running` 2 passed / 0 failed。
 - 全量回归：`cargo test -p opencoder-tui` → **1518 passed / 0 failed**（1448 lib + 70 integration，24 个测试二进制）；`cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 0 警告 / EXIT=0。
-- 行数：`app_loop.rs` 794 / 800（净 -3）；`switch_gate_tests.rs` 580 / 800；`switch_blocked_while_running.rs` 351 + 拆出的共享 harness `switch_blocked_harness/mod.rs` 91（均 ≤400，harness 拆分保持契约文件在新文件上限内）。
+- 行数（勘误 2026-08-19 批次三 TUI 收尾后 `wc -l` 实测）：`app_loop.rs` 800 / 800（P1-1 时为 794；批次三为纯切换分支加 try_send+去重 +6 行，仍 ≤800）；`switch_gate_tests.rs` 759 / 800（P1-1 时为 580；批次三新增通道灌满/去重 2 用例）；`switch_blocked_while_running.rs` 366 + 拆出的共享 harness `switch_blocked_harness/mod.rs` 91（均 ≤400，harness 拆分保持契约文件在新文件上限内）。
 
 ## Impact Surface
 

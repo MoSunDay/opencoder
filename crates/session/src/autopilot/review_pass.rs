@@ -21,10 +21,12 @@ use crate::skill_lifecycle::run_loop_one_shot;
 use crate::SessionState;
 
 /// The single review iteration, surfaced in the `AutoPilot` event so
-/// surfaces render `autopilot: Review (iteration 1)`.
-const REVIEW_ITERATION: u32 = 1;
+/// surfaces render `autopilot: Review #0`. Zero-based, matching `drive`'s
+/// `ApState::iteration` which starts at 0 (and `should_stop`'s
+/// `iteration + 1 >= max` cap arithmetic that assumes it).
+const REVIEW_ITERATION: u32 = 0;
 
-/// Run the one-shot review pass. Emits `AutoPilot(Review, 1)` before the
+/// Run the one-shot review pass. Emits `AutoPilot(Review, 0)` before the
 /// turn and a terminal `Done` after it — the same end marker `drive` uses,
 /// so surfaces need no mode-specific completion handling.
 pub async fn review_pass(

@@ -22,9 +22,14 @@ use crate::{SessionEvent, SessionState};
 /// succeeding; the frontend resync restarts the drain slowly and heals.
 pub(super) const MAX_CONSUME_STREAK: u32 = 32;
 
-/// Claim exactly one queued input at idle. Returns its (row seq, prompt), or None.
+/// Claim exactly one queued input at idle. Returns its (row seq, prompt), or
+/// None. A persistently failing claim (initial attempt + single retry both
+/// Err) emits a `SessionEvent::Error` on `on_event` so the stranded row is
+/// visible on the event stream — the run still proceeds as if the queue were
+/// empty (Empty semantics → Done), never failing the whole run.
 pub(super) async fn claim_one_queued(
     session: &mut SessionState,
+    on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Option<(i64, String, Vec<String>)> {
     let store = session.store.clone()?;
     let sid = session.id.clone();
@@ -43,13 +48,17 @@ pub(super) async fn claim_one_queued(
             // BEGIN IMMEDIATE transaction) can surface as Err here; treating
             // it as Empty strands the row pending forever while run_loop
             // reports Done. Retry exactly once — a persistent failure still
-            // falls through to None (warned, never silent).
+            // falls through to None, but is surfaced as an Error event so the
+            // stranding is never silent (P2-4).
             tracing::warn!(error = %e, "claim_one_queued failed, retrying once");
             match store.claim_next_queue(&sid).await {
                 Ok(Some((seq, input))) => Some((seq, input.prompt, input.images.clone())),
                 Ok(None) => None,
                 Err(e2) => {
                     tracing::warn!(error = %e2, "claim_one_queued retry failed");
+                    on_event(SessionEvent::Error(format!(
+                        "queued input claim failed: {e2:#}"
+                    )));
                     None
                 }
             }
@@ -84,7 +93,7 @@ pub(super) async fn drain_one_queued(
     session: &mut SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<DrainOutcome> {
-    if let Some((seq, q, imgs)) = claim_one_queued(session).await {
+    if let Some((seq, q, imgs)) = claim_one_queued(session, on_event).await {
         on_event(SessionEvent::QueueConsumed {
             seq,
             text: q.clone(),

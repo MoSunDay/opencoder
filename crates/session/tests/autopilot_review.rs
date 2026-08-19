@@ -150,7 +150,8 @@ async fn review_mode_runs_exactly_one_review_pass() {
         .unwrap();
     let events = buf.lock().unwrap().clone();
 
-    // (i) exactly one AutoPilot { Review, 1 } marker.
+    // (i) exactly one AutoPilot { Review, 0 } marker — zero-based, matching
+    // drive's ApState::iteration which also starts at 0.
     let review_count = events
         .iter()
         .filter(|ev| {
@@ -158,12 +159,12 @@ async fn review_mode_runs_exactly_one_review_pass() {
                 ev,
                 SessionEvent::AutoPilot {
                     phase: ApPhase::Review,
-                    iteration: 1
+                    iteration: 0
                 }
             )
         })
         .count();
-    assert_eq!(review_count, 1, "exactly one AutoPilot(Review, 1) event");
+    assert_eq!(review_count, 1, "exactly one AutoPilot(Review, 0) event");
 
     // (ii) the pass switched to the plan agent.
     assert!(
@@ -380,6 +381,21 @@ async fn ap_mode_with_max_iterations_one_still_cycles_phases() {
         vec!["plan", "act", "verify"],
         "mode=Ap must run one full phase cycle under max_iterations=1"
     );
+
+    // Drive-path 0-based iteration anchor: `ApState::iteration` starts at 0,
+    // so every event of the FIRST cycle carries iteration == 0 — the same
+    // convention `review_pass` now follows (`should_stop`'s
+    // `iteration + 1 >= max` cap arithmetic already assumes it).
+    let iterations: Vec<u32> = buf
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|ev| match ev {
+            SessionEvent::AutoPilot { iteration, .. } => Some(*iteration),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(iterations, vec![0, 0, 0], "drive iterations are 0-based");
 }
 
 /// mode=Review with an attached store: an LLM failure during the review turn

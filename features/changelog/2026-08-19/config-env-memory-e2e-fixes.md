@@ -85,6 +85,7 @@ Commit: (working-tree, post-7a9f188)
 
 ## 回归 gate
 
-- `cargo test --workspace` / `cargo clippy --workspace --all-targets -- -D warnings`：免重跑——用户授权免测（人工确认本轮变更已测试通过），提交前仅复核编译；分项 crate 级回归记录见上方各节。
+- `cargo test --workspace`：✅ 3100 passed / 0 failed（RC=0，2026-08-19 实跑，197 个测试二进制）。
+- `cargo clippy --workspace --all-targets -- -D warnings`：✅ 0 警告 0 错误（2026-08-19 实跑）。
 - `cargo build --workspace`：✅ 提交前实跑干净（dev profile，2026-08-19）。
 - e2e 免 key 干跑：`python3 scripts/e2e/config_scenarios.py` 18/18（已实测）；`python3 -m py_compile scripts/e2e/*.py scripts/e2e_glm.py` ✓

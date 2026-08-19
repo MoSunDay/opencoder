@@ -15,34 +15,7 @@ use crate::Cli;
 
 pub(crate) use crate::run_image::load_image_data_uris;
 
-/// Apply a `--model` override (format `provider/model_id`) to the config.
-/// Must be called before `resolve_endpoint` so the LLM client is built against
-/// the chosen provider's credentials. Returns true when the config changed.
-pub(crate) fn apply_model_override(config: &mut Config, model: &Option<String>) -> bool {
-    if let Some(m) = model {
-        if config.model != *m {
-            config.model = m.clone();
-            return true;
-        }
-    }
-    false
-}
-
-/// Re-apply an explicit `--model` to a resumed session. `resume()` restores the
-/// stored model into the session, so an explicit `--model` must win here. Returns
-/// the new model string when the session was changed (caller persists it), else None.
-pub(crate) fn reapply_resume_model(
-    session: &mut SessionState,
-    model: &Option<String>,
-) -> Option<String> {
-    let m = model.as_ref()?;
-    if session.config.model == *m {
-        return None;
-    }
-    session.config.model = m.clone();
-    session.model = session.config.model_id().to_string();
-    Some(m.clone())
-}
+pub(crate) use crate::model_override::{apply_model_override, reapply_resume_model};
 
 /// Apply an `--agent` override (builtin name like plan/explore/build) to the
 /// config. Sets `config.agent.default` so the fresh-session path resolves it.
@@ -88,7 +61,9 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
     }
     let workdir = resolve_workdir(cli)?;
     let mut config = Config::load(&workdir)?;
-    apply_model_override(&mut config, &cli.model);
+    // Malformed --model must fail here, before resolve_endpoint's api-key
+    // error, so E20d's "names the malformed model" check holds.
+    apply_model_override(&mut config, &cli.model).map_err(anyhow::Error::msg)?;
     apply_agent_override(&mut config, &cli.agent);
     let ep = config.resolve_endpoint()?;
     let client: Arc<dyn ChatStream> = Arc::new(ChatClient::new_with_read_timeout(
@@ -152,7 +127,9 @@ pub async fn run_headless(cli: &Cli, prompt: String) -> Result<()> {
 
     // resume() restored the session's stored model; an explicit --model wins
     // over it and is re-persisted so subsequent resumes honor the new choice.
-    if let Some(new_model) = reapply_resume_model(&mut session, &cli.model) {
+    if let Some(new_model) =
+        reapply_resume_model(&mut session, &cli.model).map_err(anyhow::Error::msg)?
+    {
         if let Some(st) = &store {
             let _ = st
                 .update_session(
@@ -604,51 +581,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved.as_deref(), Some(session_id));
-    }
-
-    #[test]
-    fn apply_model_override_sets_provider_model() {
-        let mut cfg = Config::default();
-        assert!(apply_model_override(
-            &mut cfg,
-            &Some("anthropic/claude-3".into())
-        ));
-        assert_eq!(cfg.model, "anthropic/claude-3");
-        assert_eq!(cfg.provider_id(), "anthropic");
-        assert_eq!(cfg.model_id(), "claude-3");
-        // no override -> no change
-        let mut cfg2 = Config::default();
-        let before = cfg2.model.clone();
-        assert!(!apply_model_override(&mut cfg2, &None));
-        assert_eq!(cfg2.model, before);
-    }
-
-    #[test]
-    fn reapply_resume_model_overrides_stored_model() {
-        use opencoder_core::resolve_agent;
-        use opencoder_llm::{ChatStream, MockChatClient};
-        use opencoder_session::SessionState;
-        use std::sync::Arc;
-        // simulate a session resumed with stored model "openai/gpt-4o-mini"
-        let cfg = Config {
-            model: "openai/gpt-4o-mini".into(),
-            ..Config::default()
-        };
-        let agent = resolve_agent("act").unwrap();
-        let mut s = SessionState::new(
-            "s1",
-            agent,
-            cfg,
-            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
-            std::path::PathBuf::from("/tmp"),
-        );
-        // explicit --model anthropic/claude-3 wins over stored model
-        let changed = reapply_resume_model(&mut s, &Some("anthropic/claude-3".into()));
-        assert_eq!(changed.as_deref(), Some("anthropic/claude-3"));
-        assert_eq!(s.model, "claude-3");
-        assert_eq!(s.config.provider_id(), "anthropic");
-        // no override -> no change, returns None
-        assert_eq!(reapply_resume_model(&mut s, &None), None);
     }
 
     #[test]

@@ -144,8 +144,19 @@ async fn queue_plain_skill_prompt_resolves() {
         session.agent.name, "act",
         "no agent switch for plain prompt"
     );
-    let skill = session.skill_prompt_cloned();
-    assert!(skill.is_some(), "skill activated by $review token");
+    // One-shot: the skill was active DURING the run (its body was injected
+    // into the transcript) and is cleared once the run ends.
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.text().starts_with("[skill loaded] ")),
+        "skill was active during the run (body injected)"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: skill cleared at run end"
+    );
 
     let user_msgs: Vec<String> = session
         .messages
@@ -202,8 +213,19 @@ async fn steer_plain_skill_prompt_resolves() {
 
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
-    let skill = session.skill_prompt_cloned();
-    assert!(skill.is_some(), "skill activated by $review token");
+    // One-shot: activation is proven by the in-run body injection; the run's
+    // end clears the skill again.
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.text().starts_with("[skill loaded] ")),
+        "skill was active during the run (body injected)"
+    );
+    assert!(
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: skill cleared at run end"
+    );
 
     let user_msgs: Vec<String> = session
         .messages
@@ -258,8 +280,8 @@ async fn queue_pure_skill_prompt_injects_trigger() {
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
     assert!(
-        session.skill_prompt_cloned().is_some(),
-        "pure $review queue item activates the skill at consumption"
+        session.skill_prompt_cloned().is_none(),
+        "one-shot: pure $review item activated the skill for its run, then the run end cleared it"
     );
     assert!(
         session.messages.iter().any(|m| m.role == Role::User
@@ -292,17 +314,22 @@ async fn queued_skill_persists_at_consumption_not_admit() {
 
     let store = mem_store().await;
     seed(&store, "persist-skill-queue", "act").await;
+    // The queued turn's LLM call HANGS so the test can observe the store at
+    // the exact consumption moment — after the drain resolved `$review` but
+    // before the one-shot run-end clear lands.
+    let notify = Arc::new(tokio::sync::Notify::new());
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![done_turn("kickoff")])
-            .push_script(vec![done_turn("work reply")]),
-    ) as Arc<dyn ChatStream>;
+            .push_hang(notify.clone()),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "persist-skill-queue",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -327,22 +354,37 @@ async fn queued_skill_persists_at_consumption_not_admit() {
         "no skill persisted while the item is merely queued"
     );
 
-    run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
+    let run_task = tokio::spawn(async move {
+        run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
+    });
+    // Wait until the queued turn's LLM call is in flight (call #2).
+    while mock.call_count() < 2 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
 
-    let persisted = store
+    let midrun = store
         .get_session("persist-skill-queue")
         .await
         .unwrap()
         .and_then(|m| m.skill);
-    assert_eq!(
-        persisted,
-        session.skill_prompt_cloned(),
-        "consumption-time activation is persisted verbatim"
-    );
     assert!(
-        persisted
+        midrun
             .as_deref()
             .is_some_and(|b| b.starts_with("> Source: ")),
-        "persisted body carries the source prefix: {persisted:?}"
+        "consumption-time activation is persisted before the run ends: {midrun:?}"
+    );
+
+    // Release the hung turn; the run completes and the one-shot clear lands.
+    notify.notify_one();
+    run_task.await.unwrap();
+
+    let after = store
+        .get_session("persist-skill-queue")
+        .await
+        .unwrap()
+        .and_then(|m| m.skill);
+    assert!(
+        after.is_none(),
+        "one-shot: the completed run clears the persisted skill: {after:?}"
     );
 }

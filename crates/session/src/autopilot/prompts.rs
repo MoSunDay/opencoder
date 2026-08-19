@@ -46,9 +46,10 @@ pub fn verify_system_prompt() -> String {
 pub fn verify_user_prompt(goal: &str) -> String {
     format!(
         "Goal: {goal}\n\n\
-         Based on the transcript above, is the goal fully achieved? Reply with \
-         a single token: 'yes' (achieved / complete) or 'no' (more work \
-         needed).",
+         Based on the transcript above, is the goal fully achieved? Answer \
+         with EXACTLY one token: 'yes' (achieved / complete) or 'no' (more \
+         work needed) — nothing else. Parsing is strict: any qualifier, \
+         explanation or extra word makes the answer count as no verdict.",
     )
 }
 
@@ -57,7 +58,8 @@ pub fn verify_user_prompt(goal: &str) -> String {
 /// the system prompt (activated by `activate_review_skill`).
 pub fn review_prompt(goal: &str) -> String {
     format!(
-        "Review the work completed toward this goal: {goal}\n\n         Review the current state of the work — correctness, completeness, and \
+        "Review the work completed toward this goal: {goal}\n\n\
+         Review the current state of the work — correctness, completeness, and \
          any defects or risks. Do NOT redo or extend the work; produce a \
          focused review of what was done. Keep it short and actionable."
     )

@@ -6,7 +6,7 @@
 //! read side of the module (discovery, parsing, skill tokens) stays in
 //! [`crate::skill`].
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::skills_dir;
 
@@ -136,10 +136,24 @@ pub const DEPS_SENTINEL: &str = ".skills-deps";
 /// version. Errors are logged via `tracing` and never propagated — seeding
 /// must never block startup.
 pub fn seed_builtin_skills() {
-    let root = skills_dir();
-    if let Err(e) = seed_builtin_skills_in(&root) {
+    seed_packs_at_home(skills_dir(), BUILTIN_SKILLS, "built-in skills");
+}
+
+/// Shared home-resolution wrapper for the public seeding entry points:
+/// `None` home (no `HOME`, no passwd entry) means SKIP with a single warning —
+/// never fall back to a relative directory, which would write skill files
+/// into the current working directory. Factored out so the no-home skip path
+/// is unit-testable without env games.
+fn seed_packs_at_home(root: Option<PathBuf>, packs: &[(&str, &[(&str, &str)])], label: &str) {
+    let Some(root) = root else {
         tracing::warn!(
-            "failed to seed built-in skills into {}: {e}",
+            "skipping {label} seeding: no home directory for ~/.opencoder/skills"
+        );
+        return;
+    };
+    if let Err(e) = seed_skill_packs(&root, packs) {
+        tracing::warn!(
+            "failed to seed {label} into {}: {e}",
             root.display()
         );
     }
@@ -162,7 +176,12 @@ pub fn seed_builtin_skills_in(root: &Path) -> std::io::Result<()> {
 /// built-in skills until the user explicitly installs the optional deps via
 /// `install-skills-dep.sh`. Idempotent and best-effort.
 pub fn seed_dep_gated_skills() {
-    let root = skills_dir();
+    let Some(root) = skills_dir() else {
+        tracing::warn!(
+            "skipping dep-gated skill seeding: no home directory for ~/.opencoder/skills"
+        );
+        return;
+    };
     if !root.join(DEPS_SENTINEL).exists() {
         return;
     }
@@ -243,6 +262,19 @@ const INSTALL_SCRIPT: &str = include_str!("../../../../scripts/install-skills-de
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No home directory: seeding must SKIP (warn once) and never touch the
+    /// filesystem — in particular never create a relative `./.opencoder/`
+    /// inside the current working directory (the pre-fix behavior, which
+    /// seeded skill files into whatever directory the binary started in).
+    #[test]
+    fn seeding_without_home_dir_skips_without_writing() {
+        seed_packs_at_home(None, BUILTIN_SKILLS, "built-in skills");
+        assert!(
+            !std::path::Path::new(".opencoder/skills").exists(),
+            "no-home seeding must not create ./.opencoder/skills in cwd"
+        );
+    }
 
     #[test]
     fn write_install_script_creates_file() {

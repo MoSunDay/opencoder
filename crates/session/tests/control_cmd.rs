@@ -714,11 +714,11 @@ async fn clear_context_plan_mode_keeps_plan_after_phase_reset() {
 }
 
 /// Anti-fabrication regression: in act mode with NO plan (only an act-tagged
-/// assistant answer in the transcript), `/act_clear_context` must still take
-/// the blank fresh-start path — the message-level fallback never mistakes an
-/// act-mode answer for a plan.
+/// assistant answer in the transcript), `/act_clear_context` never mistakes
+/// the act-mode answer for a plan — it survives as a NEUTRAL seed (seed
+/// marker persisted, no PlanHandoff), not as the plan→act directive.
 #[tokio::test]
-async fn clear_context_act_mode_no_plan_still_blank_fresh_start() {
+async fn clear_context_act_mode_seeds_answer_never_plan_directive() {
     let store = mem_store().await;
     seed(&store, "clear-act", "act").await;
 
@@ -730,7 +730,9 @@ async fn clear_context_act_mode_no_plan_still_blank_fresh_start() {
     }];
     store.append_messages("clear-act", &msgs).await.unwrap();
 
-    let mock = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+    // The seed path continues running: one scripted execution turn.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("seeded reply")]))
+        as Arc<dyn ChatStream>;
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "clear-act",
@@ -755,8 +757,8 @@ async fn clear_context_act_mode_no_plan_still_blank_fresh_start() {
         let evs = events.lock().unwrap();
         assert_eq!(
             session.handoff_plan.as_deref(),
-            Some("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
-            "act mode with no plan must keep the blank fresh-start sentinel"
+            Some("<<OPENCODER_CLEAR_SEED>>task done"),
+            "act mode with no plan preserves the last say as a seed, not a plan"
         );
         assert!(
             !evs.iter()

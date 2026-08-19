@@ -15,22 +15,30 @@
 //!   reminder tag it is the durable arming signal: persisted to the store so
 //!   a restarted / re-opened TUI re-arms the Shift+Tab plan→act handoff.
 //!
-//! Lifecycle: reset on switching *to* plan mode ([`SessionState::reset_plan_phase`]),
-//! incremented per plan prompt (`maybe_tag_plan_prompt` + persist), captured
-//! by compaction, consumed by `after_handoff`.
+//! Lifecycle (split): switching *to* plan mode resets ONLY the input counter
+//! ([`SessionState::reset_plan_phase`]) — the snapshot survives the plain
+//! re-entry, so a plan→act→plan toggle with no new requirement still owns the
+//! previous phase's plan. The snapshot retires when a NEW requirement is
+//! recorded (`maybe_tag_plan_prompt`, alongside the counter increment): a
+//! failed or cancelled new-requirement turn must not leave the stale plan
+//! armed (the `ecce7b0` anti-fabrication guard). The snapshot is captured per
+//! plan turn by `SessionState::record`, rescued by compaction and consumed by
+//! `after_handoff`.
 
 use crate::SessionState;
 use opencoder_core::message::now_ms;
 use opencoder_core::{AgentKind, Message, Role};
 
 impl SessionState {
-    /// Reset the current plan phase: no requirements submitted, no plan
-    /// snapshot carried. Called when switching *to* plan mode (a fresh
-    /// planning phase starts) so stale state from a previous phase cannot
-    /// leak into the next handoff.
+    /// Reset the plan-phase input counter, re-arming the read-only reminder
+    /// tag. Called when switching *to* plan mode. The `plan_snapshot`
+    /// deliberately SURVIVES this reset: a plan→act→plan toggle with no new
+    /// requirement submitted still owns the previous phase's plan, so
+    /// `/act_clear_context` and the Shift+Tab handoff can carry it forward.
+    /// The snapshot retires only when a new requirement is recorded
+    /// (`maybe_tag_plan_prompt`) or the plan is consumed (`after_handoff`).
     pub fn reset_plan_phase(&mut self) {
         self.plan_input_count = 0;
-        self.plan_snapshot = None;
     }
 
     /// Best-effort persist of the plan-phase state (`plan_input_count` +
@@ -125,13 +133,18 @@ mod tests {
     }
 
     #[test]
-    fn reset_plan_phase_clears_counter_and_snapshot() {
+    fn reset_plan_phase_resets_counter_but_keeps_snapshot() {
         let mut s = make_plan_session();
         s.plan_input_count = 3;
         s.plan_snapshot = Some("## Plan".into());
         s.reset_plan_phase();
         assert_eq!(s.plan_input_count, 0, "counter must reset");
-        assert_eq!(s.plan_snapshot, None, "snapshot must reset");
+        assert_eq!(
+            s.plan_snapshot.as_deref(),
+            Some("## Plan"),
+            "snapshot survives the plain switch to plan; it retires only on a \
+             new requirement (maybe_tag_plan_prompt) or handoff"
+        );
     }
 
     #[test]

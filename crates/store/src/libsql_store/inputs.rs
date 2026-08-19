@@ -141,11 +141,18 @@ pub async fn recover_orphans(conn: &Connection, session_id: &str) -> Result<u64>
     .context("recover orphan inputs")
 }
 
-/// Promote exactly one (oldest) queued input. Returns its seq, or None if none pending.
+/// Promote exactly one (oldest) queued input. Returns its seq, or None if none
+/// pending. Invariant guard: rows already consumed into the transcript
+/// (`recorded = 1`) are never promoted — an error-recovery `unpromote` may
+/// have returned such a row to pending (it only clears `promoted_seq`), and
+/// re-promoting it would let the drain re-consume it and duplicate the prompt
+/// in the transcript. Both the SELECT and the UPDATE carry the guard: without
+/// it on the SELECT a recorded row would be picked, the guarded UPDATE would
+/// match 0 rows, and the function would still report the row as promoted.
 pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
     super::tx::run_tx(conn, "BEGIN", || async move {
         let stmt = conn
-            .prepare("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
+            .prepare("SELECT seq FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
             .await?;
         let mut rows = stmt.query(params![session_id]).await?;
         let target = match rows.next().await? {
@@ -157,7 +164,7 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
         if let Some(s) = target {
             let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
             conn.execute(
-                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ? AND recorded = 0",
                 params![promoted_seq, s],
             )
             .await?;
@@ -172,14 +179,17 @@ pub async fn promote_next_queued(conn: &Connection, session_id: &str) -> Result<
 /// Atomically return the oldest pending queued input WITH its prompt and mark it
 /// promoted. The runner drain uses this to consume one queued follow-up at idle.
 /// Returns the row seq alongside the input so callers (e.g. the TUI mirror) can
-/// reconcile by identity.
+/// reconcile by identity. Invariant guard (same as `promote_next_queued`): rows
+/// already consumed (`recorded = 1`) are skipped in the SELECT and excluded by
+/// the UPDATE, so a row flipped back to pending by an error-recovery unpromote
+/// can never be re-served into the transcript a second time.
 pub async fn claim_next_queue(
     conn: &Connection,
     session_id: &str,
 ) -> Result<Option<(i64, SessionInput)>> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || async move {
         let stmt = conn
-            .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL ORDER BY admitted_seq ASC LIMIT 1")
+            .prepare("SELECT seq, id, session_id, delivery, prompt, images_json, admitted_seq, promoted_seq, display_text FROM session_inputs WHERE session_id = ? AND delivery = 'queue' AND promoted_seq IS NULL AND recorded = 0 ORDER BY admitted_seq ASC LIMIT 1")
             .await?;
         let mut rows = stmt.query(params![session_id]).await?;
         let claimed = match rows.next().await? {
@@ -195,7 +205,7 @@ pub async fn claim_next_queue(
         if let Some((seq, mut input)) = claimed {
             let promoted_seq = last_input_seq_in_tx(conn, session_id).await? + 1;
             conn.execute(
-                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ?",
+                "UPDATE session_inputs SET promoted_seq = ? WHERE seq = ? AND recorded = 0",
                 params![promoted_seq, seq],
             )
             .await?;

@@ -74,9 +74,9 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 /// the plan turn is running is intercepted — no command sent, input
 /// untouched, running stays true, and a busy flash hint is shown (the user
 /// re-presses at a clean idle boundary; no deferred auto-fire). The
-/// direction-aware gate intercepts every plan→act variant this way (with or
-/// without a submitted plan, handoff or no_handoff); act→plan while running
-/// is instead a pure state switch (see switch_gate_tests).
+/// bidirectional gate intercepts every variant this way (either direction,
+/// with or without a submitted plan, handoff or no_handoff; see
+/// switch_gate_tests).
 #[tokio::test]
 async fn switch_plan_to_act_while_running_is_noop() {
     let mut chat = plan_view();

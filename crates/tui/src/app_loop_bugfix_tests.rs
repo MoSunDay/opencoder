@@ -315,7 +315,7 @@ async fn drain_pending_restart_with_dead_worker_quits() {
 
 /// When the user presses Shift+Tab (plan→act) while a plan turn is still
 /// running AND the plan was already submitted, the switch is intercepted
-/// with an explicit busy hint ("busy — plan switch blocked, retry when
+/// with an explicit busy hint ("busy — mode switch blocked, retry when
 /// idle"): the agent stays in plan mode — no deferred auto-fire, the user
 /// re-presses at a clean idle boundary.
 ///
@@ -384,7 +384,7 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
     );
     // The running flag must be untouched (still running the plan turn).
     assert!(running, "running flag must not be cleared by the noop");
-    // The flash must announce the plan switch is blocked while busy.
+    // The flash must announce the switch is blocked while busy.
     assert!(
         mode_flash
             .as_ref()
@@ -394,8 +394,8 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
     assert!(
         mode_flash
             .as_ref()
-            .is_some_and(|(msg, _)| msg.contains("plan switch blocked")),
-        "mode_flash must say the plan switch is blocked, got {mode_flash:?}"
+            .is_some_and(|(msg, _)| msg.contains("mode switch blocked")),
+        "mode_flash must say the mode switch is blocked, got {mode_flash:?}"
     );
     // The key assertion: the context-meter baseline is NOT overwritten.
     assert_eq!(

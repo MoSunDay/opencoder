@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, ApMode, AutoPilotConfig, Config, Message};
 use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
-use opencoder_session::autopilot::{drive, verify, ApOutcome, ApPhase, ApState, VerifyVerdict};
+use opencoder_session::autopilot::{
+    drive, verify, ApOutcome, ApPhase, ApState, VerifyFailure, VerifyVerdict,
+};
 use opencoder_session::runner::run_with_registry;
 use opencoder_session::tools::registry;
 use opencoder_session::{SessionEvent, SessionState};
@@ -81,7 +83,7 @@ async fn verify_yes_means_complete_and_does_not_pollute_transcript() {
     let state = ApState::new("do the thing".into());
     let before = session.messages.len();
 
-    let verdict = verify(&session, &state, 3).await;
+    let verdict = verify(&session, &state, 3).await.unwrap();
     assert_eq!(verdict, VerifyVerdict::Complete);
     assert_eq!(
         session.messages.len(),
@@ -97,13 +99,14 @@ async fn verify_no_means_more_work() {
     let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
     session.record(Message::user("u1", "do the thing")).await;
     let state = ApState::new("do the thing".into());
-    let verdict = verify(&session, &state, 3).await;
+    let verdict = verify(&session, &state, 3).await.unwrap();
     assert_eq!(verdict, VerifyVerdict::MoreWork);
 }
 
 #[tokio::test]
-async fn verify_garbage_retries_then_malformed() {
-    // 3 garbage answers + verify_retries=3 -> Malformed (each retry consumed).
+async fn verify_garbage_retries_then_unparseable() {
+    // 3 garbage answers + verify_retries=3 -> Err(Unparseable) naming the
+    // attempt count (each retry consumed).
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![completed("maybe", vec![])])
@@ -116,8 +119,53 @@ async fn verify_garbage_retries_then_malformed() {
     let before = session.messages.len();
 
     let verdict = verify(&session, &state, 3).await;
-    assert_eq!(verdict, VerifyVerdict::Malformed);
+    assert_eq!(
+        verdict,
+        Err(VerifyFailure::Unparseable { attempts: 3 }),
+        "exhausted unparseable budget must report the cause + attempts"
+    );
     assert_eq!(session.messages.len(), before, "transcript untouched");
+}
+
+#[tokio::test]
+async fn verify_transport_errors_report_unreachable() {
+    // Every judge call dies at the transport layer -> Err(Unreachable)
+    // carrying the LAST error verbatim — distinguishable from the
+    // unparseable-judge exhaustion above.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![LlmEvent::Error("conn refused".into())])
+            .push_script(vec![LlmEvent::Error("429 rate limited".into())]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(10, 2));
+    session.record(Message::user("u1", "do the thing")).await;
+    let state = ApState::new("do the thing".into());
+    let before = session.messages.len();
+
+    let verdict = verify(&session, &state, 2).await;
+    assert_eq!(
+        verdict,
+        Err(VerifyFailure::Unreachable {
+            attempts: 2,
+            last_error: "429 rate limited".into(),
+        }),
+        "transport exhaustion must report unreachable + the last error"
+    );
+    assert_eq!(session.messages.len(), before, "transcript untouched");
+}
+
+#[tokio::test]
+async fn verify_qualified_yes_is_unparseable_not_complete() {
+    // Strict single-token parsing: "Yes, more work" is NOT a Complete — it
+    // burns a retry; here it exhausts the budget as Unparseable.
+    let mock = Arc::new(
+        MockChatClient::new().push_script(vec![completed("Yes, more work needed", vec![])]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(10, 1));
+    session.record(Message::user("u1", "do the thing")).await;
+    let state = ApState::new("do the thing".into());
+    let verdict = verify(&session, &state, 1).await;
+    assert_eq!(verdict, Err(VerifyFailure::Unparseable { attempts: 1 }));
 }
 
 #[tokio::test]
@@ -131,7 +179,7 @@ async fn verify_retries_until_a_parseable_answer() {
     let (_dir, mut session) = make_session(mock, autopilot_config(10, 3));
     session.record(Message::user("u1", "do the thing")).await;
     let state = ApState::new("do the thing".into());
-    let verdict = verify(&session, &state, 3).await;
+    let verdict = verify(&session, &state, 3).await.unwrap();
     assert_eq!(verdict, VerifyVerdict::Complete);
 }
 
@@ -196,8 +244,40 @@ async fn drive_emits_autopilot_phase_events() {
 }
 
 #[tokio::test]
+async fn drive_aborts_when_verify_judge_is_unreachable() {
+    // plan, act, then every verify attempt dies at the transport layer:
+    // Aborted with a reason naming the outage — a dead judge must be
+    // distinguishable from a chatty (unparseable) one in CLI/TUI output.
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![completed("plan-0", vec![])])
+            .push_script(vec![completed("act-0", vec![])])
+            .push_script(vec![LlmEvent::Error("connection refused".into())])
+            .push_script(vec![LlmEvent::Error("connection refused".into())]),
+    ) as Arc<dyn ChatStream>;
+    let (_dir, mut session) = make_session(mock, autopilot_config(10, 2));
+    session
+        .record(Message::user("u1", "implement feature X"))
+        .await;
+
+    let reg = registry();
+    let (_buf, mut on_event) = collector();
+    let outcome = drive(&mut session, &reg, &mut on_event).await.unwrap();
+    match outcome {
+        ApOutcome::Aborted(reason) => {
+            assert!(reason.contains("unreachable"), "reason: {reason}");
+            assert!(
+                reason.contains("connection refused"),
+                "reason carries the transport cause: {reason}"
+            );
+        }
+        other => panic!("expected Aborted, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn drive_aborts_when_verify_keeps_malformed() {
-    // plan, act, then verify retries 3x garbage -> Malformed -> Aborted.
+    // plan, act, then verify retries 3x garbage -> Aborted (unparseable).
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![completed("plan-0", vec![])])
@@ -215,7 +295,9 @@ async fn drive_aborts_when_verify_keeps_malformed() {
     let (_buf, mut on_event) = collector();
     let outcome = drive(&mut session, &reg, &mut on_event).await.unwrap();
     match outcome {
-        ApOutcome::Aborted(_) => {}
+        ApOutcome::Aborted(reason) => {
+            assert!(reason.contains("unparseable"), "reason: {reason}");
+        }
         other => panic!("expected Aborted, got {other:?}"),
     }
 }
@@ -581,8 +663,8 @@ async fn drive_clamps_zero_max_iterations_to_one() {
 #[tokio::test]
 async fn verify_retries_zero_is_clamped_to_one() {
     // verify_retries=0 would never judge; drive clamps to 1 so a single
-    // malformed answer still aborts (rather than silently never calling the
-    // judge and reporting Malformed immediately).
+    // unparseable answer still aborts (rather than silently never calling
+    // the judge and aborting with an empty cause immediately).
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![completed("plan-0", vec![])])
@@ -628,7 +710,7 @@ async fn verify_snapshot_truncates_transcript_to_window() {
             .await;
     }
     let state = ApState::new("implement the thing".into());
-    let verdict = verify(&session, &state, 3).await;
+    let verdict = verify(&session, &state, 3).await.unwrap();
     assert_eq!(verdict, VerifyVerdict::Complete, "\"yes\" = achieved");
 
     let reqs = mock.requests();

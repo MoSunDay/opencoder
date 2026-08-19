@@ -213,13 +213,22 @@ pub async fn replay_into_chat(
     };
 
     // Plan→act handoff card. The clear-context boundary (/act_clear_context)
-    // also persists an internal sentinel here — skip it so the raw marker
-    // never reaches the UI.
+    // persists internal markers here: the blank sentinel is skipped entirely,
+    // and a last-say seed marker is stripped to its preserved text so the raw
+    // marker never reaches the UI (the preserved reply renders like a plan
+    // card: read-only context carried across the clear).
     if let Ok(Some(meta)) = store.get_session(session_id).await {
         if let Some(plan) = meta
             .handoff_plan
             .as_deref()
             .filter(|p| !opencoder_session::is_clear_context_handoff(p))
+            .map(|p| {
+                if opencoder_session::is_clear_context_seed(p) {
+                    opencoder_session::clear_seed_text(p)
+                } else {
+                    p
+                }
+            })
         {
             let clean_plan = sanitize_multiline(plan);
             let rendered = crate::markdown::render(&clean_plan);

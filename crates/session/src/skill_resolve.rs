@@ -29,7 +29,9 @@ use crate::SessionState;
 /// item). Mirrors the idle path's pure-skill trigger so the model begins
 /// executing the active skill (surfaced via the `[active skill]` tail
 /// reminder). The plan-mode read-only tag is deliberately NOT applied to
-/// this trigger, matching the idle path.
+/// this trigger, matching the idle path. One-shot: the skill this trigger
+/// announces is cleared at the end of the run that consumed the token
+/// (`skill_lifecycle`), so it never announces a stale skill on a later run.
 pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin executing it now.";
 
 /// Persist the session's active skill to the store when it differs from
@@ -37,13 +39,16 @@ pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin execut
 /// `skill_persist::persist_skill`: best-effort — store errors are swallowed
 /// because the in-memory write keeps the in-flight turn correct — and a
 /// `None -> Some` transition only writes `skill`, never `clear_skill` (skill
-/// *clearing* stays owned by the explicit clear paths: control_cmd, plan
-/// handoff, the TUI `$` menu).
+/// *clearing* is owned by the explicit clear paths — control_cmd, plan
+/// handoff, the TUI `$` menu — plus the run-end auto-clear in
+/// `skill_lifecycle::clear_on_run_end`; this function never clears).
 ///
 /// This is what makes consumption-time activation survive resume: the queue /
 /// steer drain resolves `$name` tokens at the idle boundary and this call
-/// lands the body in `sessions.skill` right then, so a restart replays the
-/// drained item's post-state instead of a skill-less session.
+/// lands the body in `sessions.skill` right then, so a crash mid-run and the
+/// subsequent resume replays the drained item's post-state — including the
+/// still-active skill — until that resumed run completes and the run-end
+/// clear lands.
 pub async fn persist_active_skill(session: &SessionState, prev: &Option<String>) {
     let Some(store) = session.store.clone() else {
         return;
@@ -69,8 +74,10 @@ pub async fn persist_active_skill(session: &SessionState, prev: &Option<String>)
 /// stripped together with the names that matched no discovered skill (so
 /// callers can warn).
 ///
-/// When `text` has no tokens the active skill is left untouched (sticky).
-/// When tokens are present, the resolved bodies are joined (`\\n\\n`) and set
+/// When `text` has no tokens the active skill is left untouched for the
+/// remainder of the current run (this function is pure activation — the
+/// runner clears the skill at run end via `skill_lifecycle`). When tokens
+/// are present, the resolved bodies are joined (`\\n\\n`) and set
 /// as the session skill, matching the TUI multi-skill convention. Only
 /// resolved `$name` tokens are stripped from the returned text; unresolved
 /// `$name` sequences are preserved verbatim as literal text.
@@ -126,9 +133,11 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 /// empties the text (e.g. `/plan $review`), injects [`SKILL_TRIGGER`]
 /// instead — mirroring the idle path's pure-skill behavior — and skips the
 /// plan-mode tag. The condition is scoped to tokens resolved by this very
-/// call, NOT the session's sticky skill: a queue/steer restart with a stale
-/// active skill must not re-inject a trigger for a skill the item never
-/// mentioned (that amplified the drain self-continuation loop).
+/// call, NOT the session's already-active skill: a queue/steer restart with
+/// a stale active skill must not re-inject a trigger for a skill the item
+/// never mentioned (that amplified the drain self-continuation loop).
+/// Activations made here are one-shot: the run consuming this input clears
+/// them at its end (`skill_lifecycle`).
 pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[String]) {
     let skills = discover_skills();
     let prev_skill = session.skill_prompt_cloned();
@@ -136,8 +145,8 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
     persist_active_skill(session, &prev_skill).await;
     // "Resolved now": THIS input carried at least one `$name` token that
     // extraction found and discovery matched (so it was stripped and
-    // activated above). Scoped to this call — not the sticky skill — so a
-    // queue/steer restart with a stale active skill cannot re-inject a
+    // activated above). Scoped to this call — not the already-active skill —
+    // so a queue/steer restart with a stale active skill cannot re-inject a
     // trigger for a skill the item never mentioned.
     let resolved_now = extract_skill_tokens(rest)
         .1
@@ -199,7 +208,10 @@ mod tests {
         let (clean, unresolved) = resolve_inline_skills_with(&s, "review the code", &[]);
         assert_eq!(clean, "review the code");
         assert!(unresolved.is_empty());
-        assert!(s.skill_prompt_cloned().is_none(), "sticky: skill untouched");
+        assert!(
+            s.skill_prompt_cloned().is_none(),
+            "no-token call leaves skill untouched"
+        );
     }
 
     #[test]
@@ -224,7 +236,7 @@ mod tests {
         assert_eq!(unresolved, vec!["bogus"]);
         assert!(
             s.skill_prompt_cloned().is_none(),
-            "no resolved skill -> sticky"
+            "no resolved skill -> untouched"
         );
     }
 
@@ -346,15 +358,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_compound_sticky_skill_without_token_records_nothing() {
+    async fn record_compound_active_skill_without_token_records_nothing() {
         let mut s = make_session();
-        // A stale sticky skill from an earlier turn must NOT be re-triggered
-        // by an empty queue/steer item that carries no `$token` of its own.
+        // An already-active skill (e.g. resumed mid-run) must NOT be
+        // re-triggered by an empty queue/steer item that carries no `$token`
+        // of its own.
         s.set_skill(Some("STALE BODY".into()));
         record_compound(&mut s, "", &[]).await;
         assert!(
             s.messages.is_empty(),
-            "no trigger for empty text with only a sticky skill"
+            "no trigger for empty text with only an already-active skill"
         );
     }
 
@@ -366,8 +379,8 @@ mod tests {
             let _guard = lock_home(tempfile::tempdir().unwrap().path());
             // `$bogus` matches no discovered skill: the token survives as
             // literal text, so a REAL user message is recorded — but no
-            // SKILL_TRIGGER (nothing resolved now; the sticky skill alone is
-            // not a trigger source).
+            // SKILL_TRIGGER (nothing resolved now; the already-active skill
+            // alone is not a trigger source).
             record_compound(&mut s, "$bogus", &[]).await;
         }
         assert_eq!(s.messages.len(), 1, "literal unresolved token recorded");

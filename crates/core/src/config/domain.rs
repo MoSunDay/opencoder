@@ -172,6 +172,28 @@ fn json_kind(v: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Read a domain file's current content as the pre-merge root: missing file
+/// → `{}`; empty/whitespace file → `{}`; anything unparseable is corrupt
+/// (error — callers refuse to overwrite). Shared by [`save_domain`] and
+/// [`probe_mcp_conflict`] so the dry-run sees exactly what a save would.
+fn read_root(target: &Path) -> anyhow::Result<serde_json::Value> {
+    if !target.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let raw = std::fs::read_to_string(target)
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", target.display()))?;
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(v) => Ok(v),
+        // An empty/whitespace-only file is an empty object (matches a
+        // freshly-created file); anything unparseable is corrupt.
+        Err(_) if raw.trim().is_empty() => Ok(serde_json::json!({})),
+        Err(e) => anyhow::bail!(
+            "domain file {} is corrupt: {e}; refusing to overwrite",
+            target.display()
+        ),
+    }
+}
+
 /// Merge `patch` into the domain file for `key` (pretty-printed, parents
 /// created). A `null` entry deletes that key from the file (the
 /// [`super::merge::merge_json`] semantics); a whole-domain `null` patch
@@ -189,24 +211,7 @@ pub(crate) fn save_domain(
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut root: serde_json::Value = if target.exists() {
-        let raw = std::fs::read_to_string(&target)
-            .map_err(|e| anyhow::anyhow!("read {}: {e}", target.display()))?;
-        match serde_json::from_str::<serde_json::Value>(&raw) {
-            Ok(v) => v,
-            // An empty/whitespace-only file is an empty object (matches a
-            // freshly-created file); anything unparseable is corrupt.
-            Err(_) if raw.trim().is_empty() => serde_json::json!({}),
-            Err(e) => {
-                anyhow::bail!(
-                    "domain file {} is corrupt: {e}; refusing to overwrite",
-                    target.display()
-                )
-            }
-        }
-    } else {
-        serde_json::json!({})
-    };
+    let mut root: serde_json::Value = read_root(&target)?;
     super::merge::merge_json(&mut root, patch);
     // A whole-domain `null` patch (e.g. `{"cli": null}` after `split_patch`)
     // must not write a literal 4-byte `null` file: `merge_json`'s fallthrough
@@ -219,9 +224,44 @@ pub(crate) fn save_domain(
     if !root.is_object() {
         root = serde_json::json!({});
     }
+    // MCP name-collision guard (bug #14), checked on the merged map right
+    // before serialization — a refused save leaves the file untouched. The
+    // domain file's top level IS the server map (no `mcp_servers` envelope).
+    if key == "mcp_servers" {
+        if let Some(servers) = root.as_object() {
+            if let Some((offending, existing)) = super::mcp_guard::mcp_name_collision(servers) {
+                anyhow::bail!(
+                    "{}",
+                    super::mcp_guard::conflict_message(&offending, &existing)
+                );
+            }
+        }
+    }
     let pretty = serde_json::to_string_pretty(&root)?;
     std::fs::write(&target, pretty)?;
     Ok(target)
+}
+
+/// Dry-run of the mcp guard inside [`save_domain`]: would the merge a
+/// `Config::save(working_dir, patch)` performs for `mcp_servers` land on a
+/// name collision? No disk access beyond reading the current target; returns
+/// the [`super::mcp_guard::conflict_message`] on a hit. Read/target errors
+/// yield `None` — the subsequent save surfaces them itself. Non-mcp domain
+/// keys and config.json remainders are out of scope (they never carry
+/// `mcp_servers`).
+pub(crate) fn probe_mcp_conflict(working_dir: &Path, patch: &serde_json::Value) -> Option<String> {
+    let (_, domains) = split_patch(patch);
+    domains
+        .iter()
+        .filter(|(key, _)| *key == "mcp_servers")
+        .find_map(|(key, value)| {
+            let target = write_target(working_dir, key)?;
+            let mut merged = read_root(&target).ok()?;
+            super::merge::merge_json(&mut merged, value);
+            let servers = merged.as_object()?;
+            let (offending, existing) = super::mcp_guard::mcp_name_collision(servers)?;
+            Some(super::mcp_guard::conflict_message(&offending, &existing))
+        })
 }
 
 /// Pure patch split: extract top-level domain keys (values passed through

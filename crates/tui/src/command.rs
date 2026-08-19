@@ -78,7 +78,8 @@ pub enum SlashAction {
     Ps,
     /// Display-only: kill all background bash (never enters model context).
     Stop,
-    /// Display-only: toggle autopilot (never enters model context).
+    /// Display-only: open the autopilot mode menu (never enters model
+    /// context).
     Ap,
 }
 

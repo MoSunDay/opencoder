@@ -314,15 +314,16 @@ async fn drain_pending_restart_with_dead_worker_quits() {
 // ----- Bug #7: sys_tokens updated before plan→act noop early return -----
 
 /// When the user presses Shift+Tab (plan→act) while a plan turn is still
-/// running AND the plan was already submitted, the switch is a no-op: the
-/// agent stays in plan mode and only a "busy — switch when idle" flash is
-/// shown (any mode switch while running is deferred to the next clean idle
-/// boundary).
+/// running AND the plan was already submitted, the switch is intercepted
+/// with an explicit busy hint ("busy — plan switch blocked, retry when
+/// idle"): the agent stays in plan mode — no deferred auto-fire, the user
+/// re-presses at a clean idle boundary.
 ///
 /// Previously `*sys_tokens` (the context-meter baseline) was overwritten with
-/// the *act*-mode system-prompt token count *before* the no-op early return,
-/// corrupting the meter for the remainder of the running plan turn. This test
-/// locks the fix: `sys_tokens` must stay at its pre-call plan-mode baseline.
+/// the *act*-mode system-prompt token count *before* the intercepted early
+/// return, corrupting the meter for the remainder of the running plan turn.
+/// This test locks the fix: `sys_tokens` must stay at its pre-call plan-mode
+/// baseline.
 #[tokio::test]
 async fn plan_running_noop_does_not_corrupt_sys_tokens() {
     let mut chat = ChatView {
@@ -383,12 +384,18 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
     );
     // The running flag must be untouched (still running the plan turn).
     assert!(running, "running flag must not be cleared by the noop");
-    // The flash must announce the switch is deferred while busy.
+    // The flash must announce the plan switch is blocked while busy.
     assert!(
         mode_flash
             .as_ref()
             .is_some_and(|(msg, tick)| msg.contains("busy") && *tick == anim_tick),
         "mode_flash must show the 'busy' banner, got {mode_flash:?}"
+    );
+    assert!(
+        mode_flash
+            .as_ref()
+            .is_some_and(|(msg, _)| msg.contains("plan switch blocked")),
+        "mode_flash must say the plan switch is blocked, got {mode_flash:?}"
     );
     // The key assertion: the context-meter baseline is NOT overwritten.
     assert_eq!(

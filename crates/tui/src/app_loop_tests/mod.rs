@@ -355,23 +355,39 @@ async fn fold_transcript_reset_preserves_plan_submitted() {
 }
 
 /// Consumption-time arm: TurnDone(plan) re-arms `plan_submitted` from the
-/// PERSISTED plan-phase counter — the authoritative record of requirements
-/// delivered to the plan agent (incremented at record time by the runner and
-/// the queue/steer `record_compound` twin; persisted before the turn ends).
-/// Covers steers, queued inputs and compound `/plan <content>` alike, and can
-/// never arm from a stranded, never-consumed admit.
+/// PERSISTED plan-phase state — the counter (the authoritative record of
+/// requirements delivered to the plan agent, incremented at record time by
+/// the runner and the queue/steer `record_compound` twin; persisted before
+/// the turn ends) OR the phase snapshot. The session row's agent column is
+/// deliberately ignored: ts-origin sessions keep it NULL, which used to
+/// disarm Shift+Tab here. Covers steers, queued inputs and compound
+/// `/plan <content>` alike, and can never arm from a stranded,
+/// never-consumed admit.
 #[tokio::test]
 async fn fold_turn_done_plan_rearms_from_persisted_counter() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    for (sid, count, expect_armed) in [
-        ("plan-armed", 2i64, true),
-        ("plan-empty", 0i64, false),
+    for (sid, agent, count, snapshot, expect_armed) in [
+        ("plan-armed", Some("plan"), 2i64, None, true),
+        ("plan-empty", Some("plan"), 0i64, None, false),
+        // ts-origin sessions keep the session row's agent column NULL by
+        // design; the TurnDone(plan) event itself proves a plan turn ran, so
+        // the counter must arm the flag regardless of the NULL agent.
+        ("ts-origin", None, 2i64, None, true),
+        // A phase snapshot alone (legacy backfill, counter still zero) arms.
+        (
+            "snapshot-only",
+            Some("plan"),
+            0i64,
+            Some("## Plan".to_string()),
+            true,
+        ),
     ] {
         store
             .create_session(&SessionMeta {
                 id: sid.into(),
-                agent: Some("plan".into()),
+                agent: agent.map(String::from),
                 plan_input_count: count,
+                plan_snapshot: snapshot.clone(),
                 ..Default::default()
             })
             .await
@@ -476,15 +492,18 @@ async fn fold_turn_done_act_leaves_arm_untouched() {
     )
     .await;
 
-    assert!(!chat.plan_submitted, "act TurnDone must not arm the handoff");
+    assert!(
+        !chat.plan_submitted,
+        "act TurnDone must not arm the handoff"
+    );
 }
 
+mod cancel_keep_pending;
 mod cli_outcome_tests;
 mod envs_outcome_tests;
 mod mcp_outcome_tests;
 mod model_outcome_tests;
 mod skill_outcome_tests;
-mod cancel_keep_pending;
 
 mod done_error_mirror_tests;
 

@@ -76,10 +76,7 @@ pub(super) async fn claim_steers(session: &mut SessionState) -> Vec<(i64, String
     // future queries) yet never claimed -- permanent data loss. Abandoning the
     // read above can only ever leave rows PENDING, never promoted-but-unclaimed.
     let max_seq = pending.iter().map(|i| i.admitted_seq).max().unwrap_or(0);
-    let promoted_seqs = match store
-        .promote_inputs(&sid, max_seq, Delivery::Steer)
-        .await
-    {
+    let promoted_seqs = match store.promote_inputs(&sid, max_seq, Delivery::Steer).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(error = %e, "claim_steers: promote_inputs failed");

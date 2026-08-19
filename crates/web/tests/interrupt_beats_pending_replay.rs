@@ -119,7 +119,14 @@ async fn interrupt_cancels_drain_watcher_does_not_resurrect() {
 
     // Queue input admitted mid-drain: takes the else-branch (no turn cancel —
     // queue inputs are consumed at idle) and spawns the drain watcher.
-    admit(&state, sid, "queued follow-up", Delivery::Queue, hanging.clone()).await;
+    admit(
+        &state,
+        sid,
+        "queued follow-up",
+        Delivery::Queue,
+        hanging.clone(),
+    )
+    .await;
     let pending_before = state
         .store
         .pending_inputs(sid, Delivery::Queue)
@@ -130,11 +137,7 @@ async fn interrupt_cancels_drain_watcher_does_not_resurrect() {
 
     // The user interrupts via the real endpoint: the drain breaks out of the
     // hanging LLM turn and exits with the queue row STILL pending.
-    opencoder_web::api::post_interrupt(
-        State(state.clone()),
-        Path(sid.to_string()),
-    )
-    .await;
+    opencoder_web::api::post_interrupt(State(state.clone()), Path(sid.to_string())).await;
 
     // The drain exits; the watcher polls draining=false, sees the pending
     // queue row, and must refuse to restart because the cancel token fired.

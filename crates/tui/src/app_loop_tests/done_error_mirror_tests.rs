@@ -59,8 +59,10 @@ async fn fold_error_resyncs_mirrors_from_store() {
     let mut chat = ChatView::default();
     // Stale rows that no longer exist in the store (e.g. leftovers from an
     // optimistic temp submit that already reconciled elsewhere).
-    let mut queue_items: Vec<(i64, String)> =
-        vec![(999, "stale queued row".into()), (q_seq, "queued prompt A".into())];
+    let mut queue_items: Vec<(i64, String)> = vec![
+        (999, "stale queued row".into()),
+        (q_seq, "queued prompt A".into()),
+    ];
     chat.steer_items = vec![(998, "stale steer row".into())];
     let mut running = true;
     let mut cancelled = false;
@@ -340,4 +342,3 @@ async fn fold_error_when_cancelled_preserves_queue_items() {
     );
     assert_eq!(queue_items[0].0, 30);
 }
-

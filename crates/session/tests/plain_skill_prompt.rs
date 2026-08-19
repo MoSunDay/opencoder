@@ -6,7 +6,7 @@
 //!   recorded prompt; the remaining text runs as a real prompt and the agent
 //!   stays unchanged (no mode switch)
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, Config, Role};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
@@ -314,15 +314,17 @@ async fn queued_skill_persists_at_consumption_not_admit() {
 
     let store = mem_store().await;
     seed(&store, "persist-skill-queue", "act").await;
-    // The queued turn's LLM call HANGS so the test can observe the store at
-    // the exact consumption moment — after the drain resolved `$review` but
-    // before the one-shot run-end clear lands.
+    // The queued turn's LLM call GATES on a Notify so the test can observe
+    // the store at the exact consumption moment — after the drain resolved
+    // `$review` but before the one-shot run-end clear lands. Unlike
+    // `push_hang` (empty stream = runner error), this stream completes
+    // normally once released, so the run finishes cleanly.
     let notify = Arc::new(tokio::sync::Notify::new());
-    let mock = Arc::new(
-        MockChatClient::new()
-            .push_script(vec![done_turn("kickoff")])
-            .push_hang(notify.clone()),
-    );
+    let mock = Arc::new(GatedThenDoneStream {
+        notify: notify.clone(),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        requests: Mutex::new(Vec::new()),
+    });
     let client: Arc<dyn ChatStream> = mock.clone();
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
@@ -358,7 +360,7 @@ async fn queued_skill_persists_at_consumption_not_admit() {
         run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
     });
     // Wait until the queued turn's LLM call is in flight (call #2).
-    while mock.call_count() < 2 {
+    while mock.calls.load(std::sync::atomic::Ordering::SeqCst) < 2 {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
 
@@ -374,7 +376,7 @@ async fn queued_skill_persists_at_consumption_not_admit() {
         "consumption-time activation is persisted before the run ends: {midrun:?}"
     );
 
-    // Release the hung turn; the run completes and the one-shot clear lands.
+    // Release the gated turn; the run completes and the one-shot clear lands.
     notify.notify_one();
     run_task.await.unwrap();
 
@@ -387,4 +389,41 @@ async fn queued_skill_persists_at_consumption_not_admit() {
         after.is_none(),
         "one-shot: the completed run clears the persisted skill: {after:?}"
     );
+}
+
+/// First `chat_stream` call completes immediately; every later call waits on
+/// `notify`, THEN completes — lets a test freeze the run mid-turn and
+/// release it without the stream ending empty (an error for the runner).
+struct GatedThenDoneStream {
+    notify: Arc<tokio::sync::Notify>,
+    calls: std::sync::atomic::AtomicUsize,
+    requests: Mutex<Vec<opencoder_llm::ChatRequest>>,
+}
+
+impl ChatStream for GatedThenDoneStream {
+    fn chat_stream(
+        &self,
+        req: opencoder_llm::ChatRequest,
+    ) -> anyhow::Result<tokio::sync::mpsc::Receiver<LlmEvent>> {
+        self.requests.lock().unwrap().push(req);
+        let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let notify = self.notify.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(128);
+        tokio::spawn(async move {
+            if n > 0 {
+                notify.notified().await;
+            }
+            let done = LlmEvent::Completed {
+                text: "work reply".into(),
+                tool_calls: vec![],
+                usage: Some(opencoder_llm::Usage::default()),
+            };
+            let _ = tx.send(done).await;
+        });
+        Ok(rx)
+    }
+
+    fn backend(&self) -> &'static str {
+        "gated-mock"
+    }
 }

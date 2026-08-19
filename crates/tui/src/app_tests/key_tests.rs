@@ -294,9 +294,11 @@ fn ctrl_t_switches_mode_without_clear() {
 
 #[test]
 fn ctrl_t_blocked_when_input_disabled() {
-    // In subagent-focus view (input_disabled) Ctrl+T must be a no-op, matching
-    // Ctrl+Shift+Tab's behaviour, so the parent agent is not switched while
-    // browsing a subagent.
+    // In subagent-focus view (input_disabled) Ctrl+T now switches mode like
+    // every other mode-switch key (switch_mode_clear / switch_mode_keep /
+    // raw BackTab): leaving/switching mode must never be blocked by view
+    // state — the bidirectional running gate in handle_switch_agent is the
+    // single busy authority. The composer input itself stays untouched.
     let mut input = String::new();
     let mut idx = 0;
     let action = run_handle_disabled(
@@ -305,7 +307,12 @@ fn ctrl_t_blocked_when_input_disabled() {
         &mut idx,
         "plan",
     );
-    assert!(matches!(action, KeyAction::None));
+    assert!(
+        matches!(action, KeyAction::SwitchAgentNoClear(ref a) if a == "act"),
+        "Ctrl+T must stay live in the disabled (subagent-focus) view"
+    );
+    assert!(input.is_empty());
+    assert_eq!(idx, 0);
 }
 
 #[test]

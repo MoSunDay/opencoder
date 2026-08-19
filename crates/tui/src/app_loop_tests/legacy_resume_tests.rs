@@ -118,6 +118,7 @@ async fn legacy_resume_shift_tab_hands_plan_forward() {
         &mut sys_tokens,
         workdir,
         &None,
+        &mut None,
     )
     .await;
     assert!(matches!(outcome, SwitchOutcome::Proceed));

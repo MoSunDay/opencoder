@@ -2,6 +2,7 @@
 //! within the 800-line limit. Contains the `KeyAction` enum, the main
 //! `handle_key` dispatcher, and the `move_hist` history-cycle helper.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -11,6 +12,7 @@ use crate::keymap::KeyBindings;
 use opencoder_core::discover_skills;
 
 use crate::composer;
+use crate::file_menu::{handle_file_key, FileMenu, FileOutcome};
 use crate::menu::{handle_menu_key, MenuOutcome, SkillMenu};
 
 /// Window for double-Esc hard-abort (milliseconds).
@@ -71,6 +73,8 @@ pub(crate) fn handle_key(
     input_disabled: bool,
     undo_state: &mut crate::undo::UndoState,
     queue_scroll: &mut u32,
+    file_menu: &mut Option<FileMenu>,
+    workdir: &Path,
 ) -> KeyAction {
     // Modal skill picker: intercept all keys while open.
     if skill_menu.is_some() {
@@ -93,6 +97,23 @@ pub(crate) fn handle_key(
             // plumbing as a pick, so app.rs persists the clear.
             MenuOutcome::Clear => KeyAction::SetSkill(None),
             MenuOutcome::Idle => KeyAction::None,
+        };
+    }
+    // File-mention picker (`@`): intercept all keys while open, mirroring
+    // the `$` skill picker above. A pick inserts the `@relative/path `
+    // token at the cursor — the trigger `@` was consumed on open, so the
+    // pick re-emits it; the marker keeps the token expandable to an
+    // absolute path at submit time (mention_resolve).
+    if file_menu.is_some() {
+        return match handle_file_key(file_menu, k) {
+            FileOutcome::Pick(token) => {
+                let (s, i) = composer::insert_str(input, *cursor_idx, &token);
+                *input = s;
+                *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+                KeyAction::None
+            }
+            FileOutcome::Close | FileOutcome::Idle => KeyAction::None,
         };
     }
     // Queue/steer panel scroll keys: Shift+PageUp looks at older pending
@@ -416,6 +437,14 @@ pub(crate) fn handle_key(
                 *skill_menu = Some(SkillMenu::new(discover_skills()));
                 return KeyAction::None;
             }
+            // `@` at a token start opens the file-mention picker; the
+            // character itself is consumed — the pick later re-emits it as
+            // part of the `@relative/path ` token. A mid-token `@` (emails
+            // like a@b.com) never triggers.
+            if char_opens_file_menu(input, *cursor_idx, c) {
+                *file_menu = Some(FileMenu::new(workdir));
+                return KeyAction::None;
+            }
             // `/` on empty input opens the slash-command picker. Bare `/` +
             // Enter defaults to /task (first row) for muscle memory.
             if c == '/' && input.is_empty() && *cursor_idx == 0 {
@@ -429,6 +458,20 @@ pub(crate) fn handle_key(
         }
         _ => KeyAction::None,
     }
+}
+
+/// Whether typing `c` at char-index `cursor_idx` in `input` should open
+/// the file-mention picker: `@` at a token start (start of input or right
+/// after whitespace). Mid-token `@` (emails like `a@b.com`) never
+/// triggers. Public so the file-mention e2e (`tests/file_mention_flow.rs`)
+/// drives the production trigger predicate instead of re-implementing it.
+pub fn char_opens_file_menu(input: &str, cursor_idx: usize, c: char) -> bool {
+    c == '@'
+        && (cursor_idx == 0
+            || input
+                .chars()
+                .nth(cursor_idx - 1)
+                .is_some_and(char::is_whitespace))
 }
 
 /// Handle body-scroll keys (PageUp / PageDown) uniformly.
@@ -489,3 +532,7 @@ mod plan_edit_tests;
 #[cfg(test)]
 #[path = "key_handler_queue_scroll_tests.rs"]
 mod queue_scroll_tests;
+
+#[cfg(test)]
+#[path = "key_handler_file_mention_tests.rs"]
+mod file_mention_tests;

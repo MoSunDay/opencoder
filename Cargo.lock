@@ -1865,6 +1865,7 @@ dependencies = [
  "base64",
  "crossterm",
  "dirs",
+ "ignore",
  "image",
  "libc",
  "opencoder-core",

@@ -22,6 +22,8 @@ fn disabled_mode_key(ev: KeyEvent, agent: &str, input: &mut String) -> KeyAction
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init(input, cursor);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     handle_key(
         ev,
         &bindings,
@@ -41,6 +43,8 @@ fn disabled_mode_key(ev: KeyEvent, agent: &str, input: &mut String) -> KeyAction
         true,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     )
 }
 

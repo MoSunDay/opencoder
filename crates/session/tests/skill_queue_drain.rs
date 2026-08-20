@@ -1,9 +1,9 @@
-//! Integration tests: drain priority between a sticky skill and pending
+//! Integration tests: drain priority between a armed skill and pending
 //! queue/steer inputs.
 //!
 //! Before the fix, `run_with_registry` computed `drain_mode = … && !has_skill`,
 //! so an empty-prompt drain restart (TUI `drain_pending` / web
-//! `drain_to_completion`) with a sticky skill FIRST injected a synthetic
+//! `drain_to_completion`) with a armed skill FIRST injected a synthetic
 //! `SKILL_TRIGGER` and ran another skill turn; the queue was only popped at a
 //! later text-only idle boundary. Probabilistic interruption (cancel / LLM
 //! Err / doom guard) skipped that boundary, stranding the row pending — and
@@ -127,11 +127,11 @@ fn trigger_count(session: &SessionState) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// 1. sticky skill + pending queue + empty prompt -> queue first, no entry
+// 1. armed skill + pending queue + empty prompt -> queue first, no entry
 //    SKILL_TRIGGER injection
 // ---------------------------------------------------------------------------
 
-/// The core regression: a drain restart with a sticky skill and a pending
+/// The core regression: a drain restart with a armed skill and a pending
 /// queue item must pop the queue (QueueConsumed exactly once, one LLM turn
 /// for the queued prompt) and must NOT inject an entry SKILL_TRIGGER that
 /// would run another skill turn first.
@@ -190,7 +190,7 @@ async fn cancel_then_restart_pops_queue_exactly_once() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(stream_turn("queued reply"))
-            // Phase 3's drain (sticky skill, nothing pending) legitimately
+            // Phase 3's drain (armed skill, nothing pending) legitimately
             // runs one more skill turn via the entry trigger.
             .with_default(stream_turn("skill reply")),
     );
@@ -245,7 +245,7 @@ async fn cancel_then_restart_pops_queue_exactly_once() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. regression guard: no pending + sticky skill + empty prompt -> trigger
+// 3. regression guard: no pending + armed skill + empty prompt -> trigger
 // ---------------------------------------------------------------------------
 
 /// With NOTHING pending, an empty submit still means "continue the active

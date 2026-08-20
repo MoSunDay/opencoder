@@ -461,7 +461,7 @@ pub async fn process_cmd(
             } else {
                 // No plan found (fallback path): the in-memory skill clear
                 // below must also reach the store, or a resume would
-                // resurrect the deactivated sticky skill.
+                // resurrect the deactivated skill.
                 if let Some(store) = &sess.store {
                     let _ = store
                         .update_session(

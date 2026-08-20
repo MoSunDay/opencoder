@@ -368,12 +368,14 @@ pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&st
 
 /// Resolve inline `$name` skill tokens in `text`: strip them from the
 /// returned text and, when at least one named skill resolves, activate it
-/// (sticky) by updating the skill state and writing the resolved body into the
+/// (one-shot: armed for the run this prompt triggers, cleared at its end) by
+/// updating the skill state and writing the resolved body into the
 /// shared `Arc<Mutex<Option<String>>>` skill handle. Returns
 /// `(clean_text, unresolved_names)` — names that appeared in tokens but matched
 /// no discovered skill, so the caller can warn the user.
 ///
-/// When no tokens are present the active skill is left untouched (sticky).
+/// When no tokens are present the active skill is left untouched (still
+/// armed).
 /// When tokens are present but none resolve, the skill is likewise untouched
 /// and every name is reported as unresolved. The shared skill handle is updated
 /// directly before the caller issues `Prompt`, so the worker — which holds the

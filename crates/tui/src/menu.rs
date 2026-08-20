@@ -23,7 +23,7 @@ pub enum MenuOutcome {
     Idle,
     Quit,
     Pick((String, String)),
-    /// The dedicated "clear" row was confirmed: deactivate the sticky skill
+    /// The dedicated "clear" row was confirmed: deactivate the active skill
     /// (in memory + store) instead of activating a new one.
     Clear,
 }
@@ -72,7 +72,7 @@ pub fn handle_menu_key(menu: &mut Option<SkillMenu>, k: KeyEvent) -> MenuOutcome
 }
 
 /// One display row of the picker. `Skill(i)` references `SkillMenu::skills[i]`;
-/// `Clear` is the trailing "deactivate the sticky skill" action (only shown
+/// `Clear` is the trailing "deactivate the active skill" action (only shown
 /// on an unfiltered list so typing never has to dodge it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
@@ -172,9 +172,9 @@ impl SkillMenu {
             for (i, _s) in skills.iter().enumerate() {
                 rows.push(Row::Skill(i));
             }
-            // Trailing clear action: the sticky-skill contract is "active
-            // until re-picked or cleared" — this row is the lightweight
-            // in-picker clear path.
+            // Trailing clear action: manual deactivation for a skill armed
+            // outside a run (one-shot runs clear themselves at run end) —
+            // this row is the lightweight in-picker clear path.
             rows.push(Row::Clear);
             return rows;
         }
@@ -275,7 +275,7 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
                 ),
                 Span::raw(" \u{2014} "),
                 Span::styled(
-                    "deactivate the sticky skill".to_string(),
+                    "deactivate the active skill".to_string(),
                     Style::default().fg(theme::subtle()),
                 ),
             ])),
@@ -284,7 +284,7 @@ pub fn render_skill_popup(f: &mut Frame, area: Rect, menu: &SkillMenu) {
 
     // The trailing Clear row keeps the list non-empty even with zero
     // skills installed, so the hint is gated on skills.is_empty() and
-    // prepended (the clear row stays reachable — a sticky skill can outlive
+    // prepended (the clear row stays reachable — an armed skill can outlive
     // the removal of its SKILL.md).
     let mut items: Vec<ListItem> = Vec::new();
     if menu.skills.is_empty() {
@@ -365,7 +365,7 @@ pub fn render_skill_in_rect(f: &mut Frame, rect: Rect, menu: &SkillMenu) {
                 ),
                 Span::raw(" \u{2014} "),
                 Span::styled(
-                    "deactivate the sticky skill".to_string(),
+                    "deactivate the active skill".to_string(),
                     Style::default().fg(theme::subtle()),
                 ),
             ])),
@@ -577,8 +577,8 @@ mod tests {
     #[test]
     fn tab_on_empty_menu_confirms_clear_row() {
         // With zero skills the clear row is the only selectable row, so Tab
-        // confirms it: the sticky-skill clear path stays reachable even when
-        // no SKILL.md is installed (a sticky skill outlives its file).
+        // confirms it: the manual skill-clear path stays reachable even when
+        // no SKILL.md is installed (an armed skill outlives its file).
         let mut menu = Some(SkillMenu::new(vec![]));
         let outcome = handle_menu_key(&mut menu, key(KeyCode::Tab));
         assert!(matches!(outcome, MenuOutcome::Clear));

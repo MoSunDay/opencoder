@@ -26,6 +26,8 @@ pub async fn create_session(
             title: Some(format!("todos workflow {}", state.workflow_id)),
             agent: Some("workflow".into()),
             model: Some(config.model.clone()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

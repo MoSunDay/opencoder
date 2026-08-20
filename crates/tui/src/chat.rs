@@ -63,6 +63,16 @@ impl ChatView {
                 }
                 self.finalize_assistant();
             }
+            SessionEvent::LlmUsage {
+                total_tokens,
+                input_tokens,
+                output_tokens,
+            } => {
+                self.tokens_total = self.tokens_total.saturating_add(*total_tokens);
+                // Provider-truth context of this view's latest completed
+                // round (input already includes the system prompt).
+                self.real_context_tokens = Some(input_tokens.saturating_add(*output_tokens));
+            }
             SessionEvent::TextDelta(t) => {
                 self.recover_round_anchor_if_missing();
                 self.append_text_delta(&sanitize_multiline(t));
@@ -160,6 +170,10 @@ impl ChatView {
             SessionEvent::AgentSwitch(to) => self.fold_agent_switch(to),
             SessionEvent::ModelSwitch(m) => {
                 self.finalize_assistant();
+                // Different model/tokenizer: the provider-truth context of
+                // the previous model no longer describes this window. The
+                // lifetime cost accumulator is unaffected.
+                self.real_context_tokens = None;
                 // Strip a provider prefix defensively so the marker shows the
                 // bare model id even if a stale/persisted event carries the
                 // full "provider/model" string (issue #1).
@@ -171,6 +185,9 @@ impl ChatView {
                     ))]));
             }
             SessionEvent::Compaction(c) => {
+                // The transcript was rewritten down to the summary — the
+                // provider-truth context of the pre-compaction round is gone.
+                self.real_context_tokens = None;
                 self.finalize_compaction(&sanitize_multiline(c));
             }
             SessionEvent::Status(s) => self.status = sanitize_single_line(s).into_owned(),
@@ -213,6 +230,14 @@ impl ChatView {
                 });
             }
             SessionEvent::SubagentChild { id, ev } => {
+                // Subagent spend is part of this view's lifetime cost: fold
+                // the child round's tokens in here while the child view below
+                // also keeps its own (focused) copy. The child's context is
+                // NOT folded into `real_context_tokens` — it lives in a
+                // separate window from this view's.
+                if let SessionEvent::LlmUsage { total_tokens, .. } = ev.as_ref() {
+                    self.tokens_total = self.tokens_total.saturating_add(*total_tokens);
+                }
                 if let Some(ChatBlock::Subagent { view, .. }) = self
                     .blocks
                     .iter_mut()
@@ -278,7 +303,11 @@ impl ChatView {
                     });
                 }
             }
-            SessionEvent::TranscriptReset(_) => {}
+            SessionEvent::TranscriptReset(_) => {
+                // View is rebuilt from the new message list; the frozen
+                // provider-truth context of the old transcript is invalid.
+                self.real_context_tokens = None;
+            }
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq, text } => {
                 let display = if !text.is_empty() {

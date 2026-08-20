@@ -169,11 +169,12 @@ fn has_editable_key_ignores_empty_agent_and_object_keys() {
 fn has_editable_key_ignores_domain_keys() {
     // config.json whose ONLY keys are the (hard-cut) domain keys is not an
     // editable config.json — those keys live in mcp.json / cli.json /
-    // skills.json and never route a save back into config.json.
+    // skills.json / ap.json and never route a save back into config.json.
     let v = serde_json::json!({
         "mcp_servers": { "srv": { "enabled": true } },
         "cli": { "git": { "enabled": true, "content": "c" } },
-        "skills": { "review": { "enabled": true } }
+        "skills": { "review": { "enabled": true } },
+        "autopilot": { "mode": "ap", "max_iterations": 5 }
     });
     assert!(!super::merge::has_editable_key(&v));
 }

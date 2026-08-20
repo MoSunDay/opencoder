@@ -67,6 +67,8 @@ async fn setup_session(id: &str) -> Arc<dyn Store> {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -145,6 +147,7 @@ async fn forward_order_agent_switch_reset_then_handoff_yields_one_plan_block() {
         std::slice::from_ref(&handoff_msg),
         &store,
         session_id,
+        0,
     )
     .await;
     assert_eq!(
@@ -187,7 +190,7 @@ async fn reverse_order_handoff_then_reset_replay_yields_one_plan_block() {
     );
 
     // TranscriptReset handling: REPLACE the ChatView with a fresh replay.
-    chat = replay_into_chat("act", &[handoff_msg], &store, session_id).await;
+    chat = replay_into_chat("act", &[handoff_msg], &store, session_id, 0).await;
     assert_eq!(
         plan_block_count(&chat),
         1,
@@ -222,7 +225,7 @@ async fn clear_context_sentinel_renders_no_plan_card() {
         .unwrap();
 
     let fresh = opencoder_session::control_cmd::fresh_start_message();
-    let chat = replay_into_chat("act", &[fresh], &store, session_id).await;
+    let chat = replay_into_chat("act", &[fresh], &store, session_id, 0).await;
 
     assert_eq!(
         plan_block_count(&chat),

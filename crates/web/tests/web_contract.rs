@@ -84,6 +84,8 @@ async fn seed(
             title: title.map(String::from),
             agent: Some(agent.into()),
             model: Some(model.into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

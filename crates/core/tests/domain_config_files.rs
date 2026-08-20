@@ -309,3 +309,105 @@ fn load_reads_entries_from_all_three_domain_files() {
         "enabled_skill_names reflects skills.json"
     );
 }
+
+// --- autopilot domain (ap.json): same table-driven routing as the maps ---
+
+/// No env, no project/global ap.json -> the save creates the GLOBAL ap.json
+/// and never creates a config.json (the domain-only return-path contract).
+#[test]
+fn autopilot_save_creates_global_ap_json_when_neither_exists() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _guard = scoped_config_home(home.path().to_path_buf());
+
+    let written = Config::save(
+        work.path(),
+        &serde_json::json!({ "autopilot": { "mode": "ap", "max_iterations": 5 } }),
+    )
+    .unwrap();
+
+    let global = global_domain_file(home.path(), "ap.json");
+    assert_eq!(written, global, "neither candidate exists -> create global");
+    let disk = read_json(&global);
+    assert_eq!(disk["mode"], serde_json::json!("ap"));
+    assert_eq!(disk["max_iterations"], serde_json::json!(5));
+    assert!(
+        !work.path().join("opencoder.json").exists(),
+        "an autopilot-only patch must not create a config.json"
+    );
+
+    let cfg = Config::load(work.path()).unwrap();
+    assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Ap);
+    assert_eq!(cfg.autopilot.max_iterations, 5);
+}
+
+/// A project ap.json exists -> it is the save target AND shadows the global
+/// file entirely on load (single-file-wins, no per-key merge across files).
+#[test]
+fn autopilot_project_ap_json_wins_target_and_shadows_global() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _guard = scoped_config_home(home.path().to_path_buf());
+
+    write_json(
+        &global_domain_file(home.path(), "ap.json"),
+        r#"{"mode":"review","max_iterations":9}"#,
+    );
+    write_json(
+        &project_domain_file(work.path(), "ap.json"),
+        r#"{"mode":"off"}"#,
+    );
+
+    let written = Config::save(
+        work.path(),
+        &serde_json::json!({ "autopilot": { "max_iterations": 3 } }),
+    )
+    .unwrap();
+    assert_eq!(
+        written,
+        project_domain_file(work.path(), "ap.json"),
+        "existing project ap.json is the write target"
+    );
+    assert_eq!(
+        read_json(&global_domain_file(home.path(), "ap.json"))["mode"],
+        serde_json::json!("review"),
+        "global ap.json stays untouched"
+    );
+
+    // whole-file shadowing: the project body wins, `mode` stays its own "off"
+    // even though the global file says review
+    let cfg = Config::load(work.path()).unwrap();
+    assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Off);
+    assert_eq!(cfg.autopilot.max_iterations, 3);
+}
+
+/// A mixed patch routes `autopilot` to ap.json and the remainder to
+/// config.json — the split is invisible to the caller.
+#[test]
+fn autopilot_mixed_patch_splits_from_config_json() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _guard = scoped_config_home(home.path().to_path_buf());
+
+    let written = Config::save(
+        work.path(),
+        &serde_json::json!({ "theme": "light", "autopilot": { "mode": "review" } }),
+    )
+    .unwrap();
+    assert_eq!(written, work.path().join("opencoder.json"));
+    assert!(
+        !read_json(&work.path().join("opencoder.json"))
+            .as_object()
+            .unwrap()
+            .contains_key("autopilot"),
+        "autopilot must NOT land in config.json"
+    );
+    assert_eq!(
+        read_json(&global_domain_file(home.path(), "ap.json"))["mode"],
+        serde_json::json!("review")
+    );
+
+    let cfg = Config::load(work.path()).unwrap();
+    assert_eq!(cfg.theme, "light");
+    assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Review);
+}

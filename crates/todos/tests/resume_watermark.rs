@@ -54,6 +54,8 @@ async fn seed_session_with_stale_assistant(store: &Arc<dyn Store>, config: &Conf
             title: Some("test / step".into()),
             agent: Some("act".into()),
             model: Some(config.model.clone()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

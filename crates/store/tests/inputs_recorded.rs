@@ -23,6 +23,8 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("glm-5.2".into()),
+
+        autopilot_mode: None,
         workdir_hash: Some("h".into()),
         created_at: now,
         updated_at: now,
@@ -293,7 +295,7 @@ async fn migration_v9_to_v10_backfills_recorded_for_promoted_rows() {
             .expect("version row")
             .get(0)
             .unwrap();
-        assert_eq!(v, 10, "schema version must be 10 after migration");
+        assert_eq!(v, 11, "schema version must be 11 after migration");
 
         // Backfill: pre-existing promoted row treated as consumed.
         let (p_prom, rec_prom) = input_state(&conn, seq_promoted).await;

@@ -75,6 +75,9 @@ pub(super) fn replay_one(
             chat.push_marker(Line::from(""));
         }
         Role::Assistant => {
+            // Session-lifetime token cost: sum the persisted per-message
+            // usage (mirrors the live LlmUsage accumulation path).
+            chat.tokens_total = chat.tokens_total.saturating_add(msg.usage.total_tokens);
             // Live streaming groups every reasoning segment before the round's
             // sole Assistant block. Rebuild in the same order so resume never
             // flips `Thinking -> Say` into `Say -> Thinking`.
@@ -206,6 +209,7 @@ pub async fn replay_into_chat(
     messages: &[Message],
     store: &Arc<dyn Store>,
     session_id: &str,
+    preserve_tokens_total: u64,
 ) -> ChatView {
     let mut chat = ChatView {
         agent: sanitize_single_line(agent_name).into_owned(),
@@ -273,7 +277,7 @@ pub async fn replay_into_chat(
             if let Some(task_list) = tasks_by_parent.remove(&msg.id) {
                 for task in task_list {
                     let block = build_subagent_block(&task, store).await;
-                    chat.blocks.push(block);
+                    push_subagent_block(&mut chat, block);
                 }
             }
         }
@@ -281,12 +285,53 @@ pub async fn replay_into_chat(
 
     for task in orphan_tasks {
         let block = build_subagent_block(&task, store).await;
-        chat.blocks.push(block);
+        push_subagent_block(&mut chat, block);
     }
 
     // Full transcript token count for ctx% (system prompt added at render).
     chat.context_used = estimate_messages_for_display(messages) as u64;
+    // Compaction truncates the message list, so the usage sum above can only
+    // shrink across a TranscriptReset rebuild. Floor it with the live-view
+    // accumulation (passed by the caller) so `[tok cost]` never regresses.
+    // Both sides include subagent spend, so the floor cannot double-count.
+    chat.tokens_total = chat.tokens_total.max(preserve_tokens_total);
     chat
+}
+
+/// Push a reconstructed subagent block, folding the child's lifetime token
+/// spend into the parent's `[tok cost]` — mirrors the live path where
+/// `SubagentChild(LlmUsage)` events accumulate into the parent view.
+fn push_subagent_block(chat: &mut ChatView, block: ChatBlock) {
+    if let ChatBlock::Subagent { view, .. } = &block {
+        chat.tokens_total = chat.tokens_total.saturating_add(view.tokens_total);
+    }
+    chat.blocks.push(block);
+}
+
+/// Rebuild the chat view after a mid-run `TranscriptReset` (compaction /
+/// clear-context), carrying over cross-reset UI state: plan-submitted flag,
+/// saved annotation, submitted flag, first prompt, and the session-lifetime
+/// token accumulation (floored via `preserve_tokens_total`).
+pub async fn rebuild_after_reset(
+    chat: &mut ChatView,
+    msgs: &[Message],
+    store: &Arc<dyn Store>,
+    session_id: &str,
+) {
+    let agent = chat.agent.clone();
+    let saved_plan_submitted = chat.plan_submitted;
+    let saved_annotation_text = chat.annotation_text.clone();
+    let saved_submitted = chat.submitted;
+    let saved_first_prompt = chat.first_prompt.clone();
+    let saved_tokens_total = chat.tokens_total;
+    *chat = replay_into_chat(&agent, msgs, store, session_id, saved_tokens_total).await;
+    chat.plan_submitted = saved_plan_submitted;
+    chat.annotation_text = saved_annotation_text;
+    chat.submitted = saved_submitted;
+    chat.first_prompt = saved_first_prompt;
+    // The reset happened inside the admitted turn; reliable
+    // completion repair must never target pre-reset blocks.
+    chat.turn_block_start = chat.blocks.len();
 }
 
 /// Reconstruct a `ChatBlock::Subagent` from a persisted `SubagentTaskRecord`,

@@ -15,6 +15,26 @@ pub enum ApMode {
     Review,
 }
 
+impl ApMode {
+    /// Parse the canonical wire/DB spelling (`off` / `ap` / `review`).
+    /// Unknown values yield `None` — callers warn and keep the config mode.
+    /// Shared by config merge, `sessions.autopilot_mode` restore and the
+    /// `/ap` command validation, so every surface agrees on the spellings.
+    pub fn parse(v: &str) -> Option<ApMode> {
+        parse_mode(v)
+    }
+
+    /// Canonical lowercase spelling — the exact inverse of [`ApMode::parse`]
+    /// and the serde representation persisted to `sessions.autopilot_mode`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ApMode::Off => "off",
+            ApMode::Ap => "ap",
+            ApMode::Review => "review",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoPilotConfig {
     #[serde(default)]
@@ -183,5 +203,26 @@ mod tests {
             json!({"verify_context_limit": 300}).as_object().unwrap(),
         );
         assert_eq!(cfg.verify_context_limit, Some(300));
+    }
+    /// Direct contract for the two pub fns shared by config merge, the
+    /// `sessions.autopilot_mode` restore path and the TUI `/ap` flow.
+    #[test]
+    fn parse_and_as_str_round_trip_all_wire_keys() {
+        for (key, mode) in [
+            ("off", ApMode::Off),
+            ("ap", ApMode::Ap),
+            ("review", ApMode::Review),
+        ] {
+            assert_eq!(ApMode::parse(key), Some(mode));
+            assert_eq!(mode.as_str(), key, "as_str is the inverse of parse");
+            assert_eq!(
+                serde_json::to_value(mode).unwrap(),
+                json!(key),
+                "as_str matches the serde wire format"
+            );
+        }
+        for bad in ["", "on", "AP", "auto", "off "] {
+            assert_eq!(ApMode::parse(bad), None, "unknown key {bad:?} rejected");
+        }
     }
 }

@@ -5,6 +5,7 @@
 use crate::chat::ChatView;
 
 mod replay;
+pub use replay::rebuild_after_reset;
 pub use replay::replay_into_chat;
 pub use replay::replay_messages;
 

@@ -129,10 +129,7 @@ pub async fn post_handoff(
 /// applied, since it would resolve to a broken model id downstream. The 400
 /// also fires before endpoint resolution, so it can't be masked by an
 /// api-key failure. Wording mirrors the CLI `--model` rejection.
-pub(crate) fn apply_prompt_model(
-    config: &mut Config,
-    model: Option<String>,
-) -> Option<Response> {
+pub(crate) fn apply_prompt_model(config: &mut Config, model: Option<String>) -> Option<Response> {
     match model {
         Some(m) if !opencoder_core::config::is_suspicious_model(&m) => config.model = m,
         Some(m) => {

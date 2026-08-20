@@ -155,6 +155,7 @@ fn ap_chip_reflects_autopilot_mode() {
             None, // skill_menu
             None, // task_picker
             None, // command_menu
+            None, // file_menu
             None, // model_menu
             None, // mcp_menu
             None, // envs_menu
@@ -314,6 +315,7 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
             None,
             None,
             None,
+            None,
             &mut hits,
             &mut None,
             false,
@@ -381,4 +383,3 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
     // colour (the substring `contains("plan")` guess would tint this).
     check("plan submitted", "plan submitted", false);
 }
-

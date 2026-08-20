@@ -126,6 +126,7 @@ pub(super) async fn run_app(
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
     let mut command_menu: Option<CommandMenu> = None;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
     let mut model_menu: Option<ModelMenu> = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut envs_menu: Option<crate::envs_menu::EnvsMenu> = None;
@@ -249,6 +250,7 @@ pub(super) async fn run_app(
                     skill_menu.as_ref(),
                     task_picker.as_ref(),
                     command_menu.as_ref(),
+                    file_menu.as_ref(),
                     model_menu.as_ref(),
                     mcp_menu.as_ref(),
                     envs_menu.as_ref(),
@@ -482,6 +484,8 @@ pub(super) async fn run_app(
                             input_disabled,
                             &mut undo_state,
                             &mut queue_scroll,
+                            &mut file_menu,
+                            &workdir,
                         ) {
                             KeyAction::Submit(text) => {
                                 if running {
@@ -611,13 +615,11 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::QueueUnsupported => {
-                                // Tab-queue was rejected because a running
-                                // subagent is focused: show a transient hint
-                                // and do NOT touch the parent session.
-                                mode_flash = Some((
-                                    "\u{26a0} tab queue not supported for subagents \u{2014} press Enter to steer".into(),
-                                    anim_tick,
-                                ));
+                                // Tab-queue rejected: a running subagent is
+                                // focused — transient hint only, the parent
+                                // session stays untouched (string lives in
+                                // app_helpers::queue_unsupported_flash).
+                                mode_flash = Some(queue_unsupported_flash(anim_tick));
                             }
                             KeyAction::SwitchAgent(name) => {
                                 if matches!(
@@ -680,10 +682,7 @@ pub(super) async fn run_app(
                                 quitting = true;
                             }
                             KeyAction::Clip => {
-                                app_loop::paste_clipboard_image(
-                                    &mut chat, &mut pending_images,
-                                )
-                                .await;
+                                app_loop::paste_clipboard_image(&mut chat, &mut pending_images).await;
                                 dirty = true;
                             }
                             KeyAction::Bash(cmd) => { app_notepad::handle_bash(&cmd, &mut chat, &mut bash_rx, &workdir, &mut history, &mut hist_idx); dirty = true; }
@@ -765,6 +764,7 @@ pub(super) async fn run_app(
                                 &skill_handle, &mut active_skill, &mut active_skill_body,
                                 &mut sys_tokens, &agent_name, &workdir,
                             );
+                            body_refresh_pending = true; // idle: land the final frame ([tok cost] total) behind the 333ms body ticker
                         }
                         dirty = true;
                     }
@@ -791,8 +791,8 @@ pub(super) async fn run_app(
 }
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, handle_mouse, initial_chat_view, on_resize_event, poll_idle_resize,
-    pre_key_intercept, push_history, push_user, snapshot_image_uris, start_turn, sys_tokens_for,
-    worker_dead, MouseOutcome,
+    pre_key_intercept, push_history, push_user, queue_unsupported_flash, snapshot_image_uris,
+    start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::skill_trigger;
 #[cfg(test)]

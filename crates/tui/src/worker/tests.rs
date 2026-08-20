@@ -100,8 +100,8 @@ async fn try_send_idempotent_enqueues_when_capacity_remains() {
 async fn try_send_idempotent_drops_without_awaiting_when_full() {
     let (tx, _rx) = mpsc::channel::<UiCmd>(1);
     tx.send(UiCmd::Compact).await.unwrap(); // fill the only slot
-    // try_send is synchronous: a full channel drops the command instead of
-    // awaiting capacity (the app_loop-level test proves the loop unblocks).
+                                            // try_send is synchronous: a full channel drops the command instead of
+                                            // awaiting capacity (the app_loop-level test proves the loop unblocks).
     assert!(
         !try_send_idempotent(&tx, UiCmd::SwitchAgent("plan".into())),
         "full channel must drop the idempotent command, not block"

@@ -117,6 +117,8 @@ async fn seed_parent(store: &Arc<dyn Store>, id: &str) {
             title: Some("test".into()),
             agent: Some("act".into()),
             model: Some("main/glm-5.2".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

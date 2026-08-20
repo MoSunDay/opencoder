@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   task_type    TEXT NOT NULL DEFAULT 'parent',
   requirement  TEXT,
   plan_snapshot TEXT,
-  plan_input_count INTEGER NOT NULL DEFAULT 0
+  plan_input_count INTEGER NOT NULL DEFAULT 0,
+  autopilot_mode TEXT
 )";
 const CREATE_MESSAGES: &str = "\
 CREATE TABLE IF NOT EXISTS messages (
@@ -339,6 +340,12 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         )
         .await
         .context("backfill recorded")?;
+    }
+    if from < 11 {
+        // v11: session-scoped autopilot mode for the `/ap` "session-only"
+        // switch. NULL = follow the global config; "off"/"ap"/"review" pins
+        // this session's mode so resume honors it (same role as `model`).
+        add_column_if_absent(conn, "sessions", "autopilot_mode", "TEXT").await?;
     }
     Ok(())
 }

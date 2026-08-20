@@ -242,8 +242,16 @@ mod tests {
         assert_eq!(parse_context_limit(""), None, "empty is not a number");
         assert_eq!(parse_context_limit("-1"), None, "negative");
         assert_eq!(parse_context_limit("1e5"), None, "exponent notation");
-        assert_eq!(parse_context_limit(" 8192"), None, "leading space: no trimming");
-        assert_eq!(parse_context_limit("8192 "), None, "trailing space: no trimming");
+        assert_eq!(
+            parse_context_limit(" 8192"),
+            None,
+            "leading space: no trimming"
+        );
+        assert_eq!(
+            parse_context_limit("8192 "),
+            None,
+            "trailing space: no trimming"
+        );
         assert_eq!(
             parse_context_limit("18446744073709551616"),
             None,

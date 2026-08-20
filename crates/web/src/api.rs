@@ -41,6 +41,8 @@ pub async fn create_session(
             .and_then(|b| b.agent.clone())
             .or_else(|| Some("act".into())),
         model: body.as_ref().and_then(|b| b.model.clone()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: now,
         updated_at: now,
@@ -287,6 +289,8 @@ async fn ensure_session_row(
             title: Some(prompt.chars().take(80).collect()),
             agent: Some(config.agent.default.clone()),
             model: Some(config.model.clone()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,
@@ -643,17 +647,18 @@ pub async fn get_events(
     let seen = crate::sse_dedup::seed_seen(&persisted, baseline);
 
     let replay = futures::stream::iter(persisted);
-    let live = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|r| async move { map_broadcast_result(r) })
-        .filter_map({
-            let seen = Arc::clone(&seen);
-            move |evt| {
+    let live =
+        tokio_stream::wrappers::BroadcastStream::new(rx)
+            .filter_map(|r| async move { map_broadcast_result(r) })
+            .filter_map({
                 let seen = Arc::clone(&seen);
-                async move {
-                    crate::sse_dedup::forward_live(&evt, &seen, max_replay_seq).then_some(evt)
+                move |evt| {
+                    let seen = Arc::clone(&seen);
+                    async move {
+                        crate::sse_dedup::forward_live(&evt, &seen, max_replay_seq).then_some(evt)
+                    }
                 }
-            }
-        });
+            });
     let merged = replay.chain(live).map(|evt| {
         let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
         Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))

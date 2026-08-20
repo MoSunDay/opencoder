@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use opencoder_core::{resolve_agent, Config};
-use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient};
+use opencoder_llm::{ChatStream, CompletedToolCall, LlmEvent, MockChatClient, Usage};
 use opencoder_session::{run, SessionEvent, SessionState};
 
 fn completed(text: &str, tool_calls: Vec<CompletedToolCall>) -> LlmEvent {
@@ -109,4 +109,79 @@ async fn terminal_text_round_ends_before_done() {
         .position(|e| matches!(e, SessionEvent::Done))
         .expect("task terminal event");
     assert!(end < done, "terminal tasks must hide turn cost before Done");
+}
+
+/// `Usage` carried by a `Completed` event, exercising the LlmUsage emission.
+fn usage(total: u64) -> Option<Usage> {
+    Some(Usage {
+        input_tokens: total / 2,
+        output_tokens: total - total / 2,
+        total_tokens: total,
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn usage_round_emits_llm_usage_between_persist_and_round_end() {
+    let mock = Arc::new(MockChatClient::new().push_script(vec![LlmEvent::Completed {
+        text: "done".into(),
+        tool_calls: vec![],
+        usage: usage(1_234),
+    }]));
+    let (session, events) = collect(mock).await;
+
+    let llm_usage = events
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                SessionEvent::LlmUsage {
+                    total_tokens: 1234,
+                    input_tokens: 617,
+                    output_tokens: 617,
+                }
+            )
+        })
+        .expect("LlmUsage carries total plus the input/output split");
+    let round_end = events
+        .iter()
+        .position(|e| matches!(e, SessionEvent::LlmRoundEnd))
+        .expect("round end");
+    let done = events
+        .iter()
+        .position(|e| matches!(e, SessionEvent::Done))
+        .expect("done");
+    assert!(
+        llm_usage < round_end && round_end < done,
+        "LlmUsage fires right after the assistant message is persisted, before the round closes"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::LlmUsage { .. }))
+            .count(),
+        1,
+        "exactly one LlmUsage per assistant message with usage"
+    );
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.usage.total_tokens == 1_234),
+        "usage is persisted on the assistant message"
+    );
+}
+
+#[tokio::test]
+async fn usage_less_rounds_emit_no_llm_usage() {
+    // Providers that omit usage (and the default mock scripts) must not emit
+    // LlmUsage — the TUI accumulator then simply sees no data for that round.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![completed("done", vec![])]));
+    let (_, events) = collect(mock).await;
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e, SessionEvent::LlmUsage { .. })),
+        "no usage on the wire means no LlmUsage event"
+    );
 }

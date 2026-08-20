@@ -188,15 +188,13 @@ pub(crate) async fn build_session_json(store: &LibsqlStore, id: &str) -> Result<
     // a seed marker is stripped to its preserved text. Raw markers must
     // never be output (handoff_seq still records that a boundary exists).
     let meta = SessionMeta {
-        handoff_plan: meta
-            .handoff_plan
-            .and_then(|p| {
-                if opencoder_session::is_clear_context_seed(&p) {
-                    Some(opencoder_session::clear_seed_text(&p).to_string())
-                } else {
-                    (!opencoder_session::is_clear_context_handoff(&p)).then_some(p)
-                }
-            }),
+        handoff_plan: meta.handoff_plan.and_then(|p| {
+            if opencoder_session::is_clear_context_seed(&p) {
+                Some(opencoder_session::clear_seed_text(&p).to_string())
+            } else {
+                (!opencoder_session::is_clear_context_handoff(&p)).then_some(p)
+            }
+        }),
         ..meta
     };
     let messages = store.load_messages(id).await?;
@@ -418,6 +416,8 @@ mod tests {
                 title: Some("t".into()),
                 agent: Some("act".into()),
                 model: Some("m".into()),
+
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,
@@ -482,6 +482,8 @@ mod tests {
                 id: "redact-s1".into(),
                 agent: Some("act".into()),
                 model: Some("m".into()),
+
+                autopilot_mode: None,
                 handoff_seq: Some(1),
                 // Exactly what control_cmd::ClearContext persists as the
                 // resume-reconstruction boundary marker.

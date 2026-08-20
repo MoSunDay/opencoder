@@ -25,6 +25,7 @@ fn meta_for(id: &str) -> SessionMeta {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("test-model".into()),
+        autopilot_mode: None,
         workdir_hash: Some("h".into()),
         created_at: 0,
         updated_at: 0,

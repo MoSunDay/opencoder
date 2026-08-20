@@ -275,6 +275,8 @@ async fn subagent_persists_parent_child_to_store() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -372,6 +374,8 @@ async fn subagent_persists_child_events_to_store() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -505,6 +509,8 @@ async fn subagent_child_events_persisted_before_return() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

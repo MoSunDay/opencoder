@@ -46,6 +46,7 @@ fn draw(
         None, // skill_menu
         None, // task_picker
         None, // command_menu
+        None, // file_menu
         None, // model_menu
         mcp_menu,
         None, // envs_menu

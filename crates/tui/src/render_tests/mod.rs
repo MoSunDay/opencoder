@@ -35,3 +35,4 @@ mod status_bar;
 mod status_ctx;
 mod thinking;
 mod timer;
+mod tok_cost;

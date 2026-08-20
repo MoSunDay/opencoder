@@ -45,6 +45,8 @@ pub fn session_meta(id: &str, agent: &str) -> SessionMeta {
         title: Some("test".into()),
         agent: Some(agent.into()),
         model: Some("m".into()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 0,
         updated_at: 0,

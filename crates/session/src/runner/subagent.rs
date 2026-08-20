@@ -121,6 +121,8 @@ pub(super) async fn run_subagent(
                 title: Some(prompt.chars().take(60).collect()),
                 agent: Some(kind.clone()),
                 model: Some(parent.config.model_id().to_string()),
+
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: now_ms(),
                 updated_at: now_ms(),

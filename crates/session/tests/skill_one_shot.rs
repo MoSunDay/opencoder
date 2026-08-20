@@ -412,7 +412,11 @@ async fn resume_mid_run_keeps_skill_then_completion_clears() {
 async fn latent_tool_unlocked_then_relocked_across_runs() {
     let home = tempfile::tempdir().unwrap();
     let _guard = lock_home(home.path());
-    let skill_dir = home.path().join(".opencoder").join("skills").join("ssh-pty");
+    let skill_dir = home
+        .path()
+        .join(".opencoder")
+        .join("skills")
+        .join("ssh-pty");
     std::fs::create_dir_all(&skill_dir).unwrap();
     std::fs::write(
         skill_dir.join("SKILL.md"),

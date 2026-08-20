@@ -167,6 +167,8 @@ mod tests {
             title: None,
             agent: None,
             model: model.map(String::from),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: created,
             updated_at: created,

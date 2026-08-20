@@ -85,7 +85,9 @@ pub fn skills_dir() -> Option<PathBuf> {
 /// `Vec`, so the TUI picker simply reports "no skills" instead of crashing.
 /// A missing home directory likewise yields an empty `Vec`.
 pub fn discover() -> Vec<Skill> {
-    skills_dir().map(|root| discover_cached(&root)).unwrap_or_default()
+    skills_dir()
+        .map(|root| discover_cached(&root))
+        .unwrap_or_default()
 }
 
 /// Cached variant of [`discover_in`] for hot paths: returns the previously

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use opencoder_core::{
     active_env, create_env, delete_env, list_envs, recapture_env, scoped_config_home,
-    set_active_env, Config,
+    set_active_env, ApMode, Config,
 };
 
 fn write_json(path: &Path, body: &str) {
@@ -150,7 +150,11 @@ fn capture_snapshots_base_chain_without_env_overlay() {
     // global base with model+provider AND stray domain keys in config.json
     write_json(
         &home.path().join(".opencoder").join("config.json"),
-        r#"{"model":"global/m","provider":{"api_key":"gk"},"mcp_servers":{"x":{"enabled":true}},"skills":{"s":{"enabled":true}}}"#,
+        r#"{"model":"global/m","provider":{"api_key":"gk"},"mcp_servers":{"x":{"enabled":true}},"skills":{"s":{"enabled":true}},"autopilot":{"mode":"ap"}}"#,
+    );
+    write_json(
+        &home.path().join(".opencoder").join("ap.json"),
+        r#"{"mode":"review"}"#,
     );
     write_json(
         &home.path().join(".opencoder").join("cli.json"),
@@ -167,7 +171,7 @@ fn capture_snapshots_base_chain_without_env_overlay() {
     assert_eq!(captured["model"], "global/m", "active env excluded");
     assert_eq!(captured["theme"], "light", "project layer included");
     assert_eq!(captured["provider"]["api_key"], "gk");
-    for k in ["mcp_servers", "cli", "skills"] {
+    for k in ["mcp_servers", "cli", "skills", "autopilot"] {
         assert!(captured.get(k).is_none(), "domain key {k} stripped");
     }
     // domain files snapshotted from the base chain
@@ -180,6 +184,11 @@ fn capture_snapshots_base_chain_without_env_overlay() {
             && !env_file(home.path(), "shot", "skills.json").exists(),
         "no base source -> no env domain file"
     );
+    assert_eq!(
+        read_json(&env_file(home.path(), "shot", "ap.json"))["mode"],
+        serde_json::json!("review"),
+        "ap.json snapshotted from the base chain"
+    );
 
     // activating the captured env reproduces the base file view exactly
     set_active_env(Some("shot")).unwrap();
@@ -187,6 +196,7 @@ fn capture_snapshots_base_chain_without_env_overlay() {
     assert_eq!(cfg.model, "global/m");
     assert_eq!(cfg.theme, "light");
     assert_eq!(cfg.cli["git"].content, "use git");
+    assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Review);
 }
 
 #[test]
@@ -298,4 +308,86 @@ fn env_files_are_owner_only_on_unix() {
             .mode();
         assert_eq!(mode & 0o777, 0o600, "captured config.json is owner-only");
     }
+}
+
+/// Core acceptance for the autopilot domain: `ap.json` is env-scoped, so the
+/// ap mode FOLLOWS the active env. The regression this pins: `/ap` saves used
+/// to be routed by `save_target` into the project config.json (any editable
+/// key there qualified), pinning the mode in the project layer where it
+/// shadowed every env — switching envs never changed it.
+#[test]
+fn autopilot_mode_follows_env_activation_switch_and_deactivation() {
+    let home = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let _iso = scoped_config_home(home.path().to_path_buf());
+
+    // project opencoder.json holds an editable key (model) — it must NOT
+    // capture autopilot anymore
+    write_json(&work.path().join("opencoder.json"), r#"{"model":"proj/m"}"#);
+    // base global ap.json: off
+    write_json(
+        &home.path().join(".opencoder").join("ap.json"),
+        r#"{"mode":"off"}"#,
+    );
+    // two envs with different ap modes
+    make_env(home.path(), "alpha", r#"{"theme":"dark"}"#);
+    write_json(
+        &env_file(home.path(), "alpha", "ap.json"),
+        r#"{"mode":"ap"}"#,
+    );
+    make_env(home.path(), "beta", r#"{"theme":"dark"}"#);
+    write_json(
+        &env_file(home.path(), "beta", "ap.json"),
+        r#"{"mode":"review"}"#,
+    );
+
+    // base: global ap.json wins
+    assert_eq!(
+        Config::load(work.path()).unwrap().autopilot.mode,
+        ApMode::Off
+    );
+
+    // env A active: A's mode; a `/ap`-style save lands in envs/alpha/ap.json
+    set_active_env(Some("alpha")).unwrap();
+    assert_eq!(
+        Config::load(work.path()).unwrap().autopilot.mode,
+        ApMode::Ap
+    );
+    let written = Config::save(
+        work.path(),
+        &serde_json::json!({ "autopilot": { "mode": "review" } }),
+    )
+    .unwrap();
+    assert_eq!(written, env_file(home.path(), "alpha", "ap.json"));
+    assert_eq!(
+        read_json(&env_file(home.path(), "alpha", "ap.json"))["mode"],
+        serde_json::json!("review"),
+        "edit while env active lands in the env layer"
+    );
+    assert_eq!(
+        read_json(&home.path().join(".opencoder").join("ap.json"))["mode"],
+        serde_json::json!("off"),
+        "base global ap.json untouched while env active"
+    );
+    assert_eq!(
+        read_json(&work.path().join("opencoder.json")),
+        serde_json::json!({ "model": "proj/m" }),
+        "project config.json must not gain an autopilot key"
+    );
+
+    // switch to env B: B's mode applies (previously the project layer pinned it)
+    set_active_env(Some("beta")).unwrap();
+    assert_eq!(
+        Config::load(work.path()).unwrap().autopilot.mode,
+        ApMode::Review,
+        "switching envs must switch the ap mode"
+    );
+
+    // deactivate: back to the base chain
+    set_active_env(None).unwrap();
+    assert_eq!(
+        Config::load(work.path()).unwrap().autopilot.mode,
+        ApMode::Off,
+        "deactivation restores the base ap.json"
+    );
 }

@@ -475,6 +475,8 @@ mod tests {
                 title: Some("parent".into()),
                 agent: Some("act".into()),
                 model: Some("m".into()),
+
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,
@@ -499,6 +501,8 @@ mod tests {
                 title: None,
                 agent: None,
                 model: None,
+
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,
@@ -558,6 +562,8 @@ mod tests {
                 title: None,
                 agent: None,
                 model: None,
+
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: 0,
                 updated_at: 0,

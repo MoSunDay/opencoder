@@ -125,6 +125,8 @@ pub async fn prepare_session(
             title: Some(format!("{} / {}", workflow.name, todo.title)),
             agent: Some(todo.agent.clone()),
             model: Some(config.model.clone()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: now,
             updated_at: now,

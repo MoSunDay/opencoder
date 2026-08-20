@@ -230,6 +230,56 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
     rounded_block_plain().title(Line::from(spans))
 }
 
+/// [`rounded_block_line`] plus a session-lifetime `[tok cost]` label (and,
+/// when `turn_ms > 0`, a `·`-separated `[turn cost]` duration) on the bottom
+/// border's left corner — the fourth info corner of the body block (right-
+/// bottom holds the follow indicator). Both segments use the default
+/// foreground colour, matching the top-border `workdir` title. `area_w`
+/// guards narrow terminals with graded dropping: when the `[tok cost]`
+/// segment alone could collide with the right-bottom indicator (which
+/// reserves ~10 display columns at the right edge) the whole label is
+/// dropped; when only the `[turn cost]` addition would overflow, just the
+/// tok segment is kept. `turn_ms == 0` omits the turn segment entirely.
+/// Pure builder — no globals.
+pub fn rounded_block_line_tok(
+    title: &Line<'static>,
+    tokens_total: u64,
+    area_w: u16,
+    turn_ms: u64,
+) -> Block<'static> {
+    let block = rounded_block_line(title);
+    let tok = format!(
+        "[tok cost {}]",
+        crate::fmt::format_tokens_cost_m(tokens_total)
+    );
+    let turn = if turn_ms > 0 {
+        format!(
+            " \u{00b7} [turn cost {}]",
+            crate::fmt::format_run_duration(turn_ms)
+        )
+    } else {
+        String::new()
+    };
+    // Right-edge reservation: follow/jump indicator ("    v    " style) plus
+    // spacing, never wider than this.
+    const RIGHT_RESERVE: u16 = 12;
+    let avail = area_w.saturating_sub(2).saturating_sub(RIGHT_RESERVE);
+    // `·` (U+00B7) is width-1, so char count == display width.
+    let tok_w = tok.chars().count() as u16 + 2; // surrounding spaces
+    let turn_w = turn.chars().count() as u16;
+    if avail < tok_w {
+        return block; // too narrow: drop the whole bottom label
+    }
+    let full = if turn_ms > 0 && avail >= tok_w + turn_w {
+        format!("{tok}{turn}")
+    } else {
+        tok
+    };
+    block.title_bottom(
+        Line::from(Span::raw(format!(" {full} "))).alignment(ratatui::layout::Alignment::Left),
+    )
+}
+
 /// Pad a title [`Line`]'s spans with one leading/trailing space (mirroring
 /// [`rounded_block_line`]) and recolour every span to `fg`. Returns an owned
 /// line intended for a *right-aligned* top-border title, e.g. the

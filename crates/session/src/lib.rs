@@ -36,7 +36,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, Agent, AgentKind, Config, Message, Role};
+use opencoder_core::{message::now_ms, Agent, AgentKind, ApMode, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
@@ -129,6 +129,11 @@ pub struct SessionState {
     pub messages: Vec<Message>,
     pub agent: Agent,
     pub model: String,
+    /// Session-scoped autopilot-mode override: the `/ap` "session-only"
+    /// choice, persisted to `sessions.autopilot_mode` and restored on resume.
+    /// `None` = follow `config.autopilot.mode`; `Some` wins over any config
+    /// reload at the runner's post-task dispatch point.
+    pub ap_mode_override: Option<ApMode>,
     pub working_dir: PathBuf,
     pub config: Config,
     pub client: Arc<dyn ChatStream>,
@@ -226,6 +231,7 @@ impl SessionState {
             messages: Vec::new(),
             agent,
             model,
+            ap_mode_override: None,
             working_dir,
             config,
             client,
@@ -252,6 +258,12 @@ impl SessionState {
             plan_input_count: 0,
             question_hub: QuestionHub::new(),
         }
+    }
+
+    /// Autopilot mode dispatched at run end: the session override (set by
+    /// `/ap` session-only or restored on resume) wins over the global config.
+    pub fn effective_ap_mode(&self) -> ApMode {
+        self.ap_mode_override.unwrap_or(self.config.autopilot.mode)
     }
 
     /// Attach a durable store so subsequent `record` calls persist messages.
@@ -393,6 +405,7 @@ impl SessionState {
                 } else {
                     Some(self.config.model.clone())
                 },
+                autopilot_mode: None,
                 workdir_hash: None,
                 created_at: self.messages.first().map(|m| m.created_at).unwrap_or(now),
                 updated_at: now,

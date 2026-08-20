@@ -18,6 +18,8 @@ async fn make_session(store: &LibsqlStore, id: &str) {
         title: None,
         agent: Some("act".into()),
         model: Some("m".into()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: now,
         updated_at: now,

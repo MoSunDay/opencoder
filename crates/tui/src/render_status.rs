@@ -38,6 +38,15 @@ fn status_dot(running: bool, anim_tick: u32, mode: &str) -> Span<'static> {
     }
 }
 
+/// Resolve the context size shown in `ctx (used/limit)`: the provider-truth
+/// context of the latest completed round (`input+output`) wins over the local
+/// estimate. `sys_tokens` is skipped in real mode — the provider's
+/// `input_tokens` already include the system prompt, so adding it would
+/// double-count.
+pub(crate) fn resolve_ctx_used(real: Option<u64>, context_used: u64, sys_tokens: u64) -> u64 {
+    real.unwrap_or(context_used + sys_tokens)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_status(
     f: &mut Frame,

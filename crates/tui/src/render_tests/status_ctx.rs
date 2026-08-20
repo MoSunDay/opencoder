@@ -104,3 +104,28 @@ fn status_bar_colors_split_between_meter_and_labels() {
         "ctx counts must stay bright blue (ratio-to-total, not threshold-coloured); got: {row}"
     );
 }
+
+/// `ctx (used/limit)` resolution: provider-truth context replaces the local
+/// estimate once a usage-carrying round has completed, without adding
+/// `sys_tokens` (already inside the provider's input_tokens). Falls back to
+/// `estimate + sys_tokens` while no real data exists.
+mod resolve_ctx_used {
+    use crate::render::resolve_ctx_used;
+
+    #[test]
+    fn real_context_wins_and_skips_sys_tokens() {
+        // Estimate would be 5_000 + 2_000 sys = 7_000; provider says 9_100.
+        assert_eq!(resolve_ctx_used(Some(9_100), 5_000, 2_000), 9_100);
+    }
+
+    #[test]
+    fn no_real_data_falls_back_to_estimate_plus_sys() {
+        assert_eq!(resolve_ctx_used(None, 5_000, 2_000), 7_000);
+    }
+
+    #[test]
+    fn cleared_real_context_returns_to_the_estimate() {
+        // ModelSwitch/Compaction/TranscriptReset set real back to None.
+        assert_eq!(resolve_ctx_used(None, 12_000, 3_000), 15_000);
+    }
+}

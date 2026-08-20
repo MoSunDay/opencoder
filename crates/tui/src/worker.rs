@@ -31,6 +31,11 @@ pub enum UiCmd {
     SetSkill(Option<String>),
     /// Hot-reload config at the next turn boundary. Sent by the `/config` menu.
     ReloadConfig(Box<Config>),
+    /// Session-scoped autopilot-mode switch (`/ap` confirm dialog, both `y`
+    /// and `n`): pins `SessionState.ap_mode_override`, mirrors the mode into
+    /// the in-memory config, and persists `sessions.autopilot_mode` so resume
+    /// honors it. Never rebuilds the client (mode doesn't affect the endpoint).
+    ApModeSwitch(opencoder_core::ApMode),
     /// Replace the plan text in the last non-empty Assistant message in-memory.
     /// Does not touch the append-only store (consistent with compaction/handoff
     /// which also rewrite the in-memory `messages` without appending a record).
@@ -610,6 +615,23 @@ pub async fn process_cmd(
             opencoder_session::mcp::pool::sync(&sess.id, &desired).await;
             false
         }
+        UiCmd::ApModeSwitch(mode) => {
+            sess.ap_mode_override = Some(mode);
+            sess.config.autopilot.mode = mode;
+            if let Some(store) = &sess.store {
+                let _ = store
+                    .update_session(
+                        &sess.id,
+                        &opencoder_store::SessionPatch {
+                            autopilot_mode: Some(mode.as_str().to_string()),
+                            updated_at: Some(now_ms()),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+            }
+            false
+        }
         UiCmd::EditPlan(new_text) => {
             // Find the last Assistant message whose `text()` is non-empty and
             // replace its Text blocks with a single block carrying the edited
@@ -686,5 +708,7 @@ pub async fn process_cmd(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_ap_switch;
 #[cfg(test)]
 mod tests_reload;

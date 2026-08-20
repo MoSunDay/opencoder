@@ -26,6 +26,8 @@ async fn make_session(store: &LibsqlStore, id: &str) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("m".into()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1000,
         updated_at: 1000,
@@ -68,7 +70,7 @@ async fn resume_context_used_matches_transcript_estimate() {
         assistant("a1", "the drain loop promotes steer at each turn boundary and consumes exactly one queue item when idle"),
     ];
 
-    let chat = replay_into_chat("act", &messages, &store_arc, "s1").await;
+    let chat = replay_into_chat("act", &messages, &store_arc, "s1", 0).await;
 
     assert!(
         chat.context_used > 0,
@@ -88,7 +90,7 @@ async fn resume_context_used_empty_when_no_messages() {
     make_session(&store, "s2").await;
     let store_arc: Arc<dyn Store> = store.clone();
 
-    let chat = replay_into_chat("act", &[], &store_arc, "s2").await;
+    let chat = replay_into_chat("act", &[], &store_arc, "s2", 0).await;
 
     assert_eq!(
         chat.context_used, 0,
@@ -110,8 +112,8 @@ async fn resume_context_used_grows_with_more_messages() {
         assistant("a2", "token estimation uses a chars-per-token heuristic so compaction can fire before any usage is reported by the model"),
     ];
 
-    let chat_short = replay_into_chat("act", &short, &store_arc, "s3").await;
-    let chat_long = replay_into_chat("act", &long, &store_arc, "s3").await;
+    let chat_short = replay_into_chat("act", &short, &store_arc, "s3", 0).await;
+    let chat_long = replay_into_chat("act", &long, &store_arc, "s3", 0).await;
 
     assert!(
         chat_long.context_used > chat_short.context_used,
@@ -185,7 +187,7 @@ async fn child_view_context_used_is_nonzero() {
         .await
         .unwrap();
 
-    let chat = replay_into_chat("act", &parent_msgs, &store_arc, "parent").await;
+    let chat = replay_into_chat("act", &parent_msgs, &store_arc, "parent", 0).await;
 
     let sub = chat
         .blocks

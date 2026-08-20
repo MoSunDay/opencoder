@@ -37,6 +37,15 @@ pub async fn resume(
     if let Some(m) = &meta.model {
         config.model = m.clone();
     }
+    // Session-scoped autopilot mode (`/ap` session-only): the override wins
+    // over the global config at the runner's dispatch point. NULL follows the
+    // global config; unknown values warn and are ignored.
+    let ap_mode_override = meta.autopilot_mode.as_deref().and_then(|v| {
+        opencoder_core::ApMode::parse(v).or_else(|| {
+            tracing::warn!(session_id = %id, mode = %v, "unknown sessions.autopilot_mode; ignoring");
+            None
+        })
+    });
     let agent_name = meta.agent.as_deref().unwrap_or(&config.agent.default);
     let agent = resolve_agent(agent_name)
         .or_else(|| resolve_agent("act"))
@@ -209,6 +218,7 @@ pub async fn resume(
         messages,
         agent,
         model,
+        ap_mode_override,
         working_dir,
         config,
         client,

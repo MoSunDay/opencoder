@@ -668,7 +668,10 @@ async fn pure_switch_returns_promptly_when_cmd_channel_is_full() {
             "seed {i} must still be queued in order"
         );
     }
-    assert!(cmd_rx.try_recv().is_err(), "channel must be empty after seeds");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "channel must be empty after seeds"
+    );
 }
 
 /// Dedup at the app_loop layer: when the last successfully-enqueued pure

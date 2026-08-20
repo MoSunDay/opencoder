@@ -19,6 +19,11 @@ pub struct SessionMeta {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Session-scoped autopilot mode for the `/ap` "session-only" switch.
+    /// `None` = follow the global config; `Some("off"|"ap"|"review")` pins
+    /// this session's mode so resume honors it (same role as `model`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autopilot_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workdir_hash: Option<String>,
     #[serde(default)]
@@ -73,6 +78,9 @@ pub struct SessionPatch {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Sets the session-scoped autopilot mode; see `SessionMeta::autopilot_mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autopilot_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,6 +116,10 @@ pub struct SessionPatch {
     /// purpose as `clear_agent` for the model column.
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_model: bool,
+    /// When true, sets `autopilot_mode` to NULL (back to "follow the global
+    /// config"). Same purpose as `clear_model` for the autopilot_mode column.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clear_autopilot_mode: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

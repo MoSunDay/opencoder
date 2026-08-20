@@ -70,11 +70,23 @@ mod tests {
     #[test]
     fn short_api_key_is_fully_masked() {
         // Exactly 4 chars and shorter: not "longer than 4" → plain "***".
-        assert_eq!(redact_json(&json!({ "api_key": "abcd" })), json!({ "api_key": "***" }));
-        assert_eq!(redact_json(&json!({ "api_key": "k" })), json!({ "api_key": "***" }));
-        assert_eq!(redact_json(&json!({ "api_key": "" })), json!({ "api_key": "***" }));
+        assert_eq!(
+            redact_json(&json!({ "api_key": "abcd" })),
+            json!({ "api_key": "***" })
+        );
+        assert_eq!(
+            redact_json(&json!({ "api_key": "k" })),
+            json!({ "api_key": "***" })
+        );
+        assert_eq!(
+            redact_json(&json!({ "api_key": "" })),
+            json!({ "api_key": "***" })
+        );
         // 5 chars is the first masked-with-prefix case.
-        assert_eq!(redact_json(&json!({ "api_key": "abcde" })), json!({ "api_key": "abcd***" }));
+        assert_eq!(
+            redact_json(&json!({ "api_key": "abcde" })),
+            json!({ "api_key": "abcd***" })
+        );
     }
 
     #[test]
@@ -117,8 +129,13 @@ mod tests {
 
     #[test]
     fn non_string_api_key_values_pass_through() {
-        let v = json!({ "api_key": null, "nested": { "api_key": 1234 }, "api_keyb": "not-the-key" });
-        assert_eq!(redact_json(&v), v, "null/number api_key and lookalike keys stay as-is");
+        let v =
+            json!({ "api_key": null, "nested": { "api_key": 1234 }, "api_keyb": "not-the-key" });
+        assert_eq!(
+            redact_json(&v),
+            v,
+            "null/number api_key and lookalike keys stay as-is"
+        );
     }
 
     #[test]

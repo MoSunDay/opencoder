@@ -74,11 +74,7 @@ async fn plan_backtab_blocked_while_running_then_handoff_after_idle() {
     a1.agent = Some("plan".into());
     let mut a2 = assistant_with_text("a2", "## Plan\n1. do X\n2. do Y");
     a2.agent = Some("plan".into());
-    sess.messages = vec![
-        Message::user("u1", "implement feature X"),
-        a1,
-        a2,
-    ];
+    sess.messages = vec![Message::user("u1", "implement feature X"), a1, a2];
     sess.plan_input_count = 1;
     sess.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
 

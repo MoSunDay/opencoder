@@ -23,12 +23,14 @@ async fn state_with_mock() -> Arc<opencoder_web::AppState> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let workdir = tempfile::tempdir().unwrap().keep();
     // The drain reloads config from a spawned task, so the thread-local test
-    // config guard cannot isolate it. Pin the project-level autopilot mode to
-    // off: a developer's real ~/.opencoder setting must not append a review
-    // turn to this one-round client/server sequence.
+    // config guard cannot isolate it. Pin the autopilot mode to off via the
+    // project domain file `.opencoder/ap.json` (it shadows any real
+    // ~/.opencoder/ap.json entirely): a developer's global setting must not
+    // append a review turn to this one-round client/server sequence.
+    std::fs::create_dir_all(workdir.join(".opencoder")).unwrap();
     std::fs::write(
-        workdir.join("opencoder.json"),
-        r#"{"autopilot":{"mode":"off"}}"#,
+        workdir.join(".opencoder").join("ap.json"),
+        r#"{"mode":"off"}"#,
     )
     .unwrap();
     let mock: Arc<dyn ChatStream> = Arc::new(MockChatClient::new().with_default(vec![

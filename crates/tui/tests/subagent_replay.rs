@@ -28,6 +28,8 @@ async fn make_session(store: &LibsqlStore, id: &str) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("m".into()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1000,
         updated_at: 1000,
@@ -180,7 +182,7 @@ async fn replay_reconstructs_subagent_blocks_with_status_and_child_view() {
     // Rebuild the chat view.
     let messages = store.load_messages("parent").await.unwrap();
     let store_arc: Arc<dyn Store> = store.clone();
-    let chat = replay_into_chat("act", &messages, &store_arc, "parent").await;
+    let chat = replay_into_chat("act", &messages, &store_arc, "parent", 0).await;
 
     // Collect subagent blocks.
     let subagent_blocks: Vec<&ChatBlock> = chat
@@ -304,7 +306,7 @@ async fn replay_falls_back_to_message_replay_when_no_events() {
 
     let messages = store.load_messages("parent").await.unwrap();
     let store_arc: Arc<dyn Store> = store.clone();
-    let chat = replay_into_chat("act", &messages, &store_arc, "parent").await;
+    let chat = replay_into_chat("act", &messages, &store_arc, "parent", 0).await;
 
     let sub = chat
         .blocks
@@ -349,7 +351,7 @@ async fn replay_shows_interrupted_for_running_subagent() {
 
     let messages = store.load_messages("parent").await.unwrap();
     let store_arc: Arc<dyn Store> = store.clone();
-    let chat = replay_into_chat("act", &messages, &store_arc, "parent").await;
+    let chat = replay_into_chat("act", &messages, &store_arc, "parent", 0).await;
 
     let sub = chat
         .blocks
@@ -413,7 +415,7 @@ async fn replay_refreshes_status_after_subagent_completes() {
     let store_arc: Arc<dyn Store> = store.clone();
 
     // First replay — subagent is still Running → shows "(interrupted)".
-    let chat1 = replay_into_chat("act", &messages, &store_arc, "parent").await;
+    let chat1 = replay_into_chat("act", &messages, &store_arc, "parent", 0).await;
     {
         let sub = chat1
             .blocks
@@ -450,7 +452,7 @@ async fn replay_refreshes_status_after_subagent_completes() {
 
     // Second replay — must reflect the updated Completed status.
     let messages2 = store.load_messages("parent").await.unwrap();
-    let chat2 = replay_into_chat("act", &messages2, &store_arc, "parent").await;
+    let chat2 = replay_into_chat("act", &messages2, &store_arc, "parent", 0).await;
     {
         let sub = chat2
             .blocks

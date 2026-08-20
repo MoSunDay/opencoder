@@ -60,6 +60,7 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("glm-5.2".into()),
+        autopilot_mode: None,
         workdir_hash: Some("h".into()),
         created_at: now,
         updated_at: now,
@@ -105,6 +106,73 @@ async fn create_get_update_delete_session_contract() {
 
     store.delete_session("s1").await.unwrap();
     assert!(store.get_session("s1").await.unwrap().is_none());
+}
+
+/// v11: the session-scoped `autopilot_mode` column must survive the full
+/// create -> patch -> clear lifecycle, mirroring how `model` is treated.
+#[tokio::test]
+async fn autopilot_mode_column_round_trips() {
+    let (_dir, store) = fresh().await;
+    let meta = SessionMeta {
+        id: "s-ap".into(),
+        autopilot_mode: Some("ap".into()),
+        ..Default::default()
+    };
+    store.create_session(&meta).await.unwrap();
+    assert_eq!(
+        store
+            .get_session("s-ap")
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot_mode
+            .as_deref(),
+        Some("ap"),
+        "created autopilot_mode must round-trip"
+    );
+
+    store
+        .update_session(
+            "s-ap",
+            &opencoder_store::SessionPatch {
+                autopilot_mode: Some("review".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_session("s-ap")
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot_mode
+            .as_deref(),
+        Some("review"),
+        "patched autopilot_mode must round-trip"
+    );
+
+    store
+        .update_session(
+            "s-ap",
+            &opencoder_store::SessionPatch {
+                clear_autopilot_mode: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_session("s-ap")
+            .await
+            .unwrap()
+            .unwrap()
+            .autopilot_mode,
+        None,
+        "clear_autopilot_mode must NULL the column"
+    );
 }
 
 #[tokio::test]
@@ -455,6 +523,7 @@ async fn bundle_export_import_roundtrip() {
         title: Some("parent".into()),
         agent: Some("act".into()),
         model: Some("test-model".into()),
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1000,
         updated_at: 2000,
@@ -479,6 +548,7 @@ async fn bundle_export_import_roundtrip() {
         title: Some("child".into()),
         agent: Some("explore".into()),
         model: Some("test-model".into()),
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 1100,
         updated_at: 2100,
@@ -615,6 +685,8 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
         .create_session(&SessionMeta {
             id: "skilled".into(),
             agent: Some("plan".into()),
+
+            autopilot_mode: None,
             skill: Some("## do-and-done\nfull body".into()),
             ..Default::default()
         })
@@ -624,6 +696,8 @@ async fn list_sessions_carries_skill_body_for_picker_tag() {
         .create_session(&SessionMeta {
             id: "plain".into(),
             agent: Some("act".into()),
+
+            autopilot_mode: None,
             ..Default::default()
         })
         .await
@@ -656,6 +730,7 @@ async fn session_handoff_and_skill_fields_round_trip() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

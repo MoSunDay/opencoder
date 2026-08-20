@@ -14,9 +14,10 @@ use serde_json::Value;
 use std::panic::AssertUnwindSafe;
 
 use crate::compaction;
-use crate::tools::registry as build_registry;
 // run_loop_one_shot: every primary run ends with the one-shot skill clear.
-use crate::{mcp, skill_lifecycle::run_loop_one_shot, SessionState};
+use crate::skill_lifecycle::run_loop_one_shot;
+use crate::SessionState;
+use registry::build_full_registry;
 
 mod dedup;
 mod drain;
@@ -24,6 +25,7 @@ mod event;
 mod execute;
 mod input_recovery;
 mod llm_call;
+mod registry;
 mod steer;
 mod subagent;
 #[cfg(test)]
@@ -74,35 +76,6 @@ pub async fn run_with_images(
 ) -> Result<()> {
     let registry = build_full_registry(session).await;
     run_with_registry(session, user_text, images, &registry, on_event).await
-}
-
-/// Build the builtin tool registry merged with any MCP tools discovered for
-/// this session.  Also synchronises the MCP connection pool so that enabled
-/// servers are connected (and disabled ones disconnected) before the turn.
-async fn build_full_registry(session: &SessionState) -> HashMap<String, ToolArc> {
-    let desired: Vec<(String, opencoder_core::config::McpServerConfig)> = session
-        .config
-        .enabled_mcp_servers()
-        .into_iter()
-        .map(|(n, c)| (n, c.clone()))
-        .collect();
-    if !desired.is_empty() {
-        mcp::pool::sync(&session.id, &desired).await;
-    }
-    let mut reg = build_registry();
-    // The registry's `question` entry carries a placeholder hub (schema/token
-    // estimation only). Rebind it to this session's shared hub so an attached
-    // frontend resolves tool results mid-turn.
-    reg.insert(
-        "question".to_string(),
-        Arc::new(crate::tools::question::QuestionTool::new(
-            session.question_hub.clone(),
-        )),
-    );
-    if mcp::pool::has_mcp_tools(&session.id) {
-        reg.extend(mcp::pool::tools_for(&session.id));
-    }
-    reg
 }
 
 pub async fn run_with_registry(
@@ -206,12 +179,12 @@ pub async fn run_with_registry(
 
     // Autopilot mode dispatch: after the initial task completes, `ap` hands
     // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a
-    // one-shot review pass (plan agent + review skill, no ACT/VERIFY), and
-    // `off` does nothing. The review pass is act-only: a review assesses
-    // EXECUTED work, so it is dispatched solely for primary sessions running
-    // the act agent — plan mode (or any other non-act primary) falls through
-    // to the same no-op as `off` instead of reviewing an unexecuted plan.
-    match session.config.autopilot.mode {
+    // one-shot review pass (no ACT/VERIFY), and `off` does nothing. A
+    // session-scoped override (`effective_ap_mode`) wins over the config.
+    // The review pass is act-only: a review assesses EXECUTED work, so it is
+    // dispatched solely for primary sessions running the act agent — plan
+    // mode (or any other non-act primary) falls through to the no-op `off`.
+    match session.effective_ap_mode() {
         opencoder_core::ApMode::Ap => {
             crate::autopilot::drive(session, registry, &mut on_event).await?;
         }
@@ -512,6 +485,13 @@ pub(crate) async fn run_loop(
         assistant.usage = usage.as_ref().map(core_usage).unwrap_or_default();
         assistant.created_at = now_ms();
         session.record(assistant).await;
+        if let Some(u) = &usage {
+            on_event(SessionEvent::LlmUsage {
+                total_tokens: u.total_tokens,
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+            });
+        }
 
         if tool_calls.is_empty() {
             on_event(SessionEvent::LlmRoundEnd);

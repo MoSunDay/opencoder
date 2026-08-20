@@ -114,6 +114,25 @@ pub struct ChatView {
     /// `[turn cost]` holds the frozen value so the timer stays visible during
     /// inter-round tool execution instead of disappearing.
     pub frozen_round_ms: Option<u64>,
+    /// Session-lifetime real token consumption, accumulated from
+    /// `LlmUsage` events (provider-reported `total_tokens`, one per
+    /// assistant message that carried usage) plus replayed message usage.
+    /// INCLUDES subagent consumption: live rounds arrive wrapped in
+    /// `SubagentChild` and are added here as well as into the child view;
+    /// replay adds each reconstructed child view's total. Focused child
+    /// views still show only their own spend. Display-only: drives the
+    /// bottom-left `[tok cost]` corner label.
+    pub tokens_total: u64,
+    /// Provider-truth context size of the most recent completed LLM round
+    /// (`input_tokens + output_tokens` from the latest `LlmUsage`). When
+    /// `Some`, the status bar's `ctx (used/limit)` shows this instead of the
+    /// local estimate (and skips adding `sys_tokens` — the provider's
+    /// input_tokens already include them). `None` until the first
+    /// usage-carrying round, cleared by `Compaction` / `TranscriptReset` /
+    /// `ModelSwitch` (context rewritten or tokenizer changed). Never set
+    /// from subagent rounds: a child's context is not part of this view's
+    /// window.
+    pub real_context_tokens: Option<u64>,
     /// First block belonging to the currently admitted top-level turn. A
     /// reliable completed-text event uses this floor to repair any parent
     /// `TextDelta` chunks dropped by the bounded worker channel without ever

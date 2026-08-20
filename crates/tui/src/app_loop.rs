@@ -240,7 +240,9 @@ pub(crate) async fn handle_switch_agent(
         // Pure switch: idempotent — best-effort try_send (a full cmd channel
         // must never block the UI loop) + drop consecutive same-name repeats.
         let next = UiCmd::SwitchAgent(name);
-        if !dedup_switch(last_switch_sent.as_ref(), &next) && try_send_idempotent(cmd_tx, next.clone()) {
+        if !dedup_switch(last_switch_sent.as_ref(), &next)
+            && try_send_idempotent(cmd_tx, next.clone())
+        {
             *last_switch_sent = Some(next);
         }
     }
@@ -332,20 +334,7 @@ pub(crate) async fn fold_ui_events(
                     _ => {}
                 }
                 if let SessionEvent::TranscriptReset(msgs) = &sev {
-                    let agent = chat.agent.clone();
-                    let saved_plan_submitted = chat.plan_submitted;
-                    let saved_annotation_text = chat.annotation_text.clone();
-                    let saved_submitted = chat.submitted;
-                    let saved_first_prompt = chat.first_prompt.clone();
-                    *chat =
-                        crate::session_ui::replay_into_chat(&agent, msgs, store, session_id).await;
-                    chat.plan_submitted = saved_plan_submitted;
-                    chat.annotation_text = saved_annotation_text;
-                    chat.submitted = saved_submitted;
-                    chat.first_prompt = saved_first_prompt;
-                    // The reset happened inside the admitted turn; reliable
-                    // completion repair must never target pre-reset blocks.
-                    chat.turn_block_start = chat.blocks.len();
+                    crate::session_ui::rebuild_after_reset(chat, msgs, store, session_id).await;
                 } else {
                     hidden_reasoning_append = matches!(sev, SessionEvent::ReasoningDelta(_))
                         && chat.last_open_thinking_collapsed();

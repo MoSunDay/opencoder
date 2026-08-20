@@ -71,8 +71,7 @@ fn api_key_error_names_provider_and_all_config_avenues() {
         "error must mention the env var; got: {msg}"
     );
     assert!(
-        msg.contains("providers.zhipuai-coding-plan.api_key")
-            && msg.contains("provider.api_key"),
+        msg.contains("providers.zhipuai-coding-plan.api_key") && msg.contains("provider.api_key"),
         "error must mention the registry entry and top-level provider keys; got: {msg}"
     );
 }
@@ -183,8 +182,7 @@ fn openai_base_url_env_overrides_active_provider_registry_entry() {
     assert_eq!(cfg.model, "zhipuai-coding-plan/glm-5.2");
     // The registry entry for the now-active provider picks up the env value…
     assert_eq!(
-        cfg.providers["zhipuai-coding-plan"].base_url,
-        "https://env.example/v1",
+        cfg.providers["zhipuai-coding-plan"].base_url, "https://env.example/v1",
         "active provider registry entry must sync OPENAI_BASE_URL"
     );
     // …and the legacy top-level provider field keeps the old behavior…
@@ -230,8 +228,7 @@ fn openai_base_url_env_without_registry_entry_updates_legacy_only() {
     // this pins the contract).
     assert!(!cfg.providers.contains_key("unknown-svc"));
     assert_eq!(
-        cfg.providers["deepseek"].base_url,
-        "https://api.deepseek.com/v1",
+        cfg.providers["deepseek"].base_url, "https://api.deepseek.com/v1",
         "non-active registry entries stay at their file-level values"
     );
 }
@@ -256,7 +253,10 @@ fn openai_base_url_env_registry_sync_normalizes_trailing_slash() {
     std::env::remove_var("OPENCODER_MODEL");
     std::env::remove_var("OPENAI_BASE_URL");
 
-    assert_eq!(cfg.providers["zhipuai-coding-plan"].base_url, "https://env.example/v1");
+    assert_eq!(
+        cfg.providers["zhipuai-coding-plan"].base_url,
+        "https://env.example/v1"
+    );
     assert_eq!(cfg.provider.base_url, "https://env.example/v1");
 }
 

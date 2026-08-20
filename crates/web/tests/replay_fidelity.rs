@@ -80,6 +80,8 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 1,
             updated_at: 1,

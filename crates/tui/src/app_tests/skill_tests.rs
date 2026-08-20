@@ -322,6 +322,8 @@ fn double_esc_while_running_cancels() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     let esc = key(KeyCode::Esc, KeyModifiers::NONE);
 
     let first = handle_key(
@@ -343,6 +345,8 @@ fn double_esc_while_running_cancels() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(
         matches!(first, KeyAction::None),
@@ -369,6 +373,8 @@ fn double_esc_while_running_cancels() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(
         matches!(second, KeyAction::Cancel),

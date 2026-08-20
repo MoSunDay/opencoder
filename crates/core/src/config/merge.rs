@@ -38,9 +38,10 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
     {
         return true;
     }
-    // NOTE: `mcp_servers` / `cli` / `skills` are deliberately NOT editable
-    // config.json keys — they are hard-cut into their own domain files
-    // (mcp.json / cli.json / skills.json); see `config::domain`.
+    // NOTE: `mcp_servers` / `cli` / `skills` / `autopilot` are deliberately
+    // NOT editable config.json keys — they are hard-cut into their own
+    // domain files (mcp.json / cli.json / skills.json / ap.json); see
+    // `config::domain`.
     if obj
         .get("agent")
         .and_then(|v| v.as_object())
@@ -61,18 +62,6 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         .get("network")
         .and_then(|v| v.as_object())
         .is_some_and(|n| n.contains_key("proxy"))
-    {
-        return true;
-    }
-    if obj
-        .get("autopilot")
-        .and_then(|v| v.as_object())
-        .is_some_and(|a| {
-            a.contains_key("mode")
-                || a.contains_key("enabled")
-                || a.contains_key("max_iterations")
-                || a.contains_key("verify_retries")
-        })
     {
         return true;
     }
@@ -127,11 +116,11 @@ pub(super) fn merge_json(dst: &mut serde_json::Value, patch: &serde_json::Value)
     }
 }
 
-/// The legacy domain keys (`mcp_servers` / `cli` / `skills`) present in a
-/// parsed config.json object with non-`null` values, in fixed order. Pure
-/// input inspection — callers decide what to do with the result.
+/// The legacy domain keys (`mcp_servers` / `cli` / `skills` / `autopilot`)
+/// present in a parsed config.json object with non-`null` values, in fixed
+/// order. Pure input inspection — callers decide what to do with the result.
 fn legacy_domain_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&'static str> {
-    ["mcp_servers", "cli", "skills"]
+    ["mcp_servers", "cli", "skills", "autopilot"]
         .into_iter()
         .filter(|k| obj.get(*k).is_some_and(|v| !v.is_null()))
         .collect()
@@ -153,7 +142,7 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 source = "config.json",
                 "config.json carries migrated domain keys that are now ignored; \
                  move them into their own domain files \
-                 (mcp.json / cli.json / skills.json)"
+                 (mcp.json / cli.json / skills.json / ap.json)"
             );
         }
         if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
@@ -236,10 +225,10 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
                 }
             }
         }
-        // NOTE: `mcp_servers` / `cli` / `skills` are hard-cut from
-        // config.json (see `config::domain`); a legacy config.json still
+        // NOTE: `mcp_servers` / `cli` / `skills` / `autopilot` are hard-cut
+        // from config.json (see `config::domain`); a legacy config.json still
         // carrying them is ignored here (warned once above) — users migrate
-        // those keys into mcp.json / cli.json / skills.json.
+        // those keys into mcp.json / cli.json / skills.json / ap.json.
         if let Some(c) = obj.get("compaction").and_then(|v| v.as_object()) {
             if let Some(v) = c.get("auto").and_then(|v| v.as_bool()) {
                 cfg.compaction.auto = v;
@@ -280,9 +269,6 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(v) = obj.get("replay_timeout_secs").and_then(|v| v.as_u64()) {
             cfg.replay_timeout_secs = Some(v);
-        }
-        if let Some(a) = obj.get("autopilot").and_then(|v| v.as_object()) {
-            super::autopilot::merge(&mut cfg.autopilot, a);
         }
         if let Some(o) = obj.get("output_streamline").and_then(|v| v.as_object()) {
             if let Some(b) = o.get("enabled").and_then(|v| v.as_bool()) {
@@ -343,18 +329,21 @@ mod tests {
         let all = as_map(serde_json::json!({
             "skills": {},
             "cli": {},
-            "mcp_servers": {}
+            "mcp_servers": {},
+            "autopilot": {}
         }));
-        // Order is fixed (mcp_servers, cli, skills) regardless of JSON order.
+        // Order is fixed (mcp_servers, cli, skills, autopilot) regardless of
+        // JSON order.
         assert_eq!(
             legacy_domain_keys(&all),
-            vec!["mcp_servers", "cli", "skills"]
+            vec!["mcp_servers", "cli", "skills", "autopilot"]
         );
 
         let nulled = as_map(serde_json::json!({
             "mcp_servers": null,
             "cli": null,
-            "skills": null
+            "skills": null,
+            "autopilot": null
         }));
         assert!(
             legacy_domain_keys(&nulled).is_empty(),
@@ -389,11 +378,12 @@ mod tests {
         assert_eq!(cfg.tool_guard.max_consecutive_failures, u32::MAX);
     }
 
-    /// Hard-cut pin: `mcp_servers` / `cli` / `skills` no longer merge from
-    /// config.json (they live in mcp.json / cli.json / skills.json — see
-    /// `config::domain`). A legacy config.json still carrying them must be
-    /// ignored, not error. (The mcp env-indirection coverage that used to
-    /// live here moved to `config::domain`'s `apply_domain` tests.)
+    /// Hard-cut pin: `mcp_servers` / `cli` / `skills` / `autopilot` no
+    /// longer merge from config.json (they live in mcp.json / cli.json /
+    /// skills.json / ap.json — see `config::domain`). A legacy config.json
+    /// still carrying them must be ignored, not error. (The mcp
+    /// env-indirection coverage that used to live here moved to
+    /// `config::domain`'s `apply_domain` tests.)
     #[test]
     fn merge_into_hard_cuts_domain_keys_from_config_json() {
         let mut cfg = Config::default();
@@ -407,7 +397,8 @@ mod tests {
                 }
             },
             "cli": { "git": { "enabled": true, "content": "use git" } },
-            "skills": { "review": { "enabled": true } }
+            "skills": { "review": { "enabled": true } },
+            "autopilot": { "mode": "ap" }
         });
         merge_into(&mut cfg, value);
 
@@ -422,6 +413,10 @@ mod tests {
         assert!(
             cfg.skills.is_empty(),
             "legacy config.json `skills` must be ignored"
+        );
+        assert!(
+            cfg.autopilot.mode == crate::ApMode::Off,
+            "legacy config.json `autopilot` must be ignored (it lives in ap.json)"
         );
         assert!(cfg.enabled_skill_names().is_empty());
     }

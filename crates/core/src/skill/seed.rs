@@ -146,16 +146,11 @@ pub fn seed_builtin_skills() {
 /// is unit-testable without env games.
 fn seed_packs_at_home(root: Option<PathBuf>, packs: &[(&str, &[(&str, &str)])], label: &str) {
     let Some(root) = root else {
-        tracing::warn!(
-            "skipping {label} seeding: no home directory for ~/.opencoder/skills"
-        );
+        tracing::warn!("skipping {label} seeding: no home directory for ~/.opencoder/skills");
         return;
     };
     if let Err(e) = seed_skill_packs(&root, packs) {
-        tracing::warn!(
-            "failed to seed {label} into {}: {e}",
-            root.display()
-        );
+        tracing::warn!("failed to seed {label} into {}: {e}", root.display());
     }
 }
 

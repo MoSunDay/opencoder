@@ -100,6 +100,9 @@ async fn import_jsonl_file<S: Store + ?Sized>(
             .rev()
             .find(|m| m.model.is_some())
             .and_then(|m| m.model.clone()),
+        // Imported transcripts carry no session-scoped /ap pin: the imported
+        // session follows the global autopilot config.
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: earliest,
         updated_at: msgs.last().map(|m| m.created_at).unwrap_or(now),

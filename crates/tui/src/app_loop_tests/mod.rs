@@ -517,6 +517,7 @@ mod act_clear_ts_origin_tests;
 mod legacy_resume_tests;
 
 mod display_title_tests;
+mod tok_cost_idle_refresh_tests;
 
 #[cfg(test)]
 #[path = "../app_loop_plan_edit_tests.rs"]
@@ -525,6 +526,10 @@ mod plan_edit_tests;
 #[cfg(test)]
 #[path = "../app_loop_session_only_tests.rs"]
 mod session_only_tests;
+
+#[cfg(test)]
+#[path = "../app_loop_ap_outcome_tests.rs"]
+mod ap_outcome_tests;
 
 mod image_paste_tests;
 

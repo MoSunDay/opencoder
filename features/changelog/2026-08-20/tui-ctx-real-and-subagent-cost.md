@@ -66,9 +66,15 @@
 
 - `cargo fmt --all -- --check` 清洁；`cargo clippy --workspace --all-targets`
   零警告。
-- `cargo test --workspace --no-fail-fast` → 全绿（实跑数字见下）；首轮全量
-  中 `queued_skill_drain::queued_skill_fires_at_consumption_not_during_kickoff`
-  在并行满载下计时敏感 flake 一次，单测复跑通过，复跑全量无失败。
+- `cargo test --workspace --no-fail-fast` → **201 个 result 汇总 /
+  3185 passed / 0 failed**（exit 0）。
+- 过程记录：首轮全量中 `queued_skill_drain::queued_skill_fires_at_consumption_
+  not_during_kickoff` 曾在多会话并行满载下计时敏感 flake 一次，单独复跑通过，
+  最终全量无失败。
+- e2e（手工验证的固化）：`e2e_mock_task_round_folds_child_usage_into_parent_view`
+  用真实 runner + mock 模型 + task 工具跑一轮带子代理的会话——父
+  `[tok cost]` = 15+300+100=415（含子代理轮次 300）、父 real ctx=100（不含子）、
+  子视图 300/300。
 
 ## 关联
 

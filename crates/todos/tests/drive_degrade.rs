@@ -196,7 +196,9 @@ fn make_runtime(store: &Arc<dyn Store>, client: Arc<dyn ChatStream>, dir: &Path)
 #[tokio::test]
 async fn probe_failure_degrades_and_original_error_survives() {
     let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
-    let store: Arc<dyn Store> = Arc::new(ProbeFailingStore { inner: inner.clone() });
+    let store: Arc<dyn Store> = Arc::new(ProbeFailingStore {
+        inner: inner.clone(),
+    });
     // Zero scripts: the very first parent LLM call fails, so drive_inner
     // errors before any child session or interrupt poll exists.
     let mock = Arc::new(MockChatClient::new());
@@ -219,13 +221,11 @@ async fn probe_failure_degrades_and_original_error_survives() {
     );
 
     // The local suspension still landed in the real store.
-    let (_, state) = opencoder_todos::persistence::load(
-        &(inner.clone() as Arc<dyn Store>),
-        "run-probe-fail",
-    )
-    .await
-        .unwrap()
-        .expect("workflow must be persisted");
+    let (_, state) =
+        opencoder_todos::persistence::load(&(inner.clone() as Arc<dyn Store>), "run-probe-fail")
+            .await
+            .unwrap()
+            .expect("workflow must be persisted");
     assert_eq!(state.status, WorkflowStatus::Suspended);
     let events = inner.todo_events_after("run-probe-fail", 0).await.unwrap();
     assert_eq!(

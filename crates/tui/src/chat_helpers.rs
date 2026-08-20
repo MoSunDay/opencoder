@@ -49,7 +49,7 @@ pub fn block_text(view: &ChatView) -> String {
 /// Append a styled duration span to the header. Running → live warn-color
 /// timer; done → frozen muted timer (hidden when < 1s to avoid `0s` noise).
 /// NOTE: now used only by Subagent headers — the per-call Tool inline timers
-/// were removed; the body tail shows the whole-turn `[turn cost]` timer instead.
+/// were removed; the bottom-border corner shows the whole-turn `[turn cost]` timer instead.
 pub(crate) fn push_duration_span(
     spans: &mut Vec<ratatui::text::Span<'static>>,
     started_at_ms: i64,

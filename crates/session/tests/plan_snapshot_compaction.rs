@@ -84,6 +84,8 @@ async fn seed_plan_store(store: &Arc<dyn Store>) {
             title: None,
             agent: Some("plan".into()),
             model: Some("m/g".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

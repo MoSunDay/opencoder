@@ -143,7 +143,9 @@ mod tests {
         // Well-formed "prov/model" still wins over the stored model.
         let mut s = session_with_model("openai/gpt-4o-mini");
         assert_eq!(
-            reapply_resume_model(&mut s, &Some("prov/model".into())).unwrap().as_deref(),
+            reapply_resume_model(&mut s, &Some("prov/model".into()))
+                .unwrap()
+                .as_deref(),
             Some("prov/model")
         );
     }

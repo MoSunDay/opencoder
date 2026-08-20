@@ -423,8 +423,9 @@ impl Config {
 
     /// Return a cloned config with `patch` applied using the same merge rules
     /// as disk loading/saving. The source config is never mutated. Domain
-    /// keys (`mcp_servers` / `cli` / `skills`) still apply here — they are
-    /// routed through the same per-entry domain merge, so building configs
+    /// keys (`mcp_servers` / `cli` / `skills` / `autopilot`) still apply
+    /// here — they are routed through the same per-entry domain merge, so
+    /// building configs
     /// from JSON patches keeps working even though `config.json` itself no
     /// longer carries them.
     pub fn merged_with(&self, patch: &serde_json::Value) -> Config {
@@ -471,10 +472,11 @@ impl Config {
                 merge::merge_into(&mut cfg, parsed);
             }
         }
-        // Domain files (mcp.json / cli.json / skills.json): `mcp_servers` /
-        // `cli` / `skills` are hard-cut from config.json and load from exactly
-        // one file — the project one when it exists, else the global one
-        // (project shadows global entirely; no per-key merge across files).
+        // Domain files (mcp.json / cli.json / skills.json / ap.json):
+        // `mcp_servers` / `cli` / `skills` / `autopilot` are hard-cut from
+        // config.json and load from exactly one file — the project one when
+        // it exists, else the global one (project shadows global entirely;
+        // no per-key merge across files).
         for (key, _) in domain::DOMAIN_FILES {
             if let Some(v) = domain::read_effective(working_dir, key) {
                 domain::apply_domain(&mut cfg, key, &v);
@@ -698,8 +700,9 @@ impl Config {
     }
 
     /// Split-routing save (分流): top-level domain keys (`mcp_servers` /
-    /// `cli` / `skills`) are written to their dedicated domain files
-    /// (`mcp.json` / `cli.json` / `skills.json`); the remainder follows the
+    /// `cli` / `skills` / `autopilot`) are written to their dedicated domain
+    /// files (`mcp.json` / `cli.json` / `skills.json` / `ap.json`); the
+    /// remainder follows the
     /// normal [`save_target`](Self::save_target) + [`save_to`] config.json
     /// flow.
     ///

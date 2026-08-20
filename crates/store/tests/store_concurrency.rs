@@ -20,6 +20,7 @@ fn meta(id: &str) -> SessionMeta {
         title: Some(format!("title-{id}")),
         agent: None,
         model: None,
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 0,
         updated_at: 0,

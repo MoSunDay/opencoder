@@ -517,6 +517,8 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             task_type: None,
             requirement: None,
@@ -593,6 +595,8 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
             title: Some("t".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             task_type: None,
             requirement: None,

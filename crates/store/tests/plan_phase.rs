@@ -15,6 +15,7 @@ async fn store_with_session() -> (tempfile::TempDir, LibsqlStore) {
             title: Some("t".into()),
             agent: Some("plan".into()),
             model: Some("m".into()),
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

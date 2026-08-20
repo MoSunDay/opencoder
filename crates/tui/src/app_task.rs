@@ -200,6 +200,9 @@ pub(crate) async fn switch_session(
                 &resumed_messages,
                 store,
                 &new_session_id,
+                // Floor with the live view's accumulated cost so [tok cost]
+                // never regresses across the switch-back replay.
+                chat.tokens_total,
             )
             .await
         }

@@ -326,3 +326,60 @@ mod store_message_count_tests {
         assert_eq!(s.store_message_count(), 3);
     }
 }
+
+#[cfg(test)]
+mod effective_ap_mode_tests {
+    //! `SessionState::effective_ap_mode` precedence: `None` follows the
+    //! config mode; any session-scoped override (`/ap` session-only or
+    //! restored on resume) wins regardless of the config value.
+
+    use super::*;
+    use std::sync::Arc;
+
+    use opencoder_core::{resolve_agent, ApMode, AutoPilotConfig, Config};
+    use opencoder_llm::{ChatStream, MockChatClient};
+
+    fn make_session(config_mode: ApMode) -> SessionState {
+        SessionState::new(
+            "test",
+            resolve_agent("act").unwrap(),
+            Config {
+                autopilot: AutoPilotConfig {
+                    mode: config_mode,
+                    ..AutoPilotConfig::default()
+                },
+                ..Config::default()
+            },
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            PathBuf::from("."),
+        )
+    }
+
+    #[test]
+    fn none_follows_config_mode() {
+        let s = make_session(ApMode::Review);
+        assert_eq!(s.ap_mode_override, None, "fresh sessions start clean");
+        assert_eq!(s.effective_ap_mode(), ApMode::Review);
+    }
+
+    #[test]
+    fn override_wins_over_config() {
+        let mut s = make_session(ApMode::Ap);
+        s.ap_mode_override = Some(ApMode::Off);
+        assert_eq!(
+            s.effective_ap_mode(),
+            ApMode::Off,
+            "Some(Off) beats config Ap"
+        );
+
+        s.ap_mode_override = Some(ApMode::Ap);
+        assert_eq!(s.effective_ap_mode(), ApMode::Ap, "Some(Ap) returned");
+
+        s.ap_mode_override = Some(ApMode::Review);
+        assert_eq!(
+            s.effective_ap_mode(),
+            ApMode::Review,
+            "Some(Review) returned"
+        );
+    }
+}

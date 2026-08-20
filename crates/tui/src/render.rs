@@ -15,7 +15,6 @@ use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
-use crate::fmt as fmtmod;
 use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
@@ -29,6 +28,7 @@ pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
 #[path = "render_status.rs"]
 mod status_bar;
 use status_bar::render_status;
+pub(crate) use status_bar::resolve_ctx_used;
 
 /// Mouse hit-targets exported by `render` for the event loop to test clicks
 /// and wheel scrolls against. Recomputed every frame.
@@ -111,6 +111,7 @@ pub(crate) fn render<B: Backend>(
     skill_menu: Option<&SkillMenu>,
     task_picker: Option<&TaskPicker>,
     command_menu: Option<&CommandMenu>,
+    file_menu: Option<&crate::file_menu::FileMenu>,
     model_menu: Option<&ModelMenu>,
     mcp_menu: Option<&crate::mcp_menu::McpMenu>,
     envs_menu: Option<&crate::envs_menu::EnvsMenu>,
@@ -307,6 +308,7 @@ pub(crate) fn render<B: Backend>(
         );
         let composer_area = chunks[ci];
         ci += 1;
+        let used = resolve_ctx_used(chat.real_context_tokens, context_used, sys_tokens);
         render_status(
             f,
             chunks[ci],
@@ -314,45 +316,30 @@ pub(crate) fn render<B: Backend>(
             running,
             status,
             anim_tick,
-            context_used + sys_tokens,
+            used,
             compaction_threshold,
             context_limit,
             task_ms,
         );
 
-        if let Some(tp) = task_picker {
-            crate::task::render_task_picker(f, area, tp);
-        }
-        if let Some(cm) = command_menu {
-            crate::command::render_command_popup(f, area, composer_area.y, cm);
-        }
-        if let Some(mm) = model_menu {
-            crate::model_menu::render_model_popup(f, area, composer_area.y, mm);
-        }
-        if let Some(mcp) = mcp_menu {
-            crate::mcp_menu::render_mcp_popup(f, area, composer_area.y, mcp);
-        }
-        if let Some(envs) = envs_menu {
-            crate::envs_menu::render_envs_popup(f, area, composer_area.y, envs);
-        }
-        if let Some(cli) = cli_menu {
-            crate::cli_menu::render_cli_popup(f, area, composer_area.y, cli);
-        }
-        if let Some(sk) = skill_toggle_menu {
-            crate::skill_menu::render_skill_popup(f, area, composer_area.y, sk);
-        }
-        if let Some(am) = ap_menu {
-            crate::ap_menu::render_ap_popup(f, area, composer_area.y, am);
-        }
-        if let Some(cs) = cache_salt_menu {
-            crate::cache_salt_menu::render_cache_salt_popup(f, area, cs);
-        }
-        if let Some(km) = keymap_menu {
-            crate::keymap_menu::render_keymap_popup(f, area, km, &mut hits.keymap_btns);
-        }
-        if let Some(qm) = question_menu {
-            crate::question_menu::render_question_popup(f, area, composer_area.y, qm);
-        }
+        popups::render_popups(
+            f,
+            area,
+            composer_area.y,
+            hits,
+            task_picker,
+            command_menu,
+            file_menu,
+            model_menu,
+            mcp_menu,
+            envs_menu,
+            cli_menu,
+            skill_toggle_menu,
+            ap_menu,
+            cache_salt_menu,
+            keymap_menu,
+            question_menu,
+        );
         if let Some(label) = crate::ap_menu::chip_label(ap_mode) {
             render_status_chip(f, composer_area, label, theme::local_color());
         }
@@ -431,7 +418,7 @@ fn render_body(
         crate::copy_mode::render_clean(f, area, chat, scroll, follow, anim_tick, now_ms, viewport);
         return;
     }
-    let block = theme::rounded_block_line(title);
+    let block = theme::rounded_block_line_tok(title, chat.tokens_total, area.width, tail_ms);
     let inner = block.inner(area);
     let visible_h = inner.height as usize;
     let text_w = inner.width.saturating_sub(1);
@@ -461,10 +448,9 @@ fn render_body(
     let cache = viewport.as_ref().unwrap();
     let total_rows = cache.total_rows();
 
-    // Reserve a row for the [turn cost] timer line when it is visible so the
-    // content window never grows large enough to clip it.
-    let show_timer = tail_ms > 0;
-    let content_h = visible_h.saturating_sub(if show_timer { 1 } else { 0 });
+    // The [turn cost] timer lives on the bottom border (after [tok cost], see
+    // rounded_block_line_tok), so the content window takes the full height.
+    let content_h = visible_h;
 
     let max_rows = total_rows.saturating_sub(content_h);
     if follow {
@@ -522,21 +508,6 @@ fn render_body(
     let visible_lines: Vec<Line> = cache.lines()[start..end].to_vec();
     let para = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     f.render_widget(para.scroll((top_skip as u16, 0)), content_area);
-
-    // Per-round [turn cost] timer on a dedicated bottom row.
-    if show_timer {
-        let timer_area = Rect {
-            y: inner.y + content_h as u16,
-            height: 1,
-            width: text_w,
-            x: inner.x,
-        };
-        let timer = Span::styled(
-            format!("[turn cost {}]", fmtmod::format_run_duration(tail_ms)),
-            Style::default().fg(theme::warn_color()),
-        );
-        f.render_widget(Paragraph::new(Line::from(timer)), timer_area);
-    }
 
     if total_rows > visible_h {
         let scroll_area = Rect {
@@ -790,6 +761,8 @@ fn render_status_chip(f: &mut Frame, composer_area: Rect, text: &str, bg: Color)
 
 #[path = "render_hits.rs"]
 mod hit_records;
+#[path = "render_popups.rs"]
+mod popups;
 pub(crate) use hit_records::CompactionBtn;
 #[cfg(test)]
 #[path = "render_tests/mod.rs"]

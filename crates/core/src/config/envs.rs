@@ -1,8 +1,8 @@
 //! Named environment config sets (`~/.opencoder/envs/<name>/`).
 //!
 //! An env is a directory holding one complete opencoder config snapshot:
-//! `config.json` plus the three domain files (`mcp.json` / `cli.json` /
-//! `skills.json`). While an env is active — the marker file
+//! `config.json` plus the four domain files (`mcp.json` / `cli.json` /
+//! `skills.json` / `ap.json`). While an env is active — the marker file
 //! `<global_opencode_home>/envs/active` holds its name and the env directory
 //! exists — config resolution gains an env layer between the project files
 //! and the global home:

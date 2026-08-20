@@ -22,6 +22,17 @@ pub fn format_tokens_compact(n: u64) -> String {
     format!("{trimmed}{suffix}")
 }
 
+/// Session-lifetime token cost for the body's bottom-left `[tok cost]` corner:
+/// `0` when empty, else millions with three decimals (`m` = 1,000,000 tokens),
+/// floored at `0.001m`. Pure function.
+pub fn format_tokens_cost_m(total: u64) -> String {
+    if total == 0 {
+        return "0".to_string();
+    }
+    let m = total as f64 / 1_000_000.0;
+    format!("{:.3}m", m.max(0.001))
+}
+
 /// Context-window usage percent. Mirrors codex's baseline-offset math: subtract
 /// a baseline from both used and window so small sessions read ~0% rather than
 /// a misleading fraction of the full window. Clamps to [0, 100].
@@ -86,6 +97,24 @@ mod tests {
         assert_eq!(context_percent(500_000, 200_000, 12_000), 100);
         // zero window → 0 (no panic)
         assert_eq!(context_percent(100, 0, 0), 0);
+    }
+
+    #[test]
+    fn tok_cost_zero_and_floor_at_one_thousandth_million() {
+        assert_eq!(format_tokens_cost_m(0), "0");
+        assert_eq!(format_tokens_cost_m(1), "0.001m");
+        assert_eq!(format_tokens_cost_m(50_000), "0.050m");
+        assert_eq!(format_tokens_cost_m(100_000), "0.100m");
+    }
+
+    #[test]
+    fn tok_cost_scales_in_millions() {
+        assert_eq!(format_tokens_cost_m(150_000), "0.150m");
+        assert_eq!(format_tokens_cost_m(300_000), "0.300m");
+        assert_eq!(format_tokens_cost_m(1_234_567), "1.235m");
+        assert_eq!(format_tokens_cost_m(5_000_000), "5.000m");
+        assert_eq!(format_tokens_cost_m(12_600_000), "12.600m");
+        assert_eq!(format_tokens_cost_m(999_999), "1.000m");
     }
 
     #[test]

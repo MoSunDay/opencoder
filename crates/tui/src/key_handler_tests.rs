@@ -45,6 +45,8 @@ fn handle_key_disabled_blocks_char() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
@@ -65,6 +67,8 @@ fn handle_key_disabled_blocks_char() {
         true,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -82,6 +86,8 @@ fn handle_key_disabled_blocks_enter() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -102,6 +108,8 @@ fn handle_key_disabled_blocks_enter() {
         true,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
 }
@@ -118,6 +126,8 @@ fn handle_key_disabled_allows_scroll() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
@@ -138,6 +148,8 @@ fn handle_key_disabled_allows_scroll() {
         true,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(scroll, 30);
@@ -156,6 +168,8 @@ fn handle_key_disabled_allows_quit() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
@@ -176,6 +190,8 @@ fn handle_key_disabled_allows_quit() {
         true,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::Quit));
 }
@@ -192,6 +208,8 @@ fn ctrl_v_returns_clip() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
@@ -212,6 +230,8 @@ fn ctrl_v_returns_clip() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::Clip));
 }
@@ -232,6 +252,8 @@ fn undo_restores_previous_text() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     // Type "hi"
     for ch in ['h', 'i'] {
@@ -254,6 +276,8 @@ fn undo_restores_previous_text() {
             false,
             &mut undo_state,
             &mut queue_scroll,
+            &mut file_menu,
+            workdir,
         );
     }
     assert_eq!(input, "hi");
@@ -278,6 +302,8 @@ fn undo_restores_previous_text() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert_eq!(input, "");
 
@@ -301,6 +327,8 @@ fn undo_restores_previous_text() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert_eq!(input, "hi");
 }
@@ -317,6 +345,8 @@ fn undo_after_backspace() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("hello", 5);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     // Backspace
     handle_key(
@@ -338,6 +368,8 @@ fn undo_after_backspace() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert_eq!(input, "hell");
 
@@ -361,6 +393,8 @@ fn undo_after_backspace() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert_eq!(input, "hello");
 }
@@ -381,6 +415,8 @@ fn up_arrow_browses_history_when_single_row() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("current", 7);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     // Single-row input (7 chars < row_w=78), so Up browses history.
     handle_key(
@@ -402,6 +438,8 @@ fn up_arrow_browses_history_when_single_row() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert_eq!(input, "older");
     assert_eq!(hist_idx, Some(0));
@@ -421,6 +459,8 @@ fn up_arrow_moves_cursor_when_multi_row() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init(&input_text, 80);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     // Multi-row: cursor at row > 0, so Up moves cursor up (not history).
     let cursor_before = cursor;
@@ -443,6 +483,8 @@ fn up_arrow_moves_cursor_when_multi_row() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     // Cursor moved up, input unchanged, history not browsed.
     assert!(cursor < cursor_before, "cursor should move up");
@@ -465,6 +507,8 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
@@ -485,6 +529,8 @@ fn handle_key_alt_char_is_dropped_not_inserted() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty());
@@ -505,6 +551,8 @@ fn handle_key_alt_f_still_moves_word() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("hello", 0);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
 
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT),
@@ -525,6 +573,8 @@ fn handle_key_alt_f_still_moves_word() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
     assert_eq!(input, "hello");
@@ -547,6 +597,8 @@ fn bang_prefix_returns_bash_action() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("!ls", cursor);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -566,6 +618,8 @@ fn bang_prefix_returns_bash_action() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(
@@ -588,6 +642,8 @@ fn bang_prefix_with_spaces_returns_bash() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("! echo hi", cursor);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -607,6 +663,8 @@ fn bang_prefix_with_spaces_returns_bash() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "echo hi"));
     assert!(
@@ -628,6 +686,8 @@ fn bare_bang_is_noop() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("!", cursor);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -647,6 +707,8 @@ fn bare_bang_is_noop() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::None));
     assert!(input.is_empty(), "input must be cleared even on bare bang");
@@ -666,6 +728,8 @@ fn bang_prefix_works_while_running() {
     let mut skill_menu: Option<SkillMenu> = None;
     let mut undo_state = crate::undo::init("!ls", cursor);
     let mut queue_scroll: u32 = 0;
+    let mut file_menu: Option<crate::file_menu::FileMenu> = None;
+    let workdir = std::path::Path::new(".");
     let action = handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -685,6 +749,8 @@ fn bang_prefix_works_while_running() {
         false,
         &mut undo_state,
         &mut queue_scroll,
+        &mut file_menu,
+        workdir,
     );
     assert!(matches!(action, KeyAction::Bash(ref cmd) if cmd == "ls"));
     assert!(

@@ -1,7 +1,8 @@
-//! Domain config files (`mcp.json` / `cli.json` / `skills.json`).
+//! Domain config files (`mcp.json` / `cli.json` / `skills.json` / `ap.json`).
 //!
-//! The three map-shaped domains (`mcp_servers`, `cli`, `skills`) are hard-cut
-//! from `config.json`: they load from — and save to — a dedicated domain file.
+//! The three map-shaped domains (`mcp_servers`, `cli`, `skills`) plus the
+//! scalar `autopilot` domain are hard-cut from `config.json`: they load
+//! from — and save to — a dedicated domain file.
 //! Lookup walks project first and a single effective file wins (it shadows
 //! the others entirely — no per-key merge across files, unlike
 //! `config.json` candidates):
@@ -17,10 +18,11 @@ use std::path::{Path, PathBuf};
 use super::Config;
 
 /// Domain key -> domain file name. Order defines the split/save routing order.
-pub(crate) const DOMAIN_FILES: [(&str, &str); 3] = [
+pub(crate) const DOMAIN_FILES: [(&str, &str); 4] = [
     ("mcp_servers", "mcp.json"),
     ("cli", "cli.json"),
     ("skills", "skills.json"),
+    ("autopilot", "ap.json"),
 ];
 
 /// Placeholder path piece for a non-domain key: never matches a real file, so
@@ -285,9 +287,11 @@ pub(crate) fn split_patch(
     (serde_json::Value::Object(remainder), domains)
 }
 
-/// Apply one domain file's parsed JSON onto `cfg`, entry by entry (omitted
-/// fields preserve siblings — the loops previously lived in `merge_into`).
-/// Non-object values and unknown keys are ignored.
+/// Apply one domain file's parsed JSON onto `cfg` (omitted fields preserve
+/// siblings — the loops previously lived in `merge_into`). The three map
+/// domains apply entry by entry; `autopilot` merges the whole object (its
+/// file body IS the config, there is no entry map). Non-object values and
+/// unknown keys are ignored.
 pub(crate) fn apply_domain(cfg: &mut Config, key: &str, value: &serde_json::Value) {
     let entries = match value.as_object() {
         Some(o) => o,
@@ -318,6 +322,8 @@ pub(crate) fn apply_domain(cfg: &mut Config, key: &str, value: &serde_json::Valu
                 }
             }
         }
+        // Not entry-shaped: ap.json's top level is the AutoPilotConfig body.
+        "autopilot" => super::autopilot::merge(&mut cfg.autopilot, entries),
         _ => {}
     }
 }
@@ -328,7 +334,7 @@ mod tests {
 
     #[test]
     fn domain_key_table_maps_keys_to_files() {
-        for key in ["mcp_servers", "cli", "skills"] {
+        for key in ["mcp_servers", "cli", "skills", "autopilot"] {
             assert!(is_domain_key(key), "{key} must be a domain key");
         }
         for key in ["model", "theme", "providers", "keymap", ""] {
@@ -337,6 +343,7 @@ mod tests {
         assert_eq!(domain_file_name("mcp_servers"), Some("mcp.json"));
         assert_eq!(domain_file_name("cli"), Some("cli.json"));
         assert_eq!(domain_file_name("skills"), Some("skills.json"));
+        assert_eq!(domain_file_name("autopilot"), Some("ap.json"));
         assert_eq!(domain_file_name("model"), None);
     }
 
@@ -371,14 +378,15 @@ mod tests {
             "model": "prov/model",
             "skills": { "review": { "enabled": true } },
             "mcp_servers": { "srv": { "enabled": false } },
-            "cli": null
+            "cli": null,
+            "autopilot": { "mode": "ap" }
         });
         let (remainder, domains) = split_patch(&patch);
         assert_eq!(
             remainder,
             serde_json::json!({ "theme": "light", "model": "prov/model" })
         );
-        assert_eq!(domains.len(), 3, "all three domain keys extracted");
+        assert_eq!(domains.len(), 4, "all four domain keys extracted");
         // values pass through verbatim, nulls included (delete semantics)
         let by_key = |k: &str| {
             domains
@@ -395,6 +403,10 @@ mod tests {
         assert_eq!(
             by_key("mcp_servers"),
             Some(serde_json::json!({ "srv": { "enabled": false } }))
+        );
+        assert_eq!(
+            by_key("autopilot"),
+            Some(serde_json::json!({ "mode": "ap" }))
         );
     }
 
@@ -423,11 +435,44 @@ mod tests {
             "skills",
             &serde_json::json!({ "review": { "enabled": true } }),
         );
+        apply_domain(
+            &mut cfg,
+            "autopilot",
+            &serde_json::json!({ "mode": "review", "max_iterations": 7 }),
+        );
         assert_eq!(cfg.mcp_servers.len(), 1);
         assert_eq!(cfg.mcp_servers["srv"].command.as_deref(), Some("npx"));
         assert_eq!(cfg.cli.len(), 1);
         assert_eq!(cfg.cli["git"].content, "c");
         assert_eq!(cfg.enabled_skill_names(), vec!["review".to_string()]);
+        assert_eq!(cfg.autopilot.mode, super::super::ApMode::Review);
+        assert_eq!(cfg.autopilot.max_iterations, 7);
+    }
+
+    /// `autopilot` is whole-object merged: a later partial ap.json patch (or
+    /// file) preserves omitted siblings, exactly like the map domains.
+    #[test]
+    fn apply_domain_autopilot_merges_whole_object_and_preserves_siblings() {
+        let mut cfg = Config::default();
+        apply_domain(
+            &mut cfg,
+            "autopilot",
+            &serde_json::json!({ "mode": "ap", "max_iterations": 5 }),
+        );
+        apply_domain(
+            &mut cfg,
+            "autopilot",
+            &serde_json::json!({ "max_iterations": 9 }),
+        );
+        assert_eq!(
+            cfg.autopilot.mode,
+            super::super::ApMode::Ap,
+            "mode preserved"
+        );
+        assert_eq!(cfg.autopilot.max_iterations, 9);
+        // non-object bodies apply nothing (mirrors map-domain leniency)
+        apply_domain(&mut cfg, "autopilot", &serde_json::json!(null));
+        assert_eq!(cfg.autopilot.mode, super::super::ApMode::Ap);
     }
 
     #[test]

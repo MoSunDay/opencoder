@@ -88,11 +88,7 @@ impl Store for OverlapSeedStore {
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
         self.inner.admit_input(input).await
     }
-    async fn pending_inputs(
-        &self,
-        sid: &str,
-        delivery: Delivery,
-    ) -> Result<Vec<SessionInput>> {
+    async fn pending_inputs(&self, sid: &str, delivery: Delivery) -> Result<Vec<SessionInput>> {
         self.inner.pending_inputs(sid, delivery).await
     }
     async fn promote_inputs(
@@ -183,6 +179,8 @@ async fn seen_fingerprints_expire_at_first_forwarded_done() {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

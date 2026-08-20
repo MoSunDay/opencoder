@@ -18,6 +18,24 @@ pub enum SessionEvent {
     /// The current provider/model round finished, including every tool call
     /// requested by its assistant message.
     LlmRoundEnd,
+    /// Real token usage of one completed provider round, emitted right after
+    /// the assistant message (with its `usage`) is persisted. Carries the
+    /// provider-reported `total_tokens` (input+output, incl. cache) so display
+    /// surfaces can accumulate a session-lifetime cost without re-reading
+    /// messages. The split `input_tokens`/`output_tokens` let the TUI show the
+    /// provider-truth context size of the latest round. Parent views fold
+    /// subagent rounds into their lifetime cost too (the runner forwards each
+    /// child round as `SubagentChild(LlmUsage)`). Emitted only when the
+    /// provider returned usage; rounds without usage simply contribute
+    /// nothing. Old persisted payloads predate the split fields and
+    /// deserialize them to `0` (`#[serde(default)]`).
+    LlmUsage {
+        total_tokens: u64,
+        #[serde(default)]
+        input_tokens: u64,
+        #[serde(default)]
+        output_tokens: u64,
+    },
     TextDelta(String),
     ReasoningDelta(String),
     ToolStart {
@@ -116,6 +134,7 @@ impl SessionEvent {
         match self {
             SessionEvent::LlmRoundStart { .. } => "llm_round_start",
             SessionEvent::LlmRoundEnd => "llm_round_end",
+            SessionEvent::LlmUsage { .. } => "llm_usage",
             SessionEvent::TextDelta(_) => "text_delta",
             SessionEvent::ReasoningDelta(_) => "reasoning_delta",
             SessionEvent::ToolStart { .. } => "tool_start",
@@ -147,6 +166,15 @@ impl SessionEvent {
                 serde_json::json!({ "started_at_ms": started_at_ms })
             }
             SessionEvent::LlmRoundEnd => serde_json::json!({}),
+            SessionEvent::LlmUsage {
+                total_tokens,
+                input_tokens,
+                output_tokens,
+            } => serde_json::json!({
+                "total_tokens": total_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens
+            }),
             SessionEvent::TextDelta(t) => serde_json::json!({ "text": t }),
             SessionEvent::ReasoningDelta(r) => serde_json::json!({ "text": r }),
             SessionEvent::ToolStart { id, name, input } => {
@@ -217,6 +245,18 @@ impl SessionEvent {
                 started_at_ms: data.get("started_at_ms")?.as_i64()?,
             },
             "llm_round_end" => SessionEvent::LlmRoundEnd,
+            "llm_usage" => SessionEvent::LlmUsage {
+                total_tokens: data.get("total_tokens")?.as_u64()?,
+                // Old payloads carry only total_tokens; the split defaults to 0.
+                input_tokens: data
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_default(),
+                output_tokens: data
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_default(),
+            },
             "text_delta" => SessionEvent::TextDelta(data.get("text")?.as_str()?.to_string()),
             "reasoning_delta" => {
                 SessionEvent::ReasoningDelta(data.get("text")?.as_str()?.to_string())
@@ -298,7 +338,9 @@ impl SessionEvent {
     /// Coarse [`EventKind`] for backward-compatible DB `type` column.
     pub fn coarse_kind(&self) -> EventKind {
         match self {
-            SessionEvent::LlmRoundStart { .. } | SessionEvent::LlmRoundEnd => EventKind::Step,
+            SessionEvent::LlmRoundStart { .. }
+            | SessionEvent::LlmRoundEnd
+            | SessionEvent::LlmUsage { .. } => EventKind::Step,
             SessionEvent::TextDelta(_) => EventKind::TextDelta,
             SessionEvent::ReasoningDelta(_) => EventKind::TextDelta,
             SessionEvent::ToolStart { .. } => EventKind::ToolStart,
@@ -347,6 +389,11 @@ mod from_sse_tests {
                 started_at_ms: 1234,
             },
             SessionEvent::LlmRoundEnd,
+            SessionEvent::LlmUsage {
+                total_tokens: 123_456,
+                input_tokens: 100_000,
+                output_tokens: 23_456,
+            },
             SessionEvent::TextDelta("hi".into()),
             SessionEvent::ReasoningDelta("think".into()),
             SessionEvent::ToolStart {
@@ -411,8 +458,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            21,
-            "expected all 21 unique kinds, got {kinds:?}"
+            22,
+            "expected all 22 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {
@@ -436,6 +483,37 @@ mod from_sse_tests {
     #[test]
     fn from_sse_unknown_kind_is_none() {
         assert!(SessionEvent::from_sse("no_such_kind", serde_json::json!({})).is_none());
+    }
+
+    /// Backward compatibility: llm_usage payloads persisted before the
+    /// input/output split must still deserialize (split fields default to 0)
+    /// — both on the SSE wire form and the direct enum form used by the store.
+    #[test]
+    fn llm_usage_old_payload_defaults_split_fields_to_zero() {
+        let ev = SessionEvent::from_sse("llm_usage", serde_json::json!({ "total_tokens": 42 }))
+            .expect("old llm_usage payload must parse");
+        match ev {
+            SessionEvent::LlmUsage {
+                total_tokens,
+                input_tokens,
+                output_tokens,
+            } => {
+                assert_eq!(total_tokens, 42);
+                assert_eq!(input_tokens, 0);
+                assert_eq!(output_tokens, 0);
+            }
+            other => panic!("expected LlmUsage, got {other:?}"),
+        }
+        let stored: SessionEvent =
+            serde_json::from_str(r#"{"LlmUsage":{"total_tokens":42}}"#).unwrap();
+        assert!(matches!(
+            stored,
+            SessionEvent::LlmUsage {
+                total_tokens: 42,
+                input_tokens: 0,
+                output_tokens: 0,
+            }
+        ));
     }
 
     #[test]

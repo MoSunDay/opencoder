@@ -191,6 +191,8 @@ async fn seed_as(
             title: None,
             agent: agent.map(String::from),
             model: model.map(String::from),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

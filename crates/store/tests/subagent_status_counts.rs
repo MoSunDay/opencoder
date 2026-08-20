@@ -29,6 +29,8 @@ fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {
         title: Some(id.into()),
         agent: Some("act".into()),
         model: Some("m".into()),
+
+        autopilot_mode: None,
         workdir_hash: None,
         created_at: 0,
         updated_at: 0,
@@ -173,6 +175,8 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         title: Some(format!("title-{id}")),
         agent: Some("act".into()),
         model: Some("glm-5.2".into()),
+
+        autopilot_mode: None,
         workdir_hash: Some("h".into()),
         created_at: now,
         updated_at: now,

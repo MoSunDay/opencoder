@@ -93,6 +93,8 @@ pub(crate) async fn initial_chat_view(
             &session.messages,
             store,
             &session.id,
+            // Cold start: no live view whose accumulated token cost to floor.
+            0,
         )
         .await
     } else {
@@ -476,6 +478,17 @@ pub(crate) fn resolve_and_warn_with(
 /// Record a submitted/steered/queued input so Up/Down arrow can recall it,
 /// WITHOUT echoing a transcript marker (the steer/queue panels already
 /// display the text).
+/// Transient flash for `KeyAction::QueueUnsupported`: a Tab-queue was
+/// rejected because a running subagent is focused — the user should press
+/// Enter to steer the subagent instead. Extracted from `app.rs` (file-size
+/// cap); the parent session is deliberately left untouched by the caller.
+pub(crate) fn queue_unsupported_flash(anim_tick: u32) -> (String, u32) {
+    (
+        "\u{26a0} tab queue not supported for subagents \u{2014} press Enter to steer".to_string(),
+        anim_tick,
+    )
+}
+
 pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {
     history.push(text.to_string());
     *hist_idx = None;

@@ -40,9 +40,7 @@ pub fn install_tools_run() -> anyhow::Result<i32> {
     let Some(script) = install_script_path() else {
         // No home → write_install_script above also wrote nothing. Skip with
         // a visible reason; exit non-zero so scripts don't read success.
-        println!(
-            "[install_tools] no home directory \u{2014} cannot locate ~/.opencoder; skipping"
-        );
+        println!("[install_tools] no home directory \u{2014} cannot locate ~/.opencoder; skipping");
         return Ok(1);
     };
 

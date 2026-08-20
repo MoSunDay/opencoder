@@ -252,6 +252,7 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         None,
         None,
         None,
+        None, // file_menu
         &mut hits,
         &mut viewport,
         false,

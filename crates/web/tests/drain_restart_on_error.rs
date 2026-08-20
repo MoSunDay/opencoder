@@ -100,6 +100,8 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

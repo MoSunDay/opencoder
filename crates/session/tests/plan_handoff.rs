@@ -375,6 +375,8 @@ async fn handoff_skips_orphaned_cancelled_subagent() {
             title: Some("t".into()),
             agent: Some(agent.into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,

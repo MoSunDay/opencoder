@@ -89,6 +89,8 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             title: Some("test".into()),
             agent: Some("act".into()),
             model: Some("m".into()),
+
+            autopilot_mode: None,
             workdir_hash: None,
             created_at: 0,
             updated_at: 0,
@@ -382,7 +384,9 @@ async fn get_config_masks_api_keys() {
     std::fs::create_dir_all(&cfg_dir).unwrap();
     std::fs::write(
         cfg_dir.join("config.json"),
-        format!(r#"{{"provider": {{"base_url": "https://x.example/v1", "api_key": "{full_key}"}}}}"#),
+        format!(
+            r#"{{"provider": {{"base_url": "https://x.example/v1", "api_key": "{full_key}"}}}}"#
+        ),
     )
     .unwrap();
     let app = app(state.clone());

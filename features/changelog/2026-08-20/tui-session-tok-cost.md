@@ -92,9 +92,9 @@ TUI 完全没消费，`LlmRoundEnd` 事件无载荷。本次补齐第四角：bo
 ## 回归（rules/02 门）
 
 - 全量：`cargo test --workspace --no-fail-fast` → 201 个 result 汇总 /
-  **3180 passed / 0 failed**（含并发迭代全部用例；本轮含边框 `· [turn cost]`
+  **3185 passed / 0 failed**（含并发迭代全部用例；本轮含边框 `· [turn cost]`
   段 2 个新测试与三分位格式化同步；数字为 E0063 修复后当次实跑——含并发
-  `LlmUsage` 字段扩展与 file-mention 用例）
+  `LlmUsage` 字段扩展、file-mention 与 subagent 折叠用例）
 - clippy：`cargo clippy -p opencoder-tui --all-targets -- -D warnings`
   复跑 → 零警告（含本次 render.rs / timer.rs / 新增测试文件）
 - fmt：本次改动文件全部 rustfmt（edition 2021）清洁；工作区其余文件存在

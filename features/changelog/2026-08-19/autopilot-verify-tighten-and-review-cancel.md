@@ -85,7 +85,10 @@ autopilot 模块调查确认 4 项代码缺陷 + 2 处 cosmetic，本轮修复�
 - `cargo test -p opencoder-core --test config_autopilot_contract`：4 通过。
 - `cargo clippy`：`-p opencoder-session -p opencoder-tui -p opencoder-cli -p opencoder-core --all-targets -D warnings`
   全净；早前全 workspace clippy 亦绿（含顺带机械修复 `cli/session_cmd.rs` 的 `map_flatten` lint）。
-- 全量 `cargo test --workspace`（rules/02）：**阻塞于并发迭代面**，见下。
+- 全量 `cargo test --workspace`（rules/02）：当时**阻塞于并发迭代面**（见下）；并发迭代落定
+  （`6a5e3f3`）后已于次日补跑闭合：`--no-fail-fast` 全量 197 result / 3100 passed / 0 failed
+  （期间发现并修复 `stream_retry` 满载计时竞态，见
+  `2026-08-20/stream-retry-deterministic-chunk-error.md`），clippy 全 workspace 零警告。
 
 ## 顺带修复（回归中发现的既有缺口）
 

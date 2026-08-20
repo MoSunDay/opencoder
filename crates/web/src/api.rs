@@ -162,8 +162,10 @@ pub struct PromptBody {
     pub delivery: Option<String>,
     pub agent: Option<String>,
     pub model: Option<String>,
-    /// Optional skill name. Persisted to session meta and live-applied to a
-    /// running drain (resume restores it automatically).
+    /// Optional skill name. Persisted to session meta and live-applied to
+    /// the drain's skill handle. One-shot: the run that consumes it clears
+    /// the skill at run end (a crash mid-run keeps it until the resumed run
+    /// ends).
     pub skill: Option<String>,
 }
 
@@ -230,7 +232,8 @@ pub async fn post_prompt(
     if let Err(e) = ensure_session_row(&state, &id, &body.prompt, &config).await {
         return error_500(e);
     }
-    // Persist skill if provided (resume will restore it on the next drain).
+    // Persist skill if provided: the triggering run consumes it and clears
+    // it at run end (one-shot); a crash mid-run keeps it for the resume.
     if let Some(skill) = &body.skill {
         if let Err(e) = state
             .store

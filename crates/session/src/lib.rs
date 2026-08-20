@@ -6,6 +6,7 @@ pub mod dangling_tools;
 pub mod event_sink;
 pub mod fork;
 pub mod mcp;
+pub mod mention_resolve;
 pub mod plan_handoff;
 pub mod plan_phase;
 pub mod prompt;

@@ -121,7 +121,11 @@ pub fn resolve_inline_skills_with(
 /// tokens in `text`, activating resolved skills on the session. Returns the
 /// cleaned text (tokens stripped); unresolved names are silently ignored.
 pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
-    resolve_inline_skills_with(session, text, &discover_skills()).0
+    let clean = resolve_inline_skills_with(session, text, &discover_skills()).0;
+    // Expand `@path` mentions to absolute paths before the message is
+    // recorded (direct-prompt path; steer/queue get the same treatment
+    // via the head hook in `record_compound`).
+    crate::mention_resolve::expand_mentions(&clean, &session.working_dir)
 }
 
 /// Record a prompt as a synthetic user message after resolving inline
@@ -139,6 +143,10 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 /// Activations made here are one-shot: the run consuming this input clears
 /// them at its end (`skill_lifecycle`).
 pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[String]) {
+    // Expand `@path` mentions to absolute paths first so the recorded user
+    // message (and the model request) carry full paths — the steer/queue
+    // twin of the tail hook in `resolve_inline_skills`.
+    let rest = &crate::mention_resolve::expand_mentions(rest, &session.working_dir);
     let skills = discover_skills();
     let prev_skill = session.skill_prompt_cloned();
     let (mut text, unresolved) = resolve_inline_skills_with(session, rest, &skills);

@@ -59,4 +59,5 @@
 ## 回归
 
 `cargo test -p opencoder-session -p opencoder-tui`（lib + 全部集成测试）通过；
-全量 workspace 回归与 clippy 见本轮迭代 gate 记录。
+全量 `cargo test --workspace --no-fail-fast` → **201 suites / 3185 passed / 0 failed**
+（2026-08-20 01:02 实跑，独立 target 目录避开并发会话锁竞争；clippy 两 crate 0 警告）。

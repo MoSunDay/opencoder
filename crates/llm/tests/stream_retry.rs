@@ -24,6 +24,14 @@ enum Conn {
     /// Send `delta`, then hold the connection open (no more bytes) longer than
     /// the read window. A per-read timeout surfaces this as a chunk error.
     Stall { delta: String, hold: Duration },
+    /// Serve the body with chunked framing: `delta` as one valid chunk, then
+    /// a malformed chunk-size line. The client's read fails at the malformed
+    /// line — a deterministic chunk error with no timer involved. Unlike
+    /// `Stall`, whose silence arms the byte-level read timeout and the
+    /// event-level idle watchdog at the same instant (this suite's
+    /// constructor ties both to 1s, so under load the interruption kind
+    /// flips to `idle timeout` — observed flake).
+    Reset { delta: String },
     /// Send `delta`, then close cleanly WITHOUT a `finish_reason`. Surfaces as
     /// a truncated stream.
     Truncate { delta: String },
@@ -54,19 +62,36 @@ fn spawn_server(listener: TcpListener, behaviors: Vec<Conn>) {
             tokio::spawn(async move {
                 let _ = stream.set_nodelay(true);
                 consume_http_request(&mut stream).await;
-                let _ = write_sse_header(&mut stream).await;
                 match beh {
                     Conn::Stall { delta, hold } => {
+                        let _ = write_sse_header(&mut stream).await;
                         let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
                         let _ = stream.flush().await;
                         tokio::time::sleep(hold).await;
                     }
+                    Conn::Reset { delta } => {
+                        // Chunked framing lets the arm inject a malformed
+                        // chunk-size line — hyper's body read then errors
+                        // deterministically (a clean FIN would be Truncated;
+                        // a silent hold would race the idle watchdog).
+                        let _ = write_sse_header_chunked(&mut stream).await;
+                        let frame = sse_text(&delta);
+                        let _ = stream
+                            .write_all(format!("{:x}\r\n{frame}\r\n", frame.len()).as_bytes())
+                            .await;
+                        let _ = stream.flush().await;
+                        // Not a hex length: the read of this line must fail.
+                        let _ = stream.write_all(b"not-a-chunk-size\r\n").await;
+                        let _ = stream.flush().await;
+                    }
                     Conn::Truncate { delta } => {
+                        let _ = write_sse_header(&mut stream).await;
                         let _ = stream.write_all(sse_text(&delta).as_bytes()).await;
                         let _ = stream.flush().await;
                         // Drop -> clean EOF, no finish_reason.
                     }
                     Conn::Heartbeat { hold } => {
+                        let _ = write_sse_header(&mut stream).await;
                         let end = Instant::now() + hold;
                         while Instant::now() < end {
                             let _ = stream.write_all(b": ping\n\n").await;
@@ -75,6 +100,7 @@ fn spawn_server(listener: TcpListener, behaviors: Vec<Conn>) {
                         }
                     }
                     Conn::Full { text } => {
+                        let _ = write_sse_header(&mut stream).await;
                         let _ = stream.write_all(sse_text(&text).as_bytes()).await;
                         let _ = stream.flush().await;
                         let _ = stream.write_all(sse_done().as_bytes()).await;
@@ -127,6 +153,17 @@ async fn consume_http_request(stream: &mut tokio::net::TcpStream) {
             return;
         }
     }
+}
+
+/// Chunked-transfer variant used by `Conn::Reset`: the body is chunk-framed
+/// so a malformed chunk-size line can fail the client's body read on cue.
+async fn write_sse_header_chunked(stream: &mut tokio::net::TcpStream) -> std::io::Result<()> {
+    stream
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\n\r\n",
+        )
+        .await?;
+    stream.flush().await
 }
 
 async fn write_sse_header(stream: &mut tokio::net::TcpStream) -> std::io::Result<()> {
@@ -296,21 +333,18 @@ async fn retry_exhaustion_emits_error() {
 /// `chat_stream` spawn wrapper re-wrapped the `Err` into a second
 /// `LlmEvent::Error` — so consumers saw two errors, the second with a doubled
 /// `"stream failed: stream failed: ..."` prefix.
+///
+/// Uses `Conn::Reset` so the interruption kind is deterministically
+/// `chunk read error`: with `Stall`, the byte-level read timeout and the idle
+/// watchdog are armed at the same instant with the same 1s value, and under a
+/// full-workspace test run whichever fired first flipped the kind to
+/// `idle timeout` (observed flake).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_exhaustion_emits_single_non_doubled_error() {
     let url = start_server(vec![
-        Conn::Stall {
-            delta: "a".into(),
-            hold: STALL_HOLD,
-        },
-        Conn::Stall {
-            delta: "b".into(),
-            hold: STALL_HOLD,
-        },
-        Conn::Stall {
-            delta: "c".into(),
-            hold: STALL_HOLD,
-        },
+        Conn::Reset { delta: "a".into() },
+        Conn::Reset { delta: "b".into() },
+        Conn::Reset { delta: "c".into() },
     ])
     .await;
     let mut rx = make_client(&url).chat_stream(make_request()).unwrap();

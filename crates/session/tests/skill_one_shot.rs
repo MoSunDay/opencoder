@@ -9,6 +9,7 @@
 //! resumed-session resurrection. The single deliberate exception: a crash
 //! MID-run leaves `sessions.skill` set, so the resumed run KEEPS the skill
 //! until it completes — then the same run-end clear lands.
+//! Latent tools unlocked by the skill body re-lock at the same boundary.
 
 use std::sync::Arc;
 
@@ -396,4 +397,88 @@ async fn resume_mid_run_keeps_skill_then_completion_clears() {
     );
 
     assert_cleared(&s, &store, "one-shot-resume").await;
+}
+
+// ---------------------------------------------------------------------------
+// 7. Latent tools re-lock at run end
+// ---------------------------------------------------------------------------
+
+/// A latent tool (`ssh_pty`) unlocked by the skill body appears in the
+/// triggering run's tool schemas and disappears again in the next run: the
+/// one-shot clear re-locks latent tools together with the skill. Uses a
+/// custom agent with `ToolFilter::All` so the latent filter is the only gate
+/// (the default `act` allowlist would hide ssh_pty regardless).
+#[tokio::test]
+async fn latent_tool_unlocked_then_relocked_across_runs() {
+    let home = tempfile::tempdir().unwrap();
+    let _guard = lock_home(home.path());
+    let skill_dir = home.path().join(".opencoder").join("skills").join("ssh-pty");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: ssh-pty\ndescription: test skill\n---\nUse ssh_pty for persistent SSH.\n",
+    )
+    .unwrap();
+
+    let store = mem_store().await;
+    seed(&store, "one-shot-latent").await;
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![done_turn("ssh work")])
+            .push_script(vec![done_turn("plain work")]),
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let agent = opencoder_core::Agent {
+        name: "act".into(),
+        kind: opencoder_core::AgentKind::Act,
+        mode: opencoder_core::AgentMode::Primary,
+        description: String::new(),
+        prompt: String::new(),
+        tools: opencoder_core::ToolFilter::All,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = SessionState::new(
+        "one-shot-latent",
+        agent,
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+
+    run(&mut s, "$ssh-pty connect".into(), |_| {})
+        .await
+        .unwrap();
+    let first = mock.requests()[0].clone();
+    let first_tools = tool_names(&first);
+    assert!(
+        first_tools.contains(&"ssh_pty".to_string()),
+        "run 1 unlocked the latent tool: {first_tools:?}"
+    );
+
+    run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
+    let second = mock.requests()[1].clone();
+    let second_tools = tool_names(&second);
+    assert!(
+        !second_tools.contains(&"ssh_pty".to_string()),
+        "run 2 must re-lock the latent tool: {second_tools:?}"
+    );
+    assert!(
+        !user_texts(&second)
+            .iter()
+            .any(|t| t.contains("[active skill]")),
+        "run 2 carries no skill tail"
+    );
+
+    assert_cleared(&s, &store, "one-shot-latent").await;
+}
+
+/// Names of the tool schemas shipped with a captured request.
+fn tool_names(req: &opencoder_llm::ChatRequest) -> Vec<String> {
+    req.tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .map(str::to_string)
+        .collect()
 }

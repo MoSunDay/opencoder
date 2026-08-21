@@ -71,7 +71,6 @@ fn status_bar_shows_ctx_percent() {
 /// bold bright-blue status label colour no matter how high the usage climbs.
 #[test]
 fn status_bar_colors_split_between_meter_and_labels() {
-    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     let backend = TestBackend::new(120, 3);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal

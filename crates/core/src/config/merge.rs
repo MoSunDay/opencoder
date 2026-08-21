@@ -15,7 +15,6 @@ pub(super) fn has_editable_key(root: &serde_json::Value) -> bool {
         || obj.contains_key("interleaved_thinking")
         || obj.contains_key("context_limit")
         || obj.contains_key("fps")
-        || obj.contains_key("theme")
         || obj.contains_key("enable_tmux_session")
         || obj.contains_key("stream_idle_timeout_secs")
         || obj.contains_key("task_timeout_secs")
@@ -176,9 +175,6 @@ pub(super) fn merge_into(cfg: &mut Config, value: serde_json::Value) {
         }
         if let Some(fps) = obj.get("fps").and_then(|v| v.as_u64()) {
             cfg.fps = Some(fps.clamp(1, 30) as u32);
-        }
-        if let Some(t) = obj.get("theme").and_then(|v| v.as_str()) {
-            cfg.theme = t.to_string();
         }
         if let Some(p) = obj.get("provider").and_then(|v| v.as_object()) {
             if let Some(b) = p.get("base_url").and_then(|v| v.as_str()) {
@@ -352,7 +348,7 @@ mod tests {
 
         let unrelated = as_map(serde_json::json!({
             "model": "openai/gpt-4o",
-            "theme": "dark"
+            "fps": 10
         }));
         assert!(legacy_domain_keys(&unrelated).is_empty());
 

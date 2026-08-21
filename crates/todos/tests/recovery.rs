@@ -103,7 +103,10 @@ async fn acceptance_crash_then_resume_self_heals() {
     );
     let suspended = load(&store, "run-crash").await;
     assert_eq!(suspended.status, WorkflowStatus::Suspended);
-    assert_eq!(suspended.todos["step-1"].status, TodoStatus::Accepting);
+    // Suspension rolls every mid-flight todo (incl. Accepting) back to
+    // Interrupted — a suspended workflow must not leave items claiming an
+    // in-progress status; resume reconciles and re-dispatches from there.
+    assert_eq!(suspended.todos["step-1"].status, TodoStatus::Interrupted);
     assert_eq!(suspended.todos["step-1"].attempt, 1);
     let first_session = suspended.todos["step-1"].active_session_id.clone();
     assert!(first_session.is_some(), "dispatched session was committed");

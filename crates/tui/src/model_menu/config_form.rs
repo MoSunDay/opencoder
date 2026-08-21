@@ -80,14 +80,13 @@ pub enum ConfigField {
     Threshold,
     Fps,
     ApMaxIter,
-    Theme,
     EnableTmuxSession,
     Save,
     Cancel,
 }
 
 impl ConfigField {
-    const ORDER: [ConfigField; 11] = [
+    const ORDER: [ConfigField; 10] = [
         ConfigField::Reasoning,
         ConfigField::InterleavedThinking,
         ConfigField::MaxTokens,
@@ -95,7 +94,6 @@ impl ConfigField {
         ConfigField::Threshold,
         ConfigField::Fps,
         ConfigField::ApMaxIter,
-        ConfigField::Theme,
         ConfigField::EnableTmuxSession,
         ConfigField::Save,
         ConfigField::Cancel,
@@ -133,7 +131,6 @@ pub struct ConfigForm {
     pub ap_max_iter_input: String,
     /// Char-index edit cursor within `ap_max_iter_input`.
     pub ap_max_iter_cursor: usize,
-    pub theme: crate::theme::ThemeKind,
     pub enable_tmux_session: bool,
     pub focus: ConfigField,
     pub error: Option<String>,
@@ -161,7 +158,6 @@ impl ConfigForm {
             fps_cursor: fps_input.chars().count(),
             ap_max_iter_input: ap_max_iter_input.clone(),
             ap_max_iter_cursor: ap_max_iter_input.chars().count(),
-            theme: crate::theme::ThemeKind::from_label(&config.theme),
             enable_tmux_session: config.enable_tmux_session.unwrap_or(false),
             focus: ConfigField::Reasoning,
             error: None,
@@ -219,7 +215,6 @@ impl ConfigForm {
             context_limit: context_size,
             fps,
             ap_max_iter,
-            theme: self.theme.label().to_string(),
             enable_tmux_session: Some(self.enable_tmux_session),
         }
     }
@@ -307,7 +302,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
@@ -321,7 +315,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::Theme => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession => form.enable_tmux_session = !form.enable_tmux_session,
             ConfigField::MaxTokens
             | ConfigField::ContextSize
@@ -356,7 +349,6 @@ pub fn handle_key(mut form: ConfigForm, k: KeyEvent) -> (ModelOutcome, Option<Mo
             ConfigField::InterleavedThinking if c == ' ' => {
                 form.interleaved_thinking = !form.interleaved_thinking
             }
-            ConfigField::Theme if c == ' ' => form.theme = form.theme.next(),
             ConfigField::EnableTmuxSession if c == ' ' => {
                 form.enable_tmux_session = !form.enable_tmux_session
             }

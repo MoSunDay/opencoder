@@ -143,12 +143,6 @@ fn render_config_form(f: &mut Frame, area: Rect, composer_top: u16, form: &Confi
             "1+, \u{2190}/\u{2192} cursor, digits, Backspace",
         ),
         field_line(
-            "theme:",
-            &format!("[ {} ]", form.theme.label()),
-            form.focus == ConfigField::Theme,
-            "\u{2190}/\u{2192}/Space cycle",
-        ),
-        field_line(
             "tmux:",
             &format!(
                 "[ {} ]",

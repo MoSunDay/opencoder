@@ -294,3 +294,37 @@ async fn skills_endpoint_returns_name_description_enabled() {
         assert!(s.get("body").is_none(), "body must NOT be included: {s}");
     }
 }
+
+/// The flat `models` dropdown dedupes: default model id "a/b" PLUS a named
+/// provider "a" carrying model "b" both spell "a/b" — the dropdown must list
+/// it exactly once (first-seen order: the default entry first).
+#[tokio::test]
+async fn models_endpoint_dedupes_default_and_named_provider_ids() {
+    let ctx = app().await;
+    std::fs::write(
+        ctx.workdir.join(".opencoder").join("config.json"),
+        json!({
+            "model": "a/b",
+            "providers": {
+                "a": {
+                    "base_url": "https://a.example/v1",
+                    "api_key": "sk-a-secret",
+                    "model": "b"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let (status, body) = get_json(&ctx, "/api/models").await;
+    assert_eq!(status, StatusCode::OK);
+    let models = body["models"].as_array().unwrap();
+    let hits = models.iter().filter(|m| m.as_str() == Some("a/b")).count();
+    assert_eq!(hits, 1, "\"a/b\" must appear exactly once: {models:?}");
+    assert_eq!(
+        models.first().and_then(|m| m.as_str()),
+        Some("a/b"),
+        "default model id leads the dropdown: {models:?}"
+    );
+}

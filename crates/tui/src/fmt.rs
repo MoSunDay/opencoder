@@ -1,20 +1,20 @@
 //! Compact token/number formatting, mirroring codex's status-line style.
 //! Pure functions — unit-tested in this file.
 
-/// Format a token count compactly: `0`, `999`, `12.35K`, `200K`, `1.2M`.
-/// Uppercase suffix, 2 decimals when <10 scaled, 1 when <100, else 0.
+/// Format a token count compactly: `0`, `999`, `12.35k`, `200k`, `1.2m`.
+/// Lowercase suffix, 2 decimals when <10 scaled, 1 when <100, else 0.
 pub fn format_tokens_compact(n: u64) -> String {
     if n < 1000 {
         return n.to_string();
     }
     let (div, suffix) = if n < 1_000_000 {
-        (1_000u64, 'K')
+        (1_000u64, 'k')
     } else if n < 1_000_000_000 {
-        (1_000_000u64, 'M')
+        (1_000_000u64, 'm')
     } else if n < 1_000_000_000_000 {
-        (1_000_000_000u64, 'B')
+        (1_000_000_000u64, 'b')
     } else {
-        (1_000_000_000_000u64, 'T')
+        (1_000_000_000_000u64, 't')
     };
     let v = n as f64 / div as f64;
     let s = format!("{v:.2}");
@@ -74,17 +74,17 @@ mod tests {
 
     #[test]
     fn compact_thousands() {
-        assert_eq!(format_tokens_compact(1_000), "1K");
-        assert_eq!(format_tokens_compact(1_500), "1.5K");
-        assert_eq!(format_tokens_compact(12_345), "12.35K");
-        assert_eq!(format_tokens_compact(123_456), "123.46K");
-        assert_eq!(format_tokens_compact(200_000), "200K");
+        assert_eq!(format_tokens_compact(1_000), "1k");
+        assert_eq!(format_tokens_compact(1_500), "1.5k");
+        assert_eq!(format_tokens_compact(12_345), "12.35k");
+        assert_eq!(format_tokens_compact(123_456), "123.46k");
+        assert_eq!(format_tokens_compact(200_000), "200k");
     }
 
     #[test]
     fn compact_millions() {
-        assert_eq!(format_tokens_compact(1_200_000), "1.2M");
-        assert_eq!(format_tokens_compact(45_200_000), "45.2M");
+        assert_eq!(format_tokens_compact(1_200_000), "1.2m");
+        assert_eq!(format_tokens_compact(45_200_000), "45.2m");
     }
 
     #[test]

@@ -332,6 +332,7 @@ async fn events_subscribe_first_no_loss_no_dup() {
         State(state.clone()),
         Path(sid.to_string()),
         Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

@@ -459,6 +459,31 @@ fn seeded_task_plan_skill_requires_launch_closure_contract() {
 }
 
 #[test]
+fn seeded_task_plan_skill_requires_question_tool_guidance() {
+    // Regression guard (restored after 04df804 dropped it): task-plan runs
+    // in plan mode, where the `question` tool is the sanctioned
+    // clarification channel. The skill must keep: (a) the conditional
+    // protocol (interactive -> ask via `question`, one key question per
+    // call, several per turn; headless -> explicit `assumptions:`), and
+    // (b) the anti-lazy guard (repo/rules/test facts are looked up, not
+    // asked). Ambiguity must never turn into silently invented acceptance
+    // criteria.
+    let root = tempfile::tempdir().unwrap();
+    seed_builtin_skills_in(root.path()).expect("seed");
+    let body = std::fs::read_to_string(root.path().join("task-plan/SKILL.md")).unwrap();
+    assert!(body.contains("name: task-plan"), "frontmatter name missing");
+    for guidance in [
+        "澄清协议",
+        "question",
+        "可在同一轮多问",
+        "不把提问当侦察手段",
+        "assumptions:",
+    ] {
+        assert!(body.contains(guidance), "task-plan missing `{guidance}`");
+    }
+}
+
+#[test]
 fn seeded_workflow_skills_consume_launch_closure_plan() {
     // The Codex-standard task-plan no longer emits the legacy fixed STATUS
     // block. Direct consumers must follow its closure-plan/evidence contract

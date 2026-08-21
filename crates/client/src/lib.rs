@@ -4,6 +4,7 @@
 //! forwarded to the server with a bearer token.
 
 pub mod remote;
+pub mod remote_ops;
 mod sse;
 
 pub use remote::Remote;

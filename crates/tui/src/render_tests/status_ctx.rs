@@ -53,15 +53,15 @@ fn status_bar_shows_ctx_percent() {
         "status bar should show percent; got: {row}"
     );
     assert!(
-        row.contains("5K"),
+        row.contains("5k"),
         "should show compact used tokens; got: {row}"
     );
     assert!(
-        row.contains("200K"),
+        row.contains("200k"),
         "ctx denominator should be the model window, not the threshold; got: {row}"
     );
     assert!(
-        !row.contains("80K"),
+        !row.contains("80k"),
         "ctx denominator must NOT show the compaction threshold; got: {row}"
     );
 }
@@ -169,7 +169,7 @@ fn status_bar_without_provider_truth_shows_placeholder_and_zero_percent() {
         "thr must read 0% without provider truth; got: {row}"
     );
     assert!(
-        row.contains("200K"),
+        row.contains("200k"),
         "ctx denominator still shows the model window; got: {row}"
     );
 }

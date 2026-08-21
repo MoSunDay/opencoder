@@ -25,7 +25,7 @@ pub use config::{
     NetworkConfig, OutputStreamlineConfig, ProviderConfig, ScopedConfigHome, DEFAULT_CONTEXT_LIMIT,
     KEYMAP_INFO,
 };
-pub use data_dir::{data_dir_for, data_root};
+pub use data_dir::{data_dir_for, data_root, workdir_hash};
 pub use tool_deps::{all_installed, check_tool_deps, ToolDepStatus};
 pub use tool_guard_config::ToolGuardConfig;
 

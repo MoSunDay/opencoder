@@ -1,4 +1,6 @@
 pub mod client;
+pub mod client_ops;
+mod client_stream;
 pub mod display;
 pub mod exit_tips;
 pub mod install_tools;
@@ -70,6 +72,10 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+// The Client variant carries ~15 flags (340 bytes) vs ~51 for the next
+// largest; the enum is parsed exactly once at process start, so the extra
+// stack size beats per-field Box indirection.
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Headless one-shot: run a prompt and stream output to stdout.
     Run {
@@ -122,7 +128,9 @@ pub enum Command {
         token: Option<String>,
     },
     /// Thin remote client: submit a prompt to a server and stream the result.
-    /// Stores nothing locally and calls no LLM.
+    /// Stores nothing locally and calls no LLM. The global `--workdir` flag is
+    /// the remote session filter (for --continue resolution and `session
+    /// list`); it defaults to the current directory.
     Client {
         /// Server base URL (e.g. http://127.0.0.1:8080).
         #[arg(long)]
@@ -140,7 +148,50 @@ pub enum Command {
         /// exit. Requires --session <id> or --continue; no prompt needed.
         #[arg(long, default_value_t = false)]
         interrupt: bool,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        /// Delivery mode for the prompt: steer (interrupt current turn) or
+        /// queue (wait for idle). Defaults to steer. Not validated client-side:
+        /// an unknown value is rejected by the server (HTTP 400).
+        #[arg(long, default_value = "steer")]
+        delivery: String,
+        /// Activate a skill for the triggering run. Repeatable, LAST value
+        /// wins (the server's prompt body carries a single skill name).
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        /// Fork (copy) the resolved session first, then run the prompt on the
+        /// fork, leaving the original untouched.
+        #[arg(long, default_value_t = false)]
+        fork: bool,
+        /// Compact the resolved session's context, then exit (no prompt).
+        #[arg(long, default_value_t = false)]
+        compact: bool,
+        /// Plan→act handoff: submit the plan for execution, then exit (no
+        /// prompt). Optional positional extra guidance text.
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        handoff: Option<String>,
+        /// Session-scoped autopilot mode: off | ap | review. Applied before
+        /// the prompt. Validated client-side (invalid values error out).
+        #[arg(long, value_name = "MODE")]
+        autopilot: Option<String>,
+        /// Set the session's requirement annotation (empty string clears it).
+        #[arg(long, value_name = "TEXT")]
+        annotation: Option<String>,
+        /// Steer a running subagent: <TASK_ID> identifies the subagent task,
+        /// the prompt is the steer text. Requires --session/--continue to
+        /// resolve the parent session.
+        #[arg(long = "steer-task", value_name = "TASK_ID")]
+        steer_task: Option<String>,
+        /// Subcommand (session/questions management). Wins over the trailing
+        /// prompt when present. NOTE: a prompt whose FIRST word is literally
+        /// `session` or `questions` is captured by the subcommand — use `--`
+        /// (e.g. `opencode client -r http://x -- session hello`) to pass such
+        /// a prompt.
+        #[command(subcommand)]
+        cmd: Option<ClientSub>,
+        #[arg(
+            trailing_var_arg = true,
+            allow_hyphen_values = true,
+            help = "Prompt text (trailing). If the first word is `session`/`questions`, prefix with `--`."
+        )]
         prompt: Vec<String>,
     },
     /// Print the resolved configuration (defaults < config files < env vars < --model).
@@ -169,6 +220,47 @@ pub enum Command {
     /// Runs a built-in prompt through the headless agent so the agent itself
     /// performs the clone/build/replace steps (handling the busy case).
     Update,
+}
+
+/// `opencode client <sub>` — management subcommands for the remote client.
+#[derive(Subcommand, Debug, Clone)]
+pub enum ClientSub {
+    /// Remote session management (list / show / delete / fork).
+    Session {
+        #[command(subcommand)]
+        sub: ClientSessionSub,
+    },
+    /// Pending question cards on a remote session (list / answer / skip).
+    Questions {
+        #[command(subcommand)]
+        sub: ClientQuestionsSub,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ClientSessionSub {
+    /// List remote sessions for the workdir (id, title, preview).
+    List,
+    /// Show a remote session's full state as JSON.
+    Show { id: String },
+    /// Delete a remote session (cascades to messages/inputs/events).
+    Delete { id: String },
+    /// Fork (copy) a remote session; prints the new session id.
+    Fork { id: String },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ClientQuestionsSub {
+    /// List pending questions on a session (call_id, question, options).
+    List { session: String },
+    /// Answer a pending question by call id.
+    Answer {
+        session: String,
+        call_id: String,
+        answer: String,
+    },
+    /// Skip a pending question by call id (model proceeds by itself).
+    Skip { session: String, call_id: String },
 }
 
 #[derive(Subcommand, Debug)]

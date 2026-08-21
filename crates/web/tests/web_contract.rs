@@ -237,6 +237,7 @@ async fn sse_replays_persisted_events_then_live() {
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::extract::Query(query),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

@@ -74,11 +74,11 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: base_prompt_plan(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
-                // Structured clarification: the plan agent may ask the user
-                // several questions per turn (one per call) to align on
-                // genuinely ambiguous requirements or open doubts. Other
-                // agents (act/explore/build) stay silent — zero schema
-                // token cost for them.
+                // Structured clarification: the plan agent asks by default —
+                // several questions per turn (one per call), one for every
+                // undecided point that would shape the plan. Repo/rules/test
+                // facts are looked up, not asked. Other agents
+                // (act/explore/build) stay silent — zero schema token cost.
                 "question".into(),
             ]),
         },
@@ -169,7 +169,7 @@ pub fn base_prompt_build() -> String {
 const PLAN_SUFFIX: &str = "\
 PLAN mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
 Investigate via 'explore' subagents. \
-Output an actionable plan the user reviews before switching to act mode; when a requirement is genuinely ambiguous or you have doubts, align via the `question` tool (you may ask several in one turn) -- do not assume intent. \
+Output an actionable plan the user reviews before switching to act mode; before finalizing it, resolve EVERY undecided point that would shape the plan via the `question` tool -- prefer asking over assuming whenever an unstated assumption would shape the plan (you may ask several in one turn). Facts the repo, rules/, or tests can answer must be looked up first, not asked. \
 The plan MUST have these sections: Goal / TODO / Verify / Risks / Align.";
 
 const BASE_PROMPT: &str = "\
@@ -247,8 +247,9 @@ mod tests {
     /// The plan prompt must allow batched clarification: the old "at most
     /// one per turn" cap is gone (the runtime already supports parallel
     /// questions; the TUI renders them as a sequential dialog queue). Also
-    /// pins the doubt-alignment wording: open doubts must be surfaced via
-    /// `question` before the plan is finalized, not silently assumed.
+    /// pins the ask-by-default wording: every undecided point that would
+    /// shape the plan must be surfaced via `question` (prefer asking over
+    /// assuming), while repo/rules/test facts are looked up, not asked.
     #[test]
     fn plan_prompt_allows_multiple_questions_per_turn() {
         let plan = base_prompt_plan();
@@ -261,8 +262,12 @@ mod tests {
             "plan prompt must advertise batched clarification, got: {plan}"
         );
         assert!(
-            plan.contains("doubts"),
-            "plan prompt must tell the agent to align open doubts via `question`, got: {plan}"
+            plan.contains("prefer asking over assuming"),
+            "plan prompt must default to asking instead of assuming, got: {plan}"
+        );
+        assert!(
+            plan.contains("looked up first, not asked"),
+            "plan prompt must defer repo/rules/test facts to lookup, got: {plan}"
         );
     }
 

@@ -70,6 +70,12 @@ pub struct SessionHandle {
     /// path. Shared (Arc) with `SessionState` so `run_loop` can reset it
     /// after absorbing the cancelled turn.
     pub turn_cancel: opencoder_session::SharedCancel,
+    /// Question/answer rendezvous for the `question` tool. Created ONCE here
+    /// (stable across drains) — every drain rebinds the resumed session's hub
+    /// to this instance, so answers/skips posted between drains are never lost
+    /// to a throwaway hub, and the question endpoints always talk to the hub
+    /// the (possibly future) drain will use.
+    pub question_hub: Arc<opencoder_session::QuestionHub>,
 }
 
 const BROADCAST_CAPACITY: usize = 256;
@@ -90,6 +96,7 @@ impl SessionHandle {
             child_steer_gates: Arc::new(std::sync::Mutex::new(HashMap::new())),
             child_cancels: Arc::new(std::sync::Mutex::new(HashMap::new())),
             turn_cancel: Arc::new(std::sync::Mutex::new(CancellationToken::new())),
+            question_hub: opencoder_session::QuestionHub::new(),
         })
     }
 }
@@ -207,9 +214,19 @@ pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created:
                 let mut map = handles.lock().await;
                 if let Some(h) = map.get(&id) {
                     let prev = release_subscriber_slot(h);
-                    if prev == 1 && !h.draining.load(Ordering::SeqCst) {
-                        map.remove(&id);
-                        evict = true;
+                    if prev == 1 {
+                        // Last subscriber gone: nobody can answer an open
+                        // `question` tool call. Abandon them so the blocked
+                        // turn resolves to SKIPPED_REPLY instead of hanging
+                        // the drain forever. Harmless when nothing waits.
+                        // Runs BEFORE the eviction check below — while a
+                        // drain is running the handle is intentionally NOT
+                        // evicted (keep that), so this is the only unblock.
+                        crate::handle_questions::abandon_all_waiting(h);
+                        if !h.draining.load(Ordering::SeqCst) {
+                            map.remove(&id);
+                            evict = true;
+                        }
                     }
                 }
             }
@@ -223,9 +240,14 @@ pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created:
             let mut map = handles.blocking_lock();
             if let Some(h) = map.get(&id) {
                 let prev = release_subscriber_slot(h);
-                if prev == 1 && !h.draining.load(Ordering::SeqCst) {
-                    map.remove(&id);
-                    evict = true;
+                if prev == 1 {
+                    // Same abandon-on-last-subscriber semantics as the async
+                    // path above (see the comment there).
+                    crate::handle_questions::abandon_all_waiting(h);
+                    if !h.draining.load(Ordering::SeqCst) {
+                        map.remove(&id);
+                        evict = true;
+                    }
                 }
             }
         }
@@ -521,6 +543,19 @@ async fn apply_drain_cmd(
             }
             Err(e) => broadcast(SessionEvent::Error(format!("reload config: {e:#}"))),
         },
+        // The three web-parity commands mutate bookkeeping state only (no
+        // transcript-visible effect), so unlike Compact/Handoff they neither
+        // broadcast nor persist events. Bodies live in `handle_questions.rs`
+        // to keep this file within its size budget.
+        DrainCmd::SetApMode(mode) => {
+            crate::handle_questions::apply_set_ap_mode(session, mode).await;
+        }
+        DrainCmd::SetAnnotation(text) => {
+            crate::handle_questions::apply_set_annotation(session, text).await;
+        }
+        DrainCmd::ResetPlanPhase => {
+            crate::handle_questions::apply_reset_plan_phase(session).await;
+        }
     }
 }
 
@@ -650,6 +685,15 @@ async fn drain_to_completion(
     session.child_steer_gates = handle.child_steer_gates.clone();
     session.child_cancels = handle.child_cancels.clone();
     session.turn_cancel = Some(handle.turn_cancel.clone());
+    // Rebind the question hub to the handle's stable instance and mark a web
+    // listener as attached: `resume_session` builds a fresh (unattached) hub,
+    // which would make every `question` tool call fall back to
+    // NO_LISTENER_REPLY. The runner's registry (runner/registry.rs) builds the
+    // `question` tool from `session.question_hub` inside `run()`, which is
+    // invoked AFTER this swap — so the tool gets exactly this handle's hub,
+    // letting the /questions endpoints answer it mid-turn.
+    session.question_hub = handle.question_hub.clone();
+    handle.question_hub.attach();
 
     let tx = handle.tx.clone();
     let sid = session_id.to_string();
@@ -696,6 +740,14 @@ async fn drain_to_completion(
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
+
+    // Best-effort title generation after the FIRST successful completion of a
+    // drain (mirrors `crates/cli/src/run.rs`): runs while the event sink is
+    // still alive but after the run loop breaks, bounded at 30 s so a hanging
+    // small-model endpoint can never wedge teardown. `result.is_ok()` gates
+    // it to successful runs, and the title check inside makes it once-only
+    // across a session's many drains/attempt restarts. Failures only log.
+    crate::handle_questions::maybe_generate_title(&store, &session, result.is_ok()).await;
 
     drop(sink);
     drop(guard);

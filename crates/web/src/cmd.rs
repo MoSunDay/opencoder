@@ -10,7 +10,18 @@
 #[derive(Debug)]
 pub enum DrainCmd {
     Compact,
-    Handoff { extra: String },
+    Handoff {
+        extra: String,
+    },
     SetSkill(Option<String>),
     ReloadConfig,
+    /// Session-scoped autopilot switch (TUI `/ap` parity). Applies to the
+    /// live `SessionState` (`ap_mode_override` + config mode) and persists.
+    SetApMode(opencoder_core::ApMode),
+    /// Edit (or clear, on `None`/blank) the user requirement annotation on
+    /// the live session and persist it (TUI `/requirement` parity).
+    SetAnnotation(Option<String>),
+    /// Re-entering plan mode: reset only the plan-phase input counter so the
+    /// "submit your plan" affordances re-arm (TUI plan-switch parity).
+    ResetPlanPhase,
 }

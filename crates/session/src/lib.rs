@@ -490,7 +490,9 @@ impl SessionState {
 
     /// When in plan mode and this is not the first requirement in the current
     /// plan phase, append a read-only reminder so the model stays focused on
-    /// planning across multi-turn plan conversations. Also increments the
+    /// planning across multi-turn plan conversations. The tag also carries an
+    /// ask-first clause: any doubt that would shape the plan must go through
+    /// the `question` tool before the plan is emitted. Also increments the
     /// counter so the next call knows this requirement already occurred.
     ///
     /// Recording a new requirement also RETIRES any `plan_snapshot` carried
@@ -504,7 +506,9 @@ impl SessionState {
     pub fn maybe_tag_plan_prompt(&mut self, text: &mut String) {
         if self.agent.kind == AgentKind::Plan {
             if self.plan_input_count > 0 {
-                text.push_str("\n（当前处于只读的 plan 模式，聚焦计划生成）");
+                text.push_str(
+                    "\n（当前处于只读的 plan 模式，聚焦计划生成；存在影响计划的疑问必须先用 question 工具提问再输出计划）",
+                );
             }
             self.plan_input_count += 1;
             self.plan_snapshot = None;

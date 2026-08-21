@@ -28,7 +28,18 @@ fn status_bar_shows_ctx_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), "act", false, "", 0, 5000, 80000, 200000, 0);
+            render_status(
+                f,
+                f.area(),
+                "act",
+                false,
+                "",
+                0,
+                Some(5000),
+                80000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -66,7 +77,18 @@ fn status_bar_colors_split_between_meter_and_labels() {
     terminal
         .draw(|f| {
             // 180K/200K threshold → 90% → err colour for the meter.
-            render_status(f, f.area(), "act", false, "", 0, 180000, 200000, 200000, 0);
+            render_status(
+                f,
+                f.area(),
+                "act",
+                false,
+                "",
+                0,
+                Some(180000),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -105,27 +127,49 @@ fn status_bar_colors_split_between_meter_and_labels() {
     );
 }
 
-/// `ctx (used/limit)` resolution: provider-truth context replaces the local
-/// estimate once a usage-carrying round has completed, without adding
-/// `sys_tokens` (already inside the provider's input_tokens). Falls back to
-/// `estimate + sys_tokens` while no real data exists.
+/// `ctx (used/limit)` resolution: the provider-truth `total_tokens` is used
+/// verbatim; there is no local-estimate fallback. `None` (no usage-carrying
+/// round yet) renders as an em-dash placeholder.
 mod resolve_ctx_used {
     use crate::render::resolve_ctx_used;
 
     #[test]
-    fn real_context_wins_and_skips_sys_tokens() {
-        // Estimate would be 5_000 + 2_000 sys = 7_000; provider says 9_100.
-        assert_eq!(resolve_ctx_used(Some(9_100), 5_000, 2_000), 9_100);
+    fn real_context_is_used_verbatim() {
+        assert_eq!(resolve_ctx_used(Some(9_100)), Some(9_100));
     }
 
     #[test]
-    fn no_real_data_falls_back_to_estimate_plus_sys() {
-        assert_eq!(resolve_ctx_used(None, 5_000, 2_000), 7_000);
+    fn no_estimate_fallback_without_real_data() {
+        // Even with a non-zero local estimate available, no real usage
+        // means no display value — the bar shows `—` instead.
+        assert_eq!(resolve_ctx_used(None), None);
     }
+}
 
-    #[test]
-    fn cleared_real_context_returns_to_the_estimate() {
-        // ModelSwitch/Compaction/TranscriptReset set real back to None.
-        assert_eq!(resolve_ctx_used(None, 12_000, 3_000), 15_000);
-    }
+/// Before the first usage-carrying round (fresh session), the status bar
+/// shows `—` for the ctx used count and 0% for the threshold meter — never
+/// a local chars/4 estimate.
+#[test]
+fn status_bar_without_provider_truth_shows_placeholder_and_zero_percent() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            render_status(f, f.area(), "act", false, "", 0, None, 80000, 200000, 0);
+        })
+        .unwrap();
+
+    let row = row_text(terminal.backend().buffer(), 0, 120);
+    assert!(
+        row.contains("\u{2014}"),
+        "ctx used must render the em-dash placeholder; got: {row}"
+    );
+    assert!(
+        row.contains("0%"),
+        "thr must read 0% without provider truth; got: {row}"
+    );
+    assert!(
+        row.contains("200K"),
+        "ctx denominator still shows the model window; got: {row}"
+    );
 }

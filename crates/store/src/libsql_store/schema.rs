@@ -130,6 +130,10 @@ const CREATE_INDEX_SA_PARENT: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_parent ON subagent_tasks(parent_session_id, seq)";
 const CREATE_INDEX_SA_CHILD: &str =
     "CREATE INDEX IF NOT EXISTS idx_subagent_child ON subagent_tasks(child_session_id)";
+/// task_id lookups (COMPLETE / CANCEL / get-by-task-id) previously full-scanned
+/// the table; replay and interrupt paths hit these per task.
+const CREATE_INDEX_SA_TASK_ID: &str =
+    "CREATE INDEX IF NOT EXISTS idx_subagent_task_id ON subagent_tasks(task_id)";
 const CREATE_INDEX_SESSION_TASK_TYPE: &str =
     "CREATE INDEX IF NOT EXISTS idx_sessions_task_type ON sessions(task_type)";
 const CREATE_INDEX_TODO_STATUS: &str =
@@ -193,6 +197,7 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_INDEX_EV, ()).await?;
     conn.execute(CREATE_INDEX_SA_PARENT, ()).await?;
     conn.execute(CREATE_INDEX_SA_CHILD, ()).await?;
+    conn.execute(CREATE_INDEX_SA_TASK_ID, ()).await?;
 
     // Incremental migrations: only run when upgrading from a prior version.
     // Fresh databases (version None) already have the full schema from the

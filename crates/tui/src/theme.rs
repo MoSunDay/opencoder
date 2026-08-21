@@ -1,15 +1,14 @@
 //! Centralised colour / style theme for the TUI.
 //!
 //! All semantic colours and reusable block presets live here so that the
-//! rendering modules share a single source of truth. A single piece of
-//! global state selects between a `dark` (default) and `light` palette at
-//! runtime; every helper resolves through [`current_theme`] so call sites
-//! stay class-free and need no shared mutable handle of their own.
+//! rendering modules share a single source of truth. There is exactly one
+//! fixed palette ([`DARK`], tuned for dark terminal backgrounds): every
+//! helper resolves straight to its slots so call sites stay class-free and
+//! need no shared mutable handle of their own.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders};
-use std::sync::{OnceLock, RwLock};
 
 // ── Semantic colour palette (16-colour base for broad compatibility) ───────
 
@@ -40,44 +39,9 @@ pub const PINK: Color = Color::LightMagenta;
 /// index 90 is (135,0,135): a dark purple, darker than plain Magenta.
 pub const COMPACTION: Color = Color::Indexed(90);
 
-// ── Theme selection ─────────────────────────────────────────────────────────
+// ── Palette ─────────────────────────────────────────────────────────────────
 
-/// The two supported colour themes. `Dark` is the default and matches the
-/// `const` palette above; `Light` is tuned for white-background terminals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThemeKind {
-    Dark,
-    Light,
-}
-
-impl ThemeKind {
-    /// Stable lowercase label, matching the `theme` config string.
-    pub fn label(self) -> &'static str {
-        match self {
-            ThemeKind::Dark => "dark",
-            ThemeKind::Light => "light",
-        }
-    }
-
-    /// Parse a label: `trim` + `to_lowercase` first; only `"light"` yields
-    /// [`ThemeKind::Light`], anything else falls back to [`ThemeKind::Dark`].
-    pub fn from_label(s: &str) -> Self {
-        match s.trim().to_lowercase().as_str() {
-            "light" => ThemeKind::Light,
-            _ => ThemeKind::Dark,
-        }
-    }
-
-    /// Toggle between the two themes.
-    pub fn next(self) -> Self {
-        match self {
-            ThemeKind::Dark => ThemeKind::Light,
-            ThemeKind::Light => ThemeKind::Dark,
-        }
-    }
-}
-
-/// A complete semantic colour set for one theme.
+/// A complete semantic colour set.
 pub struct Palette {
     pub accent: Color,
     pub text: Color,
@@ -93,116 +57,75 @@ pub struct Palette {
     pub user: Color,
 }
 
-/// Pure lookup: the palette for the given theme. Dark mirrors the `const`
-/// palette; light swaps contrast for white-background terminals.
-pub fn palette(kind: ThemeKind) -> Palette {
-    match kind {
-        ThemeKind::Dark => Palette {
-            user: Color::Indexed(220),
-            accent: Color::Cyan,
-            text: Color::White,
-            muted: Color::DarkGray,
-            subtle: Color::Gray,
-            warn: Color::Yellow,
-            ok: Color::Green,
-            err: Color::Red,
-            info: Color::Blue,
-            local: Color::Magenta,
-            pink: Color::LightMagenta,
-            compaction: Color::Indexed(90),
-        },
-        ThemeKind::Light => Palette {
-            user: Color::Indexed(94),
-            accent: Color::Blue,
-            text: Color::Black,
-            muted: Color::Gray,
-            subtle: Color::DarkGray,
-            warn: Color::LightRed,
-            ok: Color::Green,
-            err: Color::Red,
-            info: Color::Blue,
-            local: Color::Magenta,
-            pink: Color::Magenta,
-            compaction: Color::Indexed(90),
-        },
-    }
-}
+/// The one and only palette: dark, mirroring the `const` colours above.
+pub const DARK: Palette = Palette {
+    user: Color::Indexed(220),
+    accent: Color::Cyan,
+    text: Color::White,
+    muted: Color::DarkGray,
+    subtle: Color::Gray,
+    warn: Color::Yellow,
+    ok: Color::Green,
+    err: Color::Red,
+    info: Color::Blue,
+    local: Color::Magenta,
+    pink: Color::LightMagenta,
+    compaction: Color::Indexed(90),
+};
 
-static THEME: OnceLock<RwLock<ThemeKind>> = OnceLock::new();
-
-/// Set the active theme globally.
-pub fn set_theme(kind: ThemeKind) {
-    let lock = THEME.get_or_init(|| RwLock::new(ThemeKind::Dark));
-    if let Ok(mut guard) = lock.write() {
-        *guard = kind;
-    }
-}
-
-/// The active theme. Defaults to [`ThemeKind::Dark`] until [`set_theme`] runs.
-pub fn current_theme() -> ThemeKind {
-    THEME
-        .get_or_init(|| RwLock::new(ThemeKind::Dark))
-        .read()
-        .map(|g| *g)
-        .unwrap_or(ThemeKind::Dark)
-}
-
-// ── Semantic colours (resolved via `current_theme`) ─────────────────────────
-// Each returns the matching field of the active palette; see the `const`
-// block above for the meaning of each slot (the dark values).
+// ── Semantic colours (slots of the fixed [`DARK`] palette) ──────────────────
+// Each returns the matching field of the palette; see the `const`
+// block above for the meaning of each slot.
 
 pub fn accent() -> Color {
-    palette(current_theme()).accent
+    DARK.accent
 }
 pub fn text() -> Color {
-    palette(current_theme()).text
+    DARK.text
 }
 pub fn muted() -> Color {
-    palette(current_theme()).muted
+    DARK.muted
 }
 pub fn subtle() -> Color {
-    palette(current_theme()).subtle
+    DARK.subtle
 }
 pub fn warn_color() -> Color {
-    palette(current_theme()).warn
+    DARK.warn
 }
 pub fn ok_color() -> Color {
-    palette(current_theme()).ok
+    DARK.ok
 }
 
 /// Status-bar label colour for the `thr` prefix and `ctx (used/limit)`
 /// counts: bold bright blue — ANSI 94 (LightBlue), the same brightness tier
-/// as cargo's green 92. Theme-independent: ratio-to-total context labels do
-/// not change with the palette.
+/// as cargo's green 92. Fixed: ratio-to-total context labels take no palette
+/// slot, so they never shift with the semantic colours.
 pub fn status_label_color() -> Color {
     Color::LightBlue
 }
 pub fn err_color() -> Color {
-    palette(current_theme()).err
+    DARK.err
 }
 pub fn info_color() -> Color {
-    palette(current_theme()).info
+    DARK.info
 }
 pub fn local_color() -> Color {
-    palette(current_theme()).local
+    DARK.local
 }
 pub fn pink() -> Color {
-    palette(current_theme()).pink
+    DARK.pink
 }
 pub fn compaction_color() -> Color {
-    palette(current_theme()).compaction
+    DARK.compaction
 }
 pub fn user_color() -> Color {
-    palette(current_theme()).user
+    DARK.user
 }
 
-/// Selection-row background. Dark uses 256-colour index 238, light uses the
-/// softer 252 for white-background terminals.
+/// Selection-row background: 256-colour index 238, a dark gray that reads as
+/// a highlight on dark terminal backgrounds.
 pub fn highlight_bg() -> Color {
-    match current_theme() {
-        ThemeKind::Dark => Color::Indexed(238),
-        ThemeKind::Light => Color::Indexed(252),
-    }
+    Color::Indexed(238)
 }
 
 // ── Block presets ───────────────────────────────────────────────────────────
@@ -233,8 +156,11 @@ pub fn rounded_block_line(title: &Line<'static>) -> Block<'static> {
 /// [`rounded_block_line`] plus a session-lifetime `[tok cost]` label (and,
 /// when `turn_ms > 0`, a `·`-separated `[turn cost]` duration) on the bottom
 /// border's left corner — the fourth info corner of the body block (right-
-/// bottom holds the follow indicator). Both segments use the default
-/// foreground colour, matching the top-border `workdir` title. `area_w`
+/// bottom holds the follow indicator). Both segments render in the warn
+/// colour — the same as the status bar's task timer and running-spinner
+/// spans — so the accent stays reserved for the live `跟随中…` indicator
+/// and the model name, and the `·` separator nearly vanishes (muted).
+/// `area_w`
 /// guards narrow terminals with graded dropping: when the `[tok cost]`
 /// segment alone could collide with the right-bottom indicator (which
 /// reserves ~10 display columns at the right edge) the whole label is
@@ -253,10 +179,7 @@ pub fn rounded_block_line_tok(
         crate::fmt::format_tokens_cost_m(tokens_total)
     );
     let turn = if turn_ms > 0 {
-        format!(
-            " \u{00b7} [turn cost {}]",
-            crate::fmt::format_run_duration(turn_ms)
-        )
+        format!("[turn cost {}]", crate::fmt::format_run_duration(turn_ms))
     } else {
         String::new()
     };
@@ -270,14 +193,20 @@ pub fn rounded_block_line_tok(
     if avail < tok_w {
         return block; // too narrow: drop the whole bottom label
     }
-    let full = if turn_ms > 0 && avail >= tok_w + turn_w {
-        format!("{tok}{turn}")
-    } else {
-        tok
-    };
-    block.title_bottom(
-        Line::from(Span::raw(format!(" {full} "))).alignment(ratatui::layout::Alignment::Left),
-    )
+    let show_turn = turn_ms > 0 && avail >= tok_w + turn_w;
+    // Graded spans: labels in the warn colour (the status bar's task-timer /
+    // running-spinner colour), separator nearly invisible (muted) — accent
+    // stays reserved for the live follow indicator. (` · ` adds one column
+    // per side vs. the width math above, absorbed by the surrounding-space
+    // margin.)
+    let label = Style::default().fg(warn_color());
+    let mut spans = vec![Span::raw(" "), Span::styled(tok, label)];
+    if show_turn {
+        spans.push(Span::styled(" \u{00b7} ", Style::default().fg(muted())));
+        spans.push(Span::styled(turn, label));
+    }
+    spans.push(Span::raw(" "));
+    block.title_bottom(Line::from(spans).alignment(ratatui::layout::Alignment::Left))
 }
 
 /// Pad a title [`Line`]'s spans with one leading/trailing space (mirroring
@@ -383,86 +312,39 @@ pub fn local_style() -> Style {
 mod tests {
     use super::*;
 
-    // ── ThemeKind / palette (pure — no global-state mutation) ────────────
+    // ── palette (pure — const consistency) ───────────────────────────────
 
     #[test]
     fn status_label_color_is_ansi_bright_blue() {
         // `thr` / `ctx` labels keep the bright (ANSI 9x) tier but in blue:
-        // ESC[1m ESC[94m — bold bright blue (ANSI 94 = LightBlue), fixed
-        // regardless of the active palette.
+        // ESC[1m ESC[94m — bold bright blue (ANSI 94 = LightBlue), fixed.
         assert_eq!(status_label_color(), Color::LightBlue);
-        set_theme(ThemeKind::Light);
-        assert_eq!(status_label_color(), Color::LightBlue);
-        set_theme(ThemeKind::Dark);
     }
 
     #[test]
-    fn theme_kind_label_roundtrip() {
-        assert_eq!(
-            ThemeKind::from_label(ThemeKind::Dark.label()),
-            ThemeKind::Dark
-        );
-        assert_eq!(
-            ThemeKind::from_label(ThemeKind::Light.label()),
-            ThemeKind::Light
-        );
-        assert_eq!(ThemeKind::from_label("light"), ThemeKind::Light);
-        assert_eq!(ThemeKind::from_label("Light"), ThemeKind::Light);
-        assert_eq!(ThemeKind::from_label(" LIGHT "), ThemeKind::Light);
-        assert_eq!(ThemeKind::from_label("foo"), ThemeKind::Dark);
-    }
-
-    #[test]
-    fn theme_kind_next() {
-        assert_eq!(ThemeKind::Dark.next(), ThemeKind::Light);
-        assert_eq!(ThemeKind::Light.next(), ThemeKind::Dark);
-    }
-
-    #[test]
-    fn palette_dark_matches_constants() {
-        let p = palette(ThemeKind::Dark);
-        assert_eq!(p.accent, ACCENT);
-        assert_eq!(p.text, TEXT);
-        assert_eq!(p.muted, MUTED);
-        assert_eq!(p.subtle, SUBTLE);
-        assert_eq!(p.warn, WARN);
-        assert_eq!(p.ok, OK);
-        assert_eq!(p.err, ERR);
-        assert_eq!(p.info, INFO);
-        assert_eq!(p.local, LOCAL);
-    }
-
-    #[test]
-    fn palette_light_text_is_black() {
-        let p = palette(ThemeKind::Light);
-        assert_eq!(p.text, Color::Black);
-        assert_eq!(p.accent, Color::Blue);
-        assert_eq!(p.warn, Color::LightRed);
-    }
-
-    #[test]
-    fn set_then_current_theme() {
-        // `THEME` is a process-wide global shared by many parallel tests
-        // across the crate (render_tests, chat_tests, …), all of which call
-        // `set_theme`. Setting Light and reading it back is therefore racy:
-        // a concurrent `set_theme(Dark)` can land between the two calls.
-        //
-        // Hold an exclusive write lock for the whole critical section and
-        // exercise the storage directly. Because `set_theme`/`current_theme`
-        // take this same lock, they block until we restore the default —
-        // making this deterministic with no re-entrant deadlock.
-        let lock = THEME.get_or_init(|| RwLock::new(ThemeKind::Dark));
-        let mut guard = lock.write().unwrap();
-        *guard = ThemeKind::Light;
-        assert_eq!(*guard, ThemeKind::Light);
-        // restore default so other tests see dark
-        *guard = ThemeKind::Dark;
+    fn dark_palette_matches_constants() {
+        assert_eq!(DARK.accent, ACCENT);
+        assert_eq!(DARK.text, TEXT);
+        assert_eq!(DARK.muted, MUTED);
+        assert_eq!(DARK.subtle, SUBTLE);
+        assert_eq!(DARK.warn, WARN);
+        assert_eq!(DARK.ok, OK);
+        assert_eq!(DARK.err, ERR);
+        assert_eq!(DARK.info, INFO);
+        assert_eq!(DARK.local, LOCAL);
+        assert_eq!(DARK.pink, PINK);
+        assert_eq!(DARK.compaction, COMPACTION);
+        // `user` has no const twin: gold (ANSI 220) on the fixed palette.
+        assert_eq!(DARK.user, Color::Indexed(220));
+        // Semantic helpers must resolve to the same slots.
+        assert_eq!(accent(), DARK.accent);
+        assert_eq!(user_color(), DARK.user);
+        assert_eq!(highlight_bg(), Color::Indexed(238));
     }
 
     // ── context_meter: behavioural thresholds + bar construction ──────────
 
     fn assert_meter(pct: u8, filled: usize, color: Color) {
-        set_theme(ThemeKind::Dark);
         let (bar, c) = context_meter(pct);
         assert_eq!(bar.chars().count(), 10);
         assert_eq!(bar.chars().filter(|&ch| ch == '\u{25b0}').count(), filled);
@@ -515,13 +397,11 @@ mod tests {
 
     #[test]
     fn agent_chip_fg_plan_is_warn() {
-        set_theme(ThemeKind::Dark);
         assert_eq!(agent_chip_fg("plan"), WARN);
     }
 
     #[test]
     fn agent_chip_fg_non_plan_is_accent() {
-        set_theme(ThemeKind::Dark);
         assert_eq!(agent_chip_fg("act"), ACCENT);
         assert_eq!(agent_chip_fg(""), ACCENT);
     }
@@ -529,20 +409,14 @@ mod tests {
     // ── user_color ────────────────────────────────────────────────────────
 
     #[test]
-    fn user_color_is_gold_in_dark_theme() {
-        assert_eq!(palette(ThemeKind::Dark).user, Color::Indexed(220));
-    }
-
-    #[test]
-    fn user_color_is_dark_gold_in_light_theme() {
-        assert_eq!(palette(ThemeKind::Light).user, Color::Indexed(94));
+    fn user_color_is_gold() {
+        assert_eq!(user_color(), Color::Indexed(220));
     }
 
     // ── list_highlight ───────────────────────────────────────────────────
 
     #[test]
     fn list_highlight_has_indexed_bg_and_bold() {
-        set_theme(ThemeKind::Dark);
         let s = list_highlight();
         assert_eq!(s.bg, Some(Color::Indexed(238)));
         assert!(s.add_modifier.contains(Modifier::BOLD));
@@ -559,19 +433,16 @@ mod tests {
 
     #[test]
     fn muted_style_is_muted() {
-        set_theme(ThemeKind::Dark);
         assert_eq!(muted_style().fg, Some(MUTED));
     }
 
     #[test]
     fn subtle_style_is_subtle() {
-        set_theme(ThemeKind::Dark);
         assert_eq!(subtle_style().fg, Some(SUBTLE));
     }
 
     #[test]
     fn local_style_is_local() {
-        set_theme(ThemeKind::Dark);
         assert_eq!(local_style().fg, Some(LOCAL));
     }
 
@@ -579,7 +450,6 @@ mod tests {
 
     #[test]
     fn rounded_block_line_pads_title_like_rounded_block() {
-        set_theme(ThemeKind::Dark);
         // multi-span styled title (per-segment colors kept by the Line)
         let line = Line::from(vec![
             Span::styled("workdir", Style::default().fg(Color::Cyan)),
@@ -619,7 +489,6 @@ mod tests {
 
     #[test]
     fn title_spans_colored_pads_and_recolors_all_spans() {
-        set_theme(ThemeKind::Dark);
         let green = ok_color();
         let line = Line::from(vec![
             Span::raw("workdir"),

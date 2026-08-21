@@ -226,6 +226,71 @@ async fn interrupt_unknown_workflow_errors_with_id() {
     );
 }
 
+/// `events --after <seq>` cursor contract (store-backed, key-free): after the
+/// latest seq nothing remains, after last-1 exactly the newest event. The
+/// CLI passes the cursor through to `todo_events_after`; content assertions
+/// read the same DB the command opened.
+#[tokio::test]
+async fn events_after_cursor_sees_only_newer_events() {
+    let workdir = tempfile::tempdir().unwrap();
+    // Seed the exact store the CLI opens for this workdir.
+    let data_dir = opencoder_core::data_dir_for(workdir.path());
+    tokio::fs::create_dir_all(&data_dir).await.unwrap();
+    let store: std::sync::Arc<dyn opencoder_store::Store> = std::sync::Arc::new(
+        opencoder_store::LibsqlStore::open(data_dir.join("opencoder.db"))
+            .await
+            .unwrap(),
+    );
+    let spec = opencoder_todos::parse_spec(&good_spec_json()).expect("spec parses");
+    let mut state =
+        opencoder_todos::domain::initial_state(&spec, "todos-cursor".into(), "parent".into());
+    opencoder_todos::parent::create_session(&store, &state, &opencoder_core::Config::default())
+        .await
+        .unwrap();
+    opencoder_todos::persistence::create(&store, &spec, &state)
+        .await
+        .unwrap();
+    for kind in ["workflow_started", "marker"] {
+        state.generation += 1;
+        opencoder_todos::persistence::commit(&store, &spec, &state, kind, serde_json::json!({}))
+            .await
+            .unwrap();
+    }
+    let events = store.todo_events_after("todos-cursor", 0).await.unwrap();
+    assert_eq!(events.len(), 3);
+    let last = events.last().unwrap().seq.unwrap();
+
+    // Store-level cursor semantics with non-zero cursors.
+    assert!(store
+        .todo_events_after("todos-cursor", last)
+        .await
+        .unwrap()
+        .is_empty());
+    let tail = store
+        .todo_events_after("todos-cursor", last - 1)
+        .await
+        .unwrap();
+    assert_eq!(tail.len(), 1);
+    assert_eq!(tail[0].seq, Some(last));
+
+    // CLI wiring: both cursors parse, dispatch and exit 0.
+    for after in [last, last - 1] {
+        let cli = todos_cli(
+            workdir.path(),
+            &[
+                "events",
+                "todos-cursor",
+                "--after",
+                &after.to_string(),
+                "--json",
+            ],
+        );
+        dispatch_todos(&cli)
+            .await
+            .unwrap_or_else(|error| panic!("events --after {after} must succeed: {error:#}"));
+    }
+}
+
 #[tokio::test]
 async fn run_with_unresolvable_config_fails_cleanly() {
     // Isolate config discovery + env overlays to a temp home (thread-local,

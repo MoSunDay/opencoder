@@ -59,7 +59,7 @@ plan 模式下模型从「第一次会提问、之后不再问」退化为基本
 - clippy：`cargo clippy -p opencoder-core -p opencoder-session --all-targets -- -D warnings`
   → 零警告
 - 全仓 gate 收口（并行工作流落地后补跑）：`cargo test --workspace` →
-  **3244 passed / 0 failed**（212 个测试二进制；首轮曾见 web 的
+  **3245 passed / 0 failed**（212 个测试二进制；首轮曾见 web 的
   `interrupt_beats_pending_replay` 单次失败，复跑全量与单测 5/5 均绿，判定并发抖动，
   属并行工作流测试面）；`cargo clippy --workspace --all-targets -- -D warnings`
   → 零警告。

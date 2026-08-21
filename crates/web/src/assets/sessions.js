@@ -18,7 +18,8 @@ async function refreshSessions() {
   var search = ($('#search').value || '').trim();
   var path = '/api/sessions?limit=50' + (search ? '&search=' + encodeURIComponent(search) : '');
   var j;
-  try { j = await apiGet(path); } catch (e) { return; /* sidebar refresh is best-effort */ }
+  try { j = await apiGet(path); } catch (e) { alertOnce('sessions', e); return; }
+  alertOk('sessions');
   var list = (j && j.sessions) || [];
   var box = $('#sess-list');
   box.innerHTML = '';

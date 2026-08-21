@@ -322,3 +322,51 @@ async fn e2e_mock_task_round_folds_child_usage_into_parent_view() {
         other => panic!("expected subagent block, got {other:?}"),
     }
 }
+
+/// ctx (used/limit) follows the LLM-returned `total_tokens` verbatim, even
+/// when it differs from `input_tokens + output_tokens` (e.g. cached or
+/// reasoning tokens included in total).
+#[tokio::test]
+async fn replay_real_context_uses_total_tokens_not_input_plus_output() {
+    let (dir, store) = fresh().await;
+    make_session(&store, "s-total").await;
+
+    let mut a = Message::assistant("a1");
+    a.usage.input_tokens = 10;
+    a.usage.output_tokens = 5;
+    a.usage.total_tokens = 42;
+    let msgs = vec![Message::user("u1", "hi"), a];
+
+    let chat = replay_into_chat("act", &msgs, &store, "s-total", 0).await;
+
+    assert_eq!(chat.real_context_tokens, Some(42));
+    let _ = dir;
+}
+
+/// Old persisted `LlmUsage` event payloads predate the split fields and carry
+/// only `total_tokens` (input/output deserialize to 0 via `#[serde(default)]`).
+/// Applying such an event must still set provider truth from the total.
+#[tokio::test]
+async fn old_usage_event_payload_with_only_total_rebuilds_real_context() {
+    let (dir, store) = fresh().await;
+    make_session(&store, "s-old-event").await;
+
+    let rec = SessionEventRecord {
+        session_id: "s-old-event".into(),
+        kind: EventKind::Step,
+        payload: serde_json::json!({"LlmUsage": {"total_tokens": 42}}),
+        ts: 1,
+        seq: None,
+        sse_kind: None,
+    };
+    store.append_events(&[rec]).await.unwrap();
+
+    let mut view = opencoder_tui::chat::ChatView::default();
+    for rec in store.events_after("s-old-event", 0).await.unwrap() {
+        let ev: SessionEvent = serde_json::from_value(rec.payload).unwrap();
+        view.apply(&ev);
+    }
+    assert_eq!(view.real_context_tokens, Some(42));
+    assert_eq!(view.tokens_total, 42);
+    let _ = dir;
+}

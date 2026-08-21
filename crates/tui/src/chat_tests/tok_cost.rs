@@ -78,9 +78,9 @@ fn subagent_child_usage_accumulates_into_parent_and_child() {
 }
 
 #[test]
-fn real_context_tracks_latest_round_input_plus_output() {
+fn real_context_tracks_latest_round_total_tokens() {
     let mut v = ChatView::default();
-    assert_eq!(v.real_context_tokens, None, "starts on the local estimate");
+    assert_eq!(v.real_context_tokens, None, "starts without provider truth");
     v.apply(&SessionEvent::LlmUsage {
         total_tokens: 1_400,
         input_tokens: 1_200,
@@ -97,19 +97,26 @@ fn real_context_tracks_latest_round_input_plus_output() {
         Some(900),
         "frozen at the latest completed round, not a sum"
     );
-    // Old payloads without the split still carry total: ctx falls back to
-    // `total_tokens` semantics only via input+output=0 — real ctx becomes 0
-    // only if the provider really reported an empty round.
+    // ctx uses the returned `total_tokens` verbatim, even when it differs
+    // from input+output (e.g. cached/reasoning tokens counted in total).
+    v.apply(&SessionEvent::LlmUsage {
+        total_tokens: 2_000,
+        input_tokens: 30,
+        output_tokens: 20,
+    });
+    assert_eq!(v.real_context_tokens, Some(2_000));
+    // Old payloads without the split fields deserialize input/output to 0 —
+    // the returned total still carries the real context.
     v.apply(&SessionEvent::LlmUsage {
         total_tokens: 50,
         input_tokens: 0,
         output_tokens: 0,
     });
-    assert_eq!(v.real_context_tokens, Some(0));
+    assert_eq!(v.real_context_tokens, Some(50));
 }
 
 #[test]
-fn real_context_clears_on_compaction_transcript_reset_and_model_switch() {
+fn real_context_survives_compaction_transcript_reset_and_model_switch() {
     let usage = SessionEvent::LlmUsage {
         total_tokens: 500,
         input_tokens: 400,
@@ -120,22 +127,31 @@ fn real_context_clears_on_compaction_transcript_reset_and_model_switch() {
 
     let mut c = v.clone();
     c.apply(&SessionEvent::Compaction("summary".into()));
-    assert_eq!(c.real_context_tokens, None, "compaction rewrites context");
+    assert_eq!(
+        c.real_context_tokens,
+        Some(500),
+        "compaction keeps the last real value until the next round reports"
+    );
 
     let mut r = v.clone();
     r.apply(&SessionEvent::TranscriptReset(Vec::new()));
-    assert_eq!(r.real_context_tokens, None, "reset rebuilds context");
+    assert_eq!(
+        r.real_context_tokens,
+        Some(500),
+        "in-place reset keeps the stale value; rebuilds go through replay"
+    );
 
     let mut m = v.clone();
     m.apply(&SessionEvent::ModelSwitch("openai/gpt-4o".into()));
     assert_eq!(
-        m.real_context_tokens, None,
-        "model switch changes tokenizer"
+        m.real_context_tokens,
+        Some(500),
+        "model switch keeps the last real value until the new model reports"
     );
 }
 
 #[test]
-fn model_switch_clears_real_context_but_keeps_cost() {
+fn model_switch_keeps_real_context_and_cost() {
     let mut v = ChatView::default();
     v.apply(&SessionEvent::LlmUsage {
         total_tokens: 7_000,
@@ -143,7 +159,7 @@ fn model_switch_clears_real_context_but_keeps_cost() {
         output_tokens: 1_000,
     });
     v.apply(&SessionEvent::ModelSwitch("openai/gpt-4o-mini".into()));
-    assert_eq!(v.real_context_tokens, None);
+    assert_eq!(v.real_context_tokens, Some(7_000));
     assert_eq!(
         v.tokens_total, 7_000,
         "lifetime cost survives a model switch"
@@ -164,5 +180,10 @@ fn replay_sums_persisted_assistant_usage() {
     assert_eq!(
         chat.tokens_total, 1_500_000,
         "replay sums real usage across assistant messages (user/zero excluded)"
+    );
+    assert_eq!(
+        chat.real_context_tokens,
+        Some(500_000),
+        "replay rebuilds provider truth from the latest non-zero usage"
     );
 }

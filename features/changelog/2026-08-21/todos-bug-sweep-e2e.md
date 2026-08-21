@@ -44,7 +44,7 @@ CLI 补测：`crates/cli/tests/todos_cli_dispatch.rs::events_after_cursor_sees_o
 
 ## 回归
 
-- `cargo test --workspace`：295 passed / 0 failed（含新增 todos 5 个测试文件、CLI 游标测试）。
+- `cargo test --workspace`：3203 passed / 0 failed / 0 error（206 条 result line，无截断聚合实跑复验；含新增 todos 5 个测试文件、CLI 游标测试）。
 - `cargo clippy --workspace --all-targets`：0 warning / 0 error。
 - `python3 -m py_compile scripts/e2e/*.py scripts/e2e_glm.py`：通过。
 

@@ -50,6 +50,15 @@ async fn main() -> Result<()> {
             session,
             continue_,
             interrupt,
+            delivery,
+            skills,
+            fork,
+            compact,
+            handoff,
+            autopilot,
+            annotation,
+            steer_task,
+            cmd,
             prompt,
         }) => {
             let parts = if prompt.is_empty() {
@@ -58,9 +67,8 @@ async fn main() -> Result<()> {
                 prompt.clone()
             };
             let p = join(parts);
-            if !*interrupt {
-                require(&p)?;
-            }
+            // Prompt is NOT required at this layer: --interrupt/--compact/
+            // --handoff/subcommands run without one (client_run enforces the rest).
             // The Client subcommand re-declares its own --session/--continue,
             // which shadow the global flags. Fall back to the globals so
             // `opencode --continue client -r http://...` works as expected
@@ -71,17 +79,30 @@ async fn main() -> Result<()> {
                 cli.session.clone(),
                 cli.continue_,
             );
-            opencoder_cli::client::client_run(
-                remote.clone(),
-                token.clone(),
+            opencoder_cli::client::client_run(opencoder_cli::client::ClientRunOpts {
+                remote: remote.clone(),
+                token: token.clone(),
                 session,
                 continue_,
-                cli.agent.clone(),
-                cli.model.clone(),
-                *interrupt,
-                cli.image.clone(),
-                p,
-            )
+                agent: cli.agent.clone(),
+                model: cli.model.clone(),
+                interrupt: *interrupt,
+                images: cli.image.clone(),
+                prompt: p,
+                delivery: delivery.clone(),
+                skills: skills.clone(),
+                fork: *fork || cli.fork,
+                compact: *compact,
+                handoff: handoff.clone(),
+                autopilot: autopilot.clone(),
+                annotation: annotation.clone(),
+                steer_task: steer_task.clone(),
+                workdir: cli
+                    .workdir
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
+                cmd: cmd.clone(),
+            })
             .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,

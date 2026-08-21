@@ -25,7 +25,7 @@ use opencoder_store::{Delivery, LibsqlStore, SessionInput, Store};
 
 /// The exact read-only reminder `maybe_tag_plan_prompt` appends (without the
 /// leading newline, which is added at the call site).
-const TAG: &str = "（当前处于只读的 plan 模式，聚焦计划生成）";
+const TAG: &str = "（当前处于只读的 plan 模式，聚焦计划生成；存在影响计划的疑问必须先用 question 工具提问再输出计划）";
 
 async fn mem_store() -> Arc<dyn Store> {
     Arc::new(LibsqlStore::open_memory().await.unwrap())

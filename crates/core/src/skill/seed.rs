@@ -270,6 +270,29 @@ mod tests {
             "no-home seeding must not create ./.opencoder/skills in cwd"
         );
     }
+    /// Re-seed runbook guard (plan-question-always-ask): deleting an outdated
+    /// installed SKILL.md and re-running seeding must restore it from the
+    /// shipped asset — including the 澄清协议 (clarification protocol)
+    /// section — while untouched user files keep their content.
+    #[test]
+    fn deleted_task_plan_skill_is_reseeded_with_clarification_protocol() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        seed_builtin_skills_in(base).unwrap();
+        let skill = base.join("task-plan").join("SKILL.md");
+
+        // Stale installed copy without the clarification protocol, then the
+        // runbook action: delete it so the next startup re-seeds.
+        std::fs::write(&skill, "stale content").unwrap();
+        std::fs::remove_file(&skill).unwrap();
+        seed_builtin_skills_in(base).unwrap();
+
+        let content = std::fs::read_to_string(&skill).unwrap();
+        assert!(
+            content.contains("澄清协议"),
+            "re-seeded SKILL.md must restore the clarification protocol section"
+        );
+    }
 
     #[test]
     fn write_install_script_creates_file() {

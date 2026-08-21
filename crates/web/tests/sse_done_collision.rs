@@ -99,6 +99,7 @@ async fn live_done_not_suppressed_by_historical_done() {
         State(state.clone()),
         Path(sid.to_string()),
         Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

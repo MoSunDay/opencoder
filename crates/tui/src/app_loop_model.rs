@@ -83,9 +83,6 @@ pub(crate) async fn handle_model_outcome(
                                     )));
                                 }
                             }
-                            crate::theme::set_theme(crate::theme::ThemeKind::from_label(
-                                &reloaded.theme,
-                            ));
                             *config = reloaded.clone();
                             let effective_model = reloaded.model.clone();
                             // Apply a new TUI frame rate immediately: rebuild the frame

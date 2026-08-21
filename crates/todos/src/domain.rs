@@ -37,6 +37,13 @@ pub fn validate_spec(spec: &WorkflowSpec) -> Result<()> {
         if todo.max_attempts == 0 {
             bail!("TODO {} max_attempts must be positive", todo.id);
         }
+        // Path safety: todo ids feed file paths in the --debug projection
+        // (`sessions/todos/<id>/attempt-NNN.json`, `task-info/todos/<id>.json`),
+        // so traversal-shaped ids are rejected at spec-submission time and
+        // debug_dump can keep trusting the validated spec.
+        if todo.id.contains(['/', '\\', '\0']) || todo.id.contains("..") {
+            bail!("TODO {} id is not path-safe", todo.id);
+        }
         for dep in &todo.depends_on {
             if dep == &todo.id || !ids.contains(dep.as_str()) {
                 bail!("TODO {} has invalid dependency {dep}", todo.id);
@@ -77,29 +84,35 @@ fn reject_cycles(spec: &WorkflowSpec) -> Result<()> {
             )
         })
         .collect();
-    fn visit<'a>(
-        id: &'a str,
-        deps: &HashMap<&'a str, Vec<&'a str>>,
-        visiting: &mut HashSet<&'a str>,
-        done: &mut HashSet<&'a str>,
-    ) -> Result<()> {
-        if done.contains(id) {
-            return Ok(());
+    // Iterative tri-color DFS with an explicit stack: the spec is
+    // user-supplied JSON and a long dependency chain must not be able to
+    // abort the process by overflowing the recursion stack.
+    let mut visiting: HashSet<&str> = HashSet::new();
+    let mut done: HashSet<&str> = HashSet::new();
+    for root in deps.keys() {
+        if done.contains(root) {
+            continue;
         }
-        if !visiting.insert(id) {
-            bail!("TODO dependency graph contains a cycle at {id}");
+        visiting.insert(root);
+        let mut stack: Vec<(&str, usize)> = vec![(root, 0)];
+        while let Some(&(id, index)) = stack.last() {
+            let children = &deps[id];
+            if index < children.len() {
+                let child = children[index];
+                stack.last_mut().expect("non-empty").1 += 1;
+                if done.contains(child) {
+                    continue;
+                }
+                if !visiting.insert(child) {
+                    bail!("TODO dependency graph contains a cycle at {child}");
+                }
+                stack.push((child, 0));
+            } else {
+                stack.pop();
+                visiting.remove(id);
+                done.insert(id);
+            }
         }
-        for dep in &deps[id] {
-            visit(dep, deps, visiting, done)?;
-        }
-        visiting.remove(id);
-        done.insert(id);
-        Ok(())
-    }
-    let mut visiting = HashSet::new();
-    let mut done = HashSet::new();
-    for id in deps.keys() {
-        visit(id, &deps, &mut visiting, &mut done)?;
     }
     Ok(())
 }
@@ -350,6 +363,50 @@ mod tests {
         let workflow = valid_spec(vec![todo]);
 
         validate_spec(&workflow).unwrap();
+    }
+
+    #[test]
+    fn validate_spec_rejects_path_unsafe_todo_ids() {
+        for bad in ["a/b", "a\\b", "a..b", "..", "a\u{0}b"] {
+            let workflow = valid_spec(vec![valid_todo(bad, &[])]);
+            let error = validate_spec(&workflow)
+                .err()
+                .unwrap_or_else(|| panic!("id {bad:?} must be rejected"));
+            assert!(
+                format!("{error}").contains("not path-safe"),
+                "id {bad:?} rejected for the wrong reason: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_spec_survives_deep_dependency_chain() {
+        // 30_000-long chain: a recursive DFS visitor would abort the process
+        // by overflowing the stack; the iterative one must accept the
+        // acyclic spec (and reject a cycle planted at the deep end).
+        let depth = 30_000;
+        let mut todos = Vec::with_capacity(depth);
+        for i in 0..depth {
+            let mut todo = valid_todo(&format!("t{i}"), &[]);
+            if i > 0 {
+                todo.depends_on = vec![format!("t{}", i - 1)];
+            }
+            todos.push(todo);
+        }
+        validate_spec(&valid_spec(todos)).expect("deep acyclic chain is valid");
+
+        let mut cyclic = Vec::with_capacity(depth);
+        for i in 0..depth {
+            let mut todo = valid_todo(&format!("t{i}"), &[]);
+            if i > 0 {
+                todo.depends_on = vec![format!("t{}", i - 1)];
+            } else {
+                todo.depends_on = vec![format!("t{}", depth - 1)];
+            }
+            cyclic.push(todo);
+        }
+        let error = validate_spec(&valid_spec(cyclic)).unwrap_err();
+        assert!(format!("{error}").contains("cycle"));
     }
 
     #[test]

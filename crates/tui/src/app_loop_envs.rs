@@ -1,6 +1,6 @@
 //! `/envs` outcome handling: executes env mutations against the core envs API
 //! and mirrors the `/model` full-refresh path (env config may change
-//! model/provider/theme/fps: rebuild outer client, labels, theme, ticker)
+//! model/provider/fps: rebuild outer client, labels, ticker)
 //! followed by `UiCmd::ReloadConfig` for the session worker.
 
 use std::path::Path;
@@ -170,7 +170,7 @@ pub(crate) async fn handle_envs_outcome(
 }
 
 /// The `/model` refresh sequence minus the save (the env marker is already
-/// written): reload config, rebuild the outer client, apply labels/theme/fps,
+/// written): reload config, rebuild the outer client, apply labels/fps,
 /// then notify the session worker via `ReloadConfig`.
 #[allow(clippy::too_many_arguments)]
 async fn refresh_after_env_change(
@@ -212,7 +212,6 @@ async fn refresh_after_env_change(
                     format!("endpoint resolve failed: {e:#} \u{2014} live session keeps previous client"),
                 ),
             }
-            crate::theme::set_theme(crate::theme::ThemeKind::from_label(&reloaded.theme));
             *config = reloaded.clone();
             let new_frame_ms = reloaded.tui_frame_ms();
             if new_frame_ms != *frame_ms {

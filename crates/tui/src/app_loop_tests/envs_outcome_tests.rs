@@ -44,7 +44,7 @@ fn env_world() -> (tempfile::TempDir, tempfile::TempDir) {
     std::fs::create_dir_all(g.join("envs/alpha")).unwrap();
     std::fs::write(
         g.join("config.json"),
-        r#"{"model":"prov/base","provider":{"base_url":"https://g.example","api_key":"gk"},"theme":"dark"}"#,
+        r#"{"model":"prov/base","provider":{"base_url":"https://g.example","api_key":"gk"}}"#,
     )
     .unwrap();
     std::fs::write(
@@ -209,7 +209,7 @@ async fn recapture_active_env_refreshes() {
     // make the base differ from the stale env snapshot
     std::fs::write(
         home.path().join(".opencoder/config.json"),
-        r#"{"model":"prov/base2","provider":{"base_url":"https://g.example","api_key":"gk"},"theme":"light"}"#,
+        r#"{"model":"prov/base2","provider":{"base_url":"https://g.example","api_key":"gk"}}"#,
     )
     .unwrap();
     opencoder_core::set_active_env(Some("alpha")).unwrap();

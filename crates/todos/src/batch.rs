@@ -62,6 +62,22 @@ async fn apply_result(
         Ok(execution) => execution,
         Err(error) => {
             let reason = format!("{error:#}");
+            // Mirror the late-Ok guard below: a sibling acceptance can rewind
+            // a milestone and invalidate this TODO while its (failing)
+            // execution is still in flight. A late Err must be discarded the
+            // same way — routing it into execution_failed would trip the
+            // Running guard's `require` and suspend the whole workflow over a
+            // result nobody is waiting for anymore.
+            let current = state.todos.get(todo_id).map(|todo| todo.status);
+            if current != Some(TodoStatus::Running) {
+                tracing::info!(
+                    workflow_id = %state.workflow_id,
+                    todo_id = todo_id,
+                    status = ?current,
+                    "discarding execution failure for TODO that is no longer running"
+                );
+                return Ok(());
+            }
             // An external interrupt (`runner::interrupt` from another process)
             // persists Suspended directly to the store. The local cancel token
             // is only flipped by `poll_interrupt` on its 250ms cadence, so a
@@ -128,7 +144,7 @@ async fn apply_result(
         );
         return Ok(());
     }
-    *state = transitions::candidate(state.clone(), todo_id, execution.candidate)?;
+    *state = transitions::candidate(spec, state.clone(), todo_id, execution.candidate)?;
     runtime
         .commit(
             spec,
@@ -149,14 +165,48 @@ async fn apply_result(
             serde_json::json!({"todo_id":todo_id}),
         )
         .await?;
-    let decision = parent::accept(
-        &runtime.parent_runtime(),
-        spec,
-        state,
-        todo_id,
-        &execution.gate,
-    )
-    .await?;
+    // Bug #16b/M6 symmetry: only dispatch decisions used to get correctable
+    // re-asks. An invalid acceptance decision (accepting a failed gate,
+    // rewinding to a non-milestone, revising a terminal todo) was a one-shot
+    // mistake that suspended the whole workflow. Dry-run every acceptance
+    // decision against a throwaway state clone and re-ask with a correction,
+    // bounded like the dispatch side.
+    let parent_runtime = runtime.parent_runtime();
+    let mut correction: Option<String> = None;
+    let mut retries_left = ACCEPTANCE_CORRECTION_RETRIES;
+    let decision = loop {
+        let decision = parent::accept(
+            &parent_runtime,
+            spec,
+            state,
+            todo_id,
+            &execution.gate,
+            correction.as_deref(),
+        )
+        .await?;
+        match validate_acceptance(spec, state, todo_id, &execution.gate, &decision) {
+            Ok(()) => break decision,
+            Err(error) if retries_left > 0 => {
+                retries_left -= 1;
+                let reason = format!("{error:#}");
+                tracing::info!(
+                    workflow_id = %state.workflow_id,
+                    todo_id = todo_id,
+                    error = %reason,
+                    retries_left,
+                    "parent acceptance rejected; re-asking with correction"
+                );
+                correction = Some(format!(
+                    "your previous acceptance decision was rejected: {reason}. Honor the required tool gates and the allowed operations, or choose fail."
+                ));
+            }
+            Err(error) => {
+                return Err(
+                    error.context("parent acceptance stayed invalid after correction retries")
+                );
+            }
+        }
+    };
     apply_acceptance(runtime, spec, state, todo_id, execution.gate, decision).await
 }
 
@@ -183,6 +233,72 @@ async fn externally_suspended(store: &Arc<dyn Store>, state: &WorkflowState) -> 
             );
             false
         }
+    }
+}
+
+/// Maximum acceptance-correction re-asks around `parent::accept`: 1 initial
+/// decision plus 2 corrected re-decisions before an invalid acceptance bails.
+const ACCEPTANCE_CORRECTION_RETRIES: u32 = 2;
+
+/// Pure validation of one acceptance decision: dry-runs the same transitions
+/// `apply_acceptance` performs on a cloned state that is then dropped, so an
+/// invalid model decision can be corrected with a re-ask instead of
+/// suspending the workflow. Mirrors `validate_request` on the dispatch side.
+pub(crate) fn validate_acceptance(
+    spec: &WorkflowSpec,
+    state: &WorkflowState,
+    todo_id: &str,
+    gate: &serde_json::Value,
+    decision: &AcceptanceDecision,
+) -> Result<()> {
+    match decision {
+        AcceptanceDecision::Accept { .. } => {
+            if gate["ok"] != true {
+                anyhow::bail!("cannot accept TODO {todo_id}: required tool gate failed");
+            }
+            Ok(())
+        }
+        AcceptanceDecision::Revise { context_mode, .. } => {
+            transitions::revise(spec, state.clone(), todo_id, String::new(), *context_mode)
+                .map(|_| ())
+        }
+        AcceptanceDecision::Rewind {
+            milestone_todo_id, ..
+        } => transitions::rewind(spec, state.clone(), milestone_todo_id, String::new()).map(|_| ()),
+        AcceptanceDecision::Fail { .. } => Ok(()),
+    }
+}
+
+/// Pure validation of one parent scheduling decision: dispatch reuses
+/// `validate_request` (the exact `transitions::dispatch` rules); every other
+/// operation dry-runs its transition on a cloned state that is then dropped.
+/// `runner::drive_inner` uses this to correct-and-re-ask invalid decisions of
+/// ANY kind, not just dispatches.
+pub(crate) fn validate_decision(
+    spec: &WorkflowSpec,
+    state: &WorkflowState,
+    decision: &ParentDecision,
+) -> Result<()> {
+    match decision {
+        ParentDecision::Dispatch { todos, .. } => validate_request(spec, state, todos),
+        ParentDecision::MarkMilestone { todo_id, .. } => {
+            // Re-marking an existing milestone is idempotent (mirrors
+            // accepted(mark_milestone=true)'s silent set-insert), so only the
+            // Passed requirement is validated here.
+            match state.todos.get(todo_id).map(|todo| todo.status) {
+                Some(TodoStatus::Passed) => Ok(()),
+                Some(_) => anyhow::bail!("parent tried to mark non-passed milestone {todo_id}"),
+                None => anyhow::bail!("unknown TODO {todo_id}"),
+            }
+        }
+        ParentDecision::Rewind {
+            milestone_todo_id, ..
+        } => transitions::rewind(spec, state.clone(), milestone_todo_id, String::new()).map(|_| ()),
+        ParentDecision::Complete { .. } => {
+            transitions::terminal(state.clone(), WorkflowStatus::Completed, String::new())
+                .map(|_| ())
+        }
+        ParentDecision::Fail { .. } | ParentDecision::Suspend { .. } => Ok(()),
     }
 }
 

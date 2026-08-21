@@ -171,7 +171,7 @@ fn legacy_config_json_domain_keys_are_ignored_on_load() {
     write_json(
         &work.path().join("opencoder.json"),
         r#"{
-            "theme": "light",
+            "fps": 24,
             "mcp_servers": { "srv": { "enabled": true, "command": "npx" } },
             "cli": { "git": { "enabled": true, "content": "use git" } },
             "skills": { "review": { "enabled": true } }
@@ -185,7 +185,8 @@ fn legacy_config_json_domain_keys_are_ignored_on_load() {
     assert!(cfg.enabled_skill_names().is_empty());
     assert!(cfg.enabled_mcp_servers().is_empty());
     assert_eq!(
-        cfg.theme, "light",
+        cfg.fps,
+        Some(24),
         "non-domain keys still load from config.json"
     );
 }
@@ -200,7 +201,7 @@ fn mixed_patch_routes_domain_and_config_keys_separately() {
     let written = Config::save(
         work.path(),
         &serde_json::json!({
-            "theme": "light",
+            "model": "prov/model",
             "skills": { "review": { "enabled": true } }
         }),
     )
@@ -212,7 +213,7 @@ fn mixed_patch_routes_domain_and_config_keys_separately() {
         "non-empty config remainder -> config.json path (domain writes still happen)"
     );
     let config_disk = read_json(&config_json);
-    assert_eq!(config_disk["theme"], serde_json::json!("light"));
+    assert_eq!(config_disk["model"], serde_json::json!("prov/model"));
     assert!(
         !config_disk.as_object().unwrap().contains_key("skills"),
         "skills must NOT land in config.json"
@@ -222,7 +223,7 @@ fn mixed_patch_routes_domain_and_config_keys_separately() {
 
     // roundtrip: both halves come back from their own files
     let cfg = Config::load(work.path()).unwrap();
-    assert_eq!(cfg.theme, "light");
+    assert_eq!(cfg.model, "prov/model");
     assert_eq!(cfg.enabled_skill_names(), vec!["review".to_string()]);
 }
 
@@ -391,7 +392,7 @@ fn autopilot_mixed_patch_splits_from_config_json() {
 
     let written = Config::save(
         work.path(),
-        &serde_json::json!({ "theme": "light", "autopilot": { "mode": "review" } }),
+        &serde_json::json!({ "model": "prov/model", "autopilot": { "mode": "review" } }),
     )
     .unwrap();
     assert_eq!(written, work.path().join("opencoder.json"));
@@ -408,6 +409,6 @@ fn autopilot_mixed_patch_splits_from_config_json() {
     );
 
     let cfg = Config::load(work.path()).unwrap();
-    assert_eq!(cfg.theme, "light");
+    assert_eq!(cfg.model, "prov/model");
     assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Review);
 }

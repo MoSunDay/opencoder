@@ -78,7 +78,6 @@ fn status_bar_has_single_meter_before_ctx() {
 /// fill only ~90%.
 #[test]
 fn status_bar_single_dial_tracks_threshold_not_window() {
-    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     let backend = TestBackend::new(120, 3);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal

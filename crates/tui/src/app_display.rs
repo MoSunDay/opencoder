@@ -5,9 +5,11 @@
 
 use std::path::Path;
 
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::chat::{ChatBlock, ChatView};
+use crate::theme;
 
 /// Display width (terminal columns) of the jump-to-top `⬆` arrow label on the
 /// body's top-border row: `"    ⬆    "` (4 spaces + wide ⬆ + 4 spaces). Must
@@ -16,8 +18,13 @@ pub(super) const TOP_ARROW_W: u16 = 10;
 
 /// Compose the top-level body title `Line` for the non-subagent view.
 ///
-/// Model name and optional thinking effort use the same unstyled text as the
-/// workdir. The mode is rendered at the bottom-left in the status bar.
+/// Graded palette (harmonised with the bottom-border corners): the static
+/// `workdir` uses the bold bright-blue status-label colour (same as the
+/// status bar's `thr` prefix), the `·` separators nearly vanish
+/// (muted), the model carries the cyan accent (matching the `[tok cost]`
+/// corner / follow indicator), and the thinking level takes the pink
+/// reserved for the Thinking block header. The mode is rendered at the
+/// bottom-left in the status bar.
 pub(super) fn compose_top_title(
     workdir: &Path,
     model_bare: &str,
@@ -32,14 +39,19 @@ pub(super) fn compose_top_title(
         .map(crate::terminal_text::sanitize_single_line)
         .map(|value| value.into_owned());
 
+    let thr_label = theme::bold(theme::status_label_color());
+    let muted = Style::default().fg(theme::muted());
+    let accent = Style::default().fg(theme::accent());
+    let pink = Style::default().fg(theme::pink());
+
     let mut spans = vec![
-        Span::raw(workdir),
-        Span::raw(" \u{00b7} "),
-        Span::raw(model_bare),
+        Span::styled(workdir, thr_label),
+        Span::styled(" \u{00b7} ", muted),
+        Span::styled(model_bare, accent),
     ];
     if let Some(effort) = effort {
-        spans.push(Span::raw(" \u{00b7} "));
-        spans.push(Span::raw(effort));
+        spans.push(Span::styled(" \u{00b7} ", muted));
+        spans.push(Span::styled(effort, pink));
     }
     Line::from(spans)
 }
@@ -189,16 +201,22 @@ mod tests {
     }
 
     #[test]
-    fn compose_title_uses_the_workdir_style_for_model_and_effort() {
+    fn compose_title_segments_carry_graded_colors() {
         let line = compose_top_title(Path::new("/root/opencoder"), "glm-5.2", Some("high"));
         let t = title_text(&line);
         assert_eq!(t, "/root/opencoder \u{00b7} glm-5.2 \u{00b7} high");
-        assert!(
-            line.spans
-                .iter()
-                .all(|span| span.style == Default::default()),
-            "workdir, separators, model, and effort must share the raw style"
-        );
+        // workdir bold bright blue (the `thr` label colour, matching the
+        // tok-cost corner), separators muted, model accent, thinking level
+        // pink (Thinking block header).
+        assert_eq!(line.spans[0].style.fg, Some(theme::status_label_color()));
+        assert!(line.spans[0]
+            .style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD));
+        assert_eq!(line.spans[1].style.fg, Some(theme::muted()));
+        assert_eq!(line.spans[2].style.fg, Some(theme::accent()));
+        assert_eq!(line.spans[3].style.fg, Some(theme::muted()));
+        assert_eq!(line.spans[4].style.fg, Some(theme::pink()));
     }
 
     #[test]

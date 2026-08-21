@@ -183,3 +183,124 @@ async fn prefetch_skips_data_uris_and_collects_http() {
     // Data URIs should not appear in the map (no HTTP fetch attempted).
     assert!(map.is_empty(), "data URIs should not be prefetched");
 }
+
+// ── concurrency / budget (injected fake fetcher, no network) ─────────────
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use super::replay::prefetch_image_bytes_with;
+
+fn http_msg(urls: &[&str]) -> Vec<Message> {
+    urls.iter()
+        .map(|u| Message {
+            id: format!("m-{u}"),
+            role: Role::User,
+            blocks: vec![
+                ContentBlock::Text {
+                    text: "imgs".into(),
+                },
+                ContentBlock::Image {
+                    url: (*u).into(),
+                    detail: None,
+                },
+            ],
+            model: None,
+            agent: None,
+            usage: MessageUsage::default(),
+            created_at: 0,
+            synthetic: false,
+        })
+        .collect()
+}
+
+/// Fetches run concurrently: 3 URLs each sleeping 80ms finish in roughly one
+/// slot (~80ms), not the serial 240ms, and at least two are in flight at the
+/// same time.
+#[tokio::test]
+async fn prefetch_fetches_run_concurrently() {
+    let inflight = std::sync::Arc::new(AtomicUsize::new(0));
+    let max_inflight = std::sync::Arc::new(AtomicUsize::new(0));
+    let map = prefetch_image_bytes_with(
+        &http_msg(&[
+            "https://example.com/a.png",
+            "https://example.com/b.png",
+            "https://example.com/c.png",
+        ]),
+        {
+            let inflight = inflight.clone();
+            let max_inflight = max_inflight.clone();
+            move |url: String| {
+                let inflight = inflight.clone();
+                let max_inflight = max_inflight.clone();
+                async move {
+                    let now = inflight.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_inflight.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                    inflight.fetch_sub(1, Ordering::SeqCst);
+                    Some(vec![1u8; url.len()])
+                }
+            }
+        },
+        std::time::Duration::from_secs(8),
+    )
+    .await;
+
+    assert_eq!(map.len(), 3, "all three fetches must resolve");
+    assert!(
+        max_inflight.load(Ordering::SeqCst) >= 2,
+        "fetches must overlap; max in-flight was {}",
+        max_inflight.load(Ordering::SeqCst)
+    );
+}
+
+/// The overall budget bounds the batch: one hung host cannot stall the
+/// rebuild; the fast fetch that already arrived is still returned.
+#[tokio::test]
+async fn prefetch_budget_returns_partial_success_and_bounds_wait() {
+    let start = std::time::Instant::now();
+    let map = prefetch_image_bytes_with(
+        &http_msg(&[
+            "https://fast.example.com/ok.png",
+            "https://slow.example.com/hang.png",
+        ]),
+        |url: String| async move {
+            if url.contains("fast") {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                Some(vec![2u8])
+            } else {
+                // Simulates a host that never answers (well past the budget).
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Some(vec![9u8])
+            }
+        },
+        std::time::Duration::from_millis(150),
+    )
+    .await;
+    let elapsed = start.elapsed();
+
+    assert!(
+        map.contains_key("https://fast.example.com/ok.png"),
+        "fast fetch must survive the budget cut"
+    );
+    assert!(
+        !map.contains_key("https://slow.example.com/hang.png"),
+        "hung fetch must be aborted at the budget deadline"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "budget must bound total wait; took {elapsed:?}"
+    );
+}
+
+/// An empty URL set never spawns tasks and returns instantly (data URIs are
+/// handled inline by `replay_one`, not here).
+#[tokio::test]
+async fn prefetch_empty_url_set_is_free() {
+    let map = prefetch_image_bytes_with(
+        &http_msg(&["data:image/png;base64,AAAA"]),
+        |url: String| async move { Some(vec![url.len() as u8]) },
+        std::time::Duration::from_secs(8),
+    )
+    .await;
+    assert!(map.is_empty(), "data URIs must not be fetched");
+}

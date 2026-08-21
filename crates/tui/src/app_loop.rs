@@ -66,9 +66,9 @@ pub(crate) struct DisplayState<'a> {
 
 /// Compute the per-iteration display values — `display_chat`, `display_title`,
 /// `display_ctx` and `display_sys` — swapping in a subagent's child ChatView
-/// when one is focused. The top-level title renders workdir, model name, and
-/// thinking effort with the same plain style. The mode remains in the bottom
-/// status bar. Pure: reads state, returns the values; the caller assigns them.
+/// when one is focused. The top-level title grades its segments by importance
+/// (subtle workdir, muted separators, accent model, pink thinking level). The
+/// mode remains in the bottom status bar. Pure: reads state, returns the values; the caller assigns them.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_display<'a>(
     chat: &'a ChatView,

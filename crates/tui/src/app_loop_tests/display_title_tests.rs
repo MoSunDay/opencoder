@@ -3,7 +3,7 @@
 
 use super::*;
 
-// ----- Regression: top title values share the workdir style -----
+// ----- Regression: top title segments carry graded colors -----
 
 /// Render a styled title `Line` to its plain text (span contents concatenated)
 /// for textual assertions.
@@ -11,9 +11,11 @@ fn line_text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
-/// The provider prefix is omitted and workdir/model/effort all use raw spans.
+/// The provider prefix is omitted; workdir/model/effort carry the graded
+/// palette (bold bright-blue workdir — the `thr` label colour — muted
+/// separators, accent model, pink effort).
 #[test]
-fn compute_display_title_uses_workdir_style_for_model_and_effort() {
+fn compute_display_title_segments_carry_graded_colors() {
     use opencoder_core::Config;
 
     let chat = ChatView {
@@ -43,13 +45,23 @@ fn compute_display_title_uses_workdir_style_for_model_and_effort() {
         !t.contains("bigmodel"),
         "provider prefix must not appear; got: {t}"
     );
-    assert!(
-        ds.display_title
-            .spans
-            .iter()
-            .all(|span| span.style == Style::default()),
-        "model and thinking effort must use the same raw style as workdir"
+    let spans = &ds.display_title.spans;
+    assert_eq!(
+        spans[0].style.fg,
+        Some(crate::theme::status_label_color()),
+        "workdir"
     );
+    assert!(
+        spans[0]
+            .style
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD),
+        "workdir must be bold like the thr label"
+    );
+    assert_eq!(spans[1].style.fg, Some(crate::theme::muted()), "separator");
+    assert_eq!(spans[2].style.fg, Some(crate::theme::accent()), "model");
+    assert_eq!(spans[3].style.fg, Some(crate::theme::muted()), "separator");
+    assert_eq!(spans[4].style.fg, Some(crate::theme::pink()), "effort");
     assert_eq!(
         ds.display_mode, "act",
         "top-level display_mode mirrors agent_name"

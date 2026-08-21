@@ -18,7 +18,8 @@ use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
 
-use crate::handle::{admit_and_drain, SessionHandle, SseEvt};
+use crate::cmd::DrainCmd;
+use crate::handle::{admit_and_drain, send_cmd, SessionHandle, SseEvt};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -43,7 +44,9 @@ pub async fn create_session(
         model: body.as_ref().and_then(|b| b.model.clone()),
 
         autopilot_mode: None,
-        workdir_hash: None,
+        // Stamp the server workdir so `?workdir=` filters can match (legacy
+        // NULL-hash rows never match).
+        workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
         created_at: now,
         updated_at: now,
         summary: None,
@@ -68,6 +71,9 @@ pub struct ListQuery {
     pub limit: Option<u32>,
     pub cursor: Option<String>,
     pub search: Option<String>,
+    /// Optional workdir filter: only sessions created under this exact
+    /// (canonicalized) directory; NULL-hash legacy rows never match.
+    pub workdir: Option<String>,
 }
 
 pub async fn list_sessions(
@@ -77,7 +83,10 @@ pub async fn list_sessions(
     let filter = SessionFilter {
         limit: q.limit.unwrap_or(50).clamp(1, 500),
         cursor: q.cursor,
-        workdir_hash: None,
+        workdir_hash: q
+            .workdir
+            .as_deref()
+            .map(|w| opencoder_core::workdir_hash(std::path::Path::new(w))),
         search: q.search,
         include_subagents: false,
     };
@@ -291,7 +300,8 @@ async fn ensure_session_row(
             model: Some(config.model.clone()),
 
             autopilot_mode: None,
-            workdir_hash: None,
+            // Same stamping as create_session: `?workdir=` filters match.
+            workdir_hash: Some(opencoder_core::workdir_hash(&state.workdir)),
             created_at: now,
             updated_at: now,
             summary: None,
@@ -367,6 +377,23 @@ pub async fn post_agent(
         let patch = SessionPatch::rollback_agent(old_agent.as_ref());
         let _ = state.store.update_session(&id, &patch).await;
         return error_409("agent switch refused: drain started during write");
+    }
+    // Switch INTO plan mode re-arms plan-phase affordances (TUI worker.rs
+    // parity): reset the live counter via a drain command when a drain is
+    // running, and ALWAYS persist `plan_input_count = 0` (next resume reads
+    // the store).
+    if body.value == "plan" {
+        if handle.draining.load(Ordering::SeqCst) {
+            send_cmd(&state.handles, &id, DrainCmd::ResetPlanPhase).await;
+        }
+        let patch = SessionPatch {
+            plan_input_count: Some(0),
+            updated_at: Some(opencoder_core::message::now_ms()),
+            ..Default::default()
+        };
+        if let Err(e) = state.store.update_session(&id, &patch).await {
+            warn!(error = %e, session_id = %id, "post_agent: persist plan_input_count failed");
+        }
     }
     handle.overrides.lock().await.agent = Some(body.value.clone());
     Json(json!({ "ok": true, "agent": body.value })).into_response()
@@ -580,12 +607,21 @@ pub struct EventsQuery {
 /// SSE stream: replay persisted events `after` the cursor, then forward the
 /// live broadcast. Slow clients skip lagged events (backpressure never blocks
 /// the runner); a missing live handle still yields the replay window.
+///
+/// The cursor comes from `?after=` or, when absent, the SSE-standard
+/// `Last-Event-ID` header (unparseable values ignored → fall back to 0).
 pub async fn get_events(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(q): Query<EventsQuery>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
-    let after = q.after.unwrap_or(0);
+    // `Last-Event-ID` has no constant in the `http` crate; parse by name.
+    let header_after = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<i64>().ok());
+    let after = q.after.or(header_after).unwrap_or(0);
 
     // Reject non-existent sessions: otherwise a get-or-created handle would
     // subscribe to a broadcast that never fires, hanging the SSE stream forever.

@@ -220,6 +220,7 @@ async fn seen_fingerprints_expire_at_first_forwarded_done() {
         State(state.clone()),
         Path(sid.to_string()),
         Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

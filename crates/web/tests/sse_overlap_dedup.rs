@@ -221,6 +221,7 @@ async fn overlap_window_event_is_deduped_once() {
         State(state.clone()),
         Path(sid.to_string()),
         Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

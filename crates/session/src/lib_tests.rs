@@ -165,7 +165,8 @@ mod plan_tag_tests {
         s.plan_input_count = 1;
         let mut text = String::from("also add tests");
         s.maybe_tag_plan_prompt(&mut text);
-        assert!(text.contains("（当前处于只读的 plan 模式，聚焦计划生成）"));
+        assert!(text.contains("聚焦计划生成"));
+        assert!(text.contains("question 工具提问"));
         assert_eq!(s.plan_input_count, 2);
     }
 

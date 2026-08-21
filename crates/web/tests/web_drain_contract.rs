@@ -249,6 +249,7 @@ async fn events_subscriber_before_prompt_receives_live() {
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::extract::Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();
@@ -349,6 +350,7 @@ async fn events_stream_survives_subscriber_lag() {
         axum::extract::State(state.clone()),
         axum::extract::Path(sid.to_string()),
         axum::extract::Query(opencoder_web::api::EventsQuery { after: Some(0) }),
+        axum::http::HeaderMap::new(),
     )
     .await
     .into_response();

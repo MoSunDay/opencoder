@@ -18,9 +18,9 @@ const READ_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone)]
 pub struct Remote {
-    base_url: String,
-    token: String,
-    http: reqwest::Client,
+    pub(crate) base_url: String,
+    pub(crate) token: String,
+    pub(crate) http: reqwest::Client,
 }
 
 impl Remote {
@@ -37,7 +37,7 @@ impl Remote {
         })
     }
 
-    fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 
@@ -57,12 +57,27 @@ impl Remote {
         Ok(v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false))
     }
 
-    /// List sessions (most-recent first). Returns the raw list items so the
+    /// List sessions (most-recent first). Optional query filters: `limit`
+    /// (count), `search` (title substring), `workdir` (absolute path — the
+    /// server filters by its workdir hash). Returns the raw list items so the
     /// caller can read `id`/`preview` without a fixed schema.
-    pub async fn list_sessions(&self) -> Result<Vec<serde_json::Value>> {
-        let resp = self
-            .http
-            .get(self.url("/api/sessions"))
+    pub async fn list_sessions(
+        &self,
+        limit: Option<u32>,
+        search: Option<&str>,
+        workdir: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut req = self.http.get(self.url("/api/sessions"));
+        if let Some(n) = limit {
+            req = req.query(&[("limit", n.to_string())]);
+        }
+        if let Some(s) = search {
+            req = req.query(&[("search", s)]);
+        }
+        if let Some(w) = workdir {
+            req = req.query(&[("workdir", w)]);
+        }
+        let resp = req
             .bearer_auth(&self.token)
             .send()
             .await
@@ -132,13 +147,16 @@ impl Remote {
         Ok(v.get("seq").and_then(|s| s.as_i64()).unwrap_or(0))
     }
 
-    /// POST /api/sessions/:id/prompt → the admitted input seq.
+    /// POST /api/sessions/:id/prompt → the admitted input seq. Optional
+    /// one-shot `skill` name is persisted to session meta and consumed by the
+    /// triggering run (cleared at run end).
     #[allow(clippy::too_many_arguments)]
     pub async fn post_prompt(
         &self,
         id: &str,
         prompt: &str,
         delivery: Option<&str>,
+        skill: Option<&str>,
         agent: Option<&str>,
         model: Option<&str>,
         images: &[String],
@@ -146,6 +164,9 @@ impl Remote {
         let mut body = serde_json::json!({ "prompt": prompt });
         if let Some(d) = delivery {
             body["delivery"] = serde_json::json!(d);
+        }
+        if let Some(s) = skill {
+            body["skill"] = serde_json::json!(s);
         }
         if let Some(a) = agent {
             body["agent"] = serde_json::json!(a);
@@ -195,7 +216,9 @@ impl Remote {
         Ok(())
     }
 
-    pub async fn interrupt(&self, id: &str) -> Result<()> {
+    /// POST /api/sessions/:id/interrupt → the parsed response body so callers
+    /// can surface `{"ok":false,"error":...}` (HTTP 200 carries both verdicts).
+    pub async fn interrupt(&self, id: &str) -> Result<serde_json::Value> {
         let resp = self
             .http
             .post(self.url(&format!("/api/sessions/{id}/interrupt")))
@@ -203,8 +226,8 @@ impl Remote {
             .send()
             .await
             .context("interrupt")?;
-        let _ = ensure_ok(resp, "interrupt").await?;
-        Ok(())
+        let resp = ensure_ok(resp, "interrupt").await?;
+        resp.json().await.context("interrupt json")
     }
 
     /// Submit a steer to a running subagent. The steer is admitted to the child
@@ -247,9 +270,11 @@ impl Remote {
         let http = self.http.clone();
         tokio::spawn(async move {
             if let Err(e) = run_stream(http, url, token, tx.clone()).await {
+                // Transport failure marker: the CLI layer distinguishes this
+                // from a business `error` event (terminal) and may reconnect.
                 let _ = tx
                     .send(SseEvt {
-                        kind: "error".into(),
+                        kind: "stream_error".into(),
                         data: serde_json::json!({ "error": format!("stream failed: {e:#}") }),
                         ts: opencoder_core::message::now_ms(),
                         seq: None,
@@ -337,7 +362,7 @@ async fn run_stream(
 /// Turn a non-success HTTP response into an error carrying the server's
 /// message body when available (e.g. the JSON `{ "error": ... }`). On success
 /// the (unchanged) response is returned so the caller can still read its body.
-async fn ensure_ok(resp: reqwest::Response, what: &str) -> Result<reqwest::Response> {
+pub(crate) async fn ensure_ok(resp: reqwest::Response, what: &str) -> Result<reqwest::Response> {
     if resp.status().is_success() {
         return Ok(resp);
     }

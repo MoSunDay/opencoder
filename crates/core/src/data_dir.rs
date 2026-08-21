@@ -22,6 +22,26 @@ pub fn data_root() -> PathBuf {
     base
 }
 
+/// Stable hex digest identifying a workdir: the hex form of `DefaultHasher`
+/// applied to the *canonical* string form of `workdir`. This is exactly the
+/// directory-name component [`data_dir_for`] embeds, exposed separately so
+/// callers (e.g. the web session-list `?workdir=` filter) can compute the key
+/// without touching the filesystem layout.
+pub fn workdir_hash(workdir: &Path) -> String {
+    canonical_workdir_digest(workdir)
+}
+
+/// Shared hashing core of [`data_dir_for`] and [`workdir_hash`]: canonicalize
+/// (falling back to the raw path when it does not exist yet), then hash the
+/// string form with `DefaultHasher`. Extracted so the two public functions can
+/// never drift apart — the filter key must equal the on-disk dir name.
+fn canonical_workdir_digest(workdir: &Path) -> String {
+    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    canonical.to_string_lossy().hash(&mut h);
+    format!("{:x}", h.finish())
+}
+
 /// Resolve the on-disk data directory for a given workdir.
 ///
 /// The path is `<data_local>/opencoder/<hash>` where `hash` is the hex digest
@@ -33,23 +53,60 @@ pub fn data_root() -> PathBuf {
 /// string representation — rather than the platform-dependent `Path` `Hash`
 /// impl — keeps the mapping stable across runs.
 pub fn data_dir_for(workdir: &Path) -> PathBuf {
-    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    canonical.to_string_lossy().hash(&mut h);
-    let digest = h.finish();
-    data_root().join(format!("{digest:x}"))
+    data_root().join(canonical_workdir_digest(workdir))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::data_dir_for;
-    use std::path::PathBuf;
+    use super::{data_dir_for, workdir_hash};
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn is_deterministic() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().canonicalize().unwrap();
         assert_eq!(data_dir_for(&real), data_dir_for(&real));
+    }
+
+    /// `workdir_hash` is the digest embedded in `data_dir_for`'s directory
+    /// name — the web `?workdir=` filter relies on this equality.
+    #[test]
+    fn workdir_hash_matches_data_dir_for_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap();
+        let data = data_dir_for(&real);
+        let component = data
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("data dir ends with the digest component");
+        assert_eq!(workdir_hash(&real), component);
+    }
+
+    /// The hash canonicalizes: trailing slashes and symlinks collapse to one
+    /// stable digest, and it is pure hex (safe as a SQL equality key).
+    #[test]
+    fn workdir_hash_canonicalizes_and_is_stable_hex() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap();
+        let with_slash: PathBuf = format!("{}/", real.to_string_lossy()).into();
+        assert_eq!(workdir_hash(&real), workdir_hash(&with_slash));
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("lnk");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert_eq!(workdir_hash(&real), workdir_hash(&link));
+        }
+        let h = workdir_hash(&real);
+        assert!(!h.is_empty());
+        assert!(
+            h.chars().all(|c| c.is_ascii_hexdigit()),
+            "digest must be hex, got {h}"
+        );
+        // Distinct workdirs get distinct digests (filter selectivity).
+        assert_ne!(
+            workdir_hash(&real),
+            workdir_hash(Path::new("/nonexistent/other"))
+        );
     }
 
     #[test]

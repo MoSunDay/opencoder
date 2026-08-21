@@ -88,7 +88,7 @@ async fn client_echo_matches_server_persisted_events() {
 
     // 3. post the prompt
     let seq = remote
-        .post_prompt(&id, "ping", None, None, None, &[])
+        .post_prompt(&id, "ping", None, None, None, None, &[])
         .await
         .unwrap();
     assert!(seq > 0);
@@ -151,7 +151,7 @@ async fn client_get_messages_returns_transcript() {
     let id = remote.create_session(None, None).await.unwrap();
     let after = remote.last_event_seq(&id).await.unwrap();
     let _ = remote
-        .post_prompt(&id, "hello", None, None, None, &[])
+        .post_prompt(&id, "hello", None, None, None, None, &[])
         .await
         .unwrap();
 
@@ -193,7 +193,7 @@ async fn list_sessions_returns_created_session() {
     let remote = Remote::new(&base, TOKEN).unwrap();
 
     let id = remote.create_session(Some("plan"), None).await.unwrap();
-    let list = remote.list_sessions().await.unwrap();
+    let list = remote.list_sessions(None, None, None).await.unwrap();
     assert!(list
         .iter()
         .any(|v| v.get("id").and_then(|i| i.as_str()) == Some(&id)));

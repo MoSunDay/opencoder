@@ -130,7 +130,6 @@ mod tests {
     /// all three mode keys and the `← 当前` mark on the active mode.
     #[test]
     fn popup_renders_title_choices_and_current_mark() {
-        crate::theme::set_theme(crate::theme::ThemeKind::Dark);
         let mut config = Config::default();
         config.autopilot.mode = ApMode::Ap;
         let menu = ApMenu::new(&config);
@@ -161,7 +160,6 @@ mod tests {
     /// overlay legitimately covers it — the overlay carries its own title).
     #[test]
     fn confirm_overlay_renders_save_as_default_hints() {
-        crate::theme::set_theme(crate::theme::ThemeKind::Dark);
         let mut config = Config::default();
         config.autopilot.mode = ApMode::Off;
         let mut menu = ApMenu::new(&config);

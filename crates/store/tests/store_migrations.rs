@@ -676,3 +676,40 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         assert_eq!(v, 11, "schema version must be 11 after v10->v11 migration");
     }
 }
+
+async fn index_count(store: &LibsqlStore) -> i64 {
+    let conn = store.conn().await.unwrap();
+    let stmt = conn
+        .prepare(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_subagent_task_id'",
+        )
+        .await
+        .unwrap();
+    let mut rows = stmt.query(()).await.unwrap();
+    let r = rows.next().await.unwrap().unwrap();
+    r.get(0).unwrap()
+}
+
+/// Bootstrap creates (and re-creates idempotently) the `task_id` index on
+/// `subagent_tasks`: the COMPLETE / CANCEL / get-by-task-id paths filter by
+/// `task_id` alone and previously full-scanned the table on every replay /
+/// interrupt probe.
+#[tokio::test]
+async fn bootstrap_creates_subagent_task_id_index() {
+    let (dir, store) = fresh().await;
+    assert_eq!(
+        index_count(&store).await,
+        1,
+        "idx_subagent_task_id must exist after bootstrap"
+    );
+
+    // Reopening the same database (idempotent bootstrap) must not fail or
+    // duplicate the index.
+    drop(store);
+    let store = LibsqlStore::open(dir.path().join("test.db")).await.unwrap();
+    assert_eq!(
+        index_count(&store).await,
+        1,
+        "idx_subagent_task_id stays singular across reopens"
+    );
+}

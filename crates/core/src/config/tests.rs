@@ -108,17 +108,6 @@ fn subagent_drain_is_configurable() {
 }
 
 #[test]
-fn theme_defaults_to_dark() {
-    assert_eq!(Config::default().theme, "dark");
-}
-
-#[test]
-fn has_editable_key_recognizes_theme() {
-    let v = serde_json::json!({ "theme": "light" });
-    assert!(super::merge::has_editable_key(&v));
-}
-
-#[test]
 fn has_editable_key_recognizes_enable_tmux_session() {
     let v = serde_json::json!({ "enable_tmux_session": true });
     assert!(super::merge::has_editable_key(&v));
@@ -180,13 +169,10 @@ fn has_editable_key_ignores_domain_keys() {
 }
 
 #[test]
-fn merge_into_applies_theme() {
+fn merge_into_applies_model() {
     let mut c = Config::default();
-    super::merge::merge_into(
-        &mut c,
-        serde_json::json!({ "theme": "light", "model": "openai/gpt-4o" }),
-    );
-    assert_eq!(c.theme, "light");
+    super::merge::merge_into(&mut c, serde_json::json!({ "model": "openai/gpt-4o" }));
+    assert_eq!(c.model, "openai/gpt-4o");
 }
 
 // --- Bug 3: AgentDefaults serde default must agree with Default impl ---
@@ -216,12 +202,12 @@ fn save_handles_corrupt_and_empty_config_files() {
     // Corrupt file: save must refuse and leave it untouched.
     let corrupt = "{ this is :: not valid json";
     std::fs::write(&target, corrupt).unwrap();
-    let corrupt_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
+    let corrupt_res = Config::save(dir.path(), &serde_json::json!({ "fps": 20 }));
     let corrupt_contents = std::fs::read_to_string(&target).unwrap();
 
     // Empty/whitespace file: treated as an empty object, patch applied.
     std::fs::write(&target, "   \n  ").unwrap();
-    let empty_res = Config::save(dir.path(), &serde_json::json!({ "theme": "light" }));
+    let empty_res = Config::save(dir.path(), &serde_json::json!({ "fps": 20 }));
     let empty_written: Option<serde_json::Value> = empty_res
         .ok()
         .and_then(|p| serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).ok());
@@ -238,7 +224,7 @@ fn save_handles_corrupt_and_empty_config_files() {
         "corrupt file must be left untouched"
     );
     let written = empty_written.expect("save of an empty/whitespace file should succeed");
-    assert_eq!(written["theme"], "light");
+    assert_eq!(written["fps"], serde_json::json!(20));
 }
 
 // --- Bug 2: non-object config files are tolerated (warned, not errored) ---

@@ -105,7 +105,6 @@ fn orphan_tool_end_creates_synthetic_block() {
 
 #[test]
 fn tool_end_error_colors_output_red() {
-    crate::theme::set_theme(crate::theme::ThemeKind::Dark);
     let mut v = ChatView::default();
     v.apply(&SessionEvent::ToolStart {
         id: "e1".into(),

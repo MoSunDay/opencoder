@@ -9,7 +9,6 @@ pub struct ConfigPatch {
     pub context_limit: u64,
     pub fps: u32,
     pub ap_max_iter: u32,
-    pub theme: String,
     pub enable_tmux_session: Option<bool>,
 }
 
@@ -22,7 +21,6 @@ impl ConfigPatch {
             "context_limit": self.context_limit,
             "compaction": { "context_threshold": self.context_threshold },
             "fps": self.fps,
-            "theme": self.theme,
             "autopilot": {
                 "max_iterations": self.ap_max_iter,
             },

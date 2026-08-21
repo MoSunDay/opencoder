@@ -34,7 +34,7 @@ fn make_env(home: &Path, name: &str, config_body: &str) {
 fn base_world(home: &Path, work: &Path) {
     write_json(
         &home.join(".opencoder").join("config.json"),
-        r#"{"provider":{"base_url":"https://g.example","api_key":"gk"},"model":"global/m","theme":"dark"}"#,
+        r#"{"provider":{"base_url":"https://g.example","api_key":"gk"},"model":"global/m"}"#,
     );
     make_env(home, "work", r#"{"model":"env/m"}"#);
     let _ = work;
@@ -161,7 +161,7 @@ fn capture_snapshots_base_chain_without_env_overlay() {
         r#"{"git":{"enabled":true,"content":"use git"}}"#,
     );
     // project layer is part of the capture (WYSIWYG)
-    write_json(&work.path().join("opencoder.json"), r#"{"theme":"light"}"#);
+    write_json(&work.path().join("opencoder.json"), r#"{"fps":24}"#);
     // another env is ACTIVE during capture: it must NOT leak into the capture
     make_env(home.path(), "other", r#"{"model":"other/m"}"#);
     set_active_env(Some("other")).unwrap();
@@ -169,7 +169,7 @@ fn capture_snapshots_base_chain_without_env_overlay() {
     create_env("shot", work.path(), true).unwrap();
     let captured = read_json(&env_file(home.path(), "shot", "config.json"));
     assert_eq!(captured["model"], "global/m", "active env excluded");
-    assert_eq!(captured["theme"], "light", "project layer included");
+    assert_eq!(captured["fps"], 24, "project layer included");
     assert_eq!(captured["provider"]["api_key"], "gk");
     for k in ["mcp_servers", "cli", "skills", "autopilot"] {
         assert!(captured.get(k).is_none(), "domain key {k} stripped");
@@ -194,7 +194,7 @@ fn capture_snapshots_base_chain_without_env_overlay() {
     set_active_env(Some("shot")).unwrap();
     let cfg = Config::load(work.path()).unwrap();
     assert_eq!(cfg.model, "global/m");
-    assert_eq!(cfg.theme, "light");
+    assert_eq!(cfg.fps, Some(24));
     assert_eq!(cfg.cli["git"].content, "use git");
     assert_eq!(cfg.autopilot.mode, opencoder_core::ApMode::Review);
 }
@@ -214,7 +214,7 @@ fn recapture_replaces_stale_env_files() {
     // stale env mcp.json (its source is gone)
     write_json(
         &home.path().join(".opencoder").join("config.json"),
-        r#"{"provider":{"base_url":"https://g2.example","api_key":"gk2"},"model":"global2/m","theme":"dark"}"#,
+        r#"{"provider":{"base_url":"https://g2.example","api_key":"gk2"},"model":"global2/m"}"#,
     );
     recapture_env("work", work.path()).unwrap();
     let cfg_json = read_json(&env_file(home.path(), "work", "config.json"));
@@ -330,12 +330,12 @@ fn autopilot_mode_follows_env_activation_switch_and_deactivation() {
         r#"{"mode":"off"}"#,
     );
     // two envs with different ap modes
-    make_env(home.path(), "alpha", r#"{"theme":"dark"}"#);
+    make_env(home.path(), "alpha", r#"{"fps":10}"#);
     write_json(
         &env_file(home.path(), "alpha", "ap.json"),
         r#"{"mode":"ap"}"#,
     );
-    make_env(home.path(), "beta", r#"{"theme":"dark"}"#);
+    make_env(home.path(), "beta", r#"{"fps":10}"#);
     write_json(
         &env_file(home.path(), "beta", "ap.json"),
         r#"{"mode":"review"}"#,

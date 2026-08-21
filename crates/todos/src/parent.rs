@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use anyhow::{Context, Result};
 use opencoder_core::{message::now_ms, resolve_agent, Config, Role};
 use opencoder_llm::ChatStream;
-use opencoder_store::{SessionMeta, SessionPatch, Store, TASK_TYPE_TODO_WORKFLOW};
+use opencoder_store::{SessionMeta, Store, TASK_TYPE_TODO_WORKFLOW};
 
 use crate::{domain, types::*};
 
@@ -79,6 +79,7 @@ pub async fn accept(
     state: &WorkflowState,
     todo_id: &str,
     gate: &serde_json::Value,
+    correction: Option<&str>,
 ) -> Result<AcceptanceDecision> {
     let todo = spec
         .todos
@@ -105,6 +106,11 @@ pub async fn accept(
         serde_json::to_string(gate)?,
         serde_json::to_string(&state.milestones)?
     );
+    // `None` keeps the prompt byte-identical to the pre-correction form.
+    let prompt = match correction {
+        None => prompt,
+        Some(note) => format!("{prompt}\nCORRECTION: {note}"),
+    };
     decide(runtime, state, prompt).await
 }
 
@@ -168,21 +174,12 @@ async fn decide<T: serde::de::DeserializeOwned>(
             }
         }
     };
-    let seq = runtime
-        .store
-        .last_message_seq(&state.parent_session_id)
-        .await?;
-    runtime
-        .store
-        .update_session(
-            &state.parent_session_id,
-            &SessionPatch {
-                summary: Some(serde_json::to_string(state)?),
-                summary_seq: Some(seq),
-                updated_at: Some(now_ms()),
-                ..Default::default()
-            },
-        )
-        .await?;
+    // NOTE: the parent session's summary/summary_seq are deliberately left
+    // untouched here. They are compaction metadata (see
+    // SessionState::after_compaction): writing the workflow state JSON into
+    // them made every post-compaction resume drop the real decision
+    // transcript in favor of one fake state-JSON summary and clobbered any
+    // genuine compaction summary. The full transcript is reloaded by
+    // `opencoder_session::resume` at the top of this function anyway.
     Ok(decision)
 }

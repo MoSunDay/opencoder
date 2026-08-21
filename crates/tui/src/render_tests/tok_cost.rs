@@ -170,3 +170,60 @@ fn tok_cost_border_drops_turn_segment_before_tok_on_narrow_width() {
         "graded dropping keeps tok, drops turn; got: {bottom}"
     );
 }
+
+/// The bottom-border corners keep a colour hierarchy: the
+/// `[tok cost]`/`[turn cost]` labels render in the warn colour — the same
+/// as the status bar's task timer and running-spinner spans — the `·`
+/// separator is muted, and the live `跟随中…` follow indicator keeps the
+/// accent.
+#[test]
+fn tok_cost_corner_quiet_and_follow_indicator_accent() {
+    let mut v = ChatView::default();
+    v.apply(&SessionEvent::TextDelta("hi".into()));
+    v.apply(&SessionEvent::Done);
+    let buf = draw(&v, 60, 10, true, false, 42_000);
+    let y = buf.area.bottom() - 1;
+
+    // Byte indices lie (multi-byte border glyphs), so scan cells directly.
+    let warn_style = ratatui::style::Style::default().fg(theme::warn_color());
+    let mut tok_fg = None;
+    let mut sep_fg = None;
+    let mut turn_fg = None;
+    let mut follow_fg = None;
+    let mut seen_tok_label = false;
+    for x in 0..buf.area.width {
+        let Some(cell) = buf.cell((x, y)) else {
+            continue;
+        };
+        let sym = cell.symbol();
+        if sym == "[" && tok_fg.is_none() {
+            tok_fg = Some((cell.fg, cell.modifier));
+        } else if sym == "t" && seen_tok_label {
+            // First `t` after the tok label closes belongs to [turn cost ...
+            turn_fg = Some((cell.fg, cell.modifier));
+            seen_tok_label = false;
+        } else if sym == "]" && tok_fg.is_some() && turn_fg.is_none() {
+            seen_tok_label = true;
+        } else if sym == "\u{00b7}" && tok_fg.is_some() && sep_fg.is_none() {
+            sep_fg = Some(cell.fg);
+        } else if sym == "跟" {
+            follow_fg = Some(cell.fg);
+        }
+    }
+    assert_eq!(
+        tok_fg,
+        Some((warn_style.fg.unwrap(), warn_style.add_modifier)),
+        "tok cost label must match the task-timer warn colour"
+    );
+    assert_eq!(
+        turn_fg,
+        Some((warn_style.fg.unwrap(), warn_style.add_modifier)),
+        "turn cost label must match the task-timer warn colour"
+    );
+    assert_eq!(sep_fg, Some(theme::muted()), "separator must be muted");
+    assert_eq!(
+        follow_fg,
+        Some(theme::accent()),
+        "follow indicator must keep the accent"
+    );
+}

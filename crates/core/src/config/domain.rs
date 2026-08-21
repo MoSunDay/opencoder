@@ -337,7 +337,7 @@ mod tests {
         for key in ["mcp_servers", "cli", "skills", "autopilot"] {
             assert!(is_domain_key(key), "{key} must be a domain key");
         }
-        for key in ["model", "theme", "providers", "keymap", ""] {
+        for key in ["model", "fps", "providers", "keymap", ""] {
             assert!(!is_domain_key(key), "{key} must not be a domain key");
         }
         assert_eq!(domain_file_name("mcp_servers"), Some("mcp.json"));
@@ -352,7 +352,7 @@ mod tests {
         let p = project_domain_path(Path::new("/w"), "skills");
         assert_eq!(p, PathBuf::from("/w/.opencoder/skills.json"));
         // non-domain keys map to a never-existing placeholder path
-        let foreign = project_domain_path(Path::new("/w"), "theme");
+        let foreign = project_domain_path(Path::new("/w"), "fps");
         assert_eq!(
             foreign,
             PathBuf::from("/w/.opencoder/__not_a_domain__.json")
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn split_patch_separates_domain_keys_verbatim() {
         let patch = serde_json::json!({
-            "theme": "light",
+            "fps": 20,
             "model": "prov/model",
             "skills": { "review": { "enabled": true } },
             "mcp_servers": { "srv": { "enabled": false } },
@@ -384,7 +384,7 @@ mod tests {
         let (remainder, domains) = split_patch(&patch);
         assert_eq!(
             remainder,
-            serde_json::json!({ "theme": "light", "model": "prov/model" })
+            serde_json::json!({ "fps": 20, "model": "prov/model" })
         );
         assert_eq!(domains.len(), 4, "all four domain keys extracted");
         // values pass through verbatim, nulls included (delete semantics)
@@ -500,7 +500,7 @@ mod tests {
         apply_domain(&mut cfg, "skills", &serde_json::json!(null));
         apply_domain(&mut cfg, "skills", &serde_json::json!([1, 2]));
         apply_domain(&mut cfg, "skills", &serde_json::json!("str"));
-        apply_domain(&mut cfg, "theme", &serde_json::json!({ "x": 1 }));
+        apply_domain(&mut cfg, "fps", &serde_json::json!({ "x": 1 }));
         assert!(cfg.skills.is_empty(), "non-object values apply nothing");
     }
 

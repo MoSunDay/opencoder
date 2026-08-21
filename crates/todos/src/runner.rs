@@ -8,9 +8,16 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{batch, domain, parent, persistence, transitions, types::*};
 
-/// Maximum dispatch-correction re-asks in `drive_inner`: 1 initial decision
-/// plus 2 corrected re-decisions before the invalid dispatch bails.
+/// Maximum decision-correction re-asks in `drive_inner`: 1 initial decision
+/// plus 2 corrected re-decisions before the invalid decision bails.
 const DISPATCH_CORRECTION_RETRIES: u32 = 2;
+
+/// Bounded retries for `interrupt`'s load→mutate→commit loop: the driving
+/// process bumps the generation on every transition, so a commit taken while
+/// the workflow is actively Running loses the optimistic-concurrency race
+/// with high probability. Reloading and retrying is correct because every
+/// iteration re-derives the terminal-state check from the freshest state.
+const INTERRUPT_COMMIT_RETRIES: u32 = 3;
 
 #[derive(Clone)]
 pub struct Runtime {
@@ -72,7 +79,16 @@ impl Runtime {
         ) {
             return Ok(state);
         }
-        let state = transitions::reconcile_interrupted(state);
+        let mut state = transitions::reconcile_interrupted(state);
+        // Persist Running at the resume boundary (mirrors run_new's
+        // workflow_started): leaving the stored status Pending/Suspended
+        // until the first dispatch misleads observers and opens a window
+        // where a second driver sees "not running" during the decision phase.
+        // No extra generation bump: reconcile_interrupted already provides
+        // the single +1 the CAS commit below expects.
+        if state.status != WorkflowStatus::Running {
+            state.status = WorkflowStatus::Running;
+        }
         self.commit(
             &spec,
             &state,
@@ -185,16 +201,15 @@ impl Runtime {
             let decision = loop {
                 let decision =
                     parent::schedule(&parent_runtime, spec, state, correction.as_deref()).await?;
-                let ParentDecision::Dispatch { todos, .. } = &decision else {
-                    break decision;
-                };
-                // Bug #16b: an invalid dispatch decision (unrunnable id,
-                // wrong context_mode, exhausted attempts, ...) is a
-                // correctable model mistake, not a runtime failure. Dry-run
-                // the same validation `batch::execute` applies and re-ask
-                // the parent with a correction before a bad decision
+                // Bug #16b/M6: an invalid model decision (unrunnable id,
+                // wrong context_mode, exhausted attempts, non-milestone
+                // rewind, completing with unaccepted TODOs, ...) is a
+                // correctable model mistake, not a runtime failure — for
+                // EVERY operation, not just dispatches: dry-run the dispatch
+                // rules or the actual transition on a throwaway clone and
+                // re-ask the parent with a correction before a bad decision
                 // suspends the whole workflow.
-                match batch::validate_request(spec, state, todos) {
+                match batch::validate_decision(spec, state, &decision) {
                     Ok(()) => break decision,
                     Err(error) if retries_left > 0 => {
                         retries_left -= 1;
@@ -203,15 +218,15 @@ impl Runtime {
                             workflow_id = %state.workflow_id,
                             error = %reason,
                             retries_left,
-                            "parent dispatch rejected; re-asking with correction"
+                            "parent decision rejected; re-asking with correction"
                         );
                         correction = Some(format!(
-                            "your previous dispatch decision was rejected: {reason}. Dispatch only runnable TODO ids with a valid context_mode, or choose another allowed operation."
+                            "your previous decision was rejected: {reason}. Dispatch only runnable TODO ids with a valid context_mode, or choose another allowed operation."
                         ));
                     }
                     Err(error) => {
                         return Err(error
-                            .context("parent dispatch stayed invalid after correction retries"));
+                            .context("parent decision stayed invalid after correction retries"));
                     }
                 }
             };
@@ -220,12 +235,19 @@ impl Runtime {
                     batch::execute(self, spec, state, todos, reason).await?;
                 }
                 ParentDecision::MarkMilestone { todo_id, reason } => {
-                    if state.todos.get(&todo_id).map(|todo| todo.status) != Some(TodoStatus::Passed)
-                    {
-                        anyhow::bail!("parent tried to mark non-passed milestone {todo_id}");
-                    }
+                    // validate_decision already proved the todo is Passed.
+                    // Re-marking an existing milestone is an idempotent no-op:
+                    // rewind-recovery flows legitimately re-mark it after
+                    // re-acceptance, mirroring the silent insert in
+                    // accepted(mark_milestone=true). One bail here used to
+                    // suspend the whole workflow.
                     if !state.milestones.insert(todo_id.clone()) {
-                        anyhow::bail!("milestone already exists: {todo_id}");
+                        tracing::info!(
+                            workflow_id = %state.workflow_id,
+                            todo_id = %todo_id,
+                            "milestone re-marked; treating as idempotent no-op"
+                        );
+                        continue;
                     }
                     state.generation += 1;
                     self.commit(
@@ -377,28 +399,52 @@ pub async fn interrupt(
     workflow_id: &str,
     reason: &str,
 ) -> Result<WorkflowState> {
-    let (spec, state) = persistence::load(store, workflow_id)
-        .await?
-        .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
-    if matches!(
-        state.status,
-        WorkflowStatus::Completed | WorkflowStatus::Failed
-    ) {
-        anyhow::bail!("cannot interrupt terminal workflow {workflow_id}");
+    // Load→mutate→CAS-commit with bounded retries: interrupt is typically
+    // called exactly while another process is driving the workflow, and that
+    // driver bumps the generation on every transition — a single-shot commit
+    // spuriously fails the optimistic-concurrency check. On a generation
+    // conflict, reload the freshest state and retry (the terminal-state
+    // refusal is re-derived on every iteration).
+    let mut retries_left = INTERRUPT_COMMIT_RETRIES;
+    loop {
+        let (spec, state) = persistence::load(store, workflow_id)
+            .await?
+            .with_context(|| format!("todo workflow not found: {workflow_id}"))?;
+        if matches!(
+            state.status,
+            WorkflowStatus::Completed | WorkflowStatus::Failed
+        ) {
+            anyhow::bail!("cannot interrupt terminal workflow {workflow_id}");
+        }
+        let next = transitions::terminal(state, WorkflowStatus::Suspended, reason.into())?;
+        match persistence::commit(
+            store,
+            &spec,
+            &next,
+            "workflow_interrupted",
+            serde_json::json!({"reason":reason}),
+        )
+        .await
+        {
+            Ok(_) => {
+                tracing::info!(
+                    workflow_id = %workflow_id,
+                    reason = %reason,
+                    "todo workflow interrupted"
+                );
+                return Ok(next);
+            }
+            Err(error)
+                if retries_left > 0 && format!("{error:#}").contains("generation conflict") =>
+            {
+                retries_left -= 1;
+                tracing::info!(
+                    workflow_id = %workflow_id,
+                    retries_left,
+                    "interrupt commit lost the generation race; reloading and retrying"
+                );
+            }
+            Err(error) => return Err(error),
+        }
     }
-    let state = transitions::terminal(state, WorkflowStatus::Suspended, reason.into())?;
-    persistence::commit(
-        store,
-        &spec,
-        &state,
-        "workflow_interrupted",
-        serde_json::json!({"reason":reason}),
-    )
-    .await?;
-    tracing::info!(
-        workflow_id = %workflow_id,
-        reason = %reason,
-        "todo workflow interrupted"
-    );
-    Ok(state)
 }

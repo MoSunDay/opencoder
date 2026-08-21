@@ -97,7 +97,11 @@ pub fn dispatch(
             todo.session_history.push(session_id.clone());
         }
         todo.status = TodoStatus::Running;
-        todo.candidate = None;
+        // Keep the previous attempt's candidate: the execution snapshot is
+        // taken after dispatch, and focused_prompt reads it to surface
+        // PREVIOUS_RECOVERY on a retry. Clearing it here starved that
+        // channel (recovery_context never reached a retry prompt). A new
+        // candidate overwrites it once the retry produces a result.
         todo.last_error = None;
         todo.next_context_mode = None;
         state.active_todo_ids.insert(request.todo_id.clone());
@@ -108,15 +112,33 @@ pub fn dispatch(
 }
 
 pub fn candidate(
+    spec: &WorkflowSpec,
     mut state: WorkflowState,
     todo_id: &str,
     value: Candidate,
 ) -> Result<WorkflowState> {
+    let spec_todo = spec
+        .todos
+        .iter()
+        .find(|todo| todo.id == todo_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown TODO {todo_id}"))?;
     let todo = item(&mut state, todo_id)?;
     require(todo.status, &[TodoStatus::Running])?;
     todo.status = match value.status {
         CandidateStatus::Candidate => TodoStatus::CandidateReady,
-        CandidateStatus::Blocked => TodoStatus::NeedsRevision,
+        // A blocked report at exhausted attempts must land on Failed, not
+        // NeedsRevision: runnable() would keep proposing it while
+        // validate_dispatch keeps refusing (attempt >= max_attempts), and
+        // once the correction budget runs out the workflow suspends —
+        // deterministically reappearing on every resume. Symmetric with
+        // revise()/execution_failed().
+        CandidateStatus::Blocked => {
+            if todo.attempt >= spec_todo.max_attempts {
+                TodoStatus::Failed
+            } else {
+                TodoStatus::NeedsRevision
+            }
+        }
         CandidateStatus::Interrupted => TodoStatus::Interrupted,
     };
     if todo.status != TodoStatus::CandidateReady {
@@ -271,11 +293,20 @@ pub fn terminal(
             }
         }
         WorkflowStatus::Suspended => {
-            let active: Vec<String> = state.active_todo_ids.iter().cloned().collect();
-            for id in active {
-                if let Some(todo) = state.todos.get_mut(&id) {
+            // Roll back every mid-flight todo, not just the Running ones in
+            // active_todo_ids: CandidateReady/Accepting todos already left
+            // that set when their candidate arrived, and leaving them behind
+            // produced a Suspended workflow whose items still claim an
+            // in-progress status. Mirrors reconcile_interrupted (which runs
+            // on resume and would otherwise be the only corrector).
+            for todo in state.todos.values_mut() {
+                if matches!(
+                    todo.status,
+                    TodoStatus::Running | TodoStatus::CandidateReady | TodoStatus::Accepting
+                ) {
                     todo.status = TodoStatus::Interrupted;
                     todo.last_error = Some(reason.clone());
+                    todo.candidate = None;
                 }
             }
         }
@@ -559,7 +590,7 @@ mod tests {
 
     fn at_accepting(workflow: &WorkflowSpec, id: &str) -> WorkflowState {
         let dispatched = dispatch_new(workflow, state(workflow), id);
-        let readied = candidate(dispatched, id, candidate_value()).unwrap();
+        let readied = candidate(workflow, dispatched, id, candidate_value()).unwrap();
         accepting(readied, id).unwrap()
     }
 
@@ -730,7 +761,7 @@ mod tests {
 
         // Recovery: the milestone re-runs to a fresh acceptance...
         let recovered = dispatch_new(&workflow, next, "a");
-        let recovered = candidate(recovered, "a", candidate_value()).unwrap();
+        let recovered = candidate(&workflow, recovered, "a", candidate_value()).unwrap();
         let recovered = accepting(recovered, "a").unwrap();
         let recovered = accepted(recovered, "a", true).unwrap();
         assert_eq!(recovered.todos["a"].status, TodoStatus::Passed);

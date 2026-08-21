@@ -7,7 +7,7 @@ Run:  scripts/e2e-glm.sh [binary]        # or: python3 scripts/e2e_glm.py [binar
 Each scenario asserts an actual business contract (fork copy integrity, bundle
 roundtrip, resume context-load, compaction content-awareness, subagent DB
 tracking, plan read-only, web steer+queue delivery) rather than a surface
-marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios,config_scenarios}.py
+marker. See scripts/e2e/{lib,cli_scenarios,web_scenarios,config_scenarios,todos_scenarios}.py
 for per-contract rationale. Stdlib only; no third-party Python dependency.
 """
 
@@ -18,7 +18,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from e2e import cli_scenarios, config_scenarios, web_scenarios  # noqa: E402
+from e2e import cli_scenarios, config_scenarios, todos_scenarios, web_scenarios  # noqa: E402
 from e2e.lib import Counter, ensure_auth, resolve_bin  # noqa: E402
 
 
@@ -40,6 +40,9 @@ def main() -> int:
     total = Counter()
     if args.only != "web":
         total += cli_scenarios.run_all(bin_path, api_key)
+        # Todos workflow suite (E19b/E19c): CLI-mode only — it drives real
+        # model sessions through `opencode todos` and needs the API key.
+        total += todos_scenarios.run_all(bin_path, api_key)
     if args.only != "cli" and not args.skip_web:
         total += web_scenarios.run_all(bin_path, api_key)
     # Key-free config/env scenarios (E20): never call the LLM, so they run in

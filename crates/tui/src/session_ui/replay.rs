@@ -403,13 +403,12 @@ pub(super) async fn reconstruct_child_view(
                 view.apply(&ev);
             }
         }
-        // Events may be incomplete; compute context_used from the full
-        // message list for an accurate token estimate.
-        let child_msgs = store
-            .load_messages(child_session_id)
-            .await
-            .unwrap_or_default();
-        view.context_used = estimate_messages_for_display(&child_msgs) as u64;
+        // `apply` already accumulates the ctx estimate on discrete events
+        // (tool start/end, queue/steer consumed, compaction, ...), so the
+        // meter comes for free. Deliberately NO second full `load_messages`
+        // scan per child: it doubled the query cost of every transcript
+        // rebuild, and only the crash-lost tail of the event log could ever
+        // be missed — a minor under-report, not a correctness bug.
         return view;
     }
 
@@ -444,11 +443,38 @@ pub(super) fn deserialize_event(payload: &serde_json::Value) -> Option<SessionEv
     }
 }
 
+/// Overall wall-clock budget for one prefetch batch. Partial success is
+/// acceptable (missing entries render a placeholder), so a single slow host
+/// must never stall the whole session-switch / resume rebuild — the old
+/// serial loop multiplied per-image timeouts into tens of seconds.
+pub(super) const PREFETCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
+
 /// Collect and asynchronously fetch all HTTP(S) image URLs from `messages`
 /// so they are available during synchronous `replay_one`. Data URIs are
 /// skipped (decoded in-process). Failed fetches are silently dropped —
 /// the corresponding images will show a placeholder.
 pub(super) async fn prefetch_image_bytes(messages: &[Message]) -> HashMap<String, Vec<u8>> {
+    prefetch_image_bytes_with(
+        messages,
+        |url| async move { crate::image_render::fetch_image_bytes(&url).await },
+        PREFETCH_BUDGET,
+    )
+    .await
+}
+
+/// Budgeted, concurrent variant of [`prefetch_image_bytes`] with the fetcher
+/// injected so tests can drive it without a network. Fetches run on a
+/// `JoinSet`; when the overall `budget` expires the remaining tasks are
+/// aborted and whatever arrived so far is returned.
+pub(super) async fn prefetch_image_bytes_with<F, Fut>(
+    messages: &[Message],
+    fetch: F,
+    budget: std::time::Duration,
+) -> HashMap<String, Vec<u8>>
+where
+    F: Fn(String) -> Fut + Clone + Send + 'static,
+    Fut: std::future::Future<Output = Option<Vec<u8>>> + Send + 'static,
+{
     let mut urls: Vec<String> = Vec::new();
     for msg in messages {
         for b in &msg.blocks {
@@ -470,11 +496,31 @@ pub(super) async fn prefetch_image_bytes(messages: &[Message]) -> HashMap<String
     urls.dedup();
 
     let mut map = HashMap::new();
+    if urls.is_empty() {
+        return map;
+    }
+    let mut set = tokio::task::JoinSet::new();
     for url in urls {
-        if let Some(bytes) = crate::image_render::fetch_image_bytes(&url).await {
-            map.insert(url, bytes);
+        let fetch = fetch.clone();
+        set.spawn(async move {
+            let bytes = fetch(url.clone()).await;
+            (url, bytes)
+        });
+    }
+    let deadline = tokio::time::Instant::now() + budget;
+    while let Ok(next) = tokio::time::timeout_at(deadline, set.join_next()).await {
+        match next {
+            // `Err(Elapsed)` can't happen here (deadline passed -> outer Err).
+            Some(Ok((url, Some(bytes)))) => {
+                map.insert(url, bytes);
+            }
+            Some(Ok((_, None))) => {}
+            Some(Err(e)) => tracing::warn!(error = %e, "image prefetch task panicked"),
+            None => break, // every task resolved within the budget
         }
     }
+    // Budget exhausted: abort the stragglers; their images show placeholders.
+    set.abort_all();
     map
 }
 

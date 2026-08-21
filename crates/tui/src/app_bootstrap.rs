@@ -9,7 +9,6 @@ use opencoder_llm::ChatStream;
 use opencoder_session::SessionState;
 use opencoder_store::Store;
 use ratatui::backend::CrosstermBackend;
-use tokio_util::sync::CancellationToken;
 
 use crate::app_helpers::{open_store, persist_session_model, reapply_session_model, resume_hint};
 use crate::render::Term;
@@ -25,7 +24,6 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     Config::ensure_global_config().context("create ~/.opencoder/config.json")?;
     let mut config = Config::load(&workdir)?;
-    crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
     if let Some(m) = &opts.model {
         config.model = m.clone();
     }
@@ -67,7 +65,6 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
                 )
             }
         };
-    crate::theme::set_theme(crate::theme::ThemeKind::from_label(&config.theme));
 
     let store: Arc<dyn Store> = open_store(&workdir).await?;
     // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)
@@ -75,7 +72,6 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     let store: Arc<dyn Store> = crate::ts_mirror::maybe_wrap(store, &workdir).await;
 
     // Resume an existing session if --session was given, otherwise start fresh.
-    let replay_cancel = CancellationToken::new();
     let mut session = if let Some(id) = &opts.session {
         let existing = store.get_session(id).await?;
         // If not found as a session, try as a subagent task_id to resolve
@@ -106,13 +102,15 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
             let effective_id = task
                 .map(|t| t.parent_session_id)
                 .unwrap_or_else(|| id.clone());
-            opencoder_session::resume::resume_and_replay(
+            // Pure data load — startup must not block re-running pending
+            // subagents (minutes-scale). `replay_cancelled_tasks` on the
+            // next user turn owns the replay, mirroring `/task` switches.
+            opencoder_session::resume::resume(
                 store.clone(),
                 &effective_id,
                 config.clone(),
                 client.clone(),
                 workdir.clone(),
-                Some(replay_cancel.clone()),
             )
             .await?
         }

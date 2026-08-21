@@ -23,7 +23,6 @@ fn config_patch_serializes_all_fields() {
         context_limit: 128_000,
         fps: 25,
         ap_max_iter: 15,
-        theme: "dark".into(),
         enable_tmux_session: None,
     };
     let v = p.to_json();
@@ -37,7 +36,10 @@ fn config_patch_serializes_all_fields() {
     );
     assert_eq!(v["context_limit"], serde_json::json!(128_000));
     assert_eq!(v["autopilot"]["max_iterations"], serde_json::json!(15));
-    assert_eq!(v["theme"], serde_json::json!("dark"));
+    assert!(
+        v.get("theme").is_none(),
+        "theme key no longer exists — the palette is fixed"
+    );
     assert!(
         v.get("enable_tmux_session").is_none(),
         "enable_tmux_session must be absent when None"
@@ -54,7 +56,6 @@ fn config_patch_omits_max_tokens_when_none() {
         context_limit: 128_000,
         fps: 10,
         ap_max_iter: 10,
-        theme: "dark".into(),
         enable_tmux_session: None,
     };
     let v = p.to_json();
@@ -76,7 +77,6 @@ fn config_patch_off_reasoning_emits_empty_string_not_null() {
         context_limit: 128_000,
         fps: 10,
         ap_max_iter: 10,
-        theme: "dark".into(),
         enable_tmux_session: None,
     };
     let v = p.to_json();
@@ -114,7 +114,6 @@ fn enter_chains_through_config_fields_to_save() {
         ConfigField::Threshold,
         ConfigField::Fps,
         ConfigField::ApMaxIter,
-        ConfigField::Theme,
         ConfigField::EnableTmuxSession,
         ConfigField::Save,
     ];
@@ -173,25 +172,6 @@ fn left_right_toggle_interleave() {
         _ => unreachable!(),
     };
     assert_eq!(after, !before, "Right toggles interleave");
-}
-
-#[test]
-fn config_form_theme_cycles_with_space() {
-    let mut slot: Option<ModelMenu> = Some(ModelMenu::Config(ConfigForm::new(&cfg())));
-    {
-        let f = match slot.as_mut().unwrap() {
-            ModelMenu::Config(f) => f,
-            _ => unreachable!(),
-        };
-        assert_eq!(f.theme, crate::theme::ThemeKind::Dark);
-        f.focus = ConfigField::Theme;
-    }
-    handle_model_key(&mut slot, key(' '));
-    let f = match slot.as_ref().unwrap() {
-        ModelMenu::Config(f) => f,
-        _ => unreachable!(),
-    };
-    assert_eq!(f.theme, crate::theme::ThemeKind::Light);
 }
 
 #[test]

@@ -102,10 +102,6 @@ pub struct Config {
     /// values raise CPU usage; 10 is already smooth. `None` = default (10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<u32>,
-    /// TUI colour theme — `"dark"` (default) or `"light"`. Resolved at runtime
-    /// into the semantic colour palette used across rendering modules.
-    #[serde(default = "default_theme")]
-    pub theme: String,
     /// Outbound proxy for LLM traffic. Accepts `socks5://`,
     /// `socks5h://`, `http://`, `https://`. The effective value also honors
     /// `OPENCODER_PROXY` / `ALL_PROXY` env vars (see `net::effective_proxy`).
@@ -155,10 +151,6 @@ pub struct Config {
 
 fn default_interleaved_thinking() -> Option<bool> {
     Some(true)
-}
-
-fn default_theme() -> String {
-    "dark".to_string()
 }
 
 fn default_cache_salt() -> Option<bool> {
@@ -368,7 +360,6 @@ impl Default for Config {
             cache_salt: default_cache_salt(),
             interleaved_thinking: Some(true),
             fps: None,
-            theme: default_theme(),
             network: NetworkConfig::default(),
             tool_guard: ToolGuardConfig::default(),
             stream_idle_timeout_secs: None,

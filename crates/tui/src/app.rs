@@ -318,7 +318,6 @@ pub(super) async fn run_app(
                                     crate::question_menu::abandon_dialog(&mut question_menu, &question_hub);
 
                                     app_task::switch_session(
-                                        terminal,
                                         pick,
                                         &mut cmd_tx,
                                         &mut evt_rx,

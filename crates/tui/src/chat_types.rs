@@ -124,14 +124,13 @@ pub struct ChatView {
     /// bottom-left `[tok cost]` corner label.
     pub tokens_total: u64,
     /// Provider-truth context size of the most recent completed LLM round
-    /// (`input_tokens + output_tokens` from the latest `LlmUsage`). When
-    /// `Some`, the status bar's `ctx (used/limit)` shows this instead of the
-    /// local estimate (and skips adding `sys_tokens` — the provider's
-    /// input_tokens already include them). `None` until the first
-    /// usage-carrying round, cleared by `Compaction` / `TranscriptReset` /
-    /// `ModelSwitch` (context rewritten or tokenizer changed). Never set
-    /// from subagent rounds: a child's context is not part of this view's
-    /// window.
+    /// (`total_tokens` from the latest `LlmUsage`, verbatim). When `Some`,
+    /// the status bar's `ctx (used/limit)` shows this — there is no
+    /// local-estimate fallback, so `None` (no usage-carrying round yet)
+    /// renders `—` and 0%. Kept stale across `ModelSwitch` / `Compaction`
+    /// / `TranscriptReset` until the next round reports fresh usage; resume
+    /// rebuilds it from persisted message usage. Never set from subagent
+    /// rounds: a child's context is not part of this view's window.
     pub real_context_tokens: Option<u64>,
     /// First block belonging to the currently admitted top-level turn. A
     /// reliable completed-text event uses this floor to repair any parent

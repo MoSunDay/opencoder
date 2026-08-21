@@ -10,7 +10,7 @@ fn status_bar_omits_branding_and_top_moved_info() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
         })
         .unwrap();
 
@@ -54,7 +54,7 @@ fn status_bar_has_single_meter_before_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
         })
         .unwrap();
 
@@ -84,7 +84,7 @@ fn status_bar_single_dial_tracks_threshold_not_window() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, 180000, 80000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, Some(180000), 80000, 200000, 0);
         })
         .unwrap();
 
@@ -118,7 +118,7 @@ fn status_bar_running_shows_spinner_and_status() {
                 true,
                 "compacting\u{2026}",
                 0,
-                0,
+                Some(0),
                 200000,
                 200000,
                 0,
@@ -153,7 +153,7 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, 0, 200000, 200000, 0);
+            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
         })
         .unwrap();
 
@@ -183,7 +183,7 @@ fn status_bar_has_no_steer_queue_or_ctx() {
                 true,
                 "compacting\u{2026}",
                 0,
-                0,
+                Some(0),
                 200000,
                 200000,
                 0,
@@ -223,7 +223,7 @@ fn status_bar_shows_task_time() {
                 true,
                 "compacting\u{2026}",
                 0,
-                0,
+                Some(0),
                 200000,
                 200000,
                 90000,
@@ -268,7 +268,7 @@ fn status_bar_hides_task_time_when_zero() {
                 true,
                 "compacting\u{2026}",
                 0,
-                0,
+                Some(0),
                 200000,
                 200000,
                 0,
@@ -304,7 +304,7 @@ fn status_dot_stays_visible_through_first_phase() {
                     true,
                     "working\u{2026}",
                     tick,
-                    0,
+                    Some(0),
                     200000,
                     200000,
                     0,
@@ -337,7 +337,7 @@ fn status_dot_stays_hidden_through_second_phase() {
                     true,
                     "working\u{2026}",
                     tick,
-                    0,
+                    Some(0),
                     200000,
                     200000,
                     0,
@@ -366,7 +366,7 @@ fn status_dot_stays_steady_when_idle() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                render_status(f, area, "act", false, "", tick, 0, 200000, 200000, 0);
+                render_status(f, area, "act", false, "", tick, Some(0), 200000, 200000, 0);
             })
             .unwrap();
 

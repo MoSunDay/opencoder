@@ -229,3 +229,51 @@ async fn replay_messages_context_used_is_nonzero() {
         estimate_messages_for_display(&msgs) as u64
     );
 }
+
+/// Provider-truth context must be rebuilt on resume from the persisted
+/// `messages.usage`: the most recent non-zero `total_tokens` wins (mirrors
+/// the live per-round overwrite), so the status bar shows a real value
+/// instead of `—` right after reloading a session.
+#[tokio::test]
+async fn resume_rebuilds_real_context_from_persisted_usage() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s3").await;
+    let store_arc: Arc<dyn Store> = store.clone();
+
+    let mut a1 = assistant("a1", "first reply");
+    a1.usage.total_tokens = 4_000;
+    let mut a2 = assistant("a2", "second reply");
+    a2.usage.total_tokens = 9_000;
+    let no_usage = assistant("a3", "drafted without usage");
+    let messages = vec![Message::user("u1", "hi"), a1, a2, no_usage];
+
+    let chat = replay_into_chat("act", &messages, &store_arc, "s3", 0).await;
+
+    assert_eq!(
+        chat.real_context_tokens,
+        Some(9_000),
+        "resume must rebuild provider truth from the latest non-zero usage"
+    );
+}
+
+/// A compaction-truncated transcript replays only the surviving tail, so the
+/// rebuilt provider truth is the last non-zero usage of that tail — not the
+/// pre-compaction history.
+#[tokio::test]
+async fn resume_after_compaction_uses_surviving_tail_usage() {
+    let (_dir, store) = fresh().await;
+    make_session(&store, "s4").await;
+    let store_arc: Arc<dyn Store> = store.clone();
+
+    let mut summary_round = assistant("a2", "<summary of the earlier turns>");
+    summary_round.usage.total_tokens = 1_200;
+    let messages = vec![Message::user("u1", "<summary>"), summary_round];
+
+    let chat = replay_into_chat("act", &messages, &store_arc, "s4", 0).await;
+
+    assert_eq!(
+        chat.real_context_tokens,
+        Some(1_200),
+        "truncated replay takes the latest non-zero usage of the tail"
+    );
+}

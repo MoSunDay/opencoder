@@ -1,5 +1,7 @@
 use clap::Parser;
-use opencoder_cli::{Cli, Command, ConfigSub, SessionSub};
+use opencoder_cli::{
+    Cli, ClientQuestionsSub, ClientSessionSub, ClientSub, Command, ConfigSub, SessionSub,
+};
 
 fn parse(args: &[&str]) -> Cli {
     Cli::parse_from(args)
@@ -174,6 +176,7 @@ fn client_subcommand_parses() {
             continue_,
             interrupt,
             prompt,
+            ..
         }) => {
             assert_eq!(remote, "http://127.0.0.1:8080");
             assert_eq!(token.as_deref(), Some("TKN"));
@@ -434,4 +437,339 @@ fn ts_subcommand_parses_delete_target_and_rejects_mixed_actions() {
         _ => panic!("expected Ts delete"),
     }
     assert!(opencoder_cli::Cli::try_parse_from(["opencoder", "ts", "-d", "01HZ", "-c"]).is_err());
+}
+
+// ── client: new flags (delivery/skill/fork/compact/handoff/autopilot/
+// annotation/steer-task/workdir) ────────────────────────────────────────────
+
+#[test]
+fn client_new_flags_parse() {
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--delivery",
+        "queue",
+        "--skill",
+        "a",
+        "--skill",
+        "b",
+        "--fork",
+        "--compact",
+        "--autopilot",
+        "ap",
+        "--annotation",
+        "text",
+        "--steer-task",
+        "t1",
+        "hello",
+    ]);
+    match cli.command {
+        Some(Command::Client {
+            delivery,
+            skills,
+            fork,
+            compact,
+            autopilot,
+            annotation,
+            steer_task,
+            prompt,
+            ..
+        }) => {
+            assert_eq!(delivery, "queue");
+            assert_eq!(skills, vec!["a".to_string(), "b".to_string()]);
+            assert!(fork);
+            assert!(compact);
+            assert_eq!(autopilot.as_deref(), Some("ap"));
+            assert_eq!(annotation.as_deref(), Some("text"));
+            assert_eq!(steer_task.as_deref(), Some("t1"));
+            assert_eq!(prompt, vec!["hello".to_string()]);
+        }
+        _ => panic!("expected Client"),
+    }
+
+    // --workdir is the GLOBAL flag (accepted in subcommand position) and acts
+    // as the remote session filter for --continue / `client session list`.
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--workdir",
+        "/tmp",
+        "hello",
+    ]);
+    assert_eq!(cli.workdir.as_deref(), Some(std::path::Path::new("/tmp")));
+    match cli.command {
+        Some(Command::Client { prompt, .. }) => {
+            assert_eq!(prompt, vec!["hello".to_string()]);
+        }
+        _ => panic!("expected Client"),
+    }
+}
+
+#[test]
+fn client_delivery_defaults_to_steer() {
+    let cli = parse(&["opencoder", "client", "--remote", "http://x", "hi"]);
+    match cli.command {
+        Some(Command::Client { delivery, .. }) => assert_eq!(delivery, "steer"),
+        _ => panic!("expected Client"),
+    }
+}
+
+#[test]
+fn client_handoff_parses_with_and_without_extra() {
+    // bare --handoff -> Some("") (default_missing_value)
+    let cli = parse(&["opencoder", "client", "--remote", "http://x", "--handoff"]);
+    match cli.command {
+        Some(Command::Client { handoff, .. }) => {
+            assert_eq!(handoff.as_deref(), Some(""));
+        }
+        _ => panic!("expected Client"),
+    }
+    // --handoff with a positional extra
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--handoff",
+        "extra text",
+    ]);
+    match cli.command {
+        Some(Command::Client { handoff, .. }) => {
+            assert_eq!(handoff.as_deref(), Some("extra text"));
+        }
+        _ => panic!("expected Client"),
+    }
+}
+
+#[test]
+fn client_unknown_delivery_and_autopilot_values_still_parse() {
+    // Runtime-validated (server 400s on delivery; client_run rejects autopilot):
+    // clap itself must accept arbitrary values so tests pin that contract.
+    let cli = parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--delivery",
+        "typo",
+        "--autopilot",
+        "bogus",
+        "hi",
+    ]);
+    match cli.command {
+        Some(Command::Client {
+            delivery,
+            autopilot,
+            ..
+        }) => {
+            assert_eq!(delivery, "typo");
+            assert_eq!(autopilot.as_deref(), Some("bogus"));
+        }
+        _ => panic!("expected Client"),
+    }
+}
+
+// ── client: management subcommands ────────────────────────────────────────
+
+#[test]
+fn client_session_subcommands_parse() {
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "session",
+        "list",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::List,
+                }),
+            ..
+        }) => {}
+        _ => panic!("expected client session list"),
+    }
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "session",
+        "show",
+        "id1",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::Show { id },
+                }),
+            ..
+        }) => assert_eq!(id, "id1"),
+        _ => panic!("expected client session show"),
+    }
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "session",
+        "delete",
+        "id1",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::Delete { id },
+                }),
+            ..
+        }) => assert_eq!(id, "id1"),
+        _ => panic!("expected client session delete"),
+    }
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "session",
+        "fork",
+        "id1",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::Fork { id },
+                }),
+            ..
+        }) => assert_eq!(id, "id1"),
+        _ => panic!("expected client session fork"),
+    }
+}
+
+#[test]
+fn client_questions_subcommands_parse() {
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "questions",
+        "list",
+        "s1",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Questions {
+                    sub: ClientQuestionsSub::List { session },
+                }),
+            ..
+        }) => assert_eq!(session, "s1"),
+        _ => panic!("expected client questions list"),
+    }
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "questions",
+        "answer",
+        "s1",
+        "c1",
+        "yes",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Questions {
+                    sub:
+                        ClientQuestionsSub::Answer {
+                            session,
+                            call_id,
+                            answer,
+                        },
+                }),
+            ..
+        }) => {
+            assert_eq!(session, "s1");
+            assert_eq!(call_id, "c1");
+            assert_eq!(answer, "yes");
+        }
+        _ => panic!("expected client questions answer"),
+    }
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "questions",
+        "skip",
+        "s1",
+        "c1",
+    ])
+    .command
+    {
+        Some(Command::Client {
+            cmd:
+                Some(ClientSub::Questions {
+                    sub: ClientQuestionsSub::Skip { session, call_id },
+                }),
+            ..
+        }) => {
+            assert_eq!(session, "s1");
+            assert_eq!(call_id, "c1");
+        }
+        _ => panic!("expected client questions skip"),
+    }
+}
+
+#[test]
+fn client_subcommand_wins_over_prompt_shaped_text() {
+    // `session`/`questions` as the FIRST prompt word is captured by the
+    // subcommand (documented: use `--` to force the prompt path).
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "session",
+        "list",
+    ])
+    .command
+    {
+        Some(Command::Client { cmd, .. }) => assert!(cmd.is_some()),
+        _ => panic!("expected Client"),
+    }
+    // The `--` workaround keeps such words in the prompt.
+    match parse(&[
+        "opencoder",
+        "client",
+        "--remote",
+        "http://x",
+        "--",
+        "session",
+        "list",
+    ])
+    .command
+    {
+        Some(Command::Client { cmd, prompt, .. }) => {
+            assert!(cmd.is_none());
+            assert_eq!(prompt, vec!["session".to_string(), "list".to_string()]);
+        }
+        _ => panic!("expected Client"),
+    }
 }

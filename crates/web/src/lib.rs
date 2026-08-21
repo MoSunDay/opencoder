@@ -1,9 +1,13 @@
 pub mod api;
 pub mod api_envs;
+pub mod api_inputs;
+pub mod api_meta;
 pub mod api_ops;
+pub mod api_questions;
 pub mod auth;
 pub mod cmd;
 pub mod handle;
+mod handle_questions;
 pub mod html;
 mod sse_dedup;
 
@@ -89,6 +93,37 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/sessions/:id/compact", post(api_ops::post_compact))
         .route("/api/sessions/:id/handoff", post(api_ops::post_handoff))
         .route("/api/sessions/:id/skill", post(api_ops::post_skill))
+        .route(
+            "/api/sessions/:id/questions",
+            get(api_questions::list_questions),
+        )
+        .route(
+            "/api/sessions/:id/questions/:call_id/answer",
+            post(api_questions::answer_question),
+        )
+        .route(
+            "/api/sessions/:id/questions/:call_id/skip",
+            post(api_questions::skip_question),
+        )
+        .route("/api/sessions/:id/inputs", get(api_inputs::list_inputs))
+        .route(
+            "/api/sessions/:id/inputs/reorder",
+            post(api_inputs::reorder_inputs),
+        )
+        .route(
+            "/api/sessions/:id/inputs/:seq",
+            delete(api_inputs::delete_input),
+        )
+        .route(
+            "/api/sessions/:id/annotation",
+            post(api_meta::post_annotation),
+        )
+        .route(
+            "/api/sessions/:id/autopilot",
+            post(api_meta::post_autopilot),
+        )
+        .route("/api/models", get(api_meta::get_models))
+        .route("/api/skills", get(api_meta::get_skills))
         .route("/api/config", get(api_ops::get_config))
         .route("/api/config", patch(api_ops::patch_config))
         .route(

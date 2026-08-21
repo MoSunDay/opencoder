@@ -61,7 +61,7 @@ async function apiGet(path) {
   return j;
 }
 
-// apiSend('POST', path, {..}) - body === undefined sends no body (DELETE/no-op POST).
+// apiSend('POST', path, {..}) — body === undefined sends no body (DELETE/no-op POST).
 async function apiSend(method, path, body) {
   var opts = { method: method, headers: authHeaders(body === undefined ? null : { 'content-type': 'application/json' }) };
   if (body !== undefined) { opts.body = JSON.stringify(body); }
@@ -75,6 +75,17 @@ async function apiSend(method, path, body) {
   if (!r.ok) { throw apiFail(r.status, j); }
   return j;
 }
+
+// Background pollers must surface non-2xx too, but alerting on every 1.5s
+// tick would spam: latch per key - alert the FIRST failure, re-arm on success.
+var alertLatch = {};
+function alertOnce(key, e) {
+  if (alertLatch[key]) { return; }
+  alertLatch[key] = true;
+  alert(e && e.error ? e.error : String(e || 'error'));
+}
+function alertOk(key) { alertLatch[key] = false; }
+
 
 // Pause work while the tab is hidden; pollers re-run on return.
 document.addEventListener('visibilitychange', function () {

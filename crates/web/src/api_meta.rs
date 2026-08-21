@@ -151,11 +151,17 @@ pub async fn get_models(State(state): State<Arc<AppState>>) -> Response {
         }));
     }
     // Flat dropdown entries: the default full id, then "name/model" for every
-    // named provider that carries a default model.
+    // named provider that carries a default model. Deduplicated preserving
+    // first-seen order — the default provider's id can equal a named
+    // provider's "name/model" (e.g. default "a/b" + provider "a" model "b"),
+    // and a dropdown must not list it twice.
     let mut models = vec![config.model.clone()];
     for name in sorted_provider_names(&config) {
         if let Some(m) = config.providers[&name].model.clone() {
-            models.push(format!("{name}/{m}"));
+            let id = format!("{name}/{m}");
+            if !models.contains(&id) {
+                models.push(id);
+            }
         }
     }
     Json(json!({

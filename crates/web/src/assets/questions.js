@@ -26,9 +26,11 @@ async function pollQuestions() {
     j = await apiGet('/api/sessions/' + cur + '/questions');
   } catch (e) {
     qInflight = false;
-    return; // transient poll failure: next tick retries
+    alertOnce('questions', e); // first failure only: next tick retries
+    return;
   }
   qInflight = false;
+  alertOk('questions');
   renderQuestionCards((j && j.questions) || []);
 }
 

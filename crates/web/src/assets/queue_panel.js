@@ -26,7 +26,11 @@ async function refreshQueuePanel(force) {
     var s = await apiGet('/api/sessions/' + cur + '/inputs?delivery=steer');
     queue = (q && q.inputs) || [];
     steer = (s && s.inputs) || [];
-  } catch (e) { return; }
+  } catch (e) {
+    alertOnce('inputs', e);
+    return;
+  }
+  alertOk('inputs');
   updateQBadge(queue.length);
   renderQueueList(steer.concat(queue)); // steers first: they fire at turn boundary
 }

@@ -9,7 +9,8 @@ async function loadTranscript() {
   if (!cur) { return; }
   var j;
   try { j = await apiGet('/api/sessions/' + cur + '/messages'); }
-  catch (e) { return; }
+  catch (e) { alertOnce('messages', e); return; }
+  alertOk('messages');
   renderMessages((j && j.messages) || []);
   var meta = (j && j.meta) || {};
   if (meta.agent) { mode = meta.agent; updateModeDisplay(); }
@@ -125,8 +126,7 @@ function ensureAssistant() {
   role.textContent = 'assistant';
   var body = document.createElement('div');
   body.className = 'b';
-  div.appendChild(role);
-  div.appendChild(body);
+  div.appendChild(role); div.appendChild(body);
   $('#log').appendChild(div);
   curAssistant = body;
   usageEl = null; // new turn: the next llm_usage gets a fresh chip
@@ -162,10 +162,8 @@ function echoUserPrompt(text) {
   role.textContent = 'user';
   div.appendChild(role);
   var body = document.createElement('div');
-  body.className = 'b';
-  body.textContent = text;
-  div.appendChild(body);
-  $('#log').appendChild(div);
+  body.className = 'b'; body.textContent = text;
+  div.appendChild(body); $('#log').appendChild(div);
   scrollEnd();
 }
 
@@ -207,14 +205,10 @@ function renderSubagentCard(d) {
   steer.className = 'sa-steer';
   steer.textContent = 'steer';
   steer.onclick = function () { mountSteer(d.id, el); };
-  head.appendChild(dot);
-  head.appendChild(kind);
-  head.appendChild(pr);
-  head.appendChild(steer);
+  head.appendChild(dot); head.appendChild(kind); head.appendChild(pr); head.appendChild(steer);
   var body = document.createElement('div');
   body.className = 'sa-body';
-  el.appendChild(head);
-  el.appendChild(body);
+  el.appendChild(head); el.appendChild(body);
   subagentCards[d.id] = el;
   $('#log').appendChild(el);
   scrollEnd();
@@ -319,9 +313,7 @@ onSSE('compaction', function (d) {
   var sum = document.createElement('div');
   sum.className = 'sum';
   sum.textContent = d.summary || 'compacted';
-  el.appendChild(sum);
-  $('#log').appendChild(el);
-  scrollEnd();
+  el.appendChild(sum); $('#log').appendChild(el); scrollEnd();
 });
 onSSE('status', function (d) {
   var el = document.createElement('div');
@@ -344,11 +336,8 @@ onSSE('plan_handoff', function (d) {
   var body = document.createElement('div');
   body.className = 'pb';
   body.textContent = d.plan || '';
-  el.appendChild(body);
-  $('#log').appendChild(el);
-  mode = 'act';
-  updateModeDisplay();
-  scrollEnd();
+  el.appendChild(body); $('#log').appendChild(el);
+  mode = 'act'; updateModeDisplay(); scrollEnd();
 });
 onSSE('transcript_reset', function () {
   $('#log').innerHTML = '';

@@ -7,7 +7,9 @@ var curModel = null;   // model of the active session (or config default)
 // -- model dropdown ----------------------------------------------------------
 async function loadModels() {
   var j = null;
-  try { j = await apiGet('/api/models'); } catch (e) { j = null; }
+  try { j = await apiGet('/api/models'); }
+  catch (e) { alertOnce('models', e); return; } // keep the custom free-text fallback
+  alertOk('models');
   modelList = (j && j.models) || [];
   var sel = $('#model-select');
   sel.innerHTML = '';
@@ -90,7 +92,8 @@ async function loadSettingsPop() {
   if (!cur) { return; }
   var j;
   try { j = await apiGet('/api/sessions/' + cur); }
-  catch (e) { return; }
+  catch (e) { alertOnce('settings', e); return; }
+  alertOk('settings');
   var meta = (j && j.meta) || {};
   $('#annotation').value = meta.requirement || '';
   $('#autopilot').value = meta.autopilot_mode || '';

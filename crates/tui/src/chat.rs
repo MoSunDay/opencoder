@@ -63,15 +63,15 @@ impl ChatView {
                 }
                 self.finalize_assistant();
             }
-            SessionEvent::LlmUsage {
-                total_tokens,
-                input_tokens,
-                output_tokens,
-            } => {
+            SessionEvent::LlmUsage { total_tokens, .. } => {
                 self.tokens_total = self.tokens_total.saturating_add(*total_tokens);
                 // Provider-truth context of this view's latest completed
-                // round (input already includes the system prompt).
-                self.real_context_tokens = Some(input_tokens.saturating_add(*output_tokens));
+                // round: the `total_tokens` the LLM actually returned
+                // (input already includes the system prompt). Overwritten on
+                // every usage-carrying round; never cleared on model switch
+                // or compaction — the stale value stays until the next round
+                // reports fresh usage.
+                self.real_context_tokens = Some(*total_tokens);
             }
             SessionEvent::TextDelta(t) => {
                 self.recover_round_anchor_if_missing();
@@ -170,10 +170,10 @@ impl ChatView {
             SessionEvent::AgentSwitch(to) => self.fold_agent_switch(to),
             SessionEvent::ModelSwitch(m) => {
                 self.finalize_assistant();
-                // Different model/tokenizer: the provider-truth context of
-                // the previous model no longer describes this window. The
-                // lifetime cost accumulator is unaffected.
-                self.real_context_tokens = None;
+                // A different model/tokenizer invalidates the old
+                // provider-truth context semantically, but the value is
+                // kept (display-only) until the new model's first round
+                // reports usage — there is no estimate fallback anymore.
                 // Strip a provider prefix defensively so the marker shows the
                 // bare model id even if a stale/persisted event carries the
                 // full "provider/model" string (issue #1).
@@ -185,9 +185,10 @@ impl ChatView {
                     ))]));
             }
             SessionEvent::Compaction(c) => {
-                // The transcript was rewritten down to the summary — the
-                // provider-truth context of the pre-compaction round is gone.
-                self.real_context_tokens = None;
+                // The transcript was rewritten down to the summary. The
+                // pre-compaction provider truth stays displayed (stale but
+                // real) until the next round under the compacted context
+                // reports fresh usage.
                 self.finalize_compaction(&sanitize_multiline(c));
             }
             SessionEvent::Status(s) => self.status = sanitize_single_line(s).into_owned(),
@@ -304,9 +305,9 @@ impl ChatView {
                 }
             }
             SessionEvent::TranscriptReset(_) => {
-                // View is rebuilt from the new message list; the frozen
-                // provider-truth context of the old transcript is invalid.
-                self.real_context_tokens = None;
+                // The view is rebuilt from the new message list via the
+                // replay path, which reconstructs provider truth from the
+                // persisted usage of the surviving messages.
             }
             SessionEvent::QueueConsumed { .. } => {}
             SessionEvent::SteerConsumed { seq, text } => {

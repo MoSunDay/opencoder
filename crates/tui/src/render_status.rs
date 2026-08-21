@@ -39,12 +39,11 @@ fn status_dot(running: bool, anim_tick: u32, mode: &str) -> Span<'static> {
 }
 
 /// Resolve the context size shown in `ctx (used/limit)`: the provider-truth
-/// context of the latest completed round (`input+output`) wins over the local
-/// estimate. `sys_tokens` is skipped in real mode — the provider's
-/// `input_tokens` already include the system prompt, so adding it would
-/// double-count.
-pub(crate) fn resolve_ctx_used(real: Option<u64>, context_used: u64, sys_tokens: u64) -> u64 {
-    real.unwrap_or(context_used + sys_tokens)
+/// `total_tokens` of the latest completed round, verbatim. No local-estimate
+/// fallback — before the first usage-carrying round (fresh session, or a
+/// rebuild that replayed no usage) the status bar renders `—` and 0%.
+pub(crate) fn resolve_ctx_used(real: Option<u64>) -> Option<u64> {
+    real
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -55,7 +54,7 @@ pub(crate) fn render_status(
     running: bool,
     status: &str,
     anim_tick: u32,
-    used: u64,
+    used: Option<u64>,
     compaction_threshold: u64,
     context_limit: u64,
     task_ms: u64,
@@ -69,7 +68,9 @@ pub(crate) fn render_status(
         ),
     ];
 
-    let bar_pct = fmtmod::context_percent(used, compaction_threshold, CONTEXT_BASELINE);
+    let bar_pct = used
+        .map(|u| fmtmod::context_percent(u, compaction_threshold, CONTEXT_BASELINE))
+        .unwrap_or(0);
     let (meter, ctx_color) = theme::context_meter(bar_pct);
     spans.push(Span::raw(" \u{00b7} "));
     // Only the meter bar + percent value follow the semantic threshold colour.
@@ -89,7 +90,8 @@ pub(crate) fn render_status(
     spans.push(Span::styled(
         format!(
             "ctx ({}/{})",
-            fmtmod::format_tokens_compact(used),
+            used.map(fmtmod::format_tokens_compact)
+                .unwrap_or_else(|| "\u{2014}".to_string()),
             fmtmod::format_tokens_compact(context_limit)
         ),
         Style::default()

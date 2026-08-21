@@ -95,8 +95,8 @@ pub(crate) fn render<B: Backend>(
     cursor_idx: usize,
     title: &Line<'static>,
     running: bool,
-    context_used: u64,
-    sys_tokens: u64,
+    _context_used: u64,
+    _sys_tokens: u64,
     compaction_threshold: u64,
     context_limit: u64,
     status: &str,
@@ -308,7 +308,7 @@ pub(crate) fn render<B: Backend>(
         );
         let composer_area = chunks[ci];
         ci += 1;
-        let used = resolve_ctx_used(chat.real_context_tokens, context_used, sys_tokens);
+        let used = resolve_ctx_used(chat.real_context_tokens);
         render_status(
             f,
             chunks[ci],

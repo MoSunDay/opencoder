@@ -78,6 +78,13 @@ pub(super) fn replay_one(
             // Session-lifetime token cost: sum the persisted per-message
             // usage (mirrors the live LlmUsage accumulation path).
             chat.tokens_total = chat.tokens_total.saturating_add(msg.usage.total_tokens);
+            // Provider-truth context: keep the most recent non-zero
+            // `total_tokens` (mirrors the live per-round overwrite). Later
+            // messages win, so a compaction-truncated replay naturally
+            // reflects the surviving tail of the transcript.
+            if msg.usage.total_tokens > 0 {
+                chat.real_context_tokens = Some(msg.usage.total_tokens);
+            }
             // Live streaming groups every reasoning segment before the round's
             // sole Assistant block. Rebuild in the same order so resume never
             // flips `Thinking -> Say` into `Say -> Thinking`.

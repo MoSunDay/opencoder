@@ -136,7 +136,8 @@ Web 侧三层（HTTP API / 内嵌前端 / `opencode client`）与 TUI 的会话�
 | inputs 默认 steer + 未知会话容忍 | `list_inputs_defaults_to_steer_and_tolerates_unknown_session` | `crates/web/tests/web_inputs.rs` |
 | annotation 设置/清空/404 | `annotation_set_clear_and_missing_session` | `crates/web/tests/web_meta_endpoints.rs` |
 | autopilot ap/review/非法/清除 | `autopilot_set_invalid_and_clear` | `crates/web/tests/web_meta_endpoints.rs` |
-| models 脱敏+去重+按 provider | `models_endpoint_is_sanitized_and_lists_providers` | `crates/web/tests/web_meta_endpoints.rs` |
+| models 脱敏+按 provider | `models_endpoint_is_sanitized_and_lists_providers` | `crates/web/tests/web_meta_endpoints.rs` |
+| models 下拉去重（default a/b + provider a/b 恰一次） | `models_endpoint_dedupes_default_and_named_provider_ids` | `crates/web/tests/web_meta_endpoints.rs` |
 | skills 形状（name/desc/enabled） | `skills_endpoint_returns_name_description_enabled` | `crates/web/tests/web_meta_endpoints.rs` |
 | 会话列表 workdir 过滤 | `session_list_filters_by_workdir_hash` | `crates/web/tests/web_list_events.rs` |
 | Last-Event-ID header 驱动 replay | `last_event_id_header_drives_replay` | `crates/web/tests/web_list_events.rs` |
@@ -165,9 +166,13 @@ Web 侧三层（HTTP API / 内嵌前端 / `opencode client`）与 TUI 的会话�
 | autopilot 合法值/拒绝其它 | `autopilot_accepts_known_modes_and_rejects_others` | `crates/cli/src/client.rs` |
 | Client 旗标回退全局（session/continue） | `client_session_flags_fall_back_to_globals` / `client_continue_flags_or_with_globals` | `crates/cli/src/client.rs` |
 | ClientOpts 纯数据全旗标冒烟 | `client_opts_is_plain_data` | `crates/cli/src/client.rs` |
+| generate_title 成功 drain 落库（小模型请求） | `successful_drain_persists_generated_title` | `crates/web/tests/web_title.rs` |
+| 已有 title 跳过生成（不覆盖/不加轮） | `existing_title_skips_generation` | `crates/web/tests/web_title.rs` |
+| 前端 headless 运行时冒烟（问答/队列/下拉/重连/发送 27 断言） | `frontend_headless_smoke`（node: `tests/frontend_smoke.mjs`） | `crates/web/tests/web_frontend_runtime.rs` |
+| 真实二进制 server+client 全旗标矩阵 | `client_server_flag_matrix_smoke` | `tests/client_server_smoke.rs` |
 
-- 全量回归：`cargo test --workspace` → **3245 passed / 0 failed**（212 个测试
-  二进制）
+- 全量回归：`cargo test --workspace` → **3250 passed / 0 failed**（215 个测试
+  二进制；评审修复后复跑）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告
 - fmt：`cargo fmt --check` → 干净
 
@@ -175,11 +180,39 @@ Web 侧三层（HTTP API / 内嵌前端 / `opencode client`）与 TUI 的会话�
 
 - `cargo fmt --check` → ✅
 - `cargo clippy --workspace --all-targets -- -D warnings` → ✅ 零警告
-- `cargo test --workspace` → ✅ **3245 passed / 0 failed**（含本轮新增：session
-  question 3、core data_dir 2、web 集成 5 文件 16 例、client_remote_ops 7、
-  html.rs 3、cli_parse 7、client.rs/client_stream.rs 单元 7）
-- 行数 gate：新增文件全部 ≤400 行；**`crates/web/src/api.rs` 现 799/800 行**——
-  下一轮触及该文件时应先拆分（如把 list/get_events 相关 handler 挪独立模块）。
-- 冒烟：真实二进制 `opencode server` + `opencode client` 全旗标矩阵
-  （--fork/--compact/--handoff/--autopilot/--annotation/--steer-task/--delivery/
-  --skill/--workdir + session/questions 子命令）人工跑通（e2e 场景扩展另行跟进）。
+- `cargo test --workspace` → ✅ **3250 passed / 0 failed**（215 二进制；含评审
+  修复新增：web_title 2、models 去重 1、前端冒烟 1、真实二进制冒烟 1）
+- 行数 gate：新增文件全部 ≤400 行；`crates/web/src/api.rs` 已拆出 SSE 端点至
+  `api_events.rs`（159 行），api.rs 降至 676 行（评审修复）。
+- 冒烟：真实二进制全旗标矩阵已固化为 `tests/client_server_smoke.rs`
+  （起真实 server → 401 stub LLM → client 全旗标断言），随 cargo test 回归。
+
+## 评审修复（web-tui-parity 上线前 review 跟进）
+
+评审结论 85%（12/14），三项 P0 缺口 + 两项 P1 全部补齐：
+
+1. **[P0] generate_title 专测**：新增 `crates/web/tests/web_title.rs`——成功
+   drain 后小模型调用（`requests().last().model == small_model`）把 Completed
+   文本落库为 title；已有 title 的会话跳过生成（默认脚本返回哨兵 title 证明
+   未加轮、原 title 未被覆盖）。
+2. **[P0] models 去重专测**：default `a/b` + provider `a` model `b` 时下拉数组
+   中 `a/b` 恰出现一次且居首——补齐上表原"脱敏+去重"行缺失的去重断言。
+3. **[P0] 前端运行时验收**：无浏览器环境，改走 headless 冒烟——
+   `crates/web/tests/frontend_smoke.mjs`（309 行）在 node vm 中加载**真实**
+   assets 八模块（DOM shim + mock fetch/EventSource），断言 27 项运行时行为：
+   问答卡片渲染/作答/skip 闭环、队列面板列表（steer 优先）/重排/删除/qcount、
+   模型下拉（目录+custom 回退）、composer 发送（乐观回显+busy 切换）、SSE
+   重连徽标（出错显示、`?after=<seq>` 续流、事件到达复位、5 次失败出持久横幅）。
+   由 `web_frontend_runtime.rs` 包一层（无 node 时 skip 并提示 NODE_BIN）。
+4. **[P1] CLI 冒烟脚本化**：新增根包 `tests/client_server_smoke.rs`——起真实
+   `opencode server`（--port 0 解析回显 URL），本地 401 stub 充当 LLM（非可重试
+   → 立即失败），断言：空列表、错 token 401、--autopilot 非法值客户端拦截、
+   --interrupt 无会话报错、真实 prompt run（错误呈现 401 且会话行落库存活）、
+   show JSON、--annotation/--autopilot 配置即退、interrupt 结构化失败反馈、
+   questions list/answer-404、fork→两行→delete 级联→清空。
+5. **[P1] api.rs 拆分**：SSE 端点（`get_events`/`get_event_seq`/`EventsQuery`）
+   迁至 `crates/web/src/api_events.rs` 并自 api.rs re-export（调用路径不变），
+   api.rs 799 → 676 行。
+
+复跑回归门：fmt ✅ / clippy -D warnings ✅ / `cargo test --workspace`
+**3250 passed / 0 failed**（215 二进制）。

@@ -1,5 +1,6 @@
 pub mod api;
 pub mod api_envs;
+pub mod api_events;
 pub mod api_inputs;
 pub mod api_meta;
 pub mod api_ops;

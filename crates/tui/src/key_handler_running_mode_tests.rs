@@ -44,37 +44,60 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
     press_running_command(command, code, false)
 }
 
+/// Enter on a mode command while the parent runs admits it as a steer: the
+/// runner applies it at the next turn boundary (delayed application).
 #[test]
-fn running_enter_rejects_every_mode_command_without_clearing_input() {
-    for command in ["/act", "/plan review this", "/act_clear_context now"] {
-        let (action, input, cursor) = press_running_mode_command(command, KeyCode::Enter);
-        assert!(matches!(action, KeyAction::ModeSwitchBlocked));
-        assert_eq!(input, command);
-        assert_eq!(cursor, command.chars().count());
+fn running_enter_mode_command_becomes_steer() {
+    for command in [
+        "/plan",
+        "/act",
+        "/plan review this",
+        "/act_clear_context now",
+    ] {
+        let (action, input, _) = press_running_mode_command(command, KeyCode::Enter);
+        assert!(matches!(action, KeyAction::Steer(text) if text == command));
+        assert!(input.is_empty(), "steer clears the input line");
     }
 }
 
+/// Tab on a mode command while running queues it: applied at the next idle
+/// boundary instead of being refused at admission.
 #[test]
-fn running_tab_rejects_mode_command_without_queueing() {
+fn running_tab_mode_command_becomes_queue() {
     let command = "/plan later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
-    assert!(matches!(action, KeyAction::ModeSwitchBlocked));
-    assert_eq!(input, command);
+    assert!(matches!(action, KeyAction::Queue(text) if text == command));
+    assert!(input.is_empty(), "queue clears the input line");
 }
 
+/// BackTab on a compound `/plan <content>` while running submits; app.rs
+/// routes the running Submit to the queue (mode switch at the idle boundary).
 #[test]
-fn focused_subagent_mode_command_uses_mode_busy_gate_before_queue_gate() {
-    let command = "/act later";
-    let (action, input, _) = press_running_command(command, KeyCode::Tab, true);
-    assert!(matches!(action, KeyAction::ModeSwitchBlocked));
-    assert_eq!(input, command);
-}
-
-#[test]
-fn running_backtab_rejects_plan_compound_without_submitting() {
+fn running_backtab_plan_compound_submits() {
     let command = "/plan later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::BackTab);
+    assert!(matches!(action, KeyAction::Submit(text) if text == command));
+    assert!(input.is_empty(), "submit clears the input line");
+}
+
+/// Enter on a mode command while a running subagent is focused stays blocked
+/// (subagents have no mode concept) with the input preserved.
+#[test]
+fn focused_subagent_enter_mode_command_still_blocked() {
+    let command = "/act later";
+    let (action, input, cursor) = press_running_command(command, KeyCode::Enter, true);
     assert!(matches!(action, KeyAction::ModeSwitchBlocked));
+    assert_eq!(input, command);
+    assert_eq!(cursor, command.chars().count());
+}
+
+/// Tab on a mode command while a subagent is focused is unsupported like any
+/// other queue — the mode gate no longer takes priority.
+#[test]
+fn focused_subagent_tab_mode_command_unsupported() {
+    let command = "/act later";
+    let (action, input, _) = press_running_command(command, KeyCode::Tab, true);
+    assert!(matches!(action, KeyAction::QueueUnsupported));
     assert_eq!(input, command);
 }
 

@@ -125,9 +125,12 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
 
 /// Whether `prompt` requests a user-visible mode transition.
 ///
-/// Admission boundaries use this pure predicate to reject mode commands while
-/// a session is running. The runner still parses admitted commands so idle and
-/// internal recovery flows keep their existing behavior.
+/// Pure classification of `/act`, `/plan` and `/act_clear_context` (bare or
+/// compound). No longer used to reject textual mode commands from a running
+/// PARENT session: queue/steer submissions are admitted and the runner applies
+/// them at the next idle/turn boundary, which structurally has no turn in
+/// flight. Still the admission guard for subagent steers (subagents have no
+/// mode concept) and the TUI's subagent-focus gate.
 pub fn is_mode_control(prompt: &str) -> bool {
     split_control_prefix(prompt).is_some()
 }

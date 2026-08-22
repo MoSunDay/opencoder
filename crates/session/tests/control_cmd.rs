@@ -471,14 +471,15 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
         MockChatClient::new()
             .push_script(vec![done_turn("reply")])
             .push_script(vec![done_turn("after steer")]),
-    ) as Arc<dyn ChatStream>;
+    );
+    let client: Arc<dyn ChatStream> = mock.clone();
 
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "steer-sess",
         resolve_agent("act").unwrap(),
         config(),
-        mock,
+        client,
         dir.path().to_path_buf(),
     )
     .with_store(store.clone())
@@ -511,6 +512,29 @@ async fn steered_control_cmd_not_recorded_as_user_text() {
         user_texts
     );
     assert_eq!(session.agent.name, "plan", "steered /plan switched agent");
+
+    // The bare steered control command is the whole intent: AgentSwitch is
+    // emitted, the run goes Done, and NO LLM turn is consumed.
+    {
+        let evs = events.lock().unwrap();
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            "AgentSwitch(plan) emitted"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+            "Done emitted"
+        );
+        assert!(
+            !evs.iter().any(|e| matches!(e, SessionEvent::TextDelta(_))),
+            "no LLM text streamed"
+        );
+    }
+    assert!(
+        mock.requests().is_empty(),
+        "bare steered control command must not consume an LLM turn"
+    );
 }
 
 /// After /act_clear_context the internal sentinel must never reach the model:

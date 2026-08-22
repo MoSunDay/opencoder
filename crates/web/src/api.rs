@@ -195,13 +195,17 @@ pub async fn post_prompt(
     Path(id): Path<String>,
     Json(mut body): Json<PromptBody>,
 ) -> Response {
-    let mode_transition =
-        body.agent.is_some() || opencoder_session::control_cmd::is_mode_control(&body.prompt);
-    // Fast-path an already-running mode request before config/client work so
-    // the stable busy contract wins even if configuration changed mid-run.
-    // The guarded admission below repeats this check under the lifecycle lock
-    // to close a drain-start race after this read.
-    if mode_transition
+    // Only an explicit `agent` field is an admission-time mode change: it
+    // rewrites the session config, so it must be refused while a drain runs.
+    // Textual mode commands (/plan, /act, /act_clear_context) are admitted
+    // like any prompt — the runner applies them at the next idle/turn
+    // boundary, which structurally has no turn in flight.
+    let agent_override = body.agent.is_some();
+    // Fast-path an already-running agent-field request before config/client
+    // work so the stable busy contract wins even if configuration changed
+    // mid-run. The guarded admission below repeats this check under the
+    // lifecycle lock to close a drain-start race after this read.
+    if agent_override
         && state
             .handles
             .lock()
@@ -271,7 +275,7 @@ pub async fn post_prompt(
         state.workdir.clone(),
         config,
         body.skill,
-        mode_transition,
+        agent_override,
     )
     .await
     {

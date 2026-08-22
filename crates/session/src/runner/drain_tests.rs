@@ -79,7 +79,7 @@ async fn claim_one_queued_claims_even_when_turn_cancel_fired() {
 // ---- drain_one_queued: single-pop semantics ----
 #[tokio::test]
 async fn drain_one_queued_bare_control_cmd_returns_control_cmd() {
-    let (mut session, _store, _token) = session_with_queue(&["/plan"]).await;
+    let (mut session, store, _token) = session_with_queue(&["/plan"]).await;
     let mut events = Vec::new();
     let outcome = drain_one_queued(&mut session, &mut |e| events.push(e))
         .await
@@ -87,6 +87,25 @@ async fn drain_one_queued_bare_control_cmd_returns_control_cmd() {
     assert!(
         matches!(outcome, DrainOutcome::ControlCmd),
         "bare /plan should return ControlCmd, got {outcome:?}"
+    );
+    // The command was applied at the idle boundary: agent switched and the
+    // AgentSwitch event emitted (this is the delayed-application point for
+    // mode commands admitted while running).
+    assert_eq!(
+        session.agent.name, "plan",
+        "bare /plan applied -> agent plan"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, crate::SessionEvent::AgentSwitch(a) if a == "plan")),
+        "AgentSwitch(plan) must be emitted on consumption, got {events:?}"
+    );
+    let meta = store.get_session("drain-test").await.unwrap().unwrap();
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("plan"),
+        "agent switch persisted at consumption"
     );
     // Queue should still have zero items after one pop.
     let outcome2 = drain_one_queued(&mut session, &mut |e| events.push(e))

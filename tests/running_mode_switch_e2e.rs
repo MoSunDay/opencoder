@@ -1,5 +1,8 @@
 //! Real-binary regression: while an actual server drain is blocked in its LLM
-//! request, every manual act/plan transition returns 409 and persists nothing.
+//! request, dedicated switch endpoints (POST /agent, POST /handoff, the
+//! `agent` field on /prompt) refuse with 409 and persist nothing, while
+//! textual mode commands (/plan ...) are admitted and applied by the runner
+//! at the idle boundary.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -190,20 +193,49 @@ fn real_server_rejects_running_mode_switches_until_idle() {
     );
     stub.wait_until_entered();
 
+    // Dedicated switch endpoints still refuse while a drain runs.
     for (path, body) in [
         (format!("/api/sessions/{sid}/agent"), r#"{"value":"plan"}"#),
-        (
-            format!("/api/sessions/{sid}/prompt"),
-            r#"{"prompt":"/plan later","delivery":"queue","skill":"reviewer"}"#,
-        ),
         (format!("/api/sessions/{sid}/handoff"), r#"{"extra":"now"}"#),
     ] {
         assert_eq!(http(&base, "POST", &path, body).0, 409, "{path} accepted");
     }
+    // Textual mode commands are no longer admission-time mode switches:
+    // admitted (200) while running, applied by the runner at the boundary.
+    // The dedicated `agent` field on /prompt is still refused.
+    assert_eq!(
+        http(
+            &base,
+            "POST",
+            &format!("/api/sessions/{sid}/prompt"),
+            r#"{"prompt":"/plan later","delivery":"queue","skill":"reviewer"}"#,
+        )
+        .0,
+        200,
+        "queued mode command must be admitted while running"
+    );
+    assert_eq!(
+        http(
+            &base,
+            "POST",
+            &format!("/api/sessions/{sid}/prompt"),
+            r#"{"prompt":"x","delivery":"queue","agent":"plan"}"#,
+        )
+        .0,
+        409,
+        "agent field refused while running"
+    );
+
     let (status, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");
     assert_eq!(status, 200);
-    assert_eq!(session["meta"]["agent"], "act");
-    assert!(session["meta"]["skill"].is_null());
+    assert_eq!(
+        session["meta"]["agent"], "act",
+        "queued switch not applied mid-turn"
+    );
+    assert_eq!(
+        session["meta"]["skill"], "reviewer",
+        "skill persisted at admission, consumed at boundary"
+    );
     assert!(!session["messages"].to_string().contains("/plan later"));
 
     stub.release();
@@ -219,7 +251,10 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             break;
         }
         assert_eq!(switched.0, 409);
-        assert!(Instant::now() < deadline, "drain never became idle");
+        assert!(
+            Instant::now() < deadline,
+            "queued /plan later never applied"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
     let (_, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");

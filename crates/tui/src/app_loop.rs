@@ -22,7 +22,7 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{start_turn, sys_tokens_for, worker_dead};
+use crate::app_helpers::{mode_switch_busy_flash, start_turn, sys_tokens_for, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome};
@@ -207,10 +207,7 @@ pub(crate) async fn handle_switch_agent(
         // explicit hint — the user re-presses at a clean idle boundary (no
         // deferred auto-fire). sys_tokens / input / running are untouched
         // (the mode is unchanged).
-        *mode_flash = Some((
-            "\u{23f3} busy \u{2014} mode switch blocked, retry when idle".into(),
-            anim_tick,
-        ));
+        *mode_flash = Some(mode_switch_busy_flash(anim_tick));
         return SwitchOutcome::Proceed;
     }
     *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());

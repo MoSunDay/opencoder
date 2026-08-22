@@ -9,7 +9,13 @@ var skillPopIdx = 0, skillPopItems = [];
 function setBusy(v) {
   busy = v;
   updateSendBtn();
+  if (typeof syncModeControls === 'function') { syncModeControls(); }
   if (v) { startQuestionPoll(); } else { stopQuestionPoll(true); }
+}
+
+function isModeControlInput(text) {
+  var head = String(text || '').trim().split(/\s+/, 1)[0];
+  return head === '/act' || head === '/plan' || head === '/act_clear_context';
 }
 
 // -- send / interrupt --------------------------------------------------------
@@ -21,6 +27,10 @@ async function send(delivery) {
   var ta = $('#msg');
   var t = ta.value.trim();
   if (!t) { return; }
+  if (busy && isModeControlInput(t)) {
+    alert('busy — mode switch blocked, retry when idle');
+    return;
+  }
   setBusy(true);
   ta.value = '';
   ta.style.height = 'auto';

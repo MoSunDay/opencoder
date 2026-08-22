@@ -489,6 +489,14 @@ pub(crate) fn queue_unsupported_flash(anim_tick: u32) -> (String, u32) {
     )
 }
 
+/// Stable busy hint shared by direct shortcuts and textual mode commands.
+pub(crate) fn mode_switch_busy_flash(anim_tick: u32) -> (String, u32) {
+    (
+        "\u{23f3} busy \u{2014} mode switch blocked, retry when idle".to_string(),
+        anim_tick,
+    )
+}
+
 pub(crate) fn push_history(history: &mut Vec<String>, hist_idx: &mut Option<usize>, text: &str) {
     history.push(text.to_string());
     *hist_idx = None;

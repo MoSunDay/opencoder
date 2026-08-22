@@ -356,7 +356,11 @@ pub(crate) fn render<B: Backend>(
             render_status_chip(
                 f,
                 composer_area,
-                "COPY MODE: Ctrl+G/Esc",
+                if plan_mode.is_some() {
+                    "COPY MODE: Ctrl+G/Esc"
+                } else {
+                    "COPY: ↑↓ PgUp/PgDn · Ctrl+G/Esc"
+                },
                 theme::warn_color(),
             );
         }

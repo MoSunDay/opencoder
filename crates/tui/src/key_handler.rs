@@ -35,8 +35,10 @@ pub(crate) enum KeyAction {
     /// the parent agent — so it is rejected here. The input box is left
     /// untouched so the user can press Enter to steer the subagent instead.
     QueueUnsupported,
-    /// A textual mode command was submitted while work is running. The input
-    /// remains untouched so the user can retry at an idle boundary.
+    /// A textual mode command was submitted while a running subagent is
+    /// focused (subagents have no mode concept, so it can neither steer the
+    /// child nor be deferred to a parent boundary). The input remains
+    /// untouched so the user can retry at an idle boundary.
     ModeSwitchBlocked,
     SwitchAgent(String),
     SwitchAgentNoClear(String),
@@ -294,9 +296,9 @@ pub(crate) fn handle_key(
             // prompt rather than just toggling the agent (mirrors the
             // Enter/Tab submit + buffer-clear flow).
             if let Some(text) = crate::control_helpers::plan_compound_for_submit(input) {
-                if running {
-                    return KeyAction::ModeSwitchBlocked;
-                }
+                // Submit even while running: app.rs routes a running Submit
+                // to the queue, so the mode switch lands at the next idle
+                // boundary instead of being refused at admission.
                 input.clear();
                 *cursor_idx = 0;
                 *hist_idx = None;
@@ -321,7 +323,13 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
-            if running && opencoder_session::control_cmd::is_mode_control(&text) {
+            // A mode command typed while a running subagent is focused stays
+            // blocked (subagents have no mode concept — it would otherwise
+            // steer the child as plain text). The parent session's running
+            // path steers freely: the runner applies the command at the next
+            // turn boundary.
+            if running && subagent_focused && opencoder_session::control_cmd::is_mode_control(&text)
+            {
                 return KeyAction::ModeSwitchBlocked;
             }
             input.clear();
@@ -352,12 +360,10 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
-            if running && opencoder_session::control_cmd::is_mode_control(&text) {
-                return KeyAction::ModeSwitchBlocked;
-            }
             // Focused running subagent: a queue would be admitted to the parent
-            // session and affect the parent agent — reject it instead, leaving
-            // the typed text so Enter can submit it as a subagent steer.
+            // session and affect the parent agent — reject it (mode commands
+            // included) instead, leaving the typed text so Enter can submit it
+            // as a subagent steer.
             if subagent_focused {
                 return KeyAction::QueueUnsupported;
             }

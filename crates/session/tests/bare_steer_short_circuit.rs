@@ -117,3 +117,89 @@ async fn bare_steer_switches_mode_with_no_llm_call() {
     let meta = store.get_session("bare-steer").await.unwrap().unwrap();
     assert_eq!(meta.agent.as_deref(), Some("plan"));
 }
+
+/// A compound "/plan review" admitted as a steer applies the mode switch at
+/// the turn boundary and records "review" as a real prompt: exactly one LLM
+/// call executes the rest in the new mode, and the raw command never leaks
+/// into the transcript.
+#[tokio::test]
+async fn steered_compound_plan_switches_then_runs_rest() {
+    let store = mem_store().await;
+    seed(&store, "steer-compound", "act").await;
+
+    // One scripted LLM call: the "review" rest recorded after the switch.
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("reviewed")]));
+    let client: Arc<dyn ChatStream> = mock.clone();
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "steer-compound",
+        resolve_agent("act").unwrap(),
+        config(),
+        client,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+
+    store
+        .admit_input(&mk_input("steer-compound", Delivery::Steer, "/plan review"))
+        .await
+        .unwrap();
+
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, "kickoff".into(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    {
+        let evs = events.lock().unwrap();
+        assert_eq!(session.agent.name, "plan", "agent switched to plan");
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            "AgentSwitch(plan) emitted"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, SessionEvent::Done)),
+            "Done emitted"
+        );
+    }
+
+    // The raw command must not leak; "review" is the recorded prompt in the
+    // new mode.
+    let user_texts: Vec<String> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == opencoder_core::Role::User)
+        .map(|m| m.text())
+        .collect();
+    assert!(
+        !user_texts.iter().any(|t| t.contains("/plan")),
+        "/plan must not leak as user text: {:?}",
+        user_texts
+    );
+    assert!(
+        user_texts.iter().any(|t| t.contains("review")),
+        "compound rest must be recorded as the prompt: {:?}",
+        user_texts
+    );
+    // Exactly one LLM call: the "review" turn in plan mode.
+    assert_eq!(
+        mock.requests().len(),
+        1,
+        "one LLM call for the compound rest"
+    );
+    let meta = store.get_session("steer-compound").await.unwrap().unwrap();
+    assert_eq!(meta.agent.as_deref(), Some("plan"));
+}
+
+fn done_turn(text: &str) -> opencoder_llm::LlmEvent {
+    opencoder_llm::LlmEvent::Completed {
+        text: text.into(),
+        tool_calls: vec![],
+        usage: None,
+    }
+}

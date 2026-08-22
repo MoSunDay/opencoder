@@ -49,6 +49,10 @@ pub struct SessionHandle {
     pub cancel: Mutex<CancellationToken>,
     pub overrides: Mutex<RuntimeOverrides>,
     pub draining: AtomicBool,
+    /// Serializes idle-only mutations with every false -> true drain start.
+    /// The atomic remains the cheap status signal; this mutex closes the
+    /// check/write/start TOCTOU window.
+    pub lifecycle: Arc<Mutex<()>>,
     /// Count of active SSE `/events` subscribers. Used by the events endpoint
     /// to evict a handle it created once the last subscriber disconnects (and
     /// no drain is running), so the handle map cannot grow without bound on a
@@ -89,6 +93,7 @@ impl SessionHandle {
             cancel: Mutex::new(CancellationToken::new()),
             overrides: Mutex::new(RuntimeOverrides::default()),
             draining: AtomicBool::new(false),
+            lifecycle: Arc::new(Mutex::new(())),
             subscribers: AtomicUsize::new(0),
             cmd_tx,
             cmd_rx: std::sync::Mutex::new(Some(cmd_rx)),
@@ -98,6 +103,30 @@ impl SessionHandle {
             turn_cancel: Arc::new(std::sync::Mutex::new(CancellationToken::new())),
             question_hub: opencoder_session::QuestionHub::new(),
         })
+    }
+}
+
+/// Failure from a prompt admission that may be idle-only.
+#[derive(Debug)]
+pub enum AdmissionError {
+    BusyModeSwitch,
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for AdmissionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BusyModeSwitch => write!(f, "mode switch refused while drain running"),
+            Self::Other(error) => write!(f, "{error:#}"),
+        }
+    }
+}
+
+impl std::error::Error for AdmissionError {}
+
+impl From<anyhow::Error> for AdmissionError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Other(error)
     }
 }
 
@@ -177,93 +206,7 @@ impl<S> Drop for DropGuardStream<S> {
     }
 }
 
-/// Decrement a handle's subscriber slot without ever underflowing, returning
-/// the value observed before the decrement. The map lookup is keyed by session
-/// id, so a release aimed at an OLD instance can land on a freshly created
-/// same-id handle whose counter is 0; a blind `fetch_sub` would wrap it to
-/// `usize::MAX`, permanently disabling last-subscriber eviction for that
-/// handle. `Err(current)` from `fetch_update` means the counter was already 0
-/// (f returned `None`) — report 0, never a wrapped value.
-fn release_subscriber_slot(h: &SessionHandle) -> usize {
-    match h
-        .subscribers
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-            if v == 0 {
-                None
-            } else {
-                Some(v - 1)
-            }
-        }) {
-        Ok(prev) => prev,
-        Err(current) => current,
-    }
-}
-
-/// Decrement an events subscriber and, when THIS request *created* the handle,
-/// evict it once the last subscriber is gone and no drain is running. Spawned
-/// (async work can't run in `Drop`); all subscribe+increment happen under the
-/// same `HandleMap` lock this holds, so the "last subscriber" check is
-/// authoritative w.r.t. concurrent subscribers — evicting only when nobody else
-/// is listening means dropping the broadcast Sender breaks no live Receiver.
-#[allow(unused_variables)]
-pub(crate) fn release_events_subscriber(handles: HandleMap, id: String, created: bool) {
-    if let Ok(rt) = tokio::runtime::Handle::try_current() {
-        rt.spawn(async move {
-            let mut evict = false;
-            {
-                let mut map = handles.lock().await;
-                if let Some(h) = map.get(&id) {
-                    let prev = release_subscriber_slot(h);
-                    if prev == 1 {
-                        // Last subscriber gone: nobody can answer an open
-                        // `question` tool call. Abandon them so the blocked
-                        // turn resolves to SKIPPED_REPLY instead of hanging
-                        // the drain forever. Harmless when nothing waits.
-                        // Runs BEFORE the eviction check below — while a
-                        // drain is running the handle is intentionally NOT
-                        // evicted (keep that), so this is the only unblock.
-                        crate::handle_questions::abandon_all_waiting(h);
-                        if !h.draining.load(Ordering::SeqCst) {
-                            map.remove(&id);
-                            evict = true;
-                        }
-                    }
-                }
-            }
-            if evict {
-                opencoder_session::mcp::cleanup(&id).await;
-            }
-        });
-    } else {
-        let mut evict = false;
-        {
-            let mut map = handles.blocking_lock();
-            if let Some(h) = map.get(&id) {
-                let prev = release_subscriber_slot(h);
-                if prev == 1 {
-                    // Same abandon-on-last-subscriber semantics as the async
-                    // path above (see the comment there).
-                    crate::handle_questions::abandon_all_waiting(h);
-                    if !h.draining.load(Ordering::SeqCst) {
-                        map.remove(&id);
-                        evict = true;
-                    }
-                }
-            }
-        }
-        if evict {
-            // No async runtime available — spawn a detached thread.
-            let id_clone = id.clone();
-            std::thread::spawn(move || {
-                // best-effort: block on a temporary runtime
-                let rt = tokio::runtime::Runtime::new().ok();
-                if let Some(rt) = rt {
-                    rt.block_on(async { opencoder_session::mcp::cleanup(&id_clone).await });
-                }
-            });
-        }
-    }
-}
+pub(crate) use crate::handle_lifecycle::release_events_subscriber;
 
 /// Admit a prompt durably, then ensure exactly one drain task is running.
 #[allow(clippy::too_many_arguments)]
@@ -278,6 +221,46 @@ pub async fn admit_and_drain(
     workdir: std::path::PathBuf,
     config: Config,
 ) -> Result<i64> {
+    admit_and_drain_guarded(
+        handles, store, session_id, prompt, images, delivery, client, workdir, config, None, false,
+    )
+    .await
+    .map_err(anyhow::Error::new)
+}
+
+/// Atomically admit a prompt and optional skill. An idle-only request has no
+/// side effects when a drain is active.
+#[allow(clippy::too_many_arguments)]
+pub async fn admit_and_drain_guarded(
+    handles: HandleMap,
+    store: Arc<dyn Store>,
+    session_id: &str,
+    prompt: String,
+    images: Vec<String>,
+    delivery: Delivery,
+    client: Arc<dyn ChatStream>,
+    workdir: std::path::PathBuf,
+    config: Config,
+    skill: Option<String>,
+    reject_mode_while_running: bool,
+) -> std::result::Result<i64, AdmissionError> {
+    let (handle, lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&handles, session_id).await;
+    if reject_mode_while_running && handle.draining.load(Ordering::SeqCst) {
+        return Err(AdmissionError::BusyModeSwitch);
+    }
+    if let Some(skill) = skill {
+        store
+            .update_session(
+                session_id,
+                &SessionPatch {
+                    skill: Some(skill),
+                    updated_at: Some(opencoder_core::message::now_ms()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+    }
     let input = SessionInput {
         seq: None,
         id: uuid::Uuid::new_v4().to_string(),
@@ -290,48 +273,19 @@ pub async fn admit_and_drain(
         promoted_seq: None,
     };
     let seq = store.admit_input(&input).await?;
-
-    let handle = {
-        let mut map = handles.lock().await;
-        map.entry(session_id.to_string())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
-
-    let started_new_drain = !handle.draining.swap(true, Ordering::SeqCst);
-    if started_new_drain {
-        let token = CancellationToken::new();
-        *handle.cancel.lock().await = token.clone();
-        // Reset the turn-level token so the new drain starts clean (a
-        // previous drain may have been turn-cancelled without resetting).
-        if let Ok(mut g) = handle.turn_cancel.lock() {
-            *g = CancellationToken::new();
-        }
-        let handles_clone = handles.clone();
-        let store_clone = store.clone();
-        let sid = session_id.to_string();
-        let cfg = config.clone();
-        let client_clone = client.clone();
-        let wd = workdir.clone();
-        let handle_clone = handle.clone();
-        tokio::spawn(async move {
-            drain_to_completion(
-                handles_clone,
-                store_clone,
-                &sid,
-                client_clone,
-                wd,
-                cfg,
-                handle_clone,
-            )
-            .await;
-        });
-    } else {
-        // Steer admitted while a drain is running: fire the parent's
-        // turn-level cancel so the current LLM turn (or tool execution) is
-        // interrupted immediately and the steer is absorbed at the next turn
-        // boundary. Mirrors the TUI's SteerParent path. Queue inputs are
-        // consumed at idle — no interrupt needed.
+    let started_new_drain = start_drain_locked(
+        handles.clone(),
+        store.clone(),
+        session_id,
+        client.clone(),
+        workdir.clone(),
+        config.clone(),
+        &handle,
+    )
+    .await;
+    drop(lifecycle);
+    if !started_new_drain {
+        // Steers interrupt the current turn; queued inputs wait for idle.
         if delivery == Delivery::Steer {
             opencoder_session::fire_turn_cancel(&handle.turn_cancel);
             opencoder_session::fire_child_cancels(&handle.child_cancels);
@@ -344,13 +298,8 @@ pub async fn admit_and_drain(
         let wd_w = workdir.clone();
         let handle_w = handle.clone();
         tokio::spawn(async move {
-            // Poll until the in-flight drain finishes. Real thinking phases
-            // last 10-60s+ (and long tool chains far longer), so the cap must
-            // comfortably exceed the longest legitimate drain; the previous
-            // 5s cap abandoned the drain mid-thinking and prevented the
-            // defense-in-depth restart below from ever firing. 12_000 * 50ms
-            // = 10 min; the atomic load is ~free and the swap guard at the
-            // bottom prevents duplicate drains.
+            // Poll for at most ten minutes, then defensively restart if an
+            // admitted input was stranded by a failed drain.
             for _ in 0..12_000 {
                 if !handle_w.draining.load(Ordering::SeqCst) {
                     break;
@@ -360,10 +309,12 @@ pub async fn admit_and_drain(
             if handle_w.draining.load(Ordering::SeqCst) {
                 return;
             }
-            // Defense-in-depth: a drain can exit with steers still pending
-            // (e.g. a steer stranded by a residual idle-boundary window, or a
-            // crashed drain). Restart the drain if EITHER a queued or a
-            // steered input is waiting so neither delivery channel strands.
+            let (restart_handle, _lifecycle) =
+                crate::handle_lifecycle::lock_session_lifecycle(&handles_w, &sid_w).await;
+            if restart_handle.draining.load(Ordering::SeqCst) {
+                return;
+            }
+            // Both delivery channels must be empty before staying idle.
             let pending_q = store_w
                 .pending_inputs(&sid_w, opencoder_store::Delivery::Queue)
                 .await
@@ -375,24 +326,21 @@ pub async fn admit_and_drain(
             if pending_q.is_empty() && pending_s.is_empty() {
                 return;
             }
-            if !handle_w.draining.swap(true, Ordering::SeqCst) {
-                // POST /interrupt (or session DELETE) fired the drain's
-                // hard-cancel token while it ran: the user's stop wins —
-                // never resurrect a cancelled run. Pending rows stay durably
-                // admitted; the next user prompt starts a fresh drain that
-                // consumes them.
-                if handle_w.cancel.lock().await.is_cancelled() {
-                    handle_w.draining.store(false, Ordering::SeqCst);
-                    return;
-                }
-                let token = CancellationToken::new();
-                *handle_w.cancel.lock().await = token.clone();
-                if let Ok(mut g) = handle_w.turn_cancel.lock() {
-                    *g = CancellationToken::new();
-                }
-                drain_to_completion(handles_w, store_w, &sid_w, client_w, wd_w, cfg_w, handle_w)
-                    .await;
+            // A hard interrupt wins: keep pending rows for the next explicit
+            // prompt instead of resurrecting the cancelled run.
+            if restart_handle.cancel.lock().await.is_cancelled() {
+                return;
             }
+            start_drain_locked(
+                handles_w,
+                store_w,
+                &sid_w,
+                client_w,
+                wd_w,
+                cfg_w,
+                &restart_handle,
+            )
+            .await;
         });
     }
     if started_new_drain {
@@ -411,37 +359,35 @@ pub async fn ensure_drain(
     workdir: std::path::PathBuf,
     config: Config,
 ) {
-    let handle = {
-        let mut map = handles.lock().await;
-        map.entry(session_id.to_string())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
+    let (handle, _lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&handles, session_id).await;
+    start_drain_locked(handles, store, session_id, client, workdir, config, &handle).await;
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn start_drain_locked(
+    handles: HandleMap,
+    store: Arc<dyn Store>,
+    session_id: &str,
+    client: Arc<dyn ChatStream>,
+    workdir: std::path::PathBuf,
+    config: Config,
+    handle: &Arc<SessionHandle>,
+) -> bool {
     if !handle.draining.swap(true, Ordering::SeqCst) {
         let token = CancellationToken::new();
         *handle.cancel.lock().await = token.clone();
         if let Ok(mut g) = handle.turn_cancel.lock() {
             *g = CancellationToken::new();
         }
-        let handles_clone = handles.clone();
-        let store_clone = store.clone();
         let sid = session_id.to_string();
-        let cfg = config.clone();
-        let client_clone = client.clone();
-        let wd = workdir.clone();
         let handle_clone = handle.clone();
         tokio::spawn(async move {
-            drain_to_completion(
-                handles_clone,
-                store_clone,
-                &sid,
-                client_clone,
-                wd,
-                cfg,
-                handle_clone,
-            )
-            .await;
+            drain_to_completion(handles, store, &sid, client, workdir, config, handle_clone).await;
         });
+        true
+    } else {
+        false
     }
 }
 
@@ -750,7 +696,6 @@ async fn drain_to_completion(
     crate::handle_questions::maybe_generate_title(&store, &session, result.is_ok()).await;
 
     drop(sink);
-    drop(guard);
     if let Err(e) = flusher.await {
         warn!(session_id, error = %e, "final event flush failed");
     }
@@ -758,6 +703,11 @@ async fn drain_to_completion(
     if let Err(e) = result {
         warn!(session_id, error = %e, "drain ended with error");
     }
+    // Keep `draining` true through every teardown step. Clearing it before
+    // the event flusher finished and `cmd_rx` was restored opened a tail race:
+    // an idle-only mutation (or a fresh drain) could start against a task that
+    // had not actually relinquished all of its per-session resources yet.
+    drop(guard);
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 // annotation, handoff, compact, fork.
 var modelList = [];    // catalog from GET /api/models
 var curModel = null;   // model of the active session (or config default)
+var modeSwitchPending = false;
 
 // -- model dropdown ----------------------------------------------------------
 async function loadModels() {
@@ -71,12 +72,34 @@ function switchModel() { // custom free-text input
 }
 
 // -- agent mode --------------------------------------------------------------
-function updateModeDisplay() { var el = $('#mode'); if (el) { el.value = mode; } }
+function syncModeControls() {
+  var disabled = busy || modeSwitchPending;
+  var el = $('#mode');
+  if (el) { el.value = mode; el.disabled = disabled; }
+  var handoff = $('#handoff');
+  if (handoff) { handoff.disabled = disabled; }
+}
+function updateModeDisplay() { syncModeControls(); }
 async function switchAgent() {
-  mode = $('#mode').value;
+  var requested = $('#mode').value;
+  syncModeControls(); // mode is server-confirmed; undo the native select change
   if (!cur) { return; }
-  try { await apiSend('POST', '/api/sessions/' + cur + '/agent', { value: mode }); }
-  catch (e) { alert(e.error || e); }
+  if (busy || modeSwitchPending) {
+    alert('busy — mode switch blocked, retry when idle');
+    return;
+  }
+  var sid = cur;
+  modeSwitchPending = true;
+  syncModeControls();
+  try {
+    var result = await apiSend('POST', '/api/sessions/' + sid + '/agent', { value: requested });
+    if (cur === sid) { mode = (result && result.agent) || requested; }
+  } catch (e) {
+    alert(e.error || e);
+  } finally {
+    modeSwitchPending = false;
+    syncModeControls();
+  }
 }
 
 // -- settings popover --------------------------------------------------------
@@ -118,6 +141,10 @@ async function switchAutopilot() {
 }
 async function handoffSession() {
   if (!cur) { return; }
+  if (busy || modeSwitchPending) {
+    alert('busy — mode switch blocked, retry when idle');
+    return;
+  }
   var extra = prompt('extra prompt for the handoff (optional)', '');
   if (extra === null) { return; } // cancelled
   try { await apiSend('POST', '/api/sessions/' + cur + '/handoff', { extra: extra }); }

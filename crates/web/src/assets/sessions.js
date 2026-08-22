@@ -83,8 +83,7 @@ function mkSessionRow(s) {
 async function selectSession(id) {
   cur = id;
   closeStream();
-  busy = false;
-  updateSendBtn();
+  setBusy(false);
   $('#log').innerHTML = '';
   resetStreamTurn();
   clearQuestionCards();

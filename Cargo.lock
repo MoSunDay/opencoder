@@ -1715,6 +1715,8 @@ dependencies = [
  "opencoder-core",
  "opencoder-session",
  "opencoder-tui",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 

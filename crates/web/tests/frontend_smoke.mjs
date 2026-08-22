@@ -116,7 +116,7 @@ function qsa(root, sel) {
 const body = new El('body');
 const byId = (id) => body.children.find((c) => c.id === id) || null;
 const SKELETON_IDS = ['side', 'search', 'sess-list', 'cur-id', 'mode', 'model',
-  'model-select', 'gear', 'settings-pop', 'annotation', 'autopilot', 'reconnect',
+  'model-select', 'gear', 'settings-pop', 'annotation', 'autopilot', 'handoff', 'reconnect',
   'reconnect-fail', 'log-wrap', 'log', 'hero', 'questions', 'composer',
   'skill-chip', 'msg', 'img-preview', 'skill-pop', 'send', 'qpanel', 'qp-list',
   'qcount', 'qtoggle', 'top', 'main'];
@@ -136,6 +136,7 @@ const state = {
   questions: [], inputs: { steer: [], queue: [] }, seq: 5,
   models: { default: 'a/b', models: ['a/b', 'x/y'] },
   sessions: [{ id: 's1', title: 'smoke session', agent: 'act', updated_at: Date.now() }],
+  agentStatus: 200,
 };
 const CALLS = [];
 const ALERTS = [];
@@ -180,6 +181,11 @@ async function fetch(url, opts = {}) {
   if (method === 'GET' && /\/seq$/.test(path)) return resp(200, { seq: state.seq });
   if (method === 'GET' && /\/messages$/.test(path)) return resp(200, { messages: [], meta: {} });
   if (method === 'GET' && path === '/api/sessions') return resp(200, { sessions: state.sessions });
+  if (method === 'POST' && /\/agent$/.test(path)) {
+    return state.agentStatus === 200
+      ? resp(200, { ok: true, agent: body.value })
+      : resp(409, { ok: false, error: 'agent switch refused while drain running' });
+  }
   if (method === 'POST' && /\/prompt$/.test(path)) return resp(200, { ok: true, seq: 1 });
   return resp(200, { ok: true });
 }
@@ -289,9 +295,41 @@ dispatch(ES[ES.length - 1], 'done', {});
 await sleep(50);
 ok(sandbox.busy === false && byId('send').textContent === 'Send', 'done event resets busy');
 
-// S5: SSE reconnect — badge on error, resume from /seq, reset on event,
+// S5: mode controls are committed only after server confirmation and stay
+// disabled throughout a running drain.
+console.log('S5 running mode gate');
+sandbox.mode = 'act';
+sandbox.updateModeDisplay();
+sandbox.setBusy(true);
+ok(byId('mode').disabled && byId('handoff').disabled, 'mode and handoff disabled while busy');
+byId('msg').value = '/plan later';
+const beforeBusyPrompt = calls('POST', /\/prompt$/).length;
+await sandbox.send('queue');
+ok(calls('POST', /\/prompt$/).length === beforeBusyPrompt, 'busy text mode command sends no request');
+ok(byId('msg').value === '/plan later', 'busy text mode command preserves composer input');
+byId('msg').value = '';
+const beforeBusySwitch = calls('POST', /\/agent$/).length;
+const beforeBusyHandoff = calls('POST', /\/handoff$/).length;
+byId('mode').value = 'plan';
+await sandbox.switchAgent();
+await sandbox.handoffSession();
+ok(calls('POST', /\/agent$/).length === beforeBusySwitch, 'busy mode switch sends no request');
+ok(calls('POST', /\/handoff$/).length === beforeBusyHandoff, 'busy handoff sends no request');
+ok(sandbox.mode === 'act' && byId('mode').value === 'act', 'busy select rolls back to committed mode');
+sandbox.setBusy(false);
+state.agentStatus = 409;
+byId('mode').value = 'plan';
+await sandbox.switchAgent();
+ok(sandbox.mode === 'act' && byId('mode').value === 'act', 'server rejection preserves committed mode');
+state.agentStatus = 200;
+byId('mode').value = 'plan';
+await sandbox.switchAgent();
+ok(sandbox.mode === 'plan' && byId('mode').value === 'plan', 'successful switch commits server mode');
+ok(!byId('mode').disabled && !byId('handoff').disabled, 'idle controls re-enabled after request');
+
+// S6: SSE reconnect — badge on error, resume from /seq, reset on event,
 // persistent banner after max attempts.
-console.log('S5 sse reconnect');
+console.log('S6 sse reconnect');
 const badge = byId('reconnect');
 const es1 = ES[ES.length - 1];
 es1.onerror();

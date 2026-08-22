@@ -2,8 +2,10 @@
 //!
 //! These slash commands switch the runtime agent (mode) and/or clear the
 //! transcript. Unlike normal prompts, they take effect *immediately* when
-//! consumed by the drain loop — they do NOT consume an LLM turn. This lets
-//! them be interleaved with real prompts/skills in the queue:
+//! consumed by the drain loop — they do NOT consume an LLM turn. Public UI
+//! admission rejects them while a run is active; the runner parser remains so
+//! idle submissions and already-persisted/internal recovery inputs behave
+//! deterministically:
 //!
 //! ```text
 //! queue: [/plan] -> [review skill] -> [/act]
@@ -119,6 +121,15 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
     let rest: String = parts.collect::<Vec<_>>().join(" ");
     let rest = (!rest.is_empty()).then_some(rest);
     Some((cmd, rest))
+}
+
+/// Whether `prompt` requests a user-visible mode transition.
+///
+/// Admission boundaries use this pure predicate to reject mode commands while
+/// a session is running. The runner still parses admitted commands so idle and
+/// internal recovery flows keep their existing behavior.
+pub fn is_mode_control(prompt: &str) -> bool {
+    split_control_prefix(prompt).is_some()
 }
 
 /// Parse a user prompt into a control command. Returns `None` for anything that
@@ -402,6 +413,16 @@ mod tests {
         assert_eq!(split_control_prefix("hello world"), None);
         assert_eq!(split_control_prefix(""), None);
         assert_eq!(split_control_prefix("/compact"), None);
+    }
+
+    #[test]
+    fn mode_control_predicate_covers_bare_and_compound_commands_only() {
+        for prompt in ["/act", "  /plan review  ", "/act_clear_context continue"] {
+            assert!(is_mode_control(prompt), "missed {prompt:?}");
+        }
+        for prompt in ["", "continue", "/acting", "/compact"] {
+            assert!(!is_mode_control(prompt), "false positive {prompt:?}");
+        }
     }
 
     #[test]

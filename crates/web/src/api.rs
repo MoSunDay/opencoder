@@ -20,8 +20,7 @@ use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_store::{Delivery, EventKind, SessionFilter, SessionMeta, SessionPatch};
 
-use crate::cmd::DrainCmd;
-use crate::handle::{admit_and_drain, send_cmd, SessionHandle, SseEvt};
+use crate::handle::{admit_and_drain_guarded, AdmissionError, SseEvt};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -196,6 +195,22 @@ pub async fn post_prompt(
     Path(id): Path<String>,
     Json(mut body): Json<PromptBody>,
 ) -> Response {
+    let mode_transition =
+        body.agent.is_some() || opencoder_session::control_cmd::is_mode_control(&body.prompt);
+    // Fast-path an already-running mode request before config/client work so
+    // the stable busy contract wins even if configuration changed mid-run.
+    // The guarded admission below repeats this check under the lifecycle lock
+    // to close a drain-start race after this read.
+    if mode_transition
+        && state
+            .handles
+            .lock()
+            .await
+            .get(&id)
+            .is_some_and(|handle| handle.draining.load(Ordering::SeqCst))
+    {
+        return error_409("mode switch refused while drain running");
+    }
     let mut config = match Config::load(&state.workdir) {
         Ok(c) => c,
         Err(e) => return error_500(format!("config: {e:#}")),
@@ -245,25 +260,7 @@ pub async fn post_prompt(
     if let Err(e) = ensure_session_row(&state, &id, &body.prompt, &config).await {
         return error_500(e);
     }
-    // Persist skill if provided: the triggering run consumes it and clears
-    // it at run end (one-shot); a crash mid-run keeps it for the resume.
-    if let Some(skill) = &body.skill {
-        if let Err(e) = state
-            .store
-            .update_session(
-                &id,
-                &SessionPatch {
-                    skill: Some(skill.clone()),
-                    updated_at: Some(opencoder_core::message::now_ms()),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            return error_500(format!("persist skill: {e:#}"));
-        }
-    }
-    match admit_and_drain(
+    match admit_and_drain_guarded(
         state.handles.clone(),
         state.store.clone(),
         &id,
@@ -273,11 +270,14 @@ pub async fn post_prompt(
         client,
         state.workdir.clone(),
         config,
+        body.skill,
+        mode_transition,
     )
     .await
     {
         Ok(seq) => Json(json!({ "admitted_seq": seq, "ok": true })).into_response(),
-        Err(e) => error_500(format!("admit: {e:#}")),
+        Err(AdmissionError::BusyModeSwitch) => error_409("mode switch refused while drain running"),
+        Err(AdmissionError::Other(e)) => error_500(format!("admit: {e:#}")),
     }
 }
 
@@ -333,35 +333,19 @@ pub async fn post_agent(
 ) -> Response {
     // get-or-create the handle so the override is never dropped, even right
     // after create_session when no drain has started yet.
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
-    // RUNNING-GATE: an actively draining session must not be mode-switched —
-    // the live turn keeps its current agent, so applying the switch now would
-    // leave chat.agent / persisted meta diverging from the executing mode.
-    // Refuse BEFORE any store-meta or override mutation (atomicity). Mirrors
-    // `post_interrupt`'s draining gate.
+    let (handle, _lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&state.handles, &id).await;
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("agent switch refused while drain running");
     }
-    // P1-5: Capture old meta for TOCTOU rollback. A drain may start between
-    // the draining check above and the update_session write below.
-    let old_agent = match state.store.get_session(&id).await {
-        Ok(m) => m,
-        Err(e) => {
-            warn!(error = %e, session_id = %id, "post_agent: get_session for rollback failed");
-            None
-        }
-    };
+    let plan_input_count = (body.value == "plan").then_some(0);
     if let Err(e) = state
         .store
         .update_session(
             &id,
             &SessionPatch {
                 agent: Some(body.value.clone()),
+                plan_input_count,
                 updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },
@@ -369,33 +353,6 @@ pub async fn post_agent(
         .await
     {
         return error_500(format!("update_session: {e:#}"));
-    }
-    // P1-5: Re-check draining AFTER the write. If a drain started between
-    // the first check and this write (TOCTOU), rollback the meta change.
-    // `rollback_agent` restores the captured value — or CLEARS the column
-    // when it was NULL / the capture read failed: a plain `agent: None`
-    // patch is a no-op and would leave the refused switch persisted.
-    if handle.draining.load(Ordering::SeqCst) {
-        let patch = SessionPatch::rollback_agent(old_agent.as_ref());
-        let _ = state.store.update_session(&id, &patch).await;
-        return error_409("agent switch refused: drain started during write");
-    }
-    // Switch INTO plan mode re-arms plan-phase affordances (TUI worker.rs
-    // parity): reset the live counter via a drain command when a drain is
-    // running, and ALWAYS persist `plan_input_count = 0` (next resume reads
-    // the store).
-    if body.value == "plan" {
-        if handle.draining.load(Ordering::SeqCst) {
-            send_cmd(&state.handles, &id, DrainCmd::ResetPlanPhase).await;
-        }
-        let patch = SessionPatch {
-            plan_input_count: Some(0),
-            updated_at: Some(opencoder_core::message::now_ms()),
-            ..Default::default()
-        };
-        if let Err(e) = state.store.update_session(&id, &patch).await {
-            warn!(error = %e, session_id = %id, "post_agent: persist plan_input_count failed");
-        }
     }
     handle.overrides.lock().await.agent = Some(body.value.clone());
     Json(json!({ "ok": true, "agent": body.value })).into_response()
@@ -420,20 +377,12 @@ pub async fn post_model(
 ) -> Response {
     // get-or-create the handle so the override is never dropped, even right
     // after create_session when no drain has started yet.
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
-    // RUNNING-GATE: a model override has the identical deferred-next-drain
-    // semantics as the agent switch — a mid-turn model switch would diverge
-    // from the model actually executing the live turn. Refuse BEFORE any
-    // config / store-meta / override mutation (atomicity).
+    let (handle, _lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&state.handles, &id).await;
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("model switch refused while drain running");
     }
-    // P1-5: Capture old meta for TOCTOU rollback.
+    // Keep the old value only for a global-config save failure rollback.
     let old_model = match state.store.get_session(&id).await {
         Ok(m) => m,
         Err(e) => {
@@ -455,17 +404,8 @@ pub async fn post_model(
     {
         return error_500(format!("update_session: {e:#}"));
     }
-    // P1-5: Re-check draining AFTER the write (TOCTOU). Rollback meta if a
-    // drain started during the write. `rollback_model` clears the column when
-    // the old value was NULL / unreadable (a `model: None` patch is a no-op).
-    if handle.draining.load(Ordering::SeqCst) {
-        let patch = SessionPatch::rollback_model(old_model.as_ref());
-        let _ = state.store.update_session(&id, &patch).await;
-        return error_409("model switch refused: drain started during write");
-    }
-    // Persist global config only after all drain checks pass (Bug 6): a refused
-    // request never mutates the global default. Save failure rolls back meta
-    // (same NULL-clearing semantics as the drain rollback above).
+    // A refused request never mutates the global default. Save failure rolls
+    // back the session meta while the lifecycle lock still excludes a drain.
     if body.persist_default {
         let patch = serde_json::json!({ "model": &body.value });
         if let Err(e) = Config::save(&state.workdir, &patch) {
@@ -505,6 +445,10 @@ pub async fn post_subagent_steer(
     Json(body): Json<SubagentSteerBody>,
 ) -> Response {
     use opencoder_store::{Delivery, SessionInput, SubagentStatus};
+
+    if opencoder_session::control_cmd::is_mode_control(&body.prompt) {
+        return error_409("mode switch refused while subagent running");
+    }
 
     // Guard: task must exist and be running.
     let task = match state.store.get_subagent_task(&task_id).await {

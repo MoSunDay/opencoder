@@ -35,6 +35,9 @@ pub(crate) enum KeyAction {
     /// the parent agent — so it is rejected here. The input box is left
     /// untouched so the user can press Enter to steer the subagent instead.
     QueueUnsupported,
+    /// A textual mode command was submitted while work is running. The input
+    /// remains untouched so the user can retry at an idle boundary.
+    ModeSwitchBlocked,
     SwitchAgent(String),
     SwitchAgentNoClear(String),
     Cancel,
@@ -291,6 +294,9 @@ pub(crate) fn handle_key(
             // prompt rather than just toggling the agent (mirrors the
             // Enter/Tab submit + buffer-clear flow).
             if let Some(text) = crate::control_helpers::plan_compound_for_submit(input) {
+                if running {
+                    return KeyAction::ModeSwitchBlocked;
+                }
                 input.clear();
                 *cursor_idx = 0;
                 *hist_idx = None;
@@ -315,6 +321,9 @@ pub(crate) fn handle_key(
                 return KeyAction::None;
             }
             let text = input.trim().to_string();
+            if running && opencoder_session::control_cmd::is_mode_control(&text) {
+                return KeyAction::ModeSwitchBlocked;
+            }
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
@@ -342,13 +351,16 @@ pub(crate) fn handle_key(
             if input.trim().is_empty() {
                 return KeyAction::None;
             }
+            let text = input.trim().to_string();
+            if running && opencoder_session::control_cmd::is_mode_control(&text) {
+                return KeyAction::ModeSwitchBlocked;
+            }
             // Focused running subagent: a queue would be admitted to the parent
             // session and affect the parent agent — reject it instead, leaving
             // the typed text so Enter can submit it as a subagent steer.
             if subagent_focused {
                 return KeyAction::QueueUnsupported;
             }
-            let text = input.trim().to_string();
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
@@ -536,3 +548,7 @@ mod queue_scroll_tests;
 #[cfg(test)]
 #[path = "key_handler_file_mention_tests.rs"]
 mod file_mention_tests;
+
+#[cfg(test)]
+#[path = "key_handler_running_mode_tests.rs"]
+mod running_mode_tests;

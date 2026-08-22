@@ -19,7 +19,9 @@
 //! geometry runs on the cleaned line set ([`CleanModel`]), so dropped rows
 //! leave no blank band and the first visible row is never over-skipped.
 //! The app itself never touches the clipboard — copying is the terminal's
-//! own job via its native selection shortcuts.
+//! own job via its native selection shortcuts. While active, Up/Down scroll
+//! one clean row, PageUp moves one page toward older content, PageDown/End
+//! returns to the latest content, and Home jumps to the beginning.
 
 pub mod clean;
 
@@ -71,6 +73,41 @@ fn next_state(k: &KeyEvent, active: bool, keymap: &KeyBindings) -> (bool, bool) 
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollAction {
+    LineUp,
+    LineDown,
+    PageUp,
+    Top,
+    Bottom,
+}
+
+/// Pure copy-mode navigation classifier. All non-navigation keys remain
+/// swallowed by `next_state`, so copy mode cannot edit the underlying view.
+fn scroll_action(k: &KeyEvent) -> Option<ScrollAction> {
+    match k.code {
+        KeyCode::Up => Some(ScrollAction::LineUp),
+        KeyCode::Down => Some(ScrollAction::LineDown),
+        KeyCode::PageUp => Some(ScrollAction::PageUp),
+        KeyCode::PageDown | KeyCode::End => Some(ScrollAction::Bottom),
+        KeyCode::Home => Some(ScrollAction::Top),
+        _ => None,
+    }
+}
+
+/// Pure scroll transition. The renderer owns bounds clamping against the
+/// cleaned row model; `Bottom` re-enables follow so it stays pinned while new
+/// output arrives.
+fn next_scroll(action: ScrollAction, scroll: u32) -> (u32, bool) {
+    match action {
+        ScrollAction::LineUp => (scroll.saturating_sub(1), false),
+        ScrollAction::LineDown => (scroll.saturating_add(1), false),
+        ScrollAction::PageUp => (scroll.saturating_sub(20), false),
+        ScrollAction::Top => (0, false),
+        ScrollAction::Bottom => (scroll, true),
+    }
+}
+
 /// Handle a key for copy-mode toggle / input swallowing, performing the
 /// enter/exit side effects. Returns `true` if the key was consumed (the
 /// caller should mark the frame dirty and `continue`).
@@ -80,9 +117,23 @@ fn next_state(k: &KeyEvent, active: bool, keymap: &KeyBindings) -> (bool, bool) 
 /// `render_composer_clean` / `render_notepad_clean`, so Ctrl+G is never a
 /// dead key. While active every key is swallowed; the toggle key and `Esc`
 /// exit, and the overlay is left intact underneath (layered modality: the
-/// first Esc leaves copy mode, the next one reaches the overlay).
-pub(crate) fn handle_key(k: &KeyEvent, copy_mode: &mut bool, keymap: &KeyBindings) -> bool {
+/// first Esc leaves copy mode, the next one reaches the overlay). Navigation
+/// keys are the only active-mode exception: they update the clean transcript
+/// viewport without reaching the underlying composer or modal.
+pub(crate) fn handle_key(
+    k: &KeyEvent,
+    copy_mode: &mut bool,
+    keymap: &KeyBindings,
+    scroll: &mut u32,
+    follow: &mut bool,
+) -> bool {
     let prev = *copy_mode;
+    if prev {
+        if let Some(action) = scroll_action(k) {
+            (*scroll, *follow) = next_scroll(action, *scroll);
+            return true;
+        }
+    }
     let (next, consumed) = next_state(k, prev, keymap);
     if consumed {
         *copy_mode = next;
@@ -302,9 +353,23 @@ mod tests {
     fn toggle_fires_even_with_overlay_open() {
         let kb = keybindings();
         let mut active = false;
-        assert!(handle_key(&ctrl('g'), &mut active, &kb));
+        let mut scroll = 0;
+        let mut follow = true;
+        assert!(handle_key(
+            &ctrl('g'),
+            &mut active,
+            &kb,
+            &mut scroll,
+            &mut follow
+        ));
         assert!(active, "toggle must fire even with an overlay open");
-        assert!(handle_key(&ctrl('g'), &mut active, &kb));
+        assert!(handle_key(
+            &ctrl('g'),
+            &mut active,
+            &kb,
+            &mut scroll,
+            &mut follow
+        ));
         assert!(!active, "toggle must exit an active copy mode");
     }
 
@@ -315,15 +380,50 @@ mod tests {
     fn active_swallows_keys_and_esc_exits() {
         let kb = keybindings();
         let mut active = true;
-        assert!(handle_key(&plain('x'), &mut active, &kb));
+        let mut scroll = 0;
+        let mut follow = true;
+        assert!(handle_key(
+            &plain('x'),
+            &mut active,
+            &kb,
+            &mut scroll,
+            &mut follow
+        ));
         assert!(active, "plain keys are swallowed while copy mode is active");
         let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        assert!(handle_key(&esc, &mut active, &kb));
+        assert!(handle_key(&esc, &mut active, &kb, &mut scroll, &mut follow));
         assert!(!active, "Esc must be consumed and exit copy mode");
         assert!(
-            !handle_key(&plain('x'), &mut active, &kb),
+            !handle_key(&plain('x'), &mut active, &kb, &mut scroll, &mut follow),
             "exited copy mode passes keys through again"
         );
+    }
+
+    #[test]
+    fn active_navigation_scrolls_clean_view_without_exiting() {
+        let kb = keybindings();
+        let mut active = true;
+        let mut scroll = 50;
+        let mut follow = true;
+
+        for (code, expected_scroll, expected_follow) in [
+            (KeyCode::Up, 49, false),
+            (KeyCode::Down, 50, false),
+            (KeyCode::PageUp, 30, false),
+            (KeyCode::Home, 0, false),
+            (KeyCode::PageDown, 0, true),
+        ] {
+            assert!(handle_key(
+                &KeyEvent::new(code, KeyModifiers::NONE),
+                &mut active,
+                &kb,
+                &mut scroll,
+                &mut follow
+            ));
+            assert!(active, "navigation must keep copy mode active");
+            assert_eq!(scroll, expected_scroll);
+            assert_eq!(follow, expected_follow);
+        }
     }
 
     // ── Render-level fixtures ─────────────────────────────────────────────
@@ -467,6 +567,50 @@ mod tests {
             rows[7].trim_end().is_empty(),
             "only the single structural blank may trail, got {:?}",
             rows[7]
+        );
+    }
+
+    #[test]
+    fn page_up_reveals_older_clean_transcript_rows() {
+        use opencoder_session::SessionEvent;
+
+        let body: String = (1..=30).map(|i| format!("line{i}\n")).collect();
+        let mut view = ChatView::default();
+        view.apply(&SessionEvent::TextDelta(body));
+        view.apply(&SessionEvent::Done);
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+        let mut scroll = 0;
+        let mut follow = true;
+        let mut viewport = None;
+        terminal
+            .draw(|f| {
+                render_clean(f, f.area(), &view, &mut scroll, follow, 0, 0, &mut viewport);
+            })
+            .unwrap();
+        assert!(buf_text(terminal.backend().buffer()).contains("line30"));
+
+        let mut active = true;
+        assert!(handle_key(
+            &KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+            &mut active,
+            &keybindings(),
+            &mut scroll,
+            &mut follow,
+        ));
+        terminal
+            .draw(|f| {
+                render_clean(f, f.area(), &view, &mut scroll, follow, 0, 0, &mut viewport);
+            })
+            .unwrap();
+        let older = buf_text(terminal.backend().buffer());
+        assert!(
+            older.contains("line4"),
+            "older page must be visible: {older}"
+        );
+        assert!(
+            !older.contains("line30"),
+            "latest page must no longer be pinned: {older}"
         );
     }
 

@@ -169,6 +169,43 @@ async fn steer_running_subagent_returns_ok() {
 }
 
 #[tokio::test]
+async fn mode_command_to_running_subagent_is_rejected_without_admission() {
+    let (app, state) = app().await;
+    let parent_sid = Uuid::new_v4().to_string();
+    let child_sid = Uuid::new_v4().to_string();
+    let task_id = Uuid::new_v4().to_string();
+    seed_subagent(
+        &state,
+        &parent_sid,
+        &child_sid,
+        &task_id,
+        SubagentStatus::Running,
+    )
+    .await;
+    seed_live_gate(&state, &parent_sid, &task_id).await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/sessions/{parent_sid}/subagents/{task_id}/steer"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"prompt":"/plan later","images":[]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(state
+        .store
+        .pending_inputs(&child_sid, Delivery::Steer)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
 async fn steer_running_row_without_live_gate_returns_409_and_does_not_admit() {
     let (app, state) = app().await;
     let parent_sid = Uuid::new_v4().to_string();

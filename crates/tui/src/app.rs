@@ -159,10 +159,8 @@ pub(super) async fn run_app(
         }
     });
 
-    // Input is collected on a dedicated OS thread and delivered over `input_rx`.
-    // Liveness supervisor: when crossterm 0.28's mio source busy-loops on pty
-    // close (holding the event mutex so `poll` never returns), a separate
-    // supervisor thread detects the stall, restores the terminal, exits cleanly.
+    // Input uses a dedicated OS thread. A liveness supervisor handles pty-close
+    // stalls by restoring the terminal and exiting cleanly.
     let heartbeat = crate::supervisor::Heartbeat::new();
     let supervisor_active = Arc::new(AtomicBool::new(true));
     crate::supervisor::spawn(heartbeat.clone(), Arc::clone(&supervisor_active));
@@ -300,7 +298,7 @@ pub(super) async fn run_app(
                             dirty = true;
                             continue;
                         }
-                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap) { dirty = true; render_pending = true; continue; }
+                        if crate::copy_mode::handle_key(&k, &mut copy_mode, &keymap, &mut scroll, &mut follow) { dirty = true; render_pending = true; continue; }
                         if plan_edit.is_some() {
                             let f = app_loop::dispatch_plan_edit_key(&mut plan_edit, k, &mut chat, &cmd_tx, terminal).await;
                             if f == app_loop::LoopFlow::Quit { break; } continue;
@@ -620,6 +618,9 @@ pub(super) async fn run_app(
                                 // app_helpers::queue_unsupported_flash).
                                 mode_flash = Some(queue_unsupported_flash(anim_tick));
                             }
+                            KeyAction::ModeSwitchBlocked => {
+                                mode_flash = Some(mode_switch_busy_flash(anim_tick));
+                            }
                             KeyAction::SwitchAgent(name) => {
                                 if matches!(
                                     app_loop::handle_switch_agent(
@@ -789,9 +790,9 @@ pub(super) async fn run_app(
     Ok(session_id)
 }
 pub(crate) use crate::app_helpers::{
-    apply_force_redraw, handle_mouse, initial_chat_view, on_resize_event, poll_idle_resize,
-    pre_key_intercept, push_history, push_user, queue_unsupported_flash, snapshot_image_uris,
-    start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    apply_force_redraw, handle_mouse, initial_chat_view, mode_switch_busy_flash, on_resize_event,
+    poll_idle_resize, pre_key_intercept, push_history, push_user, queue_unsupported_flash,
+    snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::skill_trigger;
 #[cfg(test)]

@@ -46,6 +46,35 @@ async fn release_subscriber_keeps_handle_while_draining() {
 }
 
 #[tokio::test]
+async fn release_subscriber_waits_for_idle_lifecycle_mutation() {
+    let handles = new_handle_map();
+    let id = "sess-lifecycle".to_string();
+    let handle = SessionHandle::new();
+    handle.subscribers.store(1, Ordering::SeqCst);
+    handles.lock().await.insert(id.clone(), handle.clone());
+    let lifecycle = handle.lifecycle.clone().lock_owned().await;
+
+    release_events_subscriber(handles.clone(), id.clone(), true);
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert!(
+        handles.lock().await.contains_key(&id),
+        "eviction must not replace a handle during a lifecycle mutation"
+    );
+
+    drop(lifecycle);
+    for _ in 0..200 {
+        if !handles.lock().await.contains_key(&id) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    assert!(
+        !handles.lock().await.contains_key(&id),
+        "last-subscriber eviction should resume after the mutation"
+    );
+}
+
+#[tokio::test]
 async fn release_subscriber_keeps_handle_while_others_remain() {
     let handles = new_handle_map();
     let id = "sess-guest".to_string();

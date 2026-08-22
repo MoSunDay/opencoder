@@ -230,6 +230,12 @@ pub async fn admit_and_drain(
 
 /// Atomically admit a prompt and optional skill. An idle-only request has no
 /// side effects when a drain is active.
+///
+/// `agent_override` marks a prompt that rewrites the session's agent config
+/// (the `agent` field): it is idle-only — refused with
+/// [`AdmissionError::BusyModeSwitch`] while a drain is active so a mid-run
+/// override never lands. Textual mode commands are NOT overrides: they are
+/// admitted and applied by the runner at the next idle/turn boundary.
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_and_drain_guarded(
     handles: HandleMap,
@@ -242,11 +248,11 @@ pub async fn admit_and_drain_guarded(
     workdir: std::path::PathBuf,
     config: Config,
     skill: Option<String>,
-    reject_mode_while_running: bool,
+    agent_override: bool,
 ) -> std::result::Result<i64, AdmissionError> {
     let (handle, lifecycle) =
         crate::handle_lifecycle::lock_session_lifecycle(&handles, session_id).await;
-    if reject_mode_while_running && handle.draining.load(Ordering::SeqCst) {
+    if agent_override && handle.draining.load(Ordering::SeqCst) {
         return Err(AdmissionError::BusyModeSwitch);
     }
     if let Some(skill) = skill {
@@ -259,7 +265,10 @@ pub async fn admit_and_drain_guarded(
                     ..Default::default()
                 },
             )
-            .await?;
+            .await
+            // Keep the "persist skill" wording the 500 contract carries
+            // (store_error_surfacing.rs) after the admission refactor.
+            .map_err(|e| anyhow::anyhow!("persist skill: {e:#}"))?;
     }
     let input = SessionInput {
         seq: None,

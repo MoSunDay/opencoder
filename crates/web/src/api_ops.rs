@@ -1,6 +1,7 @@
 //! Additional HTTP handlers for feature-parity with the TUI:
 //! fork, compact, handoff, config, skill, and background-process management.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -15,7 +16,7 @@ use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_store::SessionPatch;
 
 use crate::cmd::DrainCmd;
-use crate::handle::{ensure_drain, send_cmd, SessionHandle};
+use crate::handle::{send_cmd, start_drain_locked};
 use crate::AppState;
 
 // ── fork ──────────────────────────────────────────────────────────────────
@@ -52,22 +53,19 @@ pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<Str
     };
     // Queue the command FIRST (before spawning the drain) so it's in the
     // channel even if the drain processes instantly.
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
+    let (handle, _lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&state.handles, &id).await;
     if let Err(e) = handle.cmd_tx.send(DrainCmd::Compact) {
         warn!(error = %e, session_id = %id, "post_compact: drain command not delivered");
     }
-    ensure_drain(
+    start_drain_locked(
         state.handles.clone(),
         state.store.clone(),
         &id,
         client,
         state.workdir.clone(),
         config,
+        &handle,
     )
     .await;
     Json(json!({ "ok": true })).into_response()
@@ -93,6 +91,11 @@ pub async fn post_handoff(
         Err(e) => return error_500(format!("get_session: {e:#}")),
     }
     let extra = body.map(|b| b.extra.clone()).unwrap_or_default();
+    let (handle, _lifecycle) =
+        crate::handle_lifecycle::lock_session_lifecycle(&state.handles, &id).await;
+    if handle.draining.load(Ordering::SeqCst) {
+        return error_409("handoff refused while drain running");
+    }
     let config = match load_config(&state) {
         Ok(c) => c,
         Err(r) => return *r,
@@ -101,22 +104,17 @@ pub async fn post_handoff(
         Ok(c) => c,
         Err(r) => return *r,
     };
-    let handle = {
-        let mut map = state.handles.lock().await;
-        map.entry(id.clone())
-            .or_insert_with(SessionHandle::new)
-            .clone()
-    };
     if let Err(e) = handle.cmd_tx.send(DrainCmd::Handoff { extra }) {
-        warn!(error = %e, session_id = %id, "post_handoff: drain command not delivered");
+        return error_500(format!("post_handoff: drain command not delivered: {e}"));
     }
-    ensure_drain(
+    start_drain_locked(
         state.handles.clone(),
         state.store.clone(),
         &id,
         client,
         state.workdir.clone(),
         config,
+        &handle,
     )
     .await;
     Json(json!({ "ok": true })).into_response()
@@ -266,6 +264,14 @@ fn build_client(state: &AppState, config: &Config) -> Result<Arc<dyn ChatStream>
 fn error_400(msg: String) -> Response {
     (
         axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
+}
+
+fn error_409(msg: &str) -> Response {
+    (
+        axum::http::StatusCode::CONFLICT,
         Json(json!({ "ok": false, "error": msg })),
     )
         .into_response()

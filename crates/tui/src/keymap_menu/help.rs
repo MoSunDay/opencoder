@@ -45,6 +45,7 @@ pub const HELP: &str = "\
 
 鼠标:            滚轮滚动对话记录；点击箭头跟随最新
                   文本复制: Ctrl+G 进入复制模式（暂停鼠标捕获 + 正文去装饰全宽显示），
+                  对话正文可用 ↑/↓ 逐行、PageUp 向前翻页、PageDown/End 回最新、Home 到开头；
                   用终端自带拖拽选择和复制快捷键取干净文本; Esc/Ctrl+G 退出恢复
                   SHIFT+拖拽 = 终端原生选择（Kitty/WezTerm 等透传 Shift 的终端）
                   转向面板: ✕ 删除, > 立即提交（中断并提升）
@@ -186,6 +187,7 @@ mod tests {
         // wording must not return.
         assert!(HELP.contains("终端原生拖拽选择"));
         assert!(HELP.contains("去装饰"));
+        assert!(HELP.contains("PageDown/End 回最新"));
         assert!(!HELP.contains("OSC52"));
         assert!(!HELP.contains("应用内选择模式"));
     }

@@ -8,6 +8,7 @@ pub mod api_questions;
 pub mod auth;
 pub mod cmd;
 pub mod handle;
+mod handle_lifecycle;
 mod handle_questions;
 pub mod html;
 mod sse_dedup;

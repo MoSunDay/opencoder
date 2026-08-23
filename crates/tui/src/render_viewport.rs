@@ -92,6 +92,12 @@ impl CleanModel {
         self.total_rows
     }
 
+    /// `cum_rows[i]` = screen rows consumed by `texts[0..i]` (len+1 table);
+    /// the copy-mode wrap plan derives its soft-row flags from this.
+    pub(crate) fn cum_rows(&self) -> &[usize] {
+        &self.cum_rows
+    }
+
     /// The kept, slot-stripped texts (window indices refer to this slice).
     pub(crate) fn texts(&self) -> &[String] {
         &self.texts

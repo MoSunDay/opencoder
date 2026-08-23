@@ -1,4 +1,4 @@
-Commit: (working-tree)
+Commit: cff0b2751ba7893d0afde18b62455b3ac000a42c
 
 # 修复：copy 模式（Ctrl+G）终端原生复制在软换行处插入多余换行
 

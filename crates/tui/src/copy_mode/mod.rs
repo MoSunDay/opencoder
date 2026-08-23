@@ -25,6 +25,9 @@
 
 pub mod clean;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -33,6 +36,9 @@ use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::chat::ChatView;
+use crate::copy_wrap::{
+    soft_flags_from_cum_rows, soft_flags_from_row_texts, soft_flags_from_wrap_rows, WrapPlan,
+};
 use crate::keymap::KeyBindings;
 use crate::render_viewport::ViewportCache;
 use crate::terminal::{resume_mouse_capture, suspend_mouse_capture};
@@ -171,6 +177,7 @@ pub(crate) fn render_clean(
     anim_tick: u32,
     now_ms: i64,
     viewport: &mut Option<ViewportCache>,
+    wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -188,6 +195,15 @@ pub(crate) fn render_clean(
     }
     *scroll = (*scroll as usize).min(max_rows) as u32;
     let (start, end, top_skip) = cleaned.visible_window(*scroll as usize, content_h);
+    // Mark display-only wrap rows so the terminal auto-wraps (and thus
+    // joins) them on native copy; rows past the content stay hard.
+    if let Some(plan) = wrap_plan {
+        let mut wp = plan.borrow_mut();
+        if wp.term_width == area.width {
+            let flags = soft_flags_from_cum_rows(cleaned.cum_rows(), *scroll as usize, content_h);
+            wp.set_soft(area.y as usize, &flags);
+        }
+    }
     let lines: Vec<Line<'static>> = cleaned.texts()[start..end]
         .iter()
         .map(|t| Line::raw(t.clone()))
@@ -213,6 +229,7 @@ pub(crate) fn render_composer_clean(
     area: Rect,
     input: &str,
     reserve_chip_row: bool,
+    wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -227,6 +244,13 @@ pub(crate) fn render_composer_clean(
         area
     };
     let rows = crate::composer::wrap_rows(input, area.width, 0);
+    if let Some(plan) = wrap_plan {
+        let mut wp = plan.borrow_mut();
+        if wp.term_width == area.width {
+            let flags = soft_flags_from_wrap_rows(&rows);
+            wp.set_soft(text_area.y as usize, &flags);
+        }
+    }
     let chars: Vec<char> = input.chars().collect();
     let lines: Vec<Line<'static>> = rows
         .iter()
@@ -270,11 +294,23 @@ fn render_copy_chip(f: &mut Frame, area: Rect) {
 /// same layout model the decorated editor renders from. A COPY MODE chip
 /// is pinned to the last row so the mode stays visible (render.rs's shared
 /// chip pass never runs for the notepad fullscreen branch).
-pub(crate) fn render_notepad_clean(f: &mut Frame, area: Rect, view: &crate::notepad::NotepadView) {
+pub(crate) fn render_notepad_clean(
+    f: &mut Frame,
+    area: Rect,
+    view: &crate::notepad::NotepadView,
+    wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let rows = crate::notepad::editor::row_texts(&view.editor.vim.text, area.width);
+    if let Some(plan) = wrap_plan {
+        let mut wp = plan.borrow_mut();
+        if wp.term_width == area.width {
+            let flags = soft_flags_from_row_texts(&rows);
+            wp.set_soft(area.y as usize, &flags);
+        }
+    }
     // `row_texts` carries each logical line's terminating newline for exact
     // round-trips; a Line must not embed it — the terminal already breaks
     // rows — so trim it back off here.
@@ -440,7 +476,17 @@ mod tests {
         let mut viewport = None;
         terminal
             .draw(|f| {
-                render_clean(f, f.area(), view, &mut scroll, true, 0, 0, &mut viewport);
+                render_clean(
+                    f,
+                    f.area(),
+                    view,
+                    &mut scroll,
+                    true,
+                    0,
+                    0,
+                    &mut viewport,
+                    None,
+                );
             })
             .unwrap();
         terminal
@@ -585,7 +631,17 @@ mod tests {
         let mut viewport = None;
         terminal
             .draw(|f| {
-                render_clean(f, f.area(), &view, &mut scroll, follow, 0, 0, &mut viewport);
+                render_clean(
+                    f,
+                    f.area(),
+                    &view,
+                    &mut scroll,
+                    follow,
+                    0,
+                    0,
+                    &mut viewport,
+                    None,
+                );
             })
             .unwrap();
         assert!(buf_text(terminal.backend().buffer()).contains("line30"));
@@ -600,7 +656,17 @@ mod tests {
         ));
         terminal
             .draw(|f| {
-                render_clean(f, f.area(), &view, &mut scroll, follow, 0, 0, &mut viewport);
+                render_clean(
+                    f,
+                    f.area(),
+                    &view,
+                    &mut scroll,
+                    follow,
+                    0,
+                    0,
+                    &mut viewport,
+                    None,
+                );
             })
             .unwrap();
         let older = buf_text(terminal.backend().buffer());
@@ -618,7 +684,7 @@ mod tests {
     fn render_composer_clean_shows_text_without_chrome() {
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
-            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", false))
+            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", false, None))
             .unwrap();
         let rows = buf_rows(terminal.backend().buffer());
         // Text rows land flush at column 0: no border, no prompt glyph.
@@ -649,7 +715,7 @@ mod tests {
     fn render_composer_clean_reserved_row0_stays_blank_for_chip() {
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
-            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", true))
+            .draw(|f| render_composer_clean(f, f.area(), "hello\nworld", true, None))
             .unwrap();
         let rows = buf_rows(terminal.backend().buffer());
         assert!(
@@ -678,7 +744,7 @@ mod tests {
 
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
-            .draw(|f| render_notepad_clean(f, f.area(), &view))
+            .draw(|f| render_notepad_clean(f, f.area(), &view, None))
             .unwrap();
         let rows = buf_rows(terminal.backend().buffer());
         // File text flush at column 0 — the decorated editor would put a
@@ -706,7 +772,7 @@ mod tests {
 
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
         terminal
-            .draw(|f| render_notepad_clean(f, f.area(), &view))
+            .draw(|f| render_notepad_clean(f, f.area(), &view, None))
             .unwrap();
         let rows = buf_rows(terminal.backend().buffer());
         assert!(

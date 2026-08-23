@@ -1,4 +1,4 @@
-Commit: 3320cbb74d043bfa0071c83bbfdddbd613b72a9a
+Commit: a1b22a1a52fc7538bdb5c79f8eca45f03cdd6642
 
 # OpenCoder 能力地图
 

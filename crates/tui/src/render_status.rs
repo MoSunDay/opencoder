@@ -100,10 +100,20 @@ pub(crate) fn render_status(
     ));
     spans.push(Span::raw("  "));
 
+    // Task-state colour coding: the cumulative timer burns warn (orange)
+    // while the task runs and turns muted (gray) once stopped — the same
+    // running/done pairing as the subagent-header timers. Together with the
+    // spinner (shown only while running) the status bar always mirrors the
+    // task lifecycle; the next submitted requirement flips it back to warn.
     if task_ms > 0 {
+        let timer_color = if running {
+            theme::warn_color()
+        } else {
+            theme::muted()
+        };
         spans.push(Span::styled(
             fmtmod::format_run_duration(task_ms),
-            Style::default().fg(theme::warn_color()),
+            Style::default().fg(timer_color),
         ));
         spans.push(Span::raw("  "));
     }

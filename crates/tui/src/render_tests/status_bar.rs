@@ -252,6 +252,40 @@ fn status_bar_shows_task_time() {
     );
 }
 
+/// Once the task stops (running=false), the frozen cumulative timer keeps
+/// its position but flips from warn (orange) to muted (gray) — the state
+/// colour coding of the status bar (the spinner vanishes on stop; the timer
+/// turns warn again on the next submitted requirement).
+#[test]
+fn status_bar_task_time_turns_muted_when_stopped() {
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 90000);
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let row = row_text(buf, 0, 120);
+    let time_pos = row
+        .find("1m30s")
+        .expect("stopped task time must stay visible");
+    assert!(
+        !row.contains('\u{280b}'),
+        "no running spinner may appear once stopped; got: {row}"
+    );
+    let cell_x = row[..time_pos].chars().count() as u16;
+    let cell = buf.cell((cell_x, 0)).expect("task-time cell must exist");
+    assert_eq!(
+        cell.style().fg,
+        Some(crate::theme::muted()),
+        "stopped task time should use muted color; got: {:?}",
+        cell.style().fg
+    );
+}
+
 /// When `task_ms == 0` (no task started yet), the task time is hidden.
 #[test]
 fn status_bar_hides_task_time_when_zero() {

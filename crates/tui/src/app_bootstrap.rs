@@ -1,6 +1,8 @@
 //! TUI bootstrap: config load, session resume/create, terminal setup.
 //! Extracted from `app.rs` to keep that file under the 800-line iteration cap.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -11,6 +13,7 @@ use opencoder_store::Store;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app_helpers::{open_store, persist_session_model, reapply_session_model, resume_hint};
+use crate::copy_wrap::{WrapAwareBackend, WrapPlan};
 use crate::render::Term;
 use crate::terminal::TerminalGuard;
 use crate::TuiOpts;
@@ -191,7 +194,13 @@ impl ActiveTerminal {
                 return Err(error);
             }
         };
-        let backend = CrosstermBackend::new(std::io::stdout());
+        // The wrap-aware backend shares its per-frame WrapPlan with the
+        // renderer, so copy mode can mark display-only wrap boundaries and
+        // let terminal-native copy join them without newlines.
+        let backend = WrapAwareBackend::new(
+            CrosstermBackend::new(std::io::stdout()),
+            Rc::new(RefCell::new(WrapPlan::default())),
+        );
         let mut terminal = match Term::new(backend) {
             Ok(terminal) => terminal,
             Err(error) => {

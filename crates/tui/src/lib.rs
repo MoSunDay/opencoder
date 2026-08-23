@@ -12,6 +12,7 @@ pub mod command;
 pub mod composer;
 pub mod control_helpers;
 pub mod copy_mode;
+pub mod copy_wrap;
 pub mod envs_menu;
 pub mod file_menu;
 pub mod fmt;

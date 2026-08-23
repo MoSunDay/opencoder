@@ -40,6 +40,7 @@ fn draw(
                 true,
                 tail_ms,
                 copy_mode,
+                None,
             );
         })
         .unwrap();

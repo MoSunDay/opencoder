@@ -1,9 +1,11 @@
 //! All TUI rendering functions — body, composer, status bar, popups, cursor.
 
+use std::cell::RefCell;
 use std::io::Stdout;
+use std::rc::Rc;
 
 use anyhow::Result;
-use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::backend::Backend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -15,6 +17,7 @@ use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
 use crate::composer;
+use crate::copy_wrap::{WrapAwareBackend, WrapPlan};
 use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
@@ -23,7 +26,9 @@ use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 use crate::theme;
 
-pub(crate) type Term = Terminal<CrosstermBackend<Stdout>>;
+/// Production terminal type: the wrap-aware backend that lets copy mode
+/// suppress `MoveTo` at display-only wrap boundaries (see `copy_wrap`).
+pub(crate) type Term = Terminal<WrapAwareBackend<Stdout>>;
 
 #[path = "render_status.rs"]
 mod status_bar;
@@ -88,7 +93,7 @@ pub(crate) fn in_rect(r: Rect, col: u16, row: u16) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn render<B: Backend>(
+pub(crate) fn render<B: Backend + 'static>(
     terminal: &mut Terminal<B>,
     chat: &ChatView,
     input: &str,
@@ -136,8 +141,12 @@ pub(crate) fn render<B: Backend>(
     display_mode: &str,
     notepad: Option<&crate::notepad::NotepadView>,
 ) -> Result<()> {
+    let wrap_plan = crate::copy_wrap::frame_plan(terminal, copy_mode);
     terminal.draw(|f| {
         let area = f.area();
+        if let Some(plan) = &wrap_plan {
+            plan.borrow_mut().term_width = area.width;
+        }
         // When notepad is open it takes the whole terminal (fullscreen file
         // viewer/editor): render tree+editor over the entire frame, clear
         // every chat hit-target so no stale rect survives from the previous
@@ -160,7 +169,7 @@ pub(crate) fn render<B: Backend>(
             // selection spans pure file text (see copy_mode::render_clean
             // for the body's counterpart).
             if copy_mode {
-                crate::copy_mode::render_notepad_clean(f, area, np);
+                crate::copy_mode::render_notepad_clean(f, area, np, wrap_plan.as_ref());
             } else {
                 crate::notepad::render_top(f, area, np);
             }
@@ -258,6 +267,7 @@ pub(crate) fn render<B: Backend>(
                 is_top_level,
                 tail_ms,
                 copy_mode,
+                wrap_plan.as_ref(),
             );
             // Expose cached total_rows for scroll-wheel clamping.
             hits.total_rows = viewport.as_ref().map_or(0, |v| v.total_rows());
@@ -305,6 +315,7 @@ pub(crate) fn render<B: Backend>(
             plan_mode,
             edit_title,
             title,
+            wrap_plan.as_ref(),
         );
         let composer_area = chunks[ci];
         ci += 1;
@@ -414,12 +425,15 @@ fn render_body(
     is_top_level: bool,
     tail_ms: u64,
     copy_mode: bool,
+    wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
 ) {
     *body_out = Some(area);
     // Copy mode: undecorated full-width view so terminal-native selection
     // spans clean text (no border/scrollbar/timer/indicator rows).
     if copy_mode {
-        crate::copy_mode::render_clean(f, area, chat, scroll, follow, anim_tick, now_ms, viewport);
+        crate::copy_mode::render_clean(
+            f, area, chat, scroll, follow, anim_tick, now_ms, viewport, wrap_plan,
+        );
         return;
     }
     let block = theme::rounded_block_line_tok(title, chat.tokens_total, area.width, tail_ms);
@@ -608,12 +622,13 @@ fn render_composer(
     plan_mode: Option<&str>,
     edit_title: Option<&str>,
     top_title: &Line<'static>,
+    wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
 ) {
     // Copy mode: undecorated input text — no block/border, no prompt
     // glyph, no attachment badge — so terminal-native selection spans
     // exactly the typed text (mirrors the body's clean view).
     if copy_mode {
-        crate::copy_mode::render_composer_clean(f, area, input, plan_mode.is_some());
+        crate::copy_mode::render_composer_clean(f, area, input, plan_mode.is_some(), wrap_plan);
         return;
     }
     if disabled {

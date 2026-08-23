@@ -111,6 +111,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
                 None,
                 None,
                 &Line::raw("ignored"),
+                None,
             );
         })
         .unwrap();
@@ -182,6 +183,7 @@ fn composer_badge_renders_and_cursor_aligns() {
                 None,
                 None,
                 &Line::raw("ignored"),
+                None,
             );
         })
         .unwrap();

@@ -35,6 +35,9 @@ pub struct TodoSpec {
     pub agent: String,
     #[serde(default = "default_attempts")]
     pub max_attempts: u32,
+    /// Hard tool allowlist for focused schema-v2 TODO sessions.
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
     pub acceptance: AcceptanceSpec,
     #[serde(default)]
     pub metadata: serde_json::Value,

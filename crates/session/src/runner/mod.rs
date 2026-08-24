@@ -61,7 +61,7 @@ pub async fn run(
     user_text: String,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
-    let registry = build_full_registry(session).await;
+    let registry = build_full_registry(session).await?;
     run_with_registry(session, user_text, Vec::new(), &registry, on_event).await
 }
 
@@ -74,7 +74,7 @@ pub async fn run_with_images(
     images: Vec<String>,
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
-    let registry = build_full_registry(session).await;
+    let registry = build_full_registry(session).await?;
     run_with_registry(session, user_text, images, &registry, on_event).await
 }
 

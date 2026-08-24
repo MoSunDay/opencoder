@@ -29,6 +29,7 @@ fn spec() -> WorkflowSpec {
             depends_on: Vec::new(),
             agent: "act".into(),
             max_attempts: 2,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "candidate exists".into(),
                 required_tool_calls: Vec::new(),
@@ -204,6 +205,7 @@ fn dependency_validation_rejects_cycles_and_runnable_is_dependency_aware() {
         depends_on: vec!["step-1".into()],
         agent: "act".into(),
         max_attempts: 1,
+        allowed_tools: vec![],
         acceptance: AcceptanceSpec {
             criteria: "second".into(),
             required_tool_calls: vec![],

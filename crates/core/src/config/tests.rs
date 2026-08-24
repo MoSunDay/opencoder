@@ -368,6 +368,8 @@ mod inject_to_filtering {
                 enabled: true,
                 inject_to: target,
                 content: "c".into(),
+                tool: None,
+                tool_config_error: None,
             },
         );
         config.mcp_servers.insert(

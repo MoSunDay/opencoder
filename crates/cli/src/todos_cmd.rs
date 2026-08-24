@@ -55,13 +55,20 @@ pub async fn dispatch(cli: &Cli, sub: &TodosSub) -> Result<()> {
             );
             Ok(())
         }
-        TodosSub::Run { file, debug, json } => {
+        TodosSub::Run {
+            file,
+            workflow_id,
+            debug,
+            json,
+        } => {
             let raw = tokio::fs::read_to_string(file)
                 .await
                 .with_context(|| format!("read todos file {}", file.display()))?;
             let spec = opencoder_todos::parse_spec(&raw)
                 .with_context(|| format!("parse todos spec {}", file.display()))?;
-            let workflow_id = format!("todos-{}", ulid::Ulid::new());
+            let workflow_id = workflow_id
+                .clone()
+                .unwrap_or_else(|| format!("todos-{}", ulid::Ulid::new()));
             eprintln!("workflow_id={workflow_id}");
             let runtime = runtime(cli, &workdir, store.clone(), *debug)?;
             let state = track_progress(

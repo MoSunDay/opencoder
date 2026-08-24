@@ -20,6 +20,7 @@ fn spec_with(max_attempts: u32) -> WorkflowSpec {
             depends_on: Vec::new(),
             agent: "act".into(),
             max_attempts,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "candidate exists".into(),
                 required_tool_calls: Vec::new(),

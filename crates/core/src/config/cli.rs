@@ -184,6 +184,37 @@ impl<'de> Deserialize<'de> for InjectionTarget {
     }
 }
 
+/// Shell-free executable function tool exposed by a CLI registration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CliToolConfig {
+    pub name: String,
+    pub executable: String,
+    #[serde(default)]
+    pub args_prefix: Vec<String>,
+    #[serde(default = "default_input_field")]
+    pub input_field: String,
+    #[serde(default = "default_input_mode")]
+    pub input_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
+    #[serde(default)]
+    pub image_path_pointers: Vec<String>,
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: u64,
+}
+
+fn default_input_field() -> String {
+    "command".into()
+}
+
+fn default_input_mode() -> String {
+    "field".into()
+}
+
+const fn default_timeout_seconds() -> u64 {
+    120
+}
+
 /// One named CLI registration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CliConfig {
@@ -196,6 +227,12 @@ pub struct CliConfig {
     /// Free-form usage contract for this CLI (commands, constraints, examples).
     #[serde(default)]
     pub content: String,
+    /// Optional executable tool contract. Prompt-only registrations omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<CliToolConfig>,
+    /// Parse failure retained so malformed executable contracts fail closed.
+    #[serde(skip)]
+    pub tool_config_error: Option<String>,
 }
 
 /// Parse an `inject_to` patch value (tag, tag array, or legacy string).
@@ -213,6 +250,18 @@ pub(super) fn merge(cfg: &mut CliConfig, obj: &serde_json::Map<String, serde_jso
     }
     if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
         cfg.content = content.to_string();
+    }
+    if let Some(tool) = obj.get("tool") {
+        match serde_json::from_value(tool.clone()) {
+            Ok(tool) => {
+                cfg.tool = Some(tool);
+                cfg.tool_config_error = None;
+            }
+            Err(error) => {
+                cfg.tool = None;
+                cfg.tool_config_error = Some(error.to_string());
+            }
+        }
     }
 }
 
@@ -315,11 +364,37 @@ mod tests {
                 build: true,
             },
             content: "use foo".into(),
+            tool: None,
+            tool_config_error: None,
         };
         let json = serde_json::to_value(&cfg).unwrap();
         assert_eq!(json["inject_to"], serde_json::json!(["explore", "build"]));
         let back: CliConfig = serde_json::from_value(json).unwrap();
         assert_eq!(back.inject_to, cfg.inject_to);
+    }
+
+    #[test]
+    fn cli_config_loads_shell_free_tool_contract() {
+        let cfg: CliConfig = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "inject_to": ["parent"],
+            "content": "use fixture",
+            "tool": {
+                "name": "cli__fixture",
+                "executable": "fixture",
+                "args_prefix": ["--args-json"],
+                "input_field": "command",
+                "input_mode": "json",
+                "parameters": {"type": "object"},
+                "image_path_pointers": ["/data/local_image_path"],
+                "timeout_seconds": 120
+            }
+        }))
+        .unwrap();
+        let tool = cfg.tool.unwrap();
+        assert_eq!(tool.name, "cli__fixture");
+        assert_eq!(tool.args_prefix, vec!["--args-json"]);
+        assert_eq!(tool.input_mode, "json");
     }
 
     #[test]

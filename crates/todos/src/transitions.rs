@@ -351,6 +351,7 @@ mod tests {
             depends_on: Vec::new(),
             agent: "act".into(),
             max_attempts,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "done".into(),
                 required_tool_calls: Vec::new(),

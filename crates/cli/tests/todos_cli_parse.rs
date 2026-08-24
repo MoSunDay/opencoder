@@ -13,9 +13,16 @@ fn parses_todos_run_resume_and_debug_scope() {
     ]);
     match cli.command {
         Some(Command::Todos {
-            sub: TodosSub::Run { file, debug, json },
+            sub:
+                TodosSub::Run {
+                    file,
+                    workflow_id,
+                    debug,
+                    json,
+                },
         }) => {
             assert_eq!(file.to_string_lossy(), "case.json");
+            assert_eq!(workflow_id, None);
             assert!(debug);
             assert!(!json, "--json must default to false");
         }
@@ -33,6 +40,35 @@ fn parses_todos_run_resume_and_debug_scope() {
             }
         })
     ));
+}
+
+#[test]
+fn parses_caller_provided_todos_workflow_identity() {
+    let cli = Cli::parse_from([
+        "opencoder",
+        "todos",
+        "run",
+        "--file",
+        "case.json",
+        "--workflow-id",
+        "todos-canonical-42",
+    ]);
+    match cli.command {
+        Some(Command::Todos {
+            sub: TodosSub::Run { workflow_id, .. },
+        }) => assert_eq!(workflow_id.as_deref(), Some("todos-canonical-42")),
+        other => panic!("unexpected command: {other:?}"),
+    }
+    assert!(Cli::try_parse_from([
+        "opencoder",
+        "todos",
+        "run",
+        "--file",
+        "case.json",
+        "--workflow-id",
+        "",
+    ])
+    .is_err());
 }
 
 #[test]

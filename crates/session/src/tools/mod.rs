@@ -12,6 +12,7 @@ pub mod latent;
 pub mod ls;
 pub mod question;
 pub mod read;
+pub mod registered_cli;
 pub mod search;
 pub mod ssh_pty;
 pub mod task;

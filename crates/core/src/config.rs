@@ -19,7 +19,7 @@ mod skill;
 pub use mcp_guard::{mcp_name_collision, mcp_name_conflict_in_patch};
 
 pub use autopilot::{ApMode, AutoPilotConfig};
-pub use cli::{CliConfig, InjectionTarget};
+pub use cli::{CliConfig, CliToolConfig, InjectionTarget};
 pub use env::{looks_like_env_var, scoped_config_home, ScopedConfigHome};
 pub use envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,

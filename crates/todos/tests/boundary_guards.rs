@@ -43,6 +43,7 @@ fn spec(gate: bool) -> WorkflowSpec {
         depends_on: Vec::new(),
         agent: "act".into(),
         max_attempts: 3,
+        allowed_tools: vec![],
         acceptance: AcceptanceSpec {
             criteria: "candidate exists".into(),
             required_tool_calls: Vec::new(),

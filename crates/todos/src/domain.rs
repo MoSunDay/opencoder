@@ -6,7 +6,7 @@ use opencoder_core::resolve_agent;
 use crate::types::*;
 
 pub fn validate_spec(spec: &WorkflowSpec) -> Result<()> {
-    if spec.schema_version != 1 {
+    if !matches!(spec.schema_version, 1 | 2) {
         bail!("unsupported todos schema_version {}", spec.schema_version);
     }
     for (name, value) in [
@@ -36,6 +36,12 @@ pub fn validate_spec(spec: &WorkflowSpec) -> Result<()> {
         }
         if todo.max_attempts == 0 {
             bail!("TODO {} max_attempts must be positive", todo.id);
+        }
+        if spec.schema_version >= 2 && todo.allowed_tools.is_empty() {
+            bail!("TODO {} must declare allowed_tools in schema v2", todo.id);
+        }
+        if todo.allowed_tools.iter().any(|name| name.trim().is_empty()) {
+            bail!("TODO {} has an empty allowed tool", todo.id);
         }
         // Path safety: todo ids feed file paths in the --debug projection
         // (`sessions/todos/<id>/attempt-NNN.json`, `task-info/todos/<id>.json`),
@@ -242,6 +248,7 @@ mod tests {
             depends_on: deps.iter().map(|dep| (*dep).to_string()).collect(),
             agent: "act".into(),
             max_attempts: 2,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "done".into(),
                 required_tool_calls: Vec::new(),

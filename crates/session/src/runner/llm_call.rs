@@ -440,6 +440,8 @@ mod tests {
                     build: false,
                 },
                 content: "EXPLORE_ONLY_CONTRACT".into(),
+                tool: None,
+                tool_config_error: None,
             },
         );
         config
@@ -566,6 +568,8 @@ mod tests {
                 enabled: true,
                 inject_to: opencoder_core::InjectionTarget::parent_only(),
                 content: "WORKFLOW_MUST_NOT_SEE_CLI".into(),
+                tool: None,
+                tool_config_error: None,
             },
         );
         let session =

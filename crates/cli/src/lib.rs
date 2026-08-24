@@ -314,6 +314,13 @@ pub enum TodosSub {
     Run {
         #[arg(long, value_name = "PATH")]
         file: PathBuf,
+        /// Persist the workflow under a caller-provided canonical identity.
+        #[arg(
+            long,
+            value_name = "ID",
+            value_parser = clap::builder::NonEmptyStringValueParser::new()
+        )]
+        workflow_id: Option<String>,
         /// Dump a rebuildable filesystem projection after every transition.
         #[arg(long, default_value_t = false)]
         debug: bool,

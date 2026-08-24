@@ -45,6 +45,7 @@ fn todo_spec(id: &str, instructions: &str) -> TodoSpec {
         depends_on: vec!["a".into()],
         agent: "act".into(),
         max_attempts: 2,
+        allowed_tools: vec![],
         acceptance: AcceptanceSpec {
             criteria: "candidate exists".into(),
             required_tool_calls: Vec::new(),

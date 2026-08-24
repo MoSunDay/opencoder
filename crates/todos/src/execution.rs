@@ -1,7 +1,9 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
 use anyhow::{Context, Result};
-use opencoder_core::{message::now_ms, resolve_agent, Config, Message, Role};
+use opencoder_core::{
+    message::now_ms, resolve_agent, Config, ContentBlock, Message, Role, ToolFilter,
+};
 use opencoder_llm::ChatStream;
 use opencoder_session::SessionEvent;
 use opencoder_store::{SessionMeta, Store, TASK_TYPE_TODO};
@@ -28,7 +30,7 @@ pub async fn execute(
     cancel: CancellationToken,
 ) -> Result<TodoExecution> {
     config.autopilot.mode = opencoder_core::ApMode::Off;
-    let agent = resolve_agent(&todo.agent)
+    let mut agent = resolve_agent(&todo.agent)
         .with_context(|| format!("TODO {} has unknown agent {}", todo.id, todo.agent))?;
     if !agent.is_primary() || agent.name == "workflow" {
         anyhow::bail!(
@@ -36,6 +38,11 @@ pub async fn execute(
             todo.id
         );
     }
+    agent.tools = ToolFilter::Allow(if workflow.schema_version >= 2 {
+        todo.allowed_tools.clone()
+    } else {
+        allowed_tool_names(todo)
+    });
     let mut session = if context_mode == ContextMode::Resume {
         let existing = state
             .todos
@@ -56,7 +63,7 @@ pub async fn execute(
         prepare_session(&store, workflow, todo, &session_id, &config).await?;
         opencoder_session::SessionState::new(
             session_id,
-            agent,
+            agent.clone(),
             config,
             client,
             workdir.to_path_buf(),
@@ -64,33 +71,54 @@ pub async fn execute(
         .with_store(store.clone())
         .mark_session_created()
     };
-    session.cancel = Some(cancel);
+    // Resume restores a historical agent snapshot; the current TodoSpec is
+    // authoritative for the focused tool boundary.
+    session.agent = agent;
+    let completion_cancel = cancel.child_token();
+    session.cancel = Some(completion_cancel.clone());
     // Snapshot the transcript size before this run: on Resume the session
     // carries the previous attempt's messages, and only assistant messages
     // produced by THIS run are valid candidates.
     let watermark = session.messages.len();
     let prompt = focused_prompt(workflow, state, todo, context_mode)?;
-    let event_seq = store.last_event_seq(&session.id).await?;
-    opencoder_session::run(&mut session, prompt, |_| {}).await?;
-    let events = store
-        .events_after(&session.id, event_seq)
-        .await?
-        .into_iter()
-        .map(|record| {
-            let kind = record
-                .sse_kind
-                .as_deref()
-                .context("TODO event is missing its exact SSE kind")?;
-            SessionEvent::from_sse(kind, record.payload)
-                .with_context(|| format!("decode persisted TODO event {kind}"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let raw = latest_new_assistant(&session.messages, watermark)
-        .context("TODO agent returned no final candidate")?;
-    let candidate = parse_candidate(&raw)
-        .with_context(|| format!("TODO {} returned invalid candidate JSON: {raw}", todo.id))?;
-    let gate = evaluate_gate(todo, &events);
+    let message_seq = store.last_message_seq(&session.id).await?;
+    let mut completion_gate = CompletionGate::new(workflow.schema_version, todo);
+    opencoder_session::run(&mut session, prompt, |event| {
+        if completion_gate.observe(&event) {
+            completion_cancel.cancel();
+        }
+    })
+    .await?;
+    let invocation_messages = store.load_messages_after(&session.id, message_seq).await?;
+    let gate = evaluate_gate(workflow.schema_version, todo, &invocation_messages);
+    let raw = latest_new_assistant(&session.messages, watermark);
+    if cancel.is_cancelled() && !completion_gate.completed {
+        anyhow::bail!("TODO execution was interrupted");
+    }
+    let candidate = resolve_candidate(
+        workflow.schema_version,
+        todo,
+        raw.as_deref(),
+        &gate,
+        completion_gate.completed,
+    )
+    .with_context(|| match raw {
+        Some(raw) => format!("TODO {} returned invalid candidate JSON: {raw}", todo.id),
+        None => format!("TODO {} returned no final candidate", todo.id),
+    })?;
     Ok(TodoExecution { candidate, gate })
+}
+
+fn allowed_tool_names(todo: &TodoSpec) -> Vec<String> {
+    let mut names = todo
+        .acceptance
+        .required_tool_calls
+        .iter()
+        .map(|call| call.name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Latest assistant text among messages appended after `watermark` (the
@@ -109,6 +137,123 @@ fn latest_new_assistant(messages: &[Message], watermark: usize) -> Option<String
 
 fn parse_candidate(raw: &str) -> Result<Candidate> {
     crate::json_output::parse(raw)
+}
+
+fn resolve_candidate(
+    schema_version: u32,
+    todo: &TodoSpec,
+    raw: Option<&str>,
+    gate: &serde_json::Value,
+    runtime_completed_gate: bool,
+) -> Result<Candidate> {
+    match raw.map(parse_candidate).transpose() {
+        Ok(Some(candidate)) => {
+            if runtime_completed_gate
+                && matches!(
+                    candidate.status,
+                    CandidateStatus::Blocked | CandidateStatus::Interrupted
+                )
+                && deterministic_candidate_allowed(schema_version, todo, gate)
+            {
+                Ok(deterministic_candidate(todo))
+            } else {
+                Ok(candidate)
+            }
+        }
+        Ok(None) | Err(_) if deterministic_candidate_allowed(schema_version, todo, gate) => {
+            Ok(deterministic_candidate(todo))
+        }
+        Ok(None) => anyhow::bail!("TODO agent returned no final candidate"),
+        Err(error) => Err(error),
+    }
+}
+
+fn deterministic_candidate(todo: &TodoSpec) -> Candidate {
+    Candidate {
+        status: CandidateStatus::Candidate,
+        summary: format!(
+            "Completed {}; every declared required tool call succeeded in order.",
+            todo.title
+        ),
+        result: Some(todo.acceptance.criteria.clone()),
+        verification: "The schema-v2 runtime verified every required tool call and successful result in declaration order.".into(),
+        evidence_refs: Vec::new(),
+        recovery_context: RecoveryContext {
+            summary: "No recovery required; the runtime derived this candidate from the completed hard tool gate.".into(),
+            refs: Vec::new(),
+        },
+    }
+}
+
+fn deterministic_candidate_allowed(
+    schema_version: u32,
+    todo: &TodoSpec,
+    gate: &serde_json::Value,
+) -> bool {
+    schema_version >= 2
+        && !todo.acceptance.required_tool_calls.is_empty()
+        && gate.get("ok").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
+#[derive(Clone)]
+struct ObservedCall {
+    id: String,
+    name: String,
+    input: serde_json::Value,
+    ok: Option<bool>,
+}
+
+struct CompletionGate<'a> {
+    required: &'a [RequiredToolCall],
+    calls: Vec<ObservedCall>,
+    enabled: bool,
+    completed: bool,
+}
+
+impl<'a> CompletionGate<'a> {
+    fn new(schema_version: u32, todo: &'a TodoSpec) -> Self {
+        Self {
+            required: &todo.acceptance.required_tool_calls,
+            calls: Vec::new(),
+            enabled: schema_version >= 2 && !todo.acceptance.required_tool_calls.is_empty(),
+            completed: false,
+        }
+    }
+
+    fn observe(&mut self, event: &SessionEvent) -> bool {
+        if !self.enabled || self.completed {
+            return self.completed;
+        }
+        match event {
+            SessionEvent::ToolStart { id, name, input } => self.calls.push(ObservedCall {
+                id: id.clone(),
+                name: name.clone(),
+                input: input.clone(),
+                ok: None,
+            }),
+            SessionEvent::ToolEnd { id, is_error, .. } => {
+                if let Some(call) = self.calls.iter_mut().find(|call| call.id == *id) {
+                    call.ok = Some(!*is_error);
+                }
+            }
+            _ => {}
+        }
+        self.completed = ordered_required_calls_match(&self.calls, self.required);
+        self.completed
+    }
+}
+
+fn ordered_required_calls_match(calls: &[ObservedCall], required: &[RequiredToolCall]) -> bool {
+    required.len() <= calls.len()
+        && calls
+            .windows(required.len())
+            .any(|window| window.iter().zip(required).all(observed_call_matches))
+}
+
+fn observed_call_matches((call, required): (&ObservedCall, &RequiredToolCall)) -> bool {
+    call.name == required.name
+        && json_contains(&call.input, &required.arguments_contains)
+        && call.ok == Some(required.result_ok)
 }
 
 pub async fn prepare_session(
@@ -181,34 +326,73 @@ fn focused_prompt(
     ))
 }
 
-fn evaluate_gate(todo: &TodoSpec, events: &[SessionEvent]) -> serde_json::Value {
-    let starts: HashMap<&str, (&str, &serde_json::Value)> = events
+#[derive(Clone, Copy)]
+struct TranscriptCall<'a> {
+    name: &'a str,
+    input: &'a serde_json::Value,
+    ok: Option<bool>,
+}
+
+fn transcript_calls(messages: &[Message]) -> Vec<TranscriptCall<'_>> {
+    let results: HashMap<&str, bool> = messages
         .iter()
-        .filter_map(|event| match event {
-            SessionEvent::ToolStart { id, name, input } => {
-                Some((id.as_str(), (name.as_str(), input)))
-            }
+        .flat_map(|message| &message.blocks)
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                is_error,
+                ..
+            } => Some((tool_use_id.as_str(), !*is_error)),
             _ => None,
         })
         .collect();
-    let ends: HashMap<&str, bool> = events
+    messages
         .iter()
-        .filter_map(|event| match event {
-            SessionEvent::ToolEnd { id, is_error, .. } => Some((id.as_str(), !*is_error)),
+        .flat_map(|message| &message.blocks)
+        .filter_map(|block| match block {
+            ContentBlock::ToolUse { id, name, input } => Some(TranscriptCall {
+                name,
+                input,
+                ok: results.get(id.as_str()).copied(),
+            }),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+fn call_matches(call: TranscriptCall<'_>, required: &RequiredToolCall) -> bool {
+    call.name == required.name
+        && json_contains(call.input, &required.arguments_contains)
+        && call.ok == Some(required.result_ok)
+}
+
+fn evaluate_gate(schema_version: u32, todo: &TodoSpec, messages: &[Message]) -> serde_json::Value {
+    let calls = transcript_calls(messages);
+    if schema_version >= 2 {
+        let required = &todo.acceptance.required_tool_calls;
+        let matched = required.len() <= calls.len()
+            && calls.windows(required.len()).any(|window| {
+                window
+                    .iter()
+                    .copied()
+                    .zip(required)
+                    .all(|(call, required)| call_matches(call, required))
+            });
+        return serde_json::json!({
+            "ok": matched,
+            "checks": required
+                .iter()
+                .map(|required| serde_json::json!({"required":required,"matched":matched}))
+                .collect::<Vec<_>>()
+        });
+    }
     let checks = todo
         .acceptance
         .required_tool_calls
         .iter()
         .map(|required| {
-            let matched = starts.iter().any(|(id, (name, input))| {
-                *name == required.name
-                    && json_contains(input, &required.arguments_contains)
-                    && ends.get(id).copied() == Some(required.result_ok)
-            });
-            serde_json::json!({"required":required,"matched":matched})
+            let index = calls.iter().position(|call| call_matches(*call, required));
+            serde_json::json!({"required":required,"matched":index.is_some()})
         })
         .collect::<Vec<_>>();
     serde_json::json!({
@@ -249,6 +433,204 @@ mod tests {
     }
 
     #[test]
+    fn schema_v2_completed_gate_recovers_malformed_candidate_without_reexecuting_tools() {
+        let todo = required_call_todo();
+        let gate = evaluate_gate(2, &todo, &tool_messages(false));
+
+        let candidate = resolve_candidate(2, &todo, Some("not-json"), &gate, true).unwrap();
+
+        assert_eq!(candidate.status, CandidateStatus::Candidate);
+        assert!(candidate
+            .summary
+            .contains("every declared required tool call succeeded"));
+        assert_eq!(candidate.result.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn candidate_recovery_requires_schema_v2_nonempty_completed_gate() {
+        let todo = required_call_todo();
+        let passed = evaluate_gate(2, &todo, &tool_messages(false));
+        let failed = evaluate_gate(2, &todo, &[]);
+        let mut no_calls = todo.clone();
+        no_calls.acceptance.required_tool_calls.clear();
+
+        assert!(resolve_candidate(1, &todo, Some("not-json"), &passed, true).is_err());
+        assert!(resolve_candidate(2, &todo, Some("not-json"), &failed, true).is_err());
+        assert!(resolve_candidate(2, &no_calls, None, &passed, true).is_err());
+    }
+
+    #[test]
+    fn blocked_candidate_is_preserved_when_runtime_did_not_finish_the_gate() {
+        let todo = required_call_todo();
+        let gate = evaluate_gate(2, &todo, &tool_messages(false));
+
+        let candidate = resolve_candidate(2, &todo, Some(BLOCKED_CANDIDATE), &gate, false).unwrap();
+
+        assert_eq!(candidate.status, CandidateStatus::Blocked);
+    }
+
+    #[test]
+    fn runtime_completed_gate_overrides_cancelled_blocked_tail() {
+        let todo = required_call_todo();
+        let gate = evaluate_gate(2, &todo, &tool_messages(false));
+
+        let candidate = resolve_candidate(2, &todo, Some(BLOCKED_CANDIDATE), &gate, true).unwrap();
+
+        assert_eq!(candidate.status, CandidateStatus::Candidate);
+    }
+
+    #[test]
+    fn completion_gate_stops_only_after_all_required_calls_succeed_in_order() {
+        let mut todo = required_call_todo();
+        todo.acceptance.required_tool_calls.push(RequiredToolCall {
+            name: "mcp__fk__observe".into(),
+            arguments_contains: serde_json::json!({"command":"observe"}),
+            result_ok: true,
+        });
+        let mut gate = CompletionGate::new(2, &todo);
+        assert!(!gate.observe(&SessionEvent::ToolStart {
+            id: "tap".into(),
+            name: "mcp__fk__tap".into(),
+            input: serde_json::json!({"label":"A","x":1}),
+        }));
+        assert!(!gate.observe(&SessionEvent::ToolEnd {
+            id: "tap".into(),
+            name: "mcp__fk__tap".into(),
+            output: "ok".into(),
+            is_error: false,
+            images: vec![],
+        }));
+        assert!(!gate.observe(&SessionEvent::ToolStart {
+            id: "observe".into(),
+            name: "mcp__fk__observe".into(),
+            input: serde_json::json!({"command":"observe"}),
+        }));
+        assert!(gate.observe(&SessionEvent::ToolEnd {
+            id: "observe".into(),
+            name: "mcp__fk__observe".into(),
+            output: "ok".into(),
+            is_error: false,
+            images: vec![],
+        }));
+    }
+
+    #[test]
+    fn completion_gate_does_not_stop_on_failed_or_out_of_order_calls() {
+        let mut todo = required_call_todo();
+        todo.acceptance.required_tool_calls.push(RequiredToolCall {
+            name: "mcp__fk__observe".into(),
+            arguments_contains: serde_json::json!({"command":"observe"}),
+            result_ok: true,
+        });
+        let mut gate = CompletionGate::new(2, &todo);
+        for event in [
+            SessionEvent::ToolStart {
+                id: "observe".into(),
+                name: "mcp__fk__observe".into(),
+                input: serde_json::json!({"command":"observe"}),
+            },
+            SessionEvent::ToolEnd {
+                id: "observe".into(),
+                name: "mcp__fk__observe".into(),
+                output: "ok".into(),
+                is_error: false,
+                images: vec![],
+            },
+            SessionEvent::ToolStart {
+                id: "tap".into(),
+                name: "mcp__fk__tap".into(),
+                input: serde_json::json!({"label":"A","x":1}),
+            },
+            SessionEvent::ToolEnd {
+                id: "tap".into(),
+                name: "mcp__fk__tap".into(),
+                output: "failed".into(),
+                is_error: true,
+                images: vec![],
+            },
+        ] {
+            assert!(!gate.observe(&event));
+        }
+    }
+
+    #[test]
+    fn completion_gate_rejects_interleaved_undeclared_calls() {
+        let mut todo = required_call_todo();
+        todo.acceptance.required_tool_calls.push(RequiredToolCall {
+            name: "mcp__fk__observe".into(),
+            arguments_contains: serde_json::json!({"command":"observe"}),
+            result_ok: true,
+        });
+        let calls = vec![
+            ObservedCall {
+                id: "tap".into(),
+                name: "mcp__fk__tap".into(),
+                input: serde_json::json!({"label":"A","x":1}),
+                ok: Some(true),
+            },
+            ObservedCall {
+                id: "extra".into(),
+                name: "mcp__fk__back".into(),
+                input: serde_json::json!({"command":"back"}),
+                ok: Some(true),
+            },
+            ObservedCall {
+                id: "observe".into(),
+                name: "mcp__fk__observe".into(),
+                input: serde_json::json!({"command":"observe"}),
+                ok: Some(true),
+            },
+        ];
+
+        assert!(!ordered_required_calls_match(
+            &calls,
+            &todo.acceptance.required_tool_calls
+        ));
+    }
+
+    #[test]
+    fn schema_v2_transcript_gate_rejects_interleaved_undeclared_calls() {
+        let mut todo = required_call_todo();
+        todo.acceptance.required_tool_calls.push(RequiredToolCall {
+            name: "mcp__fk__observe".into(),
+            arguments_contains: serde_json::json!({"command":"observe"}),
+            result_ok: true,
+        });
+        let mut messages = tool_messages(false);
+        let mut extra_start = Message::assistant("extra-start");
+        extra_start.blocks = vec![ContentBlock::ToolUse {
+            id: "extra".into(),
+            name: "mcp__fk__back".into(),
+            input: serde_json::json!({"command":"back"}),
+        }];
+        let mut extra_end = Message::user("extra-end", "");
+        extra_end.role = Role::Tool;
+        extra_end.blocks = vec![ContentBlock::ToolResult {
+            tool_use_id: "extra".into(),
+            content: "ok".into(),
+            is_error: false,
+            images: vec![],
+        }];
+        let mut observe_start = Message::assistant("observe-start");
+        observe_start.blocks = vec![ContentBlock::ToolUse {
+            id: "observe".into(),
+            name: "mcp__fk__observe".into(),
+            input: serde_json::json!({"command":"observe"}),
+        }];
+        let mut observe_end = Message::user("observe-end", "");
+        observe_end.role = Role::Tool;
+        observe_end.blocks = vec![ContentBlock::ToolResult {
+            tool_use_id: "observe".into(),
+            content: "ok".into(),
+            is_error: false,
+            images: vec![],
+        }];
+        messages.extend([extra_start, extra_end, observe_start, observe_end]);
+
+        assert_eq!(evaluate_gate(2, &todo, &messages)["ok"], false);
+    }
+
+    #[test]
     fn gate_requires_matching_start_and_successful_end() {
         let todo = TodoSpec {
             id: "x".into(),
@@ -258,6 +640,7 @@ mod tests {
             depends_on: vec![],
             agent: "act".into(),
             max_attempts: 1,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "x".into(),
                 required_tool_calls: vec![RequiredToolCall {
@@ -268,21 +651,8 @@ mod tests {
             },
             metadata: serde_json::Value::Null,
         };
-        let events = vec![
-            SessionEvent::ToolStart {
-                id: "1".into(),
-                name: "mcp__fk__tap".into(),
-                input: serde_json::json!({"label":"A","x":1}),
-            },
-            SessionEvent::ToolEnd {
-                id: "1".into(),
-                name: "mcp__fk__tap".into(),
-                output: "ok".into(),
-                is_error: false,
-                images: vec![],
-            },
-        ];
-        assert_eq!(evaluate_gate(&todo, &events)["ok"], true);
+        assert_eq!(evaluate_gate(1, &todo, &tool_messages(false))["ok"], true);
+        assert_eq!(allowed_tool_names(&todo), vec!["mcp__fk__tap"]);
     }
 
     fn required_call_todo() -> TodoSpec {
@@ -294,6 +664,7 @@ mod tests {
             depends_on: vec![],
             agent: "act".into(),
             max_attempts: 1,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "x".into(),
                 required_tool_calls: vec![RequiredToolCall {
@@ -356,21 +727,31 @@ mod tests {
         assert_eq!(latest_new_assistant(&messages, 1), None);
     }
 
-    fn tool_start() -> SessionEvent {
-        SessionEvent::ToolStart {
+    fn tool_messages(is_error: bool) -> Vec<Message> {
+        let mut start = Message::assistant("tool-start");
+        start.blocks = vec![ContentBlock::ToolUse {
             id: "1".into(),
             name: "mcp__fk__tap".into(),
             input: serde_json::json!({"label":"A","x":1}),
-        }
+        }];
+        let mut end = Message::user("tool-end", "");
+        end.role = Role::Tool;
+        end.blocks = vec![ContentBlock::ToolResult {
+            tool_use_id: "1".into(),
+            content: if is_error { "boom" } else { "ok" }.into(),
+            is_error,
+            images: vec![],
+        }];
+        vec![start, end]
     }
 
     #[test]
     fn gate_rejects_when_required_call_missing() {
         let todo = required_call_todo();
-        // Matching ToolStart but the stream ended before any ToolEnd arrived.
-        let events = vec![tool_start()];
+        let mut messages = tool_messages(false);
+        messages.pop();
 
-        let gate = evaluate_gate(&todo, &events);
+        let gate = evaluate_gate(1, &todo, &messages);
 
         assert_eq!(gate["ok"], false);
         assert_eq!(gate["checks"][0]["matched"], false);
@@ -379,20 +760,20 @@ mod tests {
     #[test]
     fn gate_rejects_errored_tool_end() {
         let todo = required_call_todo();
-        let events = vec![
-            tool_start(),
-            SessionEvent::ToolEnd {
-                id: "1".into(),
-                name: "mcp__fk__tap".into(),
-                output: "boom".into(),
-                is_error: true,
-                images: vec![],
-            },
-        ];
-
-        let gate = evaluate_gate(&todo, &events);
+        let gate = evaluate_gate(1, &todo, &tool_messages(true));
 
         assert_eq!(gate["ok"], false);
         assert_eq!(gate["checks"][0]["matched"], false);
+    }
+
+    #[test]
+    fn ordered_gate_does_not_reuse_one_call() {
+        let mut todo = required_call_todo();
+        todo.acceptance
+            .required_tool_calls
+            .push(todo.acceptance.required_tool_calls[0].clone());
+        let gate = evaluate_gate(2, &todo, &tool_messages(false));
+        assert_eq!(gate["checks"][0]["matched"], true);
+        assert_eq!(gate["checks"][1]["matched"], false);
     }
 }

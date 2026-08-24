@@ -17,6 +17,7 @@ fn todo_spec(id: &str, deps: &[&str], max_attempts: u32) -> TodoSpec {
         depends_on: deps.iter().map(|dep| (*dep).to_string()).collect(),
         agent: "act".into(),
         max_attempts,
+        allowed_tools: vec![],
         acceptance: opencoder_todos::types::AcceptanceSpec {
             criteria: "done".into(),
             required_tool_calls: Vec::new(),

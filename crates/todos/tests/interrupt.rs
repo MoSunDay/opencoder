@@ -47,6 +47,7 @@ fn spec() -> WorkflowSpec {
             depends_on: Vec::new(),
             agent: "act".into(),
             max_attempts: 2,
+            allowed_tools: vec![],
             acceptance: AcceptanceSpec {
                 criteria: "candidate exists".into(),
                 required_tool_calls: Vec::new(),
@@ -643,6 +644,7 @@ async fn rewound_sibling_discards_late_successful_result() {
                 depends_on: Vec::new(),
                 agent: "act".into(),
                 max_attempts: 2,
+                allowed_tools: vec![],
                 acceptance: AcceptanceSpec {
                     criteria: "candidate exists".into(),
                     required_tool_calls: Vec::new(),
@@ -657,6 +659,7 @@ async fn rewound_sibling_discards_late_successful_result() {
                 depends_on: vec!["a".into()],
                 agent: "act".into(),
                 max_attempts: 2,
+                allowed_tools: vec![],
                 acceptance: AcceptanceSpec {
                     criteria: "candidate exists".into(),
                     required_tool_calls: Vec::new(),
@@ -671,6 +674,7 @@ async fn rewound_sibling_discards_late_successful_result() {
                 depends_on: vec!["a".into()],
                 agent: "act".into(),
                 max_attempts: 2,
+                allowed_tools: vec![],
                 acceptance: AcceptanceSpec {
                     criteria: "candidate exists".into(),
                     required_tool_calls: Vec::new(),

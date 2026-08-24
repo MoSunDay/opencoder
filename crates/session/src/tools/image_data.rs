@@ -2,6 +2,10 @@
 
 use anyhow::{Context, Result};
 use base64::Engine;
+use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage, GenericImageView};
+
+const TOOL_IMAGE_MAX_DIMENSION: u32 = 768;
+const TOOL_IMAGE_JPEG_QUALITY: u8 = 65;
 
 /// Sniff the image MIME type from magic bytes. Falls back to `image/png`
 /// (a safe default most providers render) when the signature is unknown.
@@ -26,6 +30,29 @@ pub fn bytes_to_data_uri(bytes: &[u8]) -> String {
     let mime = sniff_mime(bytes);
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     format!("data:{mime};base64,{b64}")
+}
+
+/// Normalize a tool screenshot before embedding it in the next model request.
+pub fn tool_image_to_data_uri(bytes: &[u8]) -> Result<String> {
+    let image = image::load_from_memory(bytes).context("decode tool image")?;
+    let resized = resize_to_fit(image, TOOL_IMAGE_MAX_DIMENSION);
+    let mut encoded = Vec::new();
+    JpegEncoder::new_with_quality(&mut encoded, TOOL_IMAGE_JPEG_QUALITY)
+        .encode_image(&resized)
+        .context("encode tool image as jpeg")?;
+    Ok(bytes_to_data_uri(&encoded))
+}
+
+fn resize_to_fit(image: DynamicImage, limit: u32) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    let longest = width.max(height);
+    if longest <= limit {
+        return image;
+    }
+    let scale = f64::from(limit) / f64::from(longest);
+    let width = (f64::from(width) * scale).round().max(1.0) as u32;
+    let height = (f64::from(height) * scale).round().max(1.0) as u32;
+    image.resize_exact(width, height, FilterType::Lanczos3)
 }
 
 /// Read an image file and return its data URI. Errors if the file cannot be

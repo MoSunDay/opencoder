@@ -773,3 +773,4 @@ fn client_subcommand_wins_over_prompt_shaped_text() {
         _ => panic!("expected Client"),
     }
 }
+

@@ -28,7 +28,7 @@ clap 命令前端 + headless 运行时。解析全局 flag 与子命令（run/tu
 - `--session <id> [--fork]`：resume 指定 id；`--fork` 先复制。
 - `session show <id> [--json]`：默认按 `[role] text()` 打印（仅 Text 块）；`--json` 打印完整状态。
 - `session export <id> -o <file>` / `session import <file>`：见 [agents/store](../store/index.md) 的 bundle。
-- `client`：`ClientRunOpts` 编排（fork→autopilot→annotation→终态操作→steer-task/prompt→带重连的流式回显）；`client session/questions` 子命令管理远端会话与待答问题（实现在 `src/client.rs`/`src/client_ops.rs`/`src/client_stream.rs`，语义见 [agents/client](../client/index.md)）。
+- `client`：`ClientRunOpts` 编排（fork→autopilot→annotation→终态操作→steer-task/prompt→带重连的流式回显）；`client session/questions` 子命令管理远端会话与待答问题（实现在 `src/client.rs`/`src/client_ops.rs`/`src/client_stream.rs`，语义见 [agents/client](../client/index.md)）。`client session` 于 2026-08-25 增 `tasks <id>`（pretty JSON）与 `clear <keep>`（clear-all，draining 时服务端 409）。
 
 ## e2e 测试套件
 - 入口：`scripts/e2e-glm.sh [binary]` 或 `python3 scripts/e2e_glm.py [binary]`。Flag：`--skip-web`（跳过 serve/HTTP 场景）、`--only {cli,web}`。

@@ -10,7 +10,7 @@ use anyhow::Result;
 use opencoder_core::{Message, Role, ToolArc};
 use opencoder_store::Delivery;
 
-use super::input_recovery::mark_input_recorded;
+use super::input_recovery::{mark_input_recorded, unpromote_batch};
 use super::new_id;
 use super::steer::{cancel_guard, has_pending_steers};
 use crate::skill_lifecycle::run_loop_one_shot;
@@ -94,6 +94,21 @@ pub(super) async fn drain_one_queued(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<DrainOutcome> {
     if let Some((seq, q, imgs)) = claim_one_queued(session, on_event).await {
+        // Hard-cancel guard between claim and apply: a cancel that fired
+        // after the atomic claim must NOT apply a queued control command
+        // (mode switch under a cancelled run). Unpromote the claimed row so
+        // the next explicit run re-absorbs it and report Empty — the run
+        // loop's top-of-loop check picks up the cancel and stops. The guard
+        // sits BEFORE the QueueConsumed event: the TUI mirror drops the row
+        // on that event while a cancelled run suppresses the Done resync,
+        // which would leave the badge gone but the store row pending. The
+        // claim itself stays deliberately unguarded (atomic
+        // BEGIN IMMEDIATE..COMMIT; a biased-select race could strand the
+        // row promoted-but-unclaimed — permanent data loss).
+        if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            unpromote_batch(session, &[seq]).await;
+            return Ok(DrainOutcome::Empty);
+        }
         on_event(SessionEvent::QueueConsumed {
             seq,
             text: q.clone(),

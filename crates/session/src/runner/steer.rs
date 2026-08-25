@@ -1,7 +1,8 @@
+use anyhow::Result;
 use opencoder_store::Delivery;
 use tokio_util::sync::CancellationToken;
 
-use crate::SessionState;
+use crate::{SessionEvent, SessionState};
 
 /// Resolves when the session is cancelled. If no token is attached, this never
 /// resolves (pending forever), so the `select!` cancel arm stays dormant.
@@ -130,6 +131,115 @@ pub(super) async fn has_pending_steers(session: &SessionState) -> bool {
             }
         } => v,
     }
+}
+
+/// Outcome of applying a claimed steer batch inside [`run_loop`]
+/// (super::mod).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SteerApplyOutcome {
+    /// Batch fully applied; run_loop proceeds to the LLM/drain step.
+    /// `recorded` tells the caller whether any item became a real user
+    /// message (used by the skip-LLM idle-drain decision).
+    Continue { recorded: bool },
+    /// Sentinel ClearContext or bare-control-command-only batch: `Done` was
+    /// emitted, run_loop must end the turn without an LLM call.
+    Done,
+    /// Hard cancel hit mid-batch: the remaining items (current included)
+    /// were unpromoted for the next explicit run and `Status("interrupted")`
+    /// was emitted; run_loop must stop.
+    Cancelled,
+}
+
+/// Apply a claimed steer batch: each item is recorded as a real user turn
+/// (or a control command applied inline, never leaking to the LLM), and the
+/// outcome tells [`run_loop`] whether to go idle or continue.
+///
+/// Hard-cancel guard, checked at the top of EVERY item BEFORE the
+/// `SteerConsumed` event: the TUI mirror removes a steer row on
+/// `SteerConsumed` while a cancelled run suppresses the `Done` resync, so
+/// emitting the event and then unpromoting would leave the badge gone but
+/// the store row pending — a UI inconsistency. The guard unpromotes the
+/// current item plus everything not yet processed (P1-3 batch semantics)
+/// and stops the run; the next explicit submission re-absorbs them. A
+/// pre-fired cancel cannot reach here (the guarded `claim_steers` read
+/// abandons it), so the guard only fires mid-batch — the already-consumed
+/// items stay applied, matching the external-async-cancel vs sub-ms-apply
+/// boundary. Turn-level (`turn_cancel`) interrupts are intentionally NOT
+/// guarded: "submit now" is a queued-into-steer promotion, not a hard stop.
+pub(super) async fn apply_steer_batch(
+    session: &mut SessionState,
+    on_event: &mut (dyn FnMut(SessionEvent) + Send),
+    steer_prompts: &[(i64, String, Vec<String>)],
+) -> Result<SteerApplyOutcome> {
+    // Track whether the last steer was a sentinel ClearContext so we
+    // can go idle without an LM call.
+    let mut clear_sentinel = false;
+    let mut steer_recorded = false;
+    for (idx, (seq, p, imgs)) in steer_prompts.iter().enumerate() {
+        if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            // Hard cancel: leave the current item and all remaining items
+            // pending so the next explicit run re-absorbs them (mirrors the
+            // P1-3 apply-failure recovery below).
+            let remaining: Vec<i64> = steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
+            super::input_recovery::unpromote_batch(session, &remaining).await;
+            on_event(SessionEvent::Status("interrupted".into()));
+            return Ok(SteerApplyOutcome::Cancelled);
+        }
+        on_event(SessionEvent::SteerConsumed {
+            seq: *seq,
+            text: p.clone(),
+        });
+        // Defensive: a steered control command is applied immediately and
+        // NOT recorded as user text, so "/plan" never leaks to the LLM.
+        if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
+            if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
+                // P1-3: unpromote the failed item and all remaining
+                // unprocessed items so the next run re-absorbs them.
+                let remaining: Vec<i64> = steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
+                super::input_recovery::unpromote_batch(session, &remaining).await;
+                return Err(e);
+            }
+            clear_sentinel = matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
+                && crate::control_cmd::is_clear_context_handoff(
+                    session.handoff_plan.as_deref().unwrap_or(""),
+                );
+            // Compound (/plan review): record the rest as a real
+            // user message in the new mode.
+            if let Some(rest) = rest {
+                clear_sentinel = false;
+                crate::skill_resolve::record_compound(session, &rest, imgs).await;
+                steer_recorded = true;
+            }
+            // F2: mark per-item (not per-batch): a mid-batch failure
+            // leaves earlier items marked, failed+remaining unpromoted.
+            super::input_recovery::mark_input_recorded(session, *seq).await;
+            continue;
+        }
+        clear_sentinel = false;
+        // Resolve `$skill` tokens, apply plan tag, record as real user turn.
+        crate::skill_resolve::record_compound(session, p, imgs).await;
+        super::input_recovery::mark_input_recorded(session, *seq).await;
+        steer_recorded = true;
+    }
+    // Sentinel ClearContext: go idle without an LM call.
+    if clear_sentinel {
+        on_event(SessionEvent::Done);
+        return Ok(SteerApplyOutcome::Done);
+    }
+    // Bare control command(s) only (e.g. a bare "/plan" steer with no
+    // accompanying text): the mode/skill switch is the whole intent
+    // and no new user message was recorded. Avoid a wasteful LLM call
+    // on the existing transcript — go idle, mirroring the initial-
+    // prompt short-circuit in `run_with_registry`. Only fires when
+    // steers were actually claimed this turn (an empty steer batch
+    // with a pending `skip` is handled by the idle-drain block below).
+    if !steer_prompts.is_empty() && !steer_recorded {
+        on_event(SessionEvent::Done);
+        return Ok(SteerApplyOutcome::Done);
+    }
+    Ok(SteerApplyOutcome::Continue {
+        recorded: steer_recorded,
+    })
 }
 
 /// Resolves when a turn-level interrupt is requested. Like `await_cancel` but

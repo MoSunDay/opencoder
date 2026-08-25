@@ -1,17 +1,19 @@
 Commit: 3542e74a91260499233794c755a6a0ca5c1c8992
 
+> 语义修正（2026-08-24，见 [hard-cancel 守卫](../2026-08-24/hard-cancel-guards-drain-steer-apply.md)）：「应用点无条件、无运行时守卫」仅对 turn 内竞态成立；外部异步 hard cancel 与 queue/steer 应用点之间存在竞态，已由后续变更在事件 emit 之前加守卫（cancel 时 unpromote 保留 pending，下次显式提交再应用）。无 cancel 时本契约全部条款不变。
+
 # 延迟模式命令 admission：运行中文本 /plan|/act 由提交时拒绝改为边界生效
 
 ## 背景与根因
 
-`running-mode-gate` 契约（52622d7）要求 running/draining 时所有 act/plan transition 一律提交时拒绝。但文本模式命令（`/plan`、`/act`、`/act_clear_context`，含复合内容）本质是普通 prompt：runner 在 idle/turn 边界应用控制命令时本就**无条件执行、无在途 turn**，不存在“切换落地在 turn 中途”的竞态。提交时拒绝的唯一收益是提前反馈，代价是运行中无法排队模式命令——与普通 prompt 的 queue/steer 语义不一致，也让 TUI 在 busy 时只能阻塞输入。
+`running-mode-gate` 契约（52622d7）要求 running/draining 时所有 act/plan transition 一律提交时拒绝。但文本模式命令（`/plan`、`/act`、`/act_clear_context`，含复合内容）本质是普通 prompt：runner 在 idle/turn 边界应用控制命令时**无在途 turn**，不存在“切换落地在 turn 中途”的竞态（turn 内竞态结论不变；外部异步 hard cancel 的竞态由 2026-08-24 守卫修复，见上）。提交时拒绝的唯一收益是提前反馈，代价是运行中无法排队模式命令——与普通 prompt 的 queue/steer 语义不一致，也让 TUI 在 busy 时只能阻塞输入。
 
 真正的模式切换风险来自**改写会话配置的入口**（`agent` 字段、POST /agent、POST /handoff、TUI 直接切换键、`/` popup、subagent steer），它们才需要 admission-time 拒绝。
 
 ## 新稳定契约
 
 - `PromptBody.agent`、POST `/agent`、POST `/handoff`、TUI Shift+Tab 等直接切换键、`/` popup：running/draining 时仍 409 / `ModeSwitchBlocked`，无副作用。
-- 文本模式命令：TUI/Web 在运行中照常 admit——Enter → steer（turn 边界应用）、Tab → queue（idle 边界应用）、BackTab → submit、web POST /prompt 任意 delivery → 200。应用点沿用 drain/steer 既有无条件集成点，无运行时守卫。
+- 文本模式命令：TUI/Web 在运行中照常 admit——Enter → steer（turn 边界应用）、Tab → queue（idle 边界应用）、BackTab → submit、web POST /prompt 任意 delivery → 200。应用点沿用 drain/steer 集成点；唯一例外守卫：应用点已取消（hard cancel）时不消费、unpromote 保留 pending（2026-08-24 修正）。
 - TUI `ModeSwitchBlocked` 唯一保留分支：**聚焦运行中 subagent 视图的 Enter**（subagent 无模式概念）；subagent 聚焦下 Tab/BackTab → `QueueUnsupported`。
 - subagent steer（web + TUI）仍拒绝模式命令。
 - `is_mode_control` 语义不变（分类用纯判定），仅不再作为公共入口的提交时拒绝依据。

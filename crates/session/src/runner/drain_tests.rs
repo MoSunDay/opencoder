@@ -1,11 +1,17 @@
 //! Queue/drain-consumption tests extracted from `steer.rs` to keep that
 //! file within the repository's per-file size gate.
 
-use super::super::test_fixtures::{make_session, session_with_pending, session_with_queue};
+use std::collections::HashMap;
+
+use super::super::{
+    run_loop,
+    test_fixtures::{make_session, session_with_pending, session_with_queue},
+};
 use super::{
     claim_one_queued, drain_mode_step, drain_one_queued, has_pending_queues, idle_drain,
     DrainModeAction, DrainOutcome, IdleAction,
 };
+use crate::SessionEvent;
 use opencoder_core::Role;
 use opencoder_store::Delivery;
 use tokio_util::sync::CancellationToken;
@@ -208,4 +214,163 @@ async fn claim_one_queued_completes_under_hard_cancel() {
         .await
         .unwrap()
         .is_empty());
+}
+
+// ---- Hard-cancel guards (cancel fired after claim must not apply items) ----
+
+#[tokio::test]
+async fn idle_drain_under_hard_cancel_keeps_queued_mode_cmd_pending() {
+    // TUI scenario: plan session running, Tab submits "/act" (queue), then
+    // Esc×2 hard-cancels before the idle boundary applies it. The guard must
+    // leave the row pending so the next explicit submission re-applies it.
+    let (mut session, store, _) = session_with_queue(&["/act"]).await;
+    crate::control_cmd::apply(
+        &mut session,
+        &crate::control_cmd::ControlCmd::SwitchAgent("plan".into()),
+        &mut |_| {},
+    )
+    .await
+    .unwrap();
+    let hard = CancellationToken::new();
+    hard.cancel();
+    session.cancel = Some(hard);
+
+    let mut events: Vec<SessionEvent> = Vec::new();
+    let action = idle_drain(&mut session, &mut |e| events.push(e), None)
+        .await
+        .unwrap();
+
+    assert!(matches!(action, IdleAction::Done), "got {action:?}");
+    assert_eq!(session.agent.name, "plan", "mode must not switch");
+    let meta = store.get_session(&session.id).await.unwrap().unwrap();
+    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
+    let pending = store
+        .pending_inputs(&session.id, Delivery::Queue)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1, "/act must stay pending");
+    assert_eq!(pending[0].prompt, "/act");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(_))),
+        "no AgentSwitch allowed, got {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::QueueConsumed { .. })),
+        "no QueueConsumed allowed (guard precedes the event), got {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn drain_one_queued_under_hard_cancel_keeps_plain_prompt_pending() {
+    // The guard covers plain prompts too, not just control commands.
+    let (mut session, store, _) = session_with_queue(&["hello"]).await;
+    let hard = CancellationToken::new();
+    hard.cancel();
+    session.cancel = Some(hard);
+
+    let outcome = drain_one_queued(&mut session, &mut |_| {}).await.unwrap();
+    assert!(matches!(outcome, DrainOutcome::Empty), "got {outcome:?}");
+    let pending = store
+        .pending_inputs(&session.id, Delivery::Queue)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1, "row must stay pending");
+    assert_eq!(pending[0].prompt, "hello");
+    assert!(
+        pending[0].promoted_seq.is_none(),
+        "row must be unpromoted for the next run"
+    );
+}
+
+#[tokio::test]
+async fn steer_batch_hard_cancel_unpromotes_remaining_mode_cmd() {
+    // Run-loop level: two steers — "hello" (plain prompt) then "/act" (mode
+    // switch). The on_event callback fires the hard cancel when the FIRST
+    // SteerConsumed arrives, so the second item hits the mid-batch guard: it
+    // must be unpromoted (not applied) and the run must end with
+    // Status("interrupted") instead of switching modes.
+    let (mut session, store) = make_session("steer-cancel-test").await;
+    crate::control_cmd::apply(
+        &mut session,
+        &crate::control_cmd::ControlCmd::SwitchAgent("plan".into()),
+        &mut |_| {},
+    )
+    .await
+    .unwrap();
+    for (i, p) in ["hello", "/act"].iter().enumerate() {
+        store
+            .admit_input(&opencoder_store::SessionInput {
+                seq: None,
+                id: format!("s-{i}"),
+                session_id: session.id.clone(),
+                delivery: Delivery::Steer,
+                prompt: (*p).into(),
+                images: vec![],
+                admitted_seq: 0,
+                promoted_seq: None,
+                display_text: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    let hard = CancellationToken::new();
+    session.cancel = Some(hard.clone());
+    let mut events: Vec<SessionEvent> = Vec::new();
+    {
+        let token = hard.clone();
+        let mut on_event = |e: SessionEvent| {
+            if matches!(e, SessionEvent::SteerConsumed { .. }) {
+                token.cancel();
+            }
+            events.push(e);
+        };
+        run_loop(&mut session, &HashMap::new(), &mut on_event, false)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(session.agent.name, "plan", "mode must not switch");
+    let meta = store.get_session(&session.id).await.unwrap().unwrap();
+    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(_))),
+        "no AgentSwitch allowed, got {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Status(s) if s == "interrupted")),
+        "interrupted status must be emitted, got {events:?}"
+    );
+    // First item consumed normally (SteerConsumed + recorded user turn)…
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::SteerConsumed { .. }))
+            .count(),
+        1,
+        "only the first steer is consumed, got {events:?}"
+    );
+    assert!(session
+        .messages
+        .iter()
+        .any(|m| m.role == Role::User && m.text().contains("hello")));
+    // …the second stays pending for the next explicit run.
+    let pending = store
+        .pending_inputs(&session.id, Delivery::Steer)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].prompt, "/act");
+    assert!(
+        pending[0].promoted_seq.is_none(),
+        "row must be unpromoted for the next run"
+    );
 }

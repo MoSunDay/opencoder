@@ -42,7 +42,9 @@ use drain::{
 use execute::{execute_call, panic_message};
 use llm_call::{core_usage, run_one_llm_call};
 pub(crate) use steer::await_cancel;
-use steer::{claim_steers, is_turn_cancelled, reset_turn_cancel};
+use steer::{
+    apply_steer_batch, claim_steers, is_turn_cancelled, reset_turn_cancel, SteerApplyOutcome,
+};
 
 /// Emit an event through the shared sink. Best-effort: a poisoned mutex (only
 /// possible on panic inside a closure) drops the event rather than propagating.
@@ -248,65 +250,14 @@ pub(crate) async fn run_loop(
             // Steer absorption is loop progress — reset the drain consume
             // streak so the cap only counts back-to-back no-progress steps.
             consume_streak = 0;
-            // Track whether the last steer was a sentinel ClearContext so we
-            // can go idle without an LM call.
-            let mut clear_sentinel = false;
-            for (idx, (seq, p, imgs)) in steer_prompts.iter().enumerate() {
-                on_event(SessionEvent::SteerConsumed {
-                    seq: *seq,
-                    text: p.clone(),
-                });
-                // Defensive: a steered control command is applied immediately and
-                // NOT recorded as user text, so "/plan" never leaks to the LLM.
-                if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
-                    if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
-                        // P1-3: unpromote the failed item and all remaining
-                        // unprocessed items so the next run re-absorbs them.
-                        let remaining: Vec<i64> =
-                            steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
-                        input_recovery::unpromote_batch(session, &remaining).await;
-                        return Err(e);
-                    }
-                    clear_sentinel = matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
-                        && crate::control_cmd::is_clear_context_handoff(
-                            session.handoff_plan.as_deref().unwrap_or(""),
-                        );
-                    // Compound (/plan review): record the rest as a real
-                    // user message in the new mode.
-                    if let Some(rest) = rest {
-                        clear_sentinel = false;
-                        crate::skill_resolve::record_compound(session, &rest, imgs).await;
-                        steer_recorded = true;
-                    }
-                    // F2: mark per-item (not per-batch): a mid-batch failure
-                    // leaves earlier items marked, failed+remaining unpromoted.
-                    input_recovery::mark_input_recorded(session, *seq).await;
-                    continue;
-                }
-                clear_sentinel = false;
-                // Resolve `$skill` tokens, apply plan tag, record as real user turn.
-                crate::skill_resolve::record_compound(session, p, imgs).await;
-                input_recovery::mark_input_recorded(session, *seq).await;
-                steer_recorded = true;
-            }
-            // Sentinel ClearContext: go idle without an LM call.
-            if clear_sentinel {
-                on_event(SessionEvent::Done);
-                break;
-            }
-            // Bare control command(s) only (e.g. a bare "/plan" steer with no
-            // accompanying text): the mode/skill switch is the whole intent
-            // and no new user message was recorded. Avoid a wasteful LLM call
-            // on the existing transcript — go idle, mirroring the initial-
-            // prompt short-circuit in `run_with_registry`. Only fires when
-            // steers were actually claimed this turn (an empty steer batch
-            // with a pending `skip` is handled by the idle-drain block below).
-            if !steer_prompts.is_empty() && !steer_recorded {
-                on_event(SessionEvent::Done);
-                break;
+            match apply_steer_batch(session, &mut *on_event, &steer_prompts).await? {
+                SteerApplyOutcome::Continue { recorded } => steer_recorded = recorded,
+                // Sentinel/bare-command-only batch, or hard cancel mid-batch
+                // (Done / Status("interrupted") already emitted by the helper):
+                // end this run — the frontend resync restarts as needed.
+                SteerApplyOutcome::Done | SteerApplyOutcome::Cancelled => break,
             }
         }
-
         // Drain-mode pre-consume: process queue before the first LLM call
         // (web drain_to_completion). Bare commands loop via continue.
         if drain_mode && steer_prompts.is_empty() {

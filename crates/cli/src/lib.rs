@@ -247,6 +247,10 @@ pub enum ClientSessionSub {
     Delete { id: String },
     /// Fork (copy) a remote session; prints the new session id.
     Fork { id: String },
+    /// List a remote session's subagent tasks (pretty JSON).
+    Tasks { id: String },
+    /// Clear every remote session except <keep> (refused while running).
+    Clear { keep: String },
 }
 
 #[derive(Subcommand, Debug, Clone)]

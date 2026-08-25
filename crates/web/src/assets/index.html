@@ -29,6 +29,10 @@
       <button id="gear" title="settings" onclick="toggleSettings()">&#x2699;</button>
       <div id="settings-pop" style="display:none">
         <div class="sp-row">
+          <label>background processes</label>
+          <div id="bg-list"></div>
+        </div>
+        <div class="sp-row">
           <label>autopilot</label>
           <select id="autopilot" onchange="switchAutopilot()">
             <option value="">follow config</option>
@@ -88,6 +92,8 @@
   <!--JS_COMPOSER-->
   <!--JS_QUESTIONS-->
   <!--JS_QUEUE-->
+  <!--JS_SUBAGENTS-->
+  <!--JS_BG-->
   <!--JS_SETTINGS-->
 </body>
 </html>

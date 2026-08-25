@@ -62,6 +62,20 @@ pub async fn client_session_sub(
             println!("{new_id}");
             Ok(())
         }
+        ClientSessionSub::Tasks { id } => {
+            let tasks = remote.list_subagents(&id).await?;
+            if tasks.is_empty() {
+                println!("(no subagent tasks for {id})");
+                return Ok(());
+            }
+            println!("{}", serde_json::to_string_pretty(&tasks)?);
+            Ok(())
+        }
+        ClientSessionSub::Clear { keep } => {
+            let removed = remote.clear_sessions(&keep).await?;
+            println!("cleared {removed} session(s), kept {keep}");
+            Ok(())
+        }
     }
 }
 

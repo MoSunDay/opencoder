@@ -5,6 +5,7 @@ pub mod api_inputs;
 pub mod api_meta;
 pub mod api_ops;
 pub mod api_questions;
+pub mod api_subagents;
 pub mod auth;
 pub mod cmd;
 pub mod handle;
@@ -74,7 +75,9 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
     let mut app = app
         .route(
             "/api/sessions",
-            get(api::list_sessions).post(api::create_session),
+            get(api::list_sessions)
+                .post(api::create_session)
+                .delete(api_subagents::clear_sessions),
         )
         .route(
             "/api/sessions/:id",
@@ -87,6 +90,10 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/sessions/:id/agent", post(api::post_agent))
         .route("/api/sessions/:id/model", post(api::post_model))
         .route("/api/sessions/:id/interrupt", post(api::post_interrupt))
+        .route(
+            "/api/sessions/:id/subagents",
+            get(api_subagents::list_subagents),
+        )
         .route(
             "/api/sessions/:id/subagents/:task_id/steer",
             post(api::post_subagent_steer),

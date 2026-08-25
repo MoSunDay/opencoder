@@ -75,7 +75,7 @@ class El {
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
-  addEventListener() {}
+  addEventListener(kind, fn) { (this._listeners = this._listeners || {})[kind] = this._listeners[kind] || []; this._listeners[kind].push(fn); }
   focus() {}
   querySelector(sel) { return qsa(this, sel)[0] || null; }
   querySelectorAll(sel) { return qsa(this, sel); }
@@ -119,12 +119,13 @@ const SKELETON_IDS = ['side', 'search', 'sess-list', 'cur-id', 'mode', 'model',
   'model-select', 'gear', 'settings-pop', 'annotation', 'autopilot', 'handoff', 'reconnect',
   'reconnect-fail', 'log-wrap', 'log', 'hero', 'questions', 'composer',
   'skill-chip', 'msg', 'img-preview', 'skill-pop', 'send', 'qpanel', 'qp-list',
-  'qcount', 'qtoggle', 'top', 'main'];
+  'qcount', 'qtoggle', 'top', 'main', 'bg-list'];
 for (const id of SKELETON_IDS) body.appendChild(new El('div', id));
 
 const document = {
   hidden: false,
   body,
+  getElementById: (id) => byId(id),
   querySelector: (sel) => qsa(body, sel)[0] || null,
   querySelectorAll: (sel) => qsa(body, sel),
   createElement: (tag) => new El(tag),
@@ -137,6 +138,9 @@ const state = {
   models: { default: 'a/b', models: ['a/b', 'x/y'] },
   sessions: [{ id: 's1', title: 'smoke session', agent: 'act', updated_at: Date.now() }],
   agentStatus: 200,
+  subagents: [],
+  bgProcs: [],
+  messagesBySession: {},
 };
 const CALLS = [];
 const ALERTS = [];
@@ -179,7 +183,18 @@ async function fetch(url, opts = {}) {
   }
   if (method === 'GET' && path === '/api/models') return resp(200, state.models);
   if (method === 'GET' && /\/seq$/.test(path)) return resp(200, { seq: state.seq });
-  if (method === 'GET' && /\/messages$/.test(path)) return resp(200, { messages: [], meta: {} });
+  if (method === 'GET' && (m = /^\/api\/sessions\/([^/]+)\/subagents$/.exec(path))) {
+    return resp(200, { tasks: state.subagents });
+  }
+  if (method === 'GET' && (m = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path))) {
+    return resp(200, { messages: state.messagesBySession[m[1]] || [], meta: {} });
+  }
+  if (method === 'GET' && path === '/api/bg') return resp(200, { processes: state.bgProcs });
+  if (method === 'POST' && path === '/api/bg/stop') {
+    const killed = state.bgProcs.length;
+    state.bgProcs = [];
+    return resp(200, { ok: true, killed });
+  }
   if (method === 'GET' && path === '/api/sessions') return resp(200, { sessions: state.sessions });
   if (method === 'POST' && /\/agent$/.test(path)) {
     return state.agentStatus === 200
@@ -212,7 +227,7 @@ const sandbox = {
   clearInterval: (t) => clearInterval(t),
 };
 runInNewContext(['api', 'sse', 'sessions', 'chat', 'composer', 'questions',
-  'queue_panel', 'settings'].map((n) => readFileSync(join(ASSETS, `${n}.js`), 'utf8')).join('\n;\n'), sandbox);
+  'queue_panel', 'subagent_view', 'bg_panel', 'settings'].map((n) => readFileSync(join(ASSETS, `${n}.js`), 'utf8')).join('\n;\n'), sandbox);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await sleep(50); // let load-time fetches settle
 sandbox.cur = 's1'; // select the mock session (sidebar click equivalent)
@@ -342,6 +357,60 @@ ok(badge.style.display === 'none', 'badge hidden once events flow again');
 sandbox.sseAttempts = 5; // white-box: jump to the last allowed attempt
 es2.onerror();
 ok(byId('reconnect-fail').style.display === '', 'persistent fail banner after max attempts');
+
+
+// S7: subagent drill-down + background-process panel (subagent_view.js,
+// bg_panel.js). Cards restored from the durable task list after a transcript
+// reload; the delegated expand click opens the child transcript drawer; the
+// settings panel lists and stops background processes.
+console.log('S7 subagent view + bg panel');
+const fire = (el, kind, ev) => (el._listeners && el._listeners[kind] || []).forEach((fn) => fn(ev || { target: el }));
+state.subagents = [
+  { id: 't1', kind: 'explore', status: 'completed', child_session_id: 's1', prompt: 'map the crates', result: '9 crates' },
+  { id: 't2', kind: 'build', status: 'running', child_session_id: 's2', prompt: 'add the endpoint' },
+];
+state.messagesBySession['s1'] = [
+  { role: 'user', blocks: [{ type: 'text', text: 'map the crates' }] },
+  { role: 'assistant', blocks: [{ type: 'text', text: 'child reply: found 9' }] },
+];
+await sandbox.loadTranscript(); // chat.js snapshot paint + subagent restore
+const log = byId('log');
+const cards = qsa(log, '.subagent-card');
+ok(cards.length === 2, `historical subagent cards restored after reload (${cards.length})`);
+// (the DOM shim has no compound-class selector support: match via class set)
+const doneCard = cards.find((c) => qsa(c, '.sa-tail').some((t) => t._cls.has('ok'))) || null;
+ok(!!doneCard && doneCard.textContent.includes('9 crates'), 'completed card carries its result tail');
+const runningCard = cards.find((c) => !qsa(c, '.sa-tail').length) || null;
+ok(!!runningCard && qsa(runningCard, '.sa-dot').some((d) => d._cls.has('running')),
+  'running card keeps the pulsing dot');
+if (!doneCard || !runningCard) {
+  console.error('FAIL  S7 preconditions unmet — skipping expand flow');
+  failed++;
+} else {
+ok(!qsa(doneCard, '.sa-steer').length, 'completed card has no steer button');
+const expand = qsa(doneCard, '.sa-expand')[0];
+ok(!!expand && expand.dataset.child === 's1', 'expand button carries the child session id');
+fire(log, 'click', { target: expand }); // delegated through #log
+await sleep(50);
+const drawer = byId('sa-drawer');
+ok(!!drawer, 'child transcript drawer opened');
+ok(drawer.textContent.includes('child reply: found 9'), 'drawer renders the child session transcript');
+ok(drawer.textContent.includes('child: s1'), 'drawer surfaces the child session id');
+ok(calls('GET', /\/sessions\/s1\/messages$/).length >= 1, 'child transcript fetched via the messages endpoint');
+qsa(drawer, '.sa-drawer-hdr button')[0].onclick();
+ok(!byId('sa-drawer') && !byId('sa-backdrop'), 'close button tears the drawer down');
+}
+
+state.bgProcs = [{ pid: 4242, output_path: '/tmp/bg-4242.log' }];
+await sandbox.refreshBgPanel();
+const bgBox = byId('bg-list');
+ok(bgBox.textContent.includes('pid 4242'), 'bg panel lists the live process');
+qsa(bgBox, 'button').find((b) => b.textContent === 'stop all').onclick();
+await sleep(50);
+ok(calls('POST', /\/api\/bg\/stop$/).length === 1, 'stop-all POSTs /api/bg/stop');
+ok(qsa(byId('log'), '.sys-chip').some((c) => c.textContent.includes('stopped 1')),
+  'stop result surfaced as a system chip');
+ok(!qsa(byId('bg-list'), '.bg-row').length, 'panel empties after stop-all');
 
 console.log(failed === 0 ? 'FRONTEND SMOKE PASSED' : `FRONTEND SMOKE FAILED (${failed})`);
 process.exit(failed === 0 ? 0 : 1);

@@ -1,4 +1,4 @@
-Commit: (working-tree)
+Commit: 48cb5e605a38a42537951be40d24dddcba334e36
 
 # drain/steer 应用点 hard-cancel 守卫：取消后不再自动应用排队模式命令
 

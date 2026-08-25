@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use opencoder_client::Remote;
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
-use opencoder_store::{LibsqlStore, Store};
+use opencoder_store::{LibsqlStore, Store, SubagentStatus, SubagentTaskRecord};
 
 const TOKEN: &str = "remote-ops-token";
 
@@ -228,4 +228,69 @@ async fn models_and_skills_catalogs_are_objects() {
 
     let skills = remote.get_skills().await.unwrap();
     assert!(skills.get("skills").and_then(|s| s.as_array()).is_some());
+}
+
+#[tokio::test]
+async fn list_subagents_and_clear_sessions_roundtrip() {
+    let state = state_with_mock().await;
+    let base = spawn_server(state.clone()).await;
+    let remote = Remote::new(&base, TOKEN).unwrap();
+
+    let keep = remote.create_session(None, None).await.unwrap();
+    let other = remote.create_session(None, None).await.unwrap();
+    let child = remote.create_session(None, None).await.unwrap();
+    state
+        .store
+        .create_subagent_task(&SubagentTaskRecord {
+            task_id: "task-1".into(),
+            parent_session_id: other.clone(),
+            child_session_id: child.clone(),
+            parent_message_id: None,
+            agent: "explore".into(),
+            prompt: "scan the crates".into(),
+            result: None,
+            status: SubagentStatus::Running,
+            ok: None,
+            started_at: 0,
+            completed_at: None,
+        })
+        .await
+        .unwrap();
+
+    // Unknown parent surfaces the server's 404; an existing parent with no
+    // tasks is a normal empty list.
+    let err = remote
+        .list_subagents("no-such-session")
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("404"), "list 404: {err:#}");
+    assert!(
+        remote.list_subagents(&keep).await.unwrap().is_empty(),
+        "keep session has no tasks yet"
+    );
+
+    let tasks = remote.list_subagents(&other).await.unwrap();
+    assert_eq!(tasks.len(), 1, "tasks: {tasks:?}");
+    assert_eq!(tasks[0]["id"], "task-1");
+    assert_eq!(tasks[0]["kind"], "explore");
+    assert_eq!(tasks[0]["status"], "running");
+    assert_eq!(tasks[0]["child_session_id"], child);
+    assert_eq!(tasks[0]["prompt"], "scan the crates");
+
+    let removed = remote.clear_sessions(&keep).await.unwrap();
+    assert_eq!(removed, 2, "other + its subagent child cleared");
+    assert!(state.store.get_session(&keep).await.unwrap().is_some());
+    assert!(state.store.get_session(&other).await.unwrap().is_none());
+    assert!(state.store.get_session(&child).await.unwrap().is_none());
+    assert!(
+        state.store.get_subagent_task("task-1").await.unwrap().is_none(),
+        "subagent task rows cascade with their parent session"
+    );
+    assert_eq!(
+        remote.clear_sessions(&keep).await.unwrap(),
+        0,
+        "clear is idempotent"
+    );
+    let err = remote.clear_sessions("no-such-session").await.unwrap_err();
+    assert!(err.to_string().contains("404"), "clear 404: {err:#}");
 }

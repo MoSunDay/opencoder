@@ -282,4 +282,41 @@ impl Remote {
         let _ = ensure_ok(resp, "reorder inputs").await?;
         Ok(())
     }
+
+    /// GET /api/sessions/:id/subagents — the session's subagent task records
+    /// (`[{"id","kind","status","child_session_id","prompt",...}]`). 404 when
+    /// the parent session does not exist (empty list is a normal 200).
+    pub async fn list_subagents(&self, id: &str) -> Result<Vec<serde_json::Value>> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/api/sessions/{id}/subagents")))
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .context("list subagents")?;
+        let resp = ensure_ok(resp, "list subagents").await?;
+        let v: serde_json::Value = resp.json().await.context("list subagents json")?;
+        Ok(v
+            .get("tasks")
+            .cloned()
+            .and_then(|t| serde_json::from_value(t).ok())
+            .unwrap_or_default())
+    }
+
+    /// DELETE /api/sessions?keep=<id> — clear every remote session except
+    /// `keep` (FK-cascades to messages/inputs/events/subagent tasks). Returns
+    /// the removed count. 409 while any session drain is running.
+    pub async fn clear_sessions(&self, keep: &str) -> Result<u64> {
+        let resp = self
+            .http
+            .delete(self.url("/api/sessions"))
+            .query(&[("keep", keep)])
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .context("clear sessions")?;
+        let resp = ensure_ok(resp, "clear sessions").await?;
+        let v: serde_json::Value = resp.json().await.context("clear sessions json")?;
+        Ok(v.get("removed").and_then(|r| r.as_u64()).unwrap_or(0))
+    }
 }

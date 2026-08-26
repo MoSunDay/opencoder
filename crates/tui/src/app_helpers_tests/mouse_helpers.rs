@@ -106,6 +106,7 @@ pub fn empty_hits(body: Rect) -> MouseHits {
         queue_panel: None,
         queue_total: 0,
         queue_btns: Vec::new(),
+        attach_del_btns: Vec::new(),
         thinking_btns: Vec::new(),
         subagent_btns: Vec::new(),
         tool_btns: Vec::new(),

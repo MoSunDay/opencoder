@@ -43,6 +43,7 @@ async fn hanging_app(notify: Arc<Notify>) -> Ctx {
         workdir,
         handles: handles.clone(),
         client_override: Some(Arc::new(mock) as Arc<dyn ChatStream>),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     });
     Ctx {
         app: opencoder_web::build_app(state, None, false),
@@ -59,6 +60,7 @@ async fn plain_app() -> Ctx {
         store: store.clone(),
         workdir,
         handles: handles.clone(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: Some(Arc::new(MockChatClient::new().with_default(vec![
             LlmEvent::Completed {
                 text: "t".into(),

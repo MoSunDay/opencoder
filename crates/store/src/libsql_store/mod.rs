@@ -9,14 +9,17 @@ use tracing::debug;
 
 use crate::store::Store;
 use crate::types::{
-    Delivery, ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
-    SessionMeta, SessionPatch, SubagentTaskRecord,
+    Delivery, ImportReport, NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord,
+    SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 
 mod events;
 mod inputs;
 mod messages;
+mod node_state;
+mod node_tasks;
+mod nodes;
 pub(crate) mod schema;
 mod sessions;
 mod subagent_tasks;
@@ -306,6 +309,88 @@ impl Store for LibsqlStore {
     ) -> Result<Vec<TodoEventRecord>> {
         let _guard = self.db_lock.lock().await;
         todos::events_after(&self.conn, workflow_id, after_seq).await
+    }
+
+    async fn register_node(
+        &self,
+        name: &str,
+        version: Option<&str>,
+        workdir: Option<&str>,
+        now_ms: i64,
+    ) -> Result<NodeRecord> {
+        let _guard = self.db_lock.lock().await;
+        nodes::register(&self.conn, name, version, workdir, now_ms).await
+    }
+    async fn list_nodes(&self) -> Result<Vec<NodeRecord>> {
+        let _guard = self.db_lock.lock().await;
+        nodes::list(&self.conn).await
+    }
+    async fn get_node(&self, id: &str) -> Result<Option<NodeRecord>> {
+        let _guard = self.db_lock.lock().await;
+        nodes::get(&self.conn, id).await
+    }
+    async fn delete_node(&self, id: &str) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        nodes::delete(&self.conn, id).await
+    }
+    async fn heartbeat_node(&self, id: &str, now_ms: i64) -> Result<Vec<String>> {
+        let _guard = self.db_lock.lock().await;
+        nodes::heartbeat(&self.conn, id, now_ms).await
+    }
+    async fn dispatch_node_task(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        node_id: &str,
+        title: Option<&str>,
+        prompt: &str,
+        agent: Option<&str>,
+        model: Option<&str>,
+        now_ms: i64,
+    ) -> Result<NodeTaskRecord> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::dispatch(
+            &self.conn, task_id, session_id, node_id, title, prompt, agent, model, now_ms,
+        )
+        .await
+    }
+    async fn claim_next_node_task(
+        &self,
+        node_id: &str,
+        now_ms: i64,
+    ) -> Result<Option<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::claim_next(&self.conn, node_id, now_ms).await
+    }
+    async fn update_node_task_status(
+        &self,
+        task_id: &str,
+        status: NodeTaskStatus,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<()> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::update_status(&self.conn, task_id, status, error, now_ms).await
+    }
+    async fn request_node_task_cancel(&self, task_id: &str) -> Result<Option<NodeTaskStatus>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::request_cancel(&self.conn, task_id).await
+    }
+    async fn list_node_tasks(&self, node_id: &str, limit: u32) -> Result<Vec<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::list_tasks(&self.conn, node_id, limit).await
+    }
+    async fn get_node_task(&self, task_id: &str) -> Result<Option<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::get_task(&self.conn, task_id).await
+    }
+    async fn converge_lost_node_tasks(
+        &self,
+        now_ms: i64,
+        stale_ms: i64,
+    ) -> Result<Vec<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::converge_lost(&self.conn, now_ms, stale_ms).await
     }
 
     async fn import_messages(

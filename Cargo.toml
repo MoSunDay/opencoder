@@ -10,6 +10,7 @@ members = [
     "crates/client",
     "crates/cli",
     "crates/todos",
+    "crates/node",
 ]
 
 [package]
@@ -27,6 +28,7 @@ opencoder-cli.workspace = true
 opencoder-tui.workspace = true
 opencoder-core.workspace = true
 opencoder-session.workspace = true
+opencoder-node.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -51,6 +53,7 @@ opencoder-web    = { path = "crates/web" }
 opencoder-client  = { path = "crates/client" }
 opencoder-cli    = { path = "crates/cli" }
 opencoder-todos  = { path = "crates/todos" }
+opencoder-node   = { path = "crates/node" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

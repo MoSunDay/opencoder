@@ -3,6 +3,8 @@ pub mod api_envs;
 pub mod api_events;
 pub mod api_inputs;
 pub mod api_meta;
+pub mod api_nodes;
+pub mod api_nodes_ops;
 pub mod api_ops;
 pub mod api_questions;
 pub mod api_subagents;
@@ -12,7 +14,9 @@ pub mod handle;
 mod handle_lifecycle;
 mod handle_questions;
 pub mod html;
-mod sse_dedup;
+pub mod nodes_state;
+pub mod sse_dedup;
+pub mod sse_nodes;
 
 use std::sync::Arc;
 
@@ -22,11 +26,14 @@ use axum::Router;
 use opencoder_store::{LibsqlStore, Store};
 
 use crate::handle::HandleMap;
+use crate::nodes_state::NodeHub;
 
 pub struct AppState {
     pub store: Arc<dyn Store>,
     pub workdir: std::path::PathBuf,
     pub handles: HandleMap,
+    /// Broadcast hub for node-task sessions (they own no drain handle).
+    pub nodes: Arc<NodeHub>,
     pub client_override: Option<Arc<dyn opencoder_llm::ChatStream>>,
 }
 
@@ -45,6 +52,7 @@ pub async fn serve(
         store,
         workdir: workdir.clone(),
         handles: handle::new_handle_map(),
+        nodes: Arc::new(NodeHub::new()),
         client_override: None,
     });
 
@@ -145,6 +153,28 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
         .route("/api/envs/:name", delete(api_envs::delete))
         .route("/api/bg", get(api_ops::list_bg))
         .route("/api/bg/stop", post(api_ops::stop_bg))
+        // ── multi-node fleet (Phase 2) ────────────────────────────────
+        .route("/api/nodes", get(api_nodes::list_nodes))
+        .route("/api/nodes/register", post(api_nodes::post_register))
+        .route("/api/nodes/tasks/claim", get(api_nodes_ops::claim))
+        .route(
+            "/api/nodes/tasks/:tid/events",
+            get(sse_nodes::get_node_task_events).post(api_nodes_ops::post_events),
+        )
+        .route(
+            "/api/nodes/tasks/:tid/status",
+            post(api_nodes_ops::post_status),
+        )
+        .route("/api/nodes/:id/heartbeat", post(api_nodes::post_heartbeat))
+        .route(
+            "/api/nodes/:id/tasks",
+            get(api_nodes::list_tasks).post(api_nodes::dispatch_task),
+        )
+        .route(
+            "/api/nodes/:node_id/tasks/:tid/cancel",
+            post(api_nodes_ops::cancel_task),
+        )
+        .route("/api/nodes/:id", delete(api_nodes::delete_node))
         .route("/api/health", get(api::health))
         .with_state(state);
     if let Some(t) = token {
@@ -192,6 +222,7 @@ mod tests {
             store,
             workdir: std::env::temp_dir(),
             handles: handle::new_handle_map(),
+            nodes: Arc::new(crate::nodes_state::NodeHub::new()),
             client_override: None,
         });
         build_app(state, None, true)
@@ -203,6 +234,7 @@ mod tests {
             store,
             workdir: std::env::temp_dir(),
             handles: handle::new_handle_map(),
+            nodes: Arc::new(crate::nodes_state::NodeHub::new()),
             client_override: None,
         });
         build_app(state, None, false)

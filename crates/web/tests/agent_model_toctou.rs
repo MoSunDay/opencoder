@@ -58,6 +58,8 @@ async fn state(sid: &str) -> (Arc<opencoder_web::AppState>, Arc<SessionHandle>) 
             store,
             workdir: std::env::temp_dir(),
             handles,
+
+            nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         }),
         handle,
     )

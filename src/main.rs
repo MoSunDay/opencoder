@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::Parser;
 use opencoder_cli::{init_logging, Cli, Command};
@@ -103,6 +105,34 @@ async fn main() -> Result<()> {
                     .map(|p| p.to_string_lossy().into_owned()),
                 cmd: cmd.clone(),
             })
+            .await
+        }
+        Some(Command::Node {
+            name,
+            remote,
+            token,
+        }) => {
+            // Node follows the CLIENT token semantics (never auto-generate):
+            // reuse the client resolver verbatim so a missing flag+env pair
+            // fails fast here with the same error message.
+            let resolved_token = opencoder_cli::client::resolve_token(token.clone())?;
+            let workdir = cli
+                .workdir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            opencoder_node::run_node(
+                opencoder_node::NodeOpts {
+                    name: name.clone(),
+                    remote: remote.clone(),
+                    token: resolved_token,
+                    workdir,
+                    heartbeat_interval: opencoder_node::DEFAULT_HEARTBEAT_INTERVAL,
+                    claim_interval: opencoder_node::DEFAULT_CLAIM_INTERVAL,
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    local_store_dir: None,
+                },
+                None,
+            )
             .await
         }
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,

@@ -19,6 +19,7 @@ async fn app() -> axum::Router {
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: None,
     });
     opencoder_web::build_app(state, Some(TOKEN.into()), true)

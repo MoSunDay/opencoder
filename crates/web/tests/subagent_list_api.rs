@@ -21,6 +21,7 @@ async fn app() -> (axum::Router, Arc<opencoder_web::AppState>) {
         store: store.clone(),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     });
     (opencoder_web::build_app(state.clone(), None, false), state)
 }
@@ -90,7 +91,9 @@ async fn get(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
         .await
         .unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, v)
 }

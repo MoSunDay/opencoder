@@ -23,6 +23,7 @@ async fn app() -> (axum::Router, Arc<opencoder_web::AppState>) {
         store: store.clone(),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     });
     (opencoder_web::build_app(state.clone(), None, false), state)
 }
@@ -66,7 +67,9 @@ async fn clear(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) 
         .await
         .unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
     let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, v)
 }
@@ -124,8 +127,7 @@ async fn refused_with_409_while_any_handle_draining() {
     seed_session(&state, "KEEP").await;
     seed_session(&state, "BUSY").await;
     let h = opencoder_web::handle::SessionHandle::new();
-    h.draining
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    h.draining.store(true, std::sync::atomic::Ordering::SeqCst);
     state.handles.lock().await.insert("BUSY".into(), h);
 
     let (status, v) = clear(router, "/api/sessions?keep=KEEP").await;
@@ -134,17 +136,14 @@ async fn refused_with_409_while_any_handle_draining() {
         state.store.get_session("BUSY").await.unwrap().is_some(),
         "409 must not delete anything"
     );
-    assert!(
-        state.store.get_session("KEEP").await.unwrap().is_some()
-    );
+    assert!(state.store.get_session("KEEP").await.unwrap().is_some());
 
     // The KEEP session draining also refuses: its running subagent's child
     // session is still being written to (TUI gate_clear_all semantics).
     let (router2, state2) = app().await;
     seed_session(&state2, "KEEP").await;
     let hk = opencoder_web::handle::SessionHandle::new();
-    hk.draining
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    hk.draining.store(true, std::sync::atomic::Ordering::SeqCst);
     state2.handles.lock().await.insert("KEEP".into(), hk);
     let (status, _) = clear(router2, "/api/sessions?keep=KEEP").await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -170,7 +169,10 @@ async fn evicts_non_keep_handles_and_keeps_the_targets() {
     assert_eq!(status, StatusCode::OK);
     let map = state.handles.lock().await;
     assert!(map.contains_key("KEEP"), "kept session keeps its handle");
-    assert!(!map.contains_key("IDLE"), "cleared session's handle evicted");
+    assert!(
+        !map.contains_key("IDLE"),
+        "cleared session's handle evicted"
+    );
 }
 
 #[tokio::test]

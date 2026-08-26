@@ -23,6 +23,7 @@ fn composer_renders_prompt_and_multiline_text() {
                 None,
                 &Line::raw("ignored"),
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();
@@ -78,6 +79,7 @@ fn annotation_editor_shows_green_top_title() {
                 Some("edit annotation"),
                 &top_title,
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();
@@ -127,6 +129,7 @@ fn plan_editor_has_no_info_top_title() {
                 None, // edit_title None -> "edit plan", warn-coloured, NO info title
                 &top_title,
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();
@@ -165,6 +168,7 @@ fn composer_copy_mode_param_early_exits_to_clean_view() {
                 Some("edit annotation"),
                 &Line::raw("ignored"),
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();

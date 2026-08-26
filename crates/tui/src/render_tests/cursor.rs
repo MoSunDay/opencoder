@@ -112,6 +112,7 @@ fn composer_word_wrap_renders_and_cursor_aligns() {
                 None,
                 &Line::raw("ignored"),
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();
@@ -184,6 +185,7 @@ fn composer_badge_renders_and_cursor_aligns() {
                 None,
                 &Line::raw("ignored"),
                 None,
+                &mut MouseHits::default(),
             );
         })
         .unwrap();
@@ -209,4 +211,57 @@ fn composer_badge_renders_and_cursor_aligns() {
         })
         .unwrap();
     terminal.backend_mut().assert_cursor_position((4, 2));
+}
+
+/// Multiple attachments: one badge line per image, ✕ right-aligned at each
+/// row end, input shifted down by the number of badge rows (not just one).
+/// Pins the per-row ✕ rects exported for the click handler.
+#[test]
+fn composer_multi_badge_rows_shift_input() {
+    // composer width 24 -> inner 22 cells wide, rows 1..3 available inside.
+    let backend = TestBackend::new(24, 9);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut hits = MouseHits::default();
+    terminal
+        .draw(|f| {
+            render_composer(
+                f,
+                Rect::new(0, 0, 24, 8),
+                "hi",
+                false, // copy_mode
+                0,
+                22,
+                2,
+                &[
+                    ("data:image/png;base64,aa".to_string(), "a.png".to_string()),
+                    ("data:image/png;base64,bb".to_string(), "b.png".to_string()),
+                ],
+                false,
+                None,
+                None,
+                &Line::raw("ignored"),
+                None,
+                &mut hits,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row1 = row_text(buf, 1, 24);
+    let row2 = row_text(buf, 2, 24);
+    let row3 = row_text(buf, 3, 24);
+    assert!(row1.contains("a.png"), "first badge on row 1: {row1}");
+    assert!(row2.contains("b.png"), "second badge on row 2: {row2}");
+    // ✕ right-aligned at inner.x + inner.width - 1 = 1 + 22 - 1 = 22.
+    assert_eq!(buf[(22, 1)].symbol(), "\u{2715}", "row-1 ✕ at col 22");
+    assert_eq!(buf[(22, 2)].symbol(), "\u{2715}", "row-2 ✕ at col 22");
+    // Input pushed below BOTH badge rows.
+    assert!(
+        row3.contains("hi"),
+        "input must shift down by 2 badge rows: {row3}"
+    );
+    assert_eq!(hits.attach_del_btns.len(), 2);
+    assert_eq!(hits.attach_del_btns[0].index, 0);
+    assert_eq!(hits.attach_del_btns[0].rect, Rect::new(22, 1, 1, 1));
+    assert_eq!(hits.attach_del_btns[1].index, 1);
+    assert_eq!(hits.attach_del_btns[1].rect, Rect::new(22, 2, 1, 1));
 }

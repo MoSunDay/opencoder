@@ -35,10 +35,7 @@ impl MockChatClient {
 
     /// Queue the events to return for the next `chat_stream` call (FIFO).
     pub fn push_script(self, events: Vec<LlmEvent>) -> Self {
-        self.scripts
-            .lock()
-            .unwrap()
-            .push_back(ScriptEntry::Events(events));
+        self.queue_script(events);
         self
     }
 
@@ -47,11 +44,25 @@ impl MockChatClient {
     /// channel closes so the stream ends. Lets a test hold an in-flight LLM
     /// call open and release it on demand.
     pub fn push_hang(self, notify: Arc<tokio::sync::Notify>) -> Self {
+        self.queue_hang(notify);
+        self
+    }
+
+    /// Interior-mutable twin of [`push_script`] usable through a shared
+    /// `Arc<MockChatClient>` after the handle was handed to a runtime.
+    pub fn queue_script(&self, events: Vec<LlmEvent>) {
+        self.scripts
+            .lock()
+            .unwrap()
+            .push_back(ScriptEntry::Events(events));
+    }
+
+    /// Interior-mutable twin of [`push_hang`] (shared-handle form).
+    pub fn queue_hang(&self, notify: Arc<tokio::sync::Notify>) {
         self.scripts
             .lock()
             .unwrap()
             .push_back(ScriptEntry::Hang(notify));
-        self
     }
 
     /// Events returned when no queued script remains. Useful for long loops.

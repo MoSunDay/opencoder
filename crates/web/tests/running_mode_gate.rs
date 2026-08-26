@@ -134,6 +134,7 @@ fn seeded_state(
         store: store.clone(),
         workdir: tmp.path().to_path_buf(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: Some(llm),
     })
 }

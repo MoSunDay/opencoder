@@ -65,6 +65,9 @@ pub async fn delete_input(
     State(state): State<Arc<AppState>>,
     Path((id, seq)): Path<(String, i64)>,
 ) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     let store = state.store.clone();
     let is_pending =
         |rows: &Vec<opencoder_store::SessionInput>| rows.iter().any(|i| i.seq == Some(seq));
@@ -101,6 +104,9 @@ pub async fn reorder_inputs(
     Path(id): Path<String>,
     Json(body): Json<ReorderBody>,
 ) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     match state.store.swap_input_order(&id, body.a, body.b).await {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err(e) => error_500(format!("swap_input_order: {e:#}")),

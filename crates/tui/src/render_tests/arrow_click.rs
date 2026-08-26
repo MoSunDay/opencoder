@@ -111,7 +111,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             "s1",
             store.as_ref(),
             &mut queue_scroll,
-        &mut vec![], // no pending images
+            &mut vec![], // no pending images
         )
         .await;
         assert_eq!(outcome, MouseOutcome::None);
@@ -202,7 +202,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             "s1",
             store.as_ref(),
             &mut queue_scroll,
-        &mut vec![], // no pending images
+            &mut vec![], // no pending images
         )
         .await;
         assert_eq!(outcome, MouseOutcome::None);

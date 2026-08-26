@@ -34,6 +34,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
         store: Arc::new(LibsqlStore::open_memory().await.unwrap()),
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     })
 }
 

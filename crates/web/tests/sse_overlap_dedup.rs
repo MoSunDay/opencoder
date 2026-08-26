@@ -196,6 +196,7 @@ async fn overlap_window_event_is_deduped_once() {
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     });
     seed(&state, sid).await;
 

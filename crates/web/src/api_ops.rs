@@ -23,6 +23,9 @@ use crate::AppState;
 
 /// POST /api/sessions/:id/fork — clone a session (meta + messages).
 pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),
@@ -38,6 +41,9 @@ pub async fn fork_session(State(state): State<Arc<AppState>>, Path(id): Path<Str
 
 /// POST /api/sessions/:id/compact — queue a manual compaction command.
 pub async fn post_compact(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),
@@ -85,6 +91,9 @@ pub async fn post_handoff(
     Path(id): Path<String>,
     body: Option<Json<HandoffBody>>,
 ) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),
@@ -193,6 +202,9 @@ pub async fn post_skill(
     Path(id): Path<String>,
     Json(body): Json<SkillBody>,
 ) -> Response {
+    if let Some(resp) = crate::api::reject_node_session(&state, &id).await {
+        return resp;
+    }
     match state.store.get_session(&id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_404(&format!("session not found: {id}")),

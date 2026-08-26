@@ -25,6 +25,7 @@
       <button onclick="compactSession()">compact</button>
       <button class="danger" onclick="delSession(currentId())">delete</button>
       <button id="qtoggle" title="pending inputs" onclick="toggleQueuePanel()">queue (<span id="qcount">0</span>)</button>
+      <button id="ntoggle" title="worker nodes" onclick="toggleNodesPanel()">nodes</button>
       <span id="reconnect" style="display:none">reconnecting...</span>
       <button id="gear" title="settings" onclick="toggleSettings()">&#x2699;</button>
       <div id="settings-pop" style="display:none">
@@ -85,6 +86,8 @@
     <div class="qp-hdr"><span>pending inputs</span><button onclick="toggleQueuePanel()" title="close">&#x2715;</button></div>
     <div id="qp-list"></div>
   </aside>
+  <aside id="nodes-panel" style="display:none"></aside>
+  <div id="nodes-live" style="display:none"></div>
   <!--JS_API-->
   <!--JS_SSE-->
   <!--JS_SESSIONS-->
@@ -94,6 +97,7 @@
   <!--JS_QUEUE-->
   <!--JS_SUBAGENTS-->
   <!--JS_BG-->
+  <!--JS_NODES-->
   <!--JS_SETTINGS-->
 </body>
 </html>

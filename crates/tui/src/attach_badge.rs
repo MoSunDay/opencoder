@@ -113,8 +113,14 @@ mod tests {
         let buf = terminal.backend().buffer();
         let row1 = row_text(buf, 1, 20);
         let row2 = row_text(buf, 2, 20);
-        assert!(row1.contains('\u{1f4ce}') && row1.contains("a.png"), "row1: {row1}");
-        assert!(row2.contains('\u{1f4ce}') && row2.contains("b.png"), "row2: {row2}");
+        assert!(
+            row1.contains('\u{1f4ce}') && row1.contains("a.png"),
+            "row1: {row1}"
+        );
+        assert!(
+            row2.contains('\u{1f4ce}') && row2.contains("b.png"),
+            "row2: {row2}"
+        );
         // ✕ right-aligned at inner.x + inner.width - 1 = 1 + 18 - 1 = 18.
         assert_eq!(buf[(18, 1)].symbol(), "\u{2715}", "row-1 ✕ at last cell");
         assert_eq!(buf[(18, 2)].symbol(), "\u{2715}", "row-2 ✕ at last cell");
@@ -135,7 +141,8 @@ mod tests {
         let long = "very-long-filename-with-many-chars.png";
         terminal
             .draw(|f| {
-                let rows = render_attach_badge(f, Rect::new(1, 0, 10, 2), &imgs(&[long]), &mut hits);
+                let rows =
+                    render_attach_badge(f, Rect::new(1, 0, 10, 2), &imgs(&[long]), &mut hits);
                 assert_eq!(rows, 1);
             })
             .unwrap();
@@ -155,10 +162,8 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut hits = MouseHits::default();
         let names: Vec<String> = (0..5).map(|i| format!("f{i}.png")).collect();
-        let imgs: Vec<(String, String)> = names
-            .iter()
-            .map(|n| ("x".to_string(), n.clone()))
-            .collect();
+        let imgs: Vec<(String, String)> =
+            names.iter().map(|n| ("x".to_string(), n.clone())).collect();
         terminal
             .draw(|f| {
                 let rows = render_attach_badge(f, Rect::new(0, 0, 20, 2), &imgs, &mut hits);

@@ -194,6 +194,23 @@ pub enum Command {
         )]
         prompt: Vec<String>,
     },
+    /// Run this machine as an execution node registered to a central server.
+    /// Claims dispatched tasks over REST, executes each with the local session
+    /// runner, and streams events/status back. The global `--workdir` flag
+    /// selects the execution working directory (and, absent an override, the
+    /// local store location via the same data-dir rule as `server`).
+    Node {
+        /// Friendly unique node name (re-registering the same name replaces
+        /// the old row). Defaults to a lowercased hostname-derived label.
+        #[arg(long, default_value_t = default_node_name())]
+        name: String,
+        /// Server base URL (e.g. http://127.0.0.1:8080).
+        #[arg(long)]
+        remote: String,
+        /// Bearer token. Defaults to OPENCODER_SERVER_TOKEN.
+        #[arg(long)]
+        token: Option<String>,
+    },
     /// Print the resolved configuration (defaults < config files < env vars < --model).
     Config {
         #[command(subcommand)]
@@ -408,6 +425,32 @@ pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
         .with_env_filter(env_filter)
         .with_target(false)
         .try_init();
+}
+
+/// Default `node --name`: lowercase machine hostname trimmed to DNS-label
+/// charset, disambiguated with a short process-local suffix so two nodes on
+/// one host (or a container fleet sharing a hostname) stay distinct.
+fn default_node_name() -> String {
+    let raw = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "opencoder-node".into());
+    let mut slug: String = raw
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if slug.is_empty() {
+        slug = "opencoder-node".into();
+    }
+    let short = ulid::Ulid::new().to_string().to_lowercase();
+    let tail: String = short.chars().rev().take(6).collect();
+    format!("{slug}-{tail}")
 }
 
 /// Best-effort fallback log file when no primary sink was provided/usable.

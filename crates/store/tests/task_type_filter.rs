@@ -7,7 +7,8 @@
 //! such an orphaned child is still excluded because its `task_type = 'subagent'`.
 
 use opencoder_store::{
-    LibsqlStore, SessionFilter, SessionMeta, Store, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
+    LibsqlStore, SessionFilter, SessionMeta, Store, TASK_TYPE_NODE, TASK_TYPE_PARENT,
+    TASK_TYPE_SUBAGENT,
 };
 
 async fn mem() -> LibsqlStore {
@@ -112,4 +113,44 @@ async fn parent_session_persists_default_task_type() {
         Some(TASK_TYPE_SUBAGENT),
         "subagent child must persist task_type='subagent'"
     );
+}
+
+/// `include_subagents = true` widens visibility to parents + subagent
+/// children, but synthetic machine sessions must stay hidden at BOTH settings:
+/// a node-dispatch session (`task_type='node'`) is an execution internal and a
+/// UI listing it would invite mutations the node protocol cannot serve.
+#[tokio::test]
+async fn include_subagents_still_excludes_node_sessions() {
+    let store = mem().await;
+    store.create_session(&meta("p1", None)).await.unwrap();
+    store
+        .create_session(&meta("c1", Some(TASK_TYPE_SUBAGENT)))
+        .await
+        .unwrap();
+    store
+        .create_session(&meta("n1", Some(TASK_TYPE_NODE)))
+        .await
+        .unwrap();
+
+    for include in [false, true] {
+        let listed = store
+            .list_sessions(&SessionFilter {
+                limit: 100,
+                include_subagents: include,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let ids: Vec<&str> = listed.iter().map(|i| i.id.as_str()).collect();
+        assert!(
+            !ids.contains(&"n1"),
+            "node session must never be listed (include_subagents={include}), got {ids:?}"
+        );
+        if include {
+            assert!(
+                ids.contains(&"c1") && ids.contains(&"p1"),
+                "parents + subagent children appear when requested, got {ids:?}"
+            );
+        }
+    }
 }

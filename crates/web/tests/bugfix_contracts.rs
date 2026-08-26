@@ -39,6 +39,7 @@ async fn state_with_store(store: Arc<dyn Store>) -> Arc<opencoder_web::AppState>
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     })
 }
 

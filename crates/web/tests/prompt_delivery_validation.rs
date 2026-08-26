@@ -33,6 +33,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
         store,
         workdir: tempfile::tempdir().unwrap().keep(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     })
 }
 
@@ -203,6 +204,7 @@ async fn model_error_precedes_and_differs_from_api_key_error() {
         store,
         workdir: workdir.clone(),
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     });
     let _iso = opencoder_core::scoped_config_home(workdir);
 

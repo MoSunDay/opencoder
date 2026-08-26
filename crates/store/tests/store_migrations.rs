@@ -32,7 +32,7 @@ async fn schema_migration_versioning() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().expect("version row exists");
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 11, "schema_version must be 11 after bootstrap");
+    assert_eq!(v, 12, "schema_version must be 12 after bootstrap");
 }
 
 #[tokio::test]
@@ -106,7 +106,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after migration");
+        assert_eq!(v, 12, "schema version must be 12 after migration");
     }
 
     // New events can be stored with sse_kind and read back.
@@ -138,7 +138,7 @@ async fn schema_migration_v1_to_v2_adds_sse_kind() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 11, "schema version stays 11 after idempotent re-open");
+    assert_eq!(v, 12, "schema version stays 12 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -234,7 +234,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after v2→v3 migration");
+        assert_eq!(v, 12, "schema version must be 12 after v2→v3 migration");
     }
 
     // (4) Idempotent: reopening again does not re-run migration or error, and
@@ -249,7 +249,7 @@ async fn schema_migration_v2_to_v3_adds_handoff_and_skill() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 11, "schema version stays 11 after idempotent re-open");
+    assert_eq!(v, 12, "schema version stays 12 after idempotent re-open");
 }
 
 #[tokio::test]
@@ -337,7 +337,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after migration");
+        assert_eq!(v, 12, "schema version must be 12 after migration");
     }
 
     // A freshly appended event still round-trips its sse_kind.
@@ -367,7 +367,7 @@ async fn schema_migration_is_idempotent_when_column_already_exists() {
     let mut rows = stmt.query(()).await.unwrap();
     let r = rows.next().await.unwrap().unwrap();
     let v: i64 = r.get(0).unwrap();
-    assert_eq!(v, 11, "schema version stays 11 after idempotent re-open");
+    assert_eq!(v, 12, "schema version stays 12 after idempotent re-open");
 }
 
 /// v6 -> v7: reopening a faithful v6 database (sessions WITHOUT
@@ -450,7 +450,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after v6->v7 migration");
+        assert_eq!(v, 12, "schema version must be 12 after v6->v7 migration");
     }
 }
 
@@ -462,7 +462,7 @@ async fn schema_migration_v6_to_v7_adds_summary_images() {
 /// NOT `requirement`), then reopen through `LibsqlStore::open` so
 /// `migrate(conn, 7)` runs the `if from < 8` block. Asserts the column is
 /// added (NULL by default), round-trips through `SessionPatch`, and that the
-/// schema version bumps to 8.
+/// schema version bumps to the latest (12).
 #[tokio::test]
 async fn schema_migration_v7_to_v8_adds_requirement() {
     use libsql::Builder;
@@ -561,7 +561,7 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after v7->v8 migration");
+        assert_eq!(v, 12, "schema version must be 12 after v7->v8 migration");
     }
 }
 
@@ -573,7 +573,7 @@ async fn schema_migration_v7_to_v8_adds_requirement() {
 /// `plan_input_count` but NOT `autopilot_mode`), then reopen through
 /// `LibsqlStore::open` so `migrate(conn, 10)` runs the `if from < 11` block.
 /// Asserts the column is added (NULL by default), round-trips through
-/// `SessionPatch`, and that the schema version bumps to 11.
+/// `SessionPatch`, and that the schema version bumps to the latest (12).
 #[tokio::test]
 async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
     use libsql::Builder;
@@ -663,7 +663,7 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         "migrated autopilot_mode round-trips"
     );
 
-    // (4) Schema version bumped to 11.
+    // (4) Schema version bumped to 12.
     {
         let conn = store.conn().await.unwrap();
         let stmt = conn
@@ -673,7 +673,7 @@ async fn schema_migration_v10_to_v11_adds_autopilot_mode() {
         let mut rows = stmt.query(()).await.unwrap();
         let r = rows.next().await.unwrap().unwrap();
         let v: i64 = r.get(0).unwrap();
-        assert_eq!(v, 11, "schema version must be 11 after v10->v11 migration");
+        assert_eq!(v, 12, "schema version must be 12 after v10->v11 migration");
     }
 }
 

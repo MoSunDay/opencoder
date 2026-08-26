@@ -387,6 +387,117 @@ pub struct SubagentTaskRecord {
     pub completed_at: Option<i64>,
 }
 
+/// Synthetic session created to execute one dispatched node task
+/// (`node_tasks.session_id`; mirrors `TASK_TYPE_PARENT` / `TASK_TYPE_TODO`).
+pub const TASK_TYPE_NODE: &str = "node";
+
+/// A registered worker node in the multi-node fleet (`nodes` table row).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeRecord {
+    /// Server-issued ULID. Stable across re-registrations of the same
+    /// `name`, so already-dispatched node tasks never dangle.
+    pub id: String,
+    /// User-friendly unique name (the upsert key for re-registration).
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workdir: Option<String>,
+    /// First registration time (epoch ms, server clock). Never rewritten.
+    #[serde(default)]
+    pub first_seen: i64,
+    /// Last heartbeat time (epoch ms, server receive clock).
+    #[serde(default)]
+    pub last_seen_at: i64,
+    /// Derived liveness: `online` | `idle` | `busy` | `lost`.
+    #[serde(default)]
+    pub last_status: String,
+    /// Most recently claimed node task (kept after completion so UIs can show
+    /// the latest work); see `node_tasks.id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_task_id: Option<String>,
+}
+
+/// Lifecycle status of a dispatched node task.
+///
+/// State machine: `pending -> running -> done | error | cancelled`;
+/// `pending/running -> cancelling -> cancelled | error | done` is also a legal
+/// collapse. Terminal states (`done`/`error`/`cancelled`) never transition again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeTaskStatus {
+    Pending,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+    /// A cancel was requested while the task was pending or running; the node
+    /// picks it up on its next heartbeat and collapses to a terminal state.
+    Cancelling,
+}
+
+impl NodeTaskStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NodeTaskStatus::Pending => "pending",
+            NodeTaskStatus::Running => "running",
+            NodeTaskStatus::Done => "done",
+            NodeTaskStatus::Error => "error",
+            NodeTaskStatus::Cancelled => "cancelled",
+            NodeTaskStatus::Cancelling => "cancelling",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "running" => NodeTaskStatus::Running,
+            "done" => NodeTaskStatus::Done,
+            "error" => NodeTaskStatus::Error,
+            "cancelled" => NodeTaskStatus::Cancelled,
+            "cancelling" => NodeTaskStatus::Cancelling,
+            _ => NodeTaskStatus::Pending,
+        }
+    }
+
+    /// Terminal states accept no further transitions.
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            NodeTaskStatus::Done | NodeTaskStatus::Error | NodeTaskStatus::Cancelled
+        )
+    }
+}
+
+/// One queued/executed task on a worker node (`node_tasks` table row).
+/// Each task owns exactly one synthetic session (`task_type == "node"`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeTaskRecord {
+    pub id: String,
+    pub node_id: String,
+    /// Synthetic session id driving the execution; unique per task.
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub status: NodeTaskStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Cancel flag set by `request_node_task_cancel`; read by the node's
+    /// heartbeat alongside `status == cancelling`.
+    #[serde(default)]
+    pub cancel_requested: bool,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claimed_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+}
+
 pub fn message_preview(msgs: &[Message], max_chars: usize) -> String {
     let mut out = String::new();
     for m in msgs {

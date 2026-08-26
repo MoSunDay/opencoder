@@ -370,7 +370,8 @@ fn evaluate_gate(schema_version: u32, todo: &TodoSpec, messages: &[Message]) -> 
     let calls = transcript_calls(messages);
     if schema_version >= 2 {
         let required = &todo.acceptance.required_tool_calls;
-        let matched = required.len() <= calls.len()
+        let matched = !required.is_empty()
+            && required.len() <= calls.len()
             && calls.windows(required.len()).any(|window| {
                 window
                     .iter()
@@ -378,11 +379,13 @@ fn evaluate_gate(schema_version: u32, todo: &TodoSpec, messages: &[Message]) -> 
                     .zip(required)
                     .all(|(call, required)| call_matches(call, required))
             });
+        let check_matches = best_ordered_check_matches(&calls, required);
         return serde_json::json!({
             "ok": matched,
             "checks": required
                 .iter()
-                .map(|required| serde_json::json!({"required":required,"matched":matched}))
+                .zip(check_matches)
+                .map(|(required, matched)| serde_json::json!({"required":required,"matched":matched}))
                 .collect::<Vec<_>>()
         });
     }
@@ -399,6 +402,31 @@ fn evaluate_gate(schema_version: u32, todo: &TodoSpec, messages: &[Message]) -> 
         "ok": checks.iter().all(|check| check["matched"] == true),
         "checks": checks
     })
+}
+
+fn best_ordered_check_matches(
+    calls: &[TranscriptCall<'_>],
+    required: &[RequiredToolCall],
+) -> Vec<bool> {
+    let mut best = vec![false; required.len()];
+    let mut best_count = 0;
+    for start in 0..calls.len() {
+        let matches = required
+            .iter()
+            .enumerate()
+            .map(|(index, required)| {
+                calls
+                    .get(start + index)
+                    .is_some_and(|call| call_matches(*call, required))
+            })
+            .collect::<Vec<_>>();
+        let count = matches.iter().filter(|matched| **matched).count();
+        if count > best_count {
+            best = matches;
+            best_count = count;
+        }
+    }
+    best
 }
 
 #[cfg(test)]

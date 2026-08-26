@@ -47,6 +47,7 @@ async fn wheel_up_in_queue_panel_scrolls_panel_only() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 
@@ -88,6 +89,7 @@ async fn wheel_down_advances_toward_newest() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
     assert_eq!(queue_scroll, 2, "one notch toward newer entries");
@@ -106,6 +108,7 @@ async fn wheel_down_advances_toward_newest() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
     assert_eq!(queue_scroll, 3, "clamped at max_scroll, pinned to bottom");
@@ -143,6 +146,7 @@ async fn wheel_outside_queue_panel_scrolls_body() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 
@@ -180,6 +184,7 @@ async fn wheel_with_no_queue_panel_keeps_body_behavior() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 

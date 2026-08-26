@@ -1,6 +1,7 @@
 pub mod ap_menu;
 pub mod app;
 pub mod app_helpers;
+pub mod attach_badge;
 pub mod bash_exec;
 pub mod cache_salt_menu;
 pub mod chat;

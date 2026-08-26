@@ -567,6 +567,7 @@ pub(crate) async fn handle_mouse(
     session_id: &str,
     store: &dyn Store,
     queue_scroll: &mut u32,
+    pending_images: &mut Vec<(String, String)>,
 ) -> MouseOutcome {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
@@ -620,6 +621,19 @@ pub(crate) async fn handle_mouse(
                     queue_panel::QueueEffect::None => {}
                 }
                 break;
+            }
+            // Attachment ✕ delete: remove the clicked pending image on the
+            // FIRST click, like the queue buttons. Rects are rebuilt every
+            // frame and a single click removes one image, so the index stays
+            // valid for this event only.
+            for btn in &hits.attach_del_btns {
+                if in_rect(btn.rect, m.column, m.row) {
+                    if btn.index < pending_images.len() {
+                        pending_images.remove(btn.index);
+                    }
+                    consumed = true;
+                    break;
+                }
             }
             // Click a Thinking/Tool header to toggle its collapse (subagent-aware:
             // toggles the focused child view, not the parent).

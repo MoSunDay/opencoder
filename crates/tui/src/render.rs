@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
+use crate::attach_badge::AttachDelBtn;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
@@ -50,6 +51,9 @@ pub(crate) struct MouseHits {
     /// queue scroll without re-deriving the panel contents.
     pub queue_total: usize,
     pub queue_btns: Vec<QueueBtn>,
+    /// Clickable ✕ delete buttons on pending-image attachment badges; one
+    /// per attachment row, recomputed every frame.
+    pub attach_del_btns: Vec<AttachDelBtn>,
     /// Clickable Thinking-block header rows; clicking toggles collapse.
     /// One entry per Thinking block currently visible in the body viewport.
     pub thinking_btns: Vec<ThinkingBtn>,
@@ -159,6 +163,7 @@ pub(crate) fn render<B: Backend + 'static>(
             hits.queue_total = 0;
             hits.total_rows = 0;
             hits.queue_btns.clear();
+            hits.attach_del_btns.clear();
             hits.thinking_btns.clear();
             hits.subagent_btns.clear();
             hits.tool_btns.clear();
@@ -187,10 +192,12 @@ pub(crate) fn render<B: Backend + 'static>(
         let inner_w = draw_area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
         let plan_active = plan_mode.is_some();
-        // The attachment badge consumes one inner line; must mirror the
-        // plan-mode filter applied at the render_composer call site below.
-        let badge_h: u16 = if !plan_active && !pending_images.is_empty() {
-            1
+        // The attachment badge consumes one inner line per pending image,
+        // capped by the composer's minimum height so the input area is never
+        // squeezed away; must mirror the plan-mode filter applied at the
+        // render_composer call site below.
+        let badge_h: u16 = if !plan_active {
+            (pending_images.len() as u16).min((draw_area.height / 3).saturating_sub(2))
         } else {
             0
         };
@@ -241,6 +248,7 @@ pub(crate) fn render<B: Backend + 'static>(
 
         let mut ci = 0;
         hits.queue_btns.clear();
+        hits.attach_del_btns.clear();
         hits.thinking_btns.clear();
         hits.subagent_btns.clear();
         hits.tool_btns.clear();
@@ -316,6 +324,7 @@ pub(crate) fn render<B: Backend + 'static>(
             edit_title,
             title,
             wrap_plan.as_ref(),
+            hits,
         );
         let composer_area = chunks[ci];
         ci += 1;
@@ -623,6 +632,7 @@ fn render_composer(
     edit_title: Option<&str>,
     top_title: &Line<'static>,
     wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
+    hits: &mut MouseHits,
 ) {
     // Copy mode: undecorated input text — no block/border, no prompt
     // glyph, no attachment badge — so terminal-native selection spans
@@ -680,34 +690,16 @@ fn render_composer(
     };
     let inner = block.inner(area);
     f.render_widget(block, area);
-    // Attachment indicator: show filenames of pending images above the input.
-    // Render the badge on the first inner line and shift the input area down by
-    // one row so the text is not overwritten.
-    let inner_input = if !pending_images.is_empty() {
-        let count = pending_images.len();
-        let names: Vec<&str> = pending_images.iter().map(|(_, n)| n.as_str()).collect();
-        let label = if count == 1 {
-            format!("\u{1f4ce} {}", names[0])
-        } else {
-            format!("\u{1f4ce} {} \u{00d7}{count}", names[0])
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                label,
-                Style::default().fg(theme::warn_color()),
-            ))),
-            inner,
-        );
-        // Return area shifted down by 1 line for the input.
-        Rect::new(
-            inner.x,
-            inner.y + 1,
-            inner.width,
-            inner.height.saturating_sub(1),
-        )
-    } else {
-        inner
-    };
+    // Attachment indicator: one badge line per pending image, each ending in
+    // a clickable ✕ delete button (see `attach_badge`); the input area shifts
+    // down by the number of badge lines actually rendered.
+    let badge_rows = crate::attach_badge::render_attach_badge(f, inner, pending_images, hits);
+    let inner_input = Rect::new(
+        inner.x,
+        inner.y + badge_rows,
+        inner.width,
+        inner.height.saturating_sub(badge_rows),
+    );
     // Pre-split the input into visual rows using the SAME `wrap_rows` model the
     // cursor math derives from, then render each row as an explicit `Line`
     // WITHOUT ratatui's own `.wrap()`. This is the fix for cursor misalignment

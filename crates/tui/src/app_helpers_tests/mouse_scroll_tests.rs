@@ -70,6 +70,7 @@ async fn scrolldown_in_subagent_view_uses_child_content() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 
@@ -115,6 +116,7 @@ async fn scrolldown_uses_parent_when_no_subagent_focused() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 
@@ -170,6 +172,7 @@ async fn scrollup_advances_faster_than_default() {
         "s",
         &store,
         &mut queue_scroll,
+        &mut vec![], // no pending images
     )
     .await;
 

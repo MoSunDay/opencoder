@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use libsql::{params, params_from_iter, Connection, Value};
 
-use crate::types::{SessionFilter, SessionListItem, SessionMeta, SessionPatch};
+use crate::types::{
+    SessionFilter, SessionListItem, SessionMeta, SessionPatch, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
+};
 
 const INSERT_SESSION: &str = "\
 INSERT OR IGNORE INTO sessions (id, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, plan_snapshot, plan_input_count)
@@ -78,8 +80,16 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         args.push(ts.into());
         args.push(id.into());
     }
-    if !filter.include_subagents {
-        where_clauses.push("s.task_type = 'parent'".into());
+    // `include_subagents` widens the visible types from "top-level parents
+    // only" to parents + subagent children — NEVER synthetic machine sessions
+    // (node dispatch / todo workflows): those are execution internals and must
+    // stay invisible to session listings at both settings.
+    if filter.include_subagents {
+        where_clauses.push(format!(
+            "s.task_type IN ('{TASK_TYPE_PARENT}','{TASK_TYPE_SUBAGENT}')"
+        ));
+    } else {
+        where_clauses.push(format!("s.task_type = '{TASK_TYPE_PARENT}'"));
         where_clauses.push(
             "NOT EXISTS (SELECT 1 FROM subagent_tasks st WHERE st.child_session_id = s.id)".into(),
         );

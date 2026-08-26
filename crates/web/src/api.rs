@@ -195,6 +195,9 @@ pub async fn post_prompt(
     Path(id): Path<String>,
     Json(mut body): Json<PromptBody>,
 ) -> Response {
+    if let Some(resp) = reject_node_session(&state, &id).await {
+        return resp;
+    }
     // Only an explicit `agent` field is an admission-time mode change: it
     // rewrites the session config, so it must be refused while a drain runs.
     // Textual mode commands (/plan, /act, /act_clear_context) are admitted
@@ -335,6 +338,9 @@ pub async fn post_agent(
     Path(id): Path<String>,
     Json(body): Json<SwitchBody>,
 ) -> Response {
+    if let Some(resp) = reject_node_session(&state, &id).await {
+        return resp;
+    }
     // get-or-create the handle so the override is never dropped, even right
     // after create_session when no drain has started yet.
     let (handle, _lifecycle) =
@@ -379,6 +385,9 @@ pub async fn post_model(
     Path(id): Path<String>,
     Json(body): Json<ModelBody>,
 ) -> Response {
+    if let Some(resp) = reject_node_session(&state, &id).await {
+        return resp;
+    }
     // get-or-create the handle so the override is never dropped, even right
     // after create_session when no drain has started yet.
     let (handle, _lifecycle) =
@@ -425,7 +434,12 @@ pub async fn post_model(
 pub async fn post_interrupt(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> impl IntoResponse {
+) -> Response {
+    // Node sessions are interrupted through their task's cancel route, not
+    // this drain-oriented endpoint.
+    if let Some(resp) = reject_node_session(&state, &id).await {
+        return resp;
+    }
     let handle = state.handles.lock().await.get(&id).cloned();
     match &handle {
         // Only an actively draining session can be interrupted; a stale/idle
@@ -433,10 +447,10 @@ pub async fn post_interrupt(
         Some(h) if h.draining.load(Ordering::SeqCst) => {
             h.cancel.lock().await.cancel();
             opencoder_session::fire_child_cancels(&h.child_cancels);
-            Json(json!({ "ok": true }))
+            Json(json!({ "ok": true })).into_response()
         }
-        Some(_) => Json(json!({ "ok": false, "error": "no active drain running" })),
-        None => Json(json!({ "ok": false, "error": "no active session handle" })),
+        Some(_) => Json(json!({ "ok": false, "error": "no active drain running" })).into_response(),
+        None => Json(json!({ "ok": false, "error": "no active session handle" })).into_response(),
     }
 }
 
@@ -450,6 +464,9 @@ pub async fn post_subagent_steer(
 ) -> Response {
     use opencoder_store::{Delivery, SessionInput, SubagentStatus};
 
+    if let Some(resp) = reject_node_session(&state, &id).await {
+        return resp;
+    }
     if opencoder_session::control_cmd::is_mode_control(&body.prompt) {
         return error_409("mode switch refused while subagent running");
     }
@@ -557,21 +574,44 @@ pub async fn health() -> impl IntoResponse {
     }))
 }
 
-fn error_400(msg: String) -> Response {
+/// Shared mutation gate for session-scoped endpoints: synthetic node sessions
+/// (`task_type == "node"`) are executed by worker nodes, never by this
+/// server's drain loop — any prompt/switch/interrupt/fork against them would
+/// desync the node protocol. Returns `Some(409)` to short-circuit the handler.
+pub(crate) async fn reject_node_session(state: &AppState, session_id: &str) -> Option<Response> {
+    match state.store.get_session(session_id).await {
+        Ok(Some(meta)) if meta.task_type.as_deref() == Some(opencoder_store::TASK_TYPE_NODE) => {
+            Some(
+                (
+                    axum::http::StatusCode::CONFLICT,
+                    Json(json!({
+                        "ok": false,
+                        "error": "synthetic node session; use /api/nodes/…"
+                    })),
+                )
+                    .into_response(),
+            )
+        }
+        Ok(_) => None,
+        Err(e) => Some(error_500(format!("get_session: {e:#}"))),
+    }
+}
+
+pub(crate) fn error_400(msg: String) -> Response {
     (
         axum::http::StatusCode::BAD_REQUEST,
         Json(json!({ "ok": false, "error": msg })),
     )
         .into_response()
 }
-fn error_409(msg: &str) -> Response {
+pub(crate) fn error_409(msg: &str) -> Response {
     (
         axum::http::StatusCode::CONFLICT,
         Json(json!({ "ok": false, "error": msg })),
     )
         .into_response()
 }
-fn error_404(msg: &str) -> Response {
+pub(crate) fn error_404(msg: &str) -> Response {
     (
         axum::http::StatusCode::NOT_FOUND,
         Json(json!({ "ok": false, "error": msg })),
@@ -579,7 +619,7 @@ fn error_404(msg: &str) -> Response {
         .into_response()
 }
 
-fn error_500(msg: String) -> Response {
+pub(crate) fn error_500(msg: String) -> Response {
     (
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "ok": false, "error": msg })),

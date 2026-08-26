@@ -392,14 +392,16 @@ async fn attach_del_click_removes_only_clicked_image() {
     let mut chat = ChatView::default();
     let body = Rect::new(0, 0, 80, 12);
     let mut hits = empty_hits(body);
-    hits.attach_del_btns.push(crate::attach_badge::AttachDelBtn {
-        index: 0,
-        rect: Rect::new(78, 0, 1, 1),
-    });
-    hits.attach_del_btns.push(crate::attach_badge::AttachDelBtn {
-        index: 1,
-        rect: Rect::new(78, 1, 1, 1),
-    });
+    hits.attach_del_btns
+        .push(crate::attach_badge::AttachDelBtn {
+            index: 0,
+            rect: Rect::new(78, 0, 1, 1),
+        });
+    hits.attach_del_btns
+        .push(crate::attach_badge::AttachDelBtn {
+            index: 1,
+            rect: Rect::new(78, 1, 1, 1),
+        });
     let mut pending_images: Vec<(String, String)> = vec![
         ("data:image/png;base64,aa".to_string(), "a.png".to_string()),
         ("data:image/png;base64,bb".to_string(), "b.png".to_string()),
@@ -438,11 +440,7 @@ async fn attach_del_click_removes_only_clicked_image() {
     .await;
 
     assert_eq!(outcome, MouseOutcome::None);
-    assert_eq!(
-        pending_images.len(),
-        1,
-        "exactly one attachment removed"
-    );
+    assert_eq!(pending_images.len(), 1, "exactly one attachment removed");
     assert_eq!(
         pending_images[0].1, "a.png",
         "the FIRST image must survive a click on the second ✕"

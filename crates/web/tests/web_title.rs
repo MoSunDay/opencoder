@@ -46,6 +46,7 @@ async fn app(mock: MockChatClient) -> Ctx {
         store: store.clone(),
         workdir: workdir.clone(),
         handles: handles.clone(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: Some(mock.clone() as Arc<dyn ChatStream>),
     });
     Ctx {

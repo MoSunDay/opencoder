@@ -33,6 +33,7 @@ async fn app(mock: MockChatClient) -> (axum::Router, Arc<dyn Store>) {
         store: store.clone(),
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: Some(Arc::new(mock) as Arc<dyn ChatStream>),
     });
     (opencoder_web::build_app(state, None, false), store)

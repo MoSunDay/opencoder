@@ -25,7 +25,10 @@ fn client_session_tasks_parses_positional_id() {
     ]);
     match cli.command {
         Some(Command::Client {
-            cmd: Some(ClientSub::Session { sub: ClientSessionSub::Tasks { id } }),
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::Tasks { id },
+                }),
             ..
         }) => assert_eq!(id, "sess-9"),
         other => panic!("expected client session tasks, got {other:?}"),
@@ -47,7 +50,10 @@ fn client_session_clear_parses_positional_keep() {
     ]);
     match cli.command {
         Some(Command::Client {
-            cmd: Some(ClientSub::Session { sub: ClientSessionSub::Clear { keep } }),
+            cmd:
+                Some(ClientSub::Session {
+                    sub: ClientSessionSub::Clear { keep },
+                }),
             ..
         }) => assert_eq!(keep, "keep-1"),
         other => panic!("expected client session clear, got {other:?}"),

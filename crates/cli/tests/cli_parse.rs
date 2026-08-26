@@ -774,3 +774,61 @@ fn client_subcommand_wins_over_prompt_shaped_text() {
     }
 }
 
+#[test]
+fn node_subcommand_parses_with_token_and_name() {
+    let cli = parse(&[
+        "opencoder",
+        "--workdir",
+        "/tmp/nodework",
+        "node",
+        "--remote",
+        "http://127.0.0.1:8080",
+        "--name",
+        "gpu-1",
+        "--token",
+        "tok-1",
+    ]);
+    match cli.command {
+        Some(Command::Node {
+            name,
+            remote,
+            token,
+        }) => {
+            assert_eq!(remote, "http://127.0.0.1:8080");
+            assert_eq!(name, "gpu-1");
+            assert_eq!(token.as_deref(), Some("tok-1"));
+        }
+        other => panic!("expected Node, got {other:?}"),
+    }
+    assert_eq!(
+        cli.workdir.as_deref(),
+        Some(std::path::Path::new("/tmp/nodework"))
+    );
+}
+
+#[test]
+fn node_defaults_derive_a_nonempty_unique_name_and_optional_token() {
+    // The CLI layer never consults the env: a missing --token parses fine and
+    // is enforced later (main.rs resolve_token -> run_node validate gate).
+    let a = parse(&["opencoder", "node", "--remote", "http://x"]);
+    let b = parse(&["opencoder", "node", "--remote", "http://x"]);
+    match (a.command, b.command) {
+        (
+            Some(Command::Node {
+                name: n1,
+                token: t1,
+                ..
+            }),
+            Some(Command::Node {
+                name: n2,
+                token: t2,
+                ..
+            }),
+        ) => {
+            assert!(!n1.is_empty());
+            assert!(!n2.is_empty(), "default node name must derive every time");
+            assert!(t1.is_none() && t2.is_none());
+        }
+        _ => panic!("expected Node"),
+    }
+}

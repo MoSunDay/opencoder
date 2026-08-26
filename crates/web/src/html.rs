@@ -29,6 +29,7 @@ const JS_QUESTIONS: &str = include_str!("assets/questions.js");
 const JS_QUEUE: &str = include_str!("assets/queue_panel.js");
 const JS_SUBAGENTS: &str = include_str!("assets/subagent_view.js");
 const JS_BG: &str = include_str!("assets/bg_panel.js");
+const JS_NODES: &str = include_str!("assets/nodes_panel.js");
 const JS_SETTINGS: &str = include_str!("assets/settings.js");
 
 /// Wrap one script body in an inline `<script>` tag (classic script, no
@@ -49,6 +50,7 @@ static MANAGER_HTML: LazyLock<String> = LazyLock::new(|| {
         ("<!--JS_QUEUE-->", JS_QUEUE),
         ("<!--JS_SUBAGENTS-->", JS_SUBAGENTS),
         ("<!--JS_BG-->", JS_BG),
+        ("<!--JS_NODES-->", JS_NODES),
         ("<!--JS_SETTINGS-->", JS_SETTINGS),
     ];
     for (marker, js) in scripts {
@@ -74,6 +76,7 @@ mod tests {
             "<!--JS_COMPOSER-->",
             "<!--JS_QUESTIONS-->",
             "<!--JS_QUEUE-->",
+            "<!--JS_NODES-->",
             "<!--JS_SETTINGS-->",
             // absorbed legacy markers must be gone entirely
             "<!--JS_RENDER-->",
@@ -93,6 +96,8 @@ mod tests {
             "id=\"reconnect\"",
             "id=\"reconnect-fail\"",
             "id=\"qcount\"",
+            "id=\"nodes-panel\"",
+            "id=\"nodes-live\"",
         ] {
             assert!(html.contains(skeleton), "missing skeleton {skeleton}");
         }
@@ -114,6 +119,7 @@ mod tests {
             ("queue_panel.js", "function refreshQueuePanel"),
             ("subagent_view.js", "function subagentViewClick"),
             ("bg_panel.js", "function refreshBgPanel"),
+            ("nodes_panel.js", "function toggleNodesPanel"),
             ("settings.js", "function loadModels"),
         ];
         let mut prev = 0usize;

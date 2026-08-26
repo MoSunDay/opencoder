@@ -29,6 +29,7 @@ async fn state_with_mock() -> Arc<opencoder_web::AppState> {
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
         client_override: Some(mock),
     })
 }
@@ -259,10 +260,7 @@ async fn list_subagents_and_clear_sessions_roundtrip() {
 
     // Unknown parent surfaces the server's 404; an existing parent with no
     // tasks is a normal empty list.
-    let err = remote
-        .list_subagents("no-such-session")
-        .await
-        .unwrap_err();
+    let err = remote.list_subagents("no-such-session").await.unwrap_err();
     assert!(err.to_string().contains("404"), "list 404: {err:#}");
     assert!(
         remote.list_subagents(&keep).await.unwrap().is_empty(),
@@ -283,7 +281,12 @@ async fn list_subagents_and_clear_sessions_roundtrip() {
     assert!(state.store.get_session(&other).await.unwrap().is_none());
     assert!(state.store.get_session(&child).await.unwrap().is_none());
     assert!(
-        state.store.get_subagent_task("task-1").await.unwrap().is_none(),
+        state
+            .store
+            .get_subagent_task("task-1")
+            .await
+            .unwrap()
+            .is_none(),
         "subagent task rows cascade with their parent session"
     );
     assert_eq!(

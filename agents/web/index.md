@@ -20,6 +20,9 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 - question hub：`SessionHandle.question_hub`（`Arc<QuestionHub>`）在 handle 上跨 drain 稳定存活；drain/resume 重建 session 时 rebind `session.question_hub` 并 attach——question 工具在 web 下等待作答而非 NO_LISTENER 兜底。**粘性 attach 无 detach**：最后一个 SSE 订阅者断开时 abandon 全部待答问题（工具得 SKIPPED）；多客户端同在线只有最后一个离开才触发。作答入口见 `src/api_questions.rs`（poll 即 attach），abandon/标题生成助手在 `src/handle_questions.rs`。首次 drain run 成功后 best-effort LLM 标题生成（30s 超时，已有 title 跳过）。
 - data dir 解析：统一经 `opencoder_core::data_dir_for`（唯一实现与稳定性论证见 [agents/core](../core/index.md)），web 无本地副本。
 
+## 节点面（nodes）
+`AppState.nodes: Arc<NodeHub>`（`src/nodes_state.rs`）：task_session_id → `broadcast::Sender<SseEvt>` 映射 + 纯函数 `compute_status`（staleness 20s，按 server 收包时钟记账）。节点端点分居 `api_nodes.rs`（注册表半区：list/register/heartbeat/delete/tasks 派发与列表/cancel）与 `api_nodes_ops.rs`（claim、事件批上传→append_events 带回 seq 后广播、终态上报追加 done/error 收束帧）；浏览器 SSE 桥在 `sse_nodes.rs`，强制复用 `sse_dedup::forward_live` 两级去重（先订阅后查库）。合成 session（task_type="node"）被 `reject_node_session` 在 prompt/agent/model/interrupt/fork/compact/handoff/skill 等 mutation 端点一律 409；`list_sessions` 即使 include_subagents 也排除 node 型。
+
 ## 主流程
 POST /prompt（`src/api.rs`）：仅 body.agent 属于 idle-only transition（改写会话 agent 配置，draining 时 409 且不写 skill、input、message 或 agent meta）；文本模式命令照常 admit——steer 打断当前 turn 后由 runner 于 turn 边界应用，queue 于 idle 边界应用。cheap busy check 先于 config/client 构建，guarded admission 在 lifecycle 锁内再次裁决；普通 prompt 仍按解析 body → load config → 建 ChatClient → `ensure_session_row` → guarded admit → 返回 `{admitted_seq}`（非阻塞）。
 GET /events：`events_after(after)` 重放 + 订阅 broadcast 实时转发（BroadcastStream，lag 客户端丢帧不阻塞 runner）。

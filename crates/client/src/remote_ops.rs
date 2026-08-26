@@ -296,8 +296,7 @@ impl Remote {
             .context("list subagents")?;
         let resp = ensure_ok(resp, "list subagents").await?;
         let v: serde_json::Value = resp.json().await.context("list subagents json")?;
-        Ok(v
-            .get("tasks")
+        Ok(v.get("tasks")
             .cloned()
             .and_then(|t| serde_json::from_value(t).ok())
             .unwrap_or_default())

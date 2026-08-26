@@ -6,6 +6,7 @@ OpenCoder 当前提供以下用户/调用方可感知的能力。每项链接到
 
 ## 能力组
 
+- **多节点分布式执行（server ↔ node）**：`opencode node --remote <server>` 把任意机器注册为执行节点（bearer token，同名顶替）；web「Nodes」面板看 online/idle/busy/lost、下发 prompt——任务用**节点本地配置与 LLM 凭证**跑完整 agent session，事件实时回传浏览器直播；注册表/任务/事件全量落 server libsql，断流按 `after=` 续传零丢失。详见 [changelog](changelog/2026-08-26/multi-node-distributed-execution.md)。
 - **CLI/MCP 注册与 Agent 范围注入**：TUI `/cli` 管理自由文本 CLI usage contract（多行编辑器），`/mcp` 管理 MCP server；两类条目均可启停，`inject_to` 以 parent/explore/build 多选（勾选对话框）决定注入对象，粒度到单个子 Agent。CLI 内容条件性进入 system prompt，MCP 范围同时约束提示和工具可见性。详见 [changelog](changelog/2026-08-15/inject-to-multiselect-and-content-editor.md)。
 - **Skill context 尾部注入**：skill 内容离开 system prompt——每次 LLM 调用按需合成瞬时 user 尾消息（`[skills]` 目录 + `[active skill]` 源路径，模型按需读 SKILL.md；不落库、压缩后重生成），TUI `/skill` 弹窗管理默认注入开关。详见 [changelog](changelog/2026-08-15/skill-context-tail-injection.md)。
 - **配置按域拆分为独立文件（mcp/cli/skills/ap.json）**：`mcp_servers`/`cli`/`skills`/`autopilot` 四域键硬切出 `config.json`（遗留键加载时忽略，**breaking**）——各自经专属域文件 `<workdir>/.opencoder/{mcp,cli,skills,ap}.json`（项目）或 `~/.opencoder/{mcp,cli,skills,ap}.json`（全局）加载/保存，项目存在则整体遮蔽全局。详见 [changelog](changelog/2026-08-16/split-domain-config-files.md) / [autopilot 域 changelog](changelog/2026-08-20/envs-autopilot-domain.md)。

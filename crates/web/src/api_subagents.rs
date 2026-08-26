@@ -117,8 +117,7 @@ pub async fn clear_sessions(
 /// fails loudly, same check-then-act window as the TUI gate).
 async fn any_draining(state: &AppState) -> bool {
     let map = state.handles.lock().await;
-    map.values()
-        .any(|h| h.draining.load(Ordering::SeqCst))
+    map.values().any(|h| h.draining.load(Ordering::SeqCst))
 }
 
 // ── helpers (same shapes as the other api_* modules) ──────────────────────

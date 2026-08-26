@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
@@ -140,6 +140,37 @@ const CREATE_INDEX_TODO_STATUS: &str =
     "CREATE INDEX IF NOT EXISTS idx_todo_workflows_status ON todo_workflows(status, updated_at)";
 const CREATE_INDEX_TODO_EVENTS: &str =
     "CREATE INDEX IF NOT EXISTS idx_todo_events_workflow ON todo_events(workflow_id, seq)";
+const CREATE_NODES: &str = "\
+CREATE TABLE IF NOT EXISTS nodes (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  version       TEXT,
+  workdir       TEXT,
+  first_seen    INTEGER NOT NULL,
+  last_seen_at  INTEGER NOT NULL,
+  last_status   TEXT NOT NULL DEFAULT 'online',
+  last_task_id  TEXT
+)";
+const CREATE_NODE_TASKS: &str = "\
+CREATE TABLE IF NOT EXISTS node_tasks (
+  id              TEXT PRIMARY KEY,
+  node_id         TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  session_id      TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+  title           TEXT,
+  prompt          TEXT NOT NULL,
+  agent           TEXT,
+  model           TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  error           TEXT,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL,
+  claimed_at      INTEGER,
+  finished_at     INTEGER
+)";
+/// Node claim polling filters by `(node_id, status)` (single-active-task guard
+/// plus the oldest-pending FIFO scan), so the index covers both branches.
+const CREATE_INDEX_NODE_TASKS_STATUS: &str =
+    "CREATE INDEX IF NOT EXISTS idx_node_tasks_node_status ON node_tasks(node_id, status)";
 
 /// Apply WAL + safety pragmas to a single connection. Cheap to call per-acquire.
 ///
@@ -192,6 +223,8 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_TODO_WORKFLOWS, ()).await?;
     conn.execute(CREATE_TODO_ITEMS, ()).await?;
     conn.execute(CREATE_TODO_EVENTS, ()).await?;
+    conn.execute(CREATE_NODES, ()).await?;
+    conn.execute(CREATE_NODE_TASKS, ()).await?;
     conn.execute(CREATE_INDEX_MSG, ()).await?;
     conn.execute(CREATE_INDEX_IN, ()).await?;
     conn.execute(CREATE_INDEX_EV, ()).await?;
@@ -218,6 +251,10 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_INDEX_SESSION_TASK_TYPE, ()).await?;
     conn.execute(CREATE_INDEX_TODO_STATUS, ()).await?;
     conn.execute(CREATE_INDEX_TODO_EVENTS, ()).await?;
+    // The node_tasks index targets tables that only exist on fresh databases
+    // (via the CREATE batch above) or after the v12 migration creates them,
+    // so — like the task_type index — it must run AFTER `migrate`.
+    conn.execute(CREATE_INDEX_NODE_TASKS_STATUS, ()).await?;
     Ok(())
 }
 
@@ -351,6 +388,16 @@ async fn migrate(conn: &Connection, from: i64) -> Result<()> {
         // switch. NULL = follow the global config; "off"/"ap"/"review" pins
         // this session's mode so resume honors it (same role as `model`).
         add_column_if_absent(conn, "sessions", "autopilot_mode", "TEXT").await?;
+    }
+    if from < 12 {
+        // v12: multi-node distributed execution plane — the worker-node
+        // registry plus its dispatch queue. Both statements are `CREATE IF NOT
+        // EXISTS`: fresh databases already carry them from bootstrap's CREATE
+        // batch, older databases create them here. No existing rows need
+        // backfilling (the tables are new), so the upgrade is a no-op beyond
+        // the DDL.
+        conn.execute(CREATE_NODES, ()).await?;
+        conn.execute(CREATE_NODE_TASKS, ()).await?;
     }
     Ok(())
 }

@@ -5,6 +5,7 @@ pub mod error;
 pub mod json;
 pub mod message;
 pub mod net;
+pub mod node_protocol;
 pub mod skill;
 pub mod sse;
 pub mod tool;

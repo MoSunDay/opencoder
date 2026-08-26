@@ -43,6 +43,7 @@ async fn state_with_workdir(workdir: std::path::PathBuf) -> Arc<opencoder_web::A
         store,
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
+        nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
     })
 }
 

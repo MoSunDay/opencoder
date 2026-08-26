@@ -697,7 +697,7 @@ pub(super) async fn run_app(
                             m, &hits, &mut scroll, &mut follow, &mut chat,
                             &mut subagent_focus,
                             &mut subagent_sys, &workdir, &mut queue_items, &session_id,
-                            store.as_ref(), &mut queue_scroll,
+                            store.as_ref(), &mut queue_scroll, &mut pending_images,
                         )
                         .await;
                         if outcome == MouseOutcome::SteerSubmit {

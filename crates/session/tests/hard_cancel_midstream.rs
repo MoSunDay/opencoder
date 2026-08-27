@@ -1,14 +1,15 @@
-//! D2 regression: a hard cancel (web /stop, double-Esc) that arrives while an
-//! LLM stream is mid-flight must NOT persist an empty assistant message or emit
-//! `Done` (which made the interrupt look like a normal — if empty —
-//! completion).
+//! D2 regression, REVISED contract: a hard cancel (web /stop, double-Esc)
+//! that arrives while an LLM stream is mid-flight must NOT persist an empty
+//! assistant message.
 //!
-//! Before the fix, `run_one_llm_call` returned an EMPTY turn on a hard cancel
-//! and emitted `Status("interrupted")`, but `run_loop` only checked the
-//! *turn*-cancel token (which a hard cancel does NOT set). The guard was
-//! skipped, the empty assistant message was recorded, and `Done` was emitted —
-//! looking like a clean finish. A new hard-cancel guard now breaks the loop
-//! instead, matching the top-of-loop interrupt check.
+//! D2 originally also forbade `Done` on this path because a consumer treated
+//! `Done` as "clean finish". The event semantics have since been redefined
+//! (real-browser acceptance of the fleet console): `Done` is the TERMINAL
+//! FRAME that closes the SSE stream — without it the web console stays busy
+//! forever after an interrupt — while `Status("interrupted")` carries the
+//! human-visible reason. Every interrupt exit therefore emits both. The
+//! invariants that survive from D2: the interrupted run must stop promptly
+//! and must never record an empty assistant message.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -123,11 +124,13 @@ async fn hard_cancel_midstream_no_empty_assistant() {
         "expected a Status(interrupted) event after hard cancel"
     );
 
-    // An interrupted run must NOT look like a normal completion: no Done event.
+    // Terminal frame: `Done` closes the SSE stream; without it the web
+    // console stays busy forever after the interrupt (real-browser
+    // acceptance). `Status("interrupted")` above carries the reason.
     let saw_done = evs.iter().any(|ev| matches!(ev, SessionEvent::Done));
     assert!(
-        !saw_done,
-        "hard-cancel mid-stream must NOT emit Done (D2 bug — looked like normal completion)"
+        saw_done,
+        "hard-cancel mid-stream must still emit the terminal Done frame"
     );
 
     drop(evs);

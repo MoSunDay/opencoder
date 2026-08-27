@@ -38,103 +38,53 @@ async fn main() -> Result<()> {
             require(&p)?;
             opencoder_cli::run::run_headless(&cli, p).await
         }
-        Some(Command::Server {
-            host,
-            port,
-            web,
-            token,
-        }) => {
-            opencoder_cli::server::server_run(&cli, host.clone(), *port, *web, token.clone()).await
-        }
-        Some(Command::Client {
-            remote,
-            token,
-            session,
-            continue_,
-            interrupt,
-            delivery,
-            skills,
-            fork,
-            compact,
-            handoff,
-            autopilot,
-            annotation,
-            steer_task,
-            cmd,
-            prompt,
-        }) => {
-            let parts = if prompt.is_empty() {
-                cli.prompt.clone()
-            } else {
-                prompt.clone()
-            };
-            let p = join(parts);
-            // Prompt is NOT required at this layer: --interrupt/--compact/
-            // --handoff/subcommands run without one (client_run enforces the rest).
-            // The Client subcommand re-declares its own --session/--continue,
-            // which shadow the global flags. Fall back to the globals so
-            // `opencode --continue client -r http://...` works as expected
-            // instead of silently creating a fresh remote session.
-            let (session, continue_) = opencoder_cli::client::resolve_client_session_flags(
-                session.clone(),
-                *continue_,
-                cli.session.clone(),
-                cli.continue_,
-            );
-            opencoder_cli::client::client_run(opencoder_cli::client::ClientRunOpts {
-                remote: remote.clone(),
-                token: token.clone(),
-                session,
-                continue_,
-                agent: cli.agent.clone(),
-                model: cli.model.clone(),
-                interrupt: *interrupt,
-                images: cli.image.clone(),
-                prompt: p,
-                delivery: delivery.clone(),
-                skills: skills.clone(),
-                fork: *fork || cli.fork,
-                compact: *compact,
-                handoff: handoff.clone(),
-                autopilot: autopilot.clone(),
-                annotation: annotation.clone(),
-                steer_task: steer_task.clone(),
-                workdir: cli
-                    .workdir
-                    .as_ref()
-                    .map(|p| p.to_string_lossy().into_owned()),
-                cmd: cmd.clone(),
-            })
-            .await
-        }
-        Some(Command::Node {
-            name,
-            remote,
-            token,
-        }) => {
-            // Node follows the CLIENT token semantics (never auto-generate):
-            // reuse the client resolver verbatim so a missing flag+env pair
-            // fails fast here with the same error message.
-            let resolved_token = opencoder_cli::client::resolve_token(token.clone())?;
-            let workdir = cli
-                .workdir
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            opencoder_node::run_node(
-                opencoder_node::NodeOpts {
-                    name: name.clone(),
-                    remote: remote.clone(),
-                    token: resolved_token,
-                    workdir,
-                    heartbeat_interval: opencoder_node::DEFAULT_HEARTBEAT_INTERVAL,
-                    claim_interval: opencoder_node::DEFAULT_CLAIM_INTERVAL,
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                    local_store_dir: None,
-                },
-                None,
-            )
-            .await
-        }
+        Some(Command::Daemon {
+            server,
+            client,
+            opts,
+        }) => match opencoder_cli::daemon::daemon_mode(*server, *client, opts.remote.as_deref()) {
+            Ok(opencoder_cli::daemon::DaemonAction::Server) => {
+                opencoder_cli::server::server_run(
+                    &cli,
+                    opts.host.clone(),
+                    opts.port,
+                    opts.web,
+                    opts.token.clone(),
+                )
+                .await
+            }
+            Ok(opencoder_cli::daemon::DaemonAction::Client) => {
+                // Node keeps the CLIENT token semantics (never auto-generate):
+                // a missing flag+env pair fails fast here with the same
+                // OPENCODER_SERVER_TOKEN usage error as before.
+                let resolved_token =
+                    opencoder_cli::daemon::resolve_client_token(opts.token.clone())?;
+                let name = opts
+                    .name
+                    .clone()
+                    .unwrap_or_else(opencoder_cli::daemon::default_node_name);
+                let workdir = cli.workdir.clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                });
+                opencoder_node::run_node(
+                    opencoder_node::NodeOpts {
+                        name,
+                        remote: opts.remote.clone().unwrap_or_default(),
+                        token: resolved_token,
+                        workdir,
+                        heartbeat_interval: opencoder_node::DEFAULT_HEARTBEAT_INTERVAL,
+                        claim_interval: opencoder_node::DEFAULT_CLAIM_INTERVAL,
+                        version: env!("CARGO_PKG_VERSION").to_string(),
+                        local_store_dir: None,
+                    },
+                    None,
+                )
+                .await
+            }
+            // Unreachable while clap enforces exactly-one-of, but the pure
+            // validator stays total so this arm can never panic.
+            Err(usage) => Err(anyhow::anyhow!("{usage}")),
+        },
         Some(Command::Tui) => opencoder_tui::run_tui(&opts_from_cli(&cli)).await,
         Some(Command::Ts {
             list,

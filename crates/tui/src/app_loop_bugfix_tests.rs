@@ -363,7 +363,6 @@ async fn plan_running_noop_does_not_corrupt_sys_tokens() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -624,7 +623,6 @@ async fn handle_switch_agent_sets_agent_optimistically() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,

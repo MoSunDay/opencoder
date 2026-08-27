@@ -60,6 +60,7 @@ async fn state(sid: &str) -> (Arc<opencoder_web::AppState>, Arc<SessionHandle>) 
             handles,
 
             nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+            controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         }),
         handle,
     )

@@ -1,4 +1,4 @@
-Commit: 3320cbb74d043bfa0071c83bbfdddbd613b72a9a
+Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
 
 # core 模块
 
@@ -18,6 +18,7 @@ Commit: 3320cbb74d043bfa0071c83bbfdddbd613b72a9a
 - `AutoPilotConfig`（`config/autopilot.rs`）：三态 `mode: ApMode`（`off | ap | review`，serde lowercase，默认 `off`）+ `max_iterations`/`verify_retries`。合并层 `mode` 键优先，旧布尔 `enabled` 迁移（`true`→`ap`、`false`→`off`，防静默关闭），未知 mode 串忽略（宽松合并）。
 - `net` 模块（`src/net.rs`）：`build_http_client`/`build_http_client_with_read_timeout`/`effective_proxy`——proxy-aware reqwest 客户端。代理开启时合并进程 `NO_PROXY`/`no_proxy` 与固定 loopback bypass（`127.0.0.1`/`localhost`/`::1`/`0.0.0.0`），内网服务和本地 mock/自连都遵守既有直连合同。被 llm client 使用。
 - `data_dir` 模块（`src/data_dir.rs`）：`data_dir_for(workdir: &Path) -> PathBuf`——唯一的 per-workdir 数据目录解析（`<data_local>/opencoder/<hash>`，hash 为 DefaultHasher over workdir 规范化字符串形式，先 canonicalize 故 `/p` 与 `/p/` 及 symlink 折叠为同一目录）。替代此前 cli/web/tui 三处各自漂移的副本，三进程对同一 workdir 解析出同一 data dir，使 session 跨进程可见。同模块另暴露 `data_root() -> PathBuf`（=`<data_local>/opencoder`，`data_dir_for` 即 `data_root().join(hash)`），供 `ts -l` 等全局操作扫描**所有** workdir 的 store。二者均经 `lib.rs` re-export。
+- `auth_sig`（`src/auth_sig.rs`）：请求签名协议纯函数 `canonical`/`sha256_hex`/`sign_hex`/`verify` + `REPLAY_WINDOW_MS=300_000` + 8 个单测；web 的 `auth_sig_mw.rs` 与 node 的 uplink 共用。
 
 ## 主流程
 Config::load 顺序：默认 → 全部已存在候选**深度合并**（global base → project override，project 后写后赢）→ 域文件 → env 覆盖。候选顺序（从最具体到最全局）：`<workdir>/.opencoder/config.json`、`<workdir>/opencoder.json`、**环境层 `~/.opencoder/envs/<active>/config.json`**（激活时插入，`config/env.rs::config_candidates_with`）、`~/.opencoder/config.json`、`~/.opencoder/opencoder.json`、`~/.config/opencoder/config.json`。四域键（`mcp_servers`/`cli`/`skills`/`autopilot`）不参与该候选链（`config/domain.rs`）：每域候选为项目 `<workdir>/.opencoder/<domain>.json` > 环境层 `~/.opencoder/envs/<active>/<domain>.json`（激活时插入，`domain.rs::effective_path_with`）> 全局 `~/.opencoder/<domain>.json`，项目文件存在则**整体遮蔽**更外层（不逐键合并），且不查 XDG 目录；config.json 遗留四域键加载时被忽略（硬切），损坏域文件 warn 后视为不存在。交互式 TUI 启动前先 `ensure_global_config`，有效配置无法解析凭证或构建客户端时进入首启表单；表单 patch 先经 `merged_with` 本地验证，再由 `save_global` 写入全局文件并按完整优先级重载。

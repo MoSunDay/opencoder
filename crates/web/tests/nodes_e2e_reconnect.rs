@@ -11,6 +11,7 @@
 //! The full-state-machine half lives in nodes_e2e_flow.rs.
 
 mod node_e2e_support;
+mod support;
 
 use std::sync::Arc;
 

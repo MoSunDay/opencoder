@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use libsql::Connection;
 
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
@@ -149,7 +149,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   first_seen    INTEGER NOT NULL,
   last_seen_at  INTEGER NOT NULL,
   last_status   TEXT NOT NULL DEFAULT 'online',
-  last_task_id  TEXT
+  last_task_id  TEXT,
+  last_addr     TEXT
 )";
 const CREATE_NODE_TASKS: &str = "\
 CREATE TABLE IF NOT EXISTS node_tasks (
@@ -271,6 +272,10 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
 /// guarding the ALTER makes re-migration safe regardless of the
 /// CREATE-TABLE-vs-stale-version disagreement.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
+    if from < 13 {
+        // v13: last observed/declared address per node (fleet UI column).
+        add_column_if_absent(conn, "nodes", "last_addr", "TEXT").await?;
+    }
     if from < 2 {
         // v2: add sse_kind column to session_events for lossless event-kind
         // replay. The column is nullable so existing rows stay valid.

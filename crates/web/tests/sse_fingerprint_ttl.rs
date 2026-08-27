@@ -172,6 +172,7 @@ async fn seen_fingerprints_expire_at_first_forwarded_done() {
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
     });
     state
         .store

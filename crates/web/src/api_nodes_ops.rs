@@ -1,6 +1,7 @@
 //! Node-task operation HTTP surface (`/api/nodes/tasks*` + cancel route).
 //!
-//! Claim / live-event upload / terminal status / cancellation. Pure handlers:
+//! Claim / live-event upload / terminal status / cancellation, plus the read
+//! half (single task / fleet-wide list / session reverse lookup). Pure handlers:
 //! every transition delegates to the [`Store`] node API, every closure event is
 //! persisted FIRST and then fanned out to the [`NodeHub`] so a browser SSE
 //! stream replays identical bytes whether it was attached or not.
@@ -13,7 +14,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use opencoder_core::node_protocol::{ClaimedTask, NodeEventBatch, NodeStatusReport};
+use opencoder_core::node_protocol::{ClaimResponse, ClaimedTask, NodeEventBatch, NodeStatusReport};
 use opencoder_core::SseEvt;
 use opencoder_store::{EventKind, NodeTaskStatus, SessionEventRecord};
 use serde::Deserialize;
@@ -28,11 +29,15 @@ pub struct ClaimQuery {
 }
 
 /// GET /api/nodes/tasks/claim?node_id= — FIFO single-active dispatch.
-/// `200` with the claimed task or `204` when nothing is due (idle/running).
+///
+/// Reply is the [`ClaimResponse`] envelope: a durable task is preferred; when
+/// the store has nothing due, a queued control task ([`ControlTask`], P3
+/// message relay) rides along instead. `200` carries `task`, `control` or
+/// both; `204` means neither was due (idle/running, nothing queued).
 pub async fn claim(State(state): State<Arc<AppState>>, Query(q): Query<ClaimQuery>) -> Response {
     let now = chrono::Utc::now().timestamp_millis();
-    match state.store.claim_next_node_task(&q.node_id, now).await {
-        Ok(Some(t)) => Json(ClaimedTask {
+    let claimed = match state.store.claim_next_node_task(&q.node_id, now).await {
+        Ok(Some(t)) => Some(ClaimedTask {
             task_id: t.id,
             session_id: t.session_id,
             title: t.title,
@@ -40,11 +45,28 @@ pub async fn claim(State(state): State<Arc<AppState>>, Query(q): Query<ClaimQuer
             agent: t.agent,
             model: t.model,
             created_at: t.created_at,
+        }),
+        Ok(None) => None,
+        Err(e) => return error_500(format!("claim_next_node_task: {e:#}")),
+    };
+    if claimed.is_some() {
+        // Durable work wins the single-active slot; control tasks wait for
+        // the busy worker's heartbeat instead of stacking up here.
+        return Json(ClaimResponse {
+            task: claimed,
+            control: None,
         })
-        .into_response(),
-        Ok(None) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => error_500(format!("claim_next_node_task: {e:#}")),
+        .into_response();
     }
+    let control = state.controls.pop(&q.node_id).await;
+    if control.is_none() {
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    Json(ClaimResponse {
+        task: None,
+        control,
+    })
+    .into_response()
 }
 
 /// SSE-kind string → coarse DB kind. Unknown granular names degrade to
@@ -286,5 +308,96 @@ pub async fn cancel_task(
             .into_response(),
         Ok(None) => error_409("not cancellable"),
         Err(e) => error_500(format!("request_node_task_cancel: {e:#}")),
+    }
+}
+
+// ── read half: task status pulls (parity with the TUI fleet view) ─────────
+
+/// Wire status token → enum. `NodeTaskStatus::parse` silently falls back to
+/// `Pending`, which is wrong for a user-supplied query filter — unknown values
+/// must surface as 400 instead of silently matching the pending queue.
+fn parse_status_filter(raw: &str) -> Option<NodeTaskStatus> {
+    match raw {
+        "pending" => Some(NodeTaskStatus::Pending),
+        "running" => Some(NodeTaskStatus::Running),
+        "done" => Some(NodeTaskStatus::Done),
+        "error" => Some(NodeTaskStatus::Error),
+        "cancelled" => Some(NodeTaskStatus::Cancelled),
+        "cancelling" => Some(NodeTaskStatus::Cancelling),
+        _ => None,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct GlobalTasksQuery {
+    pub node_id: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// GET /api/nodes/tasks?status=&node_id=&limit= — fleet-wide task list.
+///
+/// FIFO order (oldest first, identical to the claim drain order). The static
+/// sibling route `/api/nodes/tasks/claim` keeps priority in matchit, so worker
+/// claim polling is unaffected. Default `limit` 200.
+pub async fn list_all_tasks(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<GlobalTasksQuery>,
+) -> Response {
+    let status = match q.status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => match parse_status_filter(raw) {
+            Some(st) => Some(st),
+            None => return error_400(format!("unknown status filter '{raw}'")),
+        },
+        None => None,
+    };
+    let node_id = q
+        .node_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let limit = q.limit.unwrap_or(200).clamp(1, 1000);
+    match state
+        .store
+        .list_node_tasks_filtered(node_id, status, limit)
+        .await
+    {
+        Ok(tasks) => Json(json!({ "tasks": tasks })).into_response(),
+        Err(e) => error_500(format!("list_node_tasks_filtered: {e:#}")),
+    }
+}
+
+/// GET /api/nodes/tasks/:tid — one task record plus `last_event_seq`, the
+/// SSE bootstrap convenience (pass it as `?after=` on the events stream to
+/// skip the already-persisted prefix).
+pub async fn get_task(State(state): State<Arc<AppState>>, Path(tid): Path<String>) -> Response {
+    let task = match state.store.get_node_task(&tid).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return error_404("task not found"),
+        Err(e) => return error_500(format!("get_node_task: {e:#}")),
+    };
+    let last_event_seq = state
+        .store
+        .last_event_seq(&task.session_id)
+        .await
+        .unwrap_or(0);
+    let mut body = match serde_json::to_value(&task) {
+        Ok(v) => v,
+        Err(e) => return error_500(format!("serialize task: {e}")),
+    };
+    body["last_event_seq"] = json!(last_event_seq);
+    Json(body).into_response()
+}
+
+/// GET /api/sessions/:id/task — reverse lookup from the synthetic session to
+/// its node task. 404 for ordinary sessions (they legitimately have none).
+pub async fn get_session_task(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.store.get_node_task_by_session(&id).await {
+        Ok(Some(t)) => Json(t).into_response(),
+        Ok(None) => error_404("no node task for this session"),
+        Err(e) => error_500(format!("get_node_task_by_session: {e:#}")),
     }
 }

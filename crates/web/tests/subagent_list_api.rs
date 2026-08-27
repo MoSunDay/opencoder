@@ -22,6 +22,7 @@ async fn app() -> (axum::Router, Arc<opencoder_web::AppState>) {
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
     });
     (opencoder_web::build_app(state.clone(), None, false), state)
 }

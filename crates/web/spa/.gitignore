@@ -1,0 +1,6 @@
+# Build output MUST stay committed (see scripts/build-spa.sh): the Rust binary
+# embeds dist/ verbatim so `cargo build` never needs node. The repo-root
+# .gitignore has a bare `dist` rule — the negations below re-include ours.
+node_modules/
+!dist/
+!dist/**

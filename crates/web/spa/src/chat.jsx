@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
 import { dialogLabel, relTime } from './format.js';
-import { emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { emptyStream, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
 import { TranscriptView } from './render.jsx';
 import { LOCAL_NODE, LOCAL_NODE_LABEL, clearPreselect, useStore } from './store.js';
 
@@ -126,7 +126,7 @@ export function ChatPanel({ onNotice }) {
         setConnecting(false);
         setStream((s) => reduceFrame(s, f, Date.now()));
       },
-      onStatus: (st) => {
+      onStatus: (st, info) => {
         if (st === 'failed') {
           setConnecting(false);
           setBusy(false);
@@ -146,7 +146,7 @@ export function ChatPanel({ onNotice }) {
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
       const msgs = (j && j.messages) || [];
       if (msgs.length && aliveRef.current) {
-        setStream((s) => ({ ...s, turns: turnsFromMessages(msgs) }));
+        setStream((s) => ({ ...s, turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) }));
       }
     } catch {
       setStream((s) => ({ ...s, turns: s.turns.length ? s.turns : currentTurns }));
@@ -273,9 +273,9 @@ export function ChatPanel({ onNotice }) {
     }
     try {
       const j = await apiGet('/api/sessions/' + encodeURIComponent(sid));
-      const turns = turnsFromMessages((j && j.messages) || []);
+      const msgs = (j && j.messages) || [];
       if (aliveRef.current) {
-        setStream({ ...emptyStream(), turns });
+        setStream({ ...emptyStream(), turns: turnsFromMessages(msgs), usage: usageFromMessages(msgs) });
       }
     } catch {
       // Snapshot unavailable → fall back to replaying the last task's events

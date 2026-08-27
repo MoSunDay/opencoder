@@ -3,9 +3,10 @@
 // crates/web/src/assets/sse.js, whose reconnect decisions are mirrored:
 //   * backoff 1s ×2 (cap 15s per product spec), reset on any received frame;
 //   * max 5 consecutive failures, then a terminal 'failed' status;
-//   * on reconnect, jump the cursor to the persisted head via /api/sessions/
-//     :id/seq instead of replaying from 0 (skipped frames are covered by the
-//     final transcript reload);
+//   * on reconnect, replay a bounded tail of the missed window through the
+//     same reducer (the terminal frame of a finished run is always the head,
+//     so a capped tail still converges — an uncapped replay of a fast stream
+//     freezes the console, found by real-browser acceptance);
 //   * a terminal done/error frame closes the stream for good.
 //
 // openStream({ path, sessionId, after, onFrame, onStatus, signal }) →
@@ -16,6 +17,8 @@ import { apiGet, signFetch } from './api.js';
 
 const BACKOFF_START_MS = 1000;
 const BACKOFF_CAP_MS = 15000;
+/// Max frames replayed on reconnect (see reconnectCursor).
+const REPLAY_CAP_FRAMES = 400;
 const MAX_ATTEMPTS = 5;
 
 export function openStream({ path, sessionId, after, onFrame, onStatus, signal }) {
@@ -144,19 +147,6 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
   /// via /api/sessions/:id/seq so a reconnect never replays the whole dialog
   /// from 0 (frames missed in the gap are covered by the done → transcript
   /// reload in chat.jsx). Never regress below the last cursor we actually saw.
-  async function reconnectCursor() {
-    if (!sessionId) {
-      return lastSeq;
-    }
-    try {
-      const j = await apiGet('/api/sessions/' + encodeURIComponent(sessionId) + '/seq');
-      const head = j && typeof j.seq === 'number' ? j.seq : 0;
-      return Math.max(lastSeq, head);
-    } catch {
-      return lastSeq; // seq fetch failed: counts as another attempt on retry
-    }
-  }
-
   function scheduleReconnect() {
     if (stopped) {
       return;
@@ -177,6 +167,24 @@ export function openStream({ path, sessionId, after, onFrame, onStatus, signal }
       const after = await reconnectCursor();
       connect(after);
     }, delay);
+  }
+
+  /// Reconnect cursor: the run may have raced ahead while the link was down,
+  /// so ask the store for the head — then cap how much of the missed window
+  /// gets replayed (a fast stream can miss tens of thousands of delta frames
+  /// and folding them all back in freezes the tab; a finished run's terminal
+  /// frame IS the head, so the capped tail still converges).
+  async function reconnectCursor() {
+    if (!sessionId) {
+      return lastSeq;
+    }
+    try {
+      const j = await apiGet('/api/sessions/' + encodeURIComponent(sessionId) + '/seq');
+      const head = j && typeof j.seq === 'number' ? j.seq : 0;
+      return Math.max(lastSeq, head - REPLAY_CAP_FRAMES);
+    } catch {
+      return lastSeq; // seq fetch failed: counts as another attempt on retry
+    }
   }
 
   async function connect(after) {

@@ -172,12 +172,14 @@ export function EmptyHint({ text }) {
 }
 
 export function TranscriptView({ turns, usage, status, error, emptyText }) {
-  if ((!turns || !turns.length) && !usage) {
-    return <EmptyHint text={emptyText || '暂无消息'} />;
-  }
+  const empty = (!turns || !turns.length) && !usage;
   return (
     <div>
-      {(turns || []).map((t, i) => <TurnView key={i} turn={t} />)}
+      {empty ? (
+        <EmptyHint text={emptyText || '暂无消息'} />
+      ) : (
+        (turns || []).map((t, i) => <TurnView key={i} turn={t} />)
+      )}
       <UsageFooter usage={usage} />
       <StatusTag status={status} error={error} />
     </div>

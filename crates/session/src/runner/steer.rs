@@ -183,6 +183,9 @@ pub(super) async fn apply_steer_batch(
             let remaining: Vec<i64> = steer_prompts[idx..].iter().map(|(s, _, _)| *s).collect();
             super::input_recovery::unpromote_batch(session, &remaining).await;
             on_event(SessionEvent::Status("interrupted".into()));
+            // Terminal frame owed here too: the caller breaks on Cancelled
+            // and nothing else emits `Done` (real-browser acceptance).
+            on_event(SessionEvent::Done);
             return Ok(SteerApplyOutcome::Cancelled);
         }
         on_event(SessionEvent::SteerConsumed {

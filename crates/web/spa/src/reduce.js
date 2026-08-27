@@ -21,20 +21,24 @@ function blockToTurns(role, b) {
   if (!b || typeof b !== 'object') {
     return [];
   }
-  if (b.type === 'text') {
+  // Wire blocks are serde-tagged `kind` (core Message ContentBlock); older
+  // fixtures used `type`. Accept both — mismatch silently produced EMPTY
+  // transcripts from every store snapshot (real-browser acceptance).
+  const kind = b.kind || b.type;
+  if (kind === 'text') {
     return [{ kind: 'text', role, text: b.text || '' }];
   }
-  if (b.type === 'reasoning') {
+  if (kind === 'reasoning') {
     return [{ kind: 'think', role, text: b.text || '' }];
   }
-  if (b.type === 'tool_use') {
+  if (kind === 'tool_use') {
     return [{ kind: 'tool', role, id: b.id || b.tool_use_id || null, name: b.name || 'tool', input: fmtValue(b.input), output: null, isError: false, durationMs: null }];
   }
-  if (b.type === 'tool_result') {
+  if (kind === 'tool_result') {
     const out = b.output !== undefined && b.output !== null ? b.output : (b.content || []);
     return [{ kind: 'tool', role, id: b.tool_use_id || b.id || null, name: 'result', input: null, output: fmtValue(out), isError: !!b.is_error, durationMs: null }];
   }
-  if (b.type === 'image' || b.type === 'image_url') {
+  if (kind === 'image' || kind === 'image_url') {
     return [{ kind: 'text', role, text: '[image]' }];
   }
   return [];
@@ -48,7 +52,8 @@ export function turnsFromMessages(messages) {
   for (const m of list) {
     const role = (m && m.role) || 'assistant';
     for (const b of (m && m.blocks) || []) {
-      if (b && b.type === 'tool_result') {
+      const bkind = (b && (b.kind || b.type)) || '';
+      if (bkind === 'tool_result') {
         const open = findOpenTool(turns, b.tool_use_id || b.id);
         if (open) {
           turns[open] = { ...turns[open], output: fmtValue(b.output !== undefined && b.output !== null ? b.output : b.content), isError: !!b.is_error };
@@ -120,6 +125,30 @@ function closeOpenText(turns) {
     return copy;
   }
   return turns;
+}
+
+/// Snapshot messages → aggregated usage for the footer. Store rows carry
+/// per-message usage; a reloaded console has no llm_usage frame to remember,
+/// so sum the rows (all-zero/absent → null, no empty footer).
+export function usageFromMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let input = 0;
+  let output = 0;
+  let seen = false;
+  for (const m of list) {
+    const u = (m && m.usage) || {};
+    const i = num(u.input_tokens) || 0;
+    const o = num(u.output_tokens) || 0;
+    if (i > 0 || o > 0) {
+      seen = true;
+    }
+    input += i;
+    output += o;
+  }
+  if (!seen) {
+    return null;
+  }
+  return { input, output, total: input + output, contextWindow: null };
 }
 
 function usageOf(data) {

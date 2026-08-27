@@ -1,148 +1,139 @@
-use std::sync::LazyLock;
+//! Single-binary SPA embed.
+//!
+//! The React+antd console is built ahead of time into [`crate`] sibling
+//! directory `../spa/dist/` (fixed file names — see `spa/vite.config.js`,
+//! no content hashes) and embedded at compile time via `include_str!` /
+//! `include_bytes!`. Consequence: `cargo build` never needs node; the
+//! binary serves the exact committed dist output.
+//!
+//! Routing contract: `/` returns the HTML shell, `/static/:name` serves the
+//! whitelisted build outputs. Both paths are auth-exempt (see
+//! `auth_sig_mw`) so the console loads before the token is entered; the
+//! whitelist is deliberate — exempt means the route is reachable without a
+//! signature, not that arbitrary files are served.
 
-use axum::extract::State;
-use axum::response::Html;
 use std::sync::Arc;
+
+use axum::extract::{Path, State};
+use axum::http::{header, StatusCode};
+use axum::response::{Html, IntoResponse, Response};
 
 use crate::AppState;
 
-/// Single-binary SPA: every frontend asset is embedded via `include_str!`
-/// and inlined into one HTML document computed exactly once at first use.
-/// No static file serving, no external requests.
+const INDEX_HTML: &str = include_str!("../spa/dist/index.html");
+const APP_JS: &[u8] = include_bytes!("../spa/dist/static/app.js");
+const APP_CSS: &[u8] = include_bytes!("../spa/dist/static/app.css");
+
+/// SPA shell: the compile-time-embedded `spa/dist/index.html`.
 pub async fn index(State(_state): State<Arc<AppState>>) -> Html<&'static str> {
-    Html(&MANAGER_HTML)
+    Html(INDEX_HTML)
 }
 
-const SHELL: &str = include_str!("assets/index.html");
-const CSS: &str = include_str!("assets/styles.css");
-
-// Classic scripts in dependency order: state/helpers first, controller last.
-// api.js (token + fetch) is required by everything; sse.js before chat.js
-// (which registers handlers via onSSE); composer/settings/questions/queue
-// are wired at load time but only call each other at runtime.
-const JS_API: &str = include_str!("assets/api.js");
-const JS_SSE: &str = include_str!("assets/sse.js");
-const JS_SESSIONS: &str = include_str!("assets/sessions.js");
-const JS_CHAT: &str = include_str!("assets/chat.js");
-const JS_COMPOSER: &str = include_str!("assets/composer.js");
-const JS_QUESTIONS: &str = include_str!("assets/questions.js");
-const JS_QUEUE: &str = include_str!("assets/queue_panel.js");
-const JS_SUBAGENTS: &str = include_str!("assets/subagent_view.js");
-const JS_BG: &str = include_str!("assets/bg_panel.js");
-const JS_NODES: &str = include_str!("assets/nodes_panel.js");
-const JS_SETTINGS: &str = include_str!("assets/settings.js");
-
-/// Wrap one script body in an inline `<script>` tag (classic script, no
-/// modules/bundlers — single-binary inline only).
-fn inline_script(js: &str) -> String {
-    format!("<script>\n{js}\n</script>")
-}
-
-static MANAGER_HTML: LazyLock<String> = LazyLock::new(|| {
-    let mut html = SHELL.replace("<!--STYLES-->", &format!("<style>\n{CSS}\n</style>"));
-    let scripts: &[(&str, &str)] = &[
-        ("<!--JS_API-->", JS_API),
-        ("<!--JS_SSE-->", JS_SSE),
-        ("<!--JS_SESSIONS-->", JS_SESSIONS),
-        ("<!--JS_CHAT-->", JS_CHAT),
-        ("<!--JS_COMPOSER-->", JS_COMPOSER),
-        ("<!--JS_QUESTIONS-->", JS_QUESTIONS),
-        ("<!--JS_QUEUE-->", JS_QUEUE),
-        ("<!--JS_SUBAGENTS-->", JS_SUBAGENTS),
-        ("<!--JS_BG-->", JS_BG),
-        ("<!--JS_NODES-->", JS_NODES),
-        ("<!--JS_SETTINGS-->", JS_SETTINGS),
-    ];
-    for (marker, js) in scripts {
-        html = html.replace(marker, &inline_script(js));
+/// Whitelisted static build outputs (`/static/:name`). Anything outside the
+/// fixed dist contract is 404 — no filesystem access, no traversal.
+pub async fn static_asset(Path(name): Path<String>) -> Response {
+    match name.as_str() {
+        "app.js" => asset_response(APP_JS, "application/javascript"),
+        "app.css" => asset_response(APP_CSS, "text/css"),
+        _ => StatusCode::NOT_FOUND.into_response(),
     }
-    html
-});
+}
+
+/// Pure responder: static bytes with a fixed content type.
+fn asset_response(bytes: &'static [u8], content_type: &'static str) -> Response {
+    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every marker must be consumed and its asset inlined exactly once.
-    #[test]
-    fn markers_replaced_and_assets_inlined() {
-        let html = MANAGER_HTML.as_str();
-        for marker in [
-            "<!--STYLES-->",
-            "<!--JS_API-->",
-            "<!--JS_SSE-->",
-            "<!--JS_SESSIONS-->",
-            "<!--JS_CHAT-->",
-            "<!--JS_COMPOSER-->",
-            "<!--JS_QUESTIONS-->",
-            "<!--JS_QUEUE-->",
-            "<!--JS_NODES-->",
-            "<!--JS_SETTINGS-->",
-            // absorbed legacy markers must be gone entirely
-            "<!--JS_RENDER-->",
-            "<!--JS_APP-->",
-        ] {
-            assert!(!html.contains(marker), "marker {marker} still present");
-        }
-        assert!(html.contains("<style>"));
-        assert!(html.contains("var(--bg)"));
-        // new DOM skeletons the scripts bind to
-        for skeleton in [
-            "id=\"qpanel\"",
-            "id=\"questions\"",
-            "id=\"hero\"",
-            "id=\"skill-pop\"",
-            "id=\"settings-pop\"",
-            "id=\"reconnect\"",
-            "id=\"reconnect-fail\"",
-            "id=\"qcount\"",
-            "id=\"nodes-panel\"",
-            "id=\"nodes-live\"",
-        ] {
-            assert!(html.contains(skeleton), "missing skeleton {skeleton}");
+    use axum::body::Bytes;
+
+    async fn body(resp: Response) -> Bytes {
+        axum::body::to_bytes(resp.into_body(), 4 << 20)
+            .await
+            .expect("body must read")
+    }
+
+    /// The whitelist serves exactly the fixed build outputs, with the right
+    /// content types; every other name is 404 (exempt ≠ anything goes).
+    #[tokio::test]
+    async fn static_whitelist_serves_fixed_build_outputs() {
+        let js = static_asset(Path("app.js".to_string())).await;
+        assert_eq!(js.status(), StatusCode::OK);
+        assert_eq!(
+            js.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/javascript")
+        );
+        assert!(!body(js).await.is_empty(), "app.js must be non-empty");
+
+        let css = static_asset(Path("app.css".to_string())).await;
+        assert_eq!(css.status(), StatusCode::OK);
+        assert_eq!(
+            css.headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("text/css")
+        );
+        assert!(!body(css).await.is_empty(), "app.css must be non-empty");
+
+        for name in ["nope.js", "index.html"] {
+            let miss = static_asset(Path(name.to_string())).await;
+            assert_eq!(miss.status(), StatusCode::NOT_FOUND, "{name} must 404");
         }
     }
 
-    /// Each module's sentinel function must exist, and the scripts must be
-    /// inlined in dependency order (api -> sse -> sessions -> chat ->
-    /// composer -> questions -> queue_panel -> settings).
-    #[test]
-    fn script_sentinels_present_in_dependency_order() {
-        let html = MANAGER_HTML.as_str();
-        let sentinels: &[(&str, &str)] = &[
-            ("api.js", "function apiGet"),
-            ("sse.js", "function openStream"),
-            ("sessions.js", "function refreshSessions"),
-            ("chat.js", "function renderMessages"),
-            ("composer.js", "async function send"),
-            ("questions.js", "function pollQuestions"),
-            ("queue_panel.js", "function refreshQueuePanel"),
-            ("subagent_view.js", "function subagentViewClick"),
-            ("bg_panel.js", "function refreshBgPanel"),
-            ("nodes_panel.js", "function toggleNodesPanel"),
-            ("settings.js", "function loadModels"),
-        ];
-        let mut prev = 0usize;
-        for (name, sentinel) in sentinels {
-            let pos = html.find(sentinel).unwrap_or_else(|| {
-                panic!("{name} sentinel `{sentinel}` missing from inlined HTML")
-            });
-            assert!(
-                pos > prev,
-                "{name} ({sentinel}) must come after the previous script (dependency order)"
+    /// Pure scan: every `static/NAME` reference in the shell (chars up to the
+    /// closing quote after each `static/` occurrence).
+    fn static_refs(shell: &'static str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut rest = shell;
+        while let Some(pos) = rest.find("static/") {
+            let after = &rest[pos + "static/".len()..];
+            let name: String = after.chars().take_while(|c| *c != '"').collect();
+            rest = after;
+            if !name.is_empty() {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Dist contract pin: the shell must never reference an asset the
+    /// whitelist does not serve.
+    #[tokio::test]
+    async fn shell_references_resolve_through_the_whitelist() {
+        let refs = static_refs(INDEX_HTML);
+        assert!(
+            !refs.is_empty(),
+            "shell must reference at least one static asset"
+        );
+        for name in refs {
+            let resp = static_asset(Path(name.clone())).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "shell references static/{name} but the whitelist does not serve it"
             );
-            prev = pos;
         }
     }
 
-    /// The restructure stays classic-script vanilla JS: no ES module syntax,
-    /// no external/CDN references (single binary, no network at load).
+    /// Single binary, zero network: no external script/style/CDN references.
     #[test]
-    fn no_module_or_external_references() {
-        let html = MANAGER_HTML.as_str();
-        assert!(!html.contains("export "));
-        assert!(!html.contains("import "));
-        assert!(!html.contains("<script src="));
-        assert!(!html.contains("http://") && !html.contains("https://"));
+    fn shell_has_no_external_references() {
+        assert!(!INDEX_HTML.contains("src=\"http"), "no external scripts");
+        assert!(!INDEX_HTML.contains("href=\"http"), "no external styles");
+        assert!(!INDEX_HTML.contains("//cdn"), "no CDN references");
+    }
+
+    /// The shell is the console entry: React mounts into #root, title names
+    /// the product.
+    #[test]
+    fn shell_is_the_console_entry() {
+        assert!(INDEX_HTML.contains("<div id=\"root\">"));
+        assert!(INDEX_HTML.contains("Opencoder"));
     }
 }

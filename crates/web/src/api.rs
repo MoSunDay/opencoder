@@ -627,6 +627,16 @@ pub(crate) fn error_500(msg: String) -> Response {
         .into_response()
 }
 
+/// 502 Bad Gateway: the node (our upstream) answered the relay with a
+/// failure. Used by the P3 message relay; the payload is never persisted.
+pub(crate) fn error_502(msg: String) -> Response {
+    (
+        axum::http::StatusCode::BAD_GATEWAY,
+        Json(json!({ "ok": false, "error": msg })),
+    )
+        .into_response()
+}
+
 pub(crate) fn event_kind_str(k: EventKind) -> &'static str {
     match k {
         EventKind::PromptAdmitted => "prompt_admitted",

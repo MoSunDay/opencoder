@@ -10,6 +10,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use opencoder_core::auth_sig;
+
 const BIN: &str = env!("CARGO_BIN_EXE_opencoder");
 const TOKEN: &str = "running-mode-e2e-token";
 
@@ -93,7 +95,8 @@ fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
             .arg("--workdir")
             .arg(workdir)
             .args([
-                "server",
+                "daemon",
+                "--server",
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -134,15 +137,32 @@ fn spawn_server(workdir: &std::path::Path) -> (ServerGuard, String) {
     }
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
 fn http(base: &str, method: &str, path: &str, body: &str) -> (u16, serde_json::Value) {
     let host = base.trim_start_matches("http://");
     let mut stream = TcpStream::connect(host).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
+    // HMAC signature over THIS request (wire format: crates/core/src/auth_sig.rs).
+    // A fresh timestamp per call keeps every signature unique — resending the
+    // same ts+sig pair inside the replay window would be a 409, not a 200.
+    let ts = now_ms();
+    let sig = auth_sig::sign_hex(
+        TOKEN,
+        &auth_sig::canonical(method, path, ts, body.as_bytes()),
+    );
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: Bearer {TOKEN}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\n{ts_header}: {ts}\r\n{sig_header}: {sig}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len(),
+        ts_header = auth_sig::TS_HEADER,
+        sig_header = auth_sig::SIG_HEADER,
     );
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = Vec::new();

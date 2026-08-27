@@ -157,7 +157,6 @@ async fn shift_tab_after_real_plan_turn_hands_plan_forward() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,

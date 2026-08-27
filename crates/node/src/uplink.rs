@@ -1,18 +1,18 @@
 //! REST uplink from an execution node to its central server.
 //!
 //! One thin handle over a proxy-aware `reqwest::Client` (loopback always
-//! bypasses proxies, mirroring `opencode client`'s transport). Every request
-//! carries the bearer token; every non-2xx response becomes an `anyhow` error
-//! that embeds the server's body — the same house style as
-//! `crates/client/src/remote_ops.rs`, minus the SSE surface.
+//! bypasses proxies). Every request is HMAC-signed with the shared token via
+//! [`opencoder_core::auth_sig`]; every non-2xx response becomes an `anyhow`
+//! error that embeds the server's body.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use opencoder_core::auth_sig;
 use opencoder_core::net::build_http_client_with_read_timeout;
 use opencoder_core::node_protocol::{
-    ClaimedTask, NodeEventBatch, NodeHeartbeatResponse, NodeRegisterRequest, NodeRegisterResponse,
-    NodeStatusReport,
+    ClaimResponse, FetchMessagesResult, NodeEventBatch, NodeHeartbeatResponse, NodeRegisterRequest,
+    NodeRegisterResponse, NodeStatusReport,
 };
 use tracing::warn;
 
@@ -57,13 +57,10 @@ impl Uplink {
             name: name.to_string(),
             version: Some(version.to_string()),
             workdir: workdir.map(str::to_string),
+            addr: None,
         };
         let resp = self
-            .http
-            .post(self.url("/api/nodes/register"))
-            .bearer_auth(&self.token)
-            .json(&body)
-            .send()
+            .signed_request(reqwest::Method::POST, "/api/nodes/register", Some(&body))
             .await
             .context("register node")?;
         let resp = ensure_ok(resp, "register node").await?;
@@ -73,11 +70,11 @@ impl Uplink {
     /// POST /api/nodes/:id/heartbeat — liveness touch + cancel-command poll.
     pub async fn heartbeat(&self, node_id: &str) -> Result<NodeHeartbeatResponse> {
         let resp = self
-            .http
-            .post(self.url(&format!("/api/nodes/{node_id}/heartbeat")))
-            .bearer_auth(&self.token)
-            .json(&serde_json::json!({}))
-            .send()
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/{node_id}/heartbeat"),
+                Some(&serde_json::json!({})),
+            )
             .await
             .context("heartbeat")?;
         let resp = ensure_ok(resp, "heartbeat").await?;
@@ -85,31 +82,34 @@ impl Uplink {
     }
 
     /// GET /api/nodes/tasks/claim?node_id= — FIFO single-active claim.
-    /// `204 No Content` means nothing is due and maps to `None`.
-    pub async fn claim_next(&self, node_id: &str) -> Result<Option<ClaimedTask>> {
+    ///
+    /// The reply is the [`ClaimResponse`] envelope: a durable task and/or a
+    /// control task (P3 message relay). `204 No Content` maps to an empty
+    /// envelope (both fields `None`), so callers need no special case.
+    pub async fn claim_next(&self, node_id: &str) -> Result<ClaimResponse> {
+        let pq = format!(
+            "/api/nodes/tasks/claim?node_id={}",
+            urlencode_component(node_id)
+        );
         let resp = self
-            .http
-            .get(self.url("/api/nodes/tasks/claim"))
-            .query(&[("node_id", node_id)])
-            .bearer_auth(&self.token)
-            .send()
+            .signed_request(reqwest::Method::GET, &pq, None::<&serde_json::Value>)
             .await
             .context("claim task")?;
         if resp.status() == reqwest::StatusCode::NO_CONTENT {
-            return Ok(None);
+            return Ok(ClaimResponse::default());
         }
         let resp = ensure_ok(resp, "claim task").await?;
-        Ok(Some(resp.json().await.context("claim task json")?))
+        resp.json().await.context("claim task json")
     }
 
     /// POST /api/nodes/tasks/:tid/events — upload one ordered event batch.
     pub async fn upload_events(&self, task_id: &str, batch: NodeEventBatch) -> Result<()> {
         let resp = self
-            .http
-            .post(self.url(&format!("/api/nodes/tasks/{task_id}/events")))
-            .bearer_auth(&self.token)
-            .json(&batch)
-            .send()
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/tasks/{task_id}/events"),
+                Some(&batch),
+            )
             .await
             .context("upload events")?;
         let _ = ensure_ok(resp, "upload events").await?;
@@ -128,16 +128,80 @@ impl Uplink {
             error,
         };
         let resp = self
-            .http
-            .post(self.url(&format!("/api/nodes/tasks/{task_id}/status")))
-            .bearer_auth(&self.token)
-            .json(&report)
-            .send()
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/tasks/{task_id}/status"),
+                Some(&report),
+            )
             .await
             .context("report status")?;
         let _ = ensure_ok(resp, "report status").await?;
         Ok(())
     }
+}
+
+impl Uplink {
+    /// Single signed egress path: serialize the JSON body (if any), compute
+    /// the HMAC over `{METHOD}\n{path_and_query}\n{ts}\n{sha256(body)}`, and
+    /// attach the signature headers. Every control-plane call goes through
+    /// here, so the wire format can never drift per-call-site.
+    /// POST /api/nodes/:id/control_result — upload one control result
+    /// (P3 message relay). The server answers `{"resolved": bool}` and ALWAYS
+    /// 200: an unknown/stale control id is a no-op, never a retryable error.
+    pub async fn post_control_result(
+        &self,
+        node_id: &str,
+        result: &FetchMessagesResult,
+    ) -> Result<()> {
+        let resp = self
+            .signed_request(
+                reqwest::Method::POST,
+                &format!("/api/nodes/{node_id}/control_result"),
+                Some(result),
+            )
+            .await
+            .context("upload control result")?;
+        let _ = ensure_ok(resp, "upload control result").await?;
+        Ok(())
+    }
+
+    async fn signed_request<T: serde::Serialize>(
+        &self,
+        method: reqwest::Method,
+        path_and_query: &str,
+        body: Option<&T>,
+    ) -> Result<reqwest::Response> {
+        let body_bytes = match body {
+            Some(b) => serde_json::to_vec(b).context("serialize request body")?,
+            None => Vec::new(),
+        };
+        let ts = opencoder_core::message::now_ms();
+        let canon = auth_sig::canonical(method.as_str(), path_and_query, ts, &body_bytes);
+        let sig = auth_sig::sign_hex(&self.token, &canon);
+        self.http
+            .request(method, self.url(path_and_query))
+            .header(auth_sig::TS_HEADER, ts.to_string())
+            .header(auth_sig::SIG_HEADER, sig)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body_bytes)
+            .send()
+            .await
+            .context("send signed request")
+    }
+}
+
+/// Percent-encode one query component (ids are ULIDs; this is belt-and-braces).
+fn urlencode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 /// Accept only 2xx; embed the server's body in the error so operators see the

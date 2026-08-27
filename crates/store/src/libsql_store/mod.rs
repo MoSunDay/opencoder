@@ -9,8 +9,9 @@ use tracing::debug;
 
 use crate::store::Store;
 use crate::types::{
-    Delivery, ImportReport, NodeRecord, NodeTaskRecord, NodeTaskStatus, SessionEventRecord,
-    SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch, SubagentTaskRecord,
+    Delivery, ImportReport, MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus,
+    SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
+    SubagentTaskRecord,
 };
 use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 
@@ -156,6 +157,11 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::last_seq(&conn, session_id).await
+    }
+    async fn load_message_rows(&self, session_id: &str) -> Result<Vec<MessageRow>> {
+        let _guard = self.db_lock.lock().await;
+        let conn = self.conn().await?;
+        messages::load_rows(&conn, session_id).await
     }
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64> {
@@ -316,10 +322,11 @@ impl Store for LibsqlStore {
         name: &str,
         version: Option<&str>,
         workdir: Option<&str>,
+        addr: Option<&str>,
         now_ms: i64,
     ) -> Result<NodeRecord> {
         let _guard = self.db_lock.lock().await;
-        nodes::register(&self.conn, name, version, workdir, now_ms).await
+        nodes::register(&self.conn, name, version, workdir, addr, now_ms).await
     }
     async fn list_nodes(&self) -> Result<Vec<NodeRecord>> {
         let _guard = self.db_lock.lock().await;
@@ -354,6 +361,23 @@ impl Store for LibsqlStore {
         )
         .await
     }
+    async fn dispatch_node_task_for_session(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        node_id: &str,
+        title: Option<&str>,
+        prompt: &str,
+        agent: Option<&str>,
+        model: Option<&str>,
+        now_ms: i64,
+    ) -> Result<NodeTaskRecord> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::dispatch_for_session(
+            &self.conn, task_id, session_id, node_id, title, prompt, agent, model, now_ms,
+        )
+        .await
+    }
     async fn claim_next_node_task(
         &self,
         node_id: &str,
@@ -383,6 +407,19 @@ impl Store for LibsqlStore {
     async fn get_node_task(&self, task_id: &str) -> Result<Option<NodeTaskRecord>> {
         let _guard = self.db_lock.lock().await;
         node_tasks::get_task(&self.conn, task_id).await
+    }
+    async fn list_node_tasks_filtered(
+        &self,
+        node_id: Option<&str>,
+        status: Option<NodeTaskStatus>,
+        limit: u32,
+    ) -> Result<Vec<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::list_tasks_filtered(&self.conn, node_id, status, limit).await
+    }
+    async fn get_node_task_by_session(&self, session_id: &str) -> Result<Option<NodeTaskRecord>> {
+        let _guard = self.db_lock.lock().await;
+        node_tasks::get_by_session(&self.conn, session_id).await
     }
     async fn converge_lost_node_tasks(
         &self,

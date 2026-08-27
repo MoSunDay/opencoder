@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod auth_sig;
 pub mod config;
 pub mod data_dir;
 pub mod error;

@@ -35,6 +35,7 @@ async fn app() -> Ctx {
         workdir: workdir.clone(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(Arc::new(mock) as Arc<dyn ChatStream>),
     });
     Ctx {

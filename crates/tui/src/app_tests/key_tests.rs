@@ -297,7 +297,7 @@ fn ctrl_t_blocked_when_input_disabled() {
     // In subagent-focus view (input_disabled) Ctrl+T now switches mode like
     // every other mode-switch key (switch_mode_clear / switch_mode_keep /
     // raw BackTab): leaving/switching mode must never be blocked by view
-    // state — the bidirectional running gate in handle_switch_agent is the
+    // state — the bidirectional running gate in the switch handlers is the
     // single busy authority. The composer input itself stays untouched.
     let mut input = String::new();
     let mut idx = 0;

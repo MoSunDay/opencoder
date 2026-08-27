@@ -1,5 +1,5 @@
 //! Shared harness for the Phase-4 process-level e2e tests: a REAL
-//! `build_app` server (web=true, bearer token) bound to a random local port,
+//! `build_app` server (web=true, HMAC signature token) bound to a random local port,
 //! plus the small browser-side utilities (reqwest client, SSE line reader,
 //! poll helper) the flow/reconnect scenarios drive.
 
@@ -9,6 +9,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::support::sig_headers;
 use futures::StreamExt;
 use opencoder_llm::MockChatClient;
 use opencoder_store::LibsqlStore;
@@ -32,6 +33,7 @@ pub async fn spawn_server() -> Server {
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(Arc::new(MockChatClient::new())),
     });
     let app = opencoder_web::build_app(state, Some(TOKEN.to_string()), true);
@@ -73,33 +75,53 @@ fn url(base: &str, path: &str) -> String {
     format!("{base}{path}")
 }
 
-/// Bearer-header GET returning JSON.
+/// Signed GET returning JSON.
 pub async fn get_json(base: &str, path: &str) -> (reqwest::StatusCode, Value) {
-    let r = http()
-        .get(url(base, path))
-        .bearer_auth(TOKEN)
-        .send()
-        .await
-        .unwrap();
+    let r = signed_raw("GET", base, path, None).send().await.unwrap();
     let status = r.status();
     let v = r.json::<Value>().await.unwrap_or(Value::Null);
     (status, v)
 }
 
-/// Bearer-header POST with an optional JSON body.
+/// Signed POST with an optional JSON body.
 pub async fn post_json(
     base: &str,
     path: &str,
     body: Option<Value>,
 ) -> (reqwest::StatusCode, Value) {
-    let mut b = http().post(url(base, path)).bearer_auth(TOKEN);
-    if let Some(j) = body {
-        b = b.json(&j);
+    let bytes = body
+        .as_ref()
+        .map(|j| serde_json::to_vec(j).unwrap())
+        .unwrap_or_default();
+    let mut b = signed_raw("POST", base, path, Some(bytes));
+    if body.is_none() {
+        b = b.header("content-type", "application/json");
     }
     let r = b.send().await.unwrap();
     let status = r.status();
     let v = r.json::<Value>().await.unwrap_or(Value::Null);
     (status, v)
+}
+
+/// Build a signed reqwest request over the exact serialized body so the
+/// signature matches what the server hashes. `path` must include the query.
+fn signed_raw(
+    method: &str,
+    base: &str,
+    path: &str,
+    body: Option<Vec<u8>>,
+) -> reqwest::RequestBuilder {
+    let bytes = body.unwrap_or_default();
+    let (tsh, ts, sigh, sig) = sig_headers(TOKEN, method, path, &bytes);
+    http()
+        .request(
+            reqwest::Method::from_bytes(method.as_bytes()).unwrap(),
+            url(base, path),
+        )
+        .header(tsh, ts)
+        .header(sigh, sig)
+        .header("content-type", "application/json")
+        .body(bytes)
 }
 
 /// One SSE unit of the fleet API as the browser sees it: the event name plus
@@ -110,12 +132,11 @@ pub struct Frame {
     pub data: Value,
 }
 
-/// Open `GET path` (bearer header — the EventSource-equivalent auth) and
-/// yield parsed frames until the connection ends.
+/// Open `GET path` (signed — EventSource cannot set headers, so the SPA uses
+/// fetch streaming with the same header pair) and yield parsed frames until
+/// the connection ends.
 pub async fn open_sse(base: &str, path: &str) -> impl futures::Stream<Item = Frame> {
-    let r = http()
-        .get(url(base, path))
-        .bearer_auth(TOKEN)
+    let r = signed_raw("GET", base, path, None)
         .send()
         .await
         .expect("sse connect");

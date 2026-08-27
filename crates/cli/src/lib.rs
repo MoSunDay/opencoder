@@ -1,6 +1,4 @@
-pub mod client;
-pub mod client_ops;
-mod client_stream;
+pub mod daemon;
 pub mod display;
 pub mod exit_tips;
 pub mod install_tools;
@@ -15,7 +13,7 @@ pub mod update;
 
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -72,10 +70,6 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
-// The Client variant carries ~15 flags (340 bytes) vs ~51 for the next
-// largest; the enum is parsed exactly once at process start, so the extra
-// stack size beats per-field Box indirection.
-#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Headless one-shot: run a prompt and stream output to stdout.
     Run {
@@ -112,104 +106,23 @@ pub enum Command {
         #[arg(short = 'd', long = "delete", value_name = "ID", conflicts_with_all = ["list", "resume", "clean"])]
         delete: Option<String>,
     },
-    /// Start the server: centralized storage + LLM gateway (HTTP/JSON + SSE),
-    /// protected by a bearer token. (`serve` is accepted as an alias.)
-    #[command(alias = "serve")]
-    Server {
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
-        #[arg(long, default_value_t = 0)]
-        port: u16,
-        #[arg(long, default_value_t = true)]
-        web: bool,
-        /// Bearer token for API auth. Defaults to OPENCODER_SERVER_TOKEN, then
-        /// an auto-generated token printed to stderr.
-        #[arg(long)]
-        token: Option<String>,
-    },
-    /// Thin remote client: submit a prompt to a server and stream the result.
-    /// Stores nothing locally and calls no LLM. The global `--workdir` flag is
-    /// the remote session filter (for --continue resolution and `session
-    /// list`); it defaults to the current directory.
-    Client {
-        /// Server base URL (e.g. http://127.0.0.1:8080).
-        #[arg(long)]
-        remote: String,
-        /// Bearer token. Defaults to OPENCODER_SERVER_TOKEN.
-        #[arg(long)]
-        token: Option<String>,
-        /// Resume a specific remote session by id.
-        #[arg(short, long, conflicts_with = "continue_")]
-        session: Option<String>,
-        /// Resume the most recent remote session.
-        #[arg(long, default_value_t = false, conflicts_with = "session")]
-        continue_: bool,
-        /// Interrupt (cancel) the running drain on the resolved session, then
-        /// exit. Requires --session <id> or --continue; no prompt needed.
+    /// Unified fleet entry point: run the web server or register as an
+    /// execution node. Exactly one of --server / --client is required.
+    #[command(group(
+        ArgGroup::new("daemon_mode")
+            .args(["server", "client"])
+            .required(true)
+            .multiple(false)
+    ))]
+    Daemon {
+        /// Run the web server: registry + fleet dispatch + local engine.
+        #[arg(long, default_value_t = false, conflicts_with = "client")]
+        server: bool,
+        /// Register to a server as an execution node (requires --remote).
         #[arg(long, default_value_t = false)]
-        interrupt: bool,
-        /// Delivery mode for the prompt: steer (interrupt current turn) or
-        /// queue (wait for idle). Defaults to steer. Not validated client-side:
-        /// an unknown value is rejected by the server (HTTP 400).
-        #[arg(long, default_value = "steer")]
-        delivery: String,
-        /// Activate a skill for the triggering run. Repeatable, LAST value
-        /// wins (the server's prompt body carries a single skill name).
-        #[arg(long = "skill", value_name = "NAME")]
-        skills: Vec<String>,
-        /// Fork (copy) the resolved session first, then run the prompt on the
-        /// fork, leaving the original untouched.
-        #[arg(long, default_value_t = false)]
-        fork: bool,
-        /// Compact the resolved session's context, then exit (no prompt).
-        #[arg(long, default_value_t = false)]
-        compact: bool,
-        /// Plan→act handoff: submit the plan for execution, then exit (no
-        /// prompt). Optional positional extra guidance text.
-        #[arg(long, num_args = 0..=1, default_missing_value = "")]
-        handoff: Option<String>,
-        /// Session-scoped autopilot mode: off | ap | review. Applied before
-        /// the prompt. Validated client-side (invalid values error out).
-        #[arg(long, value_name = "MODE")]
-        autopilot: Option<String>,
-        /// Set the session's requirement annotation (empty string clears it).
-        #[arg(long, value_name = "TEXT")]
-        annotation: Option<String>,
-        /// Steer a running subagent: <TASK_ID> identifies the subagent task,
-        /// the prompt is the steer text. Requires --session/--continue to
-        /// resolve the parent session.
-        #[arg(long = "steer-task", value_name = "TASK_ID")]
-        steer_task: Option<String>,
-        /// Subcommand (session/questions management). Wins over the trailing
-        /// prompt when present. NOTE: a prompt whose FIRST word is literally
-        /// `session` or `questions` is captured by the subcommand — use `--`
-        /// (e.g. `opencode client -r http://x -- session hello`) to pass such
-        /// a prompt.
-        #[command(subcommand)]
-        cmd: Option<ClientSub>,
-        #[arg(
-            trailing_var_arg = true,
-            allow_hyphen_values = true,
-            help = "Prompt text (trailing). If the first word is `session`/`questions`, prefix with `--`."
-        )]
-        prompt: Vec<String>,
-    },
-    /// Run this machine as an execution node registered to a central server.
-    /// Claims dispatched tasks over REST, executes each with the local session
-    /// runner, and streams events/status back. The global `--workdir` flag
-    /// selects the execution working directory (and, absent an override, the
-    /// local store location via the same data-dir rule as `server`).
-    Node {
-        /// Friendly unique node name (re-registering the same name replaces
-        /// the old row). Defaults to a lowercased hostname-derived label.
-        #[arg(long, default_value_t = default_node_name())]
-        name: String,
-        /// Server base URL (e.g. http://127.0.0.1:8080).
-        #[arg(long)]
-        remote: String,
-        /// Bearer token. Defaults to OPENCODER_SERVER_TOKEN.
-        #[arg(long)]
-        token: Option<String>,
+        client: bool,
+        #[command(flatten)]
+        opts: DaemonOpts,
     },
     /// Print the resolved configuration (defaults < config files < env vars < --model).
     Config {
@@ -239,49 +152,33 @@ pub enum Command {
     Update,
 }
 
-/// `opencode client <sub>` — management subcommands for the remote client.
-#[derive(Subcommand, Debug, Clone)]
-pub enum ClientSub {
-    /// Remote session management (list / show / delete / fork).
-    Session {
-        #[command(subcommand)]
-        sub: ClientSessionSub,
-    },
-    /// Pending question cards on a remote session (list / answer / skip).
-    Questions {
-        #[command(subcommand)]
-        sub: ClientQuestionsSub,
-    },
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum ClientSessionSub {
-    /// List remote sessions for the workdir (id, title, preview).
-    List,
-    /// Show a remote session's full state as JSON.
-    Show { id: String },
-    /// Delete a remote session (cascades to messages/inputs/events).
-    Delete { id: String },
-    /// Fork (copy) a remote session; prints the new session id.
-    Fork { id: String },
-    /// List a remote session's subagent tasks (pretty JSON).
-    Tasks { id: String },
-    /// Clear every remote session except <keep> (refused while running).
-    Clear { keep: String },
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub enum ClientQuestionsSub {
-    /// List pending questions on a session (call_id, question, options).
-    List { session: String },
-    /// Answer a pending question by call id.
-    Answer {
-        session: String,
-        call_id: String,
-        answer: String,
-    },
-    /// Skip a pending question by call id (model proceeds by itself).
-    Skip { session: String, call_id: String },
+/// Shared flag bundle for `opencode daemon`, flattened into the [`Command::Daemon`]
+/// subcommand. Server-only flags (`--host`/`--port`/`--web`) are ignored in
+/// client mode and vice versa (`--remote`/`--name`); every field is plain
+/// data so the dispatch arm stays a pure match on [`daemon::DaemonAction`].
+#[derive(Args, Debug)]
+pub struct DaemonOpts {
+    /// Server bind host (server mode only).
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+    /// Server bind port, 0 lets the OS pick a free one (server mode only).
+    #[arg(long, default_value_t = 0)]
+    pub port: u16,
+    /// Serve the bundled web frontend (server mode only).
+    #[arg(long, default_value_t = true)]
+    pub web: bool,
+    /// Bearer token. Server mode: --token, then OPENCODER_SERVER_TOKEN, then
+    /// an auto-generated token printed to stderr. Client mode: --token, then
+    /// OPENCODER_SERVER_TOKEN only -- a node never auto-generates a token.
+    #[arg(long)]
+    pub token: Option<String>,
+    /// Server base URL (e.g. http://127.0.0.1:8080). Required with --client.
+    #[arg(long)]
+    pub remote: Option<String>,
+    /// Friendly unique node name override (client mode only). Defaults to a
+    /// hostname-derived label with a short process-local suffix.
+    #[arg(long)]
+    pub name: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -427,32 +324,6 @@ pub fn init_logging(verbose: bool, file_sink: Option<&Path>) {
         .try_init();
 }
 
-/// Default `node --name`: lowercase machine hostname trimmed to DNS-label
-/// charset, disambiguated with a short process-local suffix so two nodes on
-/// one host (or a container fleet sharing a hostname) stay distinct.
-fn default_node_name() -> String {
-    let raw = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "opencoder-node".into());
-    let mut slug: String = raw
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    if slug.is_empty() {
-        slug = "opencoder-node".into();
-    }
-    let short = ulid::Ulid::new().to_string().to_lowercase();
-    let tail: String = short.chars().rev().take(6).collect();
-    format!("{slug}-{tail}")
-}
-
 /// Best-effort fallback log file when no primary sink was provided/usable.
 fn fallback_log_path() -> PathBuf {
     std::env::temp_dir().join("opencoder-tui.log")
@@ -499,5 +370,115 @@ mod tests {
     #[test]
     fn log_dest_discards_only_when_both_unavailable() {
         assert_eq!(log_dest(false, false), LogDest::Discard);
+    }
+
+    // -- `daemon` parse contract -------------------------------------------
+
+    #[test]
+    fn daemon_without_a_role_fails_to_parse() {
+        // The daemon_mode ArgGroup is required: a bare `daemon` must be
+        // rejected at parse time, never fall through to dispatch.
+        let res = Cli::try_parse_from(["opencode", "daemon"]);
+        assert!(res.is_err(), "bare `daemon` must fail (exactly-one role)");
+    }
+
+    #[test]
+    fn daemon_server_only_parses() {
+        let cli = Cli::try_parse_from(["opencode", "daemon", "--server"]).unwrap();
+        match cli.command {
+            Some(Command::Daemon {
+                server,
+                client,
+                opts,
+            }) => {
+                assert!(server);
+                assert!(!client);
+                // Server-only defaults.
+                assert_eq!(opts.host, "127.0.0.1");
+                assert_eq!(opts.port, 0);
+                assert!(opts.web);
+                assert!(opts.token.is_none());
+            }
+            other => panic!("expected Daemon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daemon_client_with_remote_parses() {
+        let cli = Cli::try_parse_from([
+            "opencode", "daemon", "--client", "--remote", "http://x", "--name", "gpu-1", "--token",
+            "TKN",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Daemon {
+                server,
+                client,
+                opts,
+            }) => {
+                assert!(!server);
+                assert!(client);
+                assert_eq!(opts.remote.as_deref(), Some("http://x"));
+                assert_eq!(opts.name.as_deref(), Some("gpu-1"));
+                assert_eq!(opts.token.as_deref(), Some("TKN"));
+            }
+            other => panic!("expected Daemon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daemon_server_and_client_conflict() {
+        // enforced twice: the explicit conflicts_with AND the single-shot group
+        let res = Cli::try_parse_from([
+            "opencode", "daemon", "--server", "--client", "--remote", "u",
+        ]);
+        assert!(res.is_err(), "--server + --client must fail");
+    }
+
+    #[test]
+    fn daemon_server_flags_parse_server_tuning() {
+        let cli = Cli::try_parse_from([
+            "opencode", "daemon", "--server", "--host", "0.0.0.0", "--port", "9090", "--token",
+            "abc",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Daemon { opts, .. }) => {
+                assert_eq!(opts.host, "0.0.0.0");
+                assert_eq!(opts.port, 9090);
+                assert_eq!(opts.token.as_deref(), Some("abc"));
+            }
+            other => panic!("expected Daemon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daemon_client_defaults_leave_name_and_token_unset() {
+        // The CLI layer never consults the env: a missing --token parses fine
+        // and is enforced at dispatch (resolve_client_token -> run_node gate).
+        let a = Cli::try_parse_from(["opencode", "daemon", "--client", "--remote", "http://x"])
+            .unwrap();
+        let b = Cli::try_parse_from(["opencode", "daemon", "--client", "--remote", "http://x"])
+            .unwrap();
+        match (a.command, b.command) {
+            (Some(Command::Daemon { opts: o1, .. }), Some(Command::Daemon { opts: o2, .. })) => {
+                assert!(o1.name.is_none() && o2.name.is_none());
+                assert!(o1.token.is_none() && o2.token.is_none());
+            }
+            other => panic!("expected Daemon twice, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daemon_resolves_to_the_expected_action() {
+        // The pure validator agrees with the parser for its reachable paths.
+        assert_eq!(
+            daemon::daemon_mode(true, false, None).unwrap(),
+            daemon::DaemonAction::Server
+        );
+        assert_eq!(
+            daemon::daemon_mode(false, true, Some("u")).unwrap(),
+            daemon::DaemonAction::Client
+        );
     }
 }

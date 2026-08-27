@@ -9,9 +9,10 @@
 //! file-backed db (`LibsqlStore::conn()` clones share the same underlying
 //! database) because in-memory dbs cannot be reached cross-connection.
 //! Server harness mirrors `node_e2e_support::spawn_server`, reusing its HTTP /
-//! SSE helpers against the SAME bearer token.
+//! SSE helpers against the SAME signature token.
 
 mod node_e2e_support;
+mod support;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,6 +57,7 @@ async fn spawn_file_server() -> Srv {
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(Arc::new(MockChatClient::new())),
     });
     let app = opencoder_web::build_app(state, Some(TOKEN.to_string()), true);
@@ -102,9 +104,12 @@ async fn dispatch(base: &str, node_id: &str, prompt: &str) -> (String, String) {
 
 /// The worker's own claiming surface — puts the task into `running`.
 async fn worker_claim(base: &str, node_id: &str) -> Option<String> {
+    let path = format!("/api/nodes/tasks/claim?node_id={node_id}");
+    let (tsh, ts, sigh, sig) = support::sig_headers(TOKEN, "GET", &path, b"");
     let r = node_e2e_support::http()
-        .get(format!("{base}/api/nodes/tasks/claim?node_id={node_id}"))
-        .bearer_auth(TOKEN)
+        .get(format!("{base}{path}"))
+        .header(tsh, ts)
+        .header(sigh, sig)
         .send()
         .await
         .unwrap();
@@ -113,7 +118,7 @@ async fn worker_claim(base: &str, node_id: &str) -> Option<String> {
     }
     assert_eq!(r.status().as_u16(), 200, "claim must succeed or 204");
     let v: serde_json::Value = r.json().await.unwrap();
-    Some(v["task_id"].as_str().unwrap().to_string())
+    Some(v["task"]["task_id"].as_str().unwrap().to_string())
 }
 
 fn serial(name: &str) -> serde_json::Value {

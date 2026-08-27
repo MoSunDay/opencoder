@@ -144,7 +144,6 @@ async fn shift_tab_ts_origin_session_hands_plan_forward() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,

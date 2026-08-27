@@ -1,4 +1,4 @@
-Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
+Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌 + 浏览器验收收口)
 
 # daemon 统一入口 + 全量 HMAC 请求签名 + React/antd 舰队控制台内嵌（上线前评审收口）
 
@@ -32,6 +32,16 @@ Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
 - `scripts/check-spa-drift.sh`：核对 `spa/dist` 入库产物与本地构建一致（内嵌是编译期快照，必须显式防「改了源码忘了重建 dist」的漂移）。
 - `tests/auth.rs::shell_paths_are_exempt_but_api_is_not` 契约反转：`/static/app.js` 200 + 白名单外静态名 404 + API 未签名仍 401。
 - `Cargo.toml` 移除失配的 tower-http（伺服已白名单内嵌，不再读盘）。
+
+### 浏览器验收收口（playwright-core + 系统 chromium 实跑，8 步驱动脚本）
+
+真实浏览器验收不是「无法自动化」而是缺基础设施：`/tmp` 下以 playwright-core 驱动系统 chromium（`--no-sandbox`）完成 interrupt / SSE 断连重连 / compact 回放全清单，两轮连续 8/8 PASS。验收抓出 5 个真实缺陷并当场修复：
+
+1. **SPA 从未挂载**（任何浏览器里都是空壳）：`spa/src/main.jsx` 缺 `createRoot(...).render(...)`，旧产物 tree-shake 后整包为空。`html.rs` 加守护测试 `bundle_bootstraps_the_react_root`。
+2. **中断无终帧，控制台永久 busy**：runner 的中断出口只发 `Status("interrupted")`。四处出口（循环头、tool 执行后、**LLM 流式中**、`apply_steer_batch` 硬取消）统一补发终帧 `Done`。`interrupt_emits_done.rs` 新增 3 测试钉契约；`hard_cancel_midstream.rs` 的 D2 契约按新语义修订——`Done` 是关闭 SSE 的**终帧**（不再是「正常完成」标记），`Status` 承载原因；D2 真正要防的「空 assistant 消息落库」断言原样保留。
+3. **重连 cursor 跳头吞掉终帧**：断连期间 run 结束时，`after=<persisted head>` 跳过 `done` 帧 → UI 等 90s 超时。改为从 `lastSeq` 重放，且重放窗口封顶 400 帧（`REPLAY_CAP_FRAMES`，run 结束时终帧恒为 head，有界尾部重放仍收敛；无封顶时 4 万+增量帧回放会把标签页 O(n²) 渲染拖死）。`GET /api/sessions/:id` 暴露 `draining` 布尔（运行态可观测）+ `bugfix_contracts.rs` 契约测试。
+4. **store 快照回放渲染空 transcript**：wire 上 ContentBlock 是 serde `tag = "kind"`，SPA `turnsFromMessages` 只匹配 `type` → 所有 block 静默失配，openDialog/reloadAfterDone/resume 全部渲染空。兼容两种 tag 并以 `kind` fixture 钉住 wire 契约；快照路径补 `usageFromMessages`（按消息行 usage 求和还原 ▲▼Σ 脚注，reload 后不再消失）。
+5. **登录门控漏面板**：登录前 `NodesPanel` 已挂载发空 token 请求，控制台常驻「HMAC key data must not be empty」红字。Content 按 token 条件渲染。
 
 ### 测试面迁移（根级 tests/）
 
@@ -105,14 +115,17 @@ release 二进制实机冒烟（127.0.0.1 临时端口，python3 独立签名器
 | 签名协议（canonical/窗口边界/常时比较/body hash） | 8 个 `auth_sig` 单测 | `crates/core/src/auth_sig.rs` |
 | 中间件（未签名 401/错签 401/过期 401/重放 409/超限 413/body 篡改 401/`/api/time`+壳路径豁免/恶意 ts 401/签名 POST body 校验） | `api_without_signature_is_401` `replayed_signature_is_409` `oversized_body_is_413` `shell_paths_are_exempt_but_api_is_not` `time_endpoint_is_unsigned` `stale_timestamp_is_401` `malformed_timestamp_is_401` `signed_post_body_is_verified` 等 10 个 | `crates/web/tests/auth.rs` |
 | SPA 内嵌（白名单伺服/壳引用可解析/禁外链/控制台入口） | `static_whitelist_serves_fixed_build_outputs` `shell_references_resolve_through_the_whitelist` `shell_has_no_external_references` `shell_is_the_console_entry` | `crates/web/src/html.rs` |
-| SPA 前端逻辑（签名器/归约器） | vitest 20 passed | `crates/web/spa/src/{sign.test.js,reduce.test.js}` |
+| SPA 前端逻辑（签名器/归约器/快照 usage/`kind` wire tag） | vitest 22 passed | `crates/web/spa/src/{sign.test.js,reduce.test.js}` |
+| SPA 挂载守护（main.jsx 缺 render 曾致任意浏览器空壳） | `bundle_bootstraps_the_react_root` | `crates/web/src/html.rs` |
+| 中断终帧（循环头/tool 后/LLM 流式中/steer 批硬取消） | `loop_head_interrupt_emits_done` `tool_exec_interrupt_emits_done` `llm_round_interrupt_emits_done` + `hard_cancel_midstream_no_empty_assistant`（修订契约） | `crates/session/tests/{interrupt_emits_done.rs,hard_cancel_midstream.rs}` |
+| 会话快照 draining 可观测 | `get_messages_exposes_draining_flag` | `crates/web/tests/bugfix_contracts.rs` |
 | 进程级 daemon e2e（server+client 注册/心跳/来源 IP/签名矩阵） | `daemon_server_and_client_end_to_end` | `tests/daemon_smoke.rs` |
 | 运行中模式切换拒绝（真二进制，签名化后复绿） | `real_server_rejects_running_mode_switches_until_idle` | `tests/running_mode_switch_e2e.rs` |
 | zero-resubmit 对齐 | `runner_consumes_batch_steers_with_failing_store` | `crates/session/tests/steer_batch_recovery.rs` |
 
 ## 边界
 
-- 浏览器人工清单（interrupt / SSE 断连重连 / 压缩后对话回放）无法在本环境自动化：服务端语义已由 web 集成测试与 SSE 契约测试覆盖，SPA 逻辑由 vitest 覆盖；剩余为真浏览器操作验收，步骤：`opencode daemon --server --token <t>` → 浏览器开 `http://127.0.0.1:<port>/` → 登录 token → 按 interrupt/断网重连/compact 回放清单过一遍。
+- 浏览器清单已自动化执行（playwright-core + 系统 chromium 151 `--no-sandbox`，8 步驱动：登录/控制台渲染/本地流式/断连徽标/SSE 重连/中断/compact/压缩后回放，连续两轮 8/8 PASS，证据截图 `01-fleet-console` 至 `07-compact-replay`）。未覆盖：多节点 fleet 下的重连与回放（本环境单 server）、小程序/窄屏布局、`favicon.ico` 404（外观噪音，壳无此引用）。
 - 重放缓存为进程内存（重启清零、多实例不共享）——v1 既定取舍，见 `auth_sig_mw.rs` 模块注释。
 - 固定文件名入库 = 无 content hash、无 cache-busting：SPA 迭代后必须重建 dist 并入库（`check-spa-drift.sh` 把守），浏览器端靠手动强刷；正式发布若需缓存策略再引入 hash 版本化。
 - 行数门核对范围：本轮全部新增/迭代文件（新增最大 `crates/web/tests/node_messages_relay.rs` 358 行，迭代最大 `crates/tui/src/app.rs` 796 行）。

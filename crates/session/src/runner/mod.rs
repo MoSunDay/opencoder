@@ -223,6 +223,10 @@ pub(crate) async fn run_loop(
         if let Some(c) = &session.cancel {
             if c.is_cancelled() {
                 on_event(SessionEvent::Status("interrupted".into()));
+                // Terminal frame: without `Done` the SSE stream never closes
+                // and the web console stays stuck in `streaming…` (busy) until
+                // a manual reload — found by real-browser acceptance.
+                on_event(SessionEvent::Done);
                 break;
             }
         }
@@ -397,6 +401,10 @@ pub(crate) async fn run_loop(
         }
         if session.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
             on_event(SessionEvent::LlmRoundEnd);
+            // Status("interrupted") came from run_one_llm_call; still owe the
+            // terminal `Done` frame — without it the SSE stream never closes
+            // and the console stays busy forever (real-browser acceptance).
+            on_event(SessionEvent::Done);
             break;
         }
         let (text, reasoning, tool_calls, usage) = turn;
@@ -690,6 +698,8 @@ pub(crate) async fn run_loop(
             }
             on_event(SessionEvent::LlmRoundEnd);
             on_event(SessionEvent::Status("interrupted".into()));
+            // Terminal frame (same contract as the loop-head exit above).
+            on_event(SessionEvent::Done);
             break;
         }
         let tool_msg = Message {

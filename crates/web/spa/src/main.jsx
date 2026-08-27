@@ -4,6 +4,7 @@
 
 import { Badge, Layout, Menu, Typography } from 'antd';
 import { useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import { ChatPanel } from './chat.jsx';
 import { InsecureHttpAlert, LoginModal } from './login.jsx';
 import { NodesPanel } from './nodes.jsx';
@@ -61,9 +62,11 @@ function App() {
                 <Typography.Text type="danger">{notice}</Typography.Text>
               </div>
             ) : null}
-            {page === 'nodes'
-              ? <NodesPanel onNotice={setNotice} />
-              : <ChatPanel onNotice={setNotice} />}
+            {token
+              ? (page === 'nodes'
+                ? <NodesPanel onNotice={setNotice} />
+                : <ChatPanel onNotice={setNotice} />)
+              : null}
           </Content>
         </Layout>
       </Layout>
@@ -73,3 +76,7 @@ function App() {
 }
 
 export default App;
+
+// Mount the app — without this the shell serves an empty #root in every
+// browser (caught by real-browser acceptance, guarded by an html.rs test).
+createRoot(document.getElementById('root')).render(<App />);

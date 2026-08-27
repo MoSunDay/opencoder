@@ -160,7 +160,20 @@ async fn messages_response(state: &AppState, id: &str) -> Result<Response, Respo
         .load_messages(id)
         .await
         .map_err(|e| error_500(format!("load_messages: {e:#}")))?;
-    Ok(Json(json!({ "id": id, "meta": meta, "messages": messages })).into_response())
+    // Run-state flag for the console: lets a client tell "stream live" from
+    // "stream ended" without inferring from frames (found by real-browser
+    // acceptance of the interrupt/reconnect flow).
+    let draining = state
+        .handles
+        .lock()
+        .await
+        .get(id)
+        .map(|h| h.draining.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false);
+    Ok(Json(
+        json!({ "id": id, "meta": meta, "messages": messages, "draining": draining }),
+    )
+    .into_response())
 }
 
 #[derive(Deserialize)]

@@ -389,3 +389,45 @@ async fn events_subscribe_first_no_loss_no_dup() {
         "live-only event must appear exactly once (not lost); got stream:\n{text}"
     );
 }
+
+/// GET /api/sessions/:id must expose the handle's run state as `draining`, so
+/// a client can distinguish "live stream" from "already finished" even when a
+/// reconnect window hides the terminal frame (found by browser acceptance).
+#[tokio::test]
+async fn get_messages_exposes_draining_flag() {
+    let state = state().await;
+    seed(&state, "DR").await;
+
+    let read = |state: Arc<opencoder_web::AppState>| {
+        let state = state.clone();
+        async move {
+            let resp = opencoder_web::api::get_messages(
+                State(state),
+                Path("DR".to_string()),
+            )
+            .await
+            .into_response();
+            let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()
+        }
+    };
+
+    // No handle at all: not draining.
+    assert_eq!(read(state.clone()).await["draining"], json!(false));
+
+    // Live handle mid-drain: flag flips to true.
+    let handle = opencoder_web::handle::SessionHandle::new();
+    handle.draining.store(true, Ordering::SeqCst);
+    state.handles.lock().await.insert("DR".to_string(), handle);
+    assert_eq!(read(state.clone()).await["draining"], json!(true));
+
+    // Drain finished: flag back to false, messages still served.
+    if let Some(h) = state.handles.lock().await.get("DR") {
+        h.draining.store(false, Ordering::SeqCst);
+    }
+    let j = read(state.clone()).await;
+    assert_eq!(j["draining"], json!(false));
+    assert!(j["messages"].is_array(), "messages={j:?}");
+}

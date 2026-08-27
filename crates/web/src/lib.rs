@@ -1,4 +1,5 @@
 pub mod api;
+pub mod api_control;
 pub mod api_envs;
 pub mod api_events;
 pub mod api_inputs;
@@ -8,8 +9,9 @@ pub mod api_nodes_ops;
 pub mod api_ops;
 pub mod api_questions;
 pub mod api_subagents;
-pub mod auth;
+pub mod auth_sig_mw;
 pub mod cmd;
+pub mod control_state;
 pub mod handle;
 mod handle_lifecycle;
 mod handle_questions;
@@ -25,6 +27,7 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use opencoder_store::{LibsqlStore, Store};
 
+use crate::control_state::ControlHub;
 use crate::handle::HandleMap;
 use crate::nodes_state::NodeHub;
 
@@ -34,6 +37,9 @@ pub struct AppState {
     pub handles: HandleMap,
     /// Broadcast hub for node-task sessions (they own no drain handle).
     pub nodes: Arc<NodeHub>,
+    /// P3 message-relay control hub: per-node FIFO of control tasks plus the
+    /// pending browser waiters they must wake. Payloads are never persisted.
+    pub controls: Arc<ControlHub>,
     pub client_override: Option<Arc<dyn opencoder_llm::ChatStream>>,
 }
 
@@ -53,6 +59,7 @@ pub async fn serve(
         workdir: workdir.clone(),
         handles: handle::new_handle_map(),
         nodes: Arc::new(NodeHub::new()),
+        controls: Arc::new(ControlHub::new()),
         client_override: None,
     });
 
@@ -68,17 +75,23 @@ pub async fn serve(
         "opencoder {} listening on http://{addr}",
         opencoder_core::version::VERSION_LONG
     );
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
-/// Build the application router. `token = Some(t)` enables bearer-token auth on
-/// every route (production); `token = None` skips the middleware (used by tests
-/// that build their own router with an injected `MockChatClient`).
+/// Build the application router. `token = Some(t)` enables HMAC signature
+/// auth on every route (production); `token = None` skips the middleware (used
+/// by tests that build their own router with an injected `MockChatClient`).
 pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum::Router {
     let mut app = Router::<Arc<AppState>>::new();
     if web {
-        app = app.route("/", get(html::index));
+        app = app
+            .route("/", get(html::index))
+            .route("/static/:name", get(html::static_asset));
     }
     let mut app = app
         .route(
@@ -165,6 +178,12 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             "/api/nodes/tasks/:tid/status",
             post(api_nodes_ops::post_status),
         )
+        .route("/api/nodes/tasks", get(api_nodes_ops::list_all_tasks))
+        .route("/api/nodes/tasks/:tid", get(api_nodes_ops::get_task))
+        .route(
+            "/api/sessions/:id/task",
+            get(api_nodes_ops::get_session_task),
+        )
         .route("/api/nodes/:id/heartbeat", post(api_nodes::post_heartbeat))
         .route(
             "/api/nodes/:id/tasks",
@@ -174,11 +193,27 @@ pub fn build_app(state: Arc<AppState>, token: Option<String>, web: bool) -> axum
             "/api/nodes/:node_id/tasks/:tid/cancel",
             post(api_nodes_ops::cancel_task),
         )
+        // ── P3 message relay (browser ⇄ server ⇄ worker) ─────────────
+        .route(
+            "/api/nodes/:id/messages",
+            post(api_control::fetch_node_messages),
+        )
+        .route(
+            "/api/nodes/:id/control_result",
+            post(api_control::post_control_result),
+        )
+        .route("/api/nodes/:id/dialogs", get(api_control::list_dialogs))
         .route("/api/nodes/:id", delete(api_nodes::delete_node))
         .route("/api/health", get(api::health))
+        // Unsigned clock bootstrap for signature clients (SPA).
+        .route("/api/time", get(auth_sig_mw::server_time))
         .with_state(state);
     if let Some(t) = token {
-        app = app.layer(axum::middleware::from_fn_with_state(t, auth::require_token));
+        let sig = std::sync::Arc::new(auth_sig_mw::SigState::new(t));
+        app = app.layer(axum::middleware::from_fn_with_state(
+            Some(sig),
+            auth_sig_mw::require_sig,
+        ));
     }
     app
 }
@@ -223,6 +258,7 @@ mod tests {
             workdir: std::env::temp_dir(),
             handles: handle::new_handle_map(),
             nodes: Arc::new(crate::nodes_state::NodeHub::new()),
+            controls: Arc::new(crate::control_state::ControlHub::new()),
             client_override: None,
         });
         build_app(state, None, true)
@@ -235,6 +271,7 @@ mod tests {
             workdir: std::env::temp_dir(),
             handles: handle::new_handle_map(),
             nodes: Arc::new(crate::nodes_state::NodeHub::new()),
+            controls: Arc::new(crate::control_state::ControlHub::new()),
             client_override: None,
         });
         build_app(state, None, false)

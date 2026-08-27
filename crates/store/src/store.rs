@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use opencoder_core::Message;
 
 use crate::types::{
-    ImportReport, SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta,
-    SessionPatch, SubagentTaskRecord,
+    ImportReport, MessageRow, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
+    SessionMeta, SessionPatch, SubagentTaskRecord,
 };
 use crate::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 
@@ -49,6 +49,29 @@ pub trait Store: Send + Sync {
         Ok(msgs)
     }
     async fn last_message_seq(&self, session_id: &str) -> Result<i64>;
+
+    /// Raw persisted message rows in `seq` order ([`MessageRow`] read model).
+    /// Backs the P3 node message relay: the caller needs the true per-session
+    /// `seq` (the resume boundary) plus the raw stored blocks, neither of
+    /// which the decoded [`Message`] view carries. Default impl reconstructs
+    /// from `load_messages` with positional seqs (1-based) so test fakes need
+    /// not override it; the primary backend reads the real columns.
+    async fn load_message_rows(&self, session_id: &str) -> Result<Vec<MessageRow>> {
+        let msgs = self.load_messages(session_id).await?;
+        Ok(msgs
+            .into_iter()
+            .enumerate()
+            .map(|(i, m)| MessageRow {
+                seq: i as i64 + 1,
+                role: serde_json::to_value(m.role)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_else(|| "user".into()),
+                blocks: serde_json::to_value(&m.blocks).unwrap_or(serde_json::Value::Null),
+                created_at: m.created_at,
+            })
+            .collect())
+    }
 
     async fn admit_input(&self, input: &SessionInput) -> Result<i64>;
     async fn pending_inputs(
@@ -201,6 +224,7 @@ pub trait Store: Send + Sync {
         _name: &str,
         _version: Option<&str>,
         _workdir: Option<&str>,
+        _addr: Option<&str>,
         _now_ms: i64,
     ) -> Result<crate::types::NodeRecord> {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
@@ -227,6 +251,24 @@ pub trait Store: Send + Sync {
     /// claims it via [`Store::claim_next_node_task`].
     #[allow(clippy::too_many_arguments)]
     async fn dispatch_node_task(
+        &self,
+        _task_id: &str,
+        _session_id: &str,
+        _node_id: &str,
+        _title: Option<&str>,
+        _prompt: &str,
+        _agent: Option<&str>,
+        _model: Option<&str>,
+        _now_ms: i64,
+    ) -> Result<crate::types::NodeTaskRecord> {
+        anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+    /// Enqueue a node task bound to an EXISTING session (the console's
+    /// "continue this dialog" flow): only the `node_tasks` row is created, the
+    /// session row is reused as-is. Errors when the session does not exist so
+    /// the HTTP layer can answer 400 instead of dangling the FK.
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_node_task_for_session(
         &self,
         _task_id: &str,
         _session_id: &str,
@@ -279,6 +321,25 @@ pub trait Store: Send + Sync {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
     }
     async fn get_node_task(&self, _task_id: &str) -> Result<Option<crate::types::NodeTaskRecord>> {
+        anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+    /// Fleet-wide task listing with optional `node_id` / `status` filters.
+    /// FIFO order (`created_at ASC, rowid ASC`) — the exact order a node's
+    /// claim loop drains in, with the same-ms `rowid` tiebreak.
+    async fn list_node_tasks_filtered(
+        &self,
+        _node_id: Option<&str>,
+        _status: Option<crate::types::NodeTaskStatus>,
+        _limit: u32,
+    ) -> Result<Vec<crate::types::NodeTaskRecord>> {
+        anyhow::bail!("node store API is not supported by {}", self.backend_name())
+    }
+    /// Reverse lookup: the node task owning a synthetic session (`None` for
+    /// ordinary sessions — not an error).
+    async fn get_node_task_by_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<crate::types::NodeTaskRecord>> {
         anyhow::bail!("node store API is not supported by {}", self.backend_name())
     }
     /// Collapse zombie tasks of nodes whose latest heartbeat is older than

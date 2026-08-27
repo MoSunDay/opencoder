@@ -5,26 +5,29 @@
 //! flips promoted-but-unrecorded orphans (crash / hard-cancel between
 //! promote and consume) back to pending so this run re-absorbs them.
 //!
-//! F3 — a failed run must not strand inputs admitted during it: the error
-//! path still runs the bounded re-absorb tail (never masking the original
-//! error), and the invariant guaranteed is no-strand — an input is either
-//! consumed, or pending, never stranded-promoted (invisible to pending
-//! polls and never recorded).
+//! F3 — zero-resubmit on failure: a failed run (LLM error or store error)
+//! never auto-resubmits admitted inputs. The invariant is no-strand — an
+//! input is either consumed, or pending, never stranded-promoted (invisible
+//! to pending polls and never recorded) — and a failed attempt fires no
+//! additional LLM requests for pending rows; the next successful run
+//! consumes them.
 
 mod common;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
-use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
+use opencoder_llm::{ChatRequest, ChatStream, LlmEvent, MockChatClient};
 use opencoder_session::{run, SessionState};
 use opencoder_store::{
     Delivery, LibsqlStore, SessionEventRecord, SessionFilter, SessionInput, SessionListItem,
     SessionMeta, SessionPatch, Store, SubagentTaskRecord,
 };
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use common::{mem_store, session_meta};
@@ -50,6 +53,22 @@ fn mock_reply() -> Arc<dyn ChatStream> {
             usage: None,
         }]),
     )
+}
+
+/// ChatStream whose every `chat_stream` call fails: models an LLM outage so
+/// the run's first (and per the zero-resubmit contract, only) turn errors.
+/// Counts calls — the number of LLM requests is the observable that pins the
+/// no-auto-resubmit behavior.
+#[derive(Default)]
+struct AlwaysFailStream {
+    calls: AtomicUsize,
+}
+
+impl ChatStream for AlwaysFailStream {
+    fn chat_stream(&self, _req: ChatRequest) -> anyhow::Result<mpsc::Receiver<LlmEvent>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(anyhow::anyhow!("simulated LLM outage"))
+    }
 }
 
 fn session(store: Arc<dyn Store>, mock: Arc<dyn ChatStream>) -> (tempfile::TempDir, SessionState) {
@@ -254,16 +273,74 @@ async fn orphan_recovery_reabsorbs_promoted_unrecorded_input() {
         .is_empty());
 }
 
-/// F3: a run that fails mid-drain must not strand inputs admitted during it.
-/// With a persistently failing `update_session`, the queued "/plan" errors in
-/// `persist_agent`, propagates out of run_loop, and the F3 error path runs
-/// the bounded re-absorb. The re-absorb re-claims the unpromoted "/plan"
-/// (FIFO) and fails again before reaching the second item — so the invariant
-/// guaranteed here is no-strand at the store layer: the second item remains
-/// PENDING (visible, recoverable), never stranded-promoted (invisible, lost).
-/// Guaranteed by: unpromote on failure + F2 marking on success only.
+/// Zero-resubmit (LLM failure): a run whose LLM turn fails must NOT
+/// auto-resubmit admitted inputs. The drain claims and consumes exactly ONE
+/// queued item (its turn fails), the failure aborts the run, and the second
+/// item stays PENDING — no re-absorb fires another LLM request for it. The
+/// stranded item is consumed by the NEXT successful run instead.
 #[tokio::test]
-async fn run_err_still_reabsorbs_pending_queue() {
+async fn llm_failure_leaves_queue_pending_without_resubmit() {
+    let store = mem_store().await;
+    seed(&store).await;
+    admit(&store, "q0", Delivery::Queue, "first queued").await;
+    admit(&store, "q1", Delivery::Queue, "second queued").await;
+
+    let failing = Arc::new(AlwaysFailStream::default());
+    let (_dir, mut s) = session(store.clone(), failing.clone());
+    let outcome = run(&mut s, "".into(), |_| {}).await;
+    assert!(outcome.is_err(), "run must fail — LLM error propagated");
+
+    // Exactly ONE LLM request was issued: the failed turn of the consumed
+    // head item. No error-path re-absorb may silently re-submit the tail.
+    assert_eq!(
+        failing.calls.load(Ordering::SeqCst),
+        1,
+        "a failed run must not fire additional LLM requests"
+    );
+
+    // The consumed head item is recorded (its user message persisted); the
+    // tail item survives pending — never deleted, never auto-retried.
+    let msgs = store.load_messages(SID).await.unwrap();
+    assert!(
+        user_texts(&msgs).iter().any(|t| t.contains("first queued")),
+        "consumed head item must be recorded as a user message"
+    );
+    let pending = store.pending_inputs(SID, Delivery::Queue).await.unwrap();
+    let texts: Vec<&str> = pending.iter().map(|i| i.prompt.as_str()).collect();
+    assert_eq!(
+        texts,
+        vec!["second queued"],
+        "tail item must stay pending after the failed run: {texts:?}"
+    );
+    assert_eq!(
+        store.recover_orphan_inputs(SID).await.unwrap(),
+        0,
+        "no promoted-but-unrecorded rows may survive the failed run"
+    );
+
+    // The stranded item is not lost: the next run consumes it normally.
+    let (_dir, mut s) = session(store.clone(), mock_reply());
+    let outcome = run(&mut s, "".into(), |_| {}).await;
+    assert!(outcome.is_ok(), "recovery run should succeed: {outcome:?}");
+    assert!(
+        store
+            .pending_inputs(SID, Delivery::Queue)
+            .await
+            .unwrap()
+            .is_empty(),
+        "the next successful run consumes the stranded tail item"
+    );
+}
+
+/// Zero-resubmit (store failure): with a persistently failing
+/// `update_session`, the queued "/plan" errors in `persist_agent`, which
+/// propagates out of run_loop and fails the run. The in-place P1-3 guard
+/// unpromotes the failed item, so the invariant is no-strand at the store
+/// layer: both items remain PENDING (visible, recoverable), never
+/// stranded-promoted (invisible, lost) — and the failure aborts the run
+/// instead of re-entering drain mode for another consumption round.
+#[tokio::test]
+async fn store_failure_leaves_queue_pending_unpromoted() {
     let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let failing: Arc<dyn Store> = Arc::new(FailingUpdateStore { inner });
 
@@ -278,8 +355,8 @@ async fn run_err_still_reabsorbs_pending_queue() {
         "run must fail — persist_agent error propagated"
     );
 
-    // Second item: still pending (consumption is retried by the next healthy
-    // run), and nothing is left promoted-but-unrecorded.
+    // Both items: still pending (the failed item is unpromoted back in place
+    // by the P1-3 guard; the tail was never claimed), nothing stranded.
     let pending = failing.pending_inputs(SID, Delivery::Queue).await.unwrap();
     let texts: Vec<&str> = pending.iter().map(|i| i.prompt.as_str()).collect();
     assert!(

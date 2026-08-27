@@ -35,6 +35,7 @@ async fn app() -> (Router, Arc<opencoder_web::AppState>) {
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
     });
     let app = Router::new()
         .route(

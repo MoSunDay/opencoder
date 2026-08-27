@@ -1,0 +1,23 @@
+{
+  "name": "opencoder-fleet-spa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Opencoder 舰队控制台 SPA (React 18 + antd 5 + Vite 5)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "antd": "^5.21.6",
+    "dayjs": "^1.11.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

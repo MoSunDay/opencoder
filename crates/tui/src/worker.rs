@@ -162,8 +162,8 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 ///
 /// Unified contract: BOTH directions are refused while busy. The slash paths
 /// (`/act` `/plan` `/act_clear_context` → `dispatch_mode_switch`) and the
-/// Shift+Tab / t+Tab key path (`handle_switch_agent`) share this same
-/// bidirectional gate.
+/// Shift+Tab key path (`handle_switch_agent`) and the ctrl+t pure path
+/// (`mode_switch::handle_pure_mode_switch`) share this same bidirectional gate.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,
@@ -181,7 +181,7 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
 /// Whether `next` is a redundant repeat of `prev` for PURE mode-switch
 /// commands: two consecutive `SwitchAgent(name)` with the SAME name collapse
 /// into one (the second carries no new information — the UI chip was already
-/// folded optimistically by `handle_switch_agent`). A different name, a
+/// folded optimistically at flip time). A different name, a
 /// first-ever send (`prev == None`) and any non-`SwitchAgent` command —
 /// notably `SwitchAndStart`, which STARTS a turn — are never deduplicated.
 /// Pure so the channel-pressure hygiene is unit-testable without a worker.
@@ -353,8 +353,9 @@ pub async fn process_cmd(
             // — a switch queued during a live turn is not consumed until that
             // `process_cmd` returns, so `sess.agent` is never flipped mid-
             // `run_session`. The app-loop running gate
-            // (`handle_switch_agent`) refuses to SEND a switch — either
-            // direction, handoff or no_handoff — while a turn/subagent is
+            // (`handle_switch_agent` / `handle_pure_mode_switch`) refuses to
+            // SEND a switch — either direction, handoff or pure switch — while
+            // a turn/subagent is
             // live, so this arm is only reachable at a clean idle boundary;
             // the turn-boundary-only consumption above is the backstop.
             if let Some(a) = resolve_agent(&name) {

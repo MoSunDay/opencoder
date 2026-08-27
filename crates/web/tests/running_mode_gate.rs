@@ -135,6 +135,7 @@ fn seeded_state(
         workdir: tmp.path().to_path_buf(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(llm),
     })
 }

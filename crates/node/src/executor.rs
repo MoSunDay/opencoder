@@ -240,15 +240,22 @@ fn lock_batcher(b: &Mutex<Batcher>) -> MutexGuard<'_, Batcher> {
     b.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Create the synthetic local session mirroring the server-side dispatch row.
+/// Create the local session mirroring the server-side dispatch row.
 /// `task_type="node"` hides it from normal listings (same convention as the
 /// web layer); reusing the server's ids verbatim makes cross-machine logs and
 /// tasks reconcile 1:1 (two stores, one logical timeline).
+///
+/// Session REUSE dispatch (P3 dialog resume) re-claims a session this node may
+/// already know: an existing local row is kept as-is (its summary/summary_seq
+/// drive the resume replay) and only a genuinely fresh id gets a new row.
 async fn create_local_meta(
     store: &Arc<dyn Store>,
     workdir: &std::path::Path,
     task: &ClaimedTask,
 ) -> Result<()> {
+    if store.get_session(&task.session_id).await?.is_some() {
+        return Ok(());
+    }
     let now = now_ms();
     store
         .create_session(&SessionMeta {

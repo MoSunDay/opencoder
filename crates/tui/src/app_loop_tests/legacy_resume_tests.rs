@@ -105,7 +105,6 @@ async fn legacy_resume_shift_tab_hands_plan_forward() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,

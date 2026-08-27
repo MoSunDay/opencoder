@@ -38,6 +38,7 @@ async fn hanging_app(notify: Arc<Notify>) -> axum::Router {
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(Arc::new(mock) as Arc<dyn ChatStream>),
     });
     opencoder_web::build_app(state, None, false)

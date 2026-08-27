@@ -416,6 +416,10 @@ pub struct NodeRecord {
     /// the latest work); see `node_tasks.id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_task_id: Option<String>,
+    /// Last observed address: the client-declared value, else the TCP source
+    /// IP captured at registration. None only for pre-migration rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_addr: Option<String>,
 }
 
 /// Lifecycle status of a dispatched node task.
@@ -512,4 +516,22 @@ pub fn message_preview(msgs: &[Message], max_chars: usize) -> String {
         break;
     }
     out
+}
+
+/// Raw persisted message row — the read model of the P3 node message relay.
+///
+/// Unlike [`Message`] this keeps the per-session `seq` (the resume/compaction
+/// boundary unit) and the blocks as an already-parsed raw JSON value, so a
+/// relay can forward exactly what the worker stored without re-interpreting
+/// block kinds. Produced by `Store::load_message_rows`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageRow {
+    /// Persisted per-session sequence number (`messages.seq`).
+    pub seq: i64,
+    /// Stored role literal: `system | user | assistant | tool`.
+    pub role: String,
+    /// Raw stored `blocks_json`, parsed as a JSON value (array of blocks).
+    pub blocks: serde_json::Value,
+    /// Emitter clock (epoch ms) persisted with the row.
+    pub created_at: i64,
 }

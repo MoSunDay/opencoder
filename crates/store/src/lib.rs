@@ -18,7 +18,7 @@ pub use store::Store;
 pub use todo_types::{TodoEventRecord, TodoItemRecord, TodoWorkflowRecord, TodoWorkflowSummary};
 pub use ts_registry::{TsRecord, TsRegistry};
 pub use types::{
-    Delivery, EventKind, ImportReport, NodeRecord, NodeTaskRecord, NodeTaskStatus,
+    Delivery, EventKind, ImportReport, MessageRow, NodeRecord, NodeTaskRecord, NodeTaskStatus,
     SessionEventRecord, SessionFilter, SessionInput, SessionListItem, SessionMeta, SessionPatch,
     SubagentStatus, SubagentTaskRecord, TASK_TYPE_NODE, TASK_TYPE_PARENT, TASK_TYPE_SUBAGENT,
     TASK_TYPE_TODO, TASK_TYPE_TODO_WORKFLOW,

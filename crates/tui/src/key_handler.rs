@@ -165,8 +165,9 @@ pub(crate) fn handle_key(
         }
         // Mode-switch keys stay live in the subagent-focus (input-disabled)
         // view: leaving/switching mode must never be blocked by view state.
-        // All four funnel into handle_switch_agent, whose running gate
-        // blocks BOTH directions while a turn/subagent is live (busy hint).
+        // Shift+Tab/Alt+Tab funnel into handle_switch_agent, ctrl+t into
+        // mode_switch::handle_pure_mode_switch — both running gates block
+        // BOTH directions while a turn/subagent is live (busy hint).
         // The `/plan <content>` compound-submit branch of
         // the enabled path is intentionally skipped — input is disabled here.
         // A plain BackTab carries no CTRL/ALT modifier, so it cannot

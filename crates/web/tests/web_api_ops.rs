@@ -57,6 +57,7 @@ async fn state() -> Arc<opencoder_web::AppState> {
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
     })
 }
 
@@ -80,6 +81,7 @@ async fn state_with_reply(text: &str) -> Arc<opencoder_web::AppState> {
         workdir,
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
     })
 }
 

@@ -1,0 +1,24 @@
+/* Base chrome for the fleet console. Component styling is antd + cssinjs
+   (antd 5); this only fixes page-level defaults and monospace transcript
+   rhythm. Emitted as dist/static/app.css by the Vite build contract. */
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #fff;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Transcript long-line handling inside collapsible tool blocks. */
+.ant-collapse-content-box pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}

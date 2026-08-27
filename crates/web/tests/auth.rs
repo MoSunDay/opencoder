@@ -1,141 +1,263 @@
-//! Auth middleware contract: every route (/ and /api/*) requires a valid bearer
-//! token via the `Authorization: Bearer` header OR a `?token=` query (so the
-//! browser EventSource API, which cannot set headers, still works). Mismatched
-//! or missing tokens yield 401.
+//! Signature-auth middleware contract.
+//!
+//! Every `/api/*` route (and everything else except the SPA shell paths) must
+//! carry a valid `x-sig-timestamp` + `x-sig` pair over the shared token:
+//! missing/malformed headers, out-of-window timestamps and wrong signatures
+//! are 401; the SAME accepted signature seen twice inside the window is a
+//! replay → 409. The SPA shell (`/`, `/static/*`) and `/api/time` are exempt.
+
+mod support;
 
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use tower::ServiceExt;
-
+use opencoder_core::auth_sig;
 use opencoder_store::{LibsqlStore, Store};
+use support::signed_req;
+use tower::ServiceExt;
 
 const TOKEN: &str = "sekret-token-123";
 
 async fn app() -> axum::Router {
+    app_with_web(true).await
+}
+
+async fn app_with_web(web: bool) -> axum::Router {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let state = Arc::new(opencoder_web::AppState {
         store,
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: None,
     });
-    opencoder_web::build_app(state, Some(TOKEN.into()), true)
+    opencoder_web::build_app(state, Some(TOKEN.into()), web)
+}
+
+async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
+    let resp = app.clone().oneshot(req).await.expect("router must answer");
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), 4 << 20)
+        .await
+        .unwrap();
+    let body = if bytes.is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::json!({}))
+    };
+    (status, body)
 }
 
 #[tokio::test]
-async fn health_without_token_is_401() {
+async fn api_without_signature_is_401() {
     let app = app().await;
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/health")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let (status, body) = send(
+        &app,
+        Request::builder()
+            .uri("/api/health")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(body["error"].is_string(), "rejection must name the reason");
 }
 
 #[tokio::test]
-async fn health_with_wrong_bearer_is_401() {
+async fn api_with_wrong_signature_is_401() {
     let app = app().await;
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/health")
-                .header("authorization", "Bearer nope")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let mut req = signed_req("GET", "/api/health", "not-the-token", None);
+    // Swap in a syntactically valid but wrong signature.
+    let ts = chrono::Utc::now().timestamp_millis().to_string();
+    let sig = auth_sig::sign_hex("not-the-token", &format!("GET\n/api/health\n{ts}\nxyz"));
+    *req.headers_mut() = Default::default();
+    req.headers_mut()
+        .insert(auth_sig::TS_HEADER, ts.parse().unwrap());
+    req.headers_mut()
+        .insert(auth_sig::SIG_HEADER, sig.parse().unwrap());
+    let (status, _) = send(&app, req).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn health_with_correct_bearer_is_200() {
+async fn stale_timestamp_is_401() {
     let app = app().await;
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/health")
-                .header("authorization", format!("Bearer {TOKEN}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    let stale = chrono::Utc::now().timestamp_millis() - (auth_sig::REPLAY_WINDOW_MS + 60_000);
+    let canon = auth_sig::canonical("GET", "/api/health", stale, b"");
+    let sig = auth_sig::sign_hex(TOKEN, &canon);
+    let (status, body) = send(
+        &app,
+        Request::builder()
+            .uri("/api/health")
+            .header(auth_sig::TS_HEADER, stale.to_string())
+            .header(auth_sig::SIG_HEADER, sig)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(body["error"].as_str().unwrap().contains("window"));
 }
 
 #[tokio::test]
-async fn health_with_correct_query_token_is_200() {
+async fn fresh_signed_request_is_200() {
     let app = app().await;
-    let resp = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/health?token={TOKEN}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    let (status, _) = send(&app, signed_req("GET", "/api/health", TOKEN, None)).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
-async fn index_html_protected_by_query_token() {
+async fn signed_post_body_is_verified() {
     let app = app().await;
-    // no token -> 401
-    let r1 = app
-        .clone()
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    assert_eq!(r1.status(), StatusCode::UNAUTHORIZED);
-    // ?token= -> 200 HTML
-    let r2 = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/?token={TOKEN}"))
-                .body(Body::empty())
-                .unwrap(),
+    let body = serde_json::json!({ "name": "n1" });
+    let (status, _) = send(
+        &app,
+        signed_req("POST", "/api/nodes/register", TOKEN, Some(body.to_string())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "signed POST must pass verification");
+
+    // Tampering with the body after signing must fail: sign payload A, send B.
+    let tampered = signed_req(
+        "POST",
+        "/api/nodes/register",
+        TOKEN,
+        Some(r#"{"name":"n1"}"#.into()),
+    );
+    let evil = Request::builder()
+        .method("POST")
+        .uri("/api/nodes/register")
+        .header(
+            auth_sig::TS_HEADER,
+            tampered.headers()[auth_sig::TS_HEADER].clone(),
         )
-        .await
+        .header(
+            auth_sig::SIG_HEADER,
+            tampered.headers()[auth_sig::SIG_HEADER].clone(),
+        )
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"n2"}"#))
         .unwrap();
-    assert_eq!(r2.status(), StatusCode::OK);
+    let (status, _) = send(&app, evil).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "body swap must not verify"
+    );
 }
 
 #[tokio::test]
-async fn sessions_list_requires_token() {
+async fn replayed_signature_is_409() {
     let app = app().await;
-    // wrong token
-    let r1 = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/sessions")
-                .header("authorization", "Bearer wrong")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(r1.status(), StatusCode::UNAUTHORIZED);
-    // correct token
-    let r2 = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/sessions")
-                .header("authorization", format!("Bearer {TOKEN}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(r2.status(), StatusCode::OK);
+    // Body isn't Clone, so build two byte-identical requests from one
+    // signature pair (same ts + same canonical input → same signature).
+    let (_, ts, _, sig) = support::sig_headers(TOKEN, "GET", "/api/health", b"");
+    let build = || {
+        Request::builder()
+            .uri("/api/health")
+            .header(auth_sig::TS_HEADER, ts.clone())
+            .header(auth_sig::SIG_HEADER, sig.clone())
+            .body(Body::empty())
+            .unwrap()
+    };
+    let (status, _) = send(&app, build()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = send(&app, build()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+#[tokio::test]
+async fn time_endpoint_is_unsigned() {
+    let app = app().await;
+    let (status, body) = send(
+        &app,
+        Request::builder()
+            .uri("/api/time")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let now = chrono::Utc::now().timestamp_millis();
+    let server = body["server_time_ms"].as_i64().expect("server_time_ms");
+    assert!(
+        (server - now).abs() < 60_000,
+        "server clock must be plausible: {server} vs {now}"
+    );
+}
+
+#[tokio::test]
+async fn shell_paths_are_exempt_but_api_is_not() {
+    let app = app_with_web(true).await;
+    let (status, _) = send(
+        &app,
+        Request::builder().uri("/").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "SPA shell must load without a token"
+    );
+    let (status, _) = send(
+        &app,
+        Request::builder()
+            .uri("/static/app.js")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "embedded console asset: exempt path must be served"
+    );
+    let (status, _) = send(
+        &app,
+        Request::builder()
+            .uri("/static/nope.js")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "exempt + whitelisted asset; non-whitelisted names still 404"
+    );
+}
+
+#[tokio::test]
+async fn malformed_timestamp_is_401() {
+    let app = app().await;
+    let (status, _) = send(
+        &app,
+        Request::builder()
+            .uri("/api/health")
+            .header(auth_sig::TS_HEADER, "not-a-number")
+            .header(auth_sig::SIG_HEADER, "00")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn oversized_body_is_413() {
+    let app = app().await;
+    let big = "x".repeat(2 * 1024 * 1024 + 1);
+    let (status, _) = send(
+        &app,
+        signed_req(
+            "POST",
+            "/api/nodes/register",
+            TOKEN,
+            Some(format!(r#"{{"name":"{big}"}}"#)),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 }

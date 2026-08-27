@@ -24,6 +24,7 @@ use tracing::{info, warn};
 
 use opencoder_core::node_protocol::ClaimedTask;
 
+use crate::control::{handle_control, Inflight};
 use crate::executor::{execute, ExecDeps};
 use crate::uplink::Uplink;
 
@@ -111,6 +112,10 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     spawn_shutdown_signal(shutdown_tx);
 
+    // Shared control-task dedup: the same control can be delivered twice
+    // within milliseconds (claim reply racing a heartbeat batch).
+    let inflight = Inflight::new();
+
     let mut hb_tick = tokio::time::interval(opts.heartbeat_interval);
     let mut claim_tick = tokio::time::interval(opts.claim_interval);
     hb_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -126,17 +131,39 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
                 return Ok(());
             }
             _ = hb_tick.tick() => {
-                if let Err(e) = uplink.heartbeat(&node_id).await {
-                    warn!(error = %e, "heartbeat failed (retrying next tick)");
+                match uplink.heartbeat(&node_id).await {
+                    Ok(resp) => {
+                        // Idle nodes normally see nothing here; controls can
+                        // stack up while the claim arm was busy executing.
+                        for task in &resp.controls {
+                            handle_control(&uplink, &store, &inflight, &node_id, task).await;
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "heartbeat failed (retrying next tick)"),
                 }
             }
             _ = claim_tick.tick() => {
                 match uplink.claim_next(&node_id).await {
-                    Ok(Some(task)) => {
-                        run_task(&uplink, &store, &client, &opts, &task, &node_id, &shutdown_rx)
+                    Ok(resp) => {
+                        // Durable work is preferred by the server; a control
+                        // task rides along only when no task was due.
+                        if let Some(task) = &resp.control {
+                            handle_control(&uplink, &store, &inflight, &node_id, task).await;
+                        }
+                        if let Some(task) = resp.task {
+                            run_task(
+                                &uplink,
+                                &store,
+                                &client,
+                                &opts,
+                                &task,
+                                &node_id,
+                                &shutdown_rx,
+                                &inflight,
+                            )
                             .await;
+                        }
                     }
-                    Ok(None) => {}
                     Err(e) => warn!(error = %e, "claim poll failed"),
                 }
             }
@@ -150,6 +177,7 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
 /// heartbeat whose `cancel_task_ids` contains this task, or process shutdown.
 /// The executor races that flag against the drain so an aborted run still
 /// closes through the session's own interrupt path and reports `cancelled`.
+#[allow(clippy::too_many_arguments)]
 async fn run_task(
     uplink: &Uplink,
     store: &Arc<dyn Store>,
@@ -158,6 +186,7 @@ async fn run_task(
     task: &ClaimedTask,
     node_id: &str,
     shutdown_rx: &watch::Receiver<bool>,
+    inflight: &Inflight,
 ) {
     info!(
         task_id = %task.task_id,
@@ -169,6 +198,8 @@ async fn run_task(
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let hb = spawn_heartbeater(
         uplink.clone(),
+        Arc::clone(store),
+        inflight.clone(),
         node_id.to_string(),
         opts.heartbeat_interval,
         task.task_id.clone(),
@@ -220,6 +251,8 @@ async fn run_task(
 /// leaving the outer idle loop to resume its own ticks after `execute`.
 fn spawn_heartbeater(
     uplink: Uplink,
+    store: Arc<dyn Store>,
+    inflight: Inflight,
     node_id: String,
     interval: Duration,
     task_id: String,
@@ -236,6 +269,11 @@ fn spawn_heartbeater(
                         info!(%task_id, "cancellation observed on heartbeat");
                         let _ = cancel_tx.send(true);
                         return;
+                    }
+                    // A BUSY worker never polls claim: the heartbeat is its
+                    // only guaranteed control-task delivery channel.
+                    for task in &resp.controls {
+                        handle_control(&uplink, &store, &inflight, &node_id, task).await;
                     }
                 }
                 Err(e) => warn!(%task_id, error = %e, "busy heartbeat failed"),

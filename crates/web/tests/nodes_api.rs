@@ -1,5 +1,5 @@
 //! HTTP contract for the node registry half (`/api/nodes*`):
-//! bearer-token coverage, register/heartbeat/delete lifecycle, dispatch +
+//! signature-auth coverage, register/heartbeat/delete lifecycle, dispatch +
 //! synthetic-session isolation, and FIFO claiming through the real router.
 //! Mirrors the `app()` harness style of `web_contract.rs`.
 
@@ -8,8 +8,10 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, SessionFilter, Store};
+use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
 use tower::ServiceExt;
+
+mod support;
 
 const TOKEN: &str = "nodes-test-token";
 
@@ -25,6 +27,7 @@ async fn app(token: Option<&str>) -> Ctx {
         workdir: std::env::temp_dir(),
         handles: opencoder_web::handle::new_handle_map(),
         nodes: Arc::new(opencoder_web::nodes_state::NodeHub::new()),
+        controls: Arc::new(opencoder_web::control_state::ControlHub::new()),
         client_override: Some(Arc::new(MockChatClient::new())),
     });
     Ctx {
@@ -48,10 +51,11 @@ async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, serde_json
 }
 
 fn req(method: &str, uri: &str, token: Option<&str>, body: Option<String>) -> Request<Body> {
-    let mut b = Request::builder().method(method).uri(uri);
+    // Token present → sign (production auth path); absent → raw (negative 401 paths).
     if let Some(t) = token {
-        b = b.header("authorization", format!("Bearer {t}"));
+        return support::signed_req(method, uri, t, body);
     }
+    let b = Request::builder().method(method).uri(uri);
     match body {
         Some(json) => b
             .header("content-type", "application/json")
@@ -81,7 +85,13 @@ async fn register(app: &axum::Router, name: &str) -> String {
 #[tokio::test]
 async fn nodes_routes_require_token() {
     let ctx = app(Some(TOKEN)).await;
-    for uri in ["/api/nodes", "/api/nodes/tasks/claim?node_id=x"] {
+    for uri in [
+        "/api/nodes",
+        "/api/nodes/tasks/claim?node_id=x",
+        "/api/nodes/tasks",
+        "/api/nodes/tasks/t1",
+        "/api/sessions/s1/task",
+    ] {
         let (status, _) = send(&ctx.app, req("GET", uri, None, None)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri} without token");
     }
@@ -337,15 +347,16 @@ async fn claim_fifo_over_http_then_empty_is_204() {
         .await;
         assert_eq!(cs, StatusCode::OK);
         assert_eq!(
-            claim["task_id"],
+            claim["task"]["task_id"],
             expected.as_str(),
             "claims follow FIFO order"
         );
         assert_eq!(
-            claim["prompt"],
+            claim["task"]["prompt"],
             format!("job-{}", ids.iter().position(|i| i == expected).unwrap())
         );
-        assert!(claim["session_id"].as_str().is_some());
+        assert!(claim["task"]["session_id"].as_str().is_some());
+        assert!(claim["control"].is_null());
 
         let (_, rep) = send(
             &ctx.app,
@@ -372,4 +383,257 @@ async fn claim_fifo_over_http_then_empty_is_204() {
     )
     .await;
     assert_eq!(es, StatusCode::NO_CONTENT, "{empty_body}");
+}
+
+// ── task status pulls (single / fleet-wide / session reverse lookup) ──────
+
+async fn dispatch_ok(app: &axum::Router, node_id: &str) -> (String, String) {
+    let (s, d) = send(
+        app,
+        req(
+            "POST",
+            &format!("/api/nodes/{node_id}/tasks"),
+            None,
+            Some(format!(r#"{{"prompt":"job on {node_id}"}}"#)),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{d}");
+    // Additive submit contract: status rides along so callers can render
+    // without a follow-up fetch.
+    assert_eq!(d["status"], "pending", "{d}");
+    (
+        d["task_id"].as_str().unwrap().to_string(),
+        d["session_id"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn task_detail_returns_record_with_sse_bootstrap_seq() {
+    let ctx = app(None).await;
+    let node_id = register(&ctx.app, "detail").await;
+    let (task_id, sid) = dispatch_ok(&ctx.app, &node_id).await;
+
+    let (s, t) = send(
+        &ctx.app,
+        req("GET", &format!("/api/nodes/tasks/{task_id}"), None, None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{t}");
+    assert_eq!(t["id"], task_id.as_str());
+    assert_eq!(t["node_id"], node_id.as_str());
+    assert_eq!(t["session_id"], sid.as_str());
+    assert_eq!(t["status"], "pending");
+    assert_eq!(t["last_event_seq"], 0, "no events persisted yet");
+
+    // Unknown ids are 404.
+    let (s404, b404) = send(
+        &ctx.app,
+        req("GET", "/api/nodes/tasks/no-such-task", None, None),
+    )
+    .await;
+    assert_eq!(s404, StatusCode::NOT_FOUND, "{b404}");
+}
+
+#[tokio::test]
+async fn task_detail_tracks_events_and_terminal_closure() {
+    let ctx = app(None).await;
+    let node_id = register(&ctx.app, "closer").await;
+    let (task_id, _) = dispatch_ok(&ctx.app, &node_id).await;
+
+    // Claim -> running, upload one event, then report done (closure event).
+    let (cs, _) = send(
+        &ctx.app,
+        req(
+            "GET",
+            &format!("/api/nodes/tasks/claim?node_id={node_id}"),
+            None,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(cs, StatusCode::OK);
+    let (es, eb) = send(
+        &ctx.app,
+        req(
+            "POST",
+            &format!("/api/nodes/tasks/{task_id}/events"),
+            None,
+            Some(r#"{"events":[{"sse_kind":"text_delta","payload":{"text":"hi"},"ts":1}]}"#.into()),
+        ),
+    )
+    .await;
+    assert_eq!(es, StatusCode::OK, "{eb}");
+    let (rs, rb) = send(
+        &ctx.app,
+        req(
+            "POST",
+            &format!("/api/nodes/tasks/{task_id}/status"),
+            None,
+            Some(r#"{"status":"done"}"#.into()),
+        ),
+    )
+    .await;
+    assert_eq!(rs, StatusCode::OK, "{rb}");
+
+    let (_, t) = send(
+        &ctx.app,
+        req("GET", &format!("/api/nodes/tasks/{task_id}"), None, None),
+    )
+    .await;
+    assert_eq!(t["status"], "done", "terminal freeze stays readable");
+    let seq = t["last_event_seq"].as_i64().unwrap();
+    assert!(
+        seq >= 2,
+        "uploaded event + terminal closure must be counted, got {seq}"
+    );
+}
+
+#[tokio::test]
+async fn fleet_task_list_filters_sorts_and_limits() {
+    let ctx = app(None).await;
+    let a = register(&ctx.app, "fl-a").await;
+    let b = register(&ctx.app, "fl-b").await;
+    let (a1, _) = dispatch_ok(&ctx.app, &a).await;
+    dispatch_ok(&ctx.app, &a).await;
+    let (b1, _) = dispatch_ok(&ctx.app, &b).await;
+
+    // Drive a1 and b1 terminal so the status filter has something to bite.
+    for (node, tid) in [(&a, &a1), (&b, &b1)] {
+        let (cs, _) = send(
+            &ctx.app,
+            req(
+                "GET",
+                &format!("/api/nodes/tasks/claim?node_id={node}"),
+                None,
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(cs, StatusCode::OK);
+        let (rs, rb) = send(
+            &ctx.app,
+            req(
+                "POST",
+                &format!("/api/nodes/tasks/{tid}/status"),
+                None,
+                Some(r#"{"status":"done"}"#.into()),
+            ),
+        )
+        .await;
+        assert_eq!(rs, StatusCode::OK, "{rb}");
+    }
+
+    // Unfiltered: every task, fleet-wide, FIFO (oldest first).
+    let (s, all) = send(&ctx.app, req("GET", "/api/nodes/tasks", None, None)).await;
+    assert_eq!(s, StatusCode::OK, "{all}");
+    let ids: Vec<&str> = all["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 3);
+    assert_eq!(ids[0], a1, "oldest dispatch first");
+
+    // node_id filter only.
+    let (_, only_a) = send(
+        &ctx.app,
+        req("GET", &format!("/api/nodes/tasks?node_id={a}"), None, None),
+    )
+    .await;
+    let arr = only_a["tasks"].as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert!(arr.iter().all(|t| t["node_id"] == a.as_str()));
+
+    // status filter only.
+    let (_, done) = send(
+        &ctx.app,
+        req("GET", "/api/nodes/tasks?status=done", None, None),
+    )
+    .await;
+    let arr = done["tasks"].as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert!(arr.iter().all(|t| t["status"] == "done"));
+
+    // Combined node_id + status.
+    let (_, a_done) = send(
+        &ctx.app,
+        req(
+            "GET",
+            &format!("/api/nodes/tasks?node_id={a}&status=done"),
+            None,
+            None,
+        ),
+    )
+    .await;
+    let arr = a_done["tasks"].as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], a1.as_str());
+
+    // limit keeps the FIFO head.
+    let (_, lim) = send(&ctx.app, req("GET", "/api/nodes/tasks?limit=1", None, None)).await;
+    let arr = lim["tasks"].as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], a1.as_str());
+
+    // Unknown status is a 400, never a silently-empty 200.
+    let (s400, b400) = send(
+        &ctx.app,
+        req("GET", "/api/nodes/tasks?status=quantum", None, None),
+    )
+    .await;
+    assert_eq!(s400, StatusCode::BAD_REQUEST, "{b400}");
+}
+
+#[tokio::test]
+async fn static_claim_route_outranks_task_detail() {
+    let ctx = app(None).await;
+    let node_id = register(&ctx.app, "prio").await;
+    dispatch_ok(&ctx.app, &node_id).await;
+
+    // If `:tid` captured the literal "claim", workers would get a task-detail
+    // JSON body instead of the claim envelope.
+    let (s, claim) = send(
+        &ctx.app,
+        req(
+            "GET",
+            &format!("/api/nodes/tasks/claim?node_id={node_id}"),
+            None,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{claim}");
+    assert!(
+        claim["task"]["task_id"].as_str().is_some(),
+        "static /claim must win over :tid, got {claim}"
+    );
+}
+
+#[tokio::test]
+async fn session_reverse_lookup_resolves_and_404s_ordinary_sessions() {
+    let ctx = app(None).await;
+    let node_id = register(&ctx.app, "rev").await;
+    let (task_id, sid) = dispatch_ok(&ctx.app, &node_id).await;
+
+    let (s, t) = send(
+        &ctx.app,
+        req("GET", &format!("/api/sessions/{sid}/task"), None, None),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{t}");
+    assert_eq!(t["id"], task_id.as_str());
+    assert_eq!(t["session_id"], sid.as_str());
+
+    // Ordinary session: legal no-task case.
+    ctx.store
+        .create_session(&SessionMeta {
+            id: "plain".into(),
+            ..SessionMeta::default()
+        })
+        .await
+        .unwrap();
+    let (s404, b404) = send(&ctx.app, req("GET", "/api/sessions/plain/task", None, None)).await;
+    assert_eq!(s404, StatusCode::NOT_FOUND, "{b404}");
 }

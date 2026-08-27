@@ -624,7 +624,7 @@ pub(super) async fn run_app(
                             KeyAction::SwitchAgent(name) => {
                                 if matches!(
                                     app_loop::handle_switch_agent(
-                                        name, false, &mut chat, &mut running, &mut follow, &mut input,
+                                        name, &mut chat, &mut running, &mut follow, &mut input,
                                         &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
                                         &mut cancel, &mut sys_tokens, &workdir, &active_skill_body, &mut last_switch_sent,
                                     )
@@ -633,19 +633,15 @@ pub(super) async fn run_app(
                                 ) { break; }
                             }
                             KeyAction::SwitchAgentNoClear(name) => {
-                                // t+Tab chord: skip the plan->act handoff / TranscriptReset —
-                                // transcript preserved in full. Same bidirectional running gate
-                                // as Shift+Tab: while busy the switch is intercepted with the
-                                // busy hint (re-press when idle), never deferred.
-                                if matches!(
-                                    app_loop::handle_switch_agent(
-                                        name, true, &mut chat, &mut running, &mut follow, &mut input,
-                                        &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
-                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body, &mut last_switch_sent,
-                                    )
-                                    .await,
-                                    app_loop::SwitchOutcome::Quit
-                                ) { break; }
+                                // ctrl+t / t+Tab chord: PURE plan<->act state flip,
+                                // structurally separated from the Shift+Tab handoff path —
+                                // it can never reach SwitchAndStart, so it never starts a
+                                // turn. Busy is refused with the hint (re-press when idle).
+                                crate::mode_switch::handle_pure_mode_switch(
+                                    name, &mut chat, running, &mut mode_flash, anim_tick,
+                                    &cmd_tx, &mut sys_tokens, &workdir, &active_skill_body,
+                                    &mut last_switch_sent,
+                                );
                             }
                             KeyAction::SetSkill(opt) => {
                                 crate::skill_persist::apply_skill_selection(

@@ -1,7 +1,9 @@
+Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
+
 # node 模块
 
 ## 职责
-把一台机器变成集群的执行节点：`opencode node --remote <server>` 常驻进程，用共享 bearer token 注册到 server，领取任务后**在本机配置与 LLM 凭证下**跑完整 agent session，事件实时回传 server。本地 libsql 同步落一份完整 transcript（经与 web drain 相同的 `spawn_event_flusher`，零额外代码）。
+把一台机器变成集群的执行节点：`opencode daemon --client --remote <server>` 常驻进程，用共享 token（`--token` 或 `OPENCODER_SERVER_TOKEN`，永不自动生成）对 server 全量 HMAC 签名注册，领取任务后**在本机配置与 LLM 凭证下**跑完整 agent session，事件实时回传 server。本地 libsql 同步落一份完整 transcript（经与 web drain 相同的 `spawn_event_flusher`，零额外代码）。
 
 ## 边界与非目标
 - 只做出站 HTTP（heartbeat/claim/upload/status），**永不接受入站连接**；不信任 server 下发的任何模型/密钥——执行端凭证全在本地。
@@ -9,7 +11,7 @@
 - 不做任务自动重派：节点失联的任务由 server 标 error 收束，人工重发。
 
 ## 关键抽象
-- `uplink.rs`：`Uplink{http,base,token}` REST 客户端，请求形状即 `opencoder_core::node_protocol` DTO（register/heartbeat/claim/events/status 五口子）。
+- `uplink.rs`：`Uplink{http,base,token}` REST 客户端，所有请求经单一 `signed_request` 出口按共享 token 做 HMAC-SHA256 签名（`x-sig-timestamp`/`x-sig`）；请求形状即 `opencoder_core::node_protocol` DTO（register/heartbeat/claim/events/status 五口子）。
 - `batcher.rs`：纯函数攒批器——32 条或 300ms 先到触发 flush；`push/should_flush/take` 可独立单测。
 - `executor.rs`：领到任务 → 本地 `LibsqlStore` + 本地 `Config` 构造 `ChatStream` → 复用 session crate 原语（`resume_and_replay` + `run()` + 事件回调攒批上传）；取消传导走 runner 提供的 watch channel 触发本地 turn cancel。
 - `runner.rs`：主循环——注册（同名顶替旧行）→ 心跳 tick(5s) 与 idle claim 轮询(1.5s) 双 interval select；任务串行执行。`client_override` 仅测试注入。

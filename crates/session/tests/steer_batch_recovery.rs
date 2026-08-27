@@ -346,11 +346,12 @@ async fn partial_batch_failure_unpromotes_only_remaining() {
     );
 }
 
-/// Runner integration (P1-2 + P1-3): with a `FailingUpdateStore`
-/// (`update_session` rejects every write), `/plan` triggers
-/// `persist_agent` which now PROPAGATES the error (P1-2 fix changed
-/// `let _ =` to `?`). This activates P1-3 recovery: the failed steer AND
-/// all remaining unprocessed steers are unpromoted for retry.
+/// Runner integration (P1-2 + P1-3 + zero-resubmit): with a
+/// `FailingUpdateStore` (`update_session` rejects every write), `/plan`
+/// triggers `persist_agent` which PROPAGATES the error (P1-2 fix changed
+/// `let _ =` to `?`). P1-3 unpromotes the failed steer AND every remaining
+/// unprocessed steer for retry; the zero-resubmit contract means the failed
+/// steer is consumed EXACTLY ONCE — no error-path re-absorb may re-fire it.
 #[tokio::test]
 async fn runner_consumes_batch_steers_with_failing_store() {
     let inner = Arc::new(LibsqlStore::open_memory().await.unwrap());
@@ -378,10 +379,9 @@ async fn runner_consumes_batch_steers_with_failing_store() {
     );
 
     // The first steer (r0) was consumed (SteerConsumed emitted) before
-    // the error occurred; the second was never reached. F3: the post-error
-    // bounded re-absorb re-claims the unpromoted batch head (r0) once and
-    // fails against the still-failing store, so r0 is emitted twice —
-    // r1 is never consumed.
+    // the error occurred; the second was never reached. Zero-resubmit: the
+    // failed run fires NO further consumption — the error path does not
+    // re-absorb, so r0 is emitted EXACTLY once and r1 is never consumed.
     let consumed = events
         .lock()
         .unwrap()
@@ -389,8 +389,8 @@ async fn runner_consumes_batch_steers_with_failing_store() {
         .filter(|ev| matches!(ev, SessionEvent::SteerConsumed { .. }))
         .count();
     assert_eq!(
-        consumed, 2,
-        "r0 consumed then retried by the F3 re-absorb; r1 not reached"
+        consumed, 1,
+        "r0 consumed once; no error-path re-absorb may re-submit it"
     );
 
     // P1-3: both steers are unpromoted (still pending for retry).

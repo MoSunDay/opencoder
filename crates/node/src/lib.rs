@@ -10,6 +10,7 @@
 //! session crate's canonical `sse_kind()`/`sse_data()` accessors.
 
 pub mod batcher;
+pub mod control;
 pub mod executor;
 pub mod runner;
 pub mod uplink;

@@ -12,6 +12,7 @@
 //! The reconnect/disconnect half lives in nodes_e2e_reconnect.rs.
 
 mod node_e2e_support;
+mod support;
 
 use std::sync::Arc;
 

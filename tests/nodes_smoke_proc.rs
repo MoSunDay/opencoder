@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Hard ceiling for the whole script run (build is skipped via the injected
-/// binary; server+node startup and the 3 checkpoints fit well inside this).
+/// binary; server+node startup and the 4 checkpoints fit well inside this).
 const TIMEOUT_SECS: u64 = 300;
 /// Success marker printed by scripts/smoke_nodes.sh after all checkpoints.
 const PASSED_MARKER: &str = "SMOKE NODES PASSED";

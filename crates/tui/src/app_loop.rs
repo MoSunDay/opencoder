@@ -30,7 +30,7 @@ use crate::keymap_menu::KeymapMenu;
 use crate::model_menu::ModelMenu;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::worker::{dedup_switch, try_send_idempotent, UiCmd, UiEvent};
+use crate::worker::{UiCmd, UiEvent};
 
 /// Translation of the `continue` / `break` control flow that lived inside the
 /// extracted loop blocks. `Proceed` means fall through to the rest of the loop
@@ -166,24 +166,24 @@ pub(crate) enum SwitchOutcome {
     Quit,
 }
 
-/// Handle `KeyAction::SwitchAgent` (and `SwitchAgentNoClear`): switch agent
-/// mode behind a BIDIRECTIONAL running gate — the same contract as the
-/// slash paths' `worker::gate_switch`. Busy (a turn in flight OR a live
-/// subagent) blocks BOTH directions with an explicit busy hint: nothing is
-/// sent, agent/input/sys_tokens/running stay untouched, and the user
-/// re-presses at a clean idle boundary (no deferred auto-fire).
+/// Handle `KeyAction::SwitchAgent` (Shift+Tab / Alt+Tab): switch agent mode
+/// behind a BIDIRECTIONAL running gate — the same contract as the slash
+/// paths' `worker::gate_switch`. Busy (a turn in flight OR a live subagent)
+/// blocks BOTH directions with an explicit busy hint: nothing is sent,
+/// agent/input/sys_tokens/running stay untouched, and the user re-presses at
+/// a clean idle boundary (no deferred auto-fire).
 ///
-/// When idle: a submitted plan→act hands off immediately (transcript fold +
-/// immediate execution, carrying any input text); `no_handoff`
-/// (SwitchAgentNoClear / t+Tab chord) skips that handoff entirely —
-/// transcript preserved in full. The optimistic `fold_agent_switch` keeps
-/// the status chip correct even if the AgentSwitch event is dropped under
-/// channel pressure and collapses a stale `plan_submitted` synchronously
-/// (rapid double-tap hygiene). Pure-switch send: try_send + same-name dedup.
+/// When idle and a plan→act handoff is armed (`plan_submitted`): hand off
+/// immediately (transcript fold + immediate execution, carrying any input
+/// text). Otherwise: pure switch via [`crate::mode_switch::pure_switch_send`]
+/// — the optimistic `fold_agent_switch` keeps the status chip correct even if
+/// the AgentSwitch event is dropped under channel pressure and collapses a
+/// stale `plan_submitted` synchronously (rapid double-tap hygiene). The
+/// ctrl+t chord does NOT come through here: it is structurally separated in
+/// [`crate::mode_switch::handle_pure_mode_switch`] and can never start a turn.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_switch_agent(
     name: String,
-    no_handoff: bool,
     chat: &mut ChatView,
     running: &mut bool,
     follow: &mut bool,
@@ -220,7 +220,7 @@ pub(crate) async fn handle_switch_agent(
     // of firing a bogus handoff off an `AgentSwitch("plan")` event that has
     // not yet round-tripped back to the UI.
     chat.fold_agent_switch(&name);
-    if !no_handoff && plan_to_act && chat.plan_submitted {
+    if plan_to_act && chat.plan_submitted {
         // Idle: handoff immediately, carrying any input text.
         let extra = std::mem::take(input);
         *cursor_idx = 0;
@@ -233,15 +233,14 @@ pub(crate) async fn handle_switch_agent(
         *follow = true;
         chat.begin_turn(); // handoff starts a turn: the pure-switch dedup baseline no longer applies
     } else {
-        *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-        // Pure switch: idempotent — best-effort try_send (a full cmd channel
-        // must never block the UI loop) + drop consecutive same-name repeats.
-        let next = UiCmd::SwitchAgent(name);
-        if !dedup_switch(last_switch_sent.as_ref(), &next)
-            && try_send_idempotent(cmd_tx, next.clone())
-        {
-            *last_switch_sent = Some(next);
-        }
+        // Pure switch: same idempotent send path as the ctrl+t chord.
+        crate::mode_switch::pure_switch_send(
+            &name,
+            mode_flash,
+            anim_tick,
+            cmd_tx,
+            last_switch_sent,
+        );
     }
     SwitchOutcome::Proceed
 }

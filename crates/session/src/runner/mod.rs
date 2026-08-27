@@ -168,12 +168,11 @@ pub async fn run_with_registry(
         }
     }
     let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
-    if let Err(run_err) = run_loop_one_shot(session, registry, &mut on_event, drain_mode).await {
-        // F3: a failed run must not strand inputs admitted during it — best-effort
-        // bounded re-absorb, never masking the original error.
-        let _ = reabsorb_tail(session, registry, &mut on_event).await;
-        return Err(run_err);
-    }
+    // Zero-resubmit: a failed run must NOT re-submit admitted inputs.
+    // Queue/steer rows stay pending (or are unpromoted in place by the
+    // P1-3/F2 guards) and are consumed by the NEXT successful run —
+    // a failed attempt never fires additional LLM requests for them.
+    run_loop_one_shot(session, registry, &mut on_event, drain_mode).await?;
 
     // P1-4: bounded re-absorb of steers/queues admitted during run_loop's
     // idle window (see drain::reabsorb_tail).

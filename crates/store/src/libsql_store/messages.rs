@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use libsql::{params, Connection};
 use opencoder_core::{ContentBlock, Message, MessageUsage, Role};
 
-use crate::types::ImportReport;
+use crate::types::{ImportReport, MessageRow};
 
 const INSERT_MESSAGE: &str = "\
 INSERT INTO messages (id, session_id, role, agent, model, blocks_json, usage_json, created_at, synthetic, mode, summary)
@@ -108,6 +108,31 @@ pub async fn load_after(
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
         out.push(row_to_message(&r)?);
+    }
+    Ok(out)
+}
+
+/// Load raw relay rows ([`MessageRow`]): the true per-session `seq` plus the
+/// stored `blocks_json` parsed as a JSON value, in `seq` order. This is the
+/// P3 node message relay's read model — it must NOT decode blocks into
+/// [`ContentBlock`] because the relay forwards exactly what was stored.
+pub async fn load_rows(conn: &Connection, session_id: &str) -> Result<Vec<MessageRow>> {
+    let stmt = conn
+        .prepare(
+            "SELECT seq, role, blocks_json, created_at FROM messages \
+             WHERE session_id = ? ORDER BY seq ASC",
+        )
+        .await?;
+    let mut rows = stmt.query(params![session_id]).await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        let blocks_json: String = r.get(2)?;
+        out.push(MessageRow {
+            seq: r.get(0)?,
+            role: r.get(1)?,
+            blocks: serde_json::from_str(&blocks_json).unwrap_or(serde_json::Value::Null),
+            created_at: r.get(3)?,
+        });
     }
     Ok(out)
 }

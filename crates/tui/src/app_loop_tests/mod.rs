@@ -40,7 +40,6 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -76,7 +75,7 @@ async fn switch_plan_to_act_while_idle_triggers_handoff() {
 /// untouched, running stays true, and a busy flash hint is shown (the user
 /// re-presses at a clean idle boundary; no deferred auto-fire). The
 /// bidirectional gate intercepts every variant this way (either direction,
-/// with or without a submitted plan, handoff or no_handoff; see
+/// with or without a submitted plan (handoff vs pure switch); see
 /// switch_gate_tests).
 #[tokio::test]
 async fn switch_plan_to_act_while_running_is_noop() {
@@ -94,7 +93,6 @@ async fn switch_plan_to_act_while_running_is_noop() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -150,7 +148,6 @@ async fn switch_plan_to_act_unsubmitted_is_pure_switch() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -208,7 +205,6 @@ async fn queue_armed_then_shift_tab_plan_to_act_triggers_handoff() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,
@@ -266,7 +262,6 @@ async fn queue_admit_alone_does_not_arm_shift_tab() {
 
     let outcome = handle_switch_agent(
         "act".into(),
-        false,
         &mut chat,
         &mut running,
         &mut follow,

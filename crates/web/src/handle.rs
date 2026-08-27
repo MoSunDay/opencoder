@@ -530,42 +530,6 @@ async fn process_drain_cmds(
     }
 }
 
-/// F3: bounded drain-restart budget. When a drain run fails while steer/queue
-/// inputs are still pending, the drain retries up to this many times so a
-/// transient failure (LLM 5xx, store hiccup) does not silently strand inputs
-/// the admit POST already promised to consume. Bounded so a persistently
-/// failing store/config cannot hot-loop.
-const MAX_DRAIN_RESTARTS: u32 = 2;
-
-/// Count inputs still awaiting consumption in either delivery channel. A
-/// store read error counts as zero: an unreadable store must not be mistaken
-/// for "client still owed inputs" and resurrect a failing drain.
-async fn pending_input_count(store: &Arc<dyn Store>, sid: &str) -> usize {
-    store
-        .pending_inputs(sid, Delivery::Steer)
-        .await
-        .unwrap_or_default()
-        .len()
-        + store
-            .pending_inputs(sid, Delivery::Queue)
-            .await
-            .unwrap_or_default()
-            .len()
-}
-
-/// Pure restart policy for the drain loop: retry only when the attempt
-/// failed, the client is still owed pending inputs, the drain was not
-/// hard-cancelled (POST /stop semantics must be preserved), and the retry
-/// budget remains.
-fn should_restart_drain(
-    result: &Result<()>,
-    pending: usize,
-    cancelled: bool,
-    attempt: u32,
-) -> bool {
-    result.is_err() && pending > 0 && !cancelled && attempt < MAX_DRAIN_RESTARTS
-}
-
 /// Drive the session runner to completion, broadcasting events.
 async fn drain_to_completion(
     handles: HandleMap,
@@ -654,54 +618,29 @@ async fn drain_to_completion(
     let sid = session_id.to_string();
     let (sink, flusher) =
         opencoder_session::spawn_event_flusher(Some(store.clone()), session_id.to_string());
-    // F3: bounded restart loop. The admit POST already answered success, so
-    // pending steer/queue rows are a durable promise — abandoning the drain on
-    // the first Err would strand them with nothing left to consume them.
-    // Retry while inputs remain pending, the hard-cancel token has not fired
-    // (POST /stop must win: run breaks cleanly on cancel and a cancelled
-    // drain is never resurrected), and the budget lasts — bounded so a
-    // persistently failing store/config cannot hot-loop. Sink / flusher / tx
-    // stay alive across retries so retried runs still persist + broadcast
-    // events; the drops below run exactly once, after the loop.
-    let mut result = Ok(());
-    for attempt in 0..=MAX_DRAIN_RESTARTS {
-        result = run(&mut session, String::new(), |ev| {
-            let (sse, _kind) = sse_from_session_event(&sid, &ev);
-            let _ = tx.send(sse);
-            let _ = sink.push(&ev);
-        })
-        .await;
+    // Zero-resubmit: a failed drain NEVER auto-resubmits pending inputs and
+    // fires no additional LLM requests. Pending steer/queue rows stay in the
+    // store (the admit POST's durable promise) and are consumed by the NEXT
+    // successful drain instead of being silently retried inside this failing
+    // one. Deliberate semantic change of the former bounded drain-restart
+    // loop; the drops below run exactly once, after this single attempt.
+    let result = run(&mut session, String::new(), |ev| {
+        let (sse, _kind) = sse_from_session_event(&sid, &ev);
+        let _ = tx.send(sse);
+        let _ = sink.push(&ev);
+    })
+    .await;
 
-        // After each attempt, process queued drain commands so a restart
-        // still sees a settled command queue.
-        process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
-
-        let cancelled = session.cancel.as_ref().is_some_and(|t| t.is_cancelled());
-        if !should_restart_drain(
-            &result,
-            pending_input_count(&store, &sid).await,
-            cancelled,
-            attempt,
-        ) {
-            break;
-        }
-        if let Err(e) = &result {
-            warn!(
-                session_id,
-                attempt,
-                error = %e,
-                "drain failed with pending inputs; bounded restart"
-            );
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    }
+    // Apply endpoint-forwarded drain commands (autopilot/annotation/...)
+    // once the run settles.
+    process_drain_cmds(&mut session, &mut rx_guard, &tx, &sink, &sid, &workdir).await;
 
     // Best-effort title generation after the FIRST successful completion of a
     // drain (mirrors `crates/cli/src/run.rs`): runs while the event sink is
     // still alive but after the run loop breaks, bounded at 30 s so a hanging
     // small-model endpoint can never wedge teardown. `result.is_ok()` gates
     // it to successful runs, and the title check inside makes it once-only
-    // across a session's many drains/attempt restarts. Failures only log.
+    // across a session's many drains. Failures only log.
     crate::handle_questions::maybe_generate_title(&store, &session, result.is_ok()).await;
 
     drop(sink);

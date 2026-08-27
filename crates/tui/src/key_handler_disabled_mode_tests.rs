@@ -1,7 +1,7 @@
 //! Mode-switch keys in the subagent-focus (input-disabled) view. Leaving or
 //! switching mode must never be blocked by view state: switch_mode_clear /
 //! switch_mode_keep / switch_mode bindings and a raw BackTab all stay live
-//! and funnel into `handle_switch_agent`, whose running gate blocks both
+//! and funnel into the switch handlers, whose running gates block both
 //! directions while busy (plan→act and act→plan alike get the busy hint).
 //! Split out of `key_handler_tests.rs` to keep that file under the 800-line
 //! cap.

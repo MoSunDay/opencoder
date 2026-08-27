@@ -13,13 +13,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, Query, State};
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use opencoder_core::node_protocol::{
-    ClaimedTask, NodeEventBatch, NodeHeartbeatResponse, NodeStatusReport,
+    ClaimResponse, ClaimedTask, ControlTask, FetchMessagesResult, NodeEventBatch,
+    NodeHeartbeatResponse, NodeStatusReport,
 };
 
 pub const TOKEN: &str = "node-stub-bearer";
@@ -48,6 +49,10 @@ pub struct Inner {
     pub batches: usize,
     /// Terminal reports in arrival order: (task_id, status, error).
     pub statuses: Vec<(String, String, Option<String>)>,
+    /// Control tasks waiting for delivery (claim reply or heartbeat batch).
+    pub controls: VecDeque<ControlTask>,
+    /// Control results uploaded by the worker (arrival order).
+    pub control_results: Vec<FetchMessagesResult>,
 }
 
 pub struct Stub {
@@ -106,6 +111,16 @@ impl Stub {
     pub fn registrations(&self) -> Vec<String> {
         self.lock().registered.clone()
     }
+
+    /// Queue one control task for delivery on the next claim/heartbeat.
+    pub fn push_control(&self, task: ControlTask) {
+        self.lock().controls.push_back(task);
+    }
+
+    /// Snapshot of uploaded control results.
+    pub fn control_results(&self) -> Vec<FetchMessagesResult> {
+        self.lock().control_results.clone()
+    }
 }
 
 /// Tiny unique-suffix helper (avoids an extra dev-only dependency).
@@ -137,10 +152,19 @@ async fn heartbeat(State(st): State<Arc<Stub>>, Path(_id): Path<String>) -> Resp
     let mut g = st.lock();
     g.heartbeats += 1;
     let ids = std::mem::take(&mut g.cancels);
+    // Server contract: a busy node receives up to 4 queued control tasks.
+    let mut controls = Vec::new();
+    while controls.len() < 4 {
+        match g.controls.pop_front() {
+            Some(t) => controls.push(t),
+            None => break,
+        }
+    }
     drop(g);
     Json(NodeHeartbeatResponse {
         server_time_ms: 0,
         cancel_task_ids: ids,
+        controls,
     })
     .into_response()
 }
@@ -152,11 +176,13 @@ pub struct ClaimQuery {
 
 async fn claim(State(st): State<Arc<Stub>>, Query(q): Query<ClaimQuery>) -> Response {
     let mut g = st.lock();
-    match g.queue.pop_front() {
-        Some(t) => {
-            g.claimed.push(t.task_id.clone());
-            drop(g);
-            Json(ClaimedTask {
+    // Server contract: durable task preferred; control rides along only when
+    // no durable task was due. 204 when both absent.
+    if let Some(t) = g.queue.pop_front() {
+        g.claimed.push(t.task_id.clone());
+        drop(g);
+        return Json(ClaimResponse {
+            task: Some(ClaimedTask {
                 task_id: t.task_id,
                 session_id: t.session_id,
                 title: None,
@@ -164,9 +190,19 @@ async fn claim(State(st): State<Arc<Stub>>, Query(q): Query<ClaimQuery>) -> Resp
                 agent: None,
                 model: None,
                 created_at: 0,
-            })
-            .into_response()
-        }
+            }),
+            control: None,
+        })
+        .into_response();
+    }
+    let control = g.controls.pop_front();
+    drop(g);
+    match control {
+        Some(c) => Json(ClaimResponse {
+            task: None,
+            control: Some(c),
+        })
+        .into_response(),
         None => {
             let _ = q.node_id;
             StatusCode::NO_CONTENT.into_response()
@@ -200,17 +236,63 @@ async fn report_status(
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
-/// Bearer-token gate mirroring the server's auth middleware.
+async fn control_result(
+    State(st): State<Arc<Stub>>,
+    Path(_id): Path<String>,
+    Json(result): Json<FetchMessagesResult>,
+) -> Response {
+    st.lock().control_results.push(result);
+    Json(serde_json::json!({ "resolved": true })).into_response()
+}
+
+/// HMAC-signature gate mirroring the server's `auth_sig_mw`: every request
+/// must carry a valid `x-sig` / `x-sig-timestamp` pair over
+/// `{METHOD}\n{path_and_query}\n{ts}\n{sha256(body)}` with the shared token.
+/// The body is buffered, verified, and re-injected for the `Json` extractors.
 async fn auth(req: Request<axum::body::Body>, next: Next) -> Response {
-    let expected = format!("Bearer {TOKEN}");
-    let ok = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        == Some(expected.as_str());
+    use axum::body::to_bytes;
+    let (parts, body) = req.into_parts();
+    let bytes = match to_bytes(body, 8 << 20).await {
+        Ok(b) => b.to_vec(),
+        Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+    };
+    let ts_raw = parts
+        .headers
+        .get(opencoder_core::auth_sig::TS_HEADER)
+        .and_then(|v| v.to_str().ok());
+    let sig_raw = parts
+        .headers
+        .get(opencoder_core::auth_sig::SIG_HEADER)
+        .and_then(|v| v.to_str().ok());
+    let (Some(ts_raw), Some(sig_raw)) = (ts_raw, sig_raw) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let Ok(ts_ms) = ts_raw.trim().parse::<i64>() else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let pq = parts
+        .uri
+        .path_and_query()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_default();
+    let ok = opencoder_core::auth_sig::verify(
+        TOKEN,
+        parts.method.as_str(),
+        &pq,
+        ts_ms,
+        now_ms,
+        &bytes,
+        sig_raw,
+    )
+    .is_ok();
     if !ok {
         return StatusCode::UNAUTHORIZED.into_response();
     }
+    let req = Request::from_parts(parts, axum::body::Body::from(bytes));
     next.run(req).await
 }
 
@@ -221,6 +303,7 @@ fn router(st: Arc<Stub>) -> Router {
         .route("/api/nodes/tasks/claim", get(claim))
         .route("/api/nodes/tasks/:tid/events", post(upload_events))
         .route("/api/nodes/tasks/:tid/status", post(report_status))
+        .route("/api/nodes/:id/control_result", post(control_result))
         .layer(middleware::from_fn(auth))
         .with_state(st)
 }

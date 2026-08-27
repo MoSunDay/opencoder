@@ -56,6 +56,22 @@ mod tests {
             .expect("body must read")
     }
 
+    /// The bundle must actually mount the React app. A shell without a mounted
+    /// bundle renders an empty #root in every browser — the kind of break no
+    /// byte-level serve test catches (found by real-browser acceptance: main.jsx
+    /// once shipped without its createRoot call while every other gate stayed
+    /// green). Guard the contract at the embedded-bytes level.
+    #[test]
+    fn bundle_bootstraps_the_react_root() {
+        assert!(INDEX_HTML.contains(r#"id="root""#), "shell must carry the #root mount node");
+        let js = String::from_utf8_lossy(APP_JS);
+        assert!(js.contains("createRoot"), "bundle must create a React root");
+        assert!(
+            js.contains(r#"getElementById("root")"#) || js.contains("getElementById('root')"),
+            "bundle must mount into #root"
+        );
+    }
+
     /// The whitelist serves exactly the fixed build outputs, with the right
     /// content types; every other name is 404 (exempt ≠ anything goes).
     #[tokio::test]

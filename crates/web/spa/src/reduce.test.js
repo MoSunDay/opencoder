@@ -17,6 +17,23 @@ describe('turnsFromMessages', () => {
     ]);
     expect(turns).toHaveLength(3);
     expect(turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'hi' });
+    // serde wire tag is `kind` (crates/core/src/message.rs) — the real
+    // contract; a `type`-only matcher returned [] and blanked every store
+    // replay (caught by real-browser acceptance).
+    const wire = turnsFromMessages([
+      { role: 'user', blocks: [{ kind: 'text', text: 'wire-hi' }] },
+      {
+        role: 'assistant',
+        blocks: [
+          { kind: 'reasoning', text: 'thinking' },
+          { kind: 'tool_use', id: 'w1', name: 'bash', input: { cmd: 'ls' } },
+          { kind: 'tool_result', tool_use_id: 'w1', content: 'a.txt', is_error: false },
+        ],
+      },
+    ]);
+    expect(wire[0]).toMatchObject({ kind: 'text', role: 'user', text: 'wire-hi' });
+    expect(wire[1]).toMatchObject({ kind: 'think', role: 'assistant', text: 'thinking' });
+    expect(wire[2]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
     expect(turns[2]).toMatchObject({ kind: 'tool', name: 'bash', output: 'a.txt', isError: false });
   });
 
@@ -95,5 +112,24 @@ describe('deltaTextOf/withUserTurn', () => {
     const s = withUserTurn(emptyStream(), 'hi');
     expect(s.turns).toEqual([{ kind: 'text', role: 'user', text: 'hi' }]);
     expect(withUserTurn(emptyStream(), '')).toEqual(emptyStream());
+  });
+});
+
+import { usageFromMessages } from './reduce.js';
+
+describe('usageFromMessages (store snapshot → footer)', () => {
+  it('sums per-message usage from the wire shape', () => {
+    const u = usageFromMessages([
+      { role: 'user', blocks: [], usage: { input_tokens: 100, output_tokens: 0, total_tokens: 100 } },
+      { role: 'assistant', blocks: [], usage: { input_tokens: 0, output_tokens: 342, total_tokens: 342 } },
+      { role: 'tool', blocks: [], usage: { input_tokens: 5, output_tokens: 5, total_tokens: 10 } },
+    ]);
+    expect(u).toEqual({ input: 105, output: 347, total: 452, contextWindow: null });
+  });
+
+  it('returns null when no row carries usage (no empty footer)', () => {
+    expect(usageFromMessages([{ role: 'user', blocks: [] }])).toBeNull();
+    expect(usageFromMessages([])).toBeNull();
+    expect(usageFromMessages([{ role: 'user', blocks: [], usage: {} }])).toBeNull();
   });
 });

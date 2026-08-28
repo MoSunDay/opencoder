@@ -1,12 +1,12 @@
 // main.jsx — app shell: antd Layout with brand Header + connection badge,
 // left Sider menu (exactly two items), Content switching per menu, the
-// plaintext-HTTP warning banner, and the login gate.
+// and the login gate.
 
 import { Badge, Layout, Menu, Typography } from 'antd';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ChatPanel } from './chat.jsx';
-import { InsecureHttpAlert, LoginModal } from './login.jsx';
+import { LoginModal } from './login.jsx';
 import { NodesPanel } from './nodes.jsx';
 import './app.css';
 import { setState, useStore } from './store.js';
@@ -37,7 +37,6 @@ function App() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <InsecureHttpAlert />
       <Layout style={{ flex: 1, minHeight: 0 }}>
         <Header style={{ display: 'flex', alignItems: 'center', gap: 24, background: '#001529', paddingLeft: 24 }}>
           <span style={{ color: '#fff', fontSize: 17, fontWeight: 700, letterSpacing: 1 }}>

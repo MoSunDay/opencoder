@@ -429,8 +429,6 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await
             .unwrap();

@@ -88,19 +88,19 @@ fn assert_no_llm_calls(evs: &[SessionEvent]) {
 // tests
 // ---------------------------------------------------------------------------
 
-/// `/plan review code` queued in drain mode: mode switches to plan BEFORE any
-/// LLM call, then "review code" runs in plan mode (exactly 1 LLM turn).
+/// `/sandbox review code` queued in drain mode: the agent switches to sandbox
+/// BEFORE any LLM call, then "review code" runs (exactly 1 LLM turn).
 #[tokio::test]
-async fn drain_mode_queue_plan_switches_before_llm() {
+async fn drain_mode_queue_sandbox_switches_before_llm() {
     let store = mem_store().await;
-    seed(&store, "dr-plan", "act").await;
+    seed(&store, "dr-sandbox", "act").await;
 
-    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("plan reply")]));
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("sandbox reply")]));
     let client: Arc<dyn ChatStream> = mock.clone();
 
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
-        "dr-plan",
+        "dr-sandbox",
         resolve_agent("act").unwrap(),
         config(),
         client,
@@ -110,17 +110,24 @@ async fn drain_mode_queue_plan_switches_before_llm() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input("dr-plan", Delivery::Queue, "/plan review code"))
+        .admit_input(&mk_input(
+            "dr-sandbox",
+            Delivery::Queue,
+            "/sandbox review code",
+        ))
         .await
         .unwrap();
 
     let evs = drain_run(&mut session).await;
 
-    assert_eq!(session.agent.name, "plan", "switched to plan before LLM");
+    assert_eq!(
+        session.agent.name, "sandbox",
+        "switched to sandbox before LLM"
+    );
     assert!(
         evs.iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
-        "AgentSwitch(plan) emitted"
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
+        "AgentSwitch(sandbox) emitted"
     );
     assert!(
         evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -129,22 +136,22 @@ async fn drain_mode_queue_plan_switches_before_llm() {
     assert_eq!(
         mock.requests().len(),
         1,
-        "exactly 1 LLM call (review in plan mode)"
+        "exactly 1 LLM call (review in sandbox mode)"
     );
 }
 
-/// Bare `/plan` queued in drain mode: switches to plan with ZERO LLM calls.
+/// Bare `/sandbox` queued in drain mode: switches to sandbox with ZERO LLM calls.
 #[tokio::test]
-async fn drain_mode_queue_bare_plan_goes_idle() {
+async fn drain_mode_queue_bare_sandbox_goes_idle() {
     let store = mem_store().await;
-    seed(&store, "dr-bare-plan", "act").await;
+    seed(&store, "dr-bare-sandbox", "act").await;
 
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
 
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
-        "dr-bare-plan",
+        "dr-bare-sandbox",
         resolve_agent("act").unwrap(),
         config(),
         client,
@@ -154,17 +161,17 @@ async fn drain_mode_queue_bare_plan_goes_idle() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input("dr-bare-plan", Delivery::Queue, "/plan"))
+        .admit_input(&mk_input("dr-bare-sandbox", Delivery::Queue, "/sandbox"))
         .await
         .unwrap();
 
     let evs = drain_run(&mut session).await;
 
-    assert_eq!(session.agent.name, "plan", "switched to plan");
+    assert_eq!(session.agent.name, "sandbox", "switched to sandbox");
     assert!(
         evs.iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
-        "AgentSwitch(plan) emitted"
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
+        "AgentSwitch(sandbox) emitted"
     );
     assert!(
         evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -174,12 +181,12 @@ async fn drain_mode_queue_bare_plan_goes_idle() {
     assert!(mock.requests().is_empty(), "zero LLM calls");
 }
 
-/// `/act` queued in a plan-mode session in drain mode: switches to act with
+/// `/act` queued in a sandbox-mode session in drain mode: switches to act with
 /// ZERO LLM calls.
 #[tokio::test]
 async fn drain_mode_queue_act_switches_before_llm() {
     let store = mem_store().await;
-    seed(&store, "dr-act", "plan").await;
+    seed(&store, "dr-act", "sandbox").await;
 
     let mock = Arc::new(MockChatClient::new());
     let client: Arc<dyn ChatStream> = mock.clone();
@@ -187,7 +194,7 @@ async fn drain_mode_queue_act_switches_before_llm() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "dr-act",
-        resolve_agent("plan").unwrap(),
+        resolve_agent("sandbox").unwrap(),
         config(),
         client,
         dir.path().to_path_buf(),

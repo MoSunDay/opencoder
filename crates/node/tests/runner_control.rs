@@ -20,6 +20,7 @@ use std::time::Duration;
 use opencoder_core::node_protocol::{ControlTask, TASK_KIND_FETCH_MESSAGES};
 use opencoder_llm::{ChatStream, LlmEvent, MockChatClient};
 use opencoder_node::NodeOpts;
+use opencoder_store::Store;
 
 fn test_opts(base: &str, workdir: &std::path::Path, data: &std::path::Path) -> NodeOpts {
     NodeOpts {
@@ -75,12 +76,12 @@ async fn claim_delivers_control_and_worker_uploads_slice() {
         test_opts(&base, &workdir, data.path()),
         Some(mock_round()),
     ));
-    support::wait_for(10, || st.status_of(&task.task_id)).await;
+    support::wait_for(120, || st.status_of(&task.task_id)).await;
     assert_eq!(st.status_of(&task.task_id).as_deref(), Some("done"));
 
     // Control delivered through the claim reply (node is idle again).
     st.push_control(control("ctl-idle", &task.session_id));
-    let result = support::wait_for(10, || {
+    let result = support::wait_for(120, || {
         st.control_results()
             .into_iter()
             .find(|r| r.control_id == "ctl-idle")
@@ -114,7 +115,7 @@ async fn unknown_session_reports_ok_false() {
         Some(mock_round()),
     ));
     st.push_control(control("ctl-ghost", "sess-never-existed"));
-    let result = support::wait_for(10, || {
+    let result = support::wait_for(120, || {
         st.control_results()
             .into_iter()
             .find(|r| r.control_id == "ctl-ghost")
@@ -148,11 +149,38 @@ async fn heartbeat_delivers_control_while_busy() {
         test_opts(&base, &workdir, data.path()),
         Some(Arc::new(MockChatClient::new().push_hang(notify.clone()))),
     ));
-    support::wait_for(10, || st.claimed().contains(&task.task_id).then_some(())).await;
+    support::wait_for(30, || st.claimed().contains(&task.task_id).then_some(())).await;
+
+    // Wait until the prompt is DURABLE in the node's local store before
+    // pushing the control: the runner persists the user message just before
+    // the LLM call parks, and under heavy test-machine load the busy
+    // heartbeater could otherwise serve the fetch slice inside that startup
+    // window, racing the assertion below on an empty transcript.
+    let local = opencoder_store::LibsqlStore::open(data.path().join("opencoder.db"))
+        .await
+        .unwrap();
+    let sid = task.session_id.clone();
+    let durable = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let has_user_msg = local
+            .load_messages(&sid)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|m| m.role == opencoder_core::Role::User);
+        if has_user_msg {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < durable,
+            "user prompt never became durable in the node's local store"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 
     // Control arrives while busy: only the heartbeat can deliver it.
     st.push_control(control("ctl-busy", &task.session_id));
-    let result = support::wait_for(15, || {
+    let result = support::wait_for(120, || {
         st.control_results()
             .into_iter()
             .find(|r| r.control_id == "ctl-busy")

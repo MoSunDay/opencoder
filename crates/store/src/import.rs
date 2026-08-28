@@ -114,8 +114,6 @@ async fn import_jsonl_file<S: Store + ?Sized>(
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     };
     store.create_session(&meta).await?;
     // If message import fails mid-way, the just-created session row would be

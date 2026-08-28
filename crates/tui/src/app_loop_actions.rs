@@ -1,8 +1,8 @@
-//! Mode-switch slash-command dispatch (`/act`, `/plan`, `/act_clear_context`)
-//! extracted from `app_loop.rs` to keep that file under the 800-line
-//! iteration cap. The three commands share one gate-and-start flow: a
-//! running/subagent busy gate, an optional plan→act handoff, and the plain
-//! prompt fallback. This is a pure move — the logic, signatures and doc
+//! Agent-switch slash-command dispatch (`/act`, `/sandbox`,
+//! `/act_clear_context`) extracted from `app_loop.rs` to keep that file under
+//! the 800-line iteration cap. The three commands share one gate-and-start
+//! flow: a running/subagent busy gate, then submission of the control-command
+//! text as a pure prompt. This is a pure move — the logic, signatures and doc
 //! comments are unchanged from their original inline location. The
 //! `pub(crate)` items are re-exported from `app_loop.rs`, so the call sites
 //! in `dispatch_command` stay thin.
@@ -14,8 +14,8 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{prep_plan_to_act, LoopFlow};
-use crate::app_helpers::{start_turn, worker_dead};
+use super::LoopFlow;
+use crate::app_helpers::{start_turn, sys_tokens_for, worker_dead};
 use crate::chat::ChatView;
 use crate::theme;
 use std::sync::Arc;
@@ -29,12 +29,12 @@ use crate::local_cmd;
 use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
 use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
 
-/// Which mode-switch command triggered the dispatch. Parameterizes the plain
-/// prompt text and whether the plan→act handoff applies.
+/// Which agent-switch command triggered the dispatch. Parameterizes the
+/// control-command prompt text submitted to the runner.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModeSwitch {
     Act,
-    Plan,
+    Sandbox,
     ClearContext,
 }
 
@@ -42,27 +42,19 @@ impl ModeSwitch {
     fn prompt(self) -> &'static str {
         match self {
             ModeSwitch::Act => "/act",
-            ModeSwitch::Plan => "/plan",
-            ModeSwitch::ClearContext => "/act_clear_context",
+            ModeSwitch::Sandbox => "/sandbox",
+            ModeSwitch::ClearContext => "/clear_context",
         }
-    }
-
-    /// `/act` and `/act_clear_context` from plan mode with a submitted plan
-    /// route through `SwitchAndStart` (plan→act handoff) — same as Shift+Tab
-    /// — preserving the plan and starting execution instead of wiping the
-    /// transcript. `/plan` never hands off.
-    fn may_handoff(self) -> bool {
-        !matches!(self, ModeSwitch::Plan)
     }
 }
 
-/// Dispatch one of the three mode-switch slash commands through the worker.
+/// Dispatch one of the three agent-switch slash commands through the worker.
 /// `run_with_registry` short-circuits them (no LLM call) and emits
 /// `AgentSwitch` / `TranscriptReset` + `Done`. No user echo — the popup path
 /// never calls `push_user`.
 ///
 /// RUNNING-GATE: while a turn is in flight (`running`), all three are refused
-/// with a `[switch] busy — retry when idle` marker — a mode switch mid-turn
+/// with a `[switch] busy — retry when idle` marker — an agent switch mid-turn
 /// would start the next turn with a stale agent at an arbitrary partial
 /// boundary (mirrors `/compact`'s `SkipRunning`).
 #[allow(clippy::too_many_arguments)]
@@ -73,8 +65,6 @@ pub(crate) async fn dispatch_mode_switch(
     running: &mut bool,
     follow: &mut bool,
     chat: &mut ChatView,
-    input: &mut String,
-    cursor_idx: &mut usize,
     sys_tokens: &mut u64,
     mode_flash: &mut Option<(String, u32)>,
     anim_tick: u32,
@@ -82,15 +72,10 @@ pub(crate) async fn dispatch_mode_switch(
 ) -> LoopFlow {
     match gate_switch(*running || chat.subagents_running > 0) {
         SwitchGate::Run => {
-            if mode.may_handoff() && chat.agent == "plan" && chat.plan_submitted {
-                let extra = prep_plan_to_act(
-                    input, cursor_idx, sys_tokens, mode_flash, anim_tick, workdir,
-                );
-                if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart("act".into(), extra)).await {
-                    worker_dead(chat);
-                    return LoopFlow::Quit;
-                }
-            } else if !start_turn(
+            let name = mode.prompt().trim_start_matches('/');
+            *sys_tokens = sys_tokens_for(name, workdir, None);
+            *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+            if !start_turn(
                 cmd_tx,
                 cancel,
                 UiCmd::Prompt(mode.prompt().into(), Vec::new()),
@@ -123,7 +108,7 @@ pub(crate) async fn dispatch_mode_switch(
 /// Returns [`LoopFlow::Proceed`] for commands that only open a menu or
 /// render chrome (Task, Fork, Model, Config, Mcp, CacheSalt, Annotation,
 /// Notepad, Ps, Stop, Ap). For mode-switch commands
-/// (Act, Plan, ClearContext, Compact) returns whatever the gate-and-start
+/// (Act, Sandbox, ClearContext, Compact) returns whatever the gate-and-start
 /// flow yields (typically [`LoopFlow::Proceed`] or [`LoopFlow::Quit`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_slash_action(
@@ -144,8 +129,6 @@ pub(crate) async fn dispatch_slash_action(
     ap_menu: &mut Option<crate::ap_menu::ApMenu>,
     cache_salt_menu: &mut Option<CacheSaltMenu>,
     agent_name: &str,
-    input: &mut String,
-    cursor_idx: &mut usize,
     config: &mut Config,
     workdir: &Path,
     mode_flash: &mut Option<(String, u32)>,
@@ -235,8 +218,6 @@ pub(crate) async fn dispatch_slash_action(
                 running,
                 follow,
                 chat,
-                input,
-                cursor_idx,
                 sys_tokens,
                 mode_flash,
                 anim_tick,
@@ -244,16 +225,14 @@ pub(crate) async fn dispatch_slash_action(
             )
             .await;
         }
-        SlashAction::Plan => {
+        SlashAction::Sandbox => {
             return dispatch_mode_switch(
-                ModeSwitch::Plan,
+                ModeSwitch::Sandbox,
                 cmd_tx,
                 cancel,
                 running,
                 follow,
                 chat,
-                input,
-                cursor_idx,
                 sys_tokens,
                 mode_flash,
                 anim_tick,
@@ -269,8 +248,6 @@ pub(crate) async fn dispatch_slash_action(
                 running,
                 follow,
                 chat,
-                input,
-                cursor_idx,
                 sys_tokens,
                 mode_flash,
                 anim_tick,
@@ -333,8 +310,8 @@ pub(crate) async fn steer_submit_after_mouse(
 }
 
 /// Hard-cancel the running turn (double-Esc / Ctrl+C arm in `app.rs`):
-/// drop a deferred `/plan` arming, cancel tokens, and show the interrupted
-/// marker. Pending steer/queue rows are deliberately KEPT — both in the
+/// cancel tokens and show the interrupted marker. Pending steer/queue rows
+/// are deliberately KEPT — both in the
 /// store and in the UI mirrors — so they are consumed FIFO on the next
 /// submit's drain or a `>` panel drain. This matches the web
 /// `/interrupt` semantics, where cancelling a run also preserves queued

@@ -18,6 +18,9 @@ use crate::menu::{handle_menu_key, MenuOutcome, SkillMenu};
 /// Window for double-Esc hard-abort (milliseconds).
 pub(crate) const ESC_CANCEL_WINDOW_MS: u64 = 350;
 
+/// The clear-context control command dispatched by Shift+Tab.
+pub(crate) const CLEAR_CONTEXT_CMD: &str = "/clear_context";
+
 /// Decision returned by `handle_key` for the event loop to act on.
 #[derive(Debug)]
 pub(crate) enum KeyAction {
@@ -40,10 +43,8 @@ pub(crate) enum KeyAction {
     /// child nor be deferred to a parent boundary). The input remains
     /// untouched so the user can retry at an idle boundary.
     ModeSwitchBlocked,
-    SwitchAgent(String),
-    SwitchAgentNoClear(String),
     Cancel,
-    /// Enter the plan-text editor (Shift+I in plan mode when idle).
+    /// Enter the sandbox-text editor (Shift+I in sandbox mode when idle).
     EnterPlanEdit,
     /// Activate a skill picked from the `$` menu, or clear the active skill
     /// (None) via the menu's dedicated clear row. app.rs routes both through
@@ -125,7 +126,7 @@ pub(crate) fn handle_key(
     // entries (toward the top), Shift+PageDown moves toward newer ones
     // (toward the bottom). Plain PageUp/PageDown keep scrolling the body
     // (below). A stale offset is clamped on the next render, so these are
-    // safe even while the panel is hidden (plan mode).
+    // safe even while the panel is hidden.
     if k.modifiers.contains(KeyModifiers::SHIFT) {
         match k.code {
             KeyCode::PageUp => {
@@ -163,42 +164,11 @@ pub(crate) fn handle_key(
         if bindings.help.matches(&k) {
             return KeyAction::OpenKeymap;
         }
-        // Mode-switch keys stay live in the subagent-focus (input-disabled)
-        // view: leaving/switching mode must never be blocked by view state.
-        // Shift+Tab/Alt+Tab funnel into handle_switch_agent, ctrl+t into
-        // mode_switch::handle_pure_mode_switch — both running gates block
-        // BOTH directions while a turn/subagent is live (busy hint).
-        // The `/plan <content>` compound-submit branch of
-        // the enabled path is intentionally skipped — input is disabled here.
-        // A plain BackTab carries no CTRL/ALT modifier, so it cannot
-        // mis-match the switch_mode_clear / switch_mode_keep bindings above
-        // (keymap `matches` requires exact modifiers besides lenient SHIFT).
-        if bindings.switch_mode_clear.matches(&k) {
-            let next = if agent == "plan" { "act" } else { "plan" };
-            return KeyAction::SwitchAgent(next.into());
-        }
-        if bindings.switch_mode_keep.matches(&k) {
-            let next = if agent == "plan" { "act" } else { "plan" };
-            return KeyAction::SwitchAgentNoClear(next.into());
-        }
-        // switch_mode (default ctrl+t): same NoClear semantics as the
-        // enabled path — a customized chord must not go dead just because
-        // a subagent is focused.
-        if bindings.switch_mode.matches(&k) {
-            let next = if agent == "plan" { "act" } else { "plan" };
-            return KeyAction::SwitchAgentNoClear(next.into());
-        }
-        if k.code == KeyCode::BackTab {
-            let next = if agent == "plan" { "act" } else { "plan" };
-            return KeyAction::SwitchAgent(next.into());
-        }
+        // The plan/act mode-switch chords are gone (the plan/act toggle was
+        // removed; agent switches are `/act` / `/sandbox` control commands
+        // now), so the subagent-focus view handles only scroll, cancel, quit
+        // and help.
         return KeyAction::None;
-    }
-
-    // switch_mode_clear (default: Alt+Tab): switches act <-> plan mode.
-    if bindings.switch_mode_clear.matches(&k) {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgent(next.into());
     }
 
     // forward_word / backward_word (default: Alt+F / Alt+B).
@@ -209,14 +179,6 @@ pub(crate) fn handle_key(
     if bindings.backward_word.matches(&k) {
         *cursor_idx = composer::backward_word(input, *cursor_idx);
         return KeyAction::None;
-    }
-
-    // switch_mode_keep (default: Ctrl+Shift+Tab): toggle act <-> plan mode
-    // WITHOUT clearing context. The `matches` method normalizes BackTab ≡
-    // Tab+SHIFT so both terminal variants are covered.
-    if bindings.switch_mode_keep.matches(&k) {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgentNoClear(next.into());
     }
 
     // --- Config-driven Ctrl bindings ---
@@ -257,10 +219,6 @@ pub(crate) fn handle_key(
         }
         return KeyAction::None;
     }
-    if bindings.switch_mode.matches(&k) {
-        let next = if agent == "plan" { "act" } else { "plan" };
-        return KeyAction::SwitchAgentNoClear(next.into());
-    }
     if bindings.paste_image.matches(&k) {
         return KeyAction::Clip;
     }
@@ -291,24 +249,6 @@ pub(crate) fn handle_key(
         return KeyAction::None;
     }
     match k.code {
-        KeyCode::BackTab => {
-            // Shift+Tab = primary mode switch (codex-cli style), BUT a
-            // compound `/plan <content>` input is submitted as a plan-mode
-            // prompt rather than just toggling the agent (mirrors the
-            // Enter/Tab submit + buffer-clear flow).
-            if let Some(text) = crate::control_helpers::plan_compound_for_submit(input) {
-                // Submit even while running: app.rs routes a running Submit
-                // to the queue, so the mode switch lands at the next idle
-                // boundary instead of being refused at admission.
-                input.clear();
-                *cursor_idx = 0;
-                *hist_idx = None;
-                crate::undo::reset(undo_state, input, *cursor_idx);
-                return KeyAction::Submit(text);
-            }
-            let next = if agent == "plan" { "act" } else { "plan" };
-            KeyAction::SwitchAgent(next.into())
-        }
         KeyCode::Enter => {
             // Shift+Enter / Alt+Enter insert a newline (multi-line input).
             if k.modifiers
@@ -378,6 +318,26 @@ pub(crate) fn handle_key(
                 KeyAction::Submit(text)
             }
         }
+        KeyCode::BackTab => {
+            // Shift+Tab: pure control-command dispatch of the clear-context
+            // path — `/clear_context`, with any draft text forwarded as
+            // the compound rest (the runner runs it as a prompt in the fresh
+            // context). This is EXACTLY the same path as typing the slash
+            // command: app.rs parses the Submit through the shared dispatch
+            // chain, and while a turn is running the raw text queues
+            // verbatim for the idle boundary.
+            let rest = input.trim().to_string();
+            let text = if rest.is_empty() {
+                CLEAR_CONTEXT_CMD.to_string()
+            } else {
+                format!("{CLEAR_CONTEXT_CMD} {rest}")
+            };
+            input.clear();
+            *cursor_idx = 0;
+            *hist_idx = None;
+            crate::undo::reset(undo_state, input, *cursor_idx);
+            KeyAction::Submit(text)
+        }
         KeyCode::Esc => {
             // Double-Esc within the window while running => hard-abort.
             let now = Instant::now();
@@ -446,10 +406,10 @@ pub(crate) fn handle_key(
             {
                 return KeyAction::None;
             }
-            // Shift+I (uppercase I) enters plan-mode edit — ONLY when in
-            // plan mode, idle, and the input box is empty. Once the user starts
-            // typing, regular `I` insertion resumes.
-            if c == 'I' && agent == "plan" && !running && !input_disabled && input.is_empty() {
+            // Shift+I (uppercase I) enters plan-text edit — ONLY in the
+            // sandbox (read-only) agent, idle, and the input box is empty.
+            // Once the user starts typing, regular `I` insertion resumes.
+            if c == 'I' && agent == "sandbox" && !running && !input_disabled && input.is_empty() {
                 return KeyAction::EnterPlanEdit;
             }
             if c == '$' {
@@ -539,10 +499,6 @@ fn move_hist(
 #[cfg(test)]
 #[path = "key_handler_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "key_handler_disabled_mode_tests.rs"]
-mod disabled_mode_tests;
 
 #[cfg(test)]
 #[path = "key_handler_plan_edit_tests.rs"]

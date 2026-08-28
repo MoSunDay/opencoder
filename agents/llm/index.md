@@ -1,4 +1,4 @@
-Commit: 1ba8f4264210ee9212d2158b2d928ef4b2411477
+Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
 
 # llm 模块
 
@@ -15,7 +15,7 @@ OpenAI 兼容流式客户端 + LLM 抽象口子 + token 估算器。
 - `ChatRequest`/`ChatRequest::to_body`（`src/request.rs`）：请求体序列化。`reasoning_effort: Option<String>`（`low|medium|high`）非空时作顶层 `reasoning_effort` 字段发出，`None`/空白省略——OpenAI 风格思考深度，由 Config 透传，runner 主调用读取、compaction/title 后台调用显式置 `None`。`cache_salt: Option<String>` 非空时作顶层 `cache_salt` 字段发出，trim/空省略语义同 `reasoning_effort`——供 vLLM / prefix-cache 后端按 agent 命名空间化 KV 缓存，使会话内缓存前缀逐轮增长。
 - `lower_messages`（`src/message.rs`）：把 core `Vec<Message>` 转 OpenAI `Vec<OpenAIMessage>`。关键：`ContentBlock::Reasoning` 在工具调用 turn 后序列化为 `reasoning_content` 字段回传（交错思考契约——DeepSeek-V4 缺此字段 HTTP 400）。 **多模态/工具图片契约**：`tool_message()` 永远输出字符串 content（OpenAI 规定 `role:"tool"` 必须是纯字符串）；工具返回的图片经 `tool_image_user_message()` 重安置到一条尾随的 `role:"user"` 多模态消息（合法的 `image_url` 块），`push_tool_results()` 与 `push_user()` 均在检测到图片时 emit 该重安置消息——修复了把图片塞进 tool 消息 content 的 spec 违规（旧实现被 provider 拒绝/静默丢图）。
 - `tokens::{estimate, estimate_messages, estimate_messages_for_display, estimate_transcript}`（`src/tokens.rs`）：chars/4 启发式，**两套口径**：`estimate_messages` 含每条 +4 结构 overhead，供压缩首轮触发判断（调用 `Message::estimate_chars()`，覆盖 ToolResult/ToolUse input/Reasoning 而非仅 `Message::text()` 的 Text 块——这是压缩首轮能真正触发的关键）；`estimate_messages_for_display` **不含** overhead（仅内容），与 live 流式追踪（`track_context`/`finalize_assistant`）口径一致，供 resume/replay 的 `context_used` 显示。
-- `MockChatClient`（`src/mock.rs`）：`scripts: Vec<Vec<LlmEvent>>` FIFO 回放——每调 `chat_stream` 弹一个脚本。`requests()` 返回已录制的 `Vec<ChatRequest>`，供集成测试断言「模型实际收到什么」（如 plan_handoff 集成测试验证 act 请求结构）。这是 session/tui 集成测试的零 token 接缝。
+- `MockChatClient`（`src/mock.rs`）：`scripts: Vec<Vec<LlmEvent>>` FIFO 回放——每调 `chat_stream` 弹一个脚本。`requests()` 返回已录制的 `Vec<ChatRequest>`，供集成测试断言「模型实际收到什么」（如 handoff 集成测试验证 act 请求结构）。这是 session/tui 集成测试的零 token 接缝。
 
 ## 依赖与接口
 - 依赖：reqwest（rustls）、tokio、opencoder-core（Message）。

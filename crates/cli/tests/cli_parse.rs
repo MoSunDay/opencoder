@@ -269,14 +269,14 @@ fn rs_alias_defaults() {
 #[test]
 fn run_subcommand_accepts_global_agent_flag() {
     // --agent is global, so it works on `run` and the bare prompt path.
-    let cli = parse(&["opencoder", "run", "--agent", "plan", "design the api"]);
+    let cli = parse(&["opencoder", "run", "--agent", "sandbox", "design the api"]);
     match cli.command {
         Some(opencoder_cli::Command::Run { prompt }) => {
             assert_eq!(prompt, vec!["design the api".to_string()]);
         }
         _ => panic!("expected Run"),
     }
-    assert_eq!(cli.agent.as_deref(), Some("plan"));
+    assert_eq!(cli.agent.as_deref(), Some("sandbox"));
 }
 
 #[test]
@@ -285,6 +285,45 @@ fn bare_prompt_accepts_global_agent_flag() {
     let cli = parse(&["opencoder", "--agent", "explore", "explain it"]);
     assert_eq!(cli.agent.as_deref(), Some("explore"));
     assert!(!cli.prompt.is_empty());
+}
+
+#[test]
+fn agent_flag_rejects_removed_plan_agent_with_rename_hint() {
+    // The removed plan/act dual mode: `--agent plan` must fail at parse time
+    // (not late, after resume bookkeeping) and point at the `sandbox` rename.
+    let err = Cli::try_parse_from(["opencoder", "--agent", "plan", "hi"]).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid value 'plan'"),
+        "expected clap invalid-value error, got: {msg}"
+    );
+    assert!(
+        msg.contains("sandbox"),
+        "error must mention the sandbox replacement, got: {msg}"
+    );
+}
+
+#[test]
+fn agent_flag_rejects_unknown_names_at_parse_time() {
+    // Any non-builtin fails the same way --agent validation is not silently
+    // downgraded to the default agent.
+    let err =
+        Cli::try_parse_from(["opencoder", "--agent", "nonexistent-agent", "hi"]).unwrap_err();
+    assert!(
+        err.to_string().contains("nonexistent-agent"),
+        "error must name the offending value, got: {err}"
+    );
+}
+
+#[test]
+fn agent_flag_accepts_documented_primaries() {
+    // Every primary documented on the flag parses; other resolvable builtins
+    // (command/workflow) stay accepted so the parser never over-restricts
+    // beyond `resolve_agent`.
+    for name in ["act", "sandbox", "explore", "build", "command", "workflow"] {
+        let cli = parse(&["opencoder", "--agent", name, "hi"]);
+        assert_eq!(cli.agent.as_deref(), Some(name), "agent {name} must parse");
+    }
 }
 
 #[test]

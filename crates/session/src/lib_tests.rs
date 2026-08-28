@@ -119,77 +119,6 @@ mod cache_salt_tests {
 }
 
 #[cfg(test)]
-mod plan_tag_tests {
-    use super::*;
-    use std::sync::Arc;
-
-    use opencoder_core::{resolve_agent, Config};
-    use opencoder_llm::{ChatStream, MockChatClient};
-
-    fn make_plan_session() -> SessionState {
-        let config = Config::default();
-        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
-        SessionState::new(
-            "test",
-            resolve_agent("plan").unwrap(),
-            config,
-            client,
-            PathBuf::from("."),
-        )
-    }
-
-    fn make_act_session() -> SessionState {
-        let config = Config::default();
-        let client: Arc<dyn ChatStream> = Arc::new(MockChatClient::new());
-        SessionState::new(
-            "test",
-            resolve_agent("act").unwrap(),
-            config,
-            client,
-            PathBuf::from("."),
-        )
-    }
-
-    #[test]
-    fn plan_first_prompt_not_tagged() {
-        let mut s = make_plan_session();
-        let mut text = String::from("build a web app");
-        s.maybe_tag_plan_prompt(&mut text);
-        assert_eq!(text, "build a web app", "first prompt should not be tagged");
-        assert_eq!(s.plan_input_count, 1);
-    }
-
-    #[test]
-    fn plan_second_prompt_tagged() {
-        let mut s = make_plan_session();
-        s.plan_input_count = 1;
-        let mut text = String::from("also add tests");
-        s.maybe_tag_plan_prompt(&mut text);
-        assert!(text.contains("聚焦计划生成"));
-        assert!(text.contains("question 工具提问"));
-        assert_eq!(s.plan_input_count, 2);
-    }
-
-    #[test]
-    fn act_mode_never_tagged() {
-        let mut s = make_act_session();
-        s.plan_input_count = 5; // even with prior count, act mode should not tag
-        let mut text = String::from("do something");
-        s.maybe_tag_plan_prompt(&mut text);
-        assert_eq!(text, "do something", "act mode should never tag");
-    }
-
-    #[test]
-    fn switch_to_plan_resets_count() {
-        let mut s = make_plan_session();
-        s.plan_input_count = 3;
-        // simulate ClearContext handoff reset
-        s.after_handoff(0, String::new());
-        assert_eq!(s.plan_input_count, 0, "after_handoff resets count");
-    }
-}
-
-#[cfg(test)]
 mod compaction_after_handoff_tests {
     use super::*;
     use std::path::PathBuf;
@@ -210,7 +139,7 @@ mod compaction_after_handoff_tests {
         )
     }
 
-    /// After a plan→act handoff, compaction must clear the stale handoff
+    /// After a transcript handoff, compaction must clear the stale handoff
     /// boundary and install a compaction summary instead — otherwise resume
     /// would take the handoff path (it checks `handoff_seq` first) and ignore
     /// the freshly written summary.
@@ -218,7 +147,7 @@ mod compaction_after_handoff_tests {
     fn compaction_after_handoff_clears_handoff_state() {
         let mut s = make_session();
         // Simulate post-handoff state: handoff_seq set, no compaction yet.
-        s.after_handoff(10, "the plan".into());
+        s.after_handoff(10, "the directive".into());
         assert_eq!(s.handoff_seq, Some(10));
         assert!(s.summary_seq.is_none());
 

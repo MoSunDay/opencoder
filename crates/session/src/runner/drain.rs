@@ -123,15 +123,16 @@ pub(super) async fn drain_one_queued(
                 }
                 return Err(e);
             }
-            // Compound (/plan review, /act_clear_context review): rest is a
+            // Compound (/sandbox review, /clear_context review): rest is a
             // real prompt in the new mode — record it and break.
             if let Some(rest) = rest {
                 crate::skill_resolve::record_compound(session, &rest, &imgs).await;
                 mark_input_recorded(session, seq).await;
                 return Ok(DrainOutcome::Prompt);
             }
-            // Bare ClearContext with a preserved result breaks to execute it;
-            // sentinel path (no result) forces an outer iteration.
+            // Bare ClearContext with a preserved seed falls through so the
+            // model sees the continuity context; blank sentinel (nothing
+            // preserved) goes idle.
             if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
                 && !crate::control_cmd::is_clear_context_handoff(
                     session.handoff_plan.as_deref().unwrap_or(""),
@@ -232,7 +233,7 @@ pub(super) async fn drain_mode_step(
         DrainOutcome::ControlCmd => Ok(DrainModeAction::ConsumeNext),
         DrainOutcome::Empty => {
             // Queue empty. If the transcript ends with an unresponded user
-            // message (e.g. a plan→act handoff awaiting execution), proceed
+            // message (e.g. an execution handoff awaiting run), proceed
             // to the LLM call. A trailing Role::Tool message is equally
             // "unresponded" — the model must process the tool result — so
             // treat it the same way. Without this, a drain-mode session that

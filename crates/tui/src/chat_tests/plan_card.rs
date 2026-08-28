@@ -1,62 +1,14 @@
 use super::super::*;
 
 #[test]
-fn plan_handoff_creates_plan_card() {
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::PlanHandoff(
-        "## Plan\n1. do X\n2. do Y".into(),
-    ));
-
-    // A Plan block is pushed.
-    assert!(
-        v.blocks.iter().any(|b| matches!(b, ChatBlock::Plan { .. })),
-        "PlanHandoff must create a Plan block"
-    );
-
-    // The card renders with a header and the markdown content.
-    let flat = v.flatten();
-    let text: String = flat
-        .iter()
-        .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
-        .collect();
-    assert!(text.contains("plan"), "plan header must be present");
-    assert!(text.contains("Plan"), "plan heading text must be present");
-    assert!(text.contains("do X"), "plan content must be present");
-    assert!(
-        !text.contains("## Plan"),
-        "heading markup must be rendered, not raw"
-    );
-}
-
-#[test]
-fn plan_handoff_finalizes_pending_assistant() {
-    // An in-progress assistant block must be finalized before the Plan card
-    // is pushed, so the plan appears as a separate block.
-    let mut v = ChatView::default();
-    v.apply(&SessionEvent::TextDelta("partial response".into()));
-    v.apply(&SessionEvent::PlanHandoff("## Plan".into()));
-
-    let assistant_count = v
-        .blocks
-        .iter()
-        .filter(|b| matches!(b, ChatBlock::Assistant { .. }))
-        .count();
-    assert_eq!(assistant_count, 1, "assistant block must be finalized");
-    assert!(
-        v.blocks
-            .last()
-            .map(|b| matches!(b, ChatBlock::Plan { .. }))
-            .unwrap_or(false),
-        "Plan block must be last"
-    );
-}
-
-#[test]
 fn plan_card_line_count_matches_flatten() {
     // Verify thinking_headers/subagent_headers line counting stays aligned
     // when a Plan block precedes a Thinking block.
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::PlanHandoff("line one\nline two".into()));
+    v.blocks.push(ChatBlock::Plan {
+        rendered: crate::markdown::render("line one\nline two"),
+        raw: "line one\nline two".to_string(),
+    });
     v.apply(&SessionEvent::ReasoningDelta("think".into()));
 
     let flat = v.flatten();
@@ -73,8 +25,13 @@ fn plan_card_line_count_matches_flatten() {
 fn plan_card_flatten_structure() {
     use ratatui::style::{Color, Modifier};
 
+    // Legacy-compat surface: replay pushes the read-only Plan card directly
+    // (the live PlanHandoff event no longer exists); this pins the rendering.
     let mut v = ChatView::default();
-    v.apply(&SessionEvent::PlanHandoff("## Goal\nShip it".into()));
+    v.blocks.push(ChatBlock::Plan {
+        rendered: crate::markdown::render("## Goal\nShip it"),
+        raw: "## Goal\nShip it".to_string(),
+    });
 
     let flat = v.flatten();
 

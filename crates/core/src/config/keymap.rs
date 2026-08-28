@@ -15,20 +15,17 @@ pub const KEYMAP_INFO: &[(&str, &str)] = &[
     ("cursor_end", "Cursor to line end"),
     ("delete_word", "Delete word backward"),
     ("clear_input", "Clear input"),
-    ("switch_mode", "Toggle act/plan mode (keep context)"),
     ("paste_image", "Paste clipboard image"),
     ("undo", "Undo"),
     ("redo", "Redo"),
     ("forward_word", "Move word forward"),
     ("backward_word", "Move word backward"),
-    ("switch_mode_clear", "Switch mode (clear context)"),
-    ("switch_mode_keep", "Switch mode (keep context)"),
     ("collapse_blocks", "Collapse blocks + exit subagent"),
     ("force_redraw", "Force full-screen redraw"),
     ("copy_mode", "Toggle copy/selection mode"),
 ];
 
-/// Configuration for all 19 re-bindable global keyboard shortcuts. Each field
+/// Configuration for all 16 re-bindable global keyboard shortcuts. Each field
 /// holds a key-spec string parsed by the TUI's `parse_key_spec`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KeymapConfig {
@@ -40,14 +37,11 @@ pub struct KeymapConfig {
     pub cursor_end: String,
     pub delete_word: String,
     pub clear_input: String,
-    pub switch_mode: String,
     pub paste_image: String,
     pub undo: String,
     pub redo: String,
     pub forward_word: String,
     pub backward_word: String,
-    pub switch_mode_clear: String,
-    pub switch_mode_keep: String,
     pub collapse_blocks: String,
     pub force_redraw: String,
     pub copy_mode: String,
@@ -64,14 +58,11 @@ impl Default for KeymapConfig {
             cursor_end: "ctrl+e".into(),
             delete_word: "ctrl+w".into(),
             clear_input: "ctrl+u".into(),
-            switch_mode: "ctrl+t".into(),
             paste_image: "ctrl+v".into(),
             undo: "ctrl+z".into(),
             redo: "ctrl+y".into(),
             forward_word: "alt+f".into(),
             backward_word: "alt+b".into(),
-            switch_mode_clear: "alt+tab".into(),
-            switch_mode_keep: "ctrl+shift+tab".into(),
             collapse_blocks: "ctrl+l".into(),
             force_redraw: "ctrl+f".into(),
             copy_mode: "ctrl+g".into(),
@@ -91,14 +82,11 @@ impl KeymapConfig {
             "cursor_end" => &self.cursor_end,
             "delete_word" => &self.delete_word,
             "clear_input" => &self.clear_input,
-            "switch_mode" => &self.switch_mode,
             "paste_image" => &self.paste_image,
             "undo" => &self.undo,
             "redo" => &self.redo,
             "forward_word" => &self.forward_word,
             "backward_word" => &self.backward_word,
-            "switch_mode_clear" => &self.switch_mode_clear,
-            "switch_mode_keep" => &self.switch_mode_keep,
             "collapse_blocks" => &self.collapse_blocks,
             "force_redraw" => &self.force_redraw,
             "copy_mode" => &self.copy_mode,
@@ -117,14 +105,11 @@ impl KeymapConfig {
             "cursor_end" => self.cursor_end = value,
             "delete_word" => self.delete_word = value,
             "clear_input" => self.clear_input = value,
-            "switch_mode" => self.switch_mode = value,
             "paste_image" => self.paste_image = value,
             "undo" => self.undo = value,
             "redo" => self.redo = value,
             "forward_word" => self.forward_word = value,
             "backward_word" => self.backward_word = value,
-            "switch_mode_clear" => self.switch_mode_clear = value,
-            "switch_mode_keep" => self.switch_mode_keep = value,
             "collapse_blocks" => self.collapse_blocks = value,
             "force_redraw" => self.force_redraw = value,
             "copy_mode" => self.copy_mode = value,
@@ -149,14 +134,11 @@ mod tests {
         assert_eq!(d.cursor_end, "ctrl+e");
         assert_eq!(d.delete_word, "ctrl+w");
         assert_eq!(d.clear_input, "ctrl+u");
-        assert_eq!(d.switch_mode, "ctrl+t");
         assert_eq!(d.paste_image, "ctrl+v");
         assert_eq!(d.undo, "ctrl+z");
         assert_eq!(d.redo, "ctrl+y");
         assert_eq!(d.forward_word, "alt+f");
         assert_eq!(d.backward_word, "alt+b");
-        assert_eq!(d.switch_mode_clear, "alt+tab");
-        assert_eq!(d.switch_mode_keep, "ctrl+shift+tab");
         assert_eq!(d.collapse_blocks, "ctrl+l");
         assert_eq!(d.force_redraw, "ctrl+f");
         assert_eq!(d.copy_mode, "ctrl+g");
@@ -180,6 +162,44 @@ mod tests {
 
     #[test]
     fn keymap_info_count_matches_fields() {
-        assert_eq!(KEYMAP_INFO.len(), 19);
+        let fields = serde_json::to_value(KeymapConfig::default())
+            .expect("defaults serialize")
+            .as_object()
+            .expect("defaults are an object")
+            .len();
+        assert_eq!(KEYMAP_INFO.len(), 16);
+        assert_eq!(KEYMAP_INFO.len(), fields, "KEYMAP_INFO must cover every field");
+    }
+
+    /// Old user configs still carry the removed `switch_mode*` bindings
+    /// (the plan/act dual mode is gone). Plain `Deserialize` ignores unknown
+    /// fields, so a legacy keymap must load without error -- this guards
+    /// against re-introducing `deny_unknown_fields`.
+    #[test]
+    fn legacy_keymap_with_removed_switch_mode_keys_still_loads() {
+        let legacy = r#"{
+            "help": "ctrl+h",
+            "quit": "ctrl+d",
+            "cancel": "ctrl+c",
+            "newline": "ctrl+j",
+            "cursor_home": "ctrl+a",
+            "cursor_end": "ctrl+e",
+            "delete_word": "ctrl+w",
+            "clear_input": "ctrl+u",
+            "switch_mode": "ctrl+t",
+            "paste_image": "ctrl+v",
+            "undo": "ctrl+z",
+            "redo": "ctrl+y",
+            "forward_word": "alt+f",
+            "backward_word": "alt+b",
+            "switch_mode_clear": "alt+tab",
+            "switch_mode_keep": "ctrl+shift+tab",
+            "collapse_blocks": "ctrl+l",
+            "force_redraw": "ctrl+f",
+            "copy_mode": "ctrl+g"
+        }"#;
+        let cfg: KeymapConfig = serde_json::from_str(legacy).expect("legacy keymap loads");
+        assert_eq!(cfg, KeymapConfig::default());
+        assert!(cfg.get("switch_mode").is_none());
     }
 }

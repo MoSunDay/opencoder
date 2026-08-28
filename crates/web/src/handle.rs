@@ -14,7 +14,7 @@ use anyhow::Result;
 use opencoder_core::Config;
 use opencoder_llm::{ChatClient, ChatStream};
 use opencoder_session::compaction;
-use opencoder_session::plan_handoff;
+use opencoder_session::handoff;
 use opencoder_session::tools::registry as build_registry;
 use opencoder_session::{resume_and_replay as resume_session, run, SessionEvent};
 use opencoder_store::{Delivery, EventKind, SessionInput, SessionPatch, Store};
@@ -425,7 +425,7 @@ async fn apply_drain_cmd(
     // Mirror the main `run` callback: broadcast to live SSE subscribers AND
     // persist the event to the `session_events` table via the sink. Without
     // the `sink.push`, drain-command events (Compaction, Done,
-    // TranscriptReset, PlanHandoff, …) would never reach disk, so an SSE
+    // TranscriptReset, …) would never reach disk, so an SSE
     // reconnect replay (`?after=<seq>`) would silently miss them.
     let mut broadcast = |ev: SessionEvent| {
         let (sse, _) = sse_from_session_event(sid, &ev);
@@ -440,8 +440,11 @@ async fn apply_drain_cmd(
                 Err(e) => broadcast(SessionEvent::Error(format!("compact: {e:#}"))),
             }
         }
+        // Execution handoff (web parity of the autopilot ACT phase): collapse
+        // the transcript to the newest assistant brief as a single synthetic
+        // directive, persist the boundary, and switch back to `act`.
         DrainCmd::Handoff { extra } => {
-            if let Some(plan) = plan_handoff::handoff(session, &extra) {
+            if handoff::reset_to_directive(session, &extra).is_some() {
                 if let Some(store) = &session.store {
                     let _ = store
                         .update_session(
@@ -450,8 +453,8 @@ async fn apply_drain_cmd(
                                 agent: Some("act".into()),
                                 handoff_seq: session.handoff_seq,
                                 handoff_plan: session.handoff_plan.clone(),
-                                clear_plan_snapshot: true,
-                                plan_input_count: Some(session.plan_input_count as i64),
+                                clear_summary: true,
+                                clear_skill: true,
                                 updated_at: Some(opencoder_core::message::now_ms()),
                                 ..Default::default()
                             },
@@ -459,10 +462,11 @@ async fn apply_drain_cmd(
                         .await;
                 }
                 broadcast(SessionEvent::TranscriptReset(session.messages.clone()));
-                broadcast(SessionEvent::PlanHandoff(plan));
                 broadcast(SessionEvent::Done);
             } else {
-                broadcast(SessionEvent::Error("no plan to hand off".into()));
+                broadcast(SessionEvent::Error(
+                    "nothing to hand off: no assistant reply yet".into(),
+                ));
             }
         }
         DrainCmd::SetSkill(body) => {
@@ -507,9 +511,6 @@ async fn apply_drain_cmd(
         }
         DrainCmd::SetAnnotation(text) => {
             crate::handle_questions::apply_set_annotation(session, text).await;
-        }
-        DrainCmd::ResetPlanPhase => {
-            crate::handle_questions::apply_reset_plan_phase(session).await;
         }
     }
 }

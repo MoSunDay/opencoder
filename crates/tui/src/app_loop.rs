@@ -22,7 +22,7 @@ use ratatui::text::{Line, Span};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app_helpers::{mode_switch_busy_flash, start_turn, sys_tokens_for, worker_dead};
+use crate::app_helpers::{start_turn, worker_dead};
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::{handle_command_key, CommandMenu, CommandOutcome};
@@ -157,112 +157,6 @@ pub(crate) fn tick_clock(
     if running {
         *task_elapsed_ms = task_elapsed_ms.saturating_add(dt);
     }
-}
-
-/// Outcome of [`handle_switch_agent`]: mirrors the `break` (quit) that lived
-/// inline in the loop body when the worker channel died.
-pub(crate) enum SwitchOutcome {
-    Proceed,
-    Quit,
-}
-
-/// Handle `KeyAction::SwitchAgent` (Shift+Tab / Alt+Tab): switch agent mode
-/// behind a BIDIRECTIONAL running gate — the same contract as the slash
-/// paths' `worker::gate_switch`. Busy (a turn in flight OR a live subagent)
-/// blocks BOTH directions with an explicit busy hint: nothing is sent,
-/// agent/input/sys_tokens/running stay untouched, and the user re-presses at
-/// a clean idle boundary (no deferred auto-fire).
-///
-/// When idle and a plan→act handoff is armed (`plan_submitted`): hand off
-/// immediately (transcript fold + immediate execution, carrying any input
-/// text). Otherwise: pure switch via [`crate::mode_switch::pure_switch_send`]
-/// — the optimistic `fold_agent_switch` keeps the status chip correct even if
-/// the AgentSwitch event is dropped under channel pressure and collapses a
-/// stale `plan_submitted` synchronously (rapid double-tap hygiene). The
-/// ctrl+t chord does NOT come through here: it is structurally separated in
-/// [`crate::mode_switch::handle_pure_mode_switch`] and can never start a turn.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn handle_switch_agent(
-    name: String,
-    chat: &mut ChatView,
-    running: &mut bool,
-    follow: &mut bool,
-    input: &mut String,
-    cursor_idx: &mut usize,
-    mode_flash: &mut Option<(String, u32)>,
-    anim_tick: u32,
-    cmd_tx: &mpsc::Sender<UiCmd>,
-    cancel: &mut CancellationToken,
-    sys_tokens: &mut u64,
-    workdir: &Path,
-    active_skill_body: &Option<String>,
-    last_switch_sent: &mut Option<UiCmd>,
-) -> SwitchOutcome {
-    let plan_to_act = chat.agent == "plan" && name == "act";
-    if *running || chat.subagents_running > 0 {
-        // Busy (a turn in flight OR a live subagent): the worker is
-        // mid-run_session and any mode switch — either direction — would
-        // apply at an arbitrary partial boundary (and a plan→act handoff
-        // would start the next turn with a stale agent). Intercept with an
-        // explicit hint — the user re-presses at a clean idle boundary (no
-        // deferred auto-fire). sys_tokens / input / running are untouched
-        // (the mode is unchanged).
-        *mode_flash = Some(mode_switch_busy_flash(anim_tick));
-        return SwitchOutcome::Proceed;
-    }
-    *sys_tokens = sys_tokens_for(&name, workdir, active_skill_body.as_deref());
-    // Optimistically reflect the switch so the status chip is correct even if
-    // AgentSwitch is dropped under channel pressure. Covers non-turning switches
-    // (Alt+Tab) that emit no TurnDone to reconcile against. Folding the full
-    // switch (not just copying the name) also collapses a stale
-    // `plan_submitted` synchronously — the second tap of a rapid Shift+Tab
-    // act→plan→act double-tap then takes the pure-switch branch below instead
-    // of firing a bogus handoff off an `AgentSwitch("plan")` event that has
-    // not yet round-tripped back to the UI.
-    chat.fold_agent_switch(&name);
-    if plan_to_act && chat.plan_submitted {
-        // Idle: handoff immediately, carrying any input text.
-        let extra = std::mem::take(input);
-        *cursor_idx = 0;
-        *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
-        if !start_turn(cmd_tx, cancel, UiCmd::SwitchAndStart(name, extra)).await {
-            worker_dead(chat);
-            return SwitchOutcome::Quit;
-        }
-        *running = true;
-        *follow = true;
-        chat.begin_turn(); // handoff starts a turn: the pure-switch dedup baseline no longer applies
-    } else {
-        // Pure switch: same idempotent send path as the ctrl+t chord.
-        crate::mode_switch::pure_switch_send(
-            &name,
-            mode_flash,
-            anim_tick,
-            cmd_tx,
-            last_switch_sent,
-        );
-    }
-    SwitchOutcome::Proceed
-}
-
-/// Shared plan→act handoff prep for the `/act` and `/act_clear_context` slash
-/// commands (and mirrors the Shift+Tab path in [`handle_switch_agent`]):
-/// drain the input box, refresh the context-meter baseline, set the mode-flash
-/// banner. Returns the captured input text to forward as `SwitchAndStart`'s
-/// extra payload.
-fn prep_plan_to_act(
-    input: &mut String,
-    cursor_idx: &mut usize,
-    sys_tokens: &mut u64,
-    mode_flash: &mut Option<(String, u32)>,
-    anim_tick: u32,
-    workdir: &Path,
-) -> String {
-    let extra = std::mem::take(input);
-    *cursor_idx = 0;
-    *sys_tokens = sys_tokens_for("act", workdir, None);
-    *mode_flash = Some(("\u{2192} act mode".into(), anim_tick));
-    extra
 }
 
 /// Body of the `maybe_ev = evt_rx.recv()` select arm: drain all queued
@@ -430,28 +324,6 @@ pub(crate) async fn fold_ui_events(
                 // The ordered forwarder reliably delivers AgentSwitch before
                 // TurnDone. Keep this authoritative assignment for compatibility
                 // with older producers and restored UI state.
-                //
-                // Consumption-time plan arm: a TurnDone(plan) means a turn
-                // actually RAN in the plan phase, so re-arm `plan_submitted`
-                // from the persisted plan-phase state — the authoritative
-                // record of delivered requirements (the counter increments
-                // when a real requirement is recorded for the plan agent;
-                // bare commands and skill-only submissions never increment
-                // it) plus the phase-bounded snapshot. This covers steers,
-                // queued inputs and compound `/plan <content>` (the counter
-                // persists at record time, before this TurnDone), and it can
-                // NEVER arm from a stranded, never-consumed admit. The
-                // session row's agent column is NOT consulted: ts-origin
-                // sessions keep it NULL by design, which used to disarm
-                // Shift+Tab here — the TurnDone(plan) event itself proves a
-                // plan turn just ran. A store failure keeps the current flag
-                // (fail-open).
-                if agent == "plan" {
-                    if let Ok(Some(meta)) = store.get_session(session_id).await {
-                        chat.plan_submitted =
-                            meta.plan_input_count > 0 || meta.plan_snapshot.is_some();
-                    }
-                }
                 chat.agent = crate::terminal_text::sanitize_single_line(&agent).into_owned();
                 // Safety net for older producers that could omit
                 // SessionEvent::Done during token bursts. Current TurnDone is
@@ -551,8 +423,6 @@ pub(crate) async fn dispatch_command(
                 ap_menu,
                 cache_salt_menu,
                 agent_name,
-                input,
-                cursor_idx,
                 config,
                 workdir,
                 mode_flash,

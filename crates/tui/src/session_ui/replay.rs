@@ -316,8 +316,8 @@ fn push_subagent_block(chat: &mut ChatView, block: ChatBlock) {
 }
 
 /// Rebuild the chat view after a mid-run `TranscriptReset` (compaction /
-/// clear-context), carrying over cross-reset UI state: plan-submitted flag,
-/// saved annotation, submitted flag, first prompt, and the session-lifetime
+/// clear-context), carrying over cross-reset UI state: saved annotation,
+/// submitted flag, first prompt, and the session-lifetime
 /// token accumulation (floored via `preserve_tokens_total`).
 pub async fn rebuild_after_reset(
     chat: &mut ChatView,
@@ -326,13 +326,11 @@ pub async fn rebuild_after_reset(
     session_id: &str,
 ) {
     let agent = chat.agent.clone();
-    let saved_plan_submitted = chat.plan_submitted;
     let saved_annotation_text = chat.annotation_text.clone();
     let saved_submitted = chat.submitted;
     let saved_first_prompt = chat.first_prompt.clone();
     let saved_tokens_total = chat.tokens_total;
     *chat = replay_into_chat(&agent, msgs, store, session_id, saved_tokens_total).await;
-    chat.plan_submitted = saved_plan_submitted;
     chat.annotation_text = saved_annotation_text;
     chat.submitted = saved_submitted;
     chat.first_prompt = saved_first_prompt;

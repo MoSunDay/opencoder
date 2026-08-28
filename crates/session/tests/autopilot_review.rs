@@ -1,9 +1,9 @@
 //! Integration tests for the three-state autopilot mode dispatch through the
 //! `run` entry point, focused on the one-shot review pass
 //! (`autopilot.mode = "review"`): exactly one `Review` marker + one review
-//! turn (never a PLAN/ACT/VERIFY loop), the switch to the plan agent,
-//! review-skill activation from `~/.opencoder/skills` and its cleanup, the
-//! act-only dispatch gate (plan mode skips the pass), plus the `ap`
+//! turn (never a PLAN/ACT/VERIFY loop), the agent-agnostic dispatch (the pass
+//! runs on whatever primary agent completed the task — no switch), review
+//! skill activation from `~/.opencoder/skills` and its cleanup, plus the `ap`
 //! regression (phases still cycle under `max_iterations = 1`).
 //!
 //! Split out of `autopilot.rs` to keep both files within the per-file line
@@ -130,8 +130,8 @@ fn seed_review_skill(home: &Path) -> PathBuf {
 // ── review mode: one-shot pass, never a loop ──────────────────────────────
 
 /// mode=Review: the initial task completes, then exactly one review turn
-/// runs under the plan agent and the run finishes — the pass must NOT
-/// continue into a PLAN/ACT/VERIFY cycle.
+/// runs on the CURRENT agent (no switch) and the run finishes — the pass
+/// must NOT continue into a PLAN/ACT/VERIFY cycle.
 #[tokio::test]
 async fn review_mode_runs_exactly_one_review_pass() {
     // initial task (1 call) + review turn (1 call).
@@ -166,12 +166,13 @@ async fn review_mode_runs_exactly_one_review_pass() {
         .count();
     assert_eq!(review_count, 1, "exactly one AutoPilot(Review, 0) event");
 
-    // (ii) the pass switched to the plan agent.
+    // (ii) the pass makes NO agent switch — the reviewer stays on whatever
+    // agent completed the task.
     assert!(
         events
             .iter()
-            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(name) if name == "plan")),
-        "review pass must switch to the plan agent"
+            .all(|ev| !matches!(ev, SessionEvent::AgentSwitch(_))),
+        "review pass is agent-agnostic: no AgentSwitch, got {events:?}"
     );
 
     // (iii) a terminal Done follows the review marker.
@@ -262,22 +263,22 @@ async fn review_mode_activates_then_clears_review_skill() {
     );
 }
 
-/// mode=Review under the plan agent (plan mode): the dispatch layer must NOT
-/// admit the review pass — a review assesses EXECUTED work, so a primary
-/// session that never ran the act agent gets exactly its initial turn: one
-/// LLM call, zero AutoPilot events, no skill activation, and no synthetic
-/// review prompt in the transcript. The mock queues a single script, so an
-/// erroneously dispatched pass would exhaust it and fail the run outright.
+/// mode=Review under the sandbox agent: the dispatch is agent-agnostic — the
+/// read-only reviewer runs on the sandbox agent exactly like on act: two LLM
+/// calls (initial + review), the Review marker, and the synthetic review
+/// prompt in the transcript.
 #[tokio::test]
-async fn review_mode_skips_pass_in_plan_mode() {
-    // Exactly one script: the initial (plan) turn. No review turn is queued —
-    // if the pass were dispatched the mock would run dry and error out.
-    let mock = Arc::new(MockChatClient::new().push_script(vec![completed("planned")]));
+async fn review_mode_runs_pass_in_sandbox_mode() {
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![completed("explored")])
+            .push_script(vec![completed("review-0")]),
+    );
     let (_dir, mut session) = {
         let dir = tempfile::tempdir().unwrap();
-        let agent = resolve_agent("plan").unwrap();
+        let agent = resolve_agent("sandbox").unwrap();
         let s = SessionState::new(
-            "ap-plan-mode-sess",
+            "ap-sandbox-mode-sess",
             agent,
             mode_config(ApMode::Review, 10),
             mock.clone() as Arc<dyn ChatStream>,
@@ -288,50 +289,48 @@ async fn review_mode_skips_pass_in_plan_mode() {
 
     let reg = registry();
     let (buf, mut on_event) = collector();
-    run_with_registry(&mut session, "plan it".into(), vec![], &reg, &mut on_event)
-        .await
-        .unwrap();
+    run_with_registry(
+        &mut session,
+        "explore it".into(),
+        vec![],
+        &reg,
+        &mut on_event,
+    )
+    .await
+    .unwrap();
     let events = buf.lock().unwrap().clone();
 
-    // (i) exactly one LLM call — the initial turn, nothing else.
+    // (i) two LLM calls — the initial turn + the review turn.
     assert_eq!(
         mock.call_count(),
-        1,
-        "only the initial turn may call the LLM"
+        2,
+        "the pass must run after the initial sandbox turn"
     );
-    // (ii) zero AutoPilot events and no agent switch — no pass was dispatched.
+    // (ii) the Review marker was emitted.
     assert!(
-        !events
+        events.iter().any(|ev| matches!(
+            ev,
+            SessionEvent::AutoPilot {
+                phase: ApPhase::Review,
+                ..
+            }
+        )),
+        "sandbox mode must dispatch the review pass"
+    );
+    // (iii) no agent switch anywhere.
+    assert!(
+        events
             .iter()
-            .any(|ev| matches!(ev, SessionEvent::AutoPilot { .. })),
-        "plan mode must not emit any AutoPilot event"
+            .all(|ev| !matches!(ev, SessionEvent::AgentSwitch(_))),
+        "no agent switch may happen in sandbox mode, got {events:?}"
     );
+    // (iv) the synthetic review prompt landed in the transcript.
     assert!(
-        !events
-            .iter()
-            .any(|ev| matches!(ev, SessionEvent::AgentSwitch(_))),
-        "no agent switch may happen without the pass"
-    );
-    // (iii) no skill activation or residue.
-    assert!(
-        session.skill_prompt_cloned().is_none(),
-        "no skill may be activated in plan mode"
-    );
-    assert!(
-        session.active_skill_names.lock().unwrap().is_empty(),
-        "no skill name may leak into the latent-tool filter"
-    );
-    // (iv) no synthetic review prompt landed in the transcript.
-    assert!(
-        !session.messages.iter().any(|m| m.synthetic),
-        "no synthetic message may be recorded without the pass"
-    );
-    assert!(
-        !session
+        session
             .messages
             .iter()
             .any(|m| message_text(m).contains("Review the work completed")),
-        "no synthetic review prompt may land in the transcript"
+        "the synthetic review prompt must be recorded"
     );
 }
 
@@ -492,7 +491,10 @@ async fn review_pass_cancelled_at_entry_is_a_no_op() {
         0,
         "cancelled entry must not call the LLM"
     );
-    assert_eq!(session.agent.name, "act", "agent must not switch to plan");
+    assert_eq!(
+        session.agent.name, "act",
+        "agent must stay unchanged (review never switches)"
+    );
     assert_eq!(
         session.messages.len(),
         messages_before,

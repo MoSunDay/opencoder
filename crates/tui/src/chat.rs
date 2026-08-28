@@ -285,25 +285,9 @@ impl ChatView {
                         Style::default().fg(theme::err_color()),
                     ))]));
             }
-            SessionEvent::PlanHandoff(plan) => {
-                // Dedup: don't stack a second plan card on a replayed PlanHandoff.
-                if self
-                    .blocks
-                    .iter()
-                    .any(|b| matches!(b, ChatBlock::Plan { .. }))
-                {
-                    return;
-                }
-                self.finalize_assistant();
-                let clean_plan = sanitize_multiline(plan);
-                let rendered = crate::markdown::render(&clean_plan);
-                if !rendered.is_empty() {
-                    self.blocks.push(ChatBlock::Plan {
-                        rendered,
-                        raw: clean_plan.into_owned(),
-                    });
-                }
-            }
+            // Legacy persisted `plan_handoff` SSE events parse to `None` and
+            // never reach the display layer; the surviving handoff card comes
+            // from replaying `meta.handoff_plan` (see session_ui::replay).
             SessionEvent::TranscriptReset(_) => {
                 // The view is rebuilt from the new message list via the
                 // replay path, which reconstructs provider truth from the
@@ -335,40 +319,13 @@ impl ChatView {
     }
 
     /// Fold an agent switch into the view state: finalize any open assistant
-    /// block, reflect the new agent, and reset `plan_submitted` on plan
-    /// entries (a fresh plan phase has no delivered requirement yet).
+    /// block and reflect the new agent.
     ///
-    /// Split out of the `AgentSwitch` event arm so the optimistic switch path
-    /// (`app_loop::handle_switch_agent`) can fold synchronously at flip time.
-    /// Without that, `plan_submitted` stays stale-true across a rapid
-    /// Shift+Tab act→plan→act double-tap until the worker's `AgentSwitch`
-    /// event round-trips back to the UI — and a second tap inside that window
-    /// would fire a bogus plan→act handoff that drains the input box and
-    /// collapses the transcript around a fabricated plan.
+    /// Split out of the `AgentSwitch` event arm so other paths can fold the
+    /// switch synchronously at flip time.
     pub fn fold_agent_switch(&mut self, to: &str) {
         self.finalize_assistant();
         self.agent = sanitize_single_line(to).into_owned();
-        if to == "plan" {
-            // Entering plan starts a FRESH phase: any stale arm from a
-            // previous phase collapses here. The ONLY path back to armed is
-            // the consumption-time re-arm (TurnDone(plan) reads the
-            // persisted `plan_input_count`, which increments when a real
-            // requirement is delivered to the plan agent).
-            self.plan_submitted = false;
-        }
-    }
-
-    /// Record that a user requirement was delivered to the current agent.
-    /// In plan mode this arms the plan→act handoff, so Shift+Tab collapses the
-    /// planning transcript (only the final plan carries over). Only the
-    /// Enter idle-submit path calls this — the submit immediately starts the
-    /// run that consumes the input. Steer/queue submits must NOT arm here:
-    /// they arm at consumption (see [`ChatView::fold_agent_switch`]) so a
-    /// stranded, never-consumed row can never arm a handoff.
-    pub fn note_requirement_submitted(&mut self) {
-        if self.agent == "plan" {
-            self.plan_submitted = true;
-        }
     }
 
     /// Begin a new turn. The single owner of the turn-start invariant: any
@@ -456,9 +413,6 @@ impl ChatView {
             }
             SessionEvent::Compaction(c) => {
                 self.context_used = estimate(c) as u64;
-            }
-            SessionEvent::PlanHandoff(plan) => {
-                self.context_used += estimate(plan) as u64;
             }
             // Queue-consumed and steer-consumed prompts are real user messages
             // the model sees in context. Previously they were echoed as

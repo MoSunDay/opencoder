@@ -42,8 +42,6 @@ fn meta(id: &str, task_type: Option<&str>) -> SessionMeta {
         skill: None,
         task_type: task_type.map(str::to_string),
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     }
 }
 
@@ -188,8 +186,6 @@ async fn make_session(store: &LibsqlStore, id: &str, now: i64) {
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     };
     store.create_session(&meta).await.unwrap();
 }

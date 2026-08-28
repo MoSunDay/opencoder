@@ -261,7 +261,7 @@ fn transcript_collapse_resets_reported_usage() {
         ..Default::default()
     };
 
-    s.after_handoff(3, "plan".into());
+    s.after_handoff(3, "brief".into());
     assert_eq!(
         s.last_usage.input_tokens, 0,
         "handoff must reset stale reported usage"

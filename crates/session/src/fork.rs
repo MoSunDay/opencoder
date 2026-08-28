@@ -36,8 +36,6 @@ pub async fn fork_session(store: &dyn Store, parent_id: &str) -> Result<String> 
         skill: meta.skill.clone(),
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     };
     store.create_session(&forked).await?;
     if !messages.is_empty() {
@@ -78,8 +76,6 @@ mod tests {
                 skill: None,
                 task_type: task_type.map(String::from),
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await
             .unwrap();

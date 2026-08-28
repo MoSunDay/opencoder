@@ -87,7 +87,7 @@ pub(crate) async fn initial_chat_view(
     session: &SessionState,
     store: &Arc<dyn Store>,
 ) -> crate::chat::ChatView {
-    let mut view = if !session.messages.is_empty() {
+    let view = if !session.messages.is_empty() {
         crate::session_ui::replay_into_chat(
             &session.agent.name,
             &session.messages,
@@ -103,17 +103,6 @@ pub(crate) async fn initial_chat_view(
             ..Default::default()
         }
     };
-    // Re-arm `plan_submitted` from the persisted plan-phase state so the
-    // plan→act handoff survives a restart (`--continue` / `--session`).
-    // Armed by the input counter OR a plan snapshot: legacy sessions (created
-    // before the plan-phase columns existed) resume with counter=0 but a
-    // recovered snapshot, and both mean a real plan was produced this phase.
-    // Mirrors the /task session-switch path in app_task::switch_session.
-    if session.agent.name == "plan"
-        && (session.plan_input_count > 0 || session.plan_snapshot.is_some())
-    {
-        view.plan_submitted = true;
-    }
     view
 }
 

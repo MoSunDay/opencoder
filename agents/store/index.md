@@ -1,4 +1,4 @@
-Commit: a3b194219b48609bbb078ffd214da477d626bdf4
+Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
 
 # store 模块
 
@@ -29,7 +29,7 @@ schema 当前为 v10：
 - TODO 面：`todo_workflows` 保存 spec/state/generation；`todo_items` 保存每项 projection；`todo_events` 保存有序不可变 transition。
 - v9 migration 从既有 v8 数据库新增 TODO 表和索引，不修改既有 Session 数据。
 - v10 migration 给 `session_inputs` 加 `recorded` 消费标记（NOT NULL DEFAULT 0）：promote（含再提升）时重置 0，消费后 `mark_inputs_recorded` 置 1；promoted-but-unrecorded 孤儿行（崩溃/硬中止残留）由 `recover_orphan_inputs` 翻回 pending；迁移落地时既有 promoted 行一次性回填 recorded=1。
-- v10 migration 给 sessions 加 plan 阶段落库两列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`）。
+- v10 migration 给 sessions 加 plan 阶段落库两列（`plan_snapshot TEXT`、`plan_input_count INTEGER NOT NULL DEFAULT 0`）——plan/act 双模式删除后运行时已不再读写这两列，保留仅为兼容旧库 schema（读路径 `normalize_agent` 把存量 `agent='plan'` 归一为 `act`，原始行不重写）。
 - `commit_todo_transition` 在单事务内更新 workflow、替换 TODO projection 并追加 event；workflow update 带 expected generation，陈旧父进程不能覆盖 interrupt 或其他 writer。
 - Foreign key 将 parent/active TODO Session 关联到 `sessions`，因此 dispatch 先创建 Session，再提交 active reference。
 - 消息批量写按 200 条分块；WAL 使用 30 秒 busy timeout 和被动 checkpoint。
@@ -52,6 +52,6 @@ schema 当前为 v10：
 
 - `tests/store_integration.rs`：WAL 并发、事务回滚、取消安全和崩溃恢复。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
-- `tests/plan_phase.rs`：`plan_snapshot`/`plan_input_count` 经 SessionPatch 往返、set 与 clear 互斥、create_session 携带 plan 阶段字段。
+- `tests/legacy_agent_normalization.rs`：存量 `agent='plan'` 行在全部读路径（get/list/fork 等）归一为 `act`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。
 - `src/bundle.rs` 相关测试：Session 树导入导出与幂等性。

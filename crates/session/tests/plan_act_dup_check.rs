@@ -1,10 +1,10 @@
-//! Regression: plan->act handoff must not duplicate data in the store.
-//! Covers handoff -> run("") -> resume -> run, with steers.
+//! Regression: the transcript handoff boundary must not duplicate data in the
+//! store. Covers handoff -> run("") -> resume -> run, with steers.
 use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, Message};
 use opencoder_llm::{LlmEvent, MockChatClient, Usage};
-use opencoder_session::{plan_handoff, resume, run, SessionState};
+use opencoder_session::{handoff, resume, run, SessionState};
 use opencoder_store::{LibsqlStore, SessionPatch, Store};
 
 fn config() -> Config {
@@ -42,10 +42,10 @@ fn assert_no_dup_ids(msgs: &[Message]) {
     );
 }
 
-fn mk_plan_session(store: Arc<dyn Store>, id: &str) -> SessionState {
-    let mock = Arc::new(MockChatClient::new().push_script(vec![done("## Plan\n1. do X")]));
+fn mk_session(store: Arc<dyn Store>, id: &str) -> SessionState {
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done("## Brief\n1. do X")]));
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("plan").unwrap();
+    let agent = resolve_agent("sandbox").unwrap();
     let mut s = SessionState::new(id, agent, config(), mock, dir.path().to_path_buf());
     s.store = Some(store);
     s
@@ -55,14 +55,14 @@ fn mk_plan_session(store: Arc<dyn Store>, id: &str) -> SessionState {
 async fn handoff_run_no_duplicate() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let _dir = tempfile::tempdir().unwrap();
-    let mut session = mk_plan_session(store.clone(), "dup-1");
-    run(&mut session, "plan something".into(), |_| {})
+    let mut session = mk_session(store.clone(), "dup-1");
+    run(&mut session, "explore something".into(), |_| {})
         .await
         .unwrap();
     assert_eq!(store.load_messages(&session.id).await.unwrap().len(), 2);
 
     session.agent = resolve_agent("act").unwrap();
-    assert!(plan_handoff::handoff(&mut session, "").is_some());
+    assert!(handoff::reset_to_directive(&mut session, "").is_some());
     store
         .update_session(
             &session.id,
@@ -92,13 +92,13 @@ async fn handoff_run_no_duplicate() {
 async fn handoff_resume_run_no_duplicate() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let dir = tempfile::tempdir().unwrap();
-    let mut session = mk_plan_session(store.clone(), "dup-2");
-    run(&mut session, "plan something".into(), |_| {})
+    let mut session = mk_session(store.clone(), "dup-2");
+    run(&mut session, "explore something".into(), |_| {})
         .await
         .unwrap();
 
     session.agent = resolve_agent("act").unwrap();
-    plan_handoff::handoff(&mut session, "");
+    handoff::reset_to_directive(&mut session, "");
     store
         .update_session(
             &session.id,
@@ -148,12 +148,12 @@ async fn handoff_steer_consumed_once() {
     use opencoder_store::{Delivery, SessionInput};
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let _dir = tempfile::tempdir().unwrap();
-    let mut session = mk_plan_session(store.clone(), "dup-3");
-    run(&mut session, "plan something".into(), |_| {})
+    let mut session = mk_session(store.clone(), "dup-3");
+    run(&mut session, "explore something".into(), |_| {})
         .await
         .unwrap();
 
-    // admit a steer while plan agent is idle (un-promoted)
+    // admit a steer while the sandbox agent is idle (un-promoted)
     store
         .admit_input(&SessionInput {
             seq: None,
@@ -170,7 +170,7 @@ async fn handoff_steer_consumed_once() {
         .unwrap();
 
     session.agent = resolve_agent("act").unwrap();
-    plan_handoff::handoff(&mut session, "");
+    handoff::reset_to_directive(&mut session, "");
     store
         .update_session(
             &session.id,
@@ -192,7 +192,7 @@ async fn handoff_steer_consumed_once() {
     run(&mut session, String::new(), |_| {}).await.unwrap();
 
     let msgs = store.load_messages(&session.id).await.unwrap();
-    // plan user(1) + plan assistant(1) + steer-as-user(1) + act assistant(1) + act assistant(1) = 5
+    // sandbox user(1) + sandbox assistant(1) + steer-as-user(1) + act assistant(2) = 5
     let steer_count = msgs
         .iter()
         .filter(|m| m.text().contains("look at module X"))

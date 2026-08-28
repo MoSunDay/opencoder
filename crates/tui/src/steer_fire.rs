@@ -4,10 +4,9 @@
 //!   persist + push onto the pending panel WITHOUT interrupting the running
 //!   turn. The steer is absorbed at the next idle/turn boundary by the runner.
 //!   Deliberately takes no turn_cancel, so it is structurally incapable of
-//!   firing an interrupt. The admit does NOT arm the plan→act handoff:
-//!   arming happens at consumption time (TurnDone(plan) reads the persisted
-//!   plan-phase counter), so a stranded, never-consumed steer row can never
-//!   arm a context-clearing handoff.
+//!   firing an interrupt. The admit is persistence + panel display only —
+//!   delivery happens at the runner's turn boundary, so a stranded,
+//!   never-consumed steer row has no side effects.
 //!
 //! - **Mouse `>` button** (`MouseOutcome::SteerSubmit`) ->
 //!   [`fire_steer_interrupt`]: `steer_dispatch::resolve` + `fire_turn_cancel`,
@@ -60,11 +59,9 @@ pub(crate) async fn admit_keyboard_steer(
     let seq = store.admit_input(&input).await.ok()?;
     pending_images.clear();
     chat.steer_items.push((seq, display.to_string()));
-    // Deliberately NO `note_requirement_submitted` here: the steer is only
-    // ADMITTED, not delivered. It arms the plan→act handoff at consumption
-    // (TurnDone(plan) reads the persisted plan-phase counter), so a stranded
-    // row that a cancelled/idle drain never absorbs cannot arm a
-    // context-clearing handoff.
+    // The steer is only ADMITTED here, not delivered: the runner absorbs it
+    // at the next turn boundary. A stranded row that a cancelled/idle drain
+    // never absorbs therefore has no side effects.
     Some(seq)
 }
 
@@ -556,31 +553,30 @@ mod tests {
         );
     }
 
-    // Consumption-time arming: a keyboard steer is only ADMITTED here — it
-    // must NOT arm the plan→act handoff. The arm happens when the runner
-    // absorbs the steer and the plan turn's TurnDone(plan) re-arms from the
-    // persisted plan-phase counter. A stranded, never-consumed steer row can
-    // therefore never arm a context-clearing handoff.
+    // A keyboard steer is only ADMITTED here: the runner absorbs it at the
+    // next turn boundary, where a control command (/sandbox, /act,
+    // /clear_context) is applied. The admit itself must never touch the
+    // agent chip or the transcript.
     #[tokio::test]
-    async fn keyboard_steer_in_plan_mode_does_not_arm_plan_submitted() {
+    async fn keyboard_steer_admit_does_not_touch_agent_state() {
         let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
-                id: "steer-plan".into(),
+                id: "steer-sandbox".into(),
                 ..Default::default()
             })
             .await
             .unwrap();
 
         let mut chat = ChatView {
-            agent: "plan".into(),
+            agent: "sandbox".into(),
             ..Default::default()
         };
         let mut pending_images = Vec::new();
 
         let seq = admit_keyboard_steer(
             &store,
-            "steer-plan",
+            "steer-sandbox",
             "also cover the CLI flag",
             "also cover the CLI flag",
             &mut pending_images,
@@ -589,9 +585,9 @@ mod tests {
         .await
         .expect("admit must succeed");
 
-        assert!(
-            !chat.plan_submitted,
-            "a plan-mode steer admit must NOT arm the Shift+Tab handoff — arming is consumption-time"
+        assert_eq!(
+            chat.agent, "sandbox",
+            "a steer admit must never switch the agent chip"
         );
         assert_eq!(
             chat.steer_items,
@@ -599,7 +595,7 @@ mod tests {
             "steer must be mirrored on the pending panel"
         );
         let pending = store
-            .pending_inputs("steer-plan", Delivery::Steer)
+            .pending_inputs("steer-sandbox", Delivery::Steer)
             .await
             .unwrap();
         assert_eq!(
@@ -610,10 +606,10 @@ mod tests {
         assert_eq!(pending[0].seq, Some(seq));
     }
 
-    // Fix ④ counterpart: in act mode the same call is a self-guarded no-op for
-    // the handoff arm — `plan_submitted` must stay false.
+    // The panel mirror is agent-agnostic: the same admit path works while the
+    // act agent is active.
     #[tokio::test]
-    async fn keyboard_steer_in_act_mode_does_not_arm_plan_submitted() {
+    async fn keyboard_steer_admit_works_in_act_mode() {
         let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
         store
             .create_session(&SessionMeta {
@@ -640,10 +636,7 @@ mod tests {
         .await
         .expect("admit must succeed");
 
-        assert!(
-            !chat.plan_submitted,
-            "act-mode steer must not arm the plan handoff"
-        );
+        assert_eq!(chat.agent, "act", "act chip must stay untouched");
         assert_eq!(chat.steer_items.len(), 1, "panel mirror is agent-agnostic");
         assert!(seq > 0);
     }

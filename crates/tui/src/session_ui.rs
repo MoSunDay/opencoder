@@ -107,9 +107,9 @@ mod tests {
 
     #[test]
     fn new_produces_sensible_defaults() {
-        let st = SessionUiState::new("plan".into(), 5000);
-        assert_eq!(st.agent_name, "plan");
-        assert_eq!(st.chat.agent, "plan");
+        let st = SessionUiState::new("sandbox".into(), 5000);
+        assert_eq!(st.agent_name, "sandbox");
+        assert_eq!(st.chat.agent, "sandbox");
         assert!(!st.running);
         assert!(st.follow);
         assert_eq!(st.scroll, 0);
@@ -190,8 +190,9 @@ mod tests {
 
     #[test]
     fn replay_skips_synthetic_user_messages() {
-        // Synthetic user messages (steer/queue promotion, plan->act handoff, compaction
-        // summary) must NOT appear as visible `user:` blocks on resume/replay.
+        // Synthetic user messages (steer/queue promotion, agent-switch
+        // handoff, compaction summary) must NOT appear as visible `user:`
+        // blocks on resume/replay.
         let msgs = vec![
             make_user("u1", "real prompt", false),
             make_user("u2", "[synthetic steer body]", true),
@@ -255,9 +256,9 @@ mod tests {
     }
 
     #[test]
-    fn replay_renders_plan_handoff_as_markdown() {
-        // Simulate the synthetic user message produced by plan_handoff::handoff:
-        // the plan markdown is stuffed into a Role::User message.
+    fn replay_renders_markdown_user_message() {
+        // A persisted user message carrying markdown renders with headings
+        // styled, not raw.
         let msg = Message::user("u1", "## Plan\n1. do X\n2. do Y");
         let chat = replay_messages("act", &[msg]);
         let lines = chat.flatten();

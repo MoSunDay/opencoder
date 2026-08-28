@@ -1,37 +1,23 @@
-//! Integration test for the COMPLETE plan→act event flow through `ChatView`,
-//! simulating exactly what `fold_ui_events` does when a `SwitchAndStart` ("act")
-//! fires.
-//!
-//! In the live worker (`SwitchAndStart`), three `SessionEvent`s are emitted in
-//! order:
-//!   1. `AgentSwitch("act")`
-//!   2. `TranscriptReset(handoff_msgs)`  — the UI handles this by REPLACING the
-//!      whole `ChatView` with a fresh one built from `replay_into_chat`.
-//!   3. `PlanHandoff(plan_display)`
-//!
-//! `fold_ui_events` (app_loop.rs) maps those onto a single `ChatView`:
-//!   - `AgentSwitch` and `PlanHandoff` go through `ChatView::apply`.
-//!   - `TranscriptReset` goes through `*chat = replay_into_chat(...)` (a full
-//!     replacement, NOT `apply`).
-//!
-//! The dedup logic in `ChatView::apply` for `PlanHandoff` guarantees we never
-//! stack a second plan card on top of one already rendered — and
-//! `replay_into_chat` itself renders the plan card from the persisted
-//! `handoff_plan` session metadata. This test pins down that, regardless of
-//! ordering, the view ends up with EXACTLY ONE `ChatBlock::Plan` block.
+//! Integration tests for the persisted handoff card through
+//! `replay_into_chat` — the legacy-compat surface that must keep working
+//! after the plan/act dual-mode removal:
+//!   - a plain `handoff_plan` renders exactly one read-only `ChatBlock::Plan`
+//!     card on replay (dedup/idempotence across repeated replays);
+//!   - the clear-context blank sentinel renders NO card and the raw marker
+//!     never reaches the UI;
+//!   - a clear-context seed boundary (`<<OPENCODER_CLEAR_SEED>>` prefix) is
+//!     stripped to its preserved text and renders like a plan card.
 
 use std::sync::Arc;
 
 use opencoder_core::{ContentBlock, Message};
-use opencoder_session::plan_handoff::handoff_message;
-use opencoder_session::SessionEvent;
+use opencoder_session::handoff::handoff_message;
 use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
 use opencoder_tui::chat::{ChatBlock, ChatView};
 use opencoder_tui::session_ui::replay_into_chat;
 
-/// The finalized plan produced by the plan agent — carried verbatim through the
-/// handoff as the display text (what `plan_handoff::handoff` returns and what
-/// `PlanHandoff(plan)` + `handoff_plan` meta both carry).
+/// The finalized plan carried verbatim through the handoff as the display
+/// text (what `handoff_plan` meta persists on an agent switch).
 const PLAN_TEXT: &str = "## Plan\n1. step one\n2. step two";
 
 /// Count how many `ChatBlock::Plan` blocks a view currently holds.
@@ -42,67 +28,44 @@ fn plan_block_count(chat: &ChatView) -> usize {
         .count()
 }
 
-/// Build the plan agent's final assistant message (the source of the plan).
 fn assistant_with_plan() -> Message {
     let mut m = Message::assistant("a1");
-    m.blocks.push(ContentBlock::text(PLAN_TEXT));
+    m.blocks.push(ContentBlock::text("here is the plan"));
     m
 }
 
-/// Set up an in-memory store with one session whose plan-mode transcript and
-/// persisted handoff boundary mirror a real plan→act switch:
-///   - session created (no handoff metadata yet, exactly like live creation),
-///   - 2 plan-mode messages appended (user prompt + plan agent response),
-///   - `handoff_seq` + `handoff_plan` persisted via `update_session` (mirrors
-///     `worker.rs::SwitchAndStart` calling `store.update_session` after the
-///     in-memory handoff mutation).
+/// Create a session with a persisted handoff boundary (`handoff_seq` +
+/// `handoff_plan`), the way the worker does when submitting the control
+/// command that switches agent / clears context.
 async fn setup_session(id: &str) -> Arc<dyn Store> {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
 
-    // Create the session with no handoff metadata (realistic — the boundary is
-    // only known once the user actually switches to act).
     store
         .create_session(&SessionMeta {
             id: id.into(),
             title: None,
             agent: Some("act".into()),
             model: Some("m".into()),
-
-            autopilot_mode: None,
-            workdir_hash: None,
-            created_at: 0,
-            updated_at: 0,
-            summary: None,
-            summary_seq: None,
-            summary_images: vec![],
-            handoff_seq: None,
-            handoff_plan: None,
-            skill: None,
-            task_type: None,
-            requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
+            ..Default::default()
         })
         .await
         .unwrap();
 
-    // The plan-mode transcript that gets trimmed on handoff.
+    // The pre-boundary transcript that gets trimmed on the switch.
     store
         .append_message(id, &Message::user("u1", "plan something"))
         .await
         .unwrap();
-    store
-        .append_message(id, &assistant_with_plan())
-        .await
+    store.append_message(id, &assistant_with_plan()).await
         .unwrap();
 
-    // Persist the handoff boundary via update_session — exactly what the worker
-    // does on SwitchAndStart so resume reconstructs the focused transcript.
+    // Persist the handoff boundary via update_session — exactly what the
+    // worker does so resume reconstructs the focused transcript.
     store
         .update_session(
             id,
             &SessionPatch {
-                handoff_seq: Some(2), // 2 plan-mode messages to trim
+                handoff_seq: Some(2), // 2 pre-boundary messages to trim
                 handoff_plan: Some(PLAN_TEXT.to_string()),
                 updated_at: Some(0),
                 ..Default::default()
@@ -114,11 +77,12 @@ async fn setup_session(id: &str) -> Arc<dyn Store> {
     store
 }
 
-/// Forward order: `AgentSwitch("act")` → `TranscriptReset` replay replacement
-/// → `PlanHandoff`. This is the real `SwitchAndStart` event sequence.
+/// Replay after an agent switch renders EXACTLY one plan card from the
+/// persisted `handoff_plan`, and replaying again (fresh replacement, the
+/// TranscriptReset/resume path) stays at exactly one — no stacking.
 #[tokio::test]
-async fn forward_order_agent_switch_reset_then_handoff_yields_one_plan_block() {
-    let session_id = "plan-card-forward";
+async fn replay_renders_exactly_one_plan_card_and_is_idempotent() {
+    let session_id = "plan-card-replay";
     let store = setup_session(session_id).await;
 
     // The synthetic handoff message the worker builds and feeds through
@@ -126,23 +90,7 @@ async fn forward_order_agent_switch_reset_then_handoff_yields_one_plan_block() {
     // block produced by replay_into_chat is the plan card from `handoff_plan`.
     let handoff_msg = handoff_message(PLAN_TEXT);
 
-    // Start in plan mode, then apply AgentSwitch("act") — mirrors the first
-    // event emitted by SwitchAndStart.
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        ..Default::default()
-    };
-    chat.apply(&SessionEvent::AgentSwitch("act".into()));
-    assert_eq!(
-        plan_block_count(&chat),
-        0,
-        "AgentSwitch alone must not create a Plan block"
-    );
-    assert_eq!(chat.agent, "act", "AgentSwitch must flip the agent to act");
-
-    // TranscriptReset handling: REPLACE the ChatView with a fresh replay
-    // (this is what fold_ui_events does for TranscriptReset — NOT apply).
-    chat = replay_into_chat(
+    let mut chat = replay_into_chat(
         "act",
         std::slice::from_ref(&handoff_msg),
         &store,
@@ -155,62 +103,31 @@ async fn forward_order_agent_switch_reset_then_handoff_yields_one_plan_block() {
         1,
         "replay_into_chat must render exactly one Plan block from handoff_plan"
     );
+    assert_eq!(chat.agent, "act", "replay adopts the session agent");
 
-    // Now PlanHandoff fires on the SAME (replayed) ChatView.
-    chat.apply(&SessionEvent::PlanHandoff(PLAN_TEXT.into()));
-    assert_eq!(
-        plan_block_count(&chat),
-        1,
-        "PlanHandoff after a replayed plan card must NOT stack a second one \
-         (dedup), expected exactly one Plan block"
-    );
-}
-
-/// Reverse order: `PlanHandoff` first, then a `TranscriptReset`-style
-/// `replay_into_chat` replacement. Asserts the result is STILL exactly one
-/// Plan block — the replay rebuilds the view from persisted metadata, wiping
-/// the manually-applied card and re-rendering a single one.
-#[tokio::test]
-async fn reverse_order_handoff_then_reset_replay_yields_one_plan_block() {
-    let session_id = "plan-card-reverse";
-    let store = setup_session(session_id).await;
-
-    let handoff_msg = handoff_message(PLAN_TEXT);
-
-    // PlanHandoff FIRST, on a fresh view (no prior card).
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        ..Default::default()
-    };
-    chat.apply(&SessionEvent::PlanHandoff(PLAN_TEXT.into()));
-    assert_eq!(
-        plan_block_count(&chat),
-        1,
-        "PlanHandoff on a fresh view must create exactly one Plan block"
-    );
-
-    // TranscriptReset handling: REPLACE the ChatView with a fresh replay.
+    // A second full replacement (e.g. /clear or resume again) rebuilds the
+    // same single card — the persisted meta is the only card source.
     chat = replay_into_chat("act", &[handoff_msg], &store, session_id, 0).await;
     assert_eq!(
         plan_block_count(&chat),
         1,
-        "reverse order: replay_into_chat replacement must leave exactly one \
-         Plan block (rebuilt from handoff_plan), got {}",
+        "repeated replay must stay at exactly one Plan block, got {}",
         plan_block_count(&chat)
     );
 }
 
-/// The clear-context boundary (`/act_clear_context`) must NEVER render a plan
-/// card: `handoff_plan` only holds the internal sentinel so resume can rebuild
-/// the fresh-start transcript. `replay_into_chat` skips it — the raw
+/// The clear-context blank boundary must NEVER render a plan card:
+/// `handoff_plan` only holds the internal sentinel so resume can rebuild the
+/// fresh-start transcript. `replay_into_chat` skips it — the raw
 /// `<<OPENCODER_CLEAR_CONTEXT_MARKER>>` string never reaches the UI.
 #[tokio::test]
 async fn clear_context_sentinel_renders_no_plan_card() {
     let session_id = "clear-context-no-card";
     let store = setup_session(session_id).await;
 
-    // Overwrite the plan->act handoff with the clear-context boundary: this is
-    // exactly what `control_cmd::ClearContext` persists in handoff_plan.
+    // Overwrite the handoff with the clear-context boundary: this is exactly
+    // what `ControlCmd::ClearContext` persists in handoff_plan when nothing
+    // is preserved.
     store
         .update_session(
             session_id,
@@ -237,5 +154,46 @@ async fn clear_context_sentinel_renders_no_plan_card() {
     assert!(
         !raw.contains("<<OPENCODER_CLEAR_CONTEXT_MARKER>>"),
         "sentinel must never be output, got: {raw}"
+    );
+}
+
+/// A clear-context seed boundary strips the `<<OPENCODER_CLEAR_SEED>>` marker
+/// and renders ONLY the preserved reply text (like a plan card: read-only
+/// continuity context carried across the clear).
+#[tokio::test]
+async fn clear_context_seed_renders_preserved_text_only() {
+    let session_id = "clear-context-seed";
+    let store = setup_session(session_id).await;
+    let preserved = "the answer was 42";
+
+    store
+        .update_session(
+            session_id,
+            &SessionPatch {
+                handoff_seq: Some(2),
+                handoff_plan: Some(format!("<<OPENCODER_CLEAR_SEED>>{preserved}")),
+                updated_at: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let seed = opencoder_session::control_cmd::seed_message(preserved);
+    let chat = replay_into_chat("act", &[seed], &store, session_id, 0).await;
+
+    assert_eq!(
+        plan_block_count(&chat),
+        1,
+        "seed boundary renders its preserved text as the single plan card"
+    );
+    let raw = format!("{:?}", chat.blocks);
+    assert!(
+        raw.contains(preserved),
+        "preserved text must be visible, got: {raw}"
+    );
+    assert!(
+        !raw.contains("<<OPENCODER_CLEAR_SEED>>"),
+        "the raw seed marker must never reach the UI, got: {raw}"
     );
 }

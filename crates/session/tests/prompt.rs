@@ -346,16 +346,16 @@ fn project_instructions_truncated_past_200kb_with_boundary_safe_cut() {
 }
 
 #[test]
-fn environment_block_marks_plan_mode_readonly() {
-    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Plan);
-    assert!(block.contains("IN_PLAN_MODE"));
+fn environment_block_marks_sandbox_mode_readonly() {
+    let block = environment_block(std::path::Path::new("/repo"), AgentKind::Sandbox);
+    assert!(block.contains("IN_SANDBOX_MODE"));
     assert!(block.contains("read-only"));
     assert!(block.contains("do not edit/write files"));
 }
 
 #[test]
-fn environment_block_omits_plan_marker_in_act() {
+fn environment_block_omits_sandbox_marker_in_act() {
     let block = environment_block(std::path::Path::new("/repo"), AgentKind::Act);
-    assert!(!block.contains("IN_PLAN_MODE"));
+    assert!(!block.contains("IN_SANDBOX_MODE"));
     assert!(block.contains("Working directory: /repo"));
 }

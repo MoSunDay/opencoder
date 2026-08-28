@@ -40,11 +40,11 @@ pub struct Cli {
     /// wins over the stored model) and re-persists so later resumes honor it.
     #[arg(long, global = true, value_name = "MODEL")]
     pub model: Option<String>,
-    /// Override the agent for this run, as a builtin name (act/plan/explore/build).
+    /// Override the agent for this run, as a builtin name (act/sandbox/explore/build).
     /// New sessions use it as the primary agent and persist the choice; resuming
     /// with --agent re-applies it (explicit choice wins over the stored agent)
     /// and re-persists so later resumes honor it.
-    #[arg(long, global = true, value_name = "AGENT")]
+    #[arg(long, global = true, value_name = "AGENT", value_parser = parse_agent_name)]
     pub agent: Option<String>,
     /// Resume the most recent session for this workdir.
     #[arg(
@@ -67,6 +67,32 @@ pub struct Cli {
     pub image: Vec<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub prompt: Vec<String>,
+}
+
+/// Clap value parser for `--agent`: the value must resolve to a builtin
+/// agent, so an unknown or removed name fails at parse time with a clear
+/// message instead of a late runtime error after resume bookkeeping ran.
+/// Validates against [`opencoder_core::resolve_agent`] (the same resolver the
+/// fresh-session and resume paths use) so no previously-accepted builtin is
+/// newly rejected. The removed plan/act dual mode spelled the read-only
+/// primary `plan`; that name now gets an explicit pointer to its `sandbox`
+/// replacement.
+pub fn parse_agent_name(s: &str) -> Result<String, String> {
+    if opencoder_core::resolve_agent(s).is_some() {
+        return Ok(s.to_string());
+    }
+    let agents = opencoder_core::builtin_agents();
+    let mut known: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
+    known.sort_unstable();
+    let hint = if s == "plan" {
+        " (the 'plan' agent was renamed to 'sandbox')"
+    } else {
+        ""
+    };
+    Err(format!(
+        "unknown agent '{s}'{hint}; expected one of: {}",
+        known.join(", ")
+    ))
 }
 
 #[derive(Subcommand, Debug)]

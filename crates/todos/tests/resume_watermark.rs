@@ -67,8 +67,6 @@ async fn seed_session_with_stale_assistant(store: &Arc<dyn Store>, config: &Conf
             skill: None,
             task_type: Some(TASK_TYPE_TODO.into()),
             requirement: Some("return the candidate".into()),
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();

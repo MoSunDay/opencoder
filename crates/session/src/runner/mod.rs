@@ -88,21 +88,21 @@ pub async fn run_with_registry(
     on_event: impl FnMut(SessionEvent) + Send,
 ) -> Result<()> {
     let mut on_event = on_event;
-    // True when a ClearContext with a preserved plan OR seed was applied and
+    // True when a ClearContext with a preserved seed was applied and
     // the transcript now holds a synthetic message awaiting an LLM execution
     // turn (user_text was cleared). This keeps `drain_mode` false so run_loop
     // makes the execution call instead of going idle. Both preserved flavours
     // must continue running; only the blank sentinel (nothing preserved)
     // stops without an LLM turn.
     let mut handoff_pending = false;
-    // Control commands (/act, /plan) short-circuit without an LLM turn. A
-    // compound input (/plan review) switches then runs the rest. EXCEPTION:
-    // /act_clear_context with a preserved result falls through to run_loop.
+    // Control commands (/act, /sandbox) short-circuit without an LLM turn. A
+    // compound input (/sandbox review) switches then runs the rest. EXCEPTION:
+    // /clear_context with a preserved seed falls through to run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
-        // ClearContext with a preserved result (plan handoff or last-say
-        // seed) falls through to run_loop to execute it; blank sentinel path
-        // (nothing preserved) stops as before.
+        // ClearContext with a preserved seed falls through to run_loop so the
+        // model sees the continuity context; blank sentinel path (nothing
+        // preserved) stops as before.
         if matches!(cmd, crate::control_cmd::ControlCmd::ClearContext)
             && !crate::control_cmd::is_clear_context_handoff(
                 session.handoff_plan.as_deref().unwrap_or(""),
@@ -110,9 +110,9 @@ pub async fn run_with_registry(
         {
             handoff_pending = true;
             match rest {
-                // Compound (/act_clear_context review) with a preserved plan:
+                // Compound (/clear_context review) with a preserved seed:
                 // keep the request so it is recorded as a real user prompt and
-                // executed alongside the plan handoff message (not discarded).
+                // executed alongside the seed marker message (not discarded).
                 Some(rest) => user_text = rest,
                 None => {
                     user_text.clear();
@@ -120,7 +120,7 @@ pub async fn run_with_registry(
                 }
             }
         } else if let Some(rest) = rest {
-            // Compound (/plan review): switch done; fall through to recording
+            // Compound (/sandbox review): switch done; fall through to recording
             // which resolves `$skill` tokens and records user_text as prompt.
             user_text = rest;
         } else {
@@ -143,7 +143,7 @@ pub async fn run_with_registry(
     crate::dangling_tools::reconcile_dangling_tool_uses(session).await;
     // Resolve inline `$skill` tokens from the raw user text (headless path —
     // the TUI resolves before calling run). Covers both compound commands
-    // (`/plan $review do it`) and plain prompts (`$review do it`). After
+    // (`/sandbox $review do it`) and plain prompts (`$review do it`). After
     // stripping, text may be empty if only `$skill` tokens were provided.
     let prev_skill = session.skill_prompt_cloned();
     user_text = crate::skill_resolve::resolve_inline_skills(session, &user_text);
@@ -158,14 +158,8 @@ pub async fn run_with_registry(
     let has_text = !user_text.trim().is_empty();
     let has_images = !images.is_empty();
     if has_text || has_images {
-        session.maybe_tag_plan_prompt(&mut user_text);
         let user = Message::user_with_images(new_id(), user_text, &images);
         session.record(user).await;
-        // Persist the incremented plan-phase counter so a restart keeps the
-        // plan→act handoff armed (TUI Shift+Tab, /act_clear_context gate).
-        if session.agent.kind == AgentKind::Plan {
-            session.persist_plan_phase().await;
-        }
     }
     let drain_mode = entry_drain_mode(session, has_text, has_images, handoff_pending).await;
     // Zero-resubmit: a failed run must NOT re-submit admitted inputs.
@@ -182,17 +176,16 @@ pub async fn run_with_registry(
     // control to the PLAN -> ACT -> VERIFY self-driving loop, `review` runs a
     // one-shot review pass (no ACT/VERIFY), and `off` does nothing. A
     // session-scoped override (`effective_ap_mode`) wins over the config.
-    // The review pass is act-only: a review assesses EXECUTED work, so it is
-    // dispatched solely for primary sessions running the act agent — plan
-    // mode (or any other non-act primary) falls through to the no-op `off`.
+    // The review pass runs in ANY agent mode: it is read-only (no switch, no
+    // fold), so it is equally valid after an act run or a sandbox run.
     match session.effective_ap_mode() {
         opencoder_core::ApMode::Ap => {
             crate::autopilot::drive(session, registry, &mut on_event).await?;
         }
-        opencoder_core::ApMode::Review if session.agent.kind == AgentKind::Act => {
+        opencoder_core::ApMode::Review => {
             crate::autopilot::review_pass(session, registry, &mut on_event).await?;
         }
-        opencoder_core::ApMode::Off | opencoder_core::ApMode::Review => {}
+        opencoder_core::ApMode::Off => {}
     }
     Ok(())
 }
@@ -323,7 +316,7 @@ pub(crate) async fn run_loop(
                         // summarize: an empty or single-message transcript.
                         // Two causes are possible: a stale reported usage
                         // from before a transcript collapse (clear-context /
-                        // plan→act handoff now reset it), or a single message
+                        // handoff now reset it), or a single message
                         // so large that the estimate alone crosses the
                         // compaction budget.
                         //

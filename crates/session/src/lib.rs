@@ -5,10 +5,9 @@ pub mod control_cmd;
 pub mod dangling_tools;
 pub mod event_sink;
 pub mod fork;
+pub mod handoff;
 pub mod mcp;
 pub mod mention_resolve;
-pub mod plan_handoff;
-pub mod plan_phase;
 pub mod prompt;
 pub mod resume;
 pub mod resume_helpers;
@@ -36,7 +35,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, Agent, AgentKind, ApMode, Config, Message, Role};
+use opencoder_core::{message::now_ms, Agent, ApMode, Config, Message, Role};
 use opencoder_llm::ChatStream;
 use opencoder_store::{SessionMeta, Store};
 use tokio_util::sync::CancellationToken;
@@ -196,19 +195,15 @@ pub struct SessionState {
     /// store. The authoritative copy lives in the store; this field is used
     /// only for in-memory bookkeeping symmetry with `summary`/`summary_seq`.
     pub summary_images: Vec<String>,
-    /// Plan→act handoff boundary: number of store messages predating the
-    /// handoff (the plan-mode history). On resume these are trimmed and the
-    /// handoff plan instruction is re-attached. `None` = no handoff occurred.
+    /// Transcript handoff boundary: number of store messages predating the
+    /// reset (autopilot ACT handoff, clear-context, legacy plan boundaries).
+    /// On resume these are trimmed and the boundary marker message is
+    /// re-attached. `None` = no handoff occurred.
     pub handoff_seq: Option<i64>,
-    /// Display text of the handoff plan (plan + optional extra). Used to
-    /// reconstruct the synthetic plan instruction on resume and to render the
-    /// plan card.
+    /// Display text persisted at the handoff boundary (directive payload,
+    /// clear-context sentinel or seed marker). Used to reconstruct the
+    /// synthetic boundary message on resume and to render the handoff card.
     pub handoff_plan: Option<String>,
-    /// Requirements submitted in the current plan-mode phase (lifecycle in
-    /// [`crate::plan_phase`]). When > 0, plan prompts get a read-only tag.
-    pub plan_input_count: usize,
-    /// Pre-compaction plan snapshot; see [`crate::plan_phase`].
-    pub plan_snapshot: Option<String>,
     /// User-edited task description text, persisted via the /requirement
     /// slash command so it survives session resume.
     pub requirement: Option<String>,
@@ -254,8 +249,6 @@ impl SessionState {
             handoff_seq: None,
             handoff_plan: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
             question_hub: QuestionHub::new(),
         }
     }
@@ -368,17 +361,7 @@ impl SessionState {
     /// Push a message to the in-memory transcript AND persist it if a store is
     /// attached. Best-effort: persistence errors are logged, not fatal, so a
     /// store hiccup never kills an agent run.
-    ///
-    /// While the plan agent is active, every real assistant text also updates
-    /// the phase-bounded `plan_snapshot` (and mirrors it to the store): the
-    /// plan→act handoff reads ONLY that snapshot, so it can never fabricate a
-    /// "plan" out of an earlier act-phase answer when the plan turn failed or
-    /// was cancelled before producing any output (see `plan_handoff::handoff`).
     pub async fn record(&mut self, msg: Message) {
-        if let Some(snapshot) = crate::plan_phase::plan_snapshot_update(&self.agent.kind, &msg) {
-            self.plan_snapshot = Some(snapshot);
-            self.persist_plan_phase().await;
-        }
         self.messages.push(msg.clone());
         if let Err(e) = self.persist(&msg).await {
             tracing::warn!(session_id = %self.id, error = %e, "persist message failed");
@@ -417,8 +400,6 @@ impl SessionState {
                 skill: self.skill_prompt_cloned(),
                 task_type: None,
                 requirement: None,
-                plan_snapshot: self.plan_snapshot.clone(),
-                plan_input_count: self.plan_input_count as i64,
             };
             store.create_session(&meta).await?;
             self.session_created = true;
@@ -430,7 +411,7 @@ impl SessionState {
 
     /// Count of messages persisted to the store, accounting for any in-memory-only
     /// synthetic summary at the head. Mirrors the accounting in compaction and
-    /// plan_handoff: if a prior compaction set summary_seq, the synthetic
+    /// handoff: if a prior compaction set summary_seq, the synthetic
     /// summary message is NOT in the store, so the store count is
     /// summary_seq + (messages.len() - 1).
     pub fn store_message_count(&self) -> usize {
@@ -466,8 +447,8 @@ impl SessionState {
         self.last_usage = opencoder_llm::Usage::default();
     }
 
-    /// Update bookkeeping after a plan→act handoff. Records the handoff
-    /// boundary (so resume can trim the plan-mode history) and clears any
+    /// Update bookkeeping after an execution handoff. Records the handoff
+    /// boundary (so resume can trim the discarded history) and clears any
     /// compaction state — handoff is the dominant reset, replacing the whole
     /// transcript.
     pub fn after_handoff(&mut self, handoff_seq: i64, handoff_plan: String) {
@@ -483,36 +464,6 @@ impl SessionState {
         // killed the run with "compaction failed: transcript exceeds context
         // window but compaction found nothing to summarize".
         self.last_usage = opencoder_llm::Usage::default();
-        // Plan phase ended (lifecycle: `crate::plan_phase`).
-        self.plan_input_count = 0;
-        self.plan_snapshot = None;
-    }
-
-    /// When in plan mode and this is not the first requirement in the current
-    /// plan phase, append a read-only reminder so the model stays focused on
-    /// planning across multi-turn plan conversations. The tag also carries an
-    /// ask-first clause: any doubt that would shape the plan must go through
-    /// the `question` tool before the plan is emitted. Also increments the
-    /// counter so the next call knows this requirement already occurred.
-    ///
-    /// Recording a new requirement also RETIRES any `plan_snapshot` carried
-    /// from an earlier phase (the `ecce7b0` guard): the snapshot survives the
-    /// plain act→plan switch, but once a new requirement is submitted the old
-    /// plan is stale — if this turn then fails or is cancelled before the
-    /// model answers, `handoff` must not hand the old plan forward as if it
-    /// answered the new requirement. A successful turn re-captures a fresh
-    /// snapshot via `record`. Callers persist the mirror right after this
-    /// (`runner::run_with_registry` and `skill_resolve::record_compound`).
-    pub fn maybe_tag_plan_prompt(&mut self, text: &mut String) {
-        if self.agent.kind == AgentKind::Plan {
-            if self.plan_input_count > 0 {
-                text.push_str(
-                    "\n（当前处于只读的 plan 模式，聚焦计划生成；存在影响计划的疑问必须先用 question 工具提问再输出计划）",
-                );
-            }
-            self.plan_input_count += 1;
-            self.plan_snapshot = None;
-        }
     }
 }
 

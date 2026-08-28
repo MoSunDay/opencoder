@@ -366,7 +366,7 @@ fn status_dot_stays_hidden_through_second_phase() {
                 render_status(
                     f,
                     area,
-                    "plan",
+                    "sandbox",
                     true,
                     "working\u{2026}",
                     tick,
@@ -384,7 +384,7 @@ fn status_dot_stays_hidden_through_second_phase() {
             "hidden phase must hide the dot at tick={tick}; got: {row}"
         );
         assert!(
-            row.starts_with("   [plan]"),
+            row.starts_with("   [sandbox]"),
             "mode chip must stay at the same column at tick={tick}; got: {row}"
         );
     }
@@ -409,4 +409,51 @@ fn status_dot_stays_steady_when_idle() {
             "idle dot must stay visible for tick={tick}; got: {row}"
         );
     }
+}
+
+/// The sandbox mode chip renders as `[sandbox]` in the warning hue: the
+/// read-only agent is announced by name AND by colour (the removed plan
+/// agent never re-appears as a chip).
+#[test]
+fn status_bar_sandbox_chip_renders_in_warn_hue() {
+    use crate::theme::agent_chip_fg;
+
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, "sandbox", false, "", 0, Some(0), 200000, 200000, 0);
+        })
+        .unwrap();
+
+    let buf = terminal.backend().buffer();
+    let row = row_text(buf, 0, 120);
+    let chip_pos = row
+        .find("[sandbox]")
+        .expect("the sandbox chip text must render at the bottom-left");
+    assert_eq!(
+        buf.cell((chip_pos as u16, 0)).unwrap().fg,
+        agent_chip_fg("sandbox"),
+        "the chip must be painted in the sandbox (warn) hue"
+    );
+    
+
+    // The same slot for act stays in the accent hue.
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row = row_text(buf, 0, 120);
+    let chip_pos = row.find("[act]").expect("the act chip must render");
+    assert_eq!(
+        buf.cell((chip_pos as u16, 0)).unwrap().fg,
+        agent_chip_fg("act"),
+        "the act chip must keep the accent hue"
+    );
 }

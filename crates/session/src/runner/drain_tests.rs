@@ -85,32 +85,32 @@ async fn claim_one_queued_claims_even_when_turn_cancel_fired() {
 // ---- drain_one_queued: single-pop semantics ----
 #[tokio::test]
 async fn drain_one_queued_bare_control_cmd_returns_control_cmd() {
-    let (mut session, store, _token) = session_with_queue(&["/plan"]).await;
+    let (mut session, store, _token) = session_with_queue(&["/sandbox"]).await;
     let mut events = Vec::new();
     let outcome = drain_one_queued(&mut session, &mut |e| events.push(e))
         .await
         .unwrap();
     assert!(
         matches!(outcome, DrainOutcome::ControlCmd),
-        "bare /plan should return ControlCmd, got {outcome:?}"
+        "bare /sandbox should return ControlCmd, got {outcome:?}"
     );
     // The command was applied at the idle boundary: agent switched and the
     // AgentSwitch event emitted (this is the delayed-application point for
     // mode commands admitted while running).
     assert_eq!(
-        session.agent.name, "plan",
-        "bare /plan applied -> agent plan"
+        session.agent.name, "sandbox",
+        "bare /sandbox applied -> agent sandbox"
     );
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, crate::SessionEvent::AgentSwitch(a) if a == "plan")),
-        "AgentSwitch(plan) must be emitted on consumption, got {events:?}"
+            .any(|e| matches!(e, crate::SessionEvent::AgentSwitch(a) if a == "sandbox")),
+        "AgentSwitch(sandbox) must be emitted on consumption, got {events:?}"
     );
     let meta = store.get_session("drain-test").await.unwrap().unwrap();
     assert_eq!(
         meta.agent.as_deref(),
-        Some("plan"),
+        Some("sandbox"),
         "agent switch persisted at consumption"
     );
     // Queue should still have zero items after one pop.
@@ -135,11 +135,11 @@ async fn drain_one_queued_real_prompt_returns_prompt() {
 
 #[tokio::test]
 async fn drain_one_queued_compound_returns_prompt() {
-    let (mut session, _store, _token) = session_with_queue(&["/plan review"]).await;
+    let (mut session, _store, _token) = session_with_queue(&["/sandbox review"]).await;
     let outcome = drain_one_queued(&mut session, &mut |_| {}).await.unwrap();
     assert!(
         matches!(outcome, DrainOutcome::Prompt),
-        "compound /plan review should return Prompt, got {outcome:?}"
+        "compound /sandbox review should return Prompt, got {outcome:?}"
     );
 }
 
@@ -220,13 +220,13 @@ async fn claim_one_queued_completes_under_hard_cancel() {
 
 #[tokio::test]
 async fn idle_drain_under_hard_cancel_keeps_queued_mode_cmd_pending() {
-    // TUI scenario: plan session running, Tab submits "/act" (queue), then
+    // TUI scenario: sandbox session running, Tab submits "/act" (queue), then
     // Esc×2 hard-cancels before the idle boundary applies it. The guard must
     // leave the row pending so the next explicit submission re-applies it.
     let (mut session, store, _) = session_with_queue(&["/act"]).await;
     crate::control_cmd::apply(
         &mut session,
-        &crate::control_cmd::ControlCmd::SwitchAgent("plan".into()),
+        &crate::control_cmd::ControlCmd::SwitchAgent("sandbox".into()),
         &mut |_| {},
     )
     .await
@@ -241,9 +241,13 @@ async fn idle_drain_under_hard_cancel_keeps_queued_mode_cmd_pending() {
         .unwrap();
 
     assert!(matches!(action, IdleAction::Done), "got {action:?}");
-    assert_eq!(session.agent.name, "plan", "mode must not switch");
+    assert_eq!(session.agent.name, "sandbox", "mode must not switch");
     let meta = store.get_session(&session.id).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("sandbox"),
+        "store row unchanged"
+    );
     let pending = store
         .pending_inputs(&session.id, Delivery::Queue)
         .await
@@ -296,7 +300,7 @@ async fn steer_batch_hard_cancel_unpromotes_remaining_mode_cmd() {
     let (mut session, store) = make_session("steer-cancel-test").await;
     crate::control_cmd::apply(
         &mut session,
-        &crate::control_cmd::ControlCmd::SwitchAgent("plan".into()),
+        &crate::control_cmd::ControlCmd::SwitchAgent("sandbox".into()),
         &mut |_| {},
     )
     .await
@@ -334,9 +338,13 @@ async fn steer_batch_hard_cancel_unpromotes_remaining_mode_cmd() {
             .unwrap();
     }
 
-    assert_eq!(session.agent.name, "plan", "mode must not switch");
+    assert_eq!(session.agent.name, "sandbox", "mode must not switch");
     let meta = store.get_session(&session.id).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("plan"), "store row unchanged");
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("sandbox"),
+        "store row unchanged"
+    );
     assert!(
         !events
             .iter()

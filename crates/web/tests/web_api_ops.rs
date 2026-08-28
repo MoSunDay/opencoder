@@ -106,8 +106,6 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -574,21 +572,9 @@ async fn handoff_persists_boundary_when_plan_exists() {
         )
         .await
         .unwrap();
-    // Phase-bounded handoff (`plan_handoff::handoff`): the plan comes from
-    // the snapshot `record` persists while the plan agent answers; the drain
-    // restores it from the sessions row via `resume`. Seed that mirror
-    // exactly as a real plan-mode session would have left it.
-    state
-        .store
-        .update_session(
-            sid,
-            &opencoder_store::SessionPatch {
-                plan_snapshot: Some("## Plan\n1. do X\n2. do Y".into()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    // The handoff brief is the newest assistant reply in the transcript
+    // (`handoff::reset_to_directive`); the drain restores the transcript via
+    // `resume`, so seeding the persisted assistant message is enough.
     let resp = app
         .oneshot(
             Request::builder()
@@ -610,6 +596,11 @@ async fn handoff_persists_boundary_when_plan_exists() {
                 assert!(
                     meta.handoff_plan.is_some(),
                     "handoff_plan must be persisted alongside handoff_seq"
+                );
+                let plan = meta.handoff_plan.unwrap();
+                assert!(
+                    plan.contains("## Plan") && plan.contains("begin"),
+                    "handoff_plan carries the brief plus the extra text, got: {plan}"
                 );
                 assert_eq!(
                     meta.agent.as_deref(),

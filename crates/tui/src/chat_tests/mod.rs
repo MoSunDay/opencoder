@@ -6,7 +6,6 @@ mod compaction_state;
 mod image_render;
 mod line_accounting;
 mod plan_card;
-mod requirement_submit;
 mod steer_echo;
 mod subagent;
 mod terminal_safety;

@@ -68,8 +68,6 @@ async fn seed_session(state: &opencoder_web::AppState, sid: &str) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -193,7 +191,7 @@ async fn mode_command_to_running_subagent_is_rejected_without_admission() {
                     "/api/sessions/{parent_sid}/subagents/{task_id}/steer"
                 ))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"prompt":"/plan later","images":[]}"#))
+                .body(Body::from(r#"{"prompt":"/sandbox later","images":[]}"#))
                 .unwrap(),
         )
         .await

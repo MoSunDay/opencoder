@@ -149,11 +149,10 @@ fn paste_non_file_text_returned_verbatim() {
     assert_eq!(paste_payload("hello world", dir.path()), "hello world");
 }
 
-/// Ctrl+T is now a pure act<->plan mode toggle and must NOT be consumed by
-/// `pre_key_intercept` (so it falls through to `handle_key`, which switches
-/// mode without collapsing thinking or clearing the input). Ctrl+L owns the
-/// collapse/clear/follow behaviour (without the forced redraw — that moved to
-/// Ctrl+F).
+/// Ctrl+T (no longer bound to anything) must NOT be consumed by
+/// `pre_key_intercept` — unbound chords fall through to `handle_key`
+/// untouched. Ctrl+L owns the collapse/clear/follow behaviour (without the
+/// forced redraw — that moved to Ctrl+F).
 #[test]
 fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     fn run(key: KeyEvent) -> (bool, String, usize, bool, bool) {
@@ -182,7 +181,7 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
     let ctrl_f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
 
-    // Ctrl+T must pass through untouched (handled downstream as a mode toggle).
+    // Ctrl+T must pass through untouched (no longer bound).
     let (t_consumed, t_input, t_cursor, t_clear, t_follow) = run(ctrl_t);
     assert!(
         !t_consumed,
@@ -522,8 +521,6 @@ async fn skill_only_submit_while_running_drains_images_via_queue() {
             workdir_hash: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
             created_at: 0,
             updated_at: 0,
             summary: None,
@@ -600,8 +597,6 @@ async fn combined_skill_and_text_submit_while_running_queues_clean_text() {
             workdir_hash: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
             created_at: 0,
             updated_at: 0,
             summary: None,

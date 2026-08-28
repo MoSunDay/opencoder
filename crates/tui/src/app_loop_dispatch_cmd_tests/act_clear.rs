@@ -1,66 +1,34 @@
-//! `/act_clear_context` running-gate tests, split out of
-//! `app_loop_dispatch_cmd_tests/mod.rs` to keep both files under the
-//! 800-line iteration cap. Shared helpers (`menu_for`, `enter_key`,
-//! `drain_cmd`) live in the parent module.
-
+//! `/clear_context` popup dispatch: submits the control-command prompt when
+//! idle, refused by the busy gate while running. (`ClearContext` keeps the
+//! active agent — the runner emits only `TranscriptReset` + `Done`.)
 use super::*;
-/// `/act_clear_context` while a turn is running is a no-op (same gate).
+
+/// `/clear_context` from idle submits the prompt verbatim.
 #[tokio::test]
-async fn slash_clear_context_while_running_is_noop() {
-    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+async fn slash_clear_context_from_idle_submits_prompt() {
     let mut chat = ChatView {
-        agent: "plan".into(),
-        plan_submitted: true,
+        agent: "act".into(),
         ..Default::default()
     };
-    let mut running = true;
-    let mut follow = true;
-    let mut task_picker = None;
-    let mut model_menu = None;
-    let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
-    let mut cache_salt_menu = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
-    let mut config = Config::default();
-    let workdir = std::path::Path::new(".");
-    let mut mode_flash: Option<(String, u32)> = None;
-    let mut sys_tokens = 0u64;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let mut command_menu = menu_for("act_clear");
+    let mut menu = menu_for("clear");
+    let (flow, mut cmd_rx, running) = dispatch_popup(&mut menu, &mut chat, false, "act").await;
+    assert!(matches!(flow, LoopFlow::Proceed));
+    assert!(running, "the clear-context turn starts immediately from idle");
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, _) => assert_eq!(text, "/clear_context"),
+        other => panic!("expected Prompt(/clear_context), got {other:?}"),
+    }
+}
 
-    let flow = dispatch_command(
-        &mut command_menu,
-        enter_key(),
-        &cmd_tx,
-        &mut cancel,
-        &mut chat,
-        &mut running,
-        &mut follow,
-        &store,
-        "test",
-        &mut task_picker,
-        &mut model_menu,
-        &mut mcp_menu,
-        &mut None,
-        &mut None,
-        &mut None,
-        &mut None,
-        &mut cache_salt_menu,
-        &mut None,
-        "plan",
-        &mut input,
-        &mut cursor_idx,
-        &mut config,
-        workdir,
-        &mut mode_flash,
-        0,
-        &mut sys_tokens,
-        &mut None,
-        &mut None,
-    )
-    .await;
-
+/// `/clear_context` while running is a no-op (same gate).
+#[tokio::test]
+async fn slash_clear_context_while_running_is_noop() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut menu = menu_for("clear");
+    let (flow, mut cmd_rx, running) = dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");
     assert!(
@@ -75,4 +43,34 @@ async fn slash_clear_context_while_running_is_noop() {
         "a [switch] busy marker must be pushed; blocks: {:?}",
         chat.blocks
     );
+}
+
+/// Shift+Tab and typing the command are ONE path: the key handler emits
+/// `Submit(CLEAR_CONTEXT_CMD [+ draft])`, which parses to
+/// [`SlashAction::ClearContext`] exactly like the typed spellings, and the
+/// canonical string round-trips through `control_cmd_string`.
+#[test]
+fn backtab_and_typed_clear_context_are_one_path() {
+    use crate::command::{control_cmd_string, parse, SlashAction};
+    use crate::key_handler::CLEAR_CONTEXT_CMD;
+
+    // Every spelling the UI can produce parses to the same action.
+    assert_eq!(parse(CLEAR_CONTEXT_CMD), Some(SlashAction::ClearContext));
+    assert_eq!(parse("/clear_context"), Some(SlashAction::ClearContext));
+    assert_eq!(parse("/act_clear_context"), Some(SlashAction::ClearContext));
+
+    // The canonical submitted text is the runner's ClearContext control
+    // command and round-trips.
+    assert_eq!(
+        control_cmd_string(&SlashAction::ClearContext),
+        Some(CLEAR_CONTEXT_CMD)
+    );
+
+    // A Shift+Tab with a draft forwards it as the compound rest of the SAME
+    // command — equivalent to typing "/clear_context <draft>".
+    let typed = format!("{CLEAR_CONTEXT_CMD} finish the summary");
+    let (cmd, rest) =
+        opencoder_session::split_control_prefix(&typed).expect("compound must parse");
+    assert!(matches!(cmd, opencoder_session::ControlCmd::ClearContext));
+    assert_eq!(rest, Some("finish the summary".into()));
 }

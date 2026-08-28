@@ -59,7 +59,10 @@ async fn heartbeat_cancellation_reports_cancelled() {
     ));
 
     // Barrier 1: wait for the CLAIM (task transitioned running server-side).
-    support::wait_for(10, || {
+    // Budgets are generous failure-detection ceilings only: the happy path
+    // settles in well under a second, but a heavily loaded CI machine must
+    // not turn scheduler starvation into a false test failure.
+    support::wait_for(30, || {
         let claimed = st.claimed();
         claimed.contains(&task.task_id).then_some(())
     })
@@ -69,7 +72,7 @@ async fn heartbeat_cancellation_reports_cancelled() {
     st.request_cancel(&task.task_id);
 
     // Barrier 2: terminal status settles on `cancelled` (never done/error).
-    let status = support::wait_for(20, || st.status_of(&task.task_id)).await;
+    let status = support::wait_for(120, || st.status_of(&task.task_id)).await;
     assert_eq!(status, "cancelled", "statuses={:?}", st.statuses());
     let (_, _, err) = st
         .statuses()

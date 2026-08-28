@@ -42,8 +42,6 @@ async fn slash_action_compact_idle_starts_turn() {
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
     let mut config = Config::default();
     let workdir = std::path::Path::new(".");
     let mut mode_flash: Option<(String, u32)> = None;
@@ -69,8 +67,6 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut None,
         &mut cache_salt_menu,
         "act",
-        &mut input,
-        &mut cursor_idx,
         &mut config,
         workdir,
         &mut mode_flash,
@@ -107,8 +103,6 @@ async fn slash_action_compact_running_pushes_busy_marker() {
     let mut model_menu = None;
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
     let mut config = Config::default();
     let workdir = std::path::Path::new(".");
     let mut mode_flash: Option<(String, u32)> = None;
@@ -134,8 +128,6 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut None,
         &mut cache_salt_menu,
         "act",
-        &mut input,
-        &mut cursor_idx,
         &mut config,
         workdir,
         &mut mode_flash,
@@ -176,8 +168,6 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut skill_toggle_menu: Option<crate::skill_menu::SkillMenu> = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
     let mut config = Config::default();
     let workdir = std::path::Path::new(".");
     let mut mode_flash: Option<(String, u32)> = None;
@@ -206,8 +196,6 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut None,
         &mut cache_salt_menu,
         "act",
-        &mut input,
-        &mut cursor_idx,
         &mut config,
         workdir,
         &mut mode_flash,
@@ -246,8 +234,6 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
     let mut mcp_menu: Option<crate::mcp_menu::McpMenu> = None;
     let mut cache_salt_menu = None;
     let mut ap_menu: Option<crate::ap_menu::ApMenu> = None;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
     let mut config = Config::default();
     config.autopilot.mode = opencoder_core::ApMode::Review;
     let workdir = std::path::Path::new(".");
@@ -276,8 +262,6 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         &mut ap_menu,
         &mut cache_salt_menu,
         "act",
-        &mut input,
-        &mut cursor_idx,
         &mut config,
         workdir,
         &mut mode_flash,

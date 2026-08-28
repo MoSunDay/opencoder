@@ -1,15 +1,15 @@
-//! Plan→act handoff boundary survives resume (Gap A).
+//! Transcript handoff boundary survives resume (Gap A).
 //!
-//! The store is append-only, so the full plan-mode history stays durably. But
-//! resume must reconstruct the FOCUSED post-handoff transcript — the synthetic
-//! plan instruction plus only the act-mode messages that followed — not replay
-//! the planning chatter. Mirrors compaction's trim+prepend pattern.
+//! The store is append-only, so the full pre-handoff history stays durable.
+//! But resume must reconstruct the FOCUSED post-handoff transcript — the
+//! synthetic directive plus only the messages that followed — not replay the
+//! exploration chatter. Mirrors compaction's trim+prepend pattern.
 
 use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config, ContentBlock, Message, Role};
 use opencoder_llm::MockChatClient;
-use opencoder_session::{plan_handoff, resume, SessionState};
+use opencoder_session::{handoff, resume, SessionState};
 use opencoder_store::{LibsqlStore, SessionPatch, Store};
 
 fn cfg() -> Config {
@@ -51,21 +51,19 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
 
-    // Persist the plan-mode transcript via the store (append-only).
-    let plan_msgs = vec![
+    // Persist the exploration transcript via the store (append-only).
+    let head_msgs = vec![
         Message::user("u1", "build a foo"),
         assistant("a1", "exploring the codebase..."),
         Message::user("u2", "yes use option A"),
-        assistant("a2", "## Plan\n1. do X\n2. do Y"),
+        assistant("a2", "## Brief\n1. do X\n2. do Y"),
     ];
-    store.append_messages("s1", &plan_msgs).await.unwrap();
-    let n_plan = plan_msgs.len();
+    store.append_messages("s1", &head_msgs).await.unwrap();
+    let n_head = head_msgs.len();
 
     // Mirror the in-memory state and perform the handoff.
     let agent = resolve_agent("act").unwrap();
@@ -79,12 +77,10 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     )
     .with_store(store.clone())
     .mark_session_created();
-    session.messages = plan_msgs.clone();
-    // The handoff only reads the phase-bounded snapshot that `record`
-    // captured when the plan-mode assistant output landed.
-    session.plan_snapshot = Some("## Plan\n1. do X\n2. do Y".into());
-
-    let display = plan_handoff::handoff(&mut session, "").expect("plan present");
+    session.messages = head_msgs.clone();
+    // The handoff extracts the newest non-synthetic assistant text as the
+    // brief (the autopilot ACT phase calls exactly this).
+    let display = handoff::reset_to_directive(&mut session, "").expect("brief present");
     assert_eq!(
         session.messages.len(),
         1,
@@ -92,7 +88,7 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     );
     assert_eq!(
         session.handoff_seq,
-        Some(n_plan as i64),
+        Some(n_head as i64),
         "handoff_seq == number of pre-handoff store messages"
     );
     assert_eq!(session.handoff_plan.as_deref(), Some(display.as_str()));
@@ -115,8 +111,8 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     let act_msg = assistant("act1", "executing step 1");
     store.append_message("s1", &act_msg).await.unwrap();
 
-    // Resume: must reconstruct [plan_instruction, act_msg], NOT the full
-    // plan-mode history.
+    // Resume: must reconstruct [directive, act_msg], NOT the full
+    // pre-handoff history.
     let resumed = resume(
         store,
         "s1",
@@ -130,15 +126,15 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     assert_eq!(
         resumed.messages.len(),
         2,
-        "resumed transcript must be plan instruction + act msg only"
+        "resumed transcript must be directive + act msg only"
     );
-    let plan_msg = &resumed.messages[0];
-    assert_eq!(plan_msg.role, Role::User);
-    assert!(plan_msg.synthetic, "handoff instruction is synthetic");
-    let body = plan_msg.text();
+    let directive = &resumed.messages[0];
+    assert_eq!(directive.role, Role::User);
+    assert!(directive.synthetic, "handoff directive is synthetic");
+    let body = directive.text();
     assert!(
-        body.contains("## Plan\n1. do X\n2. do Y"),
-        "plan text must be present, got: {body}"
+        body.contains("## Brief\n1. do X\n2. do Y"),
+        "brief text must be present, got: {body}"
     );
     assert!(
         body.to_lowercase().contains("execute"),
@@ -146,8 +142,8 @@ async fn resume_after_handoff_reconstructs_focused_transcript() {
     );
     assert!(
         !body.contains("exploring the codebase"),
-        "planning chatter must be dropped, got: {body}"
+        "exploration chatter must be dropped, got: {body}"
     );
     assert_eq!(resumed.messages[1].id, "act1");
-    assert_eq!(resumed.handoff_seq, Some(n_plan as i64));
+    assert_eq!(resumed.handoff_seq, Some(n_head as i64));
 }

@@ -1,4 +1,4 @@
-//! Multi-question dialog for plan-mode `question` tool calls.
+//! Multi-question dialog for primary-agent `question` tool calls.
 //!
 //! All answers are held in the pure state machine until every visible
 //! question is confirmed, then resolved directly on the shared QuestionHub.

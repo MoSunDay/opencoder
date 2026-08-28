@@ -1,4 +1,4 @@
-//! Replay fidelity test: all 16 SessionEvent variants must replay with the
+//! Replay fidelity test: all SessionEvent variants must replay with the
 //! same SSE event-name they were broadcast live with.
 //!
 //! Root cause of the original bug: the coarse `EventKind` enum (12 variants)
@@ -16,9 +16,19 @@ use opencoder_session::SessionEvent;
 use opencoder_store::{EventKind, LibsqlStore, SessionEventRecord, SessionMeta, Store};
 use opencoder_web::handle::sse_from_session_event;
 
-/// Build all 16 SessionEvent variants (one representative of each).
+/// Build representative SessionEvent variants (one of each display kind).
 fn all_variants() -> Vec<SessionEvent> {
+    use opencoder_session::autopilot::ApPhase;
     vec![
+        SessionEvent::LlmRoundStart {
+            started_at_ms: 1,
+        },
+        SessionEvent::LlmRoundEnd,
+        SessionEvent::LlmUsage {
+            total_tokens: 10,
+            input_tokens: 4,
+            output_tokens: 6,
+        },
         SessionEvent::TextDelta("hello".into()),
         SessionEvent::ReasoningDelta("thinking".into()),
         SessionEvent::ToolStart {
@@ -34,7 +44,9 @@ fn all_variants() -> Vec<SessionEvent> {
             images: Vec::new(),
         },
         SessionEvent::AgentSwitch("act".into()),
+        SessionEvent::ModelSwitch("m2".into()),
         SessionEvent::Compaction("summary".into()),
+        SessionEvent::CompactionDelta("delta".into()),
         SessionEvent::Status("working".into()),
         SessionEvent::SubagentStart {
             id: "s1".into(),
@@ -53,7 +65,6 @@ fn all_variants() -> Vec<SessionEvent> {
             ev: Box::new(SessionEvent::TextDelta("child text".into())),
         },
         SessionEvent::TranscriptReset(vec![]),
-        SessionEvent::PlanHandoff("plan text".into()),
         SessionEvent::QueueConsumed {
             seq: 42,
             text: "queued".into(),
@@ -61,6 +72,10 @@ fn all_variants() -> Vec<SessionEvent> {
         SessionEvent::SteerConsumed {
             seq: 7,
             text: "steered".into(),
+        },
+        SessionEvent::AutoPilot {
+            phase: ApPhase::Plan,
+            iteration: 0,
         },
         SessionEvent::Done,
         SessionEvent::Error("oops".into()),
@@ -93,8 +108,6 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -102,8 +115,9 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
     let variants = all_variants();
     assert_eq!(
         variants.len(),
-        16,
-        "expected exactly 16 SessionEvent variants"
+        21,
+        "expected exactly 21 SessionEvent variants — if you added one, extend \
+         all_variants() so the replay-fidelity round-trip covers it"
     );
 
     // For each variant: compute the live kind, persist with sse_kind, read back.
@@ -128,7 +142,7 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
 
     // Read back all events and verify replayed kinds match live kinds.
     let records = store.events_after(sid, 0).await.unwrap();
-    assert_eq!(records.len(), 16);
+    assert_eq!(records.len(), variants.len());
 
     // Replay mapping — same logic as api.rs get_events.
     fn event_kind_str(k: EventKind) -> &'static str {
@@ -164,7 +178,8 @@ async fn replay_kind_matches_live_kind_for_all_variants() {
             i, ev
         );
 
-        // Without sse_kind (old records), the fallback would degrade for 8 variants.
+        // Without sse_kind (old records), the coarse fallback would degrade
+        // every variant whose granular name is not the coarse mapping.
         let fallback_kind = event_kind_str(rec.kind);
         if fallback_kind != live_kind {
             // This variant would be degraded without sse_kind — confirming the fix is needed.

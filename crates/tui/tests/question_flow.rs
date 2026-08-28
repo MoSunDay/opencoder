@@ -92,7 +92,7 @@ async fn worker_prompt_with_question_resolved_mid_turn() {
     let dir = tempfile::tempdir().unwrap();
     let session = SessionState::new(
         "question-worker",
-        resolve_agent("plan").unwrap(),
+        resolve_agent("sandbox").unwrap(),
         Config {
             model: "m/g".into(),
             ..Config::default()
@@ -196,7 +196,7 @@ async fn worker_waits_for_the_complete_question_batch_before_followup_context() 
     let dir = tempfile::tempdir().unwrap();
     let session = SessionState::new(
         "question-batch-worker",
-        resolve_agent("plan").unwrap(),
+        resolve_agent("sandbox").unwrap(),
         Config {
             model: "m/g".into(),
             ..Config::default()

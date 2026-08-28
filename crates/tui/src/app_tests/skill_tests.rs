@@ -33,10 +33,10 @@ fn sys_tokens_counts_system_prompt() {
     assert_eq!(crate::app::sys_tokens_for("does-not-exist", &dir, None), 0);
 }
 
-/// Regression for the SwitchAgent token-recalculation bug (`app.rs`,
-/// `KeyAction::SwitchAgent`): when a skill is active and the user switches
-/// agent mode (plan <-> act), `sys_tokens` is recomputed via
-/// `sys_tokens_for(agent, workdir, skill)`. The `skill` argument must be the
+/// Regression for the agent-switch token-recalculation bug: when a skill is
+/// active and the user switches agent (`/sandbox` <-> `/act`), `sys_tokens`
+/// is recomputed via `sys_tokens_for(agent, workdir, skill)`. The `skill`
+/// argument must be the
 /// skill **body** (the stored instruction text), not the skill **name**: the
 /// body is what latent-tool unlocking (`tools::latent::unlocked_from_body`)
 /// derives from, and it carries the `> Source:` prefix that surfaces the

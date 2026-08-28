@@ -1,5 +1,5 @@
-//! Integration tests for compound control commands: `/plan review` and
-//! `/plan $review` (mode switch + trailing argument / skill token),
+//! Integration tests for compound control commands: `/sandbox review` and
+//! `/sandbox $review` (agent switch + trailing argument / skill token),
 //! submitted as the idle prompt or queued.
 //!
 //! Contracts:
@@ -77,7 +77,7 @@ fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput 
 }
 
 // ---------------------------------------------------------------------------
-// Compound control commands: `/plan review` and `/act review` (mode switch +
+// Compound control commands: `/sandbox review` and `/act review` (agent switch +
 // trailing argument run as a prompt in the new mode).
 // ---------------------------------------------------------------------------
 
@@ -118,7 +118,8 @@ impl Drop for HomeGuard {
     }
 }
 
-/// `/plan review` submitted as the idle prompt switches to plan mode AND runs
+/// `/sandbox review` submitted as the idle prompt switches to the sandbox
+/// agent AND runs
 /// "review" as a real prompt in that mode (one LLM turn), rather than leaking
 /// the whole string to the model as literal text.
 #[tokio::test]
@@ -138,12 +139,12 @@ async fn idle_compound_plan_arg_switches_then_runs() {
     .with_store(store.clone())
     .mark_session_created();
 
-    run(&mut session, "/plan review".into(), |_| {})
+    run(&mut session, "/sandbox review".into(), |_| {})
         .await
         .unwrap();
 
-    assert_eq!(session.agent.name, "plan", "switched to plan");
-    // "review" was recorded as a real user prompt (not the raw "/plan review").
+    assert_eq!(session.agent.name, "sandbox", "switched to sandbox");
+    // "review" was recorded as a real user prompt (not the raw "/sandbox review").
     let has_review = session
         .messages
         .iter()
@@ -158,7 +159,7 @@ async fn idle_compound_plan_arg_switches_then_runs() {
     assert_eq!(assistant_turns, 1, "one assistant turn for the prompt");
 }
 
-/// `/plan review` queued as a single item: at the idle boundary the mode
+/// `/sandbox review` queued as a single item: at the idle boundary the agent
 /// switches (no LLM turn) and then "review" runs as a prompt (one LLM turn).
 #[tokio::test]
 async fn queue_compound_plan_arg_switches_then_runs() {
@@ -181,7 +182,11 @@ async fn queue_compound_plan_arg_switches_then_runs() {
     .mark_session_created();
 
     store
-        .admit_input(&mk_input("compound-queue", Delivery::Queue, "/plan review"))
+        .admit_input(&mk_input(
+            "compound-queue",
+            Delivery::Queue,
+            "/sandbox review",
+        ))
         .await
         .unwrap();
 
@@ -203,7 +208,7 @@ async fn queue_compound_plan_arg_switches_then_runs() {
     let evs = events.lock().unwrap();
     assert!(
         evs.iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")),
         "AgentSwitch(plan) emitted"
     );
     assert!(
@@ -223,10 +228,10 @@ async fn queue_compound_plan_arg_switches_then_runs() {
         .iter()
         .any(|m| m.role == Role::User && m.text().contains("review"));
     assert!(has_review, "'review' entered the transcript");
-    assert_eq!(session.agent.name, "plan", "ended in plan mode");
+    assert_eq!(session.agent.name, "sandbox", "ended in sandbox mode");
 }
 
-/// `/plan $review` with a discoverable review skill: switches to plan AND
+/// `/sandbox $review` with a discoverable review skill: switches to sandbox AND
 /// activates the skill for the run (proven by the LLM request carrying the
 /// skill body), while the `$review` token is stripped from the recorded
 /// prompt. One-shot: the skill is cleared when the run ends.
@@ -252,11 +257,11 @@ async fn compound_plan_with_dollar_activates_skill() {
     .with_store(store.clone())
     .mark_session_created();
 
-    run(&mut session, "/plan $review explain it".into(), |_| {})
+    run(&mut session, "/sandbox $review explain it".into(), |_| {})
         .await
         .unwrap();
 
-    assert_eq!(session.agent.name, "plan", "switched to plan");
+    assert_eq!(session.agent.name, "sandbox", "switched to sandbox");
     // One-shot semantics: activation is proven by the run's own LLM request
     // carrying the skill body/reminder, and the skill is cleared once the
     // run ends (see tests/skill_one_shot.rs for the full contract).
@@ -282,7 +287,7 @@ async fn compound_plan_with_dollar_activates_skill() {
     assert!(!has_dollar, "$review token stripped from the prompt");
 }
 
-/// `/plan $review` queued with NO trailing text (pure-skill compound): the
+/// `/sandbox $review` queued with NO trailing text (pure-skill compound): the
 /// mode switches, the skill body activates, and instead of recording an empty
 /// user message, the skill trigger ("The active skill is now in effect…") is
 /// injected so the model acts on the skill body already in the system prompt.
@@ -315,14 +320,14 @@ async fn queue_compound_pure_skill_injects_trigger() {
         .admit_input(&mk_input(
             "pure-skill-queue",
             Delivery::Queue,
-            "/plan $review",
+            "/sandbox $review",
         ))
         .await
         .unwrap();
 
     run(&mut session, "kickoff".into(), |_| {}).await.unwrap();
 
-    assert_eq!(session.agent.name, "plan", "switched to plan");
+    assert_eq!(session.agent.name, "sandbox", "switched to sandbox");
     // One-shot semantics: the drain turn's LLM request carries the skill;
     // after the run ends the skill is cleared.
     let requests = mock.requests();
@@ -355,7 +360,7 @@ async fn queue_compound_pure_skill_injects_trigger() {
     );
 }
 
-/// `/plan $review` as the IDLE prompt (direct run, not queued/drained):
+/// `/sandbox $review` as the IDLE prompt (direct run, not queued/drained):
 /// switches to plan, activates the skill, and injects the skill trigger so
 /// the model begins executing the skill body. This is the path the TUI idle
 /// submit takes when the frontend forwards the raw compound text.
@@ -380,11 +385,11 @@ async fn idle_compound_plan_pure_skill_injects_trigger() {
     .with_store(store.clone())
     .mark_session_created();
 
-    run(&mut session, "/plan $review".into(), |_| {})
+    run(&mut session, "/sandbox $review".into(), |_| {})
         .await
         .unwrap();
 
-    assert_eq!(session.agent.name, "plan", "switched to plan");
+    assert_eq!(session.agent.name, "sandbox", "switched to sandbox");
     // One-shot semantics: the run's own LLM request carries the skill; the
     // skill is cleared once the run ends.
     let requests = mock.requests();

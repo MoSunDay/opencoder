@@ -119,8 +119,6 @@ async fn done_with_pending_queue_arms_drain_pending() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -207,8 +205,6 @@ async fn done_with_empty_store_goes_idle() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -312,105 +308,6 @@ async fn drain_pending_restart_with_dead_worker_quits() {
     assert!(
         !drain_pending,
         "drain_pending must be cleared before the start_turn attempt"
-    );
-}
-
-// ----- Bug #7: sys_tokens updated before plan→act noop early return -----
-
-/// When the user presses Shift+Tab (plan→act) while a plan turn is still
-/// running AND the plan was already submitted, the switch is intercepted
-/// with an explicit busy hint ("busy — mode switch blocked, retry when
-/// idle"): the agent stays in plan mode — no deferred auto-fire, the user
-/// re-presses at a clean idle boundary.
-///
-/// Previously `*sys_tokens` (the context-meter baseline) was overwritten with
-/// the *act*-mode system-prompt token count *before* the intercepted early
-/// return, corrupting the meter for the remainder of the running plan turn.
-/// This test locks the fix: `sys_tokens` must stay at its pre-call plan-mode
-/// baseline.
-#[tokio::test]
-async fn plan_running_noop_does_not_corrupt_sys_tokens() {
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        plan_submitted: true,
-        ..ChatView::default()
-    };
-
-    let mut running = true;
-    let mut follow = true;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
-    let mut mode_flash: Option<(String, u32)> = None;
-    let anim_tick = 7u32;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let workdir = std::path::Path::new(".");
-    let active_skill_body: Option<String> = None;
-
-    // Pick a sentinel baseline that is guaranteed to differ from the act-mode
-    // system-prompt token count, so the assertion is meaningful.
-    let act_tokens = sys_tokens_for("act", workdir, active_skill_body.as_deref());
-    let baseline = if act_tokens == 42_000_000 {
-        13_370_042
-    } else {
-        42_000_000
-    };
-    assert_ne!(
-        baseline, act_tokens,
-        "test setup: sentinel must differ from act-mode token count"
-    );
-    let mut sys_tokens = baseline;
-
-    let outcome = handle_switch_agent(
-        "act".into(),
-        &mut chat,
-        &mut running,
-        &mut follow,
-        &mut input,
-        &mut cursor_idx,
-        &mut mode_flash,
-        anim_tick,
-        &cmd_tx,
-        &mut cancel,
-        &mut sys_tokens,
-        workdir,
-        &active_skill_body,
-        &mut None, // last_switch_sent dedup baseline
-    )
-    .await;
-
-    // The no-op path returns Proceed without switching.
-    assert!(matches!(outcome, SwitchOutcome::Proceed));
-    // The agent must remain in plan mode (no switch happened).
-    assert_eq!(
-        chat.agent, "plan",
-        "agent must stay in plan mode on the noop"
-    );
-    // The running flag must be untouched (still running the plan turn).
-    assert!(running, "running flag must not be cleared by the noop");
-    // The flash must announce the switch is blocked while busy.
-    assert!(
-        mode_flash
-            .as_ref()
-            .is_some_and(|(msg, tick)| msg.contains("busy") && *tick == anim_tick),
-        "mode_flash must show the 'busy' banner, got {mode_flash:?}"
-    );
-    assert!(
-        mode_flash
-            .as_ref()
-            .is_some_and(|(msg, _)| msg.contains("mode switch blocked")),
-        "mode_flash must say the mode switch is blocked, got {mode_flash:?}"
-    );
-    // The key assertion: the context-meter baseline is NOT overwritten.
-    assert_eq!(
-        sys_tokens, baseline,
-        "sys_tokens must keep the plan-mode baseline on the noop path (got {sys_tokens}, \
-         act-mode count was {act_tokens})"
-    );
-    // And no switch/start command leaked out on the noop path.
-    assert!(
-        cmd_rx.try_recv().is_err(),
-        "no UiCmd must be sent on the plan-running noop path"
     );
 }
 
@@ -547,8 +444,8 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
 
 /// `AgentSwitch` is delivered via `forward_event` -> `try_send`, which silently
 /// drops the event when the UI channel is completely saturated. Since
-/// `chat.agent` is written ONLY by that event, a drop leaves the `[plan]` /
-/// `[act]` status chip stuck on the pre-switch mode. The fix: `TurnDone`
+/// `chat.agent` is written ONLY by that event, a drop leaves the `[sandbox]`
+/// / `[act]` status chip stuck on the pre-switch agent. The fix: `TurnDone`
 /// carries the session's authoritative agent and `fold_ui_events` reconciles
 /// `chat.agent` from it (TurnDone is sent via `send().await`, so it always
 /// arrives).
@@ -559,7 +456,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut chat = ChatView {
-        agent: "plan".into(),
+        agent: "sandbox".into(),
         ..ChatView::default()
     };
     let mut queue_items: Vec<(i64, String)> = Vec::new();
@@ -597,57 +494,6 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     assert_eq!(
         chat.agent, "act",
         "TurnDone must reconcile chat.agent to the authoritative session agent"
-    );
-}
-
-/// Companion: `handle_switch_agent` optimistically sets `chat.agent` so the chip
-/// is correct immediately — for non-turning switches (Alt+Tab) that emit no
-/// TurnDone, and so a subsequent TranscriptReset rebuild uses the right agent.
-#[tokio::test]
-async fn handle_switch_agent_sets_agent_optimistically() {
-    let mut chat = ChatView {
-        agent: "plan".into(),
-        ..ChatView::default()
-    };
-    let mut running = false;
-    let mut follow = true;
-    let mut input = String::new();
-    let mut cursor_idx = 0usize;
-    let mut mode_flash: Option<(String, u32)> = None;
-    let anim_tick = 3u32;
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
-    let mut cancel = CancellationToken::new();
-    let mut sys_tokens = 0u64;
-    let workdir = std::path::Path::new(".");
-    let active_skill_body: Option<String> = None;
-
-    let outcome = handle_switch_agent(
-        "act".into(),
-        &mut chat,
-        &mut running,
-        &mut follow,
-        &mut input,
-        &mut cursor_idx,
-        &mut mode_flash,
-        anim_tick,
-        &cmd_tx,
-        &mut cancel,
-        &mut sys_tokens,
-        workdir,
-        &active_skill_body,
-        &mut None, // last_switch_sent dedup baseline
-    )
-    .await;
-
-    assert!(matches!(outcome, SwitchOutcome::Proceed));
-    assert_eq!(
-        chat.agent, "act",
-        "handle_switch_agent must optimistically set chat.agent before the \
-         worker confirms via AgentSwitch"
-    );
-    assert!(
-        matches!(cmd_rx.try_recv(), Ok(UiCmd::SwitchAgent(n)) if n == "act"),
-        "a non-turning switch must still send SwitchAgent to the worker"
     );
 }
 

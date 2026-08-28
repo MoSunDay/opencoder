@@ -28,8 +28,6 @@ fn meta(id: &str) -> SessionMeta {
         skill: Some("reviewer".into()),
         task_type: None,
         requirement: Some("must not leak secrets".into()),
-        plan_snapshot: None,
-        plan_input_count: 0,
     }
 }
 

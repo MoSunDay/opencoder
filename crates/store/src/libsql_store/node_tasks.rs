@@ -49,8 +49,6 @@ pub async fn dispatch(
                 skill: None,
                 task_type: Some(TASK_TYPE_NODE.to_string()),
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             },
         )
         .await?;

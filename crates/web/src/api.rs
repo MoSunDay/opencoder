@@ -58,8 +58,6 @@ pub async fn create_session(
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     };
     if let Err(e) = state.store.create_session(&meta).await {
         return error_500(format!("create_session: {e:#}"));
@@ -213,8 +211,8 @@ pub async fn post_prompt(
     }
     // Only an explicit `agent` field is an admission-time mode change: it
     // rewrites the session config, so it must be refused while a drain runs.
-    // Textual mode commands (/plan, /act, /act_clear_context) are admitted
-    // like any prompt — the runner applies them at the next idle/turn
+    // Textual control commands (/sandbox, /act, /act_clear_context) are
+    // admitted like any prompt — the runner applies them at the next idle/turn
     // boundary, which structurally has no turn in flight.
     let agent_override = body.agent.is_some();
     // Fast-path an already-running agent-field request before config/client
@@ -334,8 +332,6 @@ async fn ensure_session_row(
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .map_err(|e| format!("create_session: {e:#}"))
@@ -361,14 +357,24 @@ pub async fn post_agent(
     if handle.draining.load(Ordering::SeqCst) {
         return error_409("agent switch refused while drain running");
     }
-    let plan_input_count = (body.value == "plan").then_some(0);
+    // The switch surface carries the primary agents only: `act` (default) and
+    // `sandbox` (read-only). The legacy `plan` name no longer resolves
+    // (`resolve_agent("plan")` is None; the store normalizes stored rows to
+    // `act` on read), and subagent kinds (explore/build) are unreachable as a
+    // session's primary agent — both get the standard unknown-agent 400
+    // before any persistence or handle mutation.
+    if !opencoder_core::resolve_agent(&body.value).is_some_and(|a| a.is_primary()) {
+        return error_400(format!(
+            "unknown agent {:?}: expected \"act\" or \"sandbox\"",
+            body.value
+        ));
+    }
     if let Err(e) = state
         .store
         .update_session(
             &id,
             &SessionPatch {
                 agent: Some(body.value.clone()),
-                plan_input_count,
                 updated_at: Some(opencoder_core::message::now_ms()),
                 ..Default::default()
             },

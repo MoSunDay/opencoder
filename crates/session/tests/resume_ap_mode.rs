@@ -54,8 +54,6 @@ async fn seed(store: &Arc<dyn Store>, id: &str, autopilot_mode: Option<&str>) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();

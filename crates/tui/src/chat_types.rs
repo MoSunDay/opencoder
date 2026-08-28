@@ -88,10 +88,11 @@ pub enum ChatBlock {
         started_at_ms: i64,
         elapsed_ms: Option<u64>,
     },
-    /// Read-only plan card shown after plan→act handoff. `raw` holds the
-    /// original markdown source so it can be edited in plan mode; `rendered`
-    /// is the pre-computed markdown rendering for display.
-    /// Not interactive post-handoff — purely informational context.
+    /// Read-only context card. Rendered on replay from the persisted
+    /// `handoff_plan` meta (plan text, or a clear-context seed's preserved
+    /// reply). `raw` holds the original markdown source so the plan editor
+    /// can edit it; `rendered` is the pre-computed markdown rendering for
+    /// display. Purely informational — never an input block.
     Plan {
         rendered: Vec<Line<'static>>,
         raw: String,
@@ -137,11 +138,6 @@ pub struct ChatView {
     /// `TextDelta` chunks dropped by the bounded worker channel without ever
     /// overwriting an Assistant block from an earlier turn.
     pub turn_block_start: usize,
-    /// Whether the user submitted a prompt while in plan mode since the last
-    /// plan-mode entry. Reset to `false` on every `AgentSwitch` *to* plan.
-    /// Drives the plan→act handoff decision: only hand off when the user
-    /// actually interacted with the plan agent, otherwise plain-swap.
-    pub plan_submitted: bool,
     /// Whether the user has submitted at least one prompt since session start
     /// (or last TranscriptReset). Gates the in-body tutorial: the welcome text
     /// hides once the user has interacted, even if the first submission was a

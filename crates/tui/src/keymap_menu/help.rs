@@ -14,17 +14,16 @@ use crate::theme;
 pub const HELP: &str = "\
 快捷键列表：
 
-  Ctrl+T          切换模式 act <--> plan（保留上下文，主键）
-  Alt+Tab         切换模式（清空上下文；Shift+Tab 同效）
-                   /plan + 内容 提交后算需求输入，切换后开始执行任务
-  Ctrl+Shift+Tab  切换模式（保留上下文；当 Ctrl+T 被终端拦截时使用）
+  Shift+Tab        清空上下文并接续执行 (/clear_context)：保留最后回复作上下文
+                   输入框有内容时作为附加需求一并提交（运行中则排队，空闲边界生效）
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
   Ctrl+V          粘贴剪贴板图片（截图）
   Alt+回车            插入换行（多行输入）
   $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
-  Shift+I          编辑计划（plan 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
+                   /sandbox（只读沙箱） /act（执行） /clear_context（清空上下文）
+  Shift+I          编辑计划（sandbox 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Ctrl+G          复制模式: 交还终端原生拖拽选择（正文去装饰全宽显示）, 终端快捷键复制, Esc/Ctrl+G 退出
   Esc              关闭帮助/弹窗/清空输入
   Esc Esc          双击 Esc 中断运行中的任务
@@ -190,6 +189,18 @@ mod tests {
         assert!(HELP.contains("PageDown/End 回最新"));
         assert!(!HELP.contains("OSC52"));
         assert!(!HELP.contains("应用内选择模式"));
+    }
+
+    #[test]
+    fn help_matches_sandbox_world() {
+        // The plan/act dual-mode key machinery is gone: no Ctrl+T / Alt+Tab /
+        // Ctrl+Shift+Tab mode toggles may be advertised. Shift+Tab is the
+        // clear-context submit, and the slash menu documents /sandbox.
+        assert!(!HELP.contains("切换 plan / act"));
+        assert!(!HELP.contains("仅切换模式"));
+        assert!(HELP.contains("/clear_context"));
+        assert!(HELP.contains("/sandbox"));
+        assert!(HELP.contains("Shift+I"));
     }
 
     #[test]

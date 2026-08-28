@@ -2,10 +2,10 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
-/// by agent kind. Plan mode omits 'build' (it is read-only).
-pub(super) fn valid_subagent_options(plan: bool) -> String {
+/// by agent kind. Sandbox mode omits 'build' (it is read-only).
+pub(super) fn valid_subagent_options(sandbox: bool) -> String {
     let mut parts: Vec<&str> = vec!["'explore' (read-only)"];
-    if !plan {
+    if !sandbox {
         parts.push("'build' (full tools)");
     }
     match parts.len() {
@@ -40,13 +40,13 @@ pub(super) async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
-    let plan = parent.agent.kind == AgentKind::Plan;
-    // Plan mode may only spawn read-only subagents: 'explore' (filesystem).
+    let sandbox = parent.agent.kind == AgentKind::Sandbox;
+    // Sandbox mode may only spawn read-only subagents: 'explore' (filesystem).
     // 'build' stays rejected so the model is never told it exists.
-    if plan && kind != "explore" {
+    if sandbox && kind != "explore" {
         return ToolOutput::err(format!(
             "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(plan)
+            valid_subagent_options(sandbox)
         ));
     }
     let agent = match resolve_agent(&kind) {
@@ -54,7 +54,7 @@ pub(super) async fn run_subagent(
         None => {
             return ToolOutput::err(format!(
                 "Unknown subagent_type '{kind}'. Valid options: {}",
-                valid_subagent_options(plan)
+                valid_subagent_options(sandbox)
             ));
         }
     };
@@ -134,8 +134,6 @@ pub(super) async fn run_subagent(
                 skill: None,
                 task_type: Some(opencoder_store::TASK_TYPE_SUBAGENT.to_string()),
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await;
         // Mark the child session as already created so persist() doesn't

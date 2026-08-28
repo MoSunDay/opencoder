@@ -113,11 +113,10 @@ pub fn submit(
 /// already rolled the temp row and images back. The caller owns `history`, so
 /// a failed admit stays recoverable via ↑.
 ///
-/// Deliberately performs NO plan-arm bookkeeping: the input is only ADMITTED,
-/// not delivered. Arming happens at consumption (the plan turn's
-/// `TurnDone(plan)` reads the persisted plan-phase counter), so a stranded
-/// row that a cancelled/idle drain never absorbs cannot arm a
-/// context-clearing handoff.
+/// The input is only ADMITTED here, never delivered: a queued control command
+/// (`/sandbox`, `/act`, `/clear_context`) is applied by the runner at the
+/// idle boundary, so a stranded row that a cancelled/idle drain never
+/// absorbs cannot touch the live transcript.
 pub(crate) fn admit_running(
     tx: &mpsc::Sender<AdmitReq>,
     st: &mut AdmitUiState,
@@ -131,13 +130,14 @@ pub(crate) fn admit_running(
 
 /// Deferred queue admission for a submission made while a turn is running
 /// (Tab-queue, and a Submit that reaches the running state via BackTab's
-/// compound `/plan …`): the **raw** text is admitted verbatim, `$name` tokens
-/// included. Skill resolution, activation and persistence all happen at
-/// CONSUMPTION time — the runner's `record_compound` at the idle boundary —
-/// never at submit time. (Eager resolution here used to write the
-/// `skill_prompt` Arc shared with the in-flight LLM call, so a queued
-/// `$skill` armed the `[active skill]` reminder and latent tools in the
-/// *still running* turn: the skill "fired" immediately.)
+/// compound `/sandbox …` / `/clear_context …`): the **raw** text is
+/// admitted verbatim, `$name` tokens included. Skill resolution, activation
+/// and persistence all happen at CONSUMPTION time — the runner's
+/// `record_compound` at the idle boundary — never at submit time. (Eager
+/// resolution here used to write the `skill_prompt` Arc shared with the
+/// in-flight LLM call, so a queued `$skill` armed the `[active skill]`
+/// reminder and latent tools in the *still running* turn: the skill "fired"
+/// immediately.)
 ///
 /// The queue panel shows the same raw text (what the user typed); the user
 /// message the LLM eventually sees is recorded token-stripped by
@@ -154,11 +154,11 @@ pub(crate) fn handle_queue(
     if raw.is_empty() {
         return;
     }
-    // No compound `/plan <content>` arm is set here: the runner consumes the
-    // item (AgentSwitch("plan") + the content recorded as the new phase's
-    // first requirement), and the plan turn's TurnDone(plan) re-arms
-    // `plan_submitted` from the persisted plan-phase counter — consumption
-    // time, never submit time.
+    // Compound control commands (`/sandbox <content>`,
+    // `/clear_context <content>`) are consumed by the runner's
+    // control-command intercept: the agent switch / transcript fold is
+    // applied and the trailing content runs as the next prompt —
+    // consumption time, never submit time.
     let display = raw.to_string();
     // Snapshot BEFORE submit: submit consumes pending_images into the
     // in-flight stash on the success path.
@@ -471,13 +471,13 @@ mod tests {
         assert!(st.inflight.is_empty(), "stash rolled back");
     }
 
-    /// A successful admit-while-running must NOT arm the plan→act handoff:
-    /// the input is only ADMITTED. Arming is consumption-time (TurnDone(plan)
-    /// reads the persisted plan-phase counter), so a stranded row that a
-    /// cancelled/idle drain never absorbs cannot arm a context-clearing
-    /// handoff.
+    /// A successful admit-while-running must NOT touch the live transcript:
+    /// the input is only ADMITTED. A queued control command is applied by
+    /// the runner at the idle boundary, so a stranded row that a
+    /// cancelled/idle drain never absorbs cannot fold the transcript or
+    /// switch the agent.
     #[test]
-    fn admit_running_success_does_not_arm_plan_handoff() {
+    fn admit_running_success_does_not_apply_control_cmd() {
         let (tx, _rx) = mpsc::channel(1);
         let mut st = AdmitUiState::default();
         let mut queue_items = vec![];

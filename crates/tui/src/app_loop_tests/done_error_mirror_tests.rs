@@ -4,6 +4,8 @@
 
 use super::*;
 
+use opencoder_store::LibsqlStore;
+
 // ----- Done/Error queue_items mirror semantics -----
 //
 // Both `Done` and `Error` in `fold_ui_events` re-sync the queue AND steer

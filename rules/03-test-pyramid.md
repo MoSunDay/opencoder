@@ -41,7 +41,7 @@ mod tests {
 - **位置**：`crates/<crate>/tests/*.rs`
 - **对象**：跨模块协作、持久化、Mock 驱动的业务流程
 - **要求**：用 `MockChatClient`（非真网络）、`tempdir`（非真文件系统）、`LibsqlStore::open_memory()`（非真数据库文件）
-- **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration.rs`
+- **示例**：`steer_followup.rs`、`recovery.rs`、`web_contract.rs`、`store_integration/`
 
 ```rust
 // crates/session/tests/steer_followup.rs
@@ -78,6 +78,12 @@ async fn steer_promotes_at_turn_boundary_and_resets_step() {
 - ❌ 在集成测试中调用真 LLM API（用 `MockChatClient`）
 - ❌ 把所有测试堆在一个巨型 `tests/main.rs` 里（按功能拆分文件）
 - ❌ 测试文件超过 400 行（拆分或提取 helper）
+
+## 具名测试取证规范
+
+- 独立测试**文件**（`tests/<file>.rs` 或目录目标 `tests/<dir>/`）必须按目标运行：`cargo test -p <crate> --test <file>`。按函数名过滤（`cargo test <name>`）在无同名函数时会对所有目标静默零命中（`0 passed; N filtered out`），不得当作通过证据。
+- 目录目标（`tests/<dir>/main.rs`）的用例名带模块前缀（`模块名::函数名`），按名过滤用尾部片段即可匹配。
+- 取证前先确认对象是「测试文件」还是「测试函数」；输出中没有 `test result:` 行即为无效取证。
 
 ## Mock 使用规范
 

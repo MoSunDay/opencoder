@@ -198,7 +198,7 @@ async function interruptDisabled(timeout) {
       }
       const cdp = await ctx.newCDPSession(page);
       await cdp.send('Network.enable');
-      await cdp.send('Network.setBlockedURLs', { urls: [`*127.0.0.1:${PORT}/*`] });
+      await cdp.send('Network.setBlockedURLs', { urls: [`*${new URL(BASE).host}/*`] });
       execSync(`ss -K '( dport = :${PORT} or sport = :${PORT} )' || true`);
       // chat tab has no REST polling: force a signed call to fail — the
       // offline 中断 click must surface as the 连接断开 badge (and, being

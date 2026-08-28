@@ -4,6 +4,13 @@
 //   X-Sig-Timestamp: ts_ms ; X-Sig: hex(HMAC-SHA256(token, canon))
 // Empty bodies (GET/DELETE) hash the empty byte string.
 
+// WebCrypto is only exposed on secure contexts (https / localhost). On a
+// plain-HTTP intranet origin crypto.subtle is undefined, so hashing falls
+// back to the dependency-free pure-JS mirror in sha256.js.
+import { hmacSha256 as hmacSha256Fallback, sha256 as sha256Fallback } from './sha256.js';
+
+const subtle = globalThis.crypto && globalThis.crypto.subtle ? globalThis.crypto.subtle : null;
+
 const encoder = new TextEncoder();
 
 /// Lowercase hex of the empty-byte SHA-256 (known test vector, mirrors the
@@ -27,24 +34,31 @@ export function bytesToHex(u8) {
   return out;
 }
 
-/// SHA-256 of raw bytes via WebCrypto → lowercase hex.
+/// SHA-256 of raw bytes -> lowercase hex. WebCrypto when available,
+/// pure-JS fallback over plain-HTTP intranet.
 export async function sha256Hex(bytes) {
   const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
-  const digest = await crypto.subtle.digest('SHA-256', buf);
-  return bytesToHex(new Uint8Array(digest));
+  if (subtle) {
+    return bytesToHex(new Uint8Array(await subtle.digest('SHA-256', buf)));
+  }
+  return bytesToHex(sha256Fallback(buf));
 }
 
 /// Lowercase-hex HMAC-SHA256 of `canonical` keyed by the shared token.
 export async function hmacSha256Hex(token, canonical) {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(String(token || '')),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(canonical));
-  return bytesToHex(new Uint8Array(sig));
+  const keyBytes = encoder.encode(String(token || ''));
+  const msgBytes = encoder.encode(canonical);
+  if (subtle) {
+    const key = await subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    return bytesToHex(new Uint8Array(await subtle.sign('HMAC', key, msgBytes)));
+  }
+  return bytesToHex(hmacSha256Fallback(keyBytes, msgBytes));
 }
 
 /// Full signing step: bytes in, { ts, sig } headers' payload out.

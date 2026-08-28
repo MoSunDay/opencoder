@@ -1,37 +1,12 @@
-// login.jsx — shared-secret login Modal + the plaintext-HTTP warning Alert.
+// login.jsx — shared-secret login Modal.
 
-import { Alert, Button, Form, Input, Modal, Typography } from 'antd';
+import { Button, Form, Input, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet } from './api.js';
 import { setCredentials, clearCredentials } from './store.js';
 import { syncTime } from './time.js';
 
 const { Text } = Typography;
-
-export const HTTP_WARNING = '明文 HTTP：共享密钥可被窃听，生产请走 TLS 反代';
-
-/// Prominent banner whenever the console itself is served over plain HTTP
-/// from a non-local host (localhost / 127.0.0.1 are exempt).
-export function isInsecureOrigin() {
-  return typeof location !== 'undefined'
-    && location.protocol === 'http:'
-    && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(location.hostname);
-}
-
-export function InsecureHttpAlert() {
-  if (!isInsecureOrigin()) {
-    return null;
-  }
-  return (
-    <Alert
-      banner
-      type="warning"
-      showIcon
-      message={HTTP_WARNING}
-      style={{ marginBottom: 0 }}
-    />
-  );
-}
 
 /// Shown whenever no token is stored (`oc_token`). Closable: false — without
 /// a shared key every signed call 401s, so there is nothing to render behind.

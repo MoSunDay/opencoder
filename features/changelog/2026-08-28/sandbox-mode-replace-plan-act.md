@@ -40,6 +40,6 @@ plan/act 双模式职责混乱：plan agent 既承担只读探索又承担「产
 
 ## 边界
 
-- `seed_builtin_skills` 不 clobber：旧机器上已 seed 的 `task-plan`/`review/SKILL.md` 不会自动获得前移后的 question 指引（解锁靠前 500 字符匹配，旧 seed 若正文含技能名仍可命中；必要时删 `~/.opencoder/skills` 对应目录重新 seed）。
+- `seed_builtin_skills` 不 clobber：旧机器上已 seed 的 `task-plan`/`review/SKILL.md` 不会自动获得前移后的 question 指引（解锁靠前 500 字符匹配，旧 seed 若正文含技能名仍可命中；必要时删 `~/.opencoder/skills` 对应目录重新 seed）。**升级提示**：升级到本版后建议删除 `~/.opencoder/skills/task-plan` 与 `~/.opencoder/skills/review` 两个目录并重启一次（自动 re-seed），确保获得 question 解锁契约。
 - question 转 latent 是行为收窄：headless（无 hub attach）仍走 `NO_LISTENER_REPLY` 兜底，但无 skill 的 act 会话不再主动提问——按需求即为预期。
 - schema v10 的 `plan_snapshot`/`plan_input_count` 列保留（兼容旧库，无破坏性迁移）；`plan_handoff` 命名仅存于历史 changelog 链接。

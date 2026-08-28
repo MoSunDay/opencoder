@@ -102,7 +102,7 @@ fn annotation_editor_shows_green_top_title() {
     );
 }
 
-/// The `/plan` editor must NOT receive the right-aligned info title, even when
+/// The plan editor must NOT receive the right-aligned info title, even when
 /// a body top-title is in scope.
 #[test]
 fn plan_editor_has_no_info_top_title() {

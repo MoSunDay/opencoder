@@ -52,7 +52,7 @@ async fn mid_stream_disconnect_resumes_without_loss_or_duplication() {
     )
     .await;
 
-    let node_id = wait_for(15, 100, || async {
+    let node_id = wait_for(60, 100, || async {
         let (_, v) = get_json(&srv.base, "/api/nodes").await;
         v["nodes"]
             .as_array()
@@ -110,7 +110,10 @@ async fn mid_stream_disconnect_resumes_without_loss_or_duplication() {
     .await;
     let mut resumed: Vec<(String, serde_json::Value)> = Vec::new();
     loop {
-        let next = tokio::time::timeout(std::time::Duration::from_secs(10), sse2.next()).await;
+        // 60 s: same load-tolerance rationale as `collect_until`'s frame gap —
+        // a loaded box must not truncate the resumed window into a false
+        // "stream ended".
+        let next = tokio::time::timeout(std::time::Duration::from_secs(60), sse2.next()).await;
         match next {
             Ok(Some(f)) => {
                 let terminal = (f.kind == "done" || f.kind == "error")
@@ -172,7 +175,7 @@ async fn mid_stream_disconnect_resumes_without_loss_or_duplication() {
     );
 
     // Task ledger settled.
-    wait_for(15, 100, || async {
+    wait_for(60, 100, || async {
         get_json(&srv.base, &format!("/api/nodes/{node_id}/tasks"))
             .await
             .1["tasks"]

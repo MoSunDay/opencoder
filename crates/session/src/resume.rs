@@ -58,7 +58,7 @@ pub async fn resume(
     //    to re-derive them -- the fix for long-session resume stalls caused by
     //    reloading + deserializing thousands of soft-deleted head messages.
     //  - Handoff / no-compaction path: full load. Handoff is an early one-time
-    //    plan->act transition with small data; no-compaction has nothing to skip.
+    //    handoff transition with small data; no-compaction has nothing to skip.
     let mut messages: Vec<Message> =
         if meta.handoff_seq.is_none() && matches!(meta.summary_seq, Some(sk) if sk > 0) {
             store
@@ -80,15 +80,15 @@ pub async fn resume(
         }
     }
 
-    // Plan→act handoff (dominant reset) and compaction are mutually exclusive
-    // on resume: when a handoff boundary was persisted, trim the plan-mode
-    // history and re-attach the synthetic plan instruction; otherwise apply a
+    // Transcript handoff (dominant reset) and compaction are mutually exclusive
+    // on resume: when a handoff boundary was persisted, trim the discarded
+    // history and re-attach the synthetic boundary message; otherwise apply a
     // persisted compaction trim. Handoff wins because it replaces the whole
-    // transcript, so any stale compaction metadata from plan mode is moot.
+    // transcript, so any stale compaction metadata from the cleared history is moot.
     if let Some(hs) = meta.handoff_seq {
-        if let Some(plan_display) = &meta.handoff_plan {
+        if let Some(boundary_display) = &meta.handoff_plan {
             let hs = hs as usize;
-            // The discarded plan-mode head is still in the store; re-derive its
+            // The discarded head is still in the store; re-derive its
             // recent images and attach them to the handoff instruction so they
             // survive resume.
             let preserved_images = if hs < messages.len() {
@@ -101,15 +101,17 @@ pub async fn resume(
             } else {
                 messages = Vec::new();
             }
-            // Distinguish the ClearContext boundary flavours from a plan->act
+            // Distinguish the ClearContext boundary flavours from a directive
             // handoff: the blank sentinel / last-say seed markers stored by
             // control_cmd::ClearContext.
-            let mut head_msg = if crate::control_cmd::is_clear_context_handoff(plan_display) {
+            let mut head_msg = if crate::control_cmd::is_clear_context_handoff(boundary_display) {
                 crate::control_cmd::fresh_start_message()
-            } else if crate::control_cmd::is_clear_context_seed(plan_display) {
-                crate::control_cmd::seed_message(crate::control_cmd::clear_seed_text(plan_display))
+            } else if crate::control_cmd::is_clear_context_seed(boundary_display) {
+                crate::control_cmd::seed_message(crate::control_cmd::clear_seed_text(
+                    boundary_display,
+                ))
             } else {
-                crate::plan_handoff::handoff_message(plan_display)
+                crate::handoff::handoff_message(boundary_display)
             };
             for url in &preserved_images {
                 head_msg.blocks.push(ContentBlock::Image {
@@ -189,30 +191,6 @@ pub async fn resume(
         )
     };
 
-    // Legacy plan-phase backfill: sessions created before the plan-phase
-    // columns existed persist counter=0 / snapshot=NULL in the store even when
-    // the plan agent produced a real plan. Recover both from the (already
-    // handoff/compaction-trimmed) transcript so a resumed plan session re-arms
-    // the Shift+Tab / `/act_clear_context` handoff. Phase-bounded: only a
-    // plan-agent assistant answer is accepted (`newest_plan_agent_text`).
-    // The session row's agent column is NULL for ts-origin sessions by
-    // design, so NULL is allowed through the gate; an explicit non-plan
-    // agent refuses the backfill.
-    let (plan_input_count, plan_snapshot) = if meta.plan_input_count <= 0
-        && meta.plan_snapshot.is_none()
-        && meta.agent.as_deref().is_none_or(|a| a == "plan")
-    {
-        match crate::plan_handoff::newest_plan_agent_text(&messages) {
-            Some(plan) => (1, Some(plan)),
-            None => (0, None),
-        }
-    } else {
-        (
-            meta.plan_input_count.max(0) as usize,
-            meta.plan_snapshot.clone(),
-        )
-    };
-
     let s = SessionState {
         id: id.to_string(),
         messages,
@@ -248,8 +226,6 @@ pub async fn resume(
         handoff_seq: meta.handoff_seq,
         handoff_plan: meta.handoff_plan.clone(),
         requirement: meta.requirement.clone(),
-        plan_snapshot,
-        plan_input_count,
         question_hub: crate::QuestionHub::new(),
     };
     Ok(s)

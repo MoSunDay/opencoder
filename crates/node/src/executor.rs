@@ -275,8 +275,6 @@ async fn create_local_meta(
             skill: None,
             task_type: Some("node".into()),
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await?;
     Ok(())

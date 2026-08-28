@@ -39,13 +39,16 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "/compact",
         "手动压缩对话历史（总结早期消息，释放上下文窗口）",
     ),
-    ("/act", "切换到 act 模式（不重置上下文）"),
-    ("/plan", "切换到 plan 模式（不重置上下文）"),
+    ("/act", "退出沙箱，切换到 act 执行代理（不重置上下文）"),
+    (
+        "/sandbox",
+        "只读沙箱：拦截写操作，切换到 sandbox 探索代理（不重置上下文）",
+    ),
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
     (
-        "/act_clear_context",
-        "清空对话上下文并切换到 act 模式（重新开始）",
+        "/clear_context",
+        "清空对话上下文并执行（保留最后回复作为接续上下文；/act_clear_context 同效）",
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
@@ -62,7 +65,7 @@ pub enum SlashAction {
     Compact,
     CacheSalt,
     Act,
-    Plan,
+    Sandbox,
     Annotation,
     Notepad,
     ClearContext,
@@ -196,10 +199,10 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "config" | "cfg" => Some(SlashAction::Config),
         "c" | "compact" => Some(SlashAction::Compact),
         "act" => Some(SlashAction::Act),
-        "plan" => Some(SlashAction::Plan),
+        "sandbox" => Some(SlashAction::Sandbox),
         "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
-        "act_clear_context" => Some(SlashAction::ClearContext),
+        "clear_context" | "act_clear_context" => Some(SlashAction::ClearContext),
         "mcp" | "mc" => Some(SlashAction::Mcp),
         "envs" | "env" => Some(SlashAction::Envs),
         "cli" => Some(SlashAction::Cli),
@@ -219,10 +222,10 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/config" => Some(SlashAction::Config),
         "/compact" => Some(SlashAction::Compact),
         "/act" => Some(SlashAction::Act),
-        "/plan" => Some(SlashAction::Plan),
+        "/sandbox" => Some(SlashAction::Sandbox),
         "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
-        "/act_clear_context" => Some(SlashAction::ClearContext),
+        "/clear_context" | "/act_clear_context" => Some(SlashAction::ClearContext),
         "/mcp" => Some(SlashAction::Mcp),
         "/envs" => Some(SlashAction::Envs),
         "/cli" => Some(SlashAction::Cli),
@@ -236,12 +239,14 @@ fn dispatch(name: &str) -> Option<SlashAction> {
 
 /// Map a [`SlashAction`] to its canonical control-command string, or `None`
 /// for non-control actions. Used to queue a control command (Tab) or dispatch
-/// it immediately (Enter) without echoing it as user text.
+/// it immediately (Enter) without echoing it as user text. The legacy
+/// `/act_clear_context` spelling still parses as an alias of
+/// `/clear_context`.
 pub fn control_cmd_string(action: &SlashAction) -> Option<&'static str> {
     match action {
         SlashAction::Act => Some("/act"),
-        SlashAction::Plan => Some("/plan"),
-        SlashAction::ClearContext => Some("/act_clear_context"),
+        SlashAction::Sandbox => Some("/sandbox"),
+        SlashAction::ClearContext => Some("/clear_context"),
         _ => None,
     }
 }
@@ -280,7 +285,7 @@ pub fn handle_command_key(menu: &mut Option<CommandMenu>, k: KeyEvent) -> (Comma
         }
         // A command token cannot contain spaces. Complete the highlighted
         // command before requirement text reaches the filter query, so
-        // natural compound input such as `/plan <requirement>` works.
+        // natural compound input such as `/sandbox <topic>` works.
         KeyCode::Char(' ') if k.modifiers.is_empty() => match m.selected_name() {
             Some(name) => {
                 let name = name.to_string();
@@ -474,18 +479,20 @@ mod tests {
     #[test]
     fn parse_control_commands() {
         assert_eq!(parse("/act"), Some(SlashAction::Act));
-        assert_eq!(parse("/plan"), Some(SlashAction::Plan));
+        assert_eq!(parse("/sandbox"), Some(SlashAction::Sandbox));
+        assert_eq!(parse("/clear_context"), Some(SlashAction::ClearContext));
+        // Legacy alias of /clear_context must keep parsing.
         assert_eq!(parse("/act_clear_context"), Some(SlashAction::ClearContext));
-        assert_eq!(parse(" /plan "), Some(SlashAction::Plan));
+        assert_eq!(parse(" /sandbox "), Some(SlashAction::Sandbox));
     }
 
     #[test]
     fn control_cmd_string_maps_correctly() {
         assert_eq!(control_cmd_string(&SlashAction::Act), Some("/act"));
-        assert_eq!(control_cmd_string(&SlashAction::Plan), Some("/plan"));
+        assert_eq!(control_cmd_string(&SlashAction::Sandbox), Some("/sandbox"));
         assert_eq!(
             control_cmd_string(&SlashAction::ClearContext),
-            Some("/act_clear_context")
+            Some("/clear_context")
         );
         assert_eq!(control_cmd_string(&SlashAction::Task), None);
         assert_eq!(control_cmd_string(&SlashAction::Compact), None);
@@ -496,15 +503,15 @@ mod tests {
     #[test]
     fn tab_fills_input_with_command_name() {
         let mut menu = Some(CommandMenu::new());
-        // Filter to /plan
-        for c in "plan".chars() {
+        // Filter to /sandbox
+        for c in "sandbox".chars() {
             if let Some(m) = menu.as_mut() {
                 m.on_char(c);
             }
         }
         let (outcome, _quit) = handle_command_key(&mut menu, key(KeyCode::Tab, KeyModifiers::NONE));
         match outcome {
-            CommandOutcome::FillInput(s) => assert_eq!(s, "/plan"),
+            CommandOutcome::FillInput(s) => assert_eq!(s, "/sandbox"),
             other => panic!("expected FillInput, got {:?}", other),
         }
         assert!(menu.is_none(), "popup closed after Tab-fill");
@@ -513,7 +520,7 @@ mod tests {
     #[test]
     fn space_fills_selected_command_for_compound_input() {
         let mut menu = Some(CommandMenu::new());
-        for c in "plan".chars() {
+        for c in "sandbox".chars() {
             menu.as_mut().expect("menu open").on_char(c);
         }
 
@@ -521,7 +528,7 @@ mod tests {
             handle_command_key(&mut menu, key(KeyCode::Char(' '), KeyModifiers::NONE));
 
         assert!(!quit);
-        assert!(matches!(outcome, CommandOutcome::FillInput(ref s) if s == "/plan"));
+        assert!(matches!(outcome, CommandOutcome::FillInput(ref s) if s == "/sandbox"));
         assert!(menu.is_none(), "popup must close after Space-fill");
     }
 
@@ -561,7 +568,7 @@ mod tests {
     #[test]
     fn enter_on_control_command_dispatches() {
         let mut menu = Some(CommandMenu::new());
-        // Type "act" — matches /compact, /act, /act_clear_context.
+        // Type "act" — matches /compact and /act.
         for c in "act".chars() {
             if let Some(m) = menu.as_mut() {
                 m.on_char(c);
@@ -583,7 +590,7 @@ mod tests {
     #[test]
     fn enter_on_clear_context_dispatches() {
         let mut menu = Some(CommandMenu::new());
-        for c in "act_clear_context".chars() {
+        for c in "clear_context".chars() {
             if let Some(m) = menu.as_mut() {
                 m.on_char(c);
             }

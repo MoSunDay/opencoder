@@ -246,9 +246,9 @@ pub(super) async fn execute_call_with_timeout(
         };
     }
 
-    // Plan-mode bash write guard: classify the command and block mutating
+    // Sandbox-mode bash write guard: classify the command and block mutating
     // operations, returning a descriptive error to the model so it can adapt.
-    if tc.name == "bash" && session.agent.kind == AgentKind::Plan {
+    if tc.name == "bash" && session.agent.kind == AgentKind::Sandbox {
         let cmd = tc
             .input
             .get("command")
@@ -258,8 +258,8 @@ pub(super) async fn execute_call_with_timeout(
             crate::bash_guard::classify(cmd)
         {
             return ToolOutput::err(format!(
-                "Blocked in plan mode: this bash command modifies state ({reason}). \
-                 Plan mode is read-only. To make changes, switch to act mode (Alt+Tab)."
+                "Blocked in sandbox mode: this bash command modifies state ({reason}). \
+                 Sandbox mode is read-only. To make changes, switch to the act agent (/agent act)."
             ));
         }
     }
@@ -644,8 +644,6 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await
             .unwrap();
@@ -668,8 +666,6 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await
             .unwrap();
@@ -750,8 +746,6 @@ mod tests {
                 skill: None,
                 task_type: None,
                 requirement: None,
-                plan_snapshot: None,
-                plan_input_count: 0,
             })
             .await
             .unwrap();

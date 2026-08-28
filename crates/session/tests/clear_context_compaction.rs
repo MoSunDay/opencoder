@@ -1,8 +1,8 @@
-//! Regression: `/act_clear_context` with a preserved plan must not trip
+//! Regression: `/clear_context` with a preserved seed must not trip
 //! compaction into "found nothing to summarize" and kill the run.
 //!
 //! Bug: `after_handoff` left `last_usage` stale — the model-reported usage
-//! of the pre-clear planning conversation. The handoff transcript is exactly
+//! of the pre-clear conversation. The handoff transcript is exactly
 //! one synthetic message, so on the next turn `should_compact` fired on the
 //! stale reported usage (`>= budget`), `compaction_split` returned `None`
 //! (single-message transcript has nothing to summarize), and `run_loop`
@@ -42,12 +42,12 @@ fn done_turn(text: &str) -> LlmEvent {
 }
 
 #[tokio::test]
-async fn clear_context_with_stale_usage_still_executes_plan() {
+async fn clear_context_with_stale_usage_still_continues_seed() {
     let store = mem_store().await;
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "cc-stale-usage".into(),
-            agent: Some("plan".into()),
+            agent: Some("sandbox".into()),
             model: Some("m/g".into()),
             created_at: 0,
             updated_at: 0,
@@ -72,7 +72,7 @@ async fn clear_context_with_stale_usage_still_executes_plan() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "cc-stale-usage",
-        resolve_agent("plan").unwrap(),
+        resolve_agent("sandbox").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -80,9 +80,7 @@ async fn clear_context_with_stale_usage_still_executes_plan() {
     .with_store(store.clone())
     .mark_session_created();
     session.messages = msgs.clone();
-    session.plan_input_count = 1;
-    session.plan_snapshot = Some("I will implement X by...".into());
-    // Stale model-reported usage from the pre-clear planning conversation:
+    // Stale model-reported usage from the pre-clear conversation:
     // with the old code this re-triggered should_compact against the
     // single-message handoff transcript and killed the run.
     session.last_usage = Usage {
@@ -96,7 +94,7 @@ async fn clear_context_with_stale_usage_still_executes_plan() {
 
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let ev_collector = events.clone();
-    let outcome = run(&mut session, "/act_clear_context".into(), move |ev| {
+    let outcome = run(&mut session, "/clear_context".into(), move |ev| {
         if let Ok(mut g) = ev_collector.lock() {
             g.push(ev);
         }
@@ -109,19 +107,19 @@ async fn clear_context_with_stale_usage_still_executes_plan() {
         "clear-context handoff must not be killed by stale-usage compaction, got {outcome:?}"
     );
 
-    // 2) The execution turn reached the LLM exactly once.
+    // 2) The seed turn reached the LLM exactly once.
     let requests = mock.requests();
     assert_eq!(
         requests.len(),
         1,
-        "one LLM call to execute the preserved plan"
+        "one LLM call to continue from the preserved seed"
     );
 
-    // 3) The preserved plan appears in the model context (handoff intact).
+    // 3) The preserved reply appears in the model context (seed intact).
     let body = requests[0].to_body().to_string();
     assert!(
         body.contains("I will implement X by..."),
-        "preserved plan must appear in the model context: {body}"
+        "preserved reply must appear in the model context: {body}"
     );
 
     // 4) No compaction / error events were emitted.

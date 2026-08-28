@@ -65,10 +65,9 @@ pub(crate) fn print_event(ev: &SessionEvent) {
             let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
             eprintln!("\x1b[34m  {mark} {summary}\x1b[0m");
         }
-        SessionEvent::PlanHandoff(plan) => {
-            eprintln!("\n\x1b[33m\u{2500}\u{2500} plan \u{2500}\u{2500}\x1b[0m\n{plan}\n");
+        SessionEvent::TranscriptReset(cleared) => {
+            eprintln!("{}", transcript_reset_banner(cleared.len()));
         }
-        SessionEvent::TranscriptReset(_) => {}
         SessionEvent::QueueConsumed { text, .. } => {
             if !text.is_empty() {
                 println!("user: {text}");
@@ -107,6 +106,19 @@ pub(crate) fn summarize_input(input: &serde_json::Value) -> String {
             truncate(&s, 100)
         }
     }
+}
+
+/// Fold-boundary banner for `/clear_context` (the session emits
+/// [`SessionEvent::TranscriptReset`] with the cleared transcript). Replaces
+/// the old plan-handoff banner: a clear-context fold must stay visible in
+/// headless output, otherwise the model's next reply appears to answer
+/// nothing. Pure (count -> text) so the wording is unit-testable without
+/// capturing stderr.
+pub(crate) fn transcript_reset_banner(cleared: usize) -> String {
+    let plural = if cleared == 1 { "" } else { "s" };
+    format!(
+        "\n\x1b[33m\u{2500}\u{2500} context cleared ({cleared} message{plural} folded) \u{2500}\u{2500}\x1b[0m"
+    )
 }
 
 /// Truncate a string to at most `n` characters, appending `...` when trimmed.
@@ -162,5 +174,15 @@ mod tests {
     fn indent_first_pads_each_line() {
         let s = "line1\nline2";
         assert_eq!(indent_first(s, 2), "  line1\n  line2");
+    }
+
+    #[test]
+    fn transcript_reset_banner_counts_folded_messages() {
+        // Singular and plural stay grammatical; the banner is a visible
+        // fold-boundary marker (replaces the removed plan-handoff banner).
+        assert!(transcript_reset_banner(1).contains("1 message folded"));
+        assert!(transcript_reset_banner(3).contains("3 messages folded"));
+        let banner = transcript_reset_banner(0);
+        assert!(banner.contains("context cleared"), "banner must mark the fold: {banner}");
     }
 }

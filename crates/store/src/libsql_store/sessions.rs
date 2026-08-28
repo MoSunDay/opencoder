@@ -6,8 +6,8 @@ use crate::types::{
 };
 
 const INSERT_SESSION: &str = "\
-INSERT OR IGNORE INTO sessions (id, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, plan_snapshot, plan_input_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+INSERT OR IGNORE INTO sessions (id, title, agent, model, autopilot_mode, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
 pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
     conn.execute(
@@ -29,8 +29,6 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
             meta.skill.as_deref(),
             meta.task_type.as_deref().unwrap_or("parent"),
             meta.requirement.as_deref(),
-            meta.plan_snapshot.as_deref(),
-            meta.plan_input_count,
         ],
     )
     .await
@@ -40,7 +38,7 @@ pub async fn create(conn: &Connection, meta: &SessionMeta) -> Result<()> {
 
 pub async fn get(conn: &Connection, id: &str) -> Result<Option<SessionMeta>> {
     let stmt = conn
-        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, plan_snapshot, plan_input_count, autopilot_mode FROM sessions WHERE id = ?")
+        .prepare("SELECT id, title, agent, model, workdir_hash, created_at, updated_at, summary, summary_seq, summary_images_json, handoff_seq, handoff_plan, skill, task_type, requirement, autopilot_mode FROM sessions WHERE id = ?")
         .await?;
     let mut rows = stmt.query(params![id]).await?;
     match rows.next().await? {
@@ -117,7 +115,7 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         out.push(SessionListItem {
             id: r.get::<String>(0)?,
             title: r.get::<Option<String>>(1)?,
-            agent: r.get::<Option<String>>(2)?,
+            agent: normalize_agent(r.get::<Option<String>>(2)?),
             model: r.get::<Option<String>>(3)?,
             created_at: r.get::<i64>(4)?,
             updated_at: r.get::<i64>(5)?,
@@ -168,11 +166,6 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.requirement.is_some() && patch.clear_requirement {
         anyhow::bail!(
             "SessionPatch: requirement field and clear_requirement are mutually exclusive"
-        );
-    }
-    if patch.plan_snapshot.is_some() && patch.clear_plan_snapshot {
-        anyhow::bail!(
-            "SessionPatch: plan_snapshot field and clear_plan_snapshot are mutually exclusive"
         );
     }
 
@@ -254,17 +247,6 @@ pub async fn update(conn: &Connection, id: &str, patch: &SessionPatch) -> Result
     if patch.clear_requirement {
         sets.push("requirement = NULL");
     }
-    if let Some(v) = &patch.plan_snapshot {
-        sets.push("plan_snapshot = ?");
-        args.push(v.clone().into());
-    }
-    if patch.clear_plan_snapshot {
-        sets.push("plan_snapshot = NULL");
-    }
-    if let Some(v) = patch.plan_input_count {
-        sets.push("plan_input_count = ?");
-        args.push(v.into());
-    }
     if sets.is_empty() {
         return Ok(());
     }
@@ -291,13 +273,22 @@ pub async fn clear_others(conn: &Connection, keep_id: &str) -> Result<u64> {
     Ok(affected as u64)
 }
 
+/// Legacy agent-name normalization, applied on READ paths only: databases
+/// written before the plan/act split was removed may store `agent = 'plan'`
+/// for the read-only agent, which is now named `sandbox`. Resume must treat
+/// those rows as regular act sessions, so map `'plan'` -> `'act'`. The raw
+/// stored value is never rewritten.
+fn normalize_agent(agent: Option<String>) -> Option<String> {
+    agent.map(|a| if a == "plan" { "act".to_string() } else { a })
+}
+
 fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
     Ok(SessionMeta {
         id: r.get::<String>(0)?,
         title: r.get::<Option<String>>(1)?,
-        agent: r.get::<Option<String>>(2)?,
+        agent: normalize_agent(r.get::<Option<String>>(2)?),
         model: r.get::<Option<String>>(3)?,
-        autopilot_mode: r.get::<Option<String>>(17)?,
+        autopilot_mode: r.get::<Option<String>>(15)?,
         workdir_hash: r.get::<Option<String>>(4)?,
         created_at: r.get::<i64>(5)?,
         updated_at: r.get::<i64>(6)?,
@@ -312,8 +303,6 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
         skill: r.get::<Option<String>>(12)?,
         task_type: r.get::<Option<String>>(13)?,
         requirement: r.get::<Option<String>>(14)?,
-        plan_snapshot: r.get::<Option<String>>(15)?,
-        plan_input_count: r.get::<Option<i64>>(16)?.unwrap_or(0),
     })
 }
 

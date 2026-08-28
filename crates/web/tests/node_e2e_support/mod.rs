@@ -71,6 +71,16 @@ pub fn http() -> reqwest::Client {
         .unwrap()
 }
 
+/// Client for long-lived SSE reads: NO total-request timeout. A loaded box
+/// can keep a task's stream open for minutes; the default client's 30 s cap
+/// would amputate the stream mid-run and masquerade as frame loss.
+pub fn http_sse() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
+}
+
 fn url(base: &str, path: &str) -> String {
     format!("{base}{path}")
 }
@@ -124,6 +134,19 @@ fn signed_raw(
         .body(bytes)
 }
 
+fn signed_raw_sse(method: &str, base: &str, path: &str) -> reqwest::RequestBuilder {
+    let bytes: Vec<u8> = Vec::new();
+    let (tsh, ts, sigh, sig) = sig_headers(TOKEN, method, path, &bytes);
+    http_sse()
+        .request(
+            reqwest::Method::from_bytes(method.as_bytes()).unwrap(),
+            url(base, path),
+        )
+        .header(tsh, ts)
+        .header(sigh, sig)
+        .body(bytes)
+}
+
 /// One SSE unit of the fleet API as the browser sees it: the event name plus
 /// its JSON payload.
 #[derive(Debug, Clone, PartialEq)]
@@ -136,7 +159,7 @@ pub struct Frame {
 /// fetch streaming with the same header pair) and yield parsed frames until
 /// the connection ends.
 pub async fn open_sse(base: &str, path: &str) -> impl futures::Stream<Item = Frame> {
-    let r = signed_raw("GET", base, path, None)
+    let r = signed_raw_sse("GET", base, path)
         .send()
         .await
         .expect("sse connect");
@@ -159,7 +182,10 @@ pub fn parse_sse_response(
                 }
                 continue; // keep-alive comment block
             }
-            match tokio::time::timeout(Duration::from_secs(15), body.next()).await {
+            // Budget generous enough to survive a loaded CI box: the machine
+            // may be running many builds/tests concurrently, and a silent
+            // frame-gap timeout here masquerades as "stream ended" (loss).
+            match tokio::time::timeout(Duration::from_secs(60), body.next()).await {
                 Ok(Some(Ok(bytes))) => buf.push_str(&String::from_utf8_lossy(bytes.as_ref())),
                 _ => return None, // timeout / end / transport error
             }

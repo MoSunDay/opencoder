@@ -9,8 +9,8 @@ use crate::chat::{ChatBlock, ChatView};
 impl ChatView {
     /// Return the editable plan text: prefer a `Plan` block's `raw` field,
     /// otherwise fall back to the last non-empty `Assistant` block's `raw`.
-    /// In plan mode the plan IS the last assistant message, so this covers
-    /// both pre-handoff (no Plan block yet) and post-handoff cases.
+    /// The plan-edit flow seeds from the last assistant message when no
+    /// replayed Plan card exists, so this covers both cases.
     pub fn last_plan_text(&self) -> Option<String> {
         for block in self.blocks.iter().rev() {
             if let ChatBlock::Plan { raw, .. } = block {

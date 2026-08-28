@@ -1,6 +1,6 @@
 //! Drain command channel.
 //!
-//! Operations like manual compaction, plan->act handoff, config hot-reload, and
+//! Operations like manual compaction, execution handoff, config hot-reload, and
 //! live skill switching need `&mut SessionState`, which only exists inside the
 //! background drain task. Rather than exposing the session directly, these
 //! commands are queued onto an unbounded channel held by the
@@ -21,7 +21,4 @@ pub enum DrainCmd {
     /// Edit (or clear, on `None`/blank) the user requirement annotation on
     /// the live session and persist it (TUI `/requirement` parity).
     SetAnnotation(Option<String>),
-    /// Re-entering plan mode: reset only the plan-phase input counter so the
-    /// "submit your plan" affordances re-arm (TUI plan-switch parity).
-    ResetPlanPhase,
 }

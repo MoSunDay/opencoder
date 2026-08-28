@@ -95,8 +95,6 @@ async fn seed_session(store: &Arc<dyn Store>) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -123,8 +121,6 @@ async fn seed_session_id(store: &Arc<dyn Store>, id: &str) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();

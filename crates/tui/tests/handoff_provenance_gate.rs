@@ -1,41 +1,17 @@
-//! Worker-side plan-provenance gate for `UiCmd::SwitchAndStart`.
-//!
-//! `handoff`'s plan extraction is "last assistant message with non-empty
-//! text". In act mode with no plan-phase input that is just the previous
-//! answer ("task complete") — wrapping it in the plan→act directive would
-//! fabricate a plan, wipe the transcript, and persist a `handoff_seq` resume
-//! boundary that irrecoverably drops all context.
-//!
-//! The trigger is a rapid Shift+Tab double-tap (act→plan→act): the sticky
-//! UI-side `plan_submitted` flag survives the first tap until the worker's
-//! `AgentSwitch("plan")` event round-trips back to the UI, so the second tap
-//! can still queue a `SwitchAndStart`. The app-loop fix folds the switch
-//! synchronously (see `app_loop_tests::switch_gate_tests`); this file is the
-//! defense-in-depth layer: even when a stale `SwitchAndStart` reaches the
-//! worker, `plan_input_count > 0` (the session-side source of truth) must
-//! hold before the transcript is folded. On gate failure the handoff degrades
-//! to a pure switch plus a normal act-mode submission of the captured input
-//! text (`worker::handoff_run_prompt`) — an empty capture degrades to an
-//! empty turn instead.
+//! The `/clear_context` gate is PURE TRANSCRIPT PROVENANCE: the newest
+//! non-empty assistant reply is the thing preserved. There is no arming
+//! counter, no turn-distance rule and no mode state — the same input always
+//! produces the same fold, wherever the say sits in the transcript.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use opencoder_core::{resolve_agent, Config, Message, Role};
+use opencoder_core::{resolve_agent, Config, ContentBlock, Message};
 use opencoder_llm::{LlmEvent, MockChatClient};
-use opencoder_session::{resume, SessionEvent, SessionState};
+use opencoder_session::{is_clear_context_handoff, is_clear_context_seed, SessionEvent, SessionState};
 use opencoder_store::{LibsqlStore, SessionMeta, Store};
 use opencoder_tui::worker::{process_cmd, UiCmd, UiEvent};
 use tokio::sync::mpsc;
-
-async fn mem_store() -> Arc<dyn Store> {
-    Arc::new(LibsqlStore::open_memory().await.unwrap())
-}
-
-fn assistant_with_text(id: &str, text: &str) -> Message {
-    let mut m = Message::assistant(id);
-    m.blocks.push(opencoder_core::ContentBlock::text(text));
-    m
-}
 
 fn text_done(text: &str) -> LlmEvent {
     LlmEvent::Completed {
@@ -45,229 +21,216 @@ fn text_done(text: &str) -> LlmEvent {
     }
 }
 
-/// The bug's exact FIFO sequence: `SwitchAgent("plan")` (which resets the
-/// plan-input counter) immediately followed by a stale `SwitchAndStart`
-/// fired off the not-yet-folded UI flag. The gate must degrade it to a pure
-/// switch: transcript intact, no resume boundary, and the captured composer
-/// text submitted as a normal act-mode prompt (`worker::handoff_run_prompt`)
-/// — only an empty capture degrades all the way to an empty turn.
-#[tokio::test]
-async fn stale_double_tap_switch_and_start_preserves_context() {
-    let store = mem_store().await;
+fn assistant_with_text(id: &str, text: &str) -> Message {
+    let mut m = Message::assistant(id);
+    m.blocks.push(ContentBlock::text(text));
+    m
+}
+
+async fn session_with_transcript(id: &str, msgs: Vec<Message>) -> (SessionState, Arc<MockChatClient>, Arc<dyn Store>) {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     store
         .create_session(&SessionMeta {
-            id: "stale-double-tap".into(),
+            id: id.into(),
             agent: Some("act".into()),
             ..Default::default()
         })
         .await
         .unwrap();
-
-    // Act-mode history: the "final plan" extraction would fabricate a plan
-    // out of "task complete".
-    let history = vec![
-        Message::user("u1", "refactor the parser module"),
-        assistant_with_text("a1", "task complete"),
-    ];
-    for m in &history {
-        store.append_message("stale-double-tap", m).await.unwrap();
+    for m in &msgs {
+        store.append_message(id, m).await.unwrap();
     }
-
-    let mock = Arc::new(MockChatClient::new().push_script(vec![text_done("acknowledged")]));
-    let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
+    // Any seeded fold falls through to one execution turn; give it a
+    // deterministic completion so the turn lands a reply.
+    let mock = Arc::new(
+        MockChatClient::new().with_default(vec![text_done("ack from the model")]),
+    );
     let mut sess = SessionState::new(
-        "stale-double-tap",
-        resolve_agent("act").expect("act agent"),
-        Config::default(),
-        mock.clone(),
+        id,
+        resolve_agent("act").unwrap(),
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock.clone() as Arc<dyn opencoder_llm::ChatStream>,
         std::env::temp_dir(),
     )
-    .with_store(store.clone());
-    sess.messages = history;
-    // A prior plan phase armed the (sticky) UI flag; its counter survives in
-    // the session until the next plan entry resets it.
-    sess.plan_input_count = 2;
-
-    // Tap 1 (worker FIFO): SwitchAgent("plan") resets the plan phase.
-    let quit = process_cmd(UiCmd::SwitchAgent("plan".into()), &mut sess, &tx).await;
-    assert!(!quit);
-    assert_eq!(sess.plan_input_count, 0, "plan entry resets the counter");
-
-    // Tap 2: stale UI flag still fires SwitchAndStart before the
-    // AgentSwitch("plan") event folds the flag in the UI.
-    let quit = process_cmd(
-        UiCmd::SwitchAndStart("act".into(), "draft text".into()),
-        &mut sess,
-        &tx,
-    )
-    .await;
-    assert!(!quit, "SwitchAndStart must not break the worker loop");
-
-    let mut events: Vec<UiEvent> = Vec::new();
-    while let Ok(ev) = rx.try_recv() {
-        events.push(ev);
-    }
-
-    // (1) No transcript collapse: neither reset nor handoff events.
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_)))),
-        "gate failure must not emit TranscriptReset"
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, UiEvent::Session(SessionEvent::PlanHandoff(_)))),
-        "gate failure must not emit PlanHandoff"
-    );
-
-    // (2) Degrade is visible: a Status hint explains the skipped handoff.
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            UiEvent::Session(SessionEvent::Status(ref s)) if s.contains("handoff skipped")
-        )),
-        "gate failure must emit a Status hint, got {:?} events",
-        events.len()
-    );
-
-    // (3) The UI protocol still completes (the app-loop is awaiting TurnDone).
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, UiEvent::TurnDone(ref a) if a == "act")),
-        "TurnDone(act) must still be emitted for the degraded turn"
-    );
-
-    // (4) In-memory transcript intact verbatim, plus exactly the capture:
-    // gate failure degrades to a plain act-mode submission of `extra`
-    // (`worker::handoff_run_prompt`), so the input is not swallowed.
-    assert_eq!(
-        sess.messages.len(),
-        4,
-        "history preserved verbatim + one submitted user turn + its answer"
-    );
-    assert!(sess.messages[0]
-        .text()
-        .contains("refactor the parser module"));
-    assert!(sess.messages[1].text().contains("task complete"));
-    assert!(
-        matches!(sess.messages[2].role, Role::User)
-            && sess.messages[2].text().contains("draft text"),
-        "captured input-box text must be submitted as a normal user prompt"
-    );
-    assert!(
-        matches!(sess.messages[3].role, Role::Assistant)
-            && sess.messages[3].text().contains("acknowledged"),
-        "the submitted prompt consumes the scripted mock answer"
-    );
-    assert_eq!(
-        mock.requests().len(),
-        1,
-        "gate failure degrades to a plain submission: exactly one LLM call — \
-         the input must not be swallowed (zero) nor double-sent"
-    );
-
-    // (5) No resume boundary persisted; mode switch itself still persisted.
-    let meta = store
-        .get_session("stale-double-tap")
-        .await
-        .unwrap()
-        .expect("session row exists");
-    assert_eq!(meta.agent.as_deref(), Some("act"), "act mode persisted");
-    assert!(
-        meta.handoff_seq.is_none(),
-        "gate failure must not write handoff_seq, got {:?}",
-        meta.handoff_seq
-    );
-
-    // (6) A resume keeps the full context — nothing was trimmed.
-    let resumed = resume(
-        store.clone(),
-        "stale-double-tap",
-        Config::default(),
-        Arc::new(MockChatClient::new()) as Arc<dyn opencoder_llm::ChatStream>,
-        std::env::temp_dir(),
-    )
-    .await
-    .expect("resume succeeds");
-    assert!(
-        resumed
-            .messages
-            .iter()
-            .any(|m| m.text().contains("task complete")),
-        "resume must retain the act-mode history, got {} messages",
-        resumed.messages.len()
-    );
-    assert_eq!(resumed.agent.name, "act");
+    .with_store(store.clone())
+    .mark_session_created();
+    // Live transcript mirror (the store rows above are the durable half).
+    sess.messages = msgs;
+    (sess, mock, store)
 }
 
-/// The gate must not break the legitimate path: a plan phase that recorded
-/// real input still folds the transcript and persists the resume boundary.
-#[tokio::test]
-async fn plan_phase_input_still_hands_off() {
-    let store = mem_store().await;
-    store
-        .create_session(&SessionMeta {
-            id: "gated-handoff".into(),
-            agent: Some("plan".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-
-    let mock = Arc::new(MockChatClient::new().push_script(vec![text_done("starting")]));
+async fn clear(sess: &mut SessionState) -> Vec<UiEvent> {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
-    let mut sess = SessionState::new(
-        "gated-handoff",
-        resolve_agent("plan").expect("plan agent"),
-        Config::default(),
-        mock,
-        std::env::temp_dir(),
-    )
-    .with_store(store.clone());
-    sess.messages = vec![
-        Message::user("u1", "implement feature X"),
-        assistant_with_text("a1", "## Plan\n1. do X"),
-    ];
-    // Real plan-phase requirement delivered via maybe_tag_plan_prompt.
-    sess.plan_input_count = 1;
-    // `plan_snapshot` is the phase-bounded truth source (`SessionState::record` captures it when the plan agent answers); seed it to simulate an already-produced planning phase.
-    sess.plan_snapshot = Some("## Plan\n1. do X".into());
+    let quit = process_cmd(UiCmd::Prompt("/clear_context".into(), vec![]), sess, &tx).await;
+    assert!(!quit);
+    let mut events = Vec::new();
+    let collect = async {
+        while let Some(ev) = rx.recv().await {
+            events.push(ev);
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(10), collect).await;
+    events
+}
 
-    let quit = process_cmd(
-        UiCmd::SwitchAndStart("act".into(), "".into()),
-        &mut sess,
-        &tx,
+fn reset_marker(events: &[UiEvent]) -> String {
+    let msgs = events
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::Session(SessionEvent::TranscriptReset(m)) => Some(m.clone()),
+            _ => None,
+        })
+        .expect("TranscriptReset emitted");
+    assert_eq!(msgs.len(), 1, "the fold always leaves one marker message");
+    msgs[0].text()
+}
+
+/// The say is preserved even when the user spoke AFTER it: provenance looks
+/// at the newest assistant reply anywhere in the transcript — no arming
+/// counter, no "must be the last message" rule (the legacy plan-handoff gate
+/// had one; this contract must not).
+#[tokio::test]
+async fn newest_assistant_text_is_preserved_even_with_trailing_user_turns() {
+    let (mut sess, mock, store) = session_with_transcript(
+        "provenance-trailing",
+        vec![
+            Message::user("u1", "plan the migration"),
+            assistant_with_text("a1", "the migration plan is final"),
+            Message::user("u2", "ok wait, hold on"),
+            Message::user("u3", "actually nevermind that"),
+        ],
     )
     .await;
-    assert!(!quit);
 
-    let mut events: Vec<UiEvent> = Vec::new();
-    while let Ok(ev) = rx.try_recv() {
-        events.push(ev);
-    }
+    let events = clear(&mut sess).await;
+    let marker = reset_marker(&events);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_)))),
-        "legitimate handoff must still emit TranscriptReset"
+        marker.contains("continuity context") && marker.contains("the migration plan is final"),
+        "the say must travel as continuity context regardless of trailing user turns, got: {marker}"
+    );
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "a preserved say executes exactly one seeded turn"
+    );
+    let meta = store.get_session("provenance-trailing").await.unwrap().unwrap();
+    assert!(is_clear_context_seed(meta.handoff_plan.as_deref().unwrap_or("")));
+
+    // The seeded execution turn's reply is the only new content.
+    assert_eq!(sess.messages.len(), 2, "seed + execution reply");
+    assert!(
+        sess.messages[1].text().contains("ack from the model"),
+        "the execution reply lands after the seed, got: {:?}",
+        sess.messages[1].text()
+    );
+}
+
+/// An assistant message with only EMPTY text blocks carries no provenance:
+/// the fold degrades to the blank fresh-start sentinel and no LLM turn runs.
+#[tokio::test]
+async fn empty_assistant_text_degrades_to_blank_sentinel() {
+    let (mut sess, mock, store) = session_with_transcript(
+        "provenance-empty",
+        vec![
+            Message::user("u1", "do something"),
+            assistant_with_text("a1", ""), // streamed but never said anything
+            Message::user("u2", "clear this"),
+        ],
+    )
+    .await;
+
+    let events = clear(&mut sess).await;
+    let marker = reset_marker(&events);
+    assert!(
+        marker.contains("starting fresh"),
+        "no preserved text -> blank fresh-start marker, got: {marker}"
     );
     assert!(
-        events.iter().any(|e| matches!(
-            e,
-            UiEvent::Session(SessionEvent::PlanHandoff(ref p)) if p.contains("## Plan")
-        )),
-        "legitimate handoff must still emit PlanHandoff with the plan"
+        !marker.contains("prior context, not a new instruction"),
+        "the seed wrapper must not appear without a preserved say, got: {marker}"
     );
-    let meta = store
-        .get_session("gated-handoff")
-        .await
-        .unwrap()
-        .expect("session row exists");
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "the sentinel path stops without an LLM turn"
+    );
+    let meta = store.get_session("provenance-empty").await.unwrap().unwrap();
+    assert!(is_clear_context_handoff(meta.handoff_plan.as_deref().unwrap_or("")));
+    assert!(!is_clear_context_seed(meta.handoff_plan.as_deref().unwrap_or("")));
+}
+
+/// Repeated clears are deterministic and monotone: clear -> seed; clear again
+/// (the seed is a USER message, so no assistant provenance remains) -> the
+/// blank sentinel. The same input never yields different folds.
+#[tokio::test]
+async fn repeated_clears_are_deterministic_seed_then_sentinel() {
+    let (mut sess, mock, store) = session_with_transcript(
+        "provenance-repeat",
+        vec![
+            Message::user("u1", "build the thing"),
+            assistant_with_text("a1", "the thing is built"),
+        ],
+    )
+    .await;
+
+    // First clear: the say is preserved and executed.
+    let first = clear(&mut sess).await;
+    let seed_marker = reset_marker(&first);
+    assert!(seed_marker.contains("the thing is built"));
+    assert!(is_clear_context_seed(
+        store
+            .get_session("provenance-repeat")
+            .await
+            .unwrap()
+            .unwrap()
+            .handoff_plan
+            .as_deref()
+            .unwrap_or("")
+    ));
+    assert_eq!(mock.call_count(), 1, "the seeded fold runs one turn");
+
+    // Second clear: the transcript is now [seed, reply]. The reply is the
+    // newest assistant text -> it becomes the new seed (deterministic rule,
+    // not a special case).
+    mock.queue_script(vec![text_done("second reply")]);
+    let second = clear(&mut sess).await;
+    let second_marker = reset_marker(&second);
     assert!(
-        meta.handoff_seq.is_some(),
-        "legitimate handoff must persist the resume boundary"
+        second_marker.contains("continuity context")
+            && second_marker.contains("ack from the model"),
+        "the newest say (the execution reply) is re-preserved on every clear, got: {second_marker}"
+    );
+    assert_eq!(mock.call_count(), 2, "still exactly one turn per seeded fold");
+}
+
+/// A synthetic marker can never serve as provenance for the NEXT fold: after
+/// the blank sentinel fold, clearing again stays blank (the sentinel is a
+/// user-role message with no assistant text to preserve).
+#[tokio::test]
+async fn blank_sentinel_never_arms_a_later_seed() {
+    let (mut sess, mock, _store) = session_with_transcript(
+        "provenance-noarm",
+        vec![Message::user("u1", "a request that was never answered")],
+    )
+    .await;
+
+    let first = clear(&mut sess).await;
+    assert!(
+        reset_marker(&first).contains("starting fresh"),
+        "no assistant text -> blank sentinel"
+    );
+    assert_eq!(mock.call_count(), 0);
+
+    // Clear again immediately: still blank, still no turn. No hidden state
+    // (counter/flag) can flip the outcome.
+    let second = clear(&mut sess).await;
+    assert!(reset_marker(&second).contains("starting fresh"));
+    assert_eq!(
+        mock.call_count(),
+        0,
+        "repeated blank clears stay turn-free"
     );
 }

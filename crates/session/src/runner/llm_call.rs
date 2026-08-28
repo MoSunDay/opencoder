@@ -56,9 +56,9 @@ pub(super) async fn run_one_llm_call(
                         name,
                     );
             }
-            session.agent.tools.allows(name)
-                && (!crate::tools::latent::is_latent_tool(name.as_str())
-                    || unlocked.contains(name.as_str()))
+            // Sandbox always sees `question` (base-prompt clarification
+            // protocol); other agents need the task-plan/review skill unlock.
+            crate::tools::latent::is_visible(name.as_str(), &session.agent, &unlocked)
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();

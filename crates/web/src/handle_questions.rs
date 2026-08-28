@@ -82,14 +82,6 @@ pub(crate) async fn apply_set_annotation(session: &mut SessionState, text: Optio
     }
 }
 
-/// Body of [`DrainCmd::ResetPlanPhase`]: re-entry into plan mode resets only
-/// the phase input counter (the plan snapshot deliberately survives — see
-/// `plan_phase::reset_plan_phase`) and persists it so a resume re-arms fresh.
-pub(crate) async fn apply_reset_plan_phase(session: &mut SessionState) {
-    session.reset_plan_phase();
-    session.persist_plan_phase().await;
-}
-
 /// Post-drain title generation (mirrors `crates/cli/src/run.rs`): only when
 /// the run completed Ok and the session row has no title yet (covers multiple
 /// run attempts — the title check makes it once-only). Bounded at 30 s so a

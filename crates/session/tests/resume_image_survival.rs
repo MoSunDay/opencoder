@@ -1,6 +1,6 @@
 //! RC4: images must survive session resume.
 //!
-//! Both resume branches (compaction summary and plan handoff) re-derive the
+//! Both resume branches (compaction summary and transcript handoff) re-derive the
 //! recent head images via `collect_head_images` and attach them to the
 //! reconstructed synthetic message, so a vision model still sees them after a
 //! crash/restart. These tests assert that contract against a durable store.
@@ -65,8 +65,6 @@ fn meta(id: &str) -> SessionMeta {
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     }
 }
 
@@ -123,15 +121,17 @@ async fn resume_after_compaction_preserves_head_image() {
     assert_eq!(urls, vec!["img1.png"], "head image must survive resume");
 }
 
-/// Handoff branch: a plan->act handoff set handoff_seq; the plan-mode head
-/// carried an image. Resume must re-attach it to the handoff instruction.
+/// Handoff branch: a transcript handoff set handoff_seq; the pre-handoff head
+/// carried an image. Resume must re-attach it to the handoff directive. The
+/// persisted `handoff_plan` uses legacy wording on purpose: legacy boundary
+/// rows must reconstruct with the directive wording too.
 #[tokio::test]
 async fn resume_after_handoff_preserves_head_image() {
     let store = mem_store().await;
     store.create_session(&meta("h1")).await.unwrap();
 
     let head = vec![
-        user_with_image("u1", "plan from this", "plan_img.png"),
+        user_with_image("u1", "explore from this", "plan_img.png"),
         assistant("a1"),
         Message::user("u2", "approve"),
         assistant("a2"),
@@ -172,5 +172,9 @@ async fn resume_after_handoff_preserves_head_image() {
     assert!(handoff.synthetic, "handoff instruction is synthetic");
     assert!(handoff.text().contains("## Plan"));
     let urls = image_urls(handoff);
-    assert_eq!(urls, vec!["plan_img.png"], "plan head image must survive");
+    assert_eq!(
+        urls,
+        vec!["plan_img.png"],
+        "pre-handoff head image must survive"
+    );
 }

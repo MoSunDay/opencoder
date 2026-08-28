@@ -3,12 +3,14 @@
 //! When `config.autopilot.mode` is `"ap"` the session runner hands control to
 //! [`drive`] after the initial task. Each iteration:
 //!
-//! - **PLAN** — switch to the plan agent, inject a continuation prompt, run one
-//!   loop. Plan turns stay in the transcript (legitimate work record).
-//! - **ACT** — reset the transcript via plan→act handoff (ACT sees only the
-//!   plan output as its execution instruction), switch to the act agent, run
-//!   one loop. Inject an execute prompt only as a fallback when no handoff
-//!   plan is found.
+//! - **PLAN** — switch to the sandbox agent (read-only explorer), activate
+//!   the task-plan skill (unlocking the latent `question` tool), inject a
+//!   continuation prompt, run one loop. Sandbox turns stay in the transcript
+//!   (legitimate work record).
+//! - **ACT** — reset the transcript via execution handoff (ACT sees only the
+//!   brief as its execution instruction), switch to the act agent, run one
+//!   loop. Inject an execute prompt only as a fallback when no handoff brief
+//!   is found.
 //! - **VERIFY** — an isolated *shadow* one-shot: it clones the current
 //!   transcript into a throwaway snapshot, asks a small model "is the goal
 //!   fully achieved?", parses a single yes/no, then discards the snapshot.

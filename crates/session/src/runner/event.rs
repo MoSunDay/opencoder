@@ -90,10 +90,6 @@ pub enum SessionEvent {
     /// Emitted after compaction rewrites the transcript. Carries the new
     /// message list so display surfaces can rebuild their view.
     TranscriptReset(Vec<Message>),
-    /// Emitted after plan→act handoff. Carries the plan text (markdown) for the
-    /// display layer to render as a read-only card. Paired with a preceding
-    /// TranscriptReset that rebuilds the clean view.
-    PlanHandoff(String),
     /// A queued follow-up was consumed (drained) at an idle boundary. Carries
     /// the consumed input's row seq so the TUI can drop it from its pending
     /// mirror instead of leaving a stale `[queued]` row until `Done`.
@@ -150,7 +146,6 @@ impl SessionEvent {
             SessionEvent::SubagentEnd { .. } => "subagent_end",
             SessionEvent::SubagentChild { .. } => "subagent_child",
             SessionEvent::AutoPilot { .. } => "autopilot",
-            SessionEvent::PlanHandoff(_) => "plan_handoff",
             SessionEvent::TranscriptReset(_) => "transcript_reset",
             SessionEvent::QueueConsumed { .. } => "queue_consumed",
             SessionEvent::SteerConsumed { .. } => "steer_consumed",
@@ -218,7 +213,6 @@ impl SessionEvent {
             SessionEvent::AutoPilot { phase, iteration } => {
                 serde_json::json!({ "phase": phase, "iteration": iteration })
             }
-            SessionEvent::PlanHandoff(plan) => serde_json::json!({ "plan": plan }),
             SessionEvent::TranscriptReset(_) => serde_json::json!({}),
             SessionEvent::QueueConsumed { seq, text } => {
                 serde_json::json!({ "seq": seq, "text": text })
@@ -302,7 +296,6 @@ impl SessionEvent {
                     ev: Box::new(ev),
                 }
             }
-            "plan_handoff" => SessionEvent::PlanHandoff(data.get("plan")?.as_str()?.to_string()),
             "transcript_reset" => {
                 // Wire payload is `{}`; the rebuilt message list is intentionally
                 // empty (see method doc). Callers re-fetch /messages if needed.
@@ -355,7 +348,6 @@ impl SessionEvent {
             SessionEvent::SubagentStart { .. }
             | SessionEvent::SubagentEnd { .. }
             | SessionEvent::SubagentChild { .. }
-            | SessionEvent::PlanHandoff(_)
             | SessionEvent::AutoPilot { .. }
             | SessionEvent::QueueConsumed { .. }
             | SessionEvent::SteerConsumed { .. } => EventKind::Step,
@@ -415,7 +407,7 @@ mod from_sse_tests {
                 is_error: true,
                 images: Vec::new(),
             },
-            SessionEvent::AgentSwitch("plan".into()),
+            SessionEvent::AgentSwitch("sandbox".into()),
             SessionEvent::ModelSwitch("openai/gpt-4o".into()),
             SessionEvent::Compaction("summary".into()),
             SessionEvent::CompactionDelta("cdelta".into()),
@@ -436,7 +428,6 @@ mod from_sse_tests {
                 id: "s1".into(),
                 ev: Box::new(SessionEvent::TextDelta("child text".into())),
             },
-            SessionEvent::PlanHandoff("# plan".into()),
             SessionEvent::TranscriptReset(vec![Message::assistant("m1")]),
             SessionEvent::QueueConsumed {
                 seq: 7,
@@ -458,8 +449,8 @@ mod from_sse_tests {
         kinds.dedup();
         assert_eq!(
             kinds.len(),
-            22,
-            "expected all 22 unique kinds, got {kinds:?}"
+            21,
+            "expected all 21 unique kinds, got {kinds:?}"
         );
 
         for ev in &cases {

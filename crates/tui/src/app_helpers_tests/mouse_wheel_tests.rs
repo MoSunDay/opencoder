@@ -154,7 +154,7 @@ async fn wheel_outside_queue_panel_scrolls_body() {
     assert_eq!(queue_scroll, 1, "panel offset untouched");
 }
 
-/// Without a queue-panel hit rect (panel hidden, e.g. plan mode), the wheel
+/// Without a queue-panel hit rect (panel hidden, e.g. in the plan editor), the wheel
 /// keeps scrolling the body — stale `queue_scroll` stays put and is clamped
 /// by the renderer.
 #[tokio::test]

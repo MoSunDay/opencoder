@@ -419,7 +419,7 @@ fn body_title_row_shows_full_top_composition() {
 
 /// When `submitted` is true (user has interacted), the in-body tutorial
 /// must NOT render even if the transcript is empty — e.g. after submitting a
-/// bare control command like `/plan` that adds no transcript block.
+/// bare control command like `/sandbox` that adds no transcript block.
 #[test]
 fn submitted_hides_tutorial_even_with_empty_blocks() {
     let backend = TestBackend::new(60, 24);

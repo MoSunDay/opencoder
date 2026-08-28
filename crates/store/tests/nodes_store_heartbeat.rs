@@ -65,8 +65,6 @@ fn sessmeta(id: &str, now: i64) -> SessionMeta {
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     }
 }
 

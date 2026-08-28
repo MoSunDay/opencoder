@@ -8,7 +8,7 @@ OpenCoder 是完全独立、从零实现的 Rust 原生编码代理。单二进�
 
 - [agents/store](agents/store/index.md) — 持久化抽象层。`Store` trait + libsql 实现（WAL，本地嵌入）。所有 session/message/input/event/subagent 与 TODO 工作流持久化的唯一出口。未来可切其它 Rust SQLite 实现。
 - [agents/llm](agents/llm/index.md) — OpenAI 兼容流式客户端 + `ChatStream` trait + `MockChatClient` + token 估算器。
-- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册（内建 + MCP + question）、subagent 调度（explore/build + libsql 追踪）、plan 模式 bash 写拦截（bash_guard）、压缩、resume、title 生成、cancel。
+- [agents/session](agents/session/index.md) — 会话运行时核心：drain 主循环（steer/queue 提升）、工具注册（内建 + MCP + latent：ssh_pty/question 按 skill 解锁）、subagent 调度（explore/build + libsql 追踪）、sandbox 只读 bash 写拦截（bash_guard）、控制命令（/act、/sandbox、/act_clear_context）、压缩、resume、title 生成、cancel。
 - [agents/core](agents/core/index.md) — 共享类型与 Config（模型/压缩/上下文窗口/small_model 全配置化）。
 - [agents/web](agents/web/index.md) — axum HTTP + SSE 会话管理（prompt admit + 事件流 + 运行时切换 + interrupt）；全量 HMAC 请求签名中间件（token+timestamp+sig，±5min、重放 409）+ 编译期内嵌 React18+antd SPA（`spa/dist` 固定文件名 include_bytes! 白名单伺服）。
 - [agents/cli](agents/cli/index.md) — clap 前端 + headless 运行时（run/tui/ts/daemon/config/models/session/todos/update/install-tools 子命令，`ts` 别名 `rs`；统一入口 `daemon --server | --client`，server/client/node 三子命令已收敛删除；--continue/--session/--fork/--model/--image；`session show --json` 深度观测面）。

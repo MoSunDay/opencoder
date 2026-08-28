@@ -4,28 +4,21 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use opencoder_core::{message::now_ms, resolve_agent, Config, Role};
+use opencoder_core::{message::now_ms, Config, Role};
 use opencoder_llm::ChatClient;
 use opencoder_session::{
-    control_cmd::persist_agent as persist_session_agent, run as run_session, run_with_images,
+    run as run_session, run_with_images,
     spawn_event_flusher, SessionEvent, SessionState, SharedCancel, SubagentSteerGate,
 };
 use opencoder_store::{SessionEventRecord, Store};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-/// `Clone` backs the UI-side dedup baseline in `handle_switch_agent`
-/// (the last successfully-enqueued pure switch is cloned into the send).
+/// `Clone` keeps the turn-starting commands cheap to forward through the
+/// single-threaded worker command channel.
 #[derive(Debug, Clone)]
 pub enum UiCmd {
     Prompt(String, Vec<String>),
-    SwitchAgent(String),
-    /// Switch agent then immediately start a turn without recording a new user
-    /// message. Used for the plan->act manual transition: the system prompt
-    /// changes to act and the model reads the plan from conversation history.
-    /// The second field carries any text left in the plan-mode input box; it
-    /// is appended to the plan during the handoff so it is submitted too.
-    SwitchAndStart(String, String),
     /// Manually trigger conversation compaction.
     Compact,
     SetSkill(Option<String>),
@@ -152,18 +145,19 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
     }
 }
 
-/// Gate for agent-mode switch actions. Busy (`running` or a live subagent —
-/// callers precompute `running || subagents_running > 0`) means the worker is
-/// mid-`run_session`; applying a mode switch then would start the *next*
-/// turn with a stale agent while the current model is still answering under
-/// the old system prompt — the mode "switch" would complete at an arbitrary
-/// partial boundary. Refuse until idle (clean turn boundary). Pure so the
-/// running-guard is unit-testable independent of the async event loop.
+/// Gate for control-command dispatch (`/act`, `/sandbox`,
+/// `/clear_context` — and Shift+Tab, which submits the same command).
+/// Busy (`running` or a live subagent — callers precompute
+/// `running || subagents_running > 0`) means the worker is mid-`run_session`;
+/// starting a control-command turn then would race the in-flight turn at an
+/// arbitrary partial boundary. Refuse until idle (clean turn boundary).
+/// Pure so the running-guard is unit-testable independent of the async event
+/// loop.
 ///
-/// Unified contract: BOTH directions are refused while busy. The slash paths
-/// (`/act` `/plan` `/act_clear_context` → `dispatch_mode_switch`) and the
-/// Shift+Tab key path (`handle_switch_agent`) and the ctrl+t pure path
-/// (`mode_switch::handle_pure_mode_switch`) share this same bidirectional gate.
+/// While busy the command is NOT silently dropped: the dispatcher shows a
+/// `[switch] busy` marker, and a Shift+Tab / typed submit that reaches the
+/// running branch queues the raw text for the runner's idle-boundary
+/// intercept instead of starting a turn.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SwitchGate {
     Run,
@@ -175,57 +169,6 @@ pub fn gate_switch(busy: bool) -> SwitchGate {
         SwitchGate::SkipRunning
     } else {
         SwitchGate::Run
-    }
-}
-
-/// Whether `next` is a redundant repeat of `prev` for PURE mode-switch
-/// commands: two consecutive `SwitchAgent(name)` with the SAME name collapse
-/// into one (the second carries no new information — the UI chip was already
-/// folded optimistically at flip time). A different name, a
-/// first-ever send (`prev == None`) and any non-`SwitchAgent` command —
-/// notably `SwitchAndStart`, which STARTS a turn — are never deduplicated.
-/// Pure so the channel-pressure hygiene is unit-testable without a worker.
-pub fn dedup_switch(prev: Option<&UiCmd>, next: &UiCmd) -> bool {
-    matches!(
-        (prev, next),
-        (Some(UiCmd::SwitchAgent(a)), UiCmd::SwitchAgent(b)) if a == b
-    )
-}
-
-/// Best-effort send for IDEMPOTENT UI commands (pure `SwitchAgent`): uses
-/// `try_send` so a FULL worker command channel (worker busy consuming turn
-/// commands mid-`run_session`) can never block the UI event loop —
-/// `TrySendError::Full` is warned and dropped, which is safe only because
-/// re-sending the same command reaches the identical state (the UI chip is
-/// already optimistically folded; re-pressing at idle re-sends). Turn-
-/// starting or exit commands (`Prompt` / `SwitchAndStart` / `ResetCancel` /
-/// `Quit`, routed through `start_turn`) must keep the blocking
-/// `.send().await`: dropping those would desync `running` or swallow the
-/// exit. Returns whether the command was enqueued (callers record successes
-/// as the `dedup_switch` baseline).
-pub fn try_send_idempotent(tx: &mpsc::Sender<UiCmd>, cmd: UiCmd) -> bool {
-    match tx.try_send(cmd) {
-        Ok(()) => true,
-        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-            tracing::warn!("cmd channel full: dropped idempotent UI switch command");
-            false
-        }
-        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
-    }
-}
-
-/// Pure prompt selection for the run that follows a `SwitchAndStart`
-/// plan→act decision: when NO handoff happened (`plan_display` is `None` —
-/// provenance gate failure or no plan text found) the captured input-box text
-/// (`extra`, taken from the composer by `handle_switch_agent`) is submitted as
-/// a normal act-mode prompt instead of being silently dropped. When a handoff
-/// DID happen, the plan (with `extra` folded in by `plan_handoff::handoff`)
-/// already carries the requirement, so the run starts with an empty prompt.
-pub(crate) fn handoff_run_prompt(plan_display: &Option<String>, extra: String) -> String {
-    if plan_display.is_none() && !extra.is_empty() {
-        extra
-    } else {
-        String::new()
     }
 }
 
@@ -290,7 +233,7 @@ fn send_completed_assistant(
 /// Fire-and-forget persist a parent-session event to the store so web/SSE
 /// clients can replay sessions driven by the TUI. Awaited (not fire-and-
 /// forget) so the event is durable before the worker proceeds — no loss on
-/// immediate exit. Used by non-run arms (e.g. SwitchAgent) where no flusher
+/// immediate exit. Used by non-run arms where no flusher
 /// is active.
 async fn persist_event(store: &Option<Arc<dyn Store>>, session_id: &str, sev: &SessionEvent) {
     if let Some(store) = store {
@@ -340,161 +283,6 @@ pub async fn process_cmd(
             }
             // Drop every sender clone so the flusher's channel closes and it
             // performs a final flush — guaranteeing zero event loss this turn.
-            drop(sink);
-            let _ = flusher.await;
-            send_completed_assistant(&ui_tx, sess, message_floor);
-            let _ = ui_tx.send(UiEvent::TurnDone(sess.agent.name.clone()));
-            false
-        }
-        UiCmd::SwitchAgent(name) => {
-            // DEFENSE-IN-DEPTH: this arm only ever applies a switch at a
-            // clean turn boundary. The worker loop is single-threaded and
-            // `run_session` is synchronous within `process_cmd(UiCmd::Prompt)`
-            // — a switch queued during a live turn is not consumed until that
-            // `process_cmd` returns, so `sess.agent` is never flipped mid-
-            // `run_session`. The app-loop running gate
-            // (`handle_switch_agent` / `handle_pure_mode_switch`) refuses to
-            // SEND a switch — either direction, handoff or pure switch — while
-            // a turn/subagent is
-            // live, so this arm is only reachable at a clean idle boundary;
-            // the turn-boundary-only consumption above is the backstop.
-            if let Some(a) = resolve_agent(&name) {
-                sess.agent = a;
-                // Mirror control_cmd::apply: switching to plan resets ONLY
-                // the phase input counter so the "submit your plan" reminder
-                // logic starts fresh. The `plan_snapshot` deliberately
-                // survives the switch: a plan→act→plan toggle with no new
-                // requirement still owns the previous phase's plan, and the
-                // snapshot retires only when a new requirement is recorded
-                // (`maybe_tag_plan_prompt`, ecce7b0 guard). Without this
-                // counter reset the TUI key-handler path (Alt+Tab / Ctrl+T)
-                // inherited a stale nonzero count, unlike the `/plan`
-                // slash-command path. The reset is persisted so a resume
-                // does not re-arm stale plan-phase state.
-                if name == "plan" {
-                    sess.reset_plan_phase();
-                    sess.persist_plan_phase().await;
-                }
-                let ev = SessionEvent::AgentSwitch(name.clone());
-                persist_event(&sess.store, &sess.id, &ev).await;
-                forward_event(&ui_tx, ev);
-                if let Err(e) = persist_session_agent(sess, &name).await {
-                    tracing::warn!(error = %e, "persist_session_agent failed");
-                }
-            }
-            false
-        }
-        UiCmd::SwitchAndStart(name, extra) => {
-            let (sink, flusher) = spawn_event_flusher(sess.store.clone(), sess.id.clone());
-            if let Some(a) = resolve_agent(&name) {
-                sess.agent = a;
-                let ev = SessionEvent::AgentSwitch(name.clone());
-                let _ = sink.push(&ev);
-                forward_event(&ui_tx, ev);
-                if let Err(e) = persist_session_agent(sess, &name).await {
-                    tracing::warn!(error = %e, "persist_session_agent failed");
-                }
-            }
-            // Plan→act handoff: clear the transcript so the act agent starts
-            // from only the final plan, not the full read-only planning noise.
-            // Mirrors compaction — in-memory mutation + TranscriptReset so the
-            // UI rebuilds clean; the append-only store keeps the raw history.
-            //
-            // Plan-provenance gate (defense-in-depth, mirrors the ClearContext
-            // gate in control_cmd::apply): only a session that recorded real
-            // plan-mode input in this phase (`plan_input_count > 0`; every
-            // delivery path increments it via `maybe_tag_plan_prompt`, and it
-            // resets on entering plan / handoff / resume) or still carries a
-            // phase-bounded `plan_snapshot` (survives the plain act→plan
-            // switch, retired on a new requirement) may fold its
-            // transcript. The UI-side `plan_submitted` flag is sticky across a
-            // plan→act handoff and can be stale when a rapid Shift+Tab
-            // act→plan→act double-tap queues `SwitchAndStart` before the UI
-            // folds the interleaved `AgentSwitch("plan")`; `handoff`'s
-            // "last non-empty assistant text" extraction would then fabricate
-            // a plan out of the act-mode answer, wipe the transcript, and
-            // persist a `handoff_seq` resume boundary that irrecoverably
-            // drops all context. Gate failure degrades to a pure switch: no
-            // handoff, no TranscriptReset/PlanHandoff, no handoff_seq write —
-            // the skill clear and the follow-up run below still execute so
-            // the UI's TurnDone protocol is honored. The captured input-box
-            // text is NOT discarded on gate failure: with no handoff it is
-            // submitted as a normal act-mode prompt (`handoff_run_prompt`).
-            let plan_display = if sess.plan_input_count > 0 || sess.plan_snapshot.is_some() {
-                opencoder_session::plan_handoff::handoff(sess, &extra)
-            } else {
-                let ev = SessionEvent::Status(
-                    "handoff skipped \u{2014} no plan input this phase; context preserved".into(),
-                );
-                let _ = sink.push(&ev);
-                forward_event(&ui_tx, ev);
-                None
-            };
-            // Wire the pure selector: no handoff (gate failure or no plan
-            // text) with captured composer text -> run it as a normal
-            // act-mode prompt instead of silently discarding the input.
-            // `extra` has no later use in this arm, so it is moved here.
-            let run_prompt = handoff_run_prompt(&plan_display, extra);
-            if let Some(plan_display) = plan_display {
-                // Persist the handoff boundary so resume reconstructs the
-                // focused post-handoff transcript (mirrors compaction).
-                if let Some(store) = &sess.store {
-                    let _ = store
-                        .update_session(
-                            &sess.id,
-                            &opencoder_store::SessionPatch {
-                                handoff_seq: sess.handoff_seq,
-                                handoff_plan: sess.handoff_plan.clone(),
-                                clear_skill: true,
-                                // The plan phase ended: the snapshot was
-                                // consumed and the counter reset by the
-                                // handoff — mirror both so resume starts
-                                // the act phase un-armed.
-                                clear_plan_snapshot: true,
-                                plan_input_count: Some(sess.plan_input_count as i64),
-                                updated_at: Some(now_ms()),
-                                ..Default::default()
-                            },
-                        )
-                        .await;
-                }
-                let ev = SessionEvent::TranscriptReset(sess.messages.clone());
-                let _ = sink.push(&ev);
-                forward_event(&ui_tx, ev);
-                let ev2 = SessionEvent::PlanHandoff(plan_display);
-                let _ = sink.push(&ev2);
-                forward_event(&ui_tx, ev2);
-            } else {
-                // No plan found (fallback path): the in-memory skill clear
-                // below must also reach the store, or a resume would
-                // resurrect the deactivated skill.
-                if let Some(store) = &sess.store {
-                    let _ = store
-                        .update_session(
-                            &sess.id,
-                            &opencoder_store::SessionPatch {
-                                clear_skill: true,
-                                updated_at: Some(now_ms()),
-                                ..Default::default()
-                            },
-                        )
-                        .await;
-                }
-            }
-            sess.set_skill(None);
-            let message_floor = sess.messages.len();
-            let tx = ui_tx.clone();
-            let sink_for_run = sink.clone();
-            let res = run_session(sess, run_prompt, move |sev| {
-                let _ = sink_for_run.push(&sev);
-                forward_event(&tx, sev);
-            })
-            .await;
-            if let Err(e) = res {
-                let ev = SessionEvent::Error(format!("{e:#}"));
-                let _ = sink.push(&ev);
-                forward_event(&ui_tx, ev);
-            }
             drop(sink);
             let _ = flusher.await;
             send_completed_assistant(&ui_tx, sess, message_floor);
@@ -710,6 +498,5 @@ pub async fn process_cmd(
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod tests_ap_switch;
 #[cfg(test)]
 mod tests_reload;

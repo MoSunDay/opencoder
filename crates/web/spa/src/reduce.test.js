@@ -94,6 +94,20 @@ describe('reduceFrame', () => {
     expect(s.turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'do it' });
   });
 
+  // Agent surfaces render the wire value verbatim: the act/sandbox rename
+  // (legacy "plan" is gone, resolve_agent("plan") is None server-side) must
+  // show "sandbox" as-is, and any unknown future value must degrade to an
+  // empty name rather than crash the stream.
+  it('renders agent_switched sys turns for sandbox and unknown values', () => {
+    let s = emptyStream();
+    s = reduceFrame(s, { event: 'agent_switched', data: { agent: 'sandbox' } }, 0);
+    expect(s.turns[0]).toEqual({ kind: 'sys', text: 'agent → sandbox' });
+    s = reduceFrame(s, { event: 'agent_switched', data: { agent: 'act' } }, 1);
+    expect(s.turns[1]).toEqual({ kind: 'sys', text: 'agent → act' });
+    s = reduceFrame(s, { event: 'agent_switched', data: {} }, 2);
+    expect(s.turns[2]).toEqual({ kind: 'sys', text: 'agent → ' });
+  });
+
   it('ignores unknown events without mutating state', () => {
     const s = emptyStream();
     expect(reduceFrame(s, { event: 'subagent_child', data: {} }, 0)).toBe(s);

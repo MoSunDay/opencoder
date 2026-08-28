@@ -39,8 +39,6 @@ pub async fn create_session(
             skill: None,
             task_type: Some(TASK_TYPE_TODO_WORKFLOW.into()),
             requirement: Some("Manage global TODO state and acceptance".into()),
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
 }

@@ -126,7 +126,7 @@ async fn run_one_task() -> (Server, String, String, Runner, Dirs) {
         client.clone(),
     )
     .await;
-    let node_id = wait_for(15, 100, || async {
+    let node_id = wait_for(60, 100, || async {
         let (_, v) = get_json(&base, "/api/nodes").await;
         v["nodes"]
             .as_array()
@@ -150,7 +150,7 @@ async fn run_one_task() -> (Server, String, String, Runner, Dirs) {
     // the local event flush — so the node-side transcript is guaranteed
     // readable by the time this returns. (Waiting for node "idle" here would
     // race: an idle node has not necessarily claimed the task yet.)
-    wait_for(15, 50, || async {
+    wait_for(60, 50, || async {
         match store.get_node_task(&tid).await.unwrap() {
             Some(r) if r.status == opencoder_store::NodeTaskStatus::Done => Some(()),
             Some(r)

@@ -1,32 +1,32 @@
 //! Tests for `forward_skill_if_compound`.
-use super::*;
+use super::forward_skill_if_compound;
 
 #[test]
-fn plan_with_skill_forwards_raw() {
-    let got = forward_skill_if_compound("/plan $review", "/plan");
-    assert_eq!(got, "/plan $review");
+fn compound_sandbox_with_skill_forwards_raw() {
+    let got = forward_skill_if_compound("/sandbox $review", "/sandbox");
+    assert_eq!(got, "/sandbox $review");
 }
 
 #[test]
-fn plan_with_skill_and_text_forwards_raw() {
-    let got = forward_skill_if_compound("/plan $review do stuff", "/plan do stuff");
-    assert_eq!(got, "/plan $review do stuff");
+fn compound_sandbox_with_text_forwards_raw() {
+    let got = forward_skill_if_compound("/sandbox $review do stuff", "/sandbox do stuff");
+    assert_eq!(got, "/sandbox $review do stuff");
 }
 
 #[test]
-fn act_with_skill_forwards_raw() {
+fn compound_act_with_skill_forwards_raw() {
     let got = forward_skill_if_compound("/act $review", "/act");
     assert_eq!(got, "/act $review");
 }
 
 #[test]
-fn bare_plan_no_skill_keeps_clean() {
-    let got = forward_skill_if_compound("/plan", "/plan");
-    assert_eq!(got, "/plan");
+fn bare_command_not_forwarded() {
+    let got = forward_skill_if_compound("/sandbox", "/sandbox");
+    assert_eq!(got, "/sandbox");
 }
 
 #[test]
-fn plain_text_keeps_clean() {
+fn plain_text_untouched() {
     let got = forward_skill_if_compound("hello world", "hello world");
     assert_eq!(got, "hello world");
 }

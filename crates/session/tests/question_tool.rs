@@ -50,11 +50,11 @@ fn text_done(text: &str) -> LlmEvent {
     }
 }
 
-fn plan_session(mock: Arc<MockChatClient>, hub: Option<Arc<QuestionHub>>) -> SessionState {
+fn sandbox_session(mock: Arc<MockChatClient>, hub: Option<Arc<QuestionHub>>) -> SessionState {
     let dir = tempfile::tempdir().unwrap();
     let mut s = SessionState::new(
         "question-1",
-        resolve_agent("plan").unwrap(),
+        resolve_agent("sandbox").unwrap(),
         config(),
         mock as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),
@@ -101,7 +101,7 @@ async fn answered_question_feeds_the_followup_call() {
             .push_script(vec![question_turn("q-1", "which database?")])
             .push_script(vec![text_done("## Plan\nuse postgres")]),
     );
-    let mut session = plan_session(mock.clone(), Some(hub.clone()));
+    let mut session = sandbox_session(mock.clone(), Some(hub.clone()));
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = events.clone();
 
@@ -139,7 +139,7 @@ async fn skipped_question_returns_the_skip_text() {
             .push_script(vec![question_turn("q-2", "which port?")])
             .push_script(vec![text_done("## Plan\ndefault port")]),
     );
-    let mut session = plan_session(mock, Some(hub.clone()));
+    let mut session = sandbox_session(mock, Some(hub.clone()));
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let observed = events.clone();
 
@@ -173,7 +173,7 @@ async fn unattached_hub_falls_back_without_waiting() {
             .push_script(vec![question_turn("q-3", "which format?")])
             .push_script(vec![text_done("## Plan\njson")]),
     );
-    let mut session = plan_session(mock, None); // hub exists, never attached
+    let mut session = sandbox_session(mock, None); // hub exists, never attached
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let observed = events.clone();
 
@@ -212,7 +212,7 @@ async fn turn_cancel_unblocks_a_pending_question() {
             .push_script(vec![text_done("## Plan")]),
     );
     let turn_cancel: SharedCancel = Arc::new(Mutex::new(CancellationToken::new()));
-    let mut session = plan_session(mock, Some(hub.clone()));
+    let mut session = sandbox_session(mock, Some(hub.clone()));
     session = session.with_turn_cancel(turn_cancel.clone());
 
     let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));

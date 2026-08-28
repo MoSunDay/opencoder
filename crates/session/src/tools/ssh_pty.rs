@@ -109,7 +109,7 @@ const BARE_INTERACTIVE: &[&str] = &[
     "sftp",
 ];
 
-// `strip_wrappers` and `cmd_base` live in `crate::bash_guard` so the plan-mode
+// `strip_wrappers` and `cmd_base` live in `crate::bash_guard` so the sandbox-mode
 // write guard and this SSH sanitiser share one implementation of
 // command-wrapper unwrapping.
 use crate::bash_guard::{cmd_base, strip_wrappers};

@@ -1,7 +1,7 @@
 //! Inline `$name` skill-token resolution for compound control commands.
 //!
-//! When a user submits a compound prompt like `/plan $review the api`, the
-//! leading `/plan` switches the agent (handled by [`crate::control_cmd`]) and
+//! When a user submits a compound prompt like `/sandbox $review the api`, the
+//! leading `/sandbox` switches the agent (handled by [`crate::control_cmd`]) and
 //! the trailing text may carry `$skill` tokens. This module strips those
 //! tokens, discovers the named skills, and activates their bodies on the
 //! session — mirroring the TUI's `$`-picker path but operating directly on the
@@ -16,19 +16,17 @@
 use std::collections::HashSet;
 
 use opencoder_core::message::now_ms;
-use opencoder_core::{
-    body_with_source, discover_skills, extract_skill_tokens, AgentKind, Message, Skill,
-};
+use opencoder_core::{body_with_source, discover_skills, extract_skill_tokens, Message, Skill};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
 use crate::SessionState;
 
 /// Synthetic trigger injected when `$skill` token stripping empties the text
-/// but a skill was activated (e.g. `/plan $review` or a pure `$review` queue
+/// but a skill was activated (e.g. `/sandbox $review` or a pure `$review` queue
 /// item). Mirrors the idle path's pure-skill trigger so the model begins
 /// executing the active skill (surfaced via the `[active skill]` tail
-/// reminder). The plan-mode read-only tag is deliberately NOT applied to
+/// reminder). Read-only tagging is deliberately NOT applied to
 /// this trigger, matching the idle path. One-shot: the skill this trigger
 /// announces is cleared at the end of the run that consumed the token
 /// (`skill_lifecycle`), so it never announces a stale skill on a later run.
@@ -39,7 +37,7 @@ pub const SKILL_TRIGGER: &str = "The active skill is now in effect. Begin execut
 /// `skill_persist::persist_skill`: best-effort — store errors are swallowed
 /// because the in-memory write keeps the in-flight turn correct — and a
 /// `None -> Some` transition only writes `skill`, never `clear_skill` (skill
-/// *clearing* is owned by the explicit clear paths — control_cmd, plan
+/// *clearing* is owned by the explicit clear paths — control_cmd, autopilot
 /// handoff, the TUI `$` menu — plus the run-end auto-clear in
 /// `skill_lifecycle::clear_on_run_end`; this function never clears).
 ///
@@ -129,14 +127,14 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 }
 
 /// Record a prompt as a synthetic user message after resolving inline
-/// `$skill` tokens and applying the plan-mode read-only tag. Used by the
-/// queue-drain and steer paths for both compound commands (`/plan review`)
+/// `$skill` tokens. Used by the queue-drain and steer paths for both compound
+/// commands (`/sandbox review`)
 /// and plain prompts (`$review do it`) so both get consistent skill handling.
 ///
 /// When THIS input resolved at least one `$skill` token and the stripping
-/// empties the text (e.g. `/plan $review`), injects [`SKILL_TRIGGER`]
+/// empties the text (e.g. `/sandbox $review`), injects [`SKILL_TRIGGER`]
 /// instead — mirroring the idle path's pure-skill behavior — and skips the
-/// plan-mode tag. The condition is scoped to tokens resolved by this very
+/// read-only tag. The condition is scoped to tokens resolved by this very
 /// call, NOT the session's already-active skill: a queue/steer restart with
 /// a stale active skill must not re-inject a trigger for a skill the item
 /// never mentioned (that amplified the drain self-continuation loop).
@@ -149,7 +147,7 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
     let rest = &crate::mention_resolve::expand_mentions(rest, &session.working_dir);
     let skills = discover_skills();
     let prev_skill = session.skill_prompt_cloned();
-    let (mut text, unresolved) = resolve_inline_skills_with(session, rest, &skills);
+    let (text, unresolved) = resolve_inline_skills_with(session, rest, &skills);
     persist_active_skill(session, &prev_skill).await;
     // "Resolved now": THIS input carried at least one `$name` token that
     // extraction found and discovery matched (so it was stripped and
@@ -161,8 +159,7 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
         .iter()
         .any(|name| skills.iter().any(|s| &s.name == name) && !unresolved.contains(name));
     // Pure-skill: tokens consumed all text AND at least one resolved here.
-    // Inject the trigger so the model acts on the skill body (no plan-mode
-    // tag, matching the idle path).
+    // Inject the trigger so the model acts on the skill body.
     if text.trim().is_empty() && images.is_empty() {
         if resolved_now {
             let mut msg = Message::user(new_id(), SKILL_TRIGGER);
@@ -171,14 +168,8 @@ pub async fn record_compound(session: &mut SessionState, rest: &str, images: &[S
         }
         return;
     }
-    session.maybe_tag_plan_prompt(&mut text);
     let m = Message::user_with_images(new_id(), text, images);
     session.record(m).await;
-    // Keep the persisted plan-phase counter in step with the increment that
-    // just happened (queue/steer twin of the idle path in runner::run).
-    if session.agent.kind == AgentKind::Plan {
-        session.persist_plan_phase().await;
-    }
 }
 
 #[cfg(test)]
@@ -292,8 +283,7 @@ mod tests {
     #[tokio::test]
     async fn record_compound_records_cleaned_text() {
         let mut s = make_session();
-        s.agent = resolve_agent("plan").unwrap();
-        // First plan input (count 0) -> no read-only tag appended.
+        s.agent = resolve_agent("sandbox").unwrap();
         record_compound(&mut s, "review the code", &[]).await;
         assert_eq!(s.messages.len(), 1);
         assert!(
@@ -304,13 +294,12 @@ mod tests {
             s.messages[0].text().contains("review the code"),
             "cleaned text recorded"
         );
-        assert_eq!(s.plan_input_count, 1, "plan input counter incremented");
     }
 
     #[tokio::test]
     async fn record_compound_pure_skill_injects_trigger() {
         let mut s = make_session();
-        s.agent = resolve_agent("plan").unwrap();
+        s.agent = resolve_agent("sandbox").unwrap();
         {
             let _guard = lock_home(tempfile::tempdir().unwrap().path());
             opencoder_core::seed_builtin_skills();
@@ -325,8 +314,6 @@ mod tests {
             s.skill_prompt_cloned().is_some(),
             "skill activated by the token"
         );
-        // plan_input_count NOT incremented (trigger skips the plan tag).
-        assert_eq!(s.plan_input_count, 0, "trigger skips plan-mode counter");
     }
 
     #[tokio::test]

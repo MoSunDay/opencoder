@@ -10,7 +10,7 @@ use opencoder_store::SessionPatch;
 
 use crate::autopilot::prompts::{continuation_prompt, execute_prompt};
 use crate::autopilot::state::ApState;
-use crate::plan_handoff;
+use crate::handoff;
 use crate::runner::{new_id, SessionEvent};
 use crate::skill_lifecycle::run_loop_one_shot;
 use crate::SessionState;
@@ -28,18 +28,26 @@ pub(super) fn switch_agent(
     on_event(SessionEvent::AgentSwitch(session.agent.name.clone()));
 }
 
-/// Hardcode the review skill for the PLAN phase. Always discovers the
+/// Hardcode the review skill for the review pass. Always discovers the
 /// `"review"` skill from `~/.opencoder/skills`; a missing skill body is a
 /// no-op (skill set to `None`).
 pub(super) fn activate_review_skill(session: &SessionState) {
+    activate_skill(session, "review");
+}
+
+/// Activate a discovered skill by name for this session. A missing skill is a
+/// no-op (`set_skill(None)`-equivalent: nothing is injected). The body is
+/// wrapped with its source path so the model can resolve skill-relative assets.
+pub(super) fn activate_skill(session: &SessionState, name: &str) {
     let body = opencoder_core::skill::discover()
         .into_iter()
-        .find(|s| s.name == "review")
+        .find(|s| s.name == name)
         .map(|s| opencoder_core::body_with_source(&s));
     session.set_skill(body);
 }
 
-/// PLAN phase: switch to the plan agent, activate the review skill, inject the
+/// PLAN phase: switch to the sandbox agent (read-only explorer), activate the
+/// task-plan skill (which unlocks the latent `question` tool), inject the
 /// continuation prompt, and run one loop.
 pub async fn run_plan_phase(
     session: &mut SessionState,
@@ -47,24 +55,24 @@ pub async fn run_plan_phase(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
     state: &ApState,
 ) -> Result<()> {
-    switch_agent(session, "plan", on_event);
-    activate_review_skill(session);
+    switch_agent(session, "sandbox", on_event);
+    activate_skill(session, "task-plan");
     let mut msg = Message::user(new_id(), continuation_prompt(&state.goal));
     msg.synthetic = true;
     session.record(msg).await;
     run_loop_one_shot(session, registry, on_event, false).await
 }
 
-/// ACT phase: reset the transcript via plan→act handoff so ACT only sees the
-/// review output as its sole execution instruction, then run one loop. If the
-/// handoff cannot find a plan (no assistant text), fall back to injecting an
+/// ACT phase: reset the transcript via execution handoff so ACT only sees the
+/// planning brief as its sole execution instruction, then run one loop. If the
+/// handoff cannot find a brief (no assistant text), fall back to injecting an
 /// explicit execute prompt.
 pub async fn run_act_phase(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) -> Result<()> {
-    if plan_handoff::handoff(session, "").is_some() {
+    if handoff::reset_to_directive(session, "").is_some() {
         // Persist the handoff boundary so resume can reconstruct the focused
         // transcript. Best-effort: non-fatal if the store is absent.
         if let Some(store) = &session.store {

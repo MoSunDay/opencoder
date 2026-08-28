@@ -85,7 +85,8 @@ pub struct HandoffBody {
     pub extra: String,
 }
 
-/// POST /api/sessions/:id/handoff — execute a plan->act handoff.
+/// POST /api/sessions/:id/handoff — execution handoff: collapse the transcript
+/// to the newest assistant brief and switch to `act`.
 pub async fn post_handoff(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

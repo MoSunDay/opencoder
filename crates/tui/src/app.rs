@@ -140,7 +140,6 @@ pub(super) async fn run_app(
     let mut active_skill_body: Option<String> = None;
     let mut anim_tick: u32 = 0;
     let mut mode_flash: Option<(String, u32)> = None;
-    let mut last_switch_sent: Option<UiCmd> = None; // dedup baseline for pure-switch try_send
     let mut last_esc: Option<Instant> = None;
     let mut subagent_focus: Option<usize> = None;
     let mut shift_held = false;
@@ -487,7 +486,7 @@ pub(super) async fn run_app(
                             KeyAction::Submit(text) => {
                                 if running {
                                     // Submit while running is reachable only via BackTab's
-                                    // compound `/plan …` (Enter/Tab map to Steer/Queue when
+                                    // compound `/sandbox …` (Enter/Tab map to Steer/Queue when
                                     // running), so no bare slash command can land here.
                                     // Deferred: the raw text (tokens included) queues verbatim;
                                     // the runner's record_compound resolves/activates/
@@ -509,9 +508,6 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
-                                // NOTE: no compound `/plan` arm here — arming is
-                                // consumption-time (TurnDone(plan) reads the persisted
-                                // plan-phase counter).
                                 // Intercept /annotation: open the editor instead of submitting
                                 if let Some(action) = crate::command::parse(&clean) {
                                     // Unified slash-command dispatch: route recognized `/cmd`
@@ -520,7 +516,7 @@ pub(super) async fn run_app(
                                         action, &cmd_tx, &mut cancel, &mut chat,
                                         &mut running, &mut follow, &store,
                                         &session_id, &mut task_picker, &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut skill_toggle_menu,
-                                        &mut ap_menu, &mut cache_salt_menu, &agent_name, &mut input, &mut cursor_idx,
+                                        &mut ap_menu, &mut cache_salt_menu, &agent_name,
                                         &mut config, &workdir,
                                         &mut mode_flash, anim_tick, &mut sys_tokens,
                                         &mut plan_edit, &mut notepad,
@@ -549,7 +545,6 @@ pub(super) async fn run_app(
                                         task_elapsed_ms = 0;
                                         running = true;
                                         follow = true;
-                                        chat.note_requirement_submitted();
                                         chat.begin_turn();
                                         body_refresh_pending = true;
                                     }
@@ -567,7 +562,6 @@ pub(super) async fn run_app(
                                     cancelled = false;
                                     running = true;
                                     follow = true;
-                                    chat.note_requirement_submitted();
                                     chat.begin_turn();
                                     body_refresh_pending = true;
                                 }
@@ -620,28 +614,6 @@ pub(super) async fn run_app(
                             }
                             KeyAction::ModeSwitchBlocked => {
                                 mode_flash = Some(mode_switch_busy_flash(anim_tick));
-                            }
-                            KeyAction::SwitchAgent(name) => {
-                                if matches!(
-                                    app_loop::handle_switch_agent(
-                                        name, &mut chat, &mut running, &mut follow, &mut input,
-                                        &mut cursor_idx, &mut mode_flash, anim_tick, &cmd_tx,
-                                        &mut cancel, &mut sys_tokens, &workdir, &active_skill_body, &mut last_switch_sent,
-                                    )
-                                    .await,
-                                    app_loop::SwitchOutcome::Quit
-                                ) { break; }
-                            }
-                            KeyAction::SwitchAgentNoClear(name) => {
-                                // ctrl+t / t+Tab chord: PURE plan<->act state flip,
-                                // structurally separated from the Shift+Tab handoff path —
-                                // it can never reach SwitchAndStart, so it never starts a
-                                // turn. Busy is refused with the hint (re-press when idle).
-                                crate::mode_switch::handle_pure_mode_switch(
-                                    name, &mut chat, running, &mut mode_flash, anim_tick,
-                                    &cmd_tx, &mut sys_tokens, &workdir, &active_skill_body,
-                                    &mut last_switch_sent,
-                                );
                             }
                             KeyAction::SetSkill(opt) => {
                                 crate::skill_persist::apply_skill_selection(

@@ -49,7 +49,7 @@ fn move_hist_down_after_up_restores_blank() {
 }
 
 #[test]
-fn shift_i_in_plan_mode_idle_enters_plan_edit() {
+fn shift_i_in_sandbox_mode_idle_enters_plan_edit() {
     let mut input = String::new();
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
@@ -63,8 +63,8 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
     let mut file_menu: Option<crate::file_menu::FileMenu> = None;
     let workdir = std::path::Path::new(".");
 
-    // Shift+I (uppercase I) on empty input while idle in plan mode enters
-    // the plan-text editor.
+    // Shift+I (uppercase I) on empty input while idle in the sandbox agent
+    // enters the plan-text editor.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -73,7 +73,7 @@ fn shift_i_in_plan_mode_idle_enters_plan_edit() {
         &history,
         &mut hist_idx,
         false,
-        "plan",
+        "sandbox",
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -151,7 +151,7 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
     let mut file_menu: Option<crate::file_menu::FileMenu> = None;
     let workdir = std::path::Path::new(".");
 
-    // Even in plan mode, Shift+I while running just inserts the char.
+    // Even in sandbox mode, Shift+I while running just inserts the char.
     let action = handle_key(
         KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE),
         &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
@@ -160,7 +160,7 @@ fn shift_i_while_running_does_not_enter_plan_edit() {
         &history,
         &mut hist_idx,
         true,
-        "plan",
+        "sandbox",
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -202,7 +202,7 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
         &history,
         &mut hist_idx,
         false,
-        "plan",
+        "sandbox",
         &mut scroll,
         &mut follow,
         &mut last_esc,
@@ -221,7 +221,7 @@ fn shift_i_with_nonempty_input_does_not_enter_plan_edit() {
 }
 
 #[test]
-fn lowercase_i_in_plan_mode_inserts_normally() {
+fn lowercase_i_in_sandbox_mode_inserts_normally() {
     let mut input = String::new();
     let mut cursor = 0usize;
     let history: Vec<String> = Vec::new();
@@ -244,7 +244,7 @@ fn lowercase_i_in_plan_mode_inserts_normally() {
         &history,
         &mut hist_idx,
         false,
-        "plan",
+        "sandbox",
         &mut scroll,
         &mut follow,
         &mut last_esc,

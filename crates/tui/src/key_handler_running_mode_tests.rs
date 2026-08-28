@@ -49,10 +49,10 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
 #[test]
 fn running_enter_mode_command_becomes_steer() {
     for command in [
-        "/plan",
+        "/sandbox",
         "/act",
-        "/plan review this",
-        "/act_clear_context now",
+        "/sandbox review this",
+        "/clear_context now",
     ] {
         let (action, input, _) = press_running_mode_command(command, KeyCode::Enter);
         assert!(matches!(action, KeyAction::Steer(text) if text == command));
@@ -64,24 +64,14 @@ fn running_enter_mode_command_becomes_steer() {
 /// boundary instead of being refused at admission.
 #[test]
 fn running_tab_mode_command_becomes_queue() {
-    let command = "/plan later";
+    let command = "/sandbox later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
     assert!(matches!(action, KeyAction::Queue(text) if text == command));
     assert!(input.is_empty(), "queue clears the input line");
 }
 
-/// BackTab on a compound `/plan <content>` while running submits; app.rs
-/// routes the running Submit to the queue (mode switch at the idle boundary).
-#[test]
-fn running_backtab_plan_compound_submits() {
-    let command = "/plan later";
-    let (action, input, _) = press_running_mode_command(command, KeyCode::BackTab);
-    assert!(matches!(action, KeyAction::Submit(text) if text == command));
-    assert!(input.is_empty(), "submit clears the input line");
-}
-
 /// Enter on a mode command while a running subagent is focused stays blocked
-/// (subagents have no mode concept) with the input preserved.
+/// (subagents have no agent-switch concept) with the input preserved.
 #[test]
 fn focused_subagent_enter_mode_command_still_blocked() {
     let command = "/act later";
@@ -110,4 +100,61 @@ fn running_normal_prompt_keeps_steer_and_queue_behavior() {
     let (tab, input, _) = press_running_mode_command("later", KeyCode::Tab);
     assert!(matches!(tab, KeyAction::Queue(text) if text == "later"));
     assert!(input.is_empty());
+}
+
+/// Shift+Tab (BackTab) is a pure control-command submit of the clear-context
+/// path: empty input -> bare `/clear_context`; a draft is forwarded as the
+/// compound rest so the runner applies the fold and then runs the draft as
+/// the next prompt. Identical to typing the command.
+#[test]
+fn backtab_submits_clear_context_command() {
+    fn run(input_text: &str) -> (KeyAction, String) {
+        let mut input = input_text.to_string();
+        let mut cursor = input.chars().count();
+        let mut hist_idx = None;
+        let mut scroll = 0;
+        let mut follow = true;
+        let mut last_esc = None;
+        let mut skill_menu = None;
+        let mut undo_state = crate::undo::init(&input, cursor);
+        let mut queue_scroll = 0;
+        let mut file_menu = None;
+        let action = handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+            &mut input,
+            &mut cursor,
+            &[],
+            &mut hist_idx,
+            false,
+            "act",
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
+            false,
+            &mut undo_state,
+            &mut queue_scroll,
+            &mut file_menu,
+            Path::new("."),
+        );
+        (action, input)
+    }
+
+    let (action, input) = run("");
+    match action {
+        KeyAction::Submit(text) => assert_eq!(text, "/clear_context"),
+        other => panic!("expected Submit(/clear_context), got {other:?}"),
+    }
+    assert!(input.is_empty(), "submit clears the input line");
+
+    let (action, input) = run("now run the checks");
+    match action {
+        KeyAction::Submit(text) => assert_eq!(text, "/clear_context now run the checks"),
+        other => panic!("expected compound Submit, got {other:?}"),
+    }
+    assert!(input.is_empty(), "submit clears the input line");
 }

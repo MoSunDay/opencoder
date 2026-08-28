@@ -288,8 +288,6 @@ async fn subagent_persists_parent_child_to_store() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -387,8 +385,6 @@ async fn subagent_persists_child_events_to_store() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -522,8 +518,6 @@ async fn subagent_child_events_persisted_before_return() {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();

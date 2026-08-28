@@ -58,8 +58,6 @@ pub fn session_meta(id: &str, agent: &str) -> SessionMeta {
         skill: None,
         task_type: None,
         requirement: None,
-        plan_snapshot: None,
-        plan_input_count: 0,
     }
 }
 

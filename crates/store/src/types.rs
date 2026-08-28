@@ -55,19 +55,6 @@ pub struct SessionMeta {
     /// slash command so it survives session resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requirement: Option<String>,
-    /// Pre-compaction snapshot of the finalized plan text for plan-mode
-    /// sessions. Captured by compaction before the plan assistant message
-    /// can be folded into the summary head, so a later plan->act handoff
-    /// still finds the plan even when it slid out of the retained tail.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_snapshot: Option<String>,
-    /// Number of user prompts recorded in the current plan phase (since the
-    /// last handoff or re-entry into plan mode). Persisted so a resumed
-    /// session can re-arm plan-phase affordances (TUI Shift+Tab handoff,
-    /// /act_clear_context plan-provenance gate) that were previously lost
-    /// on restart.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub plan_input_count: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -131,28 +118,10 @@ pub struct SessionPatch {
     /// an explicit empty annotation save can be distinguished from no-op.
     #[serde(default, skip_serializing_if = "is_false")]
     pub clear_requirement: bool,
-    /// Mirrors the in-memory plan snapshot onto the sessions row. Compaction
-    /// writes it while the plan text is still extractable; see
-    /// `SessionMeta::plan_snapshot`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_snapshot: Option<String>,
-    /// When true, sets `plan_snapshot` to NULL (consumed by a plan->act
-    /// handoff or reset by plan-phase re-entry). Mutually exclusive with the
-    /// `plan_snapshot` value.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub clear_plan_snapshot: bool,
-    /// Persists the plan-phase input counter; see
-    /// `SessionMeta::plan_input_count`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan_input_count: Option<i64>,
 }
 
 fn is_false(b: &bool) -> bool {
     !b
-}
-
-fn is_zero(v: &i64) -> bool {
-    *v == 0
 }
 
 impl SessionPatch {

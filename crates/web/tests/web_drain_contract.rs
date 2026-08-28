@@ -70,8 +70,6 @@ async fn seed(state: &opencoder_web::AppState, sid: &str) {
             skill: None,
             task_type: None,
             requirement: None,
-            plan_snapshot: None,
-            plan_input_count: 0,
         })
         .await
         .unwrap();
@@ -389,8 +387,8 @@ async fn events_stream_survives_subscriber_lag() {
     );
 }
 
-/// C4: drain-command events (a manual compact's Status + terminal Done, a
-/// plan→act handoff's TranscriptReset + PlanHandoff, a skill switch's Done, …)
+/// C4: drain-command events (a manual compact's Status + terminal Done, an
+/// execution handoff's TranscriptReset + Done, a skill switch's Done, …)
 /// MUST be persisted to the `session_events` table so an SSE reconnect replay
 /// (`GET /events?after=<seq>`) is lossless.
 ///

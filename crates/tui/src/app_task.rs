@@ -136,12 +136,6 @@ pub(crate) async fn switch_session(
     // Capture the persisted requirement before `new_session` is moved into
     // the worker task; applied after the transcript rebuild below.
     let new_requirement = new_session.requirement.clone();
-    // Re-arm `plan_submitted` from the persisted plan-phase counter: a plan
-    // session with recorded requirements keeps the plan→act handoff armed
-    // across restarts / session switches (it was previously volatile TUI
-    // state, silently degrading Shift+Tab to a plain mode swap).
-    let new_plan_armed = new_session.agent.name == "plan"
-        && (new_session.plan_input_count > 0 || new_session.plan_snapshot.is_some());
     let session_for_worker = new_session;
     let agent_name_for_tokens = session_for_worker.agent.name.clone();
     let workdir_for_tokens = session_for_worker.working_dir.clone();
@@ -241,7 +235,6 @@ pub(crate) async fn switch_session(
     // requirement always wins; `None` for TaskPick::New correctly leaves
     // the annotation unset.
     chat.annotation_text = new_requirement;
-    chat.plan_submitted = new_plan_armed;
     *running = false; // chat rebuilt from store on switch-back
     input.clear();
     *cursor_idx = 0;

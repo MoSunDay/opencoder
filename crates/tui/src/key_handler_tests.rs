@@ -1,6 +1,6 @@
 //! Unit tests for `handle_key` / `apply_scroll`: scroll paging, disabled-input
-//! gating, clipboard (Ctrl+V), and agent-switch tab behavior. Extracted from
-//! `key_handler.rs` to keep it under the 800-line file-size cap.
+//! gating, clipboard (Ctrl+V), and the Shift+Tab clear-context submit.
+//! Extracted from `key_handler.rs` to keep it under the 800-line cap.
 
 use super::*;
 

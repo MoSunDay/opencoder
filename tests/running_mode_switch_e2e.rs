@@ -1,7 +1,7 @@
 //! Real-binary regression: while an actual server drain is blocked in its LLM
 //! request, dedicated switch endpoints (POST /agent, POST /handoff, the
 //! `agent` field on /prompt) refuse with 409 and persist nothing, while
-//! textual mode commands (/plan ...) are admitted and applied by the runner
+//! textual mode commands (/sandbox ...) are admitted and applied by the runner
 //! at the idle boundary.
 
 use std::io::{Read, Write};
@@ -215,7 +215,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
 
     // Dedicated switch endpoints still refuse while a drain runs.
     for (path, body) in [
-        (format!("/api/sessions/{sid}/agent"), r#"{"value":"plan"}"#),
+        (format!("/api/sessions/{sid}/agent"), r#"{"value":"sandbox"}"#),
         (format!("/api/sessions/{sid}/handoff"), r#"{"extra":"now"}"#),
     ] {
         assert_eq!(http(&base, "POST", &path, body).0, 409, "{path} accepted");
@@ -228,7 +228,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/prompt"),
-            r#"{"prompt":"/plan later","delivery":"queue","skill":"reviewer"}"#,
+            r#"{"prompt":"/sandbox later","delivery":"queue","skill":"reviewer"}"#,
         )
         .0,
         200,
@@ -239,7 +239,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/prompt"),
-            r#"{"prompt":"x","delivery":"queue","agent":"plan"}"#,
+            r#"{"prompt":"x","delivery":"queue","agent":"sandbox"}"#,
         )
         .0,
         409,
@@ -256,7 +256,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         session["meta"]["skill"], "reviewer",
         "skill persisted at admission, consumed at boundary"
     );
-    assert!(!session["messages"].to_string().contains("/plan later"));
+    assert!(!session["messages"].to_string().contains("/sandbox later"));
 
     stub.release();
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -265,7 +265,7 @@ fn real_server_rejects_running_mode_switches_until_idle() {
             &base,
             "POST",
             &format!("/api/sessions/{sid}/agent"),
-            r#"{"value":"plan"}"#,
+            r#"{"value":"sandbox"}"#,
         );
         if switched.0 == 200 {
             break;
@@ -273,10 +273,10 @@ fn real_server_rejects_running_mode_switches_until_idle() {
         assert_eq!(switched.0, 409);
         assert!(
             Instant::now() < deadline,
-            "queued /plan later never applied"
+            "queued /sandbox later never applied"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
     let (_, session) = http(&base, "GET", &format!("/api/sessions/{sid}"), "");
-    assert_eq!(session["meta"]["agent"], "plan");
+    assert_eq!(session["meta"]["agent"], "sandbox");
 }

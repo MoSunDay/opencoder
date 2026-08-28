@@ -364,10 +364,13 @@ pub(crate) fn render<B: Backend + 'static>(
             render_status_chip(f, composer_area, label, theme::local_color());
         }
         if let Some(text) = mode_flash {
-            // Two-colour ONLY for the definite "→ plan mode" switch flash;
-            // every other flash (busy hint, text containing "plan") = accent.
-            let is_plan = text.starts_with("\u{2192} plan mode");
-            render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_plan));
+            // Warn hue for the sandbox (read-only) side of the family: the
+            // agent-switch flash "→ sandbox mode" and the plan-text editor
+            // flash "→ plan mode" (the editor is entered from the sandbox
+            // agent). Every other flash (busy hint, "→ act mode") = accent.
+            let is_sandbox = text.starts_with("\u{2192} sandbox mode")
+                || text.starts_with("\u{2192} plan mode");
+            render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_sandbox));
         }
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());

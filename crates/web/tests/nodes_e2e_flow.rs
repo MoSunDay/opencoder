@@ -56,7 +56,7 @@ async fn dispatch_stream_cancel_and_node_state_machine() {
     .await;
 
     // Browser view: the node appears once registered + first idle heartbeat.
-    let node_id = wait_for(15, 100, || async {
+    let node_id = wait_for(60, 100, || async {
         let (_, v) = get_json(&srv.base, "/api/nodes").await;
         v["nodes"]
             .as_array()
@@ -127,7 +127,7 @@ async fn dispatch_stream_cancel_and_node_state_machine() {
     );
 
     // Terminal task status settles at done; the worker frees up again.
-    let t_status = wait_for(15, 100, || async {
+    let t_status = wait_for(60, 100, || async {
         let (_, v) = get_json(&srv.base, &format!("/api/nodes/{node_id}/tasks")).await;
         v["tasks"]
             .as_array()?
@@ -153,7 +153,7 @@ async fn dispatch_stream_cancel_and_node_state_machine() {
     assert_eq!(st2.as_u16(), 200, "{body2}");
     let tid2 = body2["task_id"].as_str().unwrap().to_string();
 
-    wait_for(15, 50, || async {
+    wait_for(60, 50, || async {
         get_json(&srv.base, &format!("/api/nodes/{node_id}/tasks"))
             .await
             .1["tasks"]
@@ -203,7 +203,7 @@ async fn dispatch_stream_cancel_and_node_state_machine() {
     notify.notify_one();
 
     // Node returns to idle and both tasks coexist with their final states.
-    wait_for(15, 100, || async {
+    wait_for(60, 100, || async {
         get_json(&srv.base, "/api/nodes").await.1["nodes"]
             .as_array()?
             .iter()

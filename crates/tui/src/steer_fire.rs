@@ -555,7 +555,7 @@ mod tests {
 
     // A keyboard steer is only ADMITTED here: the runner absorbs it at the
     // next turn boundary, where a control command (/sandbox, /act,
-    // /clear_context) is applied. The admit itself must never touch the
+    // /act_clear_context) is applied. The admit itself must never touch the
     // agent chip or the transcript.
     #[tokio::test]
     async fn keyboard_steer_admit_does_not_touch_agent_state() {

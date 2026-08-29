@@ -397,6 +397,7 @@ pub(crate) async fn dispatch_command(
     sys_tokens: &mut u64,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
+    clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
 ) -> LoopFlow {
     let (outcome, quit) = handle_command_key(command_menu, k);
     if quit {
@@ -430,6 +431,7 @@ pub(crate) async fn dispatch_command(
                 sys_tokens,
                 plan_edit,
                 notepad,
+                clear_confirm,
             )
             .await;
         }
@@ -587,8 +589,11 @@ pub(crate) use app_loop_paste::{handle_paste_event, paste_clipboard_image};
 mod app_loop_actions;
 
 pub(crate) use app_loop_actions::{
-    cancel_running_turn, dispatch_slash_action, steer_submit_after_mouse,
+    cancel_running_turn, confirm_tick, dispatch_slash_action, handle_confirm_key,
+    steer_submit_after_mouse,
 };
+#[cfg(test)]
+pub(crate) use app_loop_actions::fire_clear_confirm;
 
 /// Handle a keystroke while the keymap-rebinding modal is open. On `Save`,
 /// persists the changed keymap fields to disk, reloads config, and rebuilds

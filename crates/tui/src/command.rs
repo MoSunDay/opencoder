@@ -47,8 +47,8 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/annotation", "记录/编辑任务备注 (annotation editor)"),
     ("/notepad", "IDE 式文件浏览/编辑 (文件树 + vim 编辑器)"),
     (
-        "/clear_context",
-        "清空对话上下文并执行（保留最后回复作为接续上下文；/act_clear_context 同效）",
+        "/act_clear_context",
+        "清空对话上下文并执行（保留最后回复作为接续上下文；/clear_context 同效）",
     ),
     ("/ps", "查看所有后台 bash 进程（不计入模型上下文）"),
     ("/stop", "强制结束所有后台 bash 进程（不计入模型上下文）"),
@@ -202,7 +202,7 @@ pub fn parse(input: &str) -> Option<SlashAction> {
         "sandbox" => Some(SlashAction::Sandbox),
         "annotation" | "ann" => Some(SlashAction::Annotation),
         "notepad" | "note" => Some(SlashAction::Notepad),
-        "clear_context" | "act_clear_context" => Some(SlashAction::ClearContext),
+        "act_clear_context" | "clear_context" => Some(SlashAction::ClearContext),
         "mcp" | "mc" => Some(SlashAction::Mcp),
         "envs" | "env" => Some(SlashAction::Envs),
         "cli" => Some(SlashAction::Cli),
@@ -225,7 +225,7 @@ fn dispatch(name: &str) -> Option<SlashAction> {
         "/sandbox" => Some(SlashAction::Sandbox),
         "/annotation" => Some(SlashAction::Annotation),
         "/notepad" => Some(SlashAction::Notepad),
-        "/clear_context" | "/act_clear_context" => Some(SlashAction::ClearContext),
+        "/act_clear_context" | "/clear_context" => Some(SlashAction::ClearContext),
         "/mcp" => Some(SlashAction::Mcp),
         "/envs" => Some(SlashAction::Envs),
         "/cli" => Some(SlashAction::Cli),
@@ -240,13 +240,13 @@ fn dispatch(name: &str) -> Option<SlashAction> {
 /// Map a [`SlashAction`] to its canonical control-command string, or `None`
 /// for non-control actions. Used to queue a control command (Tab) or dispatch
 /// it immediately (Enter) without echoing it as user text. The legacy
-/// `/act_clear_context` spelling still parses as an alias of
-/// `/clear_context`.
+/// `/clear_context` spelling still parses as an alias of
+/// `/act_clear_context`.
 pub fn control_cmd_string(action: &SlashAction) -> Option<&'static str> {
     match action {
         SlashAction::Act => Some("/act"),
         SlashAction::Sandbox => Some("/sandbox"),
-        SlashAction::ClearContext => Some("/clear_context"),
+        SlashAction::ClearContext => Some("/act_clear_context"),
         _ => None,
     }
 }
@@ -480,9 +480,12 @@ mod tests {
     fn parse_control_commands() {
         assert_eq!(parse("/act"), Some(SlashAction::Act));
         assert_eq!(parse("/sandbox"), Some(SlashAction::Sandbox));
+        assert_eq!(
+            parse("/act_clear_context"),
+            Some(SlashAction::ClearContext)
+        );
+        // Legacy alias of /act_clear_context must keep parsing.
         assert_eq!(parse("/clear_context"), Some(SlashAction::ClearContext));
-        // Legacy alias of /clear_context must keep parsing.
-        assert_eq!(parse("/act_clear_context"), Some(SlashAction::ClearContext));
         assert_eq!(parse(" /sandbox "), Some(SlashAction::Sandbox));
     }
 
@@ -492,7 +495,7 @@ mod tests {
         assert_eq!(control_cmd_string(&SlashAction::Sandbox), Some("/sandbox"));
         assert_eq!(
             control_cmd_string(&SlashAction::ClearContext),
-            Some("/clear_context")
+            Some("/act_clear_context")
         );
         assert_eq!(control_cmd_string(&SlashAction::Task), None);
         assert_eq!(control_cmd_string(&SlashAction::Compact), None);

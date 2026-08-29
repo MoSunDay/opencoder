@@ -8,6 +8,7 @@
 //! in `dispatch_command` stay thin.
 
 use std::path::Path;
+use crossterm::event::KeyEvent;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -30,12 +31,13 @@ use crate::model_menu::{ConfigForm, ModelMenu, ProviderList};
 use crate::worker::{gate_compact, gate_switch, CompactGate, SwitchGate, UiCmd};
 
 /// Which agent-switch command triggered the dispatch. Parameterizes the
-/// control-command prompt text submitted to the runner.
+/// control-command prompt text submitted to the runner. The clear-context
+/// fold is NOT here: it is destructive, so it goes through the
+/// `clear_confirm` countdown guard (arm -> fire/cancel) instead.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ModeSwitch {
     Act,
     Sandbox,
-    ClearContext,
 }
 
 impl ModeSwitch {
@@ -43,7 +45,6 @@ impl ModeSwitch {
         match self {
             ModeSwitch::Act => "/act",
             ModeSwitch::Sandbox => "/sandbox",
-            ModeSwitch::ClearContext => "/clear_context",
         }
     }
 }
@@ -136,6 +137,7 @@ pub(crate) async fn dispatch_slash_action(
     sys_tokens: &mut u64,
     plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
     notepad: &mut Option<crate::notepad::NotepadView>,
+    clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
 ) -> LoopFlow {
     match action {
         SlashAction::Task => {
@@ -241,19 +243,11 @@ pub(crate) async fn dispatch_slash_action(
             .await;
         }
         SlashAction::ClearContext => {
-            return dispatch_mode_switch(
-                ModeSwitch::ClearContext,
-                cmd_tx,
-                cancel,
-                running,
-                follow,
-                chat,
-                sys_tokens,
-                mode_flash,
-                anim_tick,
-                workdir,
-            )
-            .await;
+            // Destructive fold: arm the countdown guard instead of firing.
+            // The chip counts down; Esc cancels, Enter / window-elapsed fires
+            // via `fire_clear_confirm`.
+            crate::clear_confirm::engage(clear_confirm, chat, mode_flash, anim_tick, None, None);
+            return LoopFlow::Proceed;
         }
         SlashAction::Annotation => {
             crate::plan_edit::enter_annotation(
@@ -335,4 +329,136 @@ pub(crate) async fn cancel_running_turn(
     *running = false;
     *cancelled = true;
     *follow = true;
+}
+
+/// Fire an armed clear-context confirm. While running the compound command
+/// text queues verbatim (the runner applies it at the idle boundary, tail
+/// included); idle starts the control-command turn now, mirroring the
+/// `dispatch_mode_switch` Run arm.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn fire_clear_confirm(
+    cc: crate::clear_confirm::ClearConfirm,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    running: &mut bool,
+    follow: &mut bool,
+    chat: &mut ChatView,
+    sys_tokens: &mut u64,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    workdir: &Path,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+) -> LoopFlow {
+    let text = crate::clear_confirm::command_text(&cc);
+    if *running {
+        crate::queue_admitter::handle_queue(
+            &text, admit_tx, admit_st, queue_items, pending_images, session_id,
+        );
+        crate::app_helpers::push_history(history, hist_idx, &text);
+        return LoopFlow::Proceed;
+    }
+    let name = crate::clear_confirm::CLEAR_CONTEXT_CMD.trim_start_matches('/');
+    *sys_tokens = sys_tokens_for(name, workdir, None);
+    *mode_flash = Some((format!("\u{2192} {name} mode"), anim_tick));
+    if !start_turn(cmd_tx, cancel, UiCmd::Prompt(text, Vec::new())).await {
+        worker_dead(chat);
+        return LoopFlow::Quit;
+    }
+    *running = true;
+    *follow = true;
+    chat.begin_turn();
+    LoopFlow::Proceed
+}
+
+/// Armed-guard key handling with all side effects: swallow every key, fire
+/// early on Enter (`fire_clear_confirm`), cancel on Esc (回撤 marker + draft
+/// restore). Returns true when the worker died firing (caller quits).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn handle_confirm_key(
+    clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
+    k: KeyEvent,
+    input: &mut String,
+    cursor_idx: &mut usize,
+    undo_state: &mut crate::undo::UndoState,
+    chat: &mut ChatView,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    running: &mut bool,
+    follow: &mut bool,
+    sys_tokens: &mut u64,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    workdir: &Path,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+) -> bool {
+    match crate::clear_confirm::intercept(clear_confirm, input, cursor_idx, undo_state, k) {
+        Some(crate::clear_confirm::ConfirmFlow::Fire) => {
+            if let Some(cc) = clear_confirm.take() {
+                return matches!(
+                    fire_clear_confirm(
+                        cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash,
+                        anim_tick, workdir, admit_tx, admit_st, queue_items, pending_images,
+                        session_id, history, hist_idx,
+                    )
+                    .await,
+                    LoopFlow::Quit
+                );
+            }
+            false
+        }
+        Some(crate::clear_confirm::ConfirmFlow::Cancel) => {
+            crate::clear_confirm::push_cancel_marker(chat);
+            false
+        }
+        None => false,
+    }
+}
+
+/// Anim-tick side of the armed guard: refresh the countdown chip and
+/// auto-fire when the window elapsed. Returns true when the worker died
+/// firing (caller quits).
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn confirm_tick(
+    clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
+    mode_flash: &mut Option<(String, u32)>,
+    anim_tick: u32,
+    cmd_tx: &mpsc::Sender<UiCmd>,
+    cancel: &mut CancellationToken,
+    running: &mut bool,
+    follow: &mut bool,
+    chat: &mut ChatView,
+    sys_tokens: &mut u64,
+    workdir: &Path,
+    admit_tx: &mpsc::Sender<crate::queue_admitter::AdmitReq>,
+    admit_st: &mut crate::queue_admitter::AdmitUiState,
+    queue_items: &mut Vec<(i64, String)>,
+    pending_images: &mut Vec<(String, String)>,
+    session_id: &str,
+    history: &mut Vec<String>,
+    hist_idx: &mut Option<usize>,
+) -> bool {
+    if let Some(cc) = crate::clear_confirm::tick(clear_confirm, mode_flash, anim_tick) {
+        return matches!(
+            fire_clear_confirm(
+                cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash,
+                anim_tick, workdir, admit_tx, admit_st, queue_items, pending_images,
+                session_id, history, hist_idx,
+            )
+            .await,
+            LoopFlow::Quit
+        );
+    }
+    false
 }

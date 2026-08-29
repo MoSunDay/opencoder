@@ -146,7 +146,7 @@ pub fn gate_clear_all(running: bool) -> ClearAllGate {
 }
 
 /// Gate for control-command dispatch (`/act`, `/sandbox`,
-/// `/clear_context` — and Shift+Tab, which submits the same command).
+/// `/act_clear_context` — and Shift+Tab, which arms its countdown guard).
 /// Busy (`running` or a live subagent — callers precompute
 /// `running || subagents_running > 0`) means the worker is mid-`run_session`;
 /// starting a control-command turn then would race the in-flight turn at an

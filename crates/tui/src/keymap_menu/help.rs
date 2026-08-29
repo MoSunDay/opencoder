@@ -14,7 +14,8 @@ use crate::theme;
 pub const HELP: &str = "\
 快捷键列表：
 
-  Shift+Tab        清空上下文并接续执行 (/clear_context)：保留最后回复作上下文
+  Shift+Tab        清空上下文并接续执行 (/act_clear_context)：保留最后回复作
+                   上下文；先倒计时确认，Esc 回撤
                    输入框有内容时作为附加需求一并提交（运行中则排队，空闲边界生效）
   Enter            提交（空闲） / 转向（运行中，下一轮生效）
   Tab              提交（空闲） / 排队跟进（运行中，完成后提交）
@@ -22,7 +23,8 @@ pub const HELP: &str = "\
   Alt+回车            插入换行（多行输入）
   $                选择并插入技能 -> $name；提交时加载
   /                命令选择: /task（会话）, /config（设置）, /model（模型）, /compact（压缩）
-                   /sandbox（只读沙箱） /act（执行） /clear_context（清空上下文）
+                   /sandbox（只读沙箱） /act（执行） /act_clear_context（清空上下
+                   文，倒计时确认）
   Shift+I          编辑计划（sandbox 模式、空闲时）: i/a 编辑, :wq 保存, :q! 放弃
   Ctrl+G          复制模式: 交还终端原生拖拽选择（正文去装饰全宽显示）, 终端快捷键复制, Esc/Ctrl+G 退出
   Esc              关闭帮助/弹窗/清空输入
@@ -198,7 +200,7 @@ mod tests {
         // clear-context submit, and the slash menu documents /sandbox.
         assert!(!HELP.contains("切换 plan / act"));
         assert!(!HELP.contains("仅切换模式"));
-        assert!(HELP.contains("/clear_context"));
+        assert!(HELP.contains("/act_clear_context"));
         assert!(HELP.contains("/sandbox"));
         assert!(HELP.contains("Shift+I"));
     }

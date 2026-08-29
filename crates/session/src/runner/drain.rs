@@ -123,7 +123,7 @@ pub(super) async fn drain_one_queued(
                 }
                 return Err(e);
             }
-            // Compound (/sandbox review, /clear_context review): rest is a
+            // Compound (/sandbox review, /act_clear_context review): rest is a
             // real prompt in the new mode — record it and break.
             if let Some(rest) = rest {
                 crate::skill_resolve::record_compound(session, &rest, &imgs).await;

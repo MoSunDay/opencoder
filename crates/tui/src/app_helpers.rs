@@ -113,9 +113,9 @@ pub(crate) async fn initial_chat_view(
 /// Returns `true` when the key was consumed (caller should `continue` to the
 /// next event).
 ///
-/// Note: Ctrl+T is intentionally NOT handled here — it is a pure act<->plan
-/// mode toggle (see `handle_key`). Keeping it out of this intercept lets it
-/// switch mode without collapsing thinking or clearing the input box.
+/// No mode-switch chord exists here: the `switch_mode` bindings were removed
+/// along with the dual-mode system, so every unbound chord falls through to
+/// `handle_key` and is processed as ordinary text input.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pre_key_intercept(
     k: KeyEvent,

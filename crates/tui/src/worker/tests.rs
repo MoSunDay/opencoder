@@ -78,7 +78,7 @@ async fn prompt_clear_context_folds_transcript_and_emits_reset() {
     let mut say = Message::assistant("a1");
     say.blocks.push(ContentBlock::text("the latest say"));
     sess.messages.push(say);let _ = process_cmd(
-        UiCmd::Prompt(crate::key_handler::CLEAR_CONTEXT_CMD.into(), Vec::new()),
+        UiCmd::Prompt(crate::clear_confirm::CLEAR_CONTEXT_CMD.into(), Vec::new()),
         &mut sess,
         &evt_tx,
     )

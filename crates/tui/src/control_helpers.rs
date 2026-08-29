@@ -1,4 +1,4 @@
-//! TUI helpers for control-command (`/act`, `/sandbox`, `/clear_context`)
+//! TUI helpers for control-command (`/act`, `/sandbox`, `/act_clear_context`)
 //! input handling. Functions are consumed by the idle/steer/queue submit
 //! paths in `app.rs`.
 

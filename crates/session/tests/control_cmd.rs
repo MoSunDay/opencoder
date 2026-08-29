@@ -1,5 +1,5 @@
 //! Integration tests for queueable control commands (/act, /sandbox,
-//! /clear_context, legacy /act_clear_context alias).
+//! /act_clear_context, legacy /clear_context alias).
 //!
 //! Contracts:
 //! - idle_short_circuit: a bare "/sandbox" prompt switches agent with NO LLM
@@ -402,8 +402,9 @@ async fn clear_context_seed_falls_through_to_llm_turn() {
 
 /// ClearContext with no assistant text falls back to a blank fresh-start that
 /// survives resume: resume reconstructs the sentinel fresh-start marker.
-/// Exercises the legacy `/act_clear_context` spelling — it must behave exactly
-/// like `/clear_context` (persisted inputs keep working).
+/// Exercises the canonical `/act_clear_context` spelling with no assistant
+/// text — it must collapse to the blank fresh-start sentinel exactly like the
+/// legacy `/clear_context` alias (persisted inputs keep working).
 #[tokio::test]
 async fn clear_context_no_assistant_text_survives_resume() {
     let store = mem_store().await;

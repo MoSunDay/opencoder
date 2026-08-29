@@ -45,11 +45,13 @@ async fn drive_mode_switch(
     (chat, running, sys_tokens, mode_flash, cmd_rx)
 }
 
-/// A turn in flight blocks all three switch commands: no command sent,
-/// `running` unchanged, and a `[switch] busy` marker is pushed.
+/// A turn in flight blocks the switch commands: no command sent, `running`
+/// unchanged, and a `[switch] busy` marker is pushed. (ClearContext is not
+/// here — it arms the countdown guard instead of hitting the gate; firing
+/// while running queues, see `app_loop_dispatch_cmd_tests/act_clear.rs`.)
 #[tokio::test]
 async fn mode_switch_while_running_is_busy_gated() {
-    for mode in [ModeSwitch::Act, ModeSwitch::Sandbox, ModeSwitch::ClearContext] {
+    for mode in [ModeSwitch::Act, ModeSwitch::Sandbox] {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx) =
             drive_mode_switch(mode, true, 0).await;
         assert!(running, "running must stay true (turn still active)");
@@ -94,11 +96,7 @@ async fn mode_switch_while_subagent_live_is_busy_gated() {
 /// and flips the local running/follow state.
 #[tokio::test]
 async fn mode_switch_from_idle_submits_control_prompt() {
-    for (mode, prompt) in [
-        (ModeSwitch::Act, "/act"),
-        (ModeSwitch::Sandbox, "/sandbox"),
-        (ModeSwitch::ClearContext, "/clear_context"),
-    ] {
+    for (mode, prompt) in [(ModeSwitch::Act, "/act"), (ModeSwitch::Sandbox, "/sandbox")] {
         let (chat, running, sys_tokens, mode_flash, mut cmd_rx) =
             drive_mode_switch(mode, false, 0).await;
         assert!(running, "the switch turn starts immediately");

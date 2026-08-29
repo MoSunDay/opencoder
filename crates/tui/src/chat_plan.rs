@@ -29,6 +29,16 @@ impl ChatView {
         None
     }
 
+    /// The last non-empty assistant reply — the text the clear-context fold
+    /// keeps as the continuation seed. UI-side preview mirror of the
+    /// runner-side `handoff::last_assistant_text`.
+    pub fn last_reply_text(&self) -> Option<String> {
+        self.blocks.iter().rev().find_map(|b| match b {
+            ChatBlock::Assistant { raw, .. } if !raw.trim().is_empty() => Some(raw.clone()),
+            _ => None,
+        })
+    }
+
     /// Update the plan text in-place: re-render markdown on the Plan block
     /// (or the last non-empty Assistant block if no Plan block exists yet).
     pub fn update_plan_text(&mut self, text: &str) {

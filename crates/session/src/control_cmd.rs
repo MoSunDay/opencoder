@@ -1,4 +1,5 @@
-//! Queueable control commands: `/act`, `/sandbox`, `/clear_context`.
+//! Queueable control commands: `/act`, `/sandbox`, `/act_clear_context`
+//! (`/clear_context` is the accepted legacy alias).
 //!
 //! These slash commands switch the runtime agent and/or clear the transcript.
 //! Unlike normal prompts, they take effect *immediately* when consumed by the
@@ -100,10 +101,13 @@ pub enum ControlCmd {
 /// submission like `/sandbox review` switches agent *and* runs the rest as a
 /// prompt in the new agent.
 ///
-/// `/clear_context` supports compound inputs like `/clear_context review`
-/// where the trailing text runs as a prompt in the fresh context. The legacy
-/// spelling `/act_clear_context` still parses (mapped to the same command) so
-/// already-persisted inputs keep behaving deterministically.
+/// The clear-context fold is canonicalized as `/act_clear_context` — the
+/// `act` prefix kept explicit so the command reads as the act-agent
+/// fold-and-restart it is. It supports compound inputs like
+/// `/act_clear_context review` where the trailing text runs as a prompt in
+/// the fresh context. The legacy spelling `/clear_context` still parses
+/// (mapped to the same command) so already-persisted inputs keep behaving
+/// deterministically.
 ///
 /// Returns `None` for anything that is not a control command. The rest text is
 /// the trimmed remainder after the command token, or `None` when the input was
@@ -116,7 +120,7 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
     let cmd = match head {
         "/act" => ControlCmd::SwitchAgent("act".into()),
         "/sandbox" => ControlCmd::SwitchAgent("sandbox".into()),
-        "/clear_context" | "/act_clear_context" => ControlCmd::ClearContext,
+        "/act_clear_context" | "/clear_context" => ControlCmd::ClearContext,
         _ => return None,
     };
     let rest = trimmed

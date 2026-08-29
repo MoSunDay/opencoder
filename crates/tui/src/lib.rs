@@ -9,6 +9,7 @@ pub mod chat_plan;
 pub mod chat_req;
 pub mod cli_menu;
 pub mod clipboard;
+pub mod clear_confirm;
 pub mod command;
 pub mod composer;
 pub mod control_helpers;

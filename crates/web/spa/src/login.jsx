@@ -1,6 +1,6 @@
 // login.jsx — shared-secret login Modal.
 
-import { Button, Form, Input, Modal, Typography } from 'antd';
+import { Alert, Button, Form, Input, Modal, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { apiGet } from './api.js';
 import { setCredentials, clearCredentials } from './store.js';

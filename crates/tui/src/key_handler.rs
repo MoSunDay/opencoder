@@ -18,9 +18,6 @@ use crate::menu::{handle_menu_key, MenuOutcome, SkillMenu};
 /// Window for double-Esc hard-abort (milliseconds).
 pub(crate) const ESC_CANCEL_WINDOW_MS: u64 = 350;
 
-/// The clear-context control command dispatched by Shift+Tab.
-pub(crate) const CLEAR_CONTEXT_CMD: &str = "/clear_context";
-
 /// Decision returned by `handle_key` for the event loop to act on.
 #[derive(Debug)]
 pub(crate) enum KeyAction {
@@ -44,6 +41,11 @@ pub(crate) enum KeyAction {
     /// untouched so the user can retry at an idle boundary.
     ModeSwitchBlocked,
     Cancel,
+    /// Shift+Tab: arm the clear-context countdown confirm instead of firing
+    /// outright — the fold drops all context except the last reply, so the
+    /// guard echoes the retained seed and lets Esc 回撤 before it lands.
+    /// `rest` is the swallowed composer draft forwarded as the compound tail.
+    ArmClearConfirm { rest: Option<String> },
     /// Enter the sandbox-text editor (Shift+I in sandbox mode when idle).
     EnterPlanEdit,
     /// Activate a skill picked from the `$` menu, or clear the active skill
@@ -319,24 +321,16 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::BackTab => {
-            // Shift+Tab: pure control-command dispatch of the clear-context
-            // path — `/clear_context`, with any draft text forwarded as
-            // the compound rest (the runner runs it as a prompt in the fresh
-            // context). This is EXACTLY the same path as typing the slash
-            // command: app.rs parses the Submit through the shared dispatch
-            // chain, and while a turn is running the raw text queues
-            // verbatim for the idle boundary.
+            // Shift+Tab: arm the clear-context countdown (see ArmClearConfirm).
+            // The draft is forwarded as the compound rest; it is cleared from
+            // the composer now and restored by the guard's Esc (回撤).
             let rest = input.trim().to_string();
-            let text = if rest.is_empty() {
-                CLEAR_CONTEXT_CMD.to_string()
-            } else {
-                format!("{CLEAR_CONTEXT_CMD} {rest}")
-            };
+            let rest = (!rest.is_empty()).then_some(rest);
             input.clear();
             *cursor_idx = 0;
             *hist_idx = None;
             crate::undo::reset(undo_state, input, *cursor_idx);
-            KeyAction::Submit(text)
+            KeyAction::ArmClearConfirm { rest }
         }
         KeyCode::Esc => {
             // Double-Esc within the window while running => hard-abort.

@@ -74,6 +74,7 @@ async fn slash_action_compact_idle_starts_turn() {
         &mut sys_tokens,
         &mut None,
         &mut None,
+        &mut None,
     )
     .await;
 
@@ -133,6 +134,7 @@ async fn slash_action_compact_running_pushes_busy_marker() {
         &mut mode_flash,
         0,
         &mut sys_tokens,
+        &mut None,
         &mut None,
         &mut None,
     )
@@ -203,6 +205,7 @@ async fn slash_action_skill_parses_and_opens_toggle_menu() {
         &mut sys_tokens,
         &mut None,
         &mut None,
+        &mut None,
     )
     .await;
 
@@ -267,6 +270,7 @@ async fn slash_action_ap_parses_and_opens_mode_menu() {
         &mut mode_flash,
         0,
         &mut sys_tokens,
+        &mut None,
         &mut None,
         &mut None,
     )

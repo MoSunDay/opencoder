@@ -368,8 +368,7 @@ pub(crate) fn render<B: Backend + 'static>(
             // agent-switch flash "→ sandbox mode" and the plan-text editor
             // flash "→ plan mode" (the editor is entered from the sandbox
             // agent). Every other flash (busy hint, "→ act mode") = accent.
-            let is_sandbox = text.starts_with("\u{2192} sandbox mode")
-                || text.starts_with("\u{2192} plan mode");
+            let is_sandbox = crate::frame::is_warn_flash(text);
             render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_sandbox));
         }
         if shift_held {

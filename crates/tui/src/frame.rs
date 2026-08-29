@@ -15,6 +15,15 @@ pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
     now.wrapping_sub(start) < ticks
 }
 
+/// Whether the mode-flash chip renders in the warning hue: the read-only
+/// sandbox family, the plan-text editor, and the clear-context countdown
+/// guard (a destructive operation about to fold the transcript).
+pub(crate) fn is_warn_flash(text: &str) -> bool {
+    text.starts_with("\u{2192} sandbox mode")
+        || text.starts_with("\u{2192} plan mode")
+        || text.starts_with("\u{2192} clear")
+}
+
 /// Transient mode-flash status text if still within its visibility window.
 fn flash_status_text(mode_flash: &Option<(String, u32)>, anim_tick: u32) -> Option<&str> {
     mode_flash

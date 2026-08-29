@@ -97,7 +97,7 @@ pub async fn run_with_registry(
     let mut handoff_pending = false;
     // Control commands (/act, /sandbox) short-circuit without an LLM turn. A
     // compound input (/sandbox review) switches then runs the rest. EXCEPTION:
-    // /clear_context with a preserved seed falls through to run_loop.
+    // /act_clear_context with a preserved seed falls through to run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
         // ClearContext with a preserved seed falls through to run_loop so the
@@ -110,7 +110,7 @@ pub async fn run_with_registry(
         {
             handoff_pending = true;
             match rest {
-                // Compound (/clear_context review) with a preserved seed:
+                // Compound (/act_clear_context review) with a preserved seed:
                 // keep the request so it is recorded as a real user prompt and
                 // executed alongside the seed marker message (not discarded).
                 Some(rest) => user_text = rest,

@@ -122,6 +122,7 @@ pub(super) async fn run_app(
     // `admit_done_rx` (select branch below).
     let (admit_tx, mut admit_done_rx) = queue_admitter::spawn_admitter(Arc::clone(&store));
     let mut admit_st = queue_admitter::AdmitUiState::default();
+    let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None; // countdown guard
     let mut admitter_alive = true;
     let mut skill_menu: Option<SkillMenu> = None;
     let mut task_picker: Option<TaskPicker> = None;
@@ -293,6 +294,12 @@ pub(super) async fn run_app(
                 dirty = true;
                 match ev {
                     Event::Key(k) => {
+                        // Armed clear-context guard: Enter fires, Esc 回撤, rest inert.
+                        if clear_confirm.is_some() {
+                            if app_loop::handle_confirm_key(&mut clear_confirm, k, &mut input, &mut cursor_idx, &mut undo_state, &mut chat, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut sys_tokens, &mut mode_flash, anim_tick, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx).await { break; }
+                            dirty = true;
+                            continue;
+                        }
                         if consume_modifier_or_release(&k, &mut shift_held, copy_mode) {
                             dirty = true;
                             continue;
@@ -427,6 +434,7 @@ pub(super) async fn run_app(
                                 &mut mode_flash, anim_tick, &mut sys_tokens,
                                 &mut plan_edit,
                                 &mut notepad,
+                                &mut clear_confirm,
                             )
                             .await
                             {
@@ -485,9 +493,9 @@ pub(super) async fn run_app(
                         ) {
                             KeyAction::Submit(text) => {
                                 if running {
-                                    // Submit while running is reachable only via BackTab's
-                                    // compound `/sandbox …` (Enter/Tab map to Steer/Queue when
-                                    // running), so no bare slash command can land here.
+                                    // Submit while running is unreachable (Enter/Tab map to
+                                    // Steer/Queue when running) — no bare slash command can
+                                    // land here.
                                     // Deferred: the raw text (tokens included) queues verbatim;
                                     // the runner's record_compound resolves/activates/
                                     // persists the skill at the idle boundary — never now,
@@ -508,6 +516,13 @@ pub(super) async fn run_app(
                                 ).await;
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
+                                // Clear-context arm (both spellings, compound included):
+                                // countdown guard — unlike command::parse this keeps
+                                // the compound tail (previously leaked verbatim).
+                                if crate::clear_confirm::maybe_arm(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, &clean, Some(clean.clone())) {
+                                    dirty = true;
+                                    continue;
+                                }
                                 // Intercept /annotation: open the editor instead of submitting
                                 if let Some(action) = crate::command::parse(&clean) {
                                     // Unified slash-command dispatch: route recognized `/cmd`
@@ -519,7 +534,7 @@ pub(super) async fn run_app(
                                         &mut ap_menu, &mut cache_salt_menu, &agent_name,
                                         &mut config, &workdir,
                                         &mut mode_flash, anim_tick, &mut sys_tokens,
-                                        &mut plan_edit, &mut notepad,
+                                        &mut plan_edit, &mut notepad, &mut clear_confirm,
                                     )
                                     .await;
                                     match f {
@@ -571,6 +586,13 @@ pub(super) async fn run_app(
                                 follow = true;
                             }
                             KeyAction::Steer(text) => {
+                                // Typed clear_context while running: arm the countdown
+                                // guard instead of admitting the steer — firing queues
+                                // it for the idle boundary; Esc 回撤 restores the draft.
+                                if crate::clear_confirm::maybe_arm(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, &text, Some(text.clone())) {
+                                    dirty = true;
+                                    continue;
+                                }
                                 // Deferred steer: the raw text (tokens included) is admitted
                                 // verbatim; the runner absorbs it at the turn boundary via
                                 // record_compound, which resolves/activates/persists the
@@ -622,6 +644,10 @@ pub(super) async fn run_app(
                                     &skill_handle, &store, &session_id,
                                 )
                                 .await;
+                            }
+                            KeyAction::ArmClearConfirm { rest } => {
+                                crate::clear_confirm::engage(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, rest, None);
+                                dirty = true;
                             }
                             KeyAction::Cancel => {
                                 app_loop::cancel_running_turn(
@@ -741,6 +767,11 @@ pub(super) async fn run_app(
             }
             _ = anim_ticker.tick() => {
                 if running { anim_tick = anim_tick.wrapping_add(1); dirty = true; }
+                if clear_confirm.is_some() {
+                    anim_tick = anim_tick.wrapping_add(1);
+                    if app_loop::confirm_tick(&mut clear_confirm, &mut mode_flash, anim_tick, &cmd_tx, &mut cancel, &mut running, &mut follow, &mut chat, &mut sys_tokens, &workdir, &admit_tx, &mut admit_st, &mut queue_items, &mut pending_images, &session_id, &mut history, &mut hist_idx).await { break; }
+                    dirty = true;
+                }
                 if app_notepad::poll_bash(&mut bash_rx, &mut chat) { dirty = true; }
             }
             _ = frame_ticker.tick() => {

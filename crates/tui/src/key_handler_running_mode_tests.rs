@@ -102,12 +102,13 @@ fn running_normal_prompt_keeps_steer_and_queue_behavior() {
     assert!(input.is_empty());
 }
 
-/// Shift+Tab (BackTab) is a pure control-command submit of the clear-context
-/// path: empty input -> bare `/clear_context`; a draft is forwarded as the
-/// compound rest so the runner applies the fold and then runs the draft as
-/// the next prompt. Identical to typing the command.
+/// Shift+Tab (BackTab) arms the clear-context countdown guard: it clears the
+/// composer and forwards the draft as the compound rest of the canonical
+/// command. Execution only happens after the confirm (Enter / window
+/// elapsed); Esc 回撤 restores the draft. Identical entry to typing the
+/// command.
 #[test]
-fn backtab_submits_clear_context_command() {
+fn backtab_arms_clear_context_confirm() {
     fn run(input_text: &str) -> (KeyAction, String) {
         let mut input = input_text.to_string();
         let mut cursor = input.chars().count();
@@ -146,14 +147,16 @@ fn backtab_submits_clear_context_command() {
 
     let (action, input) = run("");
     match action {
-        KeyAction::Submit(text) => assert_eq!(text, "/clear_context"),
-        other => panic!("expected Submit(/clear_context), got {other:?}"),
+        KeyAction::ArmClearConfirm { rest } => assert_eq!(rest, None),
+        other => panic!("expected ArmClearConfirm, got {other:?}"),
     }
-    assert!(input.is_empty(), "submit clears the input line");
+    assert!(input.is_empty(), "arming clears the input line");
 
     let (action, input) = run("now run the checks");
     match action {
-        KeyAction::Submit(text) => assert_eq!(text, "/clear_context now run the checks"),
+        KeyAction::ArmClearConfirm { rest } => {
+            assert_eq!(rest, Some("now run the checks".into()))
+        }
         other => panic!("expected compound Submit, got {other:?}"),
     }
     assert!(input.is_empty(), "submit clears the input line");

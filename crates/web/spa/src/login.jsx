@@ -55,10 +55,10 @@ export function LoginModal({ open }) {
       title="Opencoder Fleet · 登录"
       open={open}
       closable={false}
-      maskClosable={false}
+      mask={{ closable: false }}
       keyboard={false}
       footer={null}
-      destroyOnClose={false}
+      destroyOnHidden={false}
     >
       <Form form={form} layout="vertical" onFinish={submit} initialValues={{ base: '' }}>
         <Form.Item

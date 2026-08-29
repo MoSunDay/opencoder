@@ -5,17 +5,30 @@
 //   local   GET /api/sessions?limit=50   (server hides node-task sessions)
 // Terminal node-task streams always end in a canonical done/error frame
 // (api_nodes_ops.rs post_status closure event), which is what stops the stream.
+//
+// T4 composer note: the input area is now @ant-design/x Sender, which ships
+// with submitType='enter' — Enter sends, Shift+Enter inserts a newline and
+// Ctrl+Enter does nothing. This intentionally replaces the old
+// TextArea + Ctrl+Enter binding; the data flow is unchanged (onSubmit → the
+// same send(), loading → stop button wired to the same interrupt()).
+//
+// T5 layout note: dialog selection moved from a header antd Select into an
+// @ant-design/x Conversations sidebar (chatSidebar.jsx) — the classic X chat
+// two-column shell. Node switcher rides along on top of the sidebar. All
+// handlers (loadDialogs / openDialog / resetTranscript / send / interrupt /
+// preselect effect) are unchanged; only their mount points moved. The
+// sidebar's activeKey IS dialogSel, and its creation button calls the same
+// reset pair the old 新建对话 button did.
 
-import { Button, Input, Select, Space, Spin, message } from 'antd';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Sender } from '@ant-design/x';
+import { Spin } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from './api.js';
 import { openStream } from './sse.js';
-import { dialogLabel, relTime } from './format.js';
 import { emptyStream, reduceFrame, turnsFromMessages, usageFromMessages, withUserTurn } from './reduce.js';
-import { TranscriptView } from './render.jsx';
-import { LOCAL_NODE, LOCAL_NODE_LABEL, clearPreselect, useStore } from './store.js';
-
-const { TextArea } = Input;
+import { TranscriptView } from './transcript.jsx';
+import { DialogSidebar } from './chatSidebar.jsx';
+import { LOCAL_NODE, clearPreselect, useStore } from './store.js';
 
 function dialogKey(nodeId, sessionId) {
   return nodeId + '|' + (sessionId || '');
@@ -37,10 +50,6 @@ export function ChatPanel({ onNotice }) {
   const aliveRef = useRef(true);
 
   const isLocal = nodeSel === LOCAL_NODE;
-  const nodeOptions = useMemo(() => (
-    [{ value: LOCAL_NODE, label: LOCAL_NODE_LABEL }]
-      .concat((nodes || []).map((n) => ({ value: n.id, label: n.name || n.id })))
-  ), [nodes]);
 
   // Tab 1's 打开对话 lands here with a preselected node.
   useEffect(() => {
@@ -289,73 +298,42 @@ export function ChatPanel({ onNotice }) {
     }
   };
 
-  const dialogOptions = dialogs.map((d) => ({
-    value: d.session_id || d.id,
-    label: dialogLabel(d) + ((d.last_created_at || d.last_updated_at) ? '  ·  ' + relTime(d.last_created_at || d.last_updated_at) : ''),
-  }));
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Space wrap style={{ marginBottom: 12 }}>
-        <Select
-          style={{ minWidth: 220 }}
-          value={nodeSel}
-          onChange={setNodeSel}
-          options={nodeOptions}
-          showSearch
-          optionFilterProp="label"
-        />
-        <Select
-          style={{ minWidth: 260 }}
-          placeholder="选择对话"
-          value={dialogSel}
-          onChange={openDialog}
-          options={dialogOptions}
-          loading={dialogsLoading}
-          allowClear
-          showSearch
-          optionFilterProp="label"
-        />
-        <Button
-          onClick={() => { resetTranscript(); setDialogSel(null); }}
-        >
-          新建对话
-        </Button>
-      </Space>
+    <div style={{ display: 'flex', flexDirection: 'row', height: '100%', minHeight: 0 }}>
+      <DialogSidebar
+        nodes={nodes}
+        nodeSel={nodeSel}
+        onNodeChange={setNodeSel}
+        dialogs={dialogs}
+        activeKey={dialogSel}
+        onActiveChange={openDialog}
+        onNew={() => { resetTranscript(); setDialogSel(null); }}
+        loading={dialogsLoading}
+      />
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 16px' }}>
-        <Spin spinning={connecting} tip="等待首个事件…">
-          <TranscriptView
-            turns={stream.turns}
-            usage={stream.usage}
-            status={stream.status}
-            error={stream.error}
-            emptyText={dialogSel ? '该对话暂无消息，输入提示词开始' : '选择或新建对话，输入提示词开始'}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 16px' }}>
+          <Spin spinning={connecting} description="等待首个事件…">
+            <TranscriptView
+              turns={stream.turns}
+              usage={stream.usage}
+              status={stream.status}
+              error={stream.error}
+              emptyText={dialogSel ? '该对话暂无消息，输入提示词开始' : '选择或新建对话，输入提示词开始'}
+            />
+          </Spin>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <Sender
+            value={input}
+            onChange={setInput}
+            onSubmit={send}
+            onCancel={interrupt}
+            loading={busy}
+            placeholder="输入提示词，Enter 发送，Shift+Enter 换行"
           />
-        </Spin>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <TextArea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.ctrlKey && e.key === 'Enter') {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="输入提示词，Ctrl+Enter 发送"
-          autoSize={{ minRows: 2, maxRows: 6 }}
-        />
-        <Space style={{ marginTop: 8 }}>
-          <Button type="primary" onClick={send} disabled={!input.trim() || busy} loading={connecting}>
-            发送
-          </Button>
-          <Button danger onClick={interrupt} disabled={!busy}>
-            中断
-          </Button>
-        </Space>
+        </div>
       </div>
     </div>
   );

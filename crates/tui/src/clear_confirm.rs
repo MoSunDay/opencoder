@@ -3,9 +3,9 @@
 //! Both triggers of the fold-and-restart path — the Shift+Tab chord and the
 //! `/act_clear_context` command (canonical; `/clear_context` is the legacy
 //! alias) — arm a short countdown instead of firing immediately. While armed
-//! the transcript echoes the last retained reply (the seed the fold keeps)
-//! and a status chip counts down; `Esc` cancels (回撤) and restores any
-//! swallowed draft, `Enter` fires early. Pure state + key/tick decisions —
+//! a single transcript marker counts down and the status chip (spinner frame
+//! included) animates; `Esc` cancels (回撤) and restores any swallowed draft,
+//! `Enter` fires early. Pure state + key/tick decisions —
 //! no I/O — so the misop guard is trivially testable.
 
 use std::time::Instant;
@@ -14,6 +14,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::chat::ChatView;
+use crate::render::SPINNER;
 use crate::theme;
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -90,16 +91,21 @@ pub(crate) fn expired(cc: &ClearConfirm, now: Instant) -> bool {
     now.duration_since(cc.armed_at).as_millis() as u64 >= CLEAR_CONFIRM_WINDOW_MS
 }
 
-/// Countdown status-chip text (rendered through the mode-flash slot).
-pub(crate) fn banner(cc: &ClearConfirm, now: Instant) -> String {
+/// Countdown status-chip text (rendered through the mode-flash slot). The
+/// spinner frame between the arrow and the countdown (reused from the
+/// status-bar `SPINNER`) animates with `anim_tick` so the armed guard reads
+/// as live while it ticks down.
+pub(crate) fn banner(cc: &ClearConfirm, now: Instant, anim_tick: u32) -> String {
+    let spin = SPINNER[(anim_tick as usize) % SPINNER.len()];
     format!(
-        "\u{2192} clear {}s 后清空上下文 · Enter 立即 / Esc 取消",
+        "\u{2192} {spin} {}s 之后仅保留计划并执行\u{2026}",
         remaining_secs(cc, now)
     )
 }
 
-/// Arm the guard and echo it into the transcript: the retained last reply
-/// (preview of the fold seed) plus the countdown hint, and the live chip.
+/// Arm the guard and echo one countdown marker into the transcript, then
+/// raise the live countdown chip. The `Esc` / `Enter` affordances stay in
+/// the help page — the transcript carries no key hints.
 pub(crate) fn engage(
     cc: &mut Option<ClearConfirm>,
     chat: &mut ChatView,
@@ -109,25 +115,12 @@ pub(crate) fn engage(
     restore_draft: Option<String>,
 ) {
     *cc = Some(arm(rest, restore_draft));
-    chat.push_marker(marker_line(
-        "[clear] 即将清空上下文并接续执行 — 最后回复将作为接续种子保留：".into(),
-    ));
-    match chat.last_reply_text() {
-        Some(seed) => {
-            chat.push_marker(marker_line(format!("[clear] ┃ {}", preview_text(&seed))));
-        }
-        None => {
-            chat.push_marker(marker_line(
-                "[clear] 当前无可保留的回复 — 将以空白上下文重新开始".into(),
-            ));
-        }
-    }
     chat.push_marker(marker_line(format!(
-        "[clear] {}s 内 Esc 取消（回撤）· Enter 立即执行",
+        "[clear] {}s 之后仅保留计划并执行\u{2026}",
         CLEAR_CONFIRM_WINDOW_MS / 1000
     )));
     if let Some(a) = cc.as_ref() {
-        *mode_flash = Some((banner(a, Instant::now()), anim_tick));
+        *mode_flash = Some((banner(a, Instant::now(), anim_tick), anim_tick));
     }
 }
 
@@ -185,7 +178,7 @@ pub(crate) fn tick(
     anim_tick: u32,
 ) -> Option<ClearConfirm> {
     let armed = cc.as_ref()?;
-    *mode_flash = Some((banner(armed, Instant::now()), anim_tick));
+    *mode_flash = Some((banner(armed, Instant::now(), anim_tick), anim_tick));
     if expired(armed, Instant::now()) {
         cc.take()
     } else {
@@ -202,17 +195,6 @@ pub(crate) fn push_cancel_marker(chat: &mut ChatView) {
 
 fn marker_line(text: String) -> Line<'static> {
     Line::from(Span::styled(text, Style::default().fg(theme::warn_color())))
-}
-
-/// Single-line, bounded preview of the retained reply for the transcript echo.
-fn preview_text(seed: &str) -> String {
-    const MAX: usize = 160;
-    let squashed = seed.split_whitespace().collect::<Vec<_>>().join(" ");
-    if squashed.chars().count() <= MAX {
-        return squashed;
-    }
-    let cut: String = squashed.chars().take(MAX).collect();
-    format!("{cut}\u{2026}")
 }
 
 #[cfg(test)]
@@ -320,15 +302,24 @@ mod tests {
         let armed = cc.expect("legacy spelling must arm too");
         assert_eq!(armed.rest, Some("tail".into()));
         assert_eq!(armed.restore_draft, Some("t".into()));
-        assert!(flash.is_some());
-    }
-
-    #[test]
-    fn preview_text_squashes_and_truncates() {
-        assert_eq!(preview_text("  hello\n  world  "), "hello world");
-        let long = "x".repeat(500);
-        let cut = preview_text(&long);
-        assert_eq!(cut.chars().count(), 161);
-        assert!(cut.ends_with('\u{2026}'));
+        let (chip, _) = flash.expect("countdown chip must be raised");
+        assert!(chip.contains("之后仅保留计划并执行"), "chip: {chip}");
+        let markers: Vec<String> = chat
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                crate::chat::ChatBlock::Marker(lines) => {
+                    Some(lines.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(markers.len(), 1, "exactly one countdown marker: {markers:?}");
+        assert!(
+            markers[0].contains("5s 之后仅保留计划并执行"),
+            "countdown marker: {:?}",
+            markers[0]
+        );
     }
 }

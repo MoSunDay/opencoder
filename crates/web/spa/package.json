@@ -3,20 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Opencoder 舰队控制台 SPA (React 18 + antd 5 + Vite 5)",
+  "description": "Opencoder 舰队控制台 SPA (React 18 + antd 6 + Vite 5)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run"
   },
   "dependencies": {
-    "antd": "^5.21.6",
+    "@ant-design/x": "^2.9.0",
+    "antd": "^6.6.2",
     "dayjs": "^1.11.13",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^30.0.1",
     "vite": "^5.4.11",
     "vitest": "^2.1.8"
   }

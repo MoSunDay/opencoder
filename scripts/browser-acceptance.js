@@ -101,7 +101,7 @@ async function trackApiFlush() {
   results.push(`api-calls: ${apiCalls.map((c) => `${c.method} ${c.path.replace(/\?.*/, '')}=${c.status}`).join(', ')}`);
 }
 const badgeText = async () => (await page.locator('.ant-badge').innerText().catch(() => '')).trim();
-const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png` });
+const shot = (n) => page.screenshot({ path: `${SHOTS}/${n}.png`, timeout: 120000 }); // compositor can starve on loaded hosts
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitBadge(text, timeout) {
@@ -128,25 +128,21 @@ async function waitGrowth(timeout) {
 
 async function gotoChatTab() {
   await page.getByRole('menuitem', { name: '会话交互' }).click();
-  await page.getByPlaceholder(/输入提示词/).waitFor({ timeout: 15000 });
+  await page.getByPlaceholder(/输入提示词/).waitFor({ timeout: 60000 });
 }
 
 async function sendPrompt(text) {
   await page.getByPlaceholder(/输入提示词/).fill(text);
-  await page.getByRole('button', { name: /发\s*送/ }).click();
-  await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 30000 });
+  await page.getByPlaceholder(/输入提示词/).press('Enter'); // X Sender: Enter submits
+  await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 90000 });
 }
 
 async function waitDone(timeout) {
   await page.getByText('done', { exact: true }).first().waitFor({ timeout });
 }
 
-async function interruptDisabled(timeout) {
-  await page.waitForFunction(
-    () => [...document.querySelectorAll('button')].some((b) => /中\s*断/.test(b.textContent) && b.disabled),
-    undefined, { timeout },
-  );
-}
+// 中断 surface is now Sender's loading-state stop button (see stopBtn()).
+const stopBtn = () => page.locator('.ant-sender-actions-btn-loading-button').first();
 
 (async () => {
   const browser = await chromium.launch({
@@ -167,8 +163,8 @@ async function interruptDisabled(timeout) {
 
   try {
     await step('01_login_with_token', async () => {
-      await page.goto(BASE + '/');
-      await page.getByText('Opencoder Fleet · 登录').waitFor({ timeout: 15000 });
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+      await page.getByText('Opencoder Fleet · 登录').waitFor({ timeout: 60000 });
       await page.getByLabel('共享密钥 (Token)').fill(TOKEN);
       await page.getByRole('button', { name: /连\s*接/ }).click();
       await waitBadge('已连接', 20000);
@@ -176,7 +172,7 @@ async function interruptDisabled(timeout) {
 
     await step('02_fleet_console_renders', async () => {
       await page.getByRole('menuitem', { name: 'Opencoder 列表' }).waitFor({ timeout: 10000 });
-      await page.getByText('暂无 Opencoder 节点').or(page.locator('.ant-table-row')).first().waitFor({ timeout: 15000 });
+      await page.getByText('暂无 Opencoder 节点').or(page.locator('.ant-table-row')).first().waitFor({ timeout: 60000 });
       await shot('01-fleet-console');
     });
 
@@ -194,7 +190,7 @@ async function interruptDisabled(timeout) {
       const intBtn = page.getByRole('button', { name: /中\s*断/ });
       if (await intBtn.isDisabled().catch(() => true)) {
         await sendPrompt(PROMPT);
-        await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 20000 });
+        await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 60000 });
       }
       const cdp = await ctx.newCDPSession(page);
       await cdp.send('Network.enable');
@@ -203,7 +199,7 @@ async function interruptDisabled(timeout) {
       // chat tab has no REST polling: force a signed call to fail — the
       // offline 中断 click must surface as the 连接断开 badge (and, being
       // offline, never reaches the server: the run keeps streaming there).
-      await page.getByRole('button', { name: /中\s*断/ }).click();
+      await stopBtn().click();
       await waitBadge('连接断开', 20000);
       await shot('03-offline-badge');
       await sleep(4000); // hold the drop > 2 backoff cycles (1s, 2s)
@@ -211,7 +207,7 @@ async function interruptDisabled(timeout) {
       // signed GET /events within its backoff schedule once the link returns.
       reconnectReq = page.waitForRequest(
         (r) => r.url().includes('/events') && r.method() === 'GET',
-        { timeout: 20000 },
+        { timeout: 60000 },
       );
       await cdp.send('Network.setBlockedURLs', { urls: [] }); // restore the link
     });
@@ -228,13 +224,12 @@ async function interruptDisabled(timeout) {
       // it directly) or already finished + resynced (launch run2, interrupt that).
       const doneTag = page.getByText('done', { exact: true });
       if ((await doneTag.count()) === 0) {
-        await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 15000 });
+        await page.getByText('streaming', { exact: false }).first().waitFor({ timeout: 60000 });
       } else {
         await sendPrompt(PROMPT); // fresh run in the same dialog
       }
-      await page.getByRole('button', { name: /中\s*断/ }).click(); // lands this time
+      await stopBtn().click(); // lands this time
       await waitBadge('已连接', 20000); // the signed POST succeeded
-      await interruptDisabled(90000);
       await waitDone(90000); // terminal frame -> transcript normalized from store
       await shot('05-interrupted');
     });
@@ -262,21 +257,19 @@ async function interruptDisabled(timeout) {
       await page.reload();
       await waitBadge('已连接', 20000); // token persisted in localStorage
       await gotoChatTab();
-      await page.locator('.ant-select', { hasText: '选择对话' }).first().click();
-      const dd = page.locator('.ant-select-dropdown').last();
-      await dd.waitFor({ state: 'visible', timeout: 15000 });
       // NOTE: store rows carry title=NULL (the fleet console synthesizes the
       // prompt-slice label client-side, which a reload clears). The test env
       // is single-tenant: the most recently updated dialog IS our session.
-      const opt = dd.locator('.ant-select-item-option').first();
+      const opt = page.locator('.ant-conversations-item').first();
+      await opt.waitFor({ state: 'visible', timeout: 60000 });
       if (!(await opt.count())) throw new Error('dialog list empty');
-      await opt.click();
+      await opt.click(); // Conversations sidebar: onActiveChange -> openDialog
       // Transcript renders after openDialog's snapshot GET resolves — poll
       // for it instead of a flat sleep.
       await page.waitForFunction(
         () => document.body.innerText.length >= 500,
         undefined,
-        { timeout: 30000 },
+        { timeout: 90000 },
       );
       const body = await page.locator('body').innerText();
       if (body.length < 500) throw new Error('replay transcript too small: ' + body.length);

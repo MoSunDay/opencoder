@@ -25,3 +25,12 @@ clear-context 折叠是全系统唯一「丢上下文」的操作：一次误触
 - `switch_gate_tests` 收敛为 Act/Sandbox 两模式；`command.rs` canonical 断言换序；session `control_cmd` 注释/文档换向。
 - 全量回归：`cargo test --workspace` → 3322 passed / 0 failed（233 个测试二进制，TEST-EXIT=0，当次实跑）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告（CLIPPY-EXIT=0）
+
+## 回修（同日）：Esc 回撤后倒计时 chip 残留
+
+- **现象**：armed 期间 Esc 回撤，「[clear] 已取消（回撤）」marker 正常落盘，但右下角倒计时 chip（`→ clear Ns 后清空上下文 · Enter 立即 / Esc 取消`）常驻不消失。
+- **根因**：chip 借道 mode-flash 槽位渲染，`clear_confirm::tick` 每动画 tick 刷新以活过 15-tick flash 生命期（设计如此，否则秒数跳不到 0）；Esc 取消臂只推 marker 未清 `mode_flash`，而 guard 拆除后 idle 下 `anim_tick` 冻结，`frame::flash_visible(start, now, 15)` 用冻结 now 判定 flash 永远可见。
+- **修复**：`app_loop_actions::handle_confirm_key` 的 `ConfirmFlow::Cancel` 臂在 `push_cancel_marker` 后补 `*mode_flash = None;`（语句级，零签名变更）；Fire（idle 提交 / running 入队）与到点自动 fire 路径不变，running 路径 flash 仍随 running tick 自增自然过期。
+- **测试**：新增 `act_clear::esc_cancel_drops_countdown_chip`（engage 抬 chip 并吞草稿 → Esc → 断言 `mode_flash`/`clear_confirm` 同步清空、回撤 marker 落盘、`restore_draft` 回填输入框、不发任何命令）；既有 act_clear 5 例 + clear_confirm 8 例不降。
+- 全量回归：`cargo test --workspace` → 3323 passed / 0 failed（233 个测试二进制，当次实跑；基线 3322 + 新 1 例）
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告；`cargo build --workspace` 干净

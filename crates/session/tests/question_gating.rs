@@ -2,8 +2,9 @@
 //! (`runner::llm_call` visibility): the tools array a real `ChatRequest`
 //! carries must follow the latent-gating contract.
 //!
-//! - act WITHOUT a task-plan/review skill: `question` absent.
-//! - act WITH a skill body naming the skill in its first 500 chars: present.
+//! - act WITHOUT a task-plan skill: `question` absent.
+//! - act WITH a task-plan body naming the skill in its first 500 chars: present.
+//! - act WITH a review body: still absent (question is task-plan-only).
 //! - sandbox: present regardless (base-prompt clarification protocol).
 
 use std::sync::Arc;
@@ -87,13 +88,16 @@ async fn act_with_plan_skill_sees_question() {
 }
 
 #[tokio::test]
-async fn act_with_review_skill_sees_question() {
+async fn act_with_review_skill_hides_question() {
+    // The built-in review skill no longer owns the question tool; only
+    // task-plan unlocks it. A review body naming itself (and even the tool)
+    // must leave the tool hidden.
     let body = "# review\n\nEvidence-driven review; use `question` for blocking ambiguities.";
     let (session, mock) = session_for("q-gate-review", "act", Some(body.into()));
     let names = requested_tools(session, mock).await;
     assert!(
-        names.contains(&"question".to_string()),
-        "a review body must unlock question for act, got: {names:?}"
+        !names.contains(&"question".to_string()),
+        "a review body must NOT unlock question for act, got: {names:?}"
     );
 }
 
@@ -105,4 +109,32 @@ async fn sandbox_sees_question_without_any_skill() {
         names.contains(&"question".to_string()),
         "sandbox must always see question, got: {names:?}"
     );
+}
+
+/// Contract bridge: the REAL seeded assets must match the gating logic.
+/// Activating the built-in `task-plan` skill unlocks `question` for act;
+/// activating the built-in `review` skill must not (its clarification
+/// protocol is lookup-first + assumptions, never the interactive tool).
+#[tokio::test]
+async fn builtin_seed_assets_match_question_gating() {
+    let root = tempfile::tempdir().unwrap();
+    opencoder_core::seed_builtin_skills_in(root.path()).expect("seed");
+    for (skill, unlocks) in [("task-plan", true), ("review", false)] {
+        let path = root.path().join(skill).join("SKILL.md");
+        let parsed =
+            opencoder_core::skill::parse_skill(&path, "fallback").expect("seeded skill parses");
+        // Mirror the runner: the unlock derives from the injected body.
+        let injected = opencoder_core::body_with_source(&parsed);
+        let (session, mock) = session_for(
+            &format!("q-gate-seed-{skill}"),
+            "act",
+            Some(injected.clone()),
+        );
+        let names = requested_tools(session, mock).await;
+        assert_eq!(
+            names.contains(&"question".to_string()),
+            unlocks,
+            "built-in {skill} body question-visibility mismatch, got: {names:?}"
+        );
+    }
 }

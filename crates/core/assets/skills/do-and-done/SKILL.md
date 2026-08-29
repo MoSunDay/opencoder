@@ -1,6 +1,6 @@
 ---
 name: do-and-done
-description: Continuously drive the launch-closure plan produced by task-plan to go-live. Pick the next dependency-ready item, implement it, verify with captured evidence, refresh the plan as facts change, and repeat until review finds the original goal, critical path, production-equivalent validation, and release conditions fully closed. Never finish incomplete — on a blocking question or irreversible operation, stop and report.
+description: Continuously drive the launch-closure plan produced by task-plan to go-live. Pick the next dependency-ready item, implement it, verify with captured evidence, refresh the plan as facts change, and repeat until the original goal, critical path, production-equivalent validation, and release conditions are fully closed with fresh evidence. Never finish incomplete — on a blocking question or irreversible operation, stop and report.
 ---
 
 # do-and-done —— 上线闭环执行
@@ -30,7 +30,7 @@ description: Continuously drive the launch-closure plan produced by task-plan to
 - 原始目标和关键路径内计划项全部有验收证据
 - 线上 / 生产等价验证已完成，或有充分的不适用说明
 - 无未闭环 blocker，发布、观测与回滚条件成立
-- review 以当次证据裁决 `go-live ready`
+- 以当次新鲜证据裁决达到 `go-live ready`，不凭历史结论签收
 
 收尾时输出：`DONE / go-live ready`，附最终证据汇总与变更摘要。
 
@@ -45,4 +45,4 @@ description: Continuously drive the launch-closure plan produced by task-plan to
 
 ## 证据要求
 - 每条 completed 必须可追溯：测试命令 + 结果、`file:line`、构建 / 日志摘要。
-- 证据不足 → 保持未完成，不得计入 review 的需求完成百分比。
+- 证据不足 → 保持未完成，不得计入需求完成百分比。

@@ -17,7 +17,6 @@ use crate::attach_badge::AttachDelBtn;
 use crate::cache_salt_menu::CacheSaltMenu;
 use crate::chat::ChatView;
 use crate::command::CommandMenu;
-use crate::composer;
 use crate::copy_wrap::{WrapAwareBackend, WrapPlan};
 use crate::keymap_menu::KeymapMenu;
 use crate::menu::SkillMenu;
@@ -26,6 +25,7 @@ use crate::queue_panel::QueueBtn;
 use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 use crate::theme;
+use crate::composer;
 
 /// Production terminal type: the wrap-aware backend that lets copy mode
 /// suppress `MoveTo` at display-only wrap boundaries (see `copy_wrap`).
@@ -35,6 +35,7 @@ pub(crate) type Term = Terminal<WrapAwareBackend<Stdout>>;
 mod status_bar;
 use status_bar::render_status;
 pub(crate) use status_bar::resolve_ctx_used;
+pub(crate) use status_bar::SPINNER;
 
 /// Mouse hit-targets exported by `render` for the event loop to test clicks
 /// and wheel scrolls against. Recomputed every frame.
@@ -136,7 +137,7 @@ pub(crate) fn render<B: Backend + 'static>(
     copy_mode: bool,
     pending_images: &[(String, String)],
     input_disabled: bool,
-    plan_mode: Option<&str>,
+    plan_edit_mode: Option<&str>,
     edit_title: Option<&str>,
     tail_ms: u64,
     task_ms: u64,
@@ -191,7 +192,7 @@ pub(crate) fn render<B: Backend + 'static>(
         let prompt_w = 2u16;
         let inner_w = draw_area.width.saturating_sub(2);
         let input_rows = composer::display_rows(input, inner_w, prompt_w).max(2);
-        let plan_active = plan_mode.is_some();
+        let plan_active = plan_edit_mode.is_some();
         // The attachment badge consumes one inner line per pending image,
         // capped by the composer's minimum height so the input area is never
         // squeezed away; must mirror the plan-mode filter applied at the
@@ -314,13 +315,13 @@ pub(crate) fn render<B: Backend + 'static>(
             composer_scroll,
             inner_w,
             prompt_w,
-            if plan_mode.is_some() {
+            if plan_edit_mode.is_some() {
                 &[]
             } else {
                 pending_images
             },
             input_disabled,
-            plan_mode,
+            plan_edit_mode,
             edit_title,
             title,
             wrap_plan.as_ref(),
@@ -366,7 +367,7 @@ pub(crate) fn render<B: Backend + 'static>(
         if let Some(text) = mode_flash {
             // Warn hue for the sandbox (read-only) side of the family: the
             // agent-switch flash "→ sandbox mode" and the plan-text editor
-            // flash "→ plan mode" (the editor is entered from the sandbox
+            // flash "→ edit plan" (the editor is entered from the sandbox
             // agent). Every other flash (busy hint, "→ act mode") = accent.
             let is_sandbox = crate::frame::is_warn_flash(text);
             render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_sandbox));
@@ -378,7 +379,7 @@ pub(crate) fn render<B: Backend + 'static>(
             render_status_chip(
                 f,
                 composer_area,
-                if plan_mode.is_some() {
+                if plan_edit_mode.is_some() {
                     "COPY MODE: Ctrl+G/Esc"
                 } else {
                     "COPY: ↑↓ PgUp/PgDn · Ctrl+G/Esc"
@@ -630,7 +631,7 @@ fn render_composer(
     prompt_w: u16,
     pending_images: &[(String, String)],
     disabled: bool,
-    plan_mode: Option<&str>,
+    plan_edit_mode: Option<&str>,
     edit_title: Option<&str>,
     top_title: &Line<'static>,
     wrap_plan: Option<&Rc<RefCell<WrapPlan>>>,
@@ -640,7 +641,7 @@ fn render_composer(
     // glyph, no attachment badge — so terminal-native selection spans
     // exactly the typed text (mirrors the body's clean view).
     if copy_mode {
-        crate::copy_mode::render_composer_clean(f, area, input, plan_mode.is_some(), wrap_plan);
+        crate::copy_mode::render_composer_clean(f, area, input, plan_edit_mode.is_some(), wrap_plan);
         return;
     }
     if disabled {
@@ -663,7 +664,7 @@ fn render_composer(
         );
         return;
     }
-    let block = if let Some(label) = plan_mode {
+    let block = if let Some(label) = plan_edit_mode {
         let is_annotation = edit_title == Some("edit annotation");
         let border_fg = if is_annotation {
             theme::ok_color()
@@ -713,7 +714,7 @@ fn render_composer(
     for (ri, vr) in rows.iter().enumerate() {
         let mut spans: Vec<Span> = Vec::new();
         if ri == 0 {
-            let prompt_color = if plan_mode.is_some() {
+            let prompt_color = if plan_edit_mode.is_some() {
                 if edit_title == Some("edit annotation") {
                     theme::ok_color()
                 } else {

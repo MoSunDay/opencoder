@@ -149,12 +149,12 @@ fn paste_non_file_text_returned_verbatim() {
     assert_eq!(paste_payload("hello world", dir.path()), "hello world");
 }
 
-/// Ctrl+T (no longer bound to anything) must NOT be consumed by
-/// `pre_key_intercept` — unbound chords fall through to `handle_key`
-/// untouched. Ctrl+L owns the collapse/clear/follow behaviour (without the
-/// forced redraw — that moved to Ctrl+F).
+/// A legacy unbound chord (Ctrl+T, no longer bound to anything) must NOT be
+/// consumed by `pre_key_intercept` — unbound chords fall through to
+/// `handle_key` untouched. Ctrl+L owns the collapse/clear/follow behaviour
+/// (without the forced redraw — that moved to Ctrl+F).
 #[test]
-fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
+fn legacy_unbound_chord_passes_through_ctrl_l_clears_ctrl_f_redraws() {
     fn run(key: KeyEvent) -> (bool, String, usize, bool, bool) {
         let mut chat = ChatView::default();
         let mut subagent_focus: Option<usize> = None;
@@ -181,19 +181,19 @@ fn ctrl_t_not_intercepted_ctrl_l_clears_ctrl_f_redraws() {
     let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
     let ctrl_f = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
 
-    // Ctrl+T must pass through untouched (no longer bound).
+    // The legacy unbound chord must pass through untouched (not bound).
     let (t_consumed, t_input, t_cursor, t_clear, t_follow) = run(ctrl_t);
     assert!(
         !t_consumed,
-        "Ctrl+T must NOT be consumed by pre_key_intercept"
+        "legacy unbound chord must NOT be consumed by pre_key_intercept"
     );
     assert_eq!(
         t_input, "hello world",
-        "Ctrl+T must leave the input untouched"
+        "legacy unbound chord must leave the input untouched"
     );
-    assert_eq!(t_cursor, 5, "Ctrl+T must not move the cursor");
-    assert!(!t_clear, "Ctrl+T must not request a forced clear/redraw");
-    assert!(!t_follow, "Ctrl+T must not touch follow mode");
+    assert_eq!(t_cursor, 5, "legacy unbound chord must not move the cursor");
+    assert!(!t_clear, "legacy unbound chord must not force a redraw");
+    assert!(!t_follow, "legacy unbound chord must not touch follow mode");
 
     // Ctrl+L still collapses thinking / clears the input, but no longer
     // forces the full-screen redraw (that is Ctrl+F's job now).

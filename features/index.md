@@ -1,4 +1,4 @@
-Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
+Commit: (working-tree, review 去 question 工具 + do-and-done 去 review 描述)
 
 # OpenCoder 能力地图
 
@@ -12,7 +12,7 @@ OpenCoder 当前提供以下用户/调用方可感知的能力。每项链接到
 - **配置按域拆分为独立文件（mcp/cli/skills/ap.json）**：`mcp_servers`/`cli`/`skills`/`autopilot` 四域键硬切出 `config.json`（遗留键加载时忽略，**breaking**）——各自经专属域文件 `<workdir>/.opencoder/{mcp,cli,skills,ap}.json`（项目）或 `~/.opencoder/{mcp,cli,skills,ap}.json`（全局）加载/保存，项目存在则整体遮蔽全局。详见 [changelog](changelog/2026-08-16/split-domain-config-files.md) / [autopilot 域 changelog](changelog/2026-08-20/envs-autopilot-domain.md)。
 - **`/envs` 环境配置管理**：每个环境是 `~/.opencoder/envs/<name>/` 完整配置快照（config.json + mcp/cli/skills/ap.json，0o600），激活后插入解析链 **project > env > ~/.opencoder > XDG**；激活期间交互式编辑（`/model` 等）落进环境层（save_target 截断）。TUI `/envs` 弹窗（列表/新建/重捕获/删除）、web `/api/envs` REST、CLI `config show` stderr 提示行。详见 [changelog](changelog/2026-08-16/envs-config-management.md)。
 - **持久化 TODO 工作流**：`opencoder todos validate/run/resume/show/events/list/interrupt` 执行预编译通用 TODO 合同；父 Workflow Session 管理全局依赖、状态、并发、验收和回退，每个 TODO 使用独立 Primary Session 聚焦完成。Store 是权威状态，`--debug` 才生成可索引文件投影。详见 [TODO 工作流](todos/index.md)。
-- **结构化提问（question 潜工具门控）**：`question` 是 latent 工具（`tools/latent.rs`，同组含 `ssh_pty`）：sandbox agent 始终可见，act 需 skill 解锁（加载的 skill 名为 `task-plan`/`review`，或 skill 正文前 500 字符含该名）才注入 schema；TUI 弹出对话框（预设选项 + 自定义输入），作答作为 tool result 同轮回填驱动继续；headless/web 无监听时固定文案兜底不挂起。详见 [changelog](changelog/2026-08-14/plan-question-tool.md)；2026-08-21 起提示词全面 ask-by-default（有疑必问、先查再问）：[changelog](changelog/2026-08-21/plan-question-always-ask.md)。
+- **结构化提问（question 潜工具门控）**：`question` 是 latent 工具（`tools/latent.rs`，同组含 `ssh_pty`）：sandbox agent 始终可见，act 需 skill 解锁（仅 `task-plan`：加载的 skill 名为 `task-plan` 或正文前 500 字符含该名；review 不再解锁 question，澄清走先查再定 + assumptions）才注入 schema；TUI 弹出对话框（预设选项 + 自定义输入），作答作为 tool result 同轮回填驱动继续；headless/web 无监听时固定文案兜底不挂起。详见 [changelog](changelog/2026-08-14/plan-question-tool.md)；2026-08-21 起提示词全面 ask-by-default（有疑必问、先查再问）：[changelog](changelog/2026-08-21/plan-question-always-ask.md)。
 - **无持久化相位状态**：plan/act 双模式删除后不再有 plan 相位落库——schema v10 的 `plan_snapshot`/`plan_input_count` 两列保留但运行时已不读写，存量 `agent='plan'` 行仅在读取时归一为 `act`（见 [agents/store](../agents/store/index.md)）；上下文折叠改由 `/clear_context` 主动触发（折叠最新 assistant 简报为种子消息，无内容则空白开局）。详见 [changelog](changelog/2026-08-18/plan-phase-persistence.md) / [阶段有界快照 changelog](changelog/2026-08-19/plan-handoff-phase-bounded-snapshot.md)（历史机制，现已被上述语义取代）。
 - **会话恢复**：CLI `--session <id>` / `--continue` / `--fork`，跨进程从 libsql 重建历史；title 由 small_model 异步生成。详见 [agents/session](../agents/session/index.md)。
 - **Session 二进制导出/导入**：`opencoder session export <id> -o <file>` 导出 session（含 subagent 树）为 `.opencoder` 二进制文件（`OPENCODR` magic）；`opencoder session import <file>` 幂等导入到新环境，`--session <id>` 可继续执行。不导出 Config（API key 安全）。详见 [agents/store](../agents/store/index.md) / [bundle changelog](changelog/2026-07-06/compact-clear-display-session-bundle.md)。

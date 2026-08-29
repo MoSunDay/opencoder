@@ -21,6 +21,7 @@ clear-context 折叠是全系统唯一「丢上下文」的操作：一次误触
 - `clear_confirm` 8 例（head_rest 边界/compound、command_text、remaining/expiry、intercept Enter/Esc/inert、maybe_arm、preview 截断）。
 - `act_clear.rs` 重写：popup dispatch arm（idle + running）、fire idle 提交 canonical 复合 prompt、fire running 入队、`backtab_and_typed_clear_context_are_one_path`（canonical 回程 + head_rest）。
 - `key_handler_running_mode_tests::backtab_arms_clear_context_confirm`（ArmClearConfirm + 草稿转发 + 输入清空）。
+- `frame::tests::warn_flash_hue_covers_sandbox_plan_and_clear_guard`（warn 黄判定提为 `frame::is_warn_flash` 纯函数后补齐的专属测试）。
 - `switch_gate_tests` 收敛为 Act/Sandbox 两模式；`command.rs` canonical 断言换序；session `control_cmd` 注释/文档换向。
 - 全量回归：`cargo test --workspace` → 3322 passed / 0 failed（233 个测试二进制，TEST-EXIT=0，当次实跑）
 - clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告（CLIPPY-EXIT=0）

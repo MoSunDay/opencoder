@@ -6,8 +6,8 @@
 use super::*;
 
 /// Popup dispatch of the clear-context command arms the guard: no UiCmd is
-/// sent, the countdown chip is up, and the transcript echoes the retained
-/// seed plus the cancel hint.
+/// sent, the countdown chip is up, and the transcript gets exactly one
+/// countdown marker (no seed echo, no key affordances).
 #[tokio::test]
 async fn slash_clear_context_arms_countdown_guard() {
     let mut chat = ChatView {
@@ -25,10 +25,14 @@ async fn slash_clear_context_arms_countdown_guard() {
     );
     let cc = confirm.expect("the guard must be armed");
     assert_eq!(cc.rest, None);
-    assert!(flash.is_some(), "countdown chip must be raised");
-    let joined = markers.join("\n");
-    assert!(joined.contains("即将清空上下文"), "seed echo: {joined}");
-    assert!(joined.contains("Esc 取消"), "cancel hint: {joined}");
+    let (chip, _) = flash.expect("countdown chip must be raised");
+    assert!(chip.contains("之后仅保留计划并执行"), "chip: {chip}");
+    assert_eq!(markers.len(), 1, "exactly one countdown marker: {markers:?}");
+    assert!(
+        markers[0].contains("5s 之后仅保留计划并执行"),
+        "countdown marker: {:?}",
+        markers[0]
+    );
 }
 
 /// While running the guard arms too — firing later queues at the idle

@@ -16,12 +16,15 @@ pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
 }
 
 /// Whether the mode-flash chip renders in the warning hue: the read-only
-/// sandbox family, the plan-text editor, and the clear-context countdown
-/// guard (a destructive operation about to fold the transcript).
+/// sandbox family, the "→ edit plan" flash for the plan-text editor, and the
+/// clear-context countdown guard (a destructive operation about to fold the
+/// transcript — matched by its countdown banner text, not by a prefix).
 pub(crate) fn is_warn_flash(text: &str) -> bool {
     text.starts_with("\u{2192} sandbox mode")
-        || text.starts_with("\u{2192} plan mode")
-        || text.starts_with("\u{2192} clear")
+        || text.starts_with("\u{2192} edit plan")
+        || text.contains(
+            "\u{4e4b}\u{540e}\u{4ec5}\u{4fdd}\u{7559}\u{8ba1}\u{5212}\u{5e76}\u{6267}\u{884c}",
+        )
 }
 
 /// Transient mode-flash status text if still within its visibility window.
@@ -85,12 +88,12 @@ pub(crate) fn render_frame(
     display_mode: &str,
     notepad: Option<&crate::notepad::NotepadView>,
 ) -> anyhow::Result<()> {
-    let plan_label = plan_edit.as_ref().map(|pe| pe.mode_label());
+    let plan_edit_label = plan_edit.as_ref().map(|pe| pe.mode_label());
     let (render_input, render_cursor) = match plan_edit {
         Some(pe) => (pe.text(), pe.cursor()),
         None => (input, cursor_idx),
     };
-    let plan_mode: Option<&str> = plan_label.as_deref();
+    let plan_edit_mode: Option<&str> = plan_edit_label.as_deref();
     let edit_title: Option<&str> = plan_edit.as_ref().map(|pe| pe.title());
     crate::render::render(
         terminal,
@@ -131,7 +134,7 @@ pub(crate) fn render_frame(
         copy_mode,
         pending_images,
         input_disabled,
-        plan_mode,
+        plan_edit_mode,
         edit_title,
         tail_ms,
         task_ms,

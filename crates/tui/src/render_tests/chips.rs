@@ -260,7 +260,7 @@ fn ap_chip_reflects_autopilot_mode() {
 }
 
 /// Mode-flash chip colouring contract: ONLY the definite sandbox-family
-/// flashes — "→ sandbox mode" (agent switch via /sandbox) and "→ plan mode"
+/// flashes — "→ sandbox mode" (agent switch via /sandbox) and "→ edit plan"
 /// (the plan-text editor, entered from the sandbox agent) — participate in
 /// the two-colour scheme. Every other flash — the busy hint ("⏳ busy — mode
 /// switch blocked, retry when idle"), "→ act mode", and any future neutral
@@ -370,7 +370,7 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
 
     // Definite mode-switch flashes keep the two-colour scheme.
     check("\u{2192} sandbox mode", "sandbox mode", true);
-    check("\u{2192} plan mode", "plan mode", true);
+    check("\u{2192} edit plan", "edit plan", true);
     check("\u{2192} act mode", "act mode", false);
     // Busy hint: accent — it is not a completed switch.
     check(

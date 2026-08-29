@@ -43,6 +43,20 @@ Commit: (working-tree, Shift+Tab 倒计时确认防护 arm 后提示收敛为单
 - 全量 `cargo test --workspace`：被并行在途改动阻断——crates/session/tests/control_cmd.rs:13 unclosed delimiter。该文件属另一在途任务，非本轮触达面（本轮 diff 仅 crates/tui）；workspace 级复跑待其收敛后再补。
 - 行数合规（迭代 ≤800，本轮零新增源码文件）：clear_confirm.rs 325 / frame.rs 152 / render.rs 789 / help.rs 228 / act_clear.rs 230。
 
+## 测试覆盖
+
+| 功能 | 测试名 | 文件 |
+|------|--------|------|
+| arm 后 chip 收敛为单条倒计时文案（braille spinner 动画 + engage 单条 `markers.len()==1` 标记） | `slash_clear_context_arms_countdown_guard` | `crates/tui/src/app_loop_dispatch_cmd_tests/act_clear.rs` |
+| arming/banner/engage 文案单元路径（chip 含「之后仅保留计划并执行」、标记含「5s 之后仅保留计划并执行」） | `maybe_arm_arms_only_clear_context_text` | `crates/tui/src/clear_confirm.rs` |
+| `is_warn_flash` 第三臂 contains 匹配新倒计时文案，旧「→ clear …后清空上下文」负断言不再命中 | `warn_flash_hue_covers_sandbox_plan_and_clear_guard` | `crates/tui/src/frame/tests.rs` |
+| Esc 回撤清除倒计时 chip（升起→消失断言） | `esc_cancel_drops_countdown_chip` | `crates/tui/src/app_loop_dispatch_cmd_tests/act_clear.rs` |
+
+- `preview_text` 随唯一调用方删除而成死代码并一并移除，其专属测试 `preview_text_squashes_and_truncates` 随之消亡（随死代码删除，非为修绿删测试；本轮唯一删除项）。
+- 全量回归：`cargo test --workspace` → 233 套件 / 3317 passed / 5 failed（tip `0108e5c` 内容树一手实跑，`/tmp/oc_r2_ws_test.log`）：smoke 1 项与 runner_control 3 项低负载 solo 复跑全 PASS（负载饥饿）；runner_cancel target 1 项（`unknown_session_reports_ok_false`）在 base `64a4878` 同样 FAILED → pre-existing flake，低负载窗口复跑待补。
+- scoped 回归：`cargo test -p opencoder-tui` → 26 套件 / 1556 passed / 0 failed（`/tmp/oc_r2_tui.log`，TUI_EXIT=0）。
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告（CLIPPY_EXIT=0，隔离干净树实跑）。
+
 ## 关联
 
 - 前因：38cbd84，[/act_clear_context canonical 更名 + Shift+Tab 倒计时确认防护](../2026-08-29/clear-context-countdown-guard.md)（倒计时确认防护引入处，本轮收敛其 arm 后提示）。

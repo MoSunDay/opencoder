@@ -32,6 +32,18 @@ Commit: (working-tree, plan 卡片编辑器闪烁文案纠偏 + 双模式删除�
 - `cargo clippy -p opencoder-tui --all-targets -- -D warnings` → 零告警。
 - 行数合规（迭代 ≤800，本轮零新增文件）：app_loop.rs 669 / frame.rs 150 / app_helpers.rs 761 / render.rs 788 / app_helpers_tests/mod.rs 730 / frame/tests.rs 29 / render_tests/chips.rs 386 / render_tests/composer.rs 309。
 
+## 测试覆盖
+
+| 功能 | 测试名 | 文件 |
+|------|--------|------|
+| plan 编辑器闪烁文案「→ plan mode」→「→ edit plan」（`is_warn_flash` 判别分支同步换字面量） | `warn_flash_hue_covers_sandbox_plan_and_clear_guard` | `crates/tui/src/frame/tests.rs` |
+| 闪烁 chip 渲染接受「→ edit plan」（warn 黄语义、双色规则不变） | `mode_flash_chip_two_colour_only_for_definite_switch` | `crates/tui/src/render_tests/chips.rs` |
+| `pre_key_intercept` 失实 Ctrl+T doc 移除 + 未绑定 chord 原样透传守卫 | `legacy_unbound_chord_passes_through_ctrl_l_clears_ctrl_f_redraws` | `crates/tui/src/app_helpers_tests/mod.rs` |
+
+- `plan_mode`/`plan_label` → `plan_edit_mode`/`plan_edit_label` 为纯改名零行为变更：既有断言全部保留未弱化，无新增/删除测试。
+- 全量回归：`cargo test --workspace` → 233 套件 / 3317 passed / 5 failed（tip `0108e5c` 内容树一手实跑，`/tmp/oc_r2_ws_test.log`；smoke/runner_control 4 项 solo 复跑 PASS 属负载饥饿，runner_cancel target 1 项 pre-existing flake——base `64a4878` 同 FAILED）。套件数与本条目轮次记录（236/3345）的差异来自并行在途任务面，本轮触达面内无测试删除；本条目自身轮次的当次实跑数字见上「验证记录」。
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 零警告（CLIPPY_EXIT=0）。
+
 ## 关联
 
 - 前因：[sandbox 模式替换 plan/act 双模式](../2026-08-28/sandbox-mode-replace-plan-act.md)（64a4878，switch_mode 绑定删除处）。

@@ -420,6 +420,9 @@ pub(crate) async fn handle_confirm_key(
         }
         Some(crate::clear_confirm::ConfirmFlow::Cancel) => {
             crate::clear_confirm::push_cancel_marker(chat);
+            // Idle freezes anim_tick once the guard is gone, so a leftover
+            // flash would stay pinned on screen forever — drop the chip.
+            *mode_flash = None;
             false
         }
         None => false,

@@ -160,3 +160,67 @@ fn backtab_and_typed_clear_context_are_one_path() {
         Some(Some("legacy tail".into()))
     );
 }
+
+/// Esc on the armed guard must drop the countdown chip itself: idle freezes
+/// `anim_tick` once the guard is gone, so a leftover mode-flash would be
+/// pinned on screen forever — the cancel path has to clear it explicitly.
+#[tokio::test]
+async fn esc_cancel_drops_countdown_chip() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut clear_confirm = None;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut input = String::from("draft text");
+    let mut cursor_idx = input.len();
+    let mut undo_state = crate::undo::UndoState::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, _admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    crate::clear_confirm::engage(
+        &mut clear_confirm,
+        &mut chat,
+        &mut mode_flash,
+        0,
+        None,
+        Some("draft text".into()),
+    );
+    assert!(clear_confirm.is_some(), "the guard must be armed");
+    assert!(mode_flash.is_some(), "countdown chip must be raised");
+
+    let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+    crate::app::app_loop::handle_confirm_key(
+        &mut clear_confirm, esc, &mut input, &mut cursor_idx,
+        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut hist_idx,
+    )
+    .await;
+
+    assert!(mode_flash.is_none(), "the countdown chip must be gone");
+    assert!(clear_confirm.is_none(), "the guard must be torn down");
+    assert!(
+        chat.blocks.iter().any(|b| matches!(b, ChatBlock::Marker(lines)
+        if lines.iter().any(|l| l.to_string().contains("已取消（回撤）")))),
+        "a cancel (回撤) marker must be pushed; blocks: {:?}",
+        chat.blocks
+    );
+    assert_eq!(input, "draft text", "the draft must be restored");
+    assert_eq!(cursor_idx, input.len(), "cursor sits at the draft end");
+    assert!(
+        cmd_rx.try_recv().is_err(),
+        "cancel must not send any command"
+    );
+}

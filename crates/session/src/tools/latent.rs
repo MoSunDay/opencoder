@@ -23,21 +23,21 @@ pub fn is_latent_tool(name: &str) -> bool {
 /// Returns an empty slice for unknown / non-latent skills.
 pub fn latent_tools_for_skill(skill_name: &str) -> &'static [&'static str] {
     match skill_name {
-        "task-plan" | "review" => &["question"],
+        "task-plan" => &["question"],
         "ssh-pty" => &["ssh_pty"],
         _ => &[],
     }
 }
 
 /// Skill names whose body text unlocks the `question` tool.
-const QUESTION_SKILLS: &[&str] = &["task-plan", "review"];
+const QUESTION_SKILLS: &[&str] = &["task-plan"];
 
 /// The full visibility rule for a registry tool under the latent-gating
 /// layer: agent allowlist ∧ latent unlock — with one sandbox exemption.
 /// The sandbox agent's clarification protocol lives in its base prompt, so
 /// `question` is ALWAYS visible there (bypasses latent gating, matching the
 /// pre-refactor plan-mode behavior). Every other agent (act, subagents) must
-/// unlock `question` through the task-plan / review skill; `ssh_pty` is
+/// unlock `question` through the task-plan skill; `ssh_pty` is
 /// skill-gated everywhere. Shared by the runner's tool filter and the token
 /// estimator so the advertised schema array and its cost estimate never drift.
 pub fn is_visible(name: &str, agent: &opencoder_core::Agent, unlocked: &HashSet<&str>) -> bool {
@@ -110,7 +110,10 @@ mod tests {
     fn skill_to_tool_mapping() {
         assert_eq!(latent_tools_for_skill("ssh-pty"), &["ssh_pty"]);
         assert_eq!(latent_tools_for_skill("task-plan"), &["question"]);
-        assert_eq!(latent_tools_for_skill("review"), &["question"]);
+        assert!(
+            latent_tools_for_skill("review").is_empty(),
+            "review must not unlock any latent tool (question is task-plan-only)"
+        );
         assert!(latent_tools_for_skill("unknown").is_empty());
     }
 
@@ -118,7 +121,7 @@ mod tests {
     fn unlocked_tools_from_skill_names() {
         let mut names = HashSet::new();
         names.insert("ssh-pty".to_string());
-        names.insert("review".to_string());
+        names.insert("task-plan".to_string());
         let unlocked = unlocked_tools(&names);
         assert!(unlocked.contains("ssh_pty"));
         assert!(unlocked.contains("question"));
@@ -132,14 +135,19 @@ mod tests {
     }
 
     #[test]
-    fn unlocked_from_body_detects_plan_and_review_skills() {
-        // The seeded bodies mention their own skill name in the first 500
-        // chars (contract-tested in opencoder-core); either unlocks question.
+    fn unlocked_from_body_detects_plan_skill_only() {
+        // The seeded body mentions its own skill name in the first 500 chars
+        // (contract-tested in opencoder-core); that unlocks question.
         let plan_body = Some("# task-plan\n\n## Overview\n\nMulti-phase planning...");
         assert!(unlocked_from_body(plan_body).contains("question"));
+    }
 
+    #[test]
+    fn unlocked_from_body_review_skill_unlocks_nothing() {
+        // review no longer owns the question tool: its body must never
+        // unlock it, even when the body names itself up front.
         let review_body = Some("# review\n\nEvidence-driven assessment of shipped work.");
-        assert!(unlocked_from_body(review_body).contains("question"));
+        assert!(unlocked_from_body(review_body).is_empty());
     }
 
     #[test]
@@ -154,7 +162,7 @@ mod tests {
     #[test]
     fn question_tool_name_alone_does_not_unlock() {
         // Matching the tool name is deliberately not enough — only the
-        // task-plan / review skill names unlock question.
+        // task-plan skill name unlocks question.
         let body = Some("ask via the question tool whenever blocked");
         assert!(!unlocked_from_body(body).contains("question"));
     }
@@ -198,7 +206,7 @@ mod tests {
         let none = HashSet::new();
         assert!(
             !is_visible("question", &act, &none),
-            "act without the task-plan/review skill must not see question"
+            "act without the task-plan skill must not see question"
         );
         let unlocked: HashSet<&str> = ["question"].into_iter().collect();
         assert!(is_visible("question", &act, &unlocked));

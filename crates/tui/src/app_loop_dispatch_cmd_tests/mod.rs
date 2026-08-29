@@ -1,5 +1,5 @@
 //! dispatch_command tests for the agent-switch popup path (`/act`,
-//! `/sandbox`, `/clear_context`).
+//! `/sandbox`, `/act_clear_context`).
 //!
 //! Guards two behaviors after the plan/act dual-mode removal (all agent
 //! switching flows through the control-command prompt, short-circuited by
@@ -56,7 +56,14 @@ async fn dispatch_popup(
     chat: &mut ChatView,
     running: bool,
     agent: &str,
-) -> (LoopFlow, mpsc::Receiver<UiCmd>, bool) {
+) -> (
+    LoopFlow,
+    mpsc::Receiver<UiCmd>,
+    bool,
+    Option<crate::clear_confirm::ClearConfirm>,
+    Option<(String, u32)>,
+    Vec<String>,
+) {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut running = running;
     let mut follow = true;
@@ -72,6 +79,7 @@ async fn dispatch_popup(
     let mut sys_tokens = 0u64;
     let (cmd_tx, cmd_rx) = mpsc::channel::<UiCmd>(64);
     let mut cancel = CancellationToken::new();
+    let mut clear_confirm: Option<crate::clear_confirm::ClearConfirm> = None;
 
     let flow = dispatch_command(
         command_menu,
@@ -102,9 +110,23 @@ async fn dispatch_popup(
         &mut sys_tokens,
         &mut None,
         &mut None,
+        &mut clear_confirm,
     )
     .await;
-    (flow, cmd_rx, running)
+    let chat_markers = marker_texts(chat);
+    (flow, cmd_rx, running, clear_confirm, mode_flash, chat_markers)
+}
+
+/// Marker lines currently in the chat, as flat strings (assert helper).
+fn marker_texts(chat: &ChatView) -> Vec<String> {
+    chat.blocks
+        .iter()
+        .filter_map(|b| match b {
+            ChatBlock::Marker(lines) => Some(lines.iter().map(|l| l.to_string()).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 /// `/sandbox` from idle submits the control-command prompt (regardless of
@@ -117,7 +139,7 @@ async fn slash_sandbox_from_idle_submits_prompt() {
             ..Default::default()
         };
         let mut menu = menu_for("sandbox");
-        let (flow, mut cmd_rx, running) = dispatch_popup(&mut menu, &mut chat, false, "act").await;
+        let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "act").await;
         assert!(matches!(flow, LoopFlow::Proceed));
         assert!(running, "the switch turn starts immediately from idle");
         match drain_cmd(&mut cmd_rx) {
@@ -135,7 +157,7 @@ async fn slash_act_from_idle_submits_prompt() {
         ..Default::default()
     };
     let mut menu = menu_for_act();
-    let (flow, mut cmd_rx, running) = dispatch_popup(&mut menu, &mut chat, false, "sandbox").await;
+    let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "sandbox").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "the switch turn starts immediately from idle");
     match drain_cmd(&mut cmd_rx) {
@@ -150,7 +172,7 @@ async fn slash_act_from_idle_submits_prompt() {
 async fn slash_sandbox_while_running_is_busy_gated() {
     let mut chat = ChatView::default();
     let mut menu = menu_for("sandbox");
-    let (flow, mut cmd_rx, running) = dispatch_popup(&mut menu, &mut chat, true, "act").await;
+    let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");
     assert!(

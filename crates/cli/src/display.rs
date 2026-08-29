@@ -108,7 +108,7 @@ pub(crate) fn summarize_input(input: &serde_json::Value) -> String {
     }
 }
 
-/// Fold-boundary banner for `/clear_context` (the session emits
+/// Fold-boundary banner for `/act_clear_context` (the session emits
 /// [`SessionEvent::TranscriptReset`] with the cleared transcript). Replaces
 /// the old plan-handoff banner: a clear-context fold must stay visible in
 /// headless output, otherwise the model's next reply appears to answer

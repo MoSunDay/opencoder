@@ -46,7 +46,7 @@ fn latent_tools_hidden_by_default() {
     );
     assert!(
         !names.contains(&"question".to_string()),
-        "question should be hidden without the task-plan/review skill, got: {names:?}"
+        "question should be hidden without the task-plan skill, got: {names:?}"
     );
 
     // But normal tools like bash/read should appear.
@@ -68,31 +68,34 @@ fn latent_tools_unlocked_by_skill_body() {
 }
 
 #[test]
-fn question_unlocked_by_plan_and_review_skill_bodies() {
+fn question_unlocked_by_plan_skill_body_only() {
     let filter = ToolFilter::All;
 
-    for (skill, body) in [
-        (
-            "task-plan",
-            "# task-plan\n\n## Overview\n\nPlan in phases; ask via question.",
-        ),
-        (
-            "review",
-            "# review\n\nEvidence-driven assessment; use question when blocked.",
-        ),
-    ] {
-        let names = visible_tool_names(&filter, Some(body));
-        assert!(
-            names.contains(&"question".to_string()),
-            "{skill} body must unlock question, got: {names:?}"
-        );
-    }
+    let plan = "# task-plan\n\n## Overview\n\nPlan in phases; ask via question.";
+    let names = visible_tool_names(&filter, Some(plan));
+    assert!(
+        names.contains(&"question".to_string()),
+        "task-plan body must unlock question, got: {names:?}"
+    );
+}
+
+#[test]
+fn question_not_unlocked_by_review_skill_body() {
+    // review no longer owns the question tool: naming itself in the prefix
+    // window must not surface it, even if the body still mentions the tool.
+    let filter = ToolFilter::All;
+    let review = "# review\n\nEvidence-driven assessment; use question when blocked.";
+    let names = visible_tool_names(&filter, Some(review));
+    assert!(
+        !names.contains(&"question".to_string()),
+        "review body must NOT unlock question, got: {names:?}"
+    );
 }
 
 #[test]
 fn question_not_unlocked_by_mentioning_the_tool_name() {
     // Matching the tool name alone is deliberately insufficient — only the
-    // task-plan / review skill names (inside the 500-char prefix) unlock.
+    // task-plan skill name (inside the 500-char prefix) unlocks.
     let names = visible_tool_names(&ToolFilter::All, Some("ask via question when blocked"));
     assert!(
         !names.contains(&"question".to_string()),

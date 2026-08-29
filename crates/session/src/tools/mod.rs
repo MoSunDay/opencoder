@@ -217,7 +217,7 @@ mod tests {
         }
     }
 
-    /// The `question` tool is latent and gated by the task-plan/review skills:
+    /// The `question` tool is latent and gated by the task-plan skill:
     /// the sandbox agent always sees it (its clarification protocol is part of
     /// the base prompt), an act agent sees it only once a skill body whose
     /// first 500 chars name the skill unlocks it, and non-primary agents never
@@ -233,8 +233,8 @@ mod tests {
         let sandbox_tokens = estimate_tool_schema_tokens(&sandbox, None, &reg);
 
         // Act without a skill: question absent. With a task-plan body (the
-        // skill name inside the 500-char prefix window): present. An unlock
-        // from a `review` body must behave identically.
+        // skill name inside the 500-char prefix window): present. A `review`
+        // body must NOT unlock it (question is task-plan-only).
         let act_tokens = estimate_tool_schema_tokens(&act, None, &reg);
         let plan_body = Some("# task-plan\n\n## Overview\n\nplan the work; ask via question");
         let review_body = Some("# review\n\nevidence-driven check; use question when blocked");
@@ -257,8 +257,8 @@ mod tests {
             "a task-plan body must unlock the question schema for act: {act_tokens} -> {act_unlocked_plan}"
         );
         assert_eq!(
-            act_unlocked_plan, act_unlocked_review,
-            "a review body must unlock question for act identically"
+            act_unlocked_review, act_tokens,
+            "a review body must NOT unlock question for act (task-plan-only)"
         );
         assert!(
             sandbox_tokens > act_tokens,

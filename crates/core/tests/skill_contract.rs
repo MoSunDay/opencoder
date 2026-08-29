@@ -484,48 +484,58 @@ fn seeded_task_plan_skill_requires_question_tool_guidance() {
 }
 
 /// The `question` tool is latent and unlocked from the FIRST 500 chars of a
-/// skill body (session-side `tools::latent::unlocked_from_body`). Both
-/// planning/review seeds must therefore name THEMSELVES and the `question`
-/// tool inside that window, or activating the skill silently leaves the
-/// clarification tool hidden from the model.
+/// skill body (session-side `tools::latent::unlocked_from_body`). The
+/// `task-plan` seed — its only owner — must therefore name ITSELF and the
+/// `question` tool inside that window, or activating the skill silently
+/// leaves the clarification tool hidden from the model.
 #[test]
-fn seeded_task_plan_and_review_bodies_unlock_question_in_prefix_window() {
+fn seeded_task_plan_body_unlocks_question_in_prefix_window() {
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
-    for skill in ["task-plan", "review"] {
-        let path = root.path().join(skill).join("SKILL.md");
-        let raw = std::fs::read_to_string(&path).unwrap();
-        let parsed = parse_skill(&path, "fallback").expect("seeded skill parses");
-        // The unlock sees the injected body (source path + frontmatter-stripped
-        // body); mirror that here.
-        let injected = format!("> Source: {}\n\n{}", parsed.source.display(), parsed.body);
-        let prefix: String = injected.chars().take(500).collect();
-        assert!(
-            prefix.contains(skill),
-            "{skill} body must name itself within the first 500 chars"
-        );
-        assert!(
-            prefix.contains("question"),
-            "{skill} body must mention the question tool within the first 500 chars"
-        );
-        assert!(
-            raw.contains("不把提问当侦察手段") && raw.contains("assumptions:"),
-            "{skill} must keep the lookup-first guard and the headless assumptions fallback"
-        );
-    }
+    let skill = "task-plan";
+    let path = root.path().join(skill).join("SKILL.md");
+    let raw = std::fs::read_to_string(&path).unwrap();
+    let parsed = parse_skill(&path, "fallback").expect("seeded skill parses");
+    // The unlock sees the injected body (source path + frontmatter-stripped
+    // body); mirror that here.
+    let injected = format!("> Source: {}\n\n{}", parsed.source.display(), parsed.body);
+    let prefix: String = injected.chars().take(500).collect();
+    assert!(
+        prefix.contains(skill),
+        "task-plan body must name itself within the first 500 chars"
+    );
+    assert!(
+        prefix.contains("question"),
+        "task-plan body must mention the question tool within the first 500 chars"
+    );
+    assert!(
+        raw.contains("不把提问当侦察手段") && raw.contains("assumptions:"),
+        "task-plan must keep the lookup-first guard and the headless assumptions fallback"
+    );
 }
 
-/// Symmetric guard for the `review` seed: the one-shot review pass activates
-/// this skill, so its clarification guidance must sit early too.
+/// `question` is task-plan-only now: the `review` seed must neither promise
+/// the interactive question flow nor carry the literal `task-plan` token
+/// (its own name-match in the 500-char prefix window would silently hijack
+/// the unlock). Session-side tests pin the actual unlock behavior; this
+/// guards the seed asset itself.
 #[test]
-fn seeded_review_skill_requires_question_tool_guidance() {
+fn seeded_review_skill_requires_no_question_tool() {
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("review/SKILL.md")).unwrap();
     assert!(body.contains("name: review"), "frontmatter name missing");
-    for guidance in ["澄清协议", "question", "可在同一轮多问", "不把提问当侦察手段"] {
+    for guidance in ["澄清协议", "不把提问当侦察手段", "assumptions:"] {
         assert!(body.contains(guidance), "review missing `{guidance}`");
     }
+    assert!(
+        !body.contains("可在同一轮多问"),
+        "review must not promise the interactive multi-question flow"
+    );
+    assert!(
+        !body.contains("task-plan"),
+        "review must not carry the task-plan token (it would hijack the question unlock)"
+    );
 }
 
 #[test]

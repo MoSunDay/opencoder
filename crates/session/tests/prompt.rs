@@ -350,7 +350,13 @@ fn environment_block_marks_sandbox_mode_readonly() {
     let block = environment_block(std::path::Path::new("/repo"), AgentKind::Sandbox);
     assert!(block.contains("IN_SANDBOX_MODE"));
     assert!(block.contains("read-only"));
-    assert!(block.contains("do not edit/write files"));
+    // Updated for the shellguard release set: the marker now names what IS
+    // permitted (/tmp writes, /dev/null redirects) and states that the
+    // project/working directory is NOT writable, instead of the blanket
+    // "do not edit/write files".
+    assert!(block.contains("writes under /tmp"));
+    assert!(block.contains("redirects to /dev/null"));
+    assert!(block.contains("NOT writable"));
 }
 
 #[test]

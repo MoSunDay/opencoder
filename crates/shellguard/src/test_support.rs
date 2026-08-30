@@ -1,7 +1,8 @@
 //! Deterministic test scaffolding for the analyzer pipeline (test-only).
 //!
-//! Replaces rippy's `Config::empty()` + `resolve::tests::MockLookup` setup:
-//! no config layer exists here, so tests inject just a variable lookup.
+//! Replaces rippy's (MIT, https://github.com/mpecan/rippy) `Config::empty()` +
+//! `resolve::tests::MockLookup` setup: no config layer exists here, so tests
+//! inject just a variable lookup.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

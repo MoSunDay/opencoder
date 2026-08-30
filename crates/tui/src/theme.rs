@@ -276,7 +276,10 @@ pub fn agent_chip_fg(agent: &str) -> Color {
 /// Foreground of the parent status-bar mode dot + `[mode]` chip: the plain
 /// [`agent_chip_fg`] mapping, except the `act` chip lights up in the sandbox
 /// warning hue while the committed skill is `task-plan`. The yellow reverts
-/// when any other skill is committed or a steer/queued input takes effect.
+/// when any other skill is committed, or a steer/queued input without a
+/// `$task-plan` token takes effect; a consumed input that does carry the
+/// token re-arms it (the runner newly activates that skill at the
+/// consumption boundary, matching an idle submit).
 pub fn status_chip_fg(mode: &str, plan_skill_active: bool) -> Color {
     if mode == "act" && plan_skill_active {
         warn_color()

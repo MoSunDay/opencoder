@@ -103,7 +103,7 @@ pub(super) async fn run_app(
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     let mut bash_rx: Option<tokio::sync::oneshot::Receiver<String>> = None;
-    let (_initial_skill_body, mut sys_tokens, mut plan_skill_active) =
+    let (initial_skill_body, mut sys_tokens, mut plan_skill_active) =
         initial_skill_state(&skill_handle, session.agent.name.as_str(), &workdir);
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
@@ -133,8 +133,8 @@ pub(super) async fn run_app(
     let mut cache_salt_menu: Option<CacheSaltMenu> = None;
     let mut keymap_menu: Option<crate::keymap_menu::KeymapMenu> = None;
     let mut keymap = crate::keymap::KeyBindings::from_config(&config);
-    let mut active_skill: Option<String> = None;
-    let mut active_skill_body: Option<String> = None;
+    let (mut active_skill, mut active_skill_body) =
+        crate::skill_display::skill_mirror_from_body(initial_skill_body);
     let mut anim_tick: u32 = 0;
     let mut mode_flash: Option<(String, u32)> = None;
     let mut last_esc: Option<Instant> = None;

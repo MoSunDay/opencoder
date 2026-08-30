@@ -228,6 +228,14 @@ pub async fn checkpoint_wal(conn: &Connection) -> Result<()> {
 /// `busy_timeout` makes concurrent openers queue on the single write lock
 /// instead of failing, and any failing step rolls the entire bootstrap (in
 /// particular the migration sequence) back atomically.
+///
+/// Databases whose tables predate schema_version tracking (tables present,
+/// version row absent) are detected by probing `sqlite_master` BEFORE the DDL
+/// batch and are upgraded through a full `migrate(0)` pass instead of being
+/// stamped with the current version untouched: stamping alone would leave
+/// `sessions.task_type` missing, fail the post-migration index batch, and -
+/// batch and stamp sharing one transaction - roll the whole bootstrap back so
+/// the database could never be opened.
 pub async fn bootstrap(conn: &Connection) -> Result<()> {
     super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn)).await
 }
@@ -238,6 +246,13 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
 /// version check / migrate / set_version branch, then the post-migration
 /// index batch (some indexes target columns that only exist after `migrate`).
 async fn bootstrap_tx(conn: &Connection) -> Result<()> {
+    // Probe BEFORE the DDL batch: afterwards every table exists (pre-existing
+    // ones via the `IF NOT EXISTS` no-ops, missing ones freshly created), so
+    // this is the only point where a legacy database - tables written before
+    // schema_version tracking, version row absent - is distinguishable from a
+    // fresh one. `sessions` is the oldest app table and therefore a
+    // sufficient marker of a pre-tracking database.
+    let preexisting = table_exists(conn, "sessions").await?;
     conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
     conn.execute(CREATE_SESSIONS, ()).await?;
     conn.execute(CREATE_MESSAGES, ()).await?;
@@ -265,6 +280,20 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
             migrate(conn, prev).await?;
             write_version(conn, SCHEMA_VERSION).await?;
         }
+    } else if preexisting {
+        // Legacy shape, version row absent. `migrate` from v0 is the correct
+        // (and simplest) entry: no version row survives to say which partial
+        // upgrades ran, and a full pass is safe on ANY historical shape
+        // because every step is either `CREATE ... IF NOT EXISTS`, an
+        // `add_column_if_absent` guarded by `PRAGMA table_info`, or a
+        // conditional backfill UPDATE converging to a fixed point (see
+        // `migrate`). Skipping migrate here would stamp the current version
+        // over stale tables; the post-migration index batch would then fail
+        // on the missing `sessions.task_type`, and - that failure sharing the
+        // bootstrap transaction - every later open would roll back and fail
+        // again, leaving the database permanently unopenable.
+        migrate(conn, 0).await?;
+        write_version(conn, SCHEMA_VERSION).await?;
     } else {
         write_version(conn, SCHEMA_VERSION).await?;
     }
@@ -294,6 +323,11 @@ async fn bootstrap_tx(conn: &Connection) -> Result<()> {
 /// bare `ADD COLUMN` would fail with `duplicate column name` in that case;
 /// guarding the ALTER makes re-migration safe regardless of the
 /// CREATE-TABLE-vs-stale-version disagreement.
+///
+/// `bootstrap_tx` also enters here with `from = 0` for legacy databases whose
+/// tables predate schema_version tracking (version row absent): with no row
+/// to say which partial upgrades ran, the full pass from the bottom is the
+/// only correct entry, and it is safe for exactly the reasons above.
 async fn migrate(conn: &Connection, from: i64) -> Result<()> {
     if from < 13 {
         // v13: last observed/declared address per node (fleet UI column).
@@ -444,6 +478,20 @@ async fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<b
         }
     }
     Ok(false)
+}
+
+/// Return `true` if a table with this name exists in the database.
+///
+/// Reads `sqlite_master` rather than `PRAGMA table_info` - the latter returns
+/// zero rows both for "table without columns" and "no table", and only the
+/// second case matters here. The name is bound as a parameter (no SQL
+/// interpolation), so the caller-controlled literal stays safe regardless.
+async fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let stmt = conn
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1")
+        .await?;
+    let mut rows = stmt.query(libsql::params![table]).await?;
+    Ok(rows.next().await?.is_some())
 }
 
 /// `ALTER TABLE {table} ADD COLUMN {column} {type_def}`, but a no-op when the

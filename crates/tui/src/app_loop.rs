@@ -256,14 +256,20 @@ pub(crate) async fn fold_ui_events(
                         chat.push_marker(Line::from(""));
                     }
                     queue_items.retain(|(s, _)| s != seq);
-                    // A queued input actually took effect: any task-plan
-                    // highlight on the `[act]` chip reverts to the plain hue.
-                    *plan_skill_active = false;
+                    // A queued input actually took effect: re-derive the
+                    // task-plan highlight from the consumed text -- a
+                    // `$task-plan` token in it is newly activated by the
+                    // runner's record_compound and keeps the chip yellow; any
+                    // other consumed input reverts the chip to the plain hue.
+                    *plan_skill_active =
+                        crate::skill_persist::plan_highlight_from_consumed_text(text);
                 }
-                if let SessionEvent::SteerConsumed { .. } = &sev {
-                    // A steered input actually took effect: any task-plan
-                    // highlight on the `[act]` chip reverts to the plain hue.
-                    *plan_skill_active = false;
+                if let SessionEvent::SteerConsumed { text, .. } = &sev {
+                    // A steered input actually took effect: same re-derivation
+                    // as the queue path -- a `$task-plan` token lights the
+                    // chip, any other steered input reverts it.
+                    *plan_skill_active =
+                        crate::skill_persist::plan_highlight_from_consumed_text(text);
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                     if *cancelled {

@@ -37,6 +37,47 @@ pub fn classify(command: &str) -> BashVerdict {
     }
 }
 
+/// Tool names a sandbox session may execute, mirroring the `sandbox` agent's
+/// `ToolFilter::Allow` list. `question` still has to clear the latent-skill
+/// gate downstream; `bash` additionally passes the shellguard classifier.
+const SANDBOX_ADMITTED: &[&str] = &["bash", "task", "question"];
+
+/// Canonical model-facing denial for a sandbox interception. The wording is
+/// the retry-suppression contract: name the mode, state the read-only
+/// invariant, tell the model retries are futile, and point at the REAL
+/// escape hatch (`/act`; there is no `/agent` command).
+pub fn sandbox_denial(tool: &str, detail: &str) -> String {
+    format!(
+        "Blocked in sandbox mode: `{tool}` was not executed - sandbox mode is read-only and \
+         nothing may be written ({detail}). Do not retry: every write attempt fails while \
+         sandbox mode is active. To make changes, the user can switch to the act agent with `/act`."
+    )
+}
+
+/// Sandbox execution gate for one tool call: `Some(denial)` refuses the call
+/// with the model-visible [`sandbox_denial`], `None` lets it proceed.
+///
+/// Two layers, both fail-closed:
+/// - the session is sandbox but the tool is not admitted (a hallucinated or
+///   remembered builtin like `edit`, or an unadvertised MCP tool): refuse so
+///   a write can never slip through a tool the model was never shown;
+/// - `bash` is admitted but the shellguard classifier flags the command as
+///   mutating: refuse with the classifier's reason.
+pub fn gate(kind: &opencoder_core::AgentKind, tool: &str, command: Option<&str>) -> Option<String> {
+    if *kind != opencoder_core::AgentKind::Sandbox {
+        return None;
+    }
+    if tool != "bash" && !SANDBOX_ADMITTED.contains(&tool) {
+        return Some(sandbox_denial(tool, "tool is not available in sandbox mode"));
+    }
+    if tool == "bash" {
+        if let BashVerdict::WriteBlocked(reason) = classify(command.unwrap_or("")) {
+            return Some(sandbox_denial("bash", &reason));
+        }
+    }
+    None
+}
+
 
 // ---------------------------------------------------------------------------
 // Command-parsing helpers (shared with `tools::ssh_pty`).
@@ -221,6 +262,74 @@ mod tests {
     #[test]
     fn cmd_base_takes_trailing_component() {
         assert_eq!(cmd_base("/usr/bin/rm"), "rm");
+    }
+
+    #[test]
+    fn denial_names_mode_forbids_retry_points_at_act() {
+        let msg = super::sandbox_denial("edit", "tool is not available in sandbox mode");
+        assert!(msg.contains("Blocked in sandbox mode"), "got: {msg}");
+        assert!(msg.contains("read-only"), "got: {msg}");
+        assert!(msg.contains("Do not retry"), "got: {msg}");
+        assert!(msg.contains("`edit`"), "got: {msg}");
+        // The escape hatch must be the REAL command: `/act`, never `/agent act`.
+        assert!(msg.contains("`/act`"), "got: {msg}");
+        assert!(!msg.contains("/agent act"), "got: {msg}");
+    }
+
+    #[test]
+    fn admitted_set_matches_sandbox_agent_tool_filter() {
+        let sandbox = opencoder_core::resolve_agent("sandbox").expect("sandbox agent");
+        for name in super::SANDBOX_ADMITTED {
+            assert!(
+                sandbox.tools.allows(name),
+                "gate admits {name} but the sandbox ToolFilter does not"
+            );
+        }
+    }
+
+    #[test]
+    fn gate_passes_non_sandbox_kinds_through() {
+        use opencoder_core::{resolve_agent, AgentKind};
+        for name in ["act", "explore"] {
+            let agent = resolve_agent(name).unwrap();
+            assert_eq!(
+                super::gate(&agent.kind, "edit", Some("x")),
+                None,
+                "{name} must not be gated"
+            );
+        }
+        // Explicit non-sandbox kind is equally untouched.
+        assert_eq!(
+            super::gate(&AgentKind::Act, "bash", Some("rm -rf /")),
+            None
+        );
+    }
+
+    #[test]
+    fn gate_refuses_unadmitted_tool_in_sandbox() {
+        use opencoder_core::resolve_agent;
+        let kind = resolve_agent("sandbox").unwrap().kind;
+        for tool in ["edit", "bg", "mcp__fs__write"] {
+            let denial = super::gate(&kind, tool, None)
+                .unwrap_or_else(|| panic!("{tool} must be refused"));
+            assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+        }
+        // Admitted tools pass the first layer untouched.
+        for tool in super::SANDBOX_ADMITTED {
+            if *tool == "bash" {
+                continue; // covered by the classifier tests below
+            }
+            assert_eq!(super::gate(&kind, tool, None), None, "{tool} admitted");
+        }
+    }
+
+    #[test]
+    fn gate_blocks_mutating_bash_in_sandbox() {
+        use opencoder_core::resolve_agent;
+        let kind = resolve_agent("sandbox").unwrap().kind;
+        assert!(super::gate(&kind, "bash", Some("ls -la")).is_none());
+        let denial = super::gate(&kind, "bash", Some("rm -rf ./f")).expect("blocked");
+        assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
     }
 
     #[test]

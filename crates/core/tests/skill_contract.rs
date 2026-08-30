@@ -207,9 +207,8 @@ fn seed_in_writes_all_packs_on_fresh_dir() {
     assert!(rlm.join("EXAMPLES.md").exists());
     assert!(rlm.join("TEMPLATES.md").exists());
     // Codex-standard task-plan uses progressive disclosure: its detailed
-    // launch and optional Any Home protocols are bundled under references/.
+    // launch-closure protocol is bundled under references/.
     let task_plan = root.path().join("task-plan");
-    assert!(task_plan.join("references/any-home-plan-run.md").exists());
     assert!(task_plan
         .join("references/launch-closure-plan-checklist.md")
         .exists());
@@ -222,6 +221,10 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     let user_file = root.path().join("do-and-done").join("SKILL.md");
     std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
     std::fs::write(&user_file, "user-authored\n").unwrap();
+    // A user file at a path the built-in no longer ships: seeding must leave
+    // user files alone AND must not re-seed the removed Any Home reference,
+    // so the stale user copy survives untouched (neither overwritten nor
+    // deleted).
     let user_reference = root
         .path()
         .join("task-plan/references/any-home-plan-run.md");
@@ -237,6 +240,13 @@ fn seed_builtin_skills_does_not_clobber_existing_files() {
     assert_eq!(
         std::fs::read_to_string(&user_reference).unwrap(),
         "user-reference\n"
+    );
+    // ...and the built-in no longer ships the removed reference, so the
+    // surviving copy is the user's, never re-seeded built-in content.
+    assert_ne!(
+        std::fs::read_to_string(&user_reference).unwrap(),
+        "# Any Home task-plan protocol\n",
+        "seeding must not restore built-in content for the removed reference"
     );
     // ...while the other packs are still written.
     assert!(root.path().join("review").join("SKILL.md").exists());
@@ -452,17 +462,25 @@ fn seeded_task_plan_skill_requires_launch_closure_contract() {
         checklist.contains("持续保鲜与稳定性"),
         "launch checklist must preserve evidence maturity checks"
     );
+    // Fresh-seed contract: the retired Any Home protocol must NOT be
+    // re-seeded into a fresh install, while the launch-closure checklist
+    // (its replacement reference) still lands.
     assert!(
-        references.join("any-home-plan-run.md").exists(),
-        "optional Any Home protocol must be bundled"
+        !references.join("any-home-plan-run.md").exists(),
+        "removed Any Home reference must not be re-seeded into a fresh install"
+    );
+    assert!(
+        references.join("launch-closure-plan-checklist.md").exists(),
+        "launch-closure checklist must be bundled"
     );
 }
 
 #[test]
 fn seeded_task_plan_skill_requires_question_tool_guidance() {
-    // Regression guard (restored after 04df804 dropped it): task-plan runs
-    // in plan mode, where the `question` tool is the sanctioned
-    // clarification channel. The skill must keep: (a) the conditional
+    // Regression guard (restored after 04df804 dropped it): the `question`
+    // tool is unlocked by the task-plan skill itself (latent, behind the
+    // 500-char window gate) and is the sanctioned clarification channel
+    // under act/sandbox alike. The skill must keep: (a) the conditional
     // protocol (interactive -> ask via `question`, one key question per
     // call, several per turn; headless -> explicit `assumptions:`), and
     // (b) the anti-lazy guard (repo/rules/test facts are looked up, not

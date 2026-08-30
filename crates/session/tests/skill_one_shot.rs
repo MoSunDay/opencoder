@@ -297,8 +297,8 @@ async fn second_run_has_no_skill_reminder() {
     assert!(
         user_texts(&first)
             .iter()
-            .any(|t| t.contains("[active skill]")),
-        "run 1 carried the tail reminder"
+            .any(|t| t.starts_with("[skill loaded] ")),
+        "run 1 receives the armed skill via the [skill loaded] message"
     );
 
     run(&mut s, "plain follow up".into(), |_| {}).await.unwrap();
@@ -392,8 +392,8 @@ async fn resume_mid_run_keeps_skill_then_completion_clears() {
     assert!(
         user_texts(&first)
             .iter()
-            .any(|t| t.contains("[active skill]")),
-        "resumed run carried the skill"
+            .any(|t| t.starts_with("[skill loaded] ")),
+        "resumed run carried the skill (loaded message)"
     );
 
     assert_cleared(&s, &store, "one-shot-resume").await;

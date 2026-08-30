@@ -51,6 +51,7 @@ async fn turn_final_usage_batch_is_idle_and_paint_eligible() {
                 &store,
                 "tok-cost-idle",
                 &mut queue_items,
+                &mut false,
                 &mut crate::queue_admitter::AdmitUiState::default(),
                 &mut running,
                 &mut cancelled,

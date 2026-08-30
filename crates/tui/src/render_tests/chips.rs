@@ -177,6 +177,7 @@ fn ap_chip_reflects_autopilot_mode() {
             true,
             mode,
             "act",
+            false,
             None,
         )
         .unwrap();
@@ -327,6 +328,7 @@ fn mode_flash_chip_two_colour_only_for_definite_switch() {
             true,
             ApMode::Off,
             "act",
+            false,
             None,
         )
         .unwrap();

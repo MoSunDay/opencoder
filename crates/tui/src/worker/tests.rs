@@ -214,7 +214,7 @@ async fn reset_cancel_replaces_with_fresh_uncancelled_token() {
 
 // EditPlan rewrites the Text blocks of the last non-empty Assistant message
 // in-memory while preserving non-Text blocks (Reasoning/ToolUse/etc.). This
-// guards the plan-mode edit path: an edit that dropped Reasoning blocks or
+// guards the plan editor edit path: an edit that dropped Reasoning blocks or
 // failed to swap the text would break here. It must not break the loop.
 #[tokio::test]
 async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
@@ -231,7 +231,7 @@ async fn edit_plan_replaces_text_and_preserves_non_text_blocks() {
         std::env::temp_dir(),
     );
 
-    // Realistic plan-mode assistant shape: a Reasoning block followed by the
+    // Realistic plan editor assistant shape: a Reasoning block followed by the
     // plan Text block.
     let mut msg = Message::assistant("a1");
     msg.blocks = vec![

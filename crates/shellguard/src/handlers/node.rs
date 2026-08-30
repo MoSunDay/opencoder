@@ -1,0 +1,250 @@
+//! Ported from rippy (MIT) https://github.com/mpecan/rippy
+
+use super::{Classification, Handler, HandlerContext, first_positional, get_flag_value, has_flag, has_flag_or_prefixed, is_sole_help_flag};
+use crate::node_safety::is_node_source_safe;
+use crate::verdict::AllowReason;
+
+pub(crate) static NODE_HANDLER: NodeHandler = NodeHandler;
+
+pub(crate) struct NodeHandler;
+
+// Deno's permission model grants capability explicitly via flags, independent of what
+// the script does; a static content scan cannot override an explicit capability grant
+// (see #186), so any of these force Ask before `deno eval` content analysis runs.
+/// Deno 2 added a short alias for most of these, so listing only the long form
+/// left `deno eval -R …` approved while `--allow-read` Asked.
+const DENO_PERMISSION_FLAGS: &[&str] = &[
+    "-A",
+    "--allow-all",
+    "--allow-run",
+    "--allow-read",
+    "-R",
+    "--allow-write",
+    "-W",
+    "--allow-net",
+    "-N",
+    "--allow-env",
+    "-E",
+    "--allow-sys",
+    "-S",
+    "--allow-ffi",
+    "--allow-hrtime",
+    "--allow-import",
+    "--allow-scripts",
+];
+
+fn has_deno_permission_flag(args: &[String]) -> bool {
+    has_flag_or_prefixed(args, DENO_PERMISSION_FLAGS)
+}
+
+impl Handler for NodeHandler {
+    fn commands(&self) -> &[&str] {
+        &["node", "nodejs", "deno"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        // `-V` is deno's version flag; safe since it must be the sole arg here.
+        if is_sole_help_flag(ctx.args, &["--version", "-v", "-V", "--help", "-h"]) {
+            return Classification::Allow(AllowReason::handler(format!(
+                "{} version/help",
+                ctx.command_name
+            )));
+        }
+
+        if ctx.command_name == "deno" && ctx.args.first().map(String::as_str) == Some("eval") {
+            if has_deno_permission_flag(&ctx.args[1..]) {
+                return Classification::Ask(format!(
+                    "{} eval (explicit permission flag)",
+                    ctx.command_name
+                ));
+            }
+            // Join the full remainder rather than trusting args[1] to be the source: a flag
+            // preceding the code (e.g. `deno eval --ext=ts 'code'`) would otherwise be
+            // analyzed instead of the actual code, silently disabling the scanner (#186).
+            let source = ctx.args[1..].join(" ");
+            return classify_inline(ctx.command_name, &source);
+        }
+
+        // -e/--eval/-p/--print inline code — analyze source for dangerous patterns.
+        if let Some(source) = get_flag_value(ctx.args, &["-e", "--eval"]) {
+            return classify_inline(ctx.command_name, &source);
+        }
+
+        if let Some(source) = get_flag_value(ctx.args, &["-p", "--print"]) {
+            return classify_inline(ctx.command_name, &source);
+        }
+
+        if has_flag(ctx.args, &["-i", "--interactive"]) || ctx.args.is_empty() {
+            return Classification::Ask(format!("{} (interactive)", ctx.command_name));
+        }
+
+        // Script file execution — try to read and analyze
+        let script = first_positional(ctx.args).unwrap_or("");
+        if let Some(source) = ctx.read_file(script) {
+            return if is_node_source_safe(&source) {
+                Classification::Allow(AllowReason::handler(format!(
+                    "{} {script} (safe script)",
+                    ctx.command_name
+                )))
+            } else {
+                Classification::Ask(format!(
+                    "{} {script} (potentially dangerous)",
+                    ctx.command_name
+                ))
+            };
+        }
+        Classification::Ask(format!("{} script execution", ctx.command_name))
+    }
+
+}
+
+fn classify_inline(cmd: &str, source: &str) -> Classification {
+    if is_node_source_safe(source) {
+        Classification::Allow(AllowReason::handler(format!("{cmd} -e (safe inline code)")))
+    } else {
+        Classification::Ask(format!("{cmd} -e (potentially dangerous code)"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::handlers::test_support::{temp_dir, write_file};
+
+    // Command->decision cases are covered by the catalog
+    // (rippy's command catalog (not ported)). Retained tests exercise the
+    // handler-level safe/dangerous distinction (the pipeline Asks via a catch-all
+    // `command=node` rule) and read_file, neither reachable from a command string.
+    #[test]
+    fn deno_capital_v_version_allows() {
+        // deno uses `-V` for --version; a lone version flag must short-circuit.
+        let args = vec!["-V".into()];
+        let ctx = HandlerContext::test("deno", &args);
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn e_safe_console_log_allows() {
+        let args = vec!["-e".into(), "console.log('hi')".into()];
+        assert!(matches!(
+            NODE_HANDLER.classify(&HandlerContext::test("node", &args)),
+            Classification::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn p_safe_allows() {
+        let args = vec!["-p".into(), "Math.PI".into()];
+        assert!(matches!(
+            NODE_HANDLER.classify(&HandlerContext::test("node", &args)),
+            Classification::Allow(_)
+        ));
+    }
+
+    // Handler-level danger arm: `-e`/`-p` inline dangerous code and `deno eval` must
+    // Ask. The catalog's isolated stdlib catch-all Asks for any node/deno, masking these
+    // arms at the pipeline level, so the safety-critical danger->Ask direction is only
+    // observable here.
+    #[test]
+    fn e_dangerous_require_child_process_asks() {
+        let args = vec![
+            "-e".into(),
+            "require('child_process').execSync('rm -rf /')".into(),
+        ];
+        assert!(matches!(
+            NODE_HANDLER.classify(&HandlerContext::test("node", &args)),
+            Classification::Ask(_)
+        ));
+    }
+
+    #[test]
+    fn p_dangerous_eval_asks() {
+        let args = vec!["-p".into(), "eval('code')".into()];
+        assert!(matches!(
+            NODE_HANDLER.classify(&HandlerContext::test("node", &args)),
+            Classification::Ask(_)
+        ));
+    }
+
+    #[test]
+    fn deno_eval_dangerous_asks() {
+        let args = vec![
+            "eval".into(),
+            "require('child_process').execSync('rm -rf /')".into(),
+        ];
+        assert!(matches!(
+            NODE_HANDLER.classify(&HandlerContext::test("deno", &args)),
+            Classification::Ask(_)
+        ));
+    }
+
+    #[test]
+    fn script_file_safe_allows() {
+        let dir = temp_dir("fs");
+        write_file(&dir, "safe.js", "console.log('hello')");
+        let args = vec!["safe.js".into()];
+        let ctx = HandlerContext {
+            working_directory: &dir,
+            ..HandlerContext::test("node", &args)
+        };
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn script_file_dangerous_asks() {
+        let dir = temp_dir("fs");
+        write_file(&dir, "evil.js", "require('child_process').execSync('rm -rf /')");
+        let args = vec!["evil.js".into()];
+        let ctx = HandlerContext {
+            working_directory: &dir,
+            ..HandlerContext::test("node", &args)
+        };
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Ask(_)
+        ));
+    }
+
+    #[test]
+    fn deno_eval_safe_allows() {
+        let args = vec!["eval".into(), "console.log('hi')".into()];
+        let ctx = HandlerContext::test("deno", &args);
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn deno_eval_permission_flag_asks_even_with_inert_content() {
+        let args = vec!["eval".into(), "--allow-all".into(), "console.log(1)".into()];
+        let ctx = HandlerContext::test("deno", &args);
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Ask(_)
+        ));
+    }
+
+    #[test]
+    fn deno_eval_flag_before_dangerous_code_still_asks() {
+        // Regression for the args.get(1) bug: a non-permission flag preceding the
+        // source must not cause the scanner to analyze the flag instead of the code.
+        let args = vec![
+            "eval".into(),
+            "--ext=ts".into(),
+            "Deno.removeSync('/tmp/x')".into(),
+        ];
+        let ctx = HandlerContext::test("deno", &args);
+        assert!(matches!(
+            NODE_HANDLER.classify(&ctx),
+            Classification::Ask(_)
+        ));
+    }
+}

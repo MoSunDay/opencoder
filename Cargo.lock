@@ -1811,6 +1811,7 @@ dependencies = [
  "libc",
  "opencoder-core",
  "opencoder-llm",
+ "opencoder-shellguard",
  "opencoder-store",
  "serde",
  "serde_json",
@@ -1821,6 +1822,14 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ulid",
+]
+
+[[package]]
+name = "opencoder-shellguard"
+version = "0.1.0"
+dependencies = [
+ "rable",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2156,6 +2165,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "rable"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "010fe03c7c468f7eea6ba5a41e4907b2b56bc90f560dffb79d4527b58d6520f3"
+dependencies = [
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "rand"

@@ -37,7 +37,7 @@ Commit: (working-tree, skill run-end 清除 + [active skill] tail fallback-only 
 - 新增 10 例 handler 单测（sed 6 形态 / perl 4 拦 + 5 放 / ruby 3 拦 + 3 放 / args 2 助手）；shellguard 360 → 368 例。
 
 ### 收敛记录（隔离复跑 + gate 总账）
-- 全量 gate（`cargo test --workspace --no-fail-fast` + 缺口隔离补跑）：**3104 通过 / 0 失败**（其中 shellguard 新增 368、session 全量 724）。mega-run 3082 通过后剩 4 个具名失败（`daemon_server_and_client_end_to_end`、`smoke_script_two_process_nodes_flow_passes`、`real_server_rejects_running_mode_switches_until_idle`、`heartbeat_cancellation_reports_cancelled`）与 2 个尾部未完成二进制（web_meta_endpoints/web_title）——全部在静默机器上隔离串行复跑通过（daemon 46.9s、two_process 58.9s、heartbeat 15.8s，均为 spawn 起动类在链接风暴（load>80）下超出 30s/120s 预算的争用假失败，`--port 0` 随机端口排除端口冲突因素；与基线已知的「并发争用假失败」同类）。
+- 全量 gate（静默机器 `cargo test --workspace --no-fail-fast`）：**3686 通过 / 0 失败**（239 个测试二进制全数产出 result 行，零启动崩溃；其中 shellguard 368、session 全量 1111 = lib 391 + 集成 720）。早期高负载 mega-run 曾报 4 具名失败（daemon/two_process/heartbeat 等 spawn 起动类，链接风暴 load>80 下超预算的争用假失败，隔离串行复跑均过：daemon 46.9s、two_process 58.9s、heartbeat 15.8s）与 52 个启动即崩二进制（SIGSEGV/127，非断言失败），静默机器复跑无一复现。
 - 顺手修复 gate 暴露的前次会话遗留断点（与本轮无关但挡 gate）：`tests/clear_context_skill_compound.rs` ① `pending_inputs` 单参调用未跟上两参 `Delivery` 签名（补 `Delivery::Queue`）；② fixture 注释声称「stale skill 已装载」但从未装载（`run_kickoff_then_compound` 增加 `stale_skill` 参数，用例 1 传 `STALE_BODY`、用例 3 传 `None`）——3/3 转绿。
 
 - corpus 分歧终账（行级，与变更节四类同口径）：RETARGETED 35（原目标在 /tmp 的结构危险用例改指非释放路径，保「结构绕过必拦」）、RELEASE 16（仅因 /tmp + /dev/null 释放翻转：`compat_tmp_release_flips` 组注释覆盖 9 断言 + `find /tmp -delete`、`zsh -c 'touch /tmp/pwned'` 内层写等尾标 7 断言）、OVER-BLOCK 13（旧放行新拦截，fail-closed 方向，逐条注明理由）、RELAXED 7（旧误拦新放行，逐条论证无写面，如 `bash -c 'echo hi'` 递归内层）；其余 159 断言两侧判定一致（230 断言 = 分歧 71 + 一致 159）。

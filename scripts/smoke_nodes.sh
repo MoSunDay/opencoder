@@ -25,6 +25,9 @@ TOKEN="local-smoke-token"
 BASE="http://127.0.0.1:${PORT}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${OPENCODER_SMOKE_BIN:-${ROOT}/target/release/opencoder}"
+# Unique per run: ck1 selects by name, so a fixed name could bind to a stale
+# registry entry left behind by an earlier run.
+NODE_NAME="smoke-node-$$"
 
 if [ -z "${OPENCODER_SMOKE_BIN:-}" ]; then
   echo "== building release binary =="
@@ -73,14 +76,21 @@ req() {
 }
 
 echo "== starting server (daemon --server) on :${PORT} =="
-"${BIN}" daemon --server --host 127.0.0.1 --port "${PORT}" --token "${TOKEN}" \
+# `--workdir` is a GLOBAL flag: it must precede the `daemon` subcommand. A
+# per-run workdir pins the server store inside ${TMP}: data_dir_for(workdir)
+# is <XDG_DATA_HOME>/opencoder/<digest(workdir)>, so pointing XDG_DATA_HOME at
+# ${TMP} keeps the node registry out of the shared persistent DB entirely and
+# lets cleanup's `rm -rf ${TMP}` reclaim it — no cross-run entry can poison ck1.
+XDG_DATA_HOME="${TMP}/xdg" "${BIN}" --workdir "${TMP}/srv" daemon --server --host 127.0.0.1 --port "${PORT}" --token "${TOKEN}" \
   >"${TMP}/server.log" 2>&1 &
 SRV_PID=$!
 
 # Readiness probe over the UNSIGNED clock-bootstrap endpoint: never blocked
 # by auth, so a broken signature pipeline still reports itself at checkpoint 1.
 SERVER_UP=""
-for _ in $(seq 1 60); do
+# 90s budget: a cold start of the debug binary can blow past 30s when a
+# parallel `cargo test --workspace` compile storm is hammering the box.
+for _ in $(seq 1 180); do
   if curl -sf "${BASE}/api/time" >/dev/null 2>&1; then
     SERVER_UP=1
     break
@@ -93,11 +103,12 @@ if [ -z "${SERVER_UP}" ]; then
   exit 1
 fi
 
-echo "== starting worker node 'smoke-node' (daemon --client) =="
+echo "== starting worker node '${NODE_NAME}' (daemon --client) =="
 mkdir -p "${TMP}/work"
 # `--workdir` is a GLOBAL flag: it must precede the `daemon` subcommand.
-"${BIN}" --workdir "${TMP}/work" daemon --client \
-  --name smoke-node --remote "${BASE}" --token "${TOKEN}" \
+# same XDG redirect: the worker's local task store dies with ${TMP} too.
+XDG_DATA_HOME="${TMP}/xdg" "${BIN}" --workdir "${TMP}/work" daemon --client \
+  --name "${NODE_NAME}" --remote "${BASE}" --token "${TOKEN}" \
   >"${TMP}/node.log" 2>&1 &
 NODE_PID=$!
 
@@ -105,24 +116,25 @@ NODE_PID=$!
 # curl runs under `|| true`; with `set -e` a failed connection inside a poll
 # assignment would otherwise kill the whole script instead of retrying.
 CK1=""
-for _ in $(seq 1 60); do
+# same 90s rationale as the readiness probe above
+for _ in $(seq 1 180); do
   OUT="$(req GET /api/nodes || true)"
   CK1="$(printf '%s' "${OUT}" | python3 -c '
 import json,sys
 v=json.load(sys.stdin)
-ns=[n for n in v.get("nodes",[]) if n.get("name")=="smoke-node"]
+ns=[n for n in v.get("nodes",[]) if n.get("name")==sys.argv[1]]
 print(ns[0]["id"] if ns and ns[0].get("status")=="idle" else "")
-' 2>/dev/null || true)"
+' "${NODE_NAME}" 2>/dev/null || true)"
   [ -n "${CK1}" ] && break
   sleep 0.5
 done
 if [ -z "${CK1}" ]; then
-  echo "❌ checkpoint 1 FAILED: smoke-node never registered idle"
+  echo "❌ checkpoint 1 FAILED: ${NODE_NAME} never registered idle"
   echo "--- server.log ---"; tail -20 "${TMP}/server.log"
   echo "--- node.log ---"; tail -20 "${TMP}/node.log"
   exit 1
 fi
-echo "✅ checkpoint 1: smoke-node registered idle (id=${CK1})"
+echo "✅ checkpoint 1: ${NODE_NAME} registered idle (id=${CK1})"
 
 # ✅ checkpoint 2: dispatch accepted with a task_id, a bound session_id, and
 # the new `status` field reporting the fresh `pending` state.

@@ -1,6 +1,9 @@
 //! Static expansion resolution: turns `$HOME`, `$'hello'`, `$((1+1))`, `{a,b}`
 //! into concrete strings using rable's AST and the host environment.
 //!
+//! Ported from rippy `src/resolve.rs` (MIT, https://github.com/mpecan/rippy).
+//! Sandbox delta: a few items re-visibility from `pub(crate)` to `pub`.
+//!
 //! The resolved command is then re-classified through the full analyzer
 //! pipeline, so the variable's *content* (not its name) determines the verdict.
 

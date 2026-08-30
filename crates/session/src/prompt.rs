@@ -227,9 +227,11 @@ pub fn environment_block(working_dir: &Path, kind: AgentKind) -> String {
     s.push_str("- You have file system and shell access via your tools. Run tools in parallel when independent.\n");
     // In sandbox mode the environment block carries a read-only marker so the
     // model is discouraged from attempting edits/writes (mutating bash is
-    // intercepted anyway). Omitted in ACT mode to save tokens.
+    // intercepted anyway). It names the declared release set (/tmp + /dev/null)
+    // and states that the project/working directory is NOT writable. Omitted
+    // in ACT mode to save tokens.
     if kind == AgentKind::Sandbox {
-        s.push_str("- IN_SANDBOX_MODE: read-only — do not edit/write files; mutating bash is intercepted. Investigate read-only and answer with findings only.\n");
+        s.push_str("- IN_SANDBOX_MODE: read-only — writes under /tmp and redirects to /dev/null are permitted; everything else that modifies state is blocked, and the project/working directory is NOT writable. Investigate read-only and answer with findings only.\n");
     }
     s
 }

@@ -54,30 +54,86 @@ pub fn unlocked_tools(skill_names: &HashSet<String>) -> HashSet<&'static str> {
     out
 }
 
+/// Prefix `opencoder_core::body_with_source` puts in front of every injected
+/// skill body (and each section of a compound activation).
+const SOURCE_LINE_PREFIX: &str = "> Source: ";
+
+/// Extract the skill name from a `> Source: <path>` annotation line. Directory
+/// layout (`.../skills/<name>/SKILL.md`) resolves to the directory name under
+/// `skills/`; flat layout (`.../skills/<name>.md`) to the file stem. Matching
+/// is EXACT on the resolved name, so a lookalike user skill (`my-task-plan`)
+/// never unlocks a builtin's tools. Returns `None` for non-Source lines and
+/// paths without a recognizable `skills/` segment.
+fn skill_name_from_source_line(line: &str) -> Option<&str> {
+    let path = line.strip_prefix(SOURCE_LINE_PREFIX)?.trim();
+    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    while let Some(seg) = segments.next() {
+        if seg != "skills" {
+            continue;
+        }
+        let name = segments.next()?;
+        let stem = name.strip_suffix(".md").unwrap_or(name);
+        return if stem.is_empty() { None } else { Some(stem) };
+    }
+    None
+}
+
 /// Derive unlocked latent tools from a skill prompt body. Used by the runner
-/// to unlock tools without a separate `active_skill_names` registry — the body
+/// to unlock tools without a separate `active_skill_names` registry - the body
 /// text already contains skill-specific identifiers that we match against.
 ///
-/// Only the first 500 chars are inspected: the seeded `SKILL.md` files name
-/// their skill and the `question` tool up front (see the seed contract tests
-/// in `opencoder-core`), so a deep scan would leak unlocks to bodies that
-/// merely reference a skill in passing.
+/// Primary path: every `> Source: <path>` annotation line (the
+/// `body_with_source` shape) is resolved to its skill name and matched
+/// exactly against the latent-skill table. The decision is
+/// position-independent, so a compound activation (several joined sections)
+/// unlocks even when a section lands past the first 500 chars, and the old
+/// substring match can no longer mis-unlock a `my-task-plan` user skill.
+///
+/// Legacy fallback: a body with NO Source line (direct `set_skill` callers,
+/// tests, pre-annotation sessions) keeps the historical behaviour - scan only
+/// the first 500 chars for the skill identifiers, so a passing mention deeper
+/// in a body still does not leak unlocks.
 pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
     let mut out = HashSet::new();
-    if let Some(b) = body {
-        let prefix: String = b.chars().take(500).collect();
-        if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
-            for t in latent_tools_for_skill("ssh-pty") {
-                out.insert(*t);
-            }
+    let Some(b) = body else {
+        return out;
+    };
+    let mut saw_source = false;
+    for line in b.lines() {
+        let Some(name) = skill_name_from_source_line(line) else {
+            continue;
+        };
+        saw_source = true;
+        for t in latent_tools_for_skill(name) {
+            out.insert(*t);
         }
-        if QUESTION_SKILLS.iter().any(|s| prefix.contains(s)) {
-            for t in latent_tools_for_skill("task-plan") {
-                out.insert(*t);
-            }
+    }
+    if saw_source {
+        return out;
+    }
+    let prefix: String = b.chars().take(500).collect();
+    if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
+        for t in latent_tools_for_skill("ssh-pty") {
+            out.insert(*t);
+        }
+    }
+    if QUESTION_SKILLS.iter().any(|s| prefix.contains(s)) {
+        for t in latent_tools_for_skill("task-plan") {
+            out.insert(*t);
         }
     }
     out
+}
+
+/// Execution-time re-check for the generic tool dispatcher: a latent tool may
+/// only execute while its owning skill is still active. Defence in depth
+/// against hallucinated calls - the schema array already withholds latent
+/// tools, but the registry keeps them callable, and `question` has no
+/// wall-clock budget (`leaf_tool_timeout`), so an unguarded phantom ask could
+/// park the run forever. Same unlock contract as advertisement-time gating
+/// ([`unlocked_from_body`]); non-latent tools are always allowed.
+pub fn latent_execution_allowed(name: &str, skill_body: Option<&str>) -> bool {
+    !is_latent_tool(name) || unlocked_from_body(skill_body).contains(name)
 }
 
 #[cfg(test)]
@@ -160,6 +216,91 @@ mod tests {
         // task-plan skill name unlocks question.
         let body = Some("ask via the question tool whenever blocked");
         assert!(!unlocked_from_body(body).contains("question"));
+    }
+
+    #[test]
+    fn execution_gate_refuses_calls_the_body_does_not_unlock() {
+        // The pure predicate behind the dispatcher's re-check: non-latent
+        // tools always pass; latent tools pass only when the body unlocks.
+        assert!(latent_execution_allowed("bash", None));
+        assert!(latent_execution_allowed("read", Some("# task-plan")));
+        assert!(!latent_execution_allowed("question", None));
+        assert!(!latent_execution_allowed("ssh_pty", None));
+        assert!(latent_execution_allowed(
+            "question",
+            Some("# task-plan\n\nask via question when blocked")
+        ));
+        assert!(latent_execution_allowed(
+            "ssh_pty",
+            Some("> Source: /h/skills/ssh-pty/SKILL.md\n\nattach with ssh_pty")
+        ));
+        assert!(!latent_execution_allowed(
+            "question",
+            Some("> Source: /h/skills/my-task-plan/SKILL.md\n\nplan")
+        ));
+    }
+
+    #[test]
+    fn compound_source_sections_unlock_in_both_orders() {
+        // Compound activation joins `> Source: <path>\n\n<body>` sections
+        // (`skill_resolve::resolve_inline_skills_with`). A section that lands
+        // after a long first body sits past the legacy 500-char window, so the
+        // unlock must come from the Source lines themselves - in BOTH orders.
+        let filler = format!("phase one detail. {}\n\n", "x".repeat(600));
+        let plan = "> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\n\
+                    plan the launch; ask via question when blocked.";
+        let ssh = "> Source: /home/u/.opencoder/skills/ssh-pty/SKILL.md\n\n\
+                   attach terminals with ssh_pty.";
+        let plan_first = format!("{filler}{plan}\n\n{ssh}");
+        let ssh_first = format!("{filler}{ssh}\n\n{plan}");
+        for (label, body) in [("plan-first", &plan_first), ("ssh-first", &ssh_first)] {
+            let unlocked = unlocked_from_body(Some(body));
+            assert!(
+                unlocked.contains("question"),
+                "{label} must still unlock question: {unlocked:?}"
+            );
+            assert!(
+                unlocked.contains("ssh_pty"),
+                "{label} must still unlock ssh_pty: {unlocked:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lookalike_user_skill_source_line_unlocks_nothing() {
+        // Exact-name matching: `my-task-plan` is a DIFFERENT skill; its Source
+        // line must not unlock the builtin task-plan's tools. (The old
+        // `prefix.contains("task-plan")` substring match mis-unlocked here.)
+        let body = "> Source: /home/u/skills/my-task-plan/SKILL.md\n\n\
+                    plan carefully; ask via question when blocked.";
+        assert!(unlocked_from_body(Some(body)).is_empty());
+    }
+
+    #[test]
+    fn flat_source_file_stem_unlocks_ssh_pty() {
+        // Flat skill layout: the file stem under `skills/` is the skill name.
+        let body = "> Source: /etc/opencoder/skills/ssh-pty.md\n\nopen terminals.";
+        assert!(unlocked_from_body(Some(body)).contains("ssh_pty"));
+    }
+
+    #[test]
+    fn legacy_body_without_source_lines_still_scans_prefix() {
+        // Fallback preserved: a body with NO `> Source:` annotation keeps the
+        // historical 500-char prefix behaviour (and its window).
+        assert!(
+            unlocked_from_body(Some("# task-plan\n\nask via question")).contains("question"),
+            "legacy bare task-plan body must keep unlocking question"
+        );
+        assert!(
+            unlocked_from_body(Some("# ssh-pty\n\nuse ssh_pty")).contains("ssh_pty"),
+            "legacy bare ssh-pty body must keep unlocking ssh_pty"
+        );
+        let filler = "x".repeat(600);
+        let late = format!("{filler} task-plan question");
+        assert!(
+            unlocked_from_body(Some(&late)).is_empty(),
+            "the legacy 500-char window still applies without a Source line"
+        );
     }
 
     /// Skills root whose absolute path is at least `min_len` bytes deep

@@ -66,6 +66,23 @@ pub(crate) fn act_plan_highlight(active_skill: Option<&str>) -> bool {
     active_skill == Some(PLAN_CHIP_SKILL)
 }
 
+/// Re-derive the task-plan chip highlight at a **consumption boundary** (the
+/// runner's queue/steer drain reporting `QueueConsumed` / `SteerConsumed`).
+/// The consumed input is a `$name`-bearing raw text: `record_compound`
+/// resolves and activates any token it names at the idle boundary, so a
+/// `$task-plan` token in the consumed text arms the highlight just like an
+/// idle submit would (any hit among multiple tokens lights it). Text without
+/// a `task-plan` token returns `false`, preserving the previous revert
+/// semantics: an interjection takes effect and the chip falls back to the
+/// plain hue. Run-end refresh re-derives from the committed body afterwards,
+/// so this never resurrects a cleared highlight.
+pub(crate) fn plan_highlight_from_consumed_text(text: &str) -> bool {
+    opencoder_core::extract_skill_tokens(text)
+        .1
+        .iter()
+        .any(|name| name == PLAN_CHIP_SKILL)
+}
+
 /// Startup skill state derived from the shared handle: persisted body,
 /// system-prompt token estimate, and whether the `[act]` chip starts in the
 /// task-plan highlight (a resumed `task-plan` commit keeps the yellow).
@@ -504,6 +521,30 @@ mod tests {
         assert!(!act_plan_highlight(None));
         // Near-miss names must not light the yellow (exact match only).
         assert!(!act_plan_highlight(Some("task-plans")));
+    }
+
+    // -- plan_highlight_from_consumed_text (pure, token scan) --------------
+
+    #[test]
+    fn consumed_text_with_plan_token_arms_the_highlight() {
+        assert!(plan_highlight_from_consumed_text("$task-plan plan the work"));
+        // Any hit among multiple tokens arms it.
+        assert!(plan_highlight_from_consumed_text(
+            "$review then $task-plan"
+        ));
+        // Token mid-text, no other text at all.
+        assert!(plan_highlight_from_consumed_text("$task-plan"));
+    }
+
+    #[test]
+    fn consumed_text_without_plan_token_keeps_the_revert() {
+        assert!(!plan_highlight_from_consumed_text("plain follow-up"));
+        assert!(!plan_highlight_from_consumed_text("$review this diff"));
+        // Exact-match discipline at the token level too.
+        assert!(!plan_highlight_from_consumed_text("$task-plans go"));
+        // `$5`/trailing `$` are literal, not tokens.
+        assert!(!plan_highlight_from_consumed_text("price is $5 and $"));
+        assert!(!plan_highlight_from_consumed_text(""));
     }
 
     #[test]

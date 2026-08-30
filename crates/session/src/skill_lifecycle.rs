@@ -43,25 +43,25 @@ pub(crate) fn clear_skill_state(session: &SessionState) {
 /// Clear the active skill after a run ends: memory (`skill_prompt` +
 /// `active_skill_names`) and the store (`clear_skill: true`).
 ///
-/// Idempotent guard: a skill-less session returns immediately WITHOUT a
-/// store write, so plain (skill-less) runs never touch `sessions.updated_at`.
+/// Idempotent guard: a skill-less session (no body AND no names) returns
+/// immediately WITHOUT a store write, so plain (skill-less) runs never touch
+/// `sessions.updated_at`.
 ///
 /// The durable clear is the half that stops later `resume`s from
 /// resurrecting the skill into every subsequent run (tail reminder + latent
 /// unlocks every turn). It therefore retries through transient store
 /// failures (busy/locked WAL under concurrent writers) and, when it still
-/// cannot land, emits a visible [`SessionEvent::Status`] instead of
-/// swallowing the error — a silently stale row used to re-arm every future
+/// cannot land, emits a visible [`SessionEvent::Error`] instead of
+/// swallowing the error - a silently stale row used to re-arm every future
 /// run, which is exactly the "reminder on every turn" bug.
 pub(crate) async fn clear_on_run_end(
     session: &SessionState,
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
 ) {
-    if session.skill_prompt_cloned().is_none() {
+    if session.skill_prompt_cloned().is_none() && session.active_skill_names_cloned().is_empty() {
         return;
     }
-    session.set_skill(None);
-    session.set_active_skill_names(HashSet::new());
+    clear_skill_state(session);
     let Some(store) = &session.store else {
         return; // no store attached: no persisted row to resurrect from
     };
@@ -86,7 +86,15 @@ pub(crate) async fn clear_on_run_end(
         }
     }
     if let Some(e) = last_err {
-        on_event(SessionEvent::Status(format!(
+        // `SessionEvent::Error`, NOT `Status`: by the time this runs, the run
+        // loop has already emitted its terminal `Done` frame (see
+        // `run_loop_one_shot`), and Status is transient noise the UIs fold
+        // away - the failure would never be seen. Error is the report frame
+        // consumers surface as a real failure (same convention as the
+        // compaction-failure path), the SSE broadcast does not close on Done,
+        // and the event sink persists it for replay - so an Error after Done
+        // stays observable.
+        on_event(SessionEvent::Error(format!(
             "[skill] run ended but the persisted skill clear failed after retries: {e:#}"
         )));
     }
@@ -115,7 +123,7 @@ mod tests {
     use std::sync::Arc;
 
     use opencoder_core::{resolve_agent, Config};
-    use opencoder_llm::{ChatStream, MockChatClient};
+    use opencoder_llm::{ChatStream, LlmEvent, MockChatClient, Usage};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use opencoder_store::{LibsqlStore, SessionMeta, SessionPatch, Store};
@@ -426,10 +434,12 @@ mod tests {
     }
 
     /// Persistent store failure: after the retries give up, the failure is
-    /// surfaced as a visible Status event — never silently swallowed, which
-    /// is what let the stale row re-arm every later run in the first place.
+    /// surfaced as a visible `SessionEvent::Error` - never silently swallowed,
+    /// which is what let the stale row re-arm every later run in the first
+    /// place. Error (not Status) because the run loop already emitted its
+    /// terminal Done frame; Error is the report frame consumers still render.
     #[tokio::test]
-    async fn persistent_store_failure_surfaces_status() {
+    async fn persistent_store_failure_surfaces_error() {
         let (probe, store) = probe_store(usize::MAX).await;
         let s = make_session(Some(store));
         s.set_skill(Some("BODY".into()));
@@ -444,9 +454,85 @@ mod tests {
         );
         assert!(s.skill_prompt_cloned().is_none(), "memory still cleared");
         assert!(
-            evs.iter().any(|e| matches!(e, SessionEvent::Status(t)
+            evs.iter().any(|e| matches!(e, SessionEvent::Error(t)
                 if t.contains("persisted skill clear failed"))),
-            "failure must be visible: {evs:?}"
+            "failure must be visible as an Error frame: {evs:?}"
+        );
+        assert!(
+            evs.iter().all(|e| !matches!(e, SessionEvent::Status(_))),
+            "no Status noise on the failure path: {evs:?}"
+        );
+    }
+
+    /// Ordering: the clear failure lands AFTER the run loop's terminal Done
+    /// frame and must still be observable in the same event stream - the
+    /// whole point of reporting through `Error` (compaction-failure
+    /// convention) instead of `Status`, which post-terminal consumers fold
+    /// away.
+    #[tokio::test]
+    async fn clear_failure_visible_after_done_in_run_stream() {
+        let (probe, store) = probe_store(usize::MAX).await;
+        let working_dir = std::env::temp_dir().join("opencoder-skill-lifecycle-tests");
+        let mock = MockChatClient::new().push_script(vec![LlmEvent::Completed {
+            text: "ok".into(),
+            tool_calls: vec![],
+            usage: Some(Usage::default()),
+        }]);
+        let mut s = SessionState::new(
+            "sess-skill-lifecycle",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            Arc::new(mock) as Arc<dyn ChatStream>,
+            working_dir,
+        )
+        .with_store(store)
+        .mark_session_created();
+        s.set_skill(Some("BODY".into()));
+
+        let registry = crate::tools::registry();
+        let mut evs: Vec<SessionEvent> = Vec::new();
+        let res = run_loop_one_shot(&mut s, &registry, &mut |e| evs.push(e), false).await;
+        assert!(res.is_ok(), "the run itself still succeeds: {res:?}");
+
+        let done = evs
+            .iter()
+            .position(|e| matches!(e, SessionEvent::Done))
+            .expect("terminal Done frame emitted");
+        let err = evs
+            .iter()
+            .position(|e| matches!(e, SessionEvent::Error(t) if t.contains("persisted skill clear failed")))
+            .expect("clear failure must be observable in the event stream");
+        assert!(
+            err > done,
+            "Error frame rides after Done (report frame, not terminal): {evs:?}"
+        );
+        assert_eq!(probe.attempts.load(Ordering::SeqCst), 3, "bounded retries");
+        assert!(s.skill_prompt_cloned().is_none(), "memory still cleared");
+    }
+
+    /// Guard is a DOUBLE condition: a session whose body is already gone but
+    /// whose `active_skill_names` set is stale (the old body-only
+    /// `/clear_context` bug) must still be cleaned up AND persisted - the
+    /// early-return used to leak latent unlocks across the run boundary.
+    #[tokio::test]
+    async fn stale_names_without_body_still_clear_and_persist() {
+        let store = mem_store_with_row().await;
+        let s = make_session(Some(store.clone()));
+        assert!(s.skill_prompt_cloned().is_none());
+        s.set_active_skill_names(["task-plan".into()].into_iter().collect());
+
+        let mut evs: Vec<SessionEvent> = Vec::new();
+        clear_on_run_end(&s, &mut |e| evs.push(e)).await;
+
+        assert!(
+            s.active_skill_names_cloned().is_empty(),
+            "stale names wiped"
+        );
+        let meta = store.get_session("sess-skill-lifecycle").await.unwrap();
+        assert_ne!(
+            meta.map(|m| m.updated_at),
+            Some(0),
+            "guard must NOT early-return: the durable clear still runs"
         );
     }
 }

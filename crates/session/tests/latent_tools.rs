@@ -1,7 +1,7 @@
 //! Integration tests: latent tools (`question`, `ssh_pty`) are hidden from the
 //! model by default and only appear when their owning skill is activated —
-//! with one exemption: the sandbox agent always sees `question` (its
-//! clarification protocol is part of the base prompt).
+//! with no agent exemptions: the sandbox agent sees `question` only while a
+//! task-plan body is active, like every other agent.
 
 use std::collections::HashSet;
 
@@ -117,14 +117,23 @@ fn sandbox_visible_tools(skill_body: Option<&str>) -> Vec<String> {
 }
 
 #[test]
-fn sandbox_always_sees_question_without_any_skill() {
+fn sandbox_hides_question_without_any_skill() {
+    // No agent exemptions: sandbox hides question until the task-plan
+    // skill unlocks it.
     let names = sandbox_visible_tools(None);
     assert!(
-        names.contains(&"question".to_string()),
-        "sandbox must see question with no skill at all, got: {names:?}"
+        !names.contains(&"question".to_string()),
+        "sandbox must NOT see question with no skill, got: {names:?}"
     );
-    // The exemption is question-scoped: ssh_pty stays latent for sandbox.
+    // ssh_pty stays latent for sandbox with or without a skill.
     assert!(!names.contains(&"ssh_pty".to_string()));
+
+    let unlocked = sandbox_visible_tools(Some("# task-plan\n\nPlan; ask via question."));
+    assert!(
+        unlocked.contains(&"question".to_string()),
+        "an active task-plan body must unlock question for sandbox, got: {unlocked:?}"
+    );
+    assert!(!unlocked.contains(&"ssh_pty".to_string()));
 }
 
 #[test]

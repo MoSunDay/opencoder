@@ -266,7 +266,7 @@ mod tests {
         ToolContext {
             session_id: "s".into(),
             message_id: id.into(),
-            agent: "plan".into(),
+            agent: "act".into(),
             working_dir: std::env::temp_dir(),
             max_output: 4096,
             proxy: None,

@@ -174,6 +174,7 @@ pub(crate) async fn fold_ui_events(
     store: &Arc<dyn Store>,
     session_id: &str,
     queue_items: &mut Vec<(i64, String)>,
+    plan_skill_active: &mut bool,
     admit: &mut crate::queue_admitter::AdmitUiState,
     running: &mut bool,
     cancelled: &mut bool,
@@ -255,6 +256,14 @@ pub(crate) async fn fold_ui_events(
                         chat.push_marker(Line::from(""));
                     }
                     queue_items.retain(|(s, _)| s != seq);
+                    // A queued input actually took effect: any task-plan
+                    // highlight on the `[act]` chip reverts to the plain hue.
+                    *plan_skill_active = false;
+                }
+                if let SessionEvent::SteerConsumed { .. } = &sev {
+                    // A steered input actually took effect: any task-plan
+                    // highlight on the `[act]` chip reverts to the plain hue.
+                    *plan_skill_active = false;
                 }
                 if matches!(sev, SessionEvent::Done | SessionEvent::Error(_)) {
                     if *cancelled {

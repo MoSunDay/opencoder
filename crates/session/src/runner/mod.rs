@@ -99,7 +99,13 @@ pub async fn run_with_registry(
     // compound input (/sandbox review) switches then runs the rest. EXCEPTION:
     // /act_clear_context with a preserved seed falls through to run_loop.
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
-        crate::control_cmd::apply(session, &cmd, &mut on_event).await?;
+        if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut on_event).await {
+            // This path returns before the one-shot wrapper; honor the
+            // run-end skill contract (a crash-resume-armed skill must not
+            // survive a failed control-command run) before propagating.
+            crate::skill_lifecycle::clear_on_run_end(session, &mut on_event).await;
+            return Err(e);
+        }
         // ClearContext with a preserved seed falls through to run_loop so the
         // model sees the continuity context; blank sentinel path (nothing
         // preserved) stops as before.
@@ -124,6 +130,11 @@ pub async fn run_with_registry(
             // which resolves `$skill` tokens and records user_text as prompt.
             user_text = rest;
         } else {
+            // Bare control command: this "run" returns before the one-shot
+            // wrapper, so clear the skill here too — otherwise a
+            // crash-resume-armed skill survives a bare `/act` //`/sandbox`
+            // and resurrects into every later run.
+            crate::skill_lifecycle::clear_on_run_end(session, &mut on_event).await;
             on_event(SessionEvent::Done);
             return Ok(());
         }

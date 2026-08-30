@@ -1,4 +1,4 @@
-//! Pure state machine for the plan-mode question dialog.
+//! Pure state machine for the skill-gated question dialog.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Line;

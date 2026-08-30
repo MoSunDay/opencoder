@@ -19,7 +19,7 @@ use crate::menu::SkillMenu;
 use crate::model_menu::ModelMenu;
 use crate::queue_admitter;
 use crate::render::{MouseHits, Term};
-use crate::skill_persist::resolve_persist;
+use crate::skill_persist::{act_plan_highlight, initial_skill_state, resolve_persist};
 use crate::task::{handle_task_key, TaskOutcome, TaskPicker};
 use crate::terminal::consume_modifier_or_release;
 use crate::worker::{process_cmd, UiCmd, UiEvent};
@@ -103,12 +103,8 @@ pub(super) async fn run_app(
     let mut plan_edit: Option<crate::plan_edit::PlanEdit> = None;
     let mut notepad: Option<crate::notepad::NotepadView> = None;
     let mut bash_rx: Option<tokio::sync::oneshot::Receiver<String>> = None;
-    let initial_skill_body = skill_handle.lock().ok().and_then(|g| g.clone());
-    let mut sys_tokens: u64 = sys_tokens_for(
-        session.agent.name.as_str(),
-        &workdir,
-        initial_skill_body.as_deref(),
-    );
+    let (_initial_skill_body, mut sys_tokens, mut plan_skill_active) =
+        initial_skill_state(&skill_handle, session.agent.name.as_str(), &workdir);
     // Cached system-prompt tokens for the subagent currently being viewed.
     // Computed once on entry (ctx-switch click) to avoid per-frame rebuild.
     let mut subagent_sys: u64 = 0;
@@ -269,6 +265,7 @@ pub(super) async fn run_app(
                     subagent_focus.is_none(),
                     config.autopilot.mode,
                     &display_mode,
+                    plan_skill_active,
                     notepad.as_ref(),
                 )?;
             }
@@ -514,6 +511,7 @@ pub(super) async fn run_app(
                                     &mut sys_tokens, &agent_name, &workdir, &skill_handle, &mut chat,
                                     &store, &session_id,
                                 ).await;
+                                plan_skill_active = act_plan_highlight(active_skill.as_deref());
                                 let clean = clean.trim().to_string();
                                 let clean = crate::control_helpers::forward_skill_if_compound(&text, &clean);
                                 // Clear-context arm (both spellings, compound included):
@@ -644,6 +642,7 @@ pub(super) async fn run_app(
                                     &skill_handle, &store, &session_id,
                                 )
                                 .await;
+                                plan_skill_active = act_plan_highlight(active_skill.as_deref());
                             }
                             KeyAction::ArmClearConfirm { rest } => {
                                 crate::clear_confirm::engage(&mut clear_confirm, &mut chat, &mut mode_flash, anim_tick, rest, None);
@@ -739,7 +738,8 @@ pub(super) async fn run_app(
             }
             maybe_ev = evt_rx.recv() => {
                 let np_flow = app_loop::fold_ui_events(
-                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items, &mut admit_st, &mut running,
+                    maybe_ev, &mut chat, &store, &session_id, &mut queue_items,
+                    &mut plan_skill_active, &mut admit_st, &mut running,
                     &mut cancelled, &mut drain_pending, &mut skip_next_render, &mut follow,
                     &cmd_tx, &mut cancel, &mut evt_rx, &mut notepad,
                     &mut question_menu, &question_hub,
@@ -756,7 +756,7 @@ pub(super) async fn run_app(
                         if !running {
                             crate::app_helpers::refresh_skill_mirrors(
                                 &skill_handle, &mut active_skill, &mut active_skill_body,
-                                &mut sys_tokens, &agent_name, &workdir,
+                                &mut sys_tokens, &agent_name, &workdir, &mut plan_skill_active,
                             );
                             body_refresh_pending = true; // idle: land the final frame ([tok cost] total) behind the 333ms body ticker
                         }
@@ -791,7 +791,7 @@ pub(super) async fn run_app(
 pub(crate) use crate::app_helpers::{
     apply_force_redraw, handle_mouse, initial_chat_view, mode_switch_busy_flash, on_resize_event,
     poll_idle_resize, pre_key_intercept, push_history, push_user, queue_unsupported_flash,
-    snapshot_image_uris, start_turn, sys_tokens_for, worker_dead, MouseOutcome,
+    snapshot_image_uris, start_turn, worker_dead, MouseOutcome,
 };
 pub(crate) use crate::skill_display::skill_trigger;
 #[cfg(test)]

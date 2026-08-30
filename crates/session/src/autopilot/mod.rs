@@ -156,8 +156,11 @@ pub async fn drive(
 /// phase loop runs through `run_loop_one_shot`, this explicit call is
 /// idempotent double-insurance covering the paths OUTSIDE a loop (cancel
 /// before a phase, `finish` bookkeeping).
-pub(crate) async fn clear_injected_skill(session: &SessionState) {
-    crate::skill_lifecycle::clear_on_run_end(session).await;
+pub(crate) async fn clear_injected_skill(
+    session: &SessionState,
+    on_event: &mut (dyn FnMut(SessionEvent) + Send),
+) {
+    crate::skill_lifecycle::clear_on_run_end(session, on_event).await;
 }
 
 /// Terminal bookkeeping for every outcome: clear the active skill (memory +
@@ -169,7 +172,7 @@ async fn finish(
     on_event: &mut (dyn FnMut(SessionEvent) + Send),
     outcome: ApOutcome,
 ) -> Result<ApOutcome> {
-    clear_injected_skill(session).await;
+    clear_injected_skill(session, on_event).await;
     on_event(SessionEvent::Done);
     Ok(outcome)
 }

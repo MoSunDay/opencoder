@@ -3,6 +3,7 @@ pub mod app;
 pub mod app_helpers;
 pub mod attach_badge;
 pub mod bash_exec;
+pub mod boot_clock;
 pub mod cache_salt_menu;
 pub mod chat;
 pub mod chat_plan;

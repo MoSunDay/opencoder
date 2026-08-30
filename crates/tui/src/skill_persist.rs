@@ -57,6 +57,31 @@ pub(crate) async fn persist_skill(
         .await;
 }
 
+/// The only skill name that lights the parent `[act]` status chip yellow.
+pub(crate) const PLAN_CHIP_SKILL: &str = "task-plan";
+
+/// Whether the parent `[act]` chip should render in the sandbox warning hue:
+/// exactly when the committed skill is `task-plan` (exact match).
+pub(crate) fn act_plan_highlight(active_skill: Option<&str>) -> bool {
+    active_skill == Some(PLAN_CHIP_SKILL)
+}
+
+/// Startup skill state derived from the shared handle: persisted body,
+/// system-prompt token estimate, and whether the `[act]` chip starts in the
+/// task-plan highlight (a resumed `task-plan` commit keeps the yellow).
+pub(crate) fn initial_skill_state(
+    skill_handle: &Arc<Mutex<Option<String>>>,
+    agent_name: &str,
+    workdir: &Path,
+) -> (Option<String>, u64, bool) {
+    let body = skill_handle.lock().ok().and_then(|g| g.clone());
+    let sys_tokens = crate::app_helpers::sys_tokens_for(agent_name, workdir, body.as_deref());
+    let name = body
+        .as_deref()
+        .and_then(crate::skill_display::skill_name_from_body);
+    (body, sys_tokens, act_plan_highlight(name.as_deref()))
+}
+
 /// Resolve `$skill` tokens in `text` (activating the skill in-memory) **and**
 /// persist the result to the store when it changed. `run_app`'s **idle**
 /// Submit path relies on this: the turn starts immediately, so eager
@@ -468,5 +493,33 @@ mod tests {
         );
         let persisted = store.get_session("s").await.unwrap().unwrap();
         assert_eq!(persisted.skill.as_deref(), Some("the alpha body"));
+    }
+
+    // -- act_plan_highlight (pure, exact-match only) ----------------------
+
+    #[test]
+    fn act_plan_highlight_matches_task_plan_exactly() {
+        assert!(act_plan_highlight(Some("task-plan")));
+        assert!(!act_plan_highlight(Some("review")));
+        assert!(!act_plan_highlight(None));
+        // Near-miss names must not light the yellow (exact match only).
+        assert!(!act_plan_highlight(Some("task-plans")));
+    }
+
+    #[test]
+    fn initial_skill_state_derives_body_tokens_and_highlight() {
+        let plan_body = "> Source: /skills/task-plan/SKILL.md\n\nplan".to_string();
+        let skill_handle = Arc::new(std::sync::Mutex::new(Some(plan_body.clone())));
+        let (body, sys_tokens, plan_highlight) =
+            initial_skill_state(&skill_handle, "act", std::path::Path::new("/tmp"));
+        assert_eq!(body.as_deref(), Some(plan_body.as_str()));
+        assert!(sys_tokens > 0, "tokens estimated from the skill body");
+        assert!(plan_highlight, "resumed task-plan commit starts yellow");
+
+        // No persisted skill: no highlight.
+        let skill_handle: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let (_body, _sys_tokens, plan_highlight) =
+            initial_skill_state(&skill_handle, "act", std::path::Path::new("/tmp"));
+        assert!(!plan_highlight, "no committed skill means no highlight");
     }
 }

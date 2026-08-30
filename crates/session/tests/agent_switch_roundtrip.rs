@@ -140,6 +140,8 @@ async fn sandbox_then_act_round_trip_folds_nothing() {
     );
 }
 
+// Total no-op holds for agent state/transcript with no armed skill; when a
+// skill is armed, a bare /act additionally clears it (skill_early_exit_clear.rs).
 #[tokio::test]
 async fn act_while_already_act_is_a_total_noop() {
     let store = mem_store().await;

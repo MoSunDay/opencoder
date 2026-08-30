@@ -7,8 +7,10 @@
 //! `sessions.skill`. The still-running kickoff turn therefore carries no
 //! `[active skill]` reminder (and no latent-tool unlock); only after the
 //! drain consumes the item does `record_compound` resolve + activate +
-//! persist the skill, so the drained turn's request ends with the tail
-//! reminder and the recorded user message is token-stripped.
+//! persist the skill, so the drained turn ships the skill body as the
+//! `[skill loaded]` message (the transient `[active skill]` tail is
+//! fallback-only and stays suppressed while that marker is on record) and
+//! the recorded user message is token-stripped.
 use std::sync::Arc;
 
 use opencoder_core::{resolve_agent, Config};
@@ -182,8 +184,9 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
         system_content(&requests[0])
     );
 
-    // The drained turn resolves the skill at consumption: its request ends
-    // with the transient tail reminder naming the skill's source file.
+    // The drained turn resolves the skill at consumption: the body ships
+    // as the `[skill loaded]` message naming the source file, and the
+    // `[active skill]` tail stays suppressed while that marker is present.
     let drained = &requests[1];
     assert!(
         !system_content(drained).contains("haiku"),
@@ -197,8 +200,12 @@ async fn queued_skill_fires_at_consumption_not_during_kickoff() {
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("");
     assert!(
-        last_user.contains("[active skill]") && last_user.contains("haiku/SKILL.md"),
-        "drained queued turn must end with the skill tail reminder: {last_user}"
+        last_user.contains("[skill loaded]") && last_user.contains("haiku/SKILL.md"),
+        "drained queued turn must carry the loaded skill body: {last_user}"
+    );
+    assert!(
+        !last_user.contains("[active skill]"),
+        "tail must be suppressed while the loaded marker is present: {last_user}"
     );
 
     // The recorded user message is the clean text; the token never reaches

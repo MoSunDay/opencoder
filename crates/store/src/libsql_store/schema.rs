@@ -3,10 +3,17 @@ use libsql::Connection;
 
 const SCHEMA_VERSION: i64 = 13;
 
+// Order invariant: busy_timeout must precede any locking statement, and
+// synchronous=NORMAL must be applied BEFORE journal_mode=WAL. Switching a
+// fresh (headerless) database into WAL performs header initialization and
+// fsyncs under whatever synchronous policy is active at that moment; if WAL
+// comes first the switch runs at the default FULL and every later bootstrap
+// fsync pays full sync cost too. On ZFS (sync=standard) a FULL fsync inside an
+// I/O storm amplifies to seconds-minutes, stalling cold start.
 const PRAGMAS: &[&str] = &[
     "PRAGMA busy_timeout=30000",
-    "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
+    "PRAGMA journal_mode=WAL",
     "PRAGMA foreign_keys=ON",
     "PRAGMA cache_size=-65536",
     "PRAGMA wal_autocheckpoint=1000",
@@ -214,7 +221,23 @@ pub async fn checkpoint_wal(conn: &Connection) -> Result<()> {
 /// `schema_version` may record a stale older version, migrations guard every
 /// `ADD COLUMN` via `add_column_if_absent`, so re-running never fails with
 /// `duplicate column name`.
+///
+/// The whole bootstrap runs inside ONE `BEGIN IMMEDIATE` transaction: the 17
+/// DDL statements would otherwise each auto-commit (17 write-amplifying
+/// commits per open). `BEGIN IMMEDIATE` plus the already-active
+/// `busy_timeout` makes concurrent openers queue on the single write lock
+/// instead of failing, and any failing step rolls the entire bootstrap (in
+/// particular the migration sequence) back atomically.
 pub async fn bootstrap(conn: &Connection) -> Result<()> {
+    super::tx::run_tx(conn, "BEGIN IMMEDIATE", || bootstrap_tx(conn)).await
+}
+
+/// Transaction body of [`bootstrap`]; runs with the write lock already held.
+///
+/// Statement order is load-bearing: the pre-migration DDL batch, then the
+/// version check / migrate / set_version branch, then the post-migration
+/// index batch (some indexes target columns that only exist after `migrate`).
+async fn bootstrap_tx(conn: &Connection) -> Result<()> {
     conn.execute(CREATE_SCHEMA_VERSION, ()).await?;
     conn.execute(CREATE_SESSIONS, ()).await?;
     conn.execute(CREATE_MESSAGES, ()).await?;
@@ -240,10 +263,10 @@ pub async fn bootstrap(conn: &Connection) -> Result<()> {
     if let Some(prev) = current {
         if prev < SCHEMA_VERSION {
             migrate(conn, prev).await?;
-            set_version(conn, SCHEMA_VERSION).await?;
+            write_version(conn, SCHEMA_VERSION).await?;
         }
     } else {
-        set_version(conn, SCHEMA_VERSION).await?;
+        write_version(conn, SCHEMA_VERSION).await?;
     }
     // The task_type index depends on a column that only physically exists in
     // fresh databases (via CREATE TABLE) or after the v5 migration adds it for
@@ -456,20 +479,33 @@ pub async fn current_version(conn: &Connection) -> Result<Option<i64>> {
     }
 }
 
+/// Replace the version row in its own transaction (the standalone write path).
+///
+/// Kept for callers/tests that need the transactional write in isolation; the
+/// bootstrap path inlines the body via `write_version` because it already
+/// holds the bootstrap transaction.
+#[cfg_attr(not(test), allow(dead_code))]
 async fn set_version(conn: &Connection, version: i64) -> Result<()> {
     // Wrap DELETE + INSERT in a single transaction so a crash between them
     // cannot leave schema_version empty (which would trigger a spurious full
     // re-migration on the next boot).
-    super::tx::run_tx(conn, "BEGIN", || async move {
-        conn.execute("DELETE FROM schema_version", ()).await?;
-        conn.execute(
-            "INSERT INTO schema_version(version) VALUES (?1)",
-            libsql::params![version],
-        )
-        .await?;
-        Ok(())
-    })
-    .await
+    super::tx::run_tx(conn, "BEGIN", || write_version(conn, version)).await
+}
+
+/// DELETE + INSERT the version row WITHOUT a surrounding transaction.
+///
+/// Standalone transaction body shared by `set_version` (which wraps it in its
+/// own `BEGIN`) and `bootstrap_tx` (which already runs inside the bootstrap
+/// transaction — nesting another BEGIN there would fail with "cannot start a
+/// transaction within a transaction").
+async fn write_version(conn: &Connection, version: i64) -> Result<()> {
+    conn.execute("DELETE FROM schema_version", ()).await?;
+    conn.execute(
+        "INSERT INTO schema_version(version) VALUES (?1)",
+        libsql::params![version],
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -505,5 +541,21 @@ mod tests {
         let mut rows = stmt.query(()).await.unwrap();
         let count: i64 = rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap();
         assert_eq!(count, 1, "schema_version must hold exactly one row");
+    }
+
+    /// Regression guard for cold-start fsync storms: `synchronous=NORMAL` must be
+    /// applied BEFORE `journal_mode=WAL`, because the WAL switch on a fresh
+    /// database performs header initialization + fsync and honors whatever
+    /// synchronous policy is active at that moment (default FULL otherwise).
+    #[test]
+    fn pragma_order_synchronous_precedes_journal_wal() {
+        let idx = |needle: &str| {
+            super::PRAGMAS
+                .iter()
+                .position(|p| p.contains(needle))
+                .unwrap_or_else(|| panic!("missing pragma containing {needle}"))
+        };
+        assert!(idx("busy_timeout") < idx("synchronous"));
+        assert!(idx("synchronous") < idx("journal_mode"));
     }
 }

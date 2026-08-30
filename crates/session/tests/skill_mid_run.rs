@@ -94,6 +94,17 @@ fn has_active_skill_reminder(req: &opencoder_llm::ChatRequest) -> bool {
     })
 }
 
+/// The skill body ships as the in-conversation `[skill loaded]` message
+/// naming `path` (the `[active skill]` tail pointer is fallback-only).
+fn has_loaded_skill_message(req: &opencoder_llm::ChatRequest, path: &str) -> bool {
+    req.messages.iter().any(|m| {
+        m.get("role").and_then(|r| r.as_str()) == Some("user")
+            && m.get("content")
+                .and_then(|c| c.as_str())
+                .is_some_and(|c| c.starts_with("[skill loaded] ") && c.contains(path))
+    })
+}
+
 /// Skill body as the TUI `$` picker / `skill_resolve` actually store it:
 /// the `> Source:` prefix (`opencoder_core::body_with_source` format) that
 /// the tail reminder parses the skill's path from.
@@ -229,7 +240,8 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     );
 
     // Turn 2's system prompt still excludes the body; the skill arrives as
-    // the transient tail reminder — the LAST user message of the payload.
+    // the in-conversation `[skill loaded]` message (the `[active skill]`
+    // tail pointer is fallback-only and stays suppressed).
     let second_system = system_content(&requests[1]);
     assert!(
         !second_system.contains("MID-RUN-SKILL"),
@@ -237,8 +249,12 @@ async fn skill_set_mid_run_appears_in_next_turn_tail_reminder() {
     );
     let tail = last_user_content(&requests[1]);
     assert!(
-        tail.contains("[active skill]") && tail.contains("/skills/mid-run/SKILL.md"),
-        "turn 2 tail reminder must name the mid-run skill's path: {tail}"
+        !tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is present: {tail}"
+    );
+    assert!(
+        has_loaded_skill_message(&requests[1], "/skills/mid-run/SKILL.md"),
+        "turn 2 receives the mid-run skill via the [skill loaded] message"
     );
 }
 
@@ -352,9 +368,9 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
         "turn 1 payload must carry no [active skill] reminder"
     );
 
-    // Turn 3 (queue follow-up): the skill arrives via the tail reminder —
-    // the LAST user message names the skill's source path; the system
-    // prompt stays skill-free.
+    // Turn 3 (queue follow-up): the skill arrives via the in-conversation
+    // `[skill loaded]` message; the system prompt stays skill-free and the
+    // tail pointer stays suppressed.
     let third_system = system_content(&requests[2]);
     assert!(
         !third_system.contains("QUEUE-SKILL"),
@@ -362,8 +378,12 @@ async fn skill_set_mid_run_appears_in_queue_followup_turn() {
     );
     let tail = last_user_content(&requests[2]);
     assert!(
-        tail.contains("[active skill]") && tail.contains("/skills/queue/SKILL.md"),
-        "turn 3 (queue follow-up) tail reminder must name the skill path: {tail}"
+        !tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is present: {tail}"
+    );
+    assert!(
+        has_loaded_skill_message(&requests[2], "/skills/queue/SKILL.md"),
+        "turn 3 (queue follow-up) receives the skill via the [skill loaded] message"
     );
 }
 
@@ -473,8 +493,12 @@ async fn skill_only_empty_prompt_starts_turn_with_skill_tail_reminder() {
     );
     let tail = last_user_content(&requests[0]);
     assert!(
-        tail.contains("[active skill]") && tail.contains("/skills/do-the-thing/SKILL.md"),
-        "tail reminder (last user message) must name the skill path: {tail}"
+        !tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is present: {tail}"
+    );
+    assert!(
+        has_loaded_skill_message(&requests[0], "/skills/do-the-thing/SKILL.md"),
+        "the skill-only submit delivers the body via the [skill loaded] message"
     );
 
     // A synthetic trigger user message must be recorded for skill-only submits

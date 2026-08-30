@@ -84,8 +84,8 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
 /// schema array.
 ///
 /// The filtering logic mirrors `runner::llm_call::run_one_llm_call` exactly
-/// (agent allowlist ∧ latent-gating, with the sandbox `question` exemption),
-/// so the estimate matches what the provider actually receives.
+/// (agent allowlist ∧ latent-gating, no agent exemptions), so the estimate
+/// matches what the provider actually receives.
 pub fn estimate_tool_schema_tokens(
     agent: &opencoder_core::Agent,
     skill_body: Option<&str>,
@@ -217,58 +217,71 @@ mod tests {
         }
     }
 
-    /// The `question` tool is latent and gated by the task-plan skill:
-    /// the sandbox agent always sees it (its clarification protocol is part of
-    /// the base prompt), an act agent sees it only once a skill body whose
-    /// first 500 chars name the skill unlocks it, and non-primary agents never
-    /// do. The schema itself stays cheap (<200 tokens).
+    /// The `question` tool is latent and gated by the task-plan skill, with
+    /// no agent-kind exemptions: act and sandbox hide it without a skill and
+    /// see it only once a skill body naming the skill inside the first
+    /// 500 chars unlocks it. A `review` body must not unlock it, and the
+    /// command agent never sees it. The schema itself stays cheap
+    /// (<200 tokens).
     #[test]
-    fn question_schema_is_sandbox_only_and_compact() {
+    fn question_schema_is_task_plan_gated_and_compact() {
         let reg = registry();
         let sandbox = opencoder_core::resolve_agent("sandbox").unwrap();
         let act = opencoder_core::resolve_agent("act").unwrap();
         let command = opencoder_core::resolve_agent("command").unwrap();
-
-        // Sandbox: question is visible with NO skill at all.
-        let sandbox_tokens = estimate_tool_schema_tokens(&sandbox, None, &reg);
-
-        // Act without a skill: question absent. With a task-plan body (the
-        // skill name inside the 500-char prefix window): present. A `review`
-        // body must NOT unlock it (question is task-plan-only).
-        let act_tokens = estimate_tool_schema_tokens(&act, None, &reg);
-        let plan_body = Some("# task-plan\n\n## Overview\n\nplan the work; ask via question");
-        let review_body = Some("# review\n\nevidence-driven check; use question when blocked");
-        let act_unlocked_plan = estimate_tool_schema_tokens(&act, plan_body, &reg);
-        let act_unlocked_review = estimate_tool_schema_tokens(&act, review_body, &reg);
-
-        // Isolate the question schema's own cost (sandbox always includes it).
         let mut without = reg.clone();
         without.remove("question");
-        let sandbox_without = estimate_tool_schema_tokens(&sandbox, None, &without);
-        let cost = sandbox_tokens - sandbox_without;
-        assert!(cost > 0, "sandbox agent must see the question schema");
+
+        // No skill: question absent for BOTH primary agents — no sandbox
+        // exemption, the schema count matches the registry minus question.
+        for agent in [&act, &sandbox] {
+            assert_eq!(
+                estimate_tool_schema_tokens(agent, None, &reg),
+                estimate_tool_schema_tokens(agent, None, &without),
+                "{:?} without a skill must not carry the question schema",
+                agent.kind
+            );
+        }
+
+        // A task-plan body naming the skill (and the tool) inside the
+        // 500-char prefix window unlocks it for both agents.
+        let plan_body = Some("# task-plan\n\n## Overview\n\nplan the work; ask via question");
+        let cost = estimate_tool_schema_tokens(&act, plan_body, &reg)
+            - estimate_tool_schema_tokens(&act, plan_body, &without);
+        for agent in [&act, &sandbox] {
+            let tokens = estimate_tool_schema_tokens(agent, plan_body, &reg);
+            assert_eq!(
+                tokens - estimate_tool_schema_tokens(agent, plan_body, &without),
+                cost,
+                "{:?} with an unlocked skill sees question at the same cost",
+                agent.kind
+            );
+            assert!(
+                tokens > estimate_tool_schema_tokens(agent, None, &reg),
+                "a task-plan body must unlock the question schema for {:?}",
+                agent.kind
+            );
+        }
+
+        // A `review` body must NOT unlock it (question is task-plan-only).
+        let review_body = Some("# review\n\nevidence-driven check; use question when blocked");
+        for agent in [&act, &sandbox] {
+            assert_eq!(
+                estimate_tool_schema_tokens(agent, review_body, &reg),
+                estimate_tool_schema_tokens(agent, review_body, &without),
+                "a review body must NOT unlock question for {:?}",
+                agent.kind
+            );
+        }
+
+        // The command agent never sees it, with or without a skill body.
         assert_eq!(
-            act_unlocked_plan - estimate_tool_schema_tokens(&act, plan_body, &without),
-            cost,
-            "act agent with an unlocked skill sees question at the same cost"
-        );
-        assert!(
-            act_unlocked_plan > act_tokens,
-            "a task-plan body must unlock the question schema for act: {act_tokens} -> {act_unlocked_plan}"
-        );
-        assert_eq!(
-            act_unlocked_review, act_tokens,
-            "a review body must NOT unlock question for act (task-plan-only)"
-        );
-        assert!(
-            sandbox_tokens > act_tokens,
-            "sandbox must carry the question schema that a skill-less act lacks: {act_tokens} vs {sandbox_tokens}"
-        );
-        assert_eq!(
-            estimate_tool_schema_tokens(&command, None, &reg),
-            estimate_tool_schema_tokens(&command, None, &without),
+            estimate_tool_schema_tokens(&command, plan_body, &reg),
+            estimate_tool_schema_tokens(&command, plan_body, &without),
             "command agent must NOT see the question schema"
         );
+
+        assert!(cost > 0, "the question schema must cost something");
         assert!(
             cost < 200,
             "question schema should stay compact (<200 tokens), got {cost}"

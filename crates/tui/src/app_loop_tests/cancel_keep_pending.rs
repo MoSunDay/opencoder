@@ -182,6 +182,7 @@ async fn fold_error_resyncs_steer_mirror_from_store() {
         &store,
         "test-session",
         &mut queue_items,
+        &mut false,
         &mut crate::queue_admitter::AdmitUiState::default(),
         &mut running,
         &mut cancelled,

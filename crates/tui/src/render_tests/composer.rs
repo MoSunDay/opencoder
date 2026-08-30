@@ -47,7 +47,7 @@ fn composer_renders_prompt_and_multiline_text() {
     );
 }
 
-/// The `/annotation` editor (`plan_mode` active, `edit_title == "edit
+/// The `/annotation` editor (`plan_edit_mode` active, `edit_title == "edit
 /// annotation"`) mirrors the body top-title (`workdir · model · effort`) on
 /// its top border, right-aligned and coloured green — alongside the left
 /// ` edit annotation ` label.
@@ -145,7 +145,7 @@ fn plan_editor_has_no_info_top_title() {
 
 /// Copy mode integrates at the `render_composer` seam: with `copy_mode`
 /// set, the function early-exits into the clean renderer — text flush at
-/// column 0 (row 1 when `plan_mode` reserves row 0 for the COPY MODE
+/// column 0 (row 1 when `plan_edit_mode` reserves row 0 for the COPY MODE
 /// chip), no border, no prompt glyph — regardless of the other decoration
 /// parameters (plan label, titles, badges).
 #[test]
@@ -212,7 +212,7 @@ fn composer_copy_mode_param_early_exits_to_clean_view() {
 }
 
 /// Full-frame regression for the `/annotation` editor + copy mode: with the
-/// annotation overlay open (`plan_mode` = mode label, `edit_title` = "edit
+/// annotation overlay open (`plan_edit_mode` = mode label, `edit_title` = "edit
 /// annotation") and copy mode active, the frame must show the editor text
 /// undecorated — flush at column 0, no border rows, no prompt glyph, no
 /// editor titles — plus the COPY MODE chip. This pins the integration of the
@@ -267,13 +267,14 @@ fn full_frame_annotation_editor_copy_mode_hides_border() {
         true, // copy_mode
         &[],
         false,
-        Some("NORMAL"),          // plan_mode (annotation editor open)
+        Some("NORMAL"),          // plan_edit_mode (annotation editor open)
         Some("edit annotation"), // edit_title
         0,
         0,
         true,
         opencoder_core::ApMode::default(),
         "act",
+        false,
         None,
     )
     .unwrap();

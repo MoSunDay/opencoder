@@ -10,7 +10,8 @@ Run `opencoder` to enter the TUI:
 
 - **`Enter`** — submit the composer input
 - **`Tab`** — while running, submits a follow-up that is queued and injected at the next turn boundary (same as a normal submit when idle)
-- **`/plan <content>`** — compound submit: switch to plan mode with content attached, e.g. `/plan implement an LRU cache`
+- **`/sandbox <content>`** — compound submit: switch to the sandbox (read-only) agent with content attached, e.g. `/sandbox review the login module`
+- **`/act_clear_context <content>`** — collapse the context (the current agent stays unchanged) and run with the content in the fresh context; alias `/clear_context`
 - **`/task`** — open the session picker to switch/resume sessions
 
 ### Headless

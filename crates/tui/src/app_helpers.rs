@@ -320,7 +320,11 @@ pub(crate) fn worker_dead(chat: &mut ChatView) {
 /// time (queue/steer drain resolved a `$name` token at the idle boundary).
 /// The runner shares only the body, so the display name is derived from the
 /// body's `> Source: .../skills/<name>/SKILL.md` prefix; `sys_tokens` is
-/// re-estimated from the new body. No-op while both sides agree.
+/// re-estimated from the new body, and the `[act]` task-plan chip highlight
+/// is re-derived. The early-return (body unchanged) path must keep the
+/// caller's `plan_skill_active` value as-is: a yellow cleared by a steer/
+/// queued input taking effect must not be revived by a later idle mirror
+/// refresh. No-op while both sides agree.
 pub(crate) fn refresh_skill_mirrors(
     skill_handle: &Arc<Mutex<Option<String>>>,
     active_skill: &mut Option<String>,
@@ -328,6 +332,7 @@ pub(crate) fn refresh_skill_mirrors(
     sys_tokens: &mut u64,
     agent_name: &str,
     workdir: &Path,
+    plan_skill_active: &mut bool,
 ) {
     let body = skill_handle.lock().ok().and_then(|g| g.clone());
     if body == *active_skill_body {
@@ -338,6 +343,7 @@ pub(crate) fn refresh_skill_mirrors(
         .and_then(crate::skill_display::skill_name_from_body);
     *active_skill_body = body;
     *sys_tokens = sys_tokens_for(agent_name, workdir, active_skill_body.as_deref());
+    *plan_skill_active = crate::skill_persist::act_plan_highlight(active_skill.as_deref());
 }
 
 pub(crate) fn sys_tokens_for(agent_name: &str, workdir: &Path, skill: Option<&str>) -> u64 {

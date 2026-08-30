@@ -138,11 +138,19 @@ async fn small_skill_body_rides_payload_and_persists() {
         "full body"
     );
     assert!(!system_content(req).contains("REV-STEP"), "system clean");
-    assert!(
-        !last_user_content(req).contains("REV-STEP"),
-        "tail reminder carries no body — it is only the fallback pointer"
+    // Fallback-pointer contract: `ensure_full_body_loaded` records the
+    // marker BEFORE the first LLM round, so the transient `[active skill]`
+    // tail stays silent and the body appears exactly once — inside the
+    // persisted marker message, never duplicated by a tail.
+    assert_eq!(
+        count_user_occurrences(req, "REV-STEP-1"),
+        1,
+        "body rides exactly once — the persisted marker message"
     );
-    assert!(last_user_content(req).contains("[active skill]"));
+    assert!(
+        !any_user_contains(req, "[active skill]"),
+        "matching [skill loaded] marker suppresses the fallback pointer"
+    );
 
     let inj = injected(&s, path).expect("marker message recorded in transcript");
     assert!(inj.synthetic, "synthetic flag set");

@@ -287,11 +287,24 @@ async fn steer_admitted_mid_turn_defers_skill_until_absorption() {
         "turn 1 payload never sees the token: {req1_text}"
     );
 
-    // Turn 2 carries the skill as the transient tail reminder, token stripped.
+    // Turn 2 carries the skill via the in-conversation `[skill loaded]`
+    // message (the tail pointer is fallback-only), token stripped.
     let tail = last_user_content(&requests[1]);
     assert!(
-        tail.contains("[active skill]") && tail.contains("skills/review/SKILL.md"),
-        "turn 2 tail reminder activates the skill and names its source: {tail}"
+        !tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is present: {tail}"
+    );
+    assert!(
+        requests[1].messages.iter().any(|m| {
+            m.get("role").and_then(|r| r.as_str()) == Some("user")
+                && m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|c| {
+                        c.starts_with("[skill loaded] ")
+                            && c.contains("skills/review/SKILL.md")
+                    })
+        }),
+        "turn 2 receives the skill via the [skill loaded] message naming its source"
     );
     let user_texts: Vec<String> = requests[1]
         .messages

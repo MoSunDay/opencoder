@@ -25,7 +25,7 @@ use crate::queue_panel::QueueBtn;
 use crate::render_viewport::ViewportCache;
 use crate::task::TaskPicker;
 use crate::theme;
-use crate::composer;
+use crate::{composer, copy_mode};
 
 /// Production terminal type: the wrap-aware backend that lets copy mode
 /// suppress `MoveTo` at display-only wrap boundaries (see `copy_wrap`).
@@ -144,8 +144,10 @@ pub(crate) fn render<B: Backend + 'static>(
     is_top_level: bool,
     ap_mode: opencoder_core::ApMode,
     display_mode: &str,
+    plan_skill_active: bool,
     notepad: Option<&crate::notepad::NotepadView>,
 ) -> Result<()> {
+    crate::boot_clock::note_first_frame();
     let wrap_plan = crate::copy_wrap::frame_plan(terminal, copy_mode);
     terminal.draw(|f| {
         let area = f.area();
@@ -195,7 +197,7 @@ pub(crate) fn render<B: Backend + 'static>(
         let plan_active = plan_edit_mode.is_some();
         // The attachment badge consumes one inner line per pending image,
         // capped by the composer's minimum height so the input area is never
-        // squeezed away; must mirror the plan-mode filter applied at the
+        // squeezed away; must mirror the plan editor filter applied at the
         // render_composer call site below.
         let badge_h: u16 = if !plan_active {
             (pending_images.len() as u16).min((draw_area.height / 3).saturating_sub(2))
@@ -334,6 +336,7 @@ pub(crate) fn render<B: Backend + 'static>(
             f,
             chunks[ci],
             display_mode,
+            plan_skill_active,
             running,
             status,
             anim_tick,
@@ -641,7 +644,7 @@ fn render_composer(
     // glyph, no attachment badge — so terminal-native selection spans
     // exactly the typed text (mirrors the body's clean view).
     if copy_mode {
-        crate::copy_mode::render_composer_clean(f, area, input, plan_edit_mode.is_some(), wrap_plan);
+        copy_mode::render_composer_clean(f, area, input, plan_edit_mode.is_some(), wrap_plan);
         return;
     }
     if disabled {

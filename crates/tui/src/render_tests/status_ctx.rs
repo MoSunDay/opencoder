@@ -33,6 +33,7 @@ fn status_bar_shows_ctx_percent() {
                 f.area(),
                 "act",
                 false,
+                false,
                 "",
                 0,
                 Some(5000),
@@ -80,6 +81,7 @@ fn status_bar_colors_split_between_meter_and_labels() {
                 f,
                 f.area(),
                 "act",
+                false,
                 false,
                 "",
                 0,
@@ -154,7 +156,19 @@ fn status_bar_without_provider_truth_shows_placeholder_and_zero_percent() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
         .draw(|f| {
-            render_status(f, f.area(), "act", false, "", 0, None, 80000, 200000, 0);
+            render_status(
+                f,
+                f.area(),
+                "act",
+                false,
+                false,
+                "",
+                0,
+                None,
+                80000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 

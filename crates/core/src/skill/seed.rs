@@ -28,10 +28,6 @@ const BUILTIN_SKILLS: &[(&str, &[(&str, &str)])] = &[
                 include_str!("../../assets/skills/task-plan/SKILL.md"),
             ),
             (
-                "references/any-home-plan-run.md",
-                include_str!("../../assets/skills/task-plan/references/any-home-plan-run.md"),
-            ),
-            (
                 "references/launch-closure-plan-checklist.md",
                 include_str!(
                     "../../assets/skills/task-plan/references/launch-closure-plan-checklist.md"

@@ -9,14 +9,15 @@ fn sys_tokens_counts_system_prompt() {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let dir = std::env::temp_dir();
-    let base = crate::app::sys_tokens_for("act", &dir, None);
+    let base = crate::app_helpers::sys_tokens_for("act", &dir, None);
     assert!(base > 0, "the system prompt must register some tokens");
     // deterministic
-    assert_eq!(crate::app::sys_tokens_for("act", &dir, None), base);
+    assert_eq!(crate::app_helpers::sys_tokens_for("act", &dir, None), base);
     // a plain skill body (no Source prefix, no latent tools) no longer adds
     // tokens: skill bodies moved out of the system prompt, so the count is
     // unchanged until a Source path or latent tool name appears.
-    let plain = crate::app::sys_tokens_for("act", &dir, Some("extra skill guidance body text"));
+    let plain =
+        crate::app_helpers::sys_tokens_for("act", &dir, Some("extra skill guidance body text"));
     assert_eq!(
         plain, base,
         "a plain skill body must not change the system-prompt estimate"
@@ -24,13 +25,16 @@ fn sys_tokens_counts_system_prompt() {
     // a Source-prefixed body surfaces the one-line active-skill tail
     // reminder, which does add tokens on top of the base.
     let sourced_body = "> Source: /skills/x/SKILL.md\n\nbody";
-    let sourced = crate::app::sys_tokens_for("act", &dir, Some(sourced_body));
+    let sourced = crate::app_helpers::sys_tokens_for("act", &dir, Some(sourced_body));
     assert!(
         sourced > base,
         "a Source-prefixed skill body must raise the count (tail reminder)"
     );
     // unknown agent -> 0 (no panic)
-    assert_eq!(crate::app::sys_tokens_for("does-not-exist", &dir, None), 0);
+    assert_eq!(
+        crate::app_helpers::sys_tokens_for("does-not-exist", &dir, None),
+        0
+    );
 }
 
 /// Regression for the agent-switch token-recalculation bug: when a skill is
@@ -77,8 +81,8 @@ fn sys_tokens_skill_body_unlocks_latent_tools_and_beats_name() {
     // End-to-end: a stored body (Source-prefixed) out-estimates the bare
     // skill name — pinning that SwitchAgent passes the body.
     let dir = std::env::temp_dir();
-    let by_name = crate::app::sys_tokens_for("act", &dir, Some("code-review"));
-    let by_body = crate::app::sys_tokens_for(
+    let by_name = crate::app_helpers::sys_tokens_for("act", &dir, Some("code-review"));
+    let by_body = crate::app_helpers::sys_tokens_for(
         "act",
         &dir,
         Some("> Source: /skills/code-review/SKILL.md\n\nReview the diff line by line."),

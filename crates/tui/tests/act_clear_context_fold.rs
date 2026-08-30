@@ -1,7 +1,8 @@
 //! Worker-level integration tests for `/clear_context` (alias
 //! `/act_clear_context`): the fold must preserve the newest assistant reply
 //! as a neutral continuity seed, execute it in exactly one LLM turn, persist
-//! a resume boundary, and never touch the active agent.
+//! a resume boundary, and leave an act session's agent untouched — while a
+//! sandbox session converges to act (one extra `AgentSwitch`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +36,21 @@ fn act_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> Se
     SessionState::new(
         id,
         resolve_agent("act").expect("act agent"),
+        Config {
+            model: "m/g".into(),
+            ..Config::default()
+        },
+        mock as Arc<dyn opencoder_llm::ChatStream>,
+        std::env::temp_dir(),
+    )
+    .with_store(store)
+    .mark_session_created()
+}
+
+fn sandbox_session(id: &str, mock: Arc<MockChatClient>, store: Arc<dyn Store>) -> SessionState {
+    SessionState::new(
+        id,
+        resolve_agent("sandbox").expect("sandbox agent"),
         Config {
             model: "m/g".into(),
             ..Config::default()
@@ -136,7 +152,9 @@ async fn clear_context_folds_transcript_and_feeds_seed_to_model() {
         "earlier chatter must be dropped, got: {seed_body}"
     );
 
-    // (2) The fold keeps the agent: no AgentSwitch, agent still act.
+    // (2) The fold keeps the agent for an already-act session: no
+    // AgentSwitch, agent still act. (The sandbox variant converges to act —
+    // see `sandbox_clear_context_converges_to_act` below.)
     assert!(
         !events
             .iter()
@@ -362,5 +380,68 @@ async fn act_switch_after_fold_is_pure_state_change() {
         meta.agent.as_deref(),
         Some("act"),
         "the switch persists to the store"
+    );
+}
+
+/// Sandbox convergence: `/act_clear_context` from a sandbox session folds the
+/// transcript AND flips the agent to act - AgentSwitch(act) follows
+/// TranscriptReset, the seed still executes in exactly one LLM turn, and the
+/// convergence persists to the store.
+#[tokio::test]
+async fn sandbox_clear_context_converges_to_act() {
+    let store = mem_store().await;
+    store
+        .create_session(&SessionMeta {
+            id: "sandbox-fold".into(),
+            agent: Some("sandbox".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mock = Arc::new(
+        MockChatClient::new().push_script(vec![text_done("continuing from the preserved say")]),
+    );
+    let mut sess = sandbox_session("sandbox-fold", mock.clone(), store.clone());
+    let say = assistant_with_text("a1", "the sandbox answer to keep");
+    seed_transcript(&store, "sandbox-fold", vec![say.clone()]).await;
+    sess.messages = vec![say];
+
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(64);
+    let quit = process_cmd(UiCmd::Prompt("/act_clear_context".into(), vec![]), &mut sess, &tx).await;
+    assert!(!quit, "the fold must not signal quit");
+    let events = drain(&mut rx).await;
+
+    let reset_idx = events
+        .iter()
+        .position(|e| matches!(e, UiEvent::Session(SessionEvent::TranscriptReset(_))))
+        .expect("TranscriptReset must be emitted");
+    let switch_idx = events
+        .iter()
+        .position(|e| matches!(
+            e,
+            UiEvent::Session(SessionEvent::AgentSwitch(ref n)) if n == "act"
+        ))
+        .expect("AgentSwitch(act) must be emitted for the sandbox convergence");
+    assert!(
+        switch_idx > reset_idx,
+        "AgentSwitch(act) must follow TranscriptReset, got {events:?}"
+    );
+    assert_eq!(
+        mock.call_count(),
+        1,
+        "the seed executes in exactly one LLM turn"
+    );
+    assert_eq!(sess.agent.name, "act", "the live session converges to act");
+
+    let meta = store
+        .get_session("sandbox-fold")
+        .await
+        .unwrap()
+        .expect("session row exists");
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("act"),
+        "the convergence persists to the store"
     );
 }

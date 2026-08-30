@@ -158,6 +158,25 @@ async fn seed_session(store: &Arc<dyn Store>, sid: &str) {
         .unwrap();
 }
 
+/// Same seeding as [`seed_session`] but the session starts as the sandbox
+/// agent — the convergence target for clear-context is act.
+async fn seed_sandbox_session(store: &Arc<dyn Store>, sid: &str) {
+    store
+        .create_session(&SessionMeta {
+            id: sid.into(),
+            // Seeded title: prevents maybe_generate_title from hanging on the
+            // HangingStream (same rationale as seed_session).
+            title: Some("seeded".into()),
+            agent: Some("sandbox".into()),
+            model: Some("test/model".into()),
+            created_at: 0,
+            updated_at: 0,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+}
+
 /// The admission-time mode changes stay 409 while running, side-effect free;
 /// after the drain ends the same switch succeeds.
 #[tokio::test]
@@ -346,11 +365,12 @@ async fn steered_mode_command_admitted_while_running_applies_at_turn_boundary() 
 
 /// A steered `/clear_context` while running is admitted (200), absorbed at the
 /// turn boundary and applied: `transcript_reset` persists, NO `agent_switched`
-/// (clear-context keeps the active agent) and no legacy `plan_handoff` frame.
-/// With no assistant reply yet the boundary degrades to the blank sentinel, so
-/// the run stops without a second LLM call.
+/// (this session is already act — the already-act clear is a pure agent
+/// no-op; only a sandbox session converges to act) and no legacy
+/// `plan_handoff` frame. With no assistant reply yet the boundary degrades to
+/// the blank sentinel, so the run stops without a second LLM call.
 #[tokio::test]
-async fn steered_clear_context_resets_transcript_and_keeps_agent() {
+async fn steered_clear_context_on_act_session_keeps_agent() {
     let tmp = tempfile::tempdir().unwrap();
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
     let sid = "steered-clear";
@@ -577,4 +597,99 @@ async fn sandbox_session_emits_agent_switched_with_sandbox_value() {
     let handle = state.handles.lock().await.get(sid).cloned().unwrap();
     handle.cancel.lock().await.cancel();
     wait_idle(&state, sid).await;
+}
+
+/// A queued `/act_clear_context` in a SANDBOX session converges to act: after
+/// the drain picks it up the boundary persists, `agent_switched` follows
+/// `transcript_reset`, the meta agent is `act`, and the sentinel boundary
+/// stops without a second LLM call (no assistant reply existed).
+#[tokio::test]
+async fn queued_clear_context_in_sandbox_session_converges_to_act() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let sid = "queued-sandbox-clear";
+    seed_sandbox_session(&store, sid).await;
+    let llm = Arc::new(HangingStream {
+        calls: AtomicUsize::new(0),
+    });
+    let state = seeded_state(&tmp, &store, llm.clone());
+    let app = opencoder_web::build_app(state.clone(), None, false);
+
+    start_running_drain(&app, &store, sid, &llm).await;
+    // Everything persisted up to here is pre-command.
+    let cursor = store.last_event_seq(sid).await.unwrap();
+
+    let admitted = request(
+        &app,
+        "POST",
+        &format!("/api/sessions/{sid}/prompt"),
+        r#"{"prompt":"/act_clear_context","delivery":"queue"}"#,
+    )
+    .await;
+    assert_eq!(
+        admitted.status(),
+        StatusCode::OK,
+        "queued control command must be admitted while running"
+    );
+
+    // A queued item waits for the idle boundary; hard-cancel the hung run
+    // (a hard interrupt keeps pending rows for the next drain), then wake the
+    // runner with a bare `/act` (a no-op on this agent-to-be) so the fresh
+    // drain pops the queue FIFO and applies the clear without any LLM call.
+    let handle = state.handles.lock().await.get(sid).cloned().unwrap();
+    handle.cancel.lock().await.cancel();
+    wait_idle(&state, sid).await;
+    let kick = request(
+        &app,
+        "POST",
+        &format!("/api/sessions/{sid}/prompt"),
+        r#"{"prompt":"/act","delivery":"queue"}"#,
+    )
+    .await;
+    assert_eq!(kick.status(), StatusCode::OK);
+
+    wait_agent(&store, sid, "act").await;
+    wait_for_event_kind(&store, sid, "transcript_reset").await;
+    wait_for_event_kind(&store, sid, "agent_switched").await;
+    wait_idle(&state, sid).await;
+
+    // transcript_reset lands before agent_switched (the reset is emitted
+    // first; the convergence frame follows it).
+    let events = store.events_after(sid, cursor).await.unwrap();
+    let reset_idx = events
+        .iter()
+        .position(|r| r.sse_kind.as_deref() == Some("transcript_reset"))
+        .expect("transcript_reset must persist");
+    let switch_idx = events
+        .iter()
+        .position(|r| r.sse_kind.as_deref() == Some("agent_switched"))
+        .expect("agent_switched must persist for the sandbox convergence");
+    assert!(switch_idx > reset_idx, "agent_switched must follow transcript_reset, got {:?}",
+        events.iter().map(|r| r.sse_kind.clone()).collect::<Vec<_>>());
+
+    // The converged agent persists with the boundary.
+    let meta = store.get_session(sid).await.unwrap().unwrap();
+    assert_eq!(
+        meta.agent.as_deref(),
+        Some("act"),
+        "sandbox clear converges to act"
+    );
+    assert!(opencoder_session::control_cmd::is_clear_context_handoff(
+        meta.handoff_plan.as_deref().unwrap_or("")
+    ),
+    "the clear (no assistant reply) must persist the sentinel, got {:?}",
+    meta.handoff_plan);
+
+    // Sentinel path stops without another LLM call; the command never
+    // reaches the transcript.
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1, "no second LLM call");
+    let messages = store.load_messages(sid).await.unwrap();
+    assert!(messages
+        .iter()
+        .all(|message| !message.text().contains("/act_clear_context")));
+    assert!(store
+        .pending_inputs(sid, Delivery::Queue)
+        .await
+        .unwrap()
+        .is_empty());
 }

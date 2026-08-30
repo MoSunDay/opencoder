@@ -9,10 +9,11 @@
 //!   commands are applied without LLM turns and the real prompt gets a
 //!   turn; the run finishes (Done) with an empty queue
 //! - clear_context_survives_resume: after /clear_context, resume
-//!   reconstructs the fresh-start marker transcript. ClearContext KEEPS the
-//!   active agent and ALWAYS preserves a chain: the last assistant reply
-//!   becomes a neutral continuity seed, only a transcript with no assistant
-//!   text collapses to the blank fresh-start sentinel.
+//!   reconstructs the fresh-start marker transcript. ClearContext ALWAYS
+//!   preserves a chain: the last assistant reply becomes a neutral continuity
+//!   seed, only a transcript with no assistant text collapses to the blank
+//!   fresh-start sentinel. A clear from a sandbox session converges to act;
+//!   an already-act session keeps its agent and its exact event sequence.
 
 use std::sync::Arc;
 
@@ -278,8 +279,8 @@ async fn clear_context_survives_resume() {
             "transcript = seed marker + assistant response"
         );
         assert_eq!(
-            session.agent.name, "sandbox",
-            "ClearContext keeps the active agent"
+            session.agent.name, "act",
+            "sandbox clear converges to act"
         );
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         // The last assistant reply ("old answer") was preserved as the seed.
@@ -292,11 +293,20 @@ async fn clear_context_survives_resume() {
                 .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
             "TranscriptReset emitted"
         );
-        // ONLY TranscriptReset: no AgentSwitch, no PlanHandoff.
+        // Converged sandbox -> act: AgentSwitch(act) fires after the reset.
+        let reset_idx = evs
+            .iter()
+            .position(|e| matches!(e, SessionEvent::TranscriptReset(_)))
+            .expect("TranscriptReset emitted");
+        let switch_idx = evs
+            .iter()
+            .position(
+                |e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act"),
+            )
+            .expect("AgentSwitch(act) emitted on sandbox clear");
         assert!(
-            !evs.iter()
-                .any(|e| matches!(e, SessionEvent::AgentSwitch(_))),
-            "no AgentSwitch on clear_context, got {evs:?}"
+            switch_idx > reset_idx,
+            "AgentSwitch(act) must follow TranscriptReset, got {evs:?}"
         );
         assert!(
             evs.iter().any(|e| matches!(e, SessionEvent::Done)),
@@ -321,8 +331,8 @@ async fn clear_context_survives_resume() {
         "resume reconstructs seed marker + assistant response"
     );
     assert_eq!(
-        resumed.agent.name, "sandbox",
-        "resume keeps the active agent"
+        resumed.agent.name, "act",
+        "resume keeps the converged act agent"
     );
     let marker_text = resumed.messages[0].text();
     assert!(
@@ -446,8 +456,8 @@ async fn clear_context_no_assistant_text_survives_resume() {
             "transcript collapsed to 1 fresh-start marker"
         );
         assert_eq!(
-            session.agent.name, "sandbox",
-            "ClearContext keeps the active agent"
+            session.agent.name, "act",
+            "sandbox clear converges to act"
         );
         assert!(session.handoff_seq.is_some(), "handoff_seq set");
         // No assistant text -> blank sentinel stored so resume reconstructs
@@ -467,9 +477,9 @@ async fn clear_context_no_assistant_text_survives_resume() {
             "TranscriptReset emitted"
         );
         assert!(
-            !evs.iter()
-                .any(|e| matches!(e, SessionEvent::AgentSwitch(_))),
-            "ClearContext keeps the agent: no AgentSwitch, got {evs:?}"
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "act")),
+            "sandbox clear emits AgentSwitch(act), got {evs:?}"
         );
     }
 
@@ -489,8 +499,8 @@ async fn clear_context_no_assistant_text_survives_resume() {
         "resume reconstructs single fresh-start marker"
     );
     assert_eq!(
-        resumed.agent.name, "sandbox",
-        "resume keeps the active agent"
+        resumed.agent.name, "act",
+        "resume keeps the converged act agent"
     );
     let marker_text = resumed.messages[0].text();
     assert!(

@@ -1,0 +1,15 @@
+[package]
+name = "opencoder-shellguard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shell command safety classifier for sandbox mode (derived from rippy, MIT)"
+
+[dependencies]
+rable = "0.1.15"
+thiserror.workspace = true
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

@@ -1,0 +1,388 @@
+//! Ported from rippy (MIT) https://github.com/mpecan/rippy
+
+use super::{Classification, Handler, HandlerContext, get_flag_value, is_sole_help_flag, positional_args};
+use crate::verdict::AllowReason;
+
+/// Verbs across gcloud/az resource trees that mutate state, checked against
+/// the command-path (positional tokens before the first flag). Any match in
+/// the path means the command mutates regardless of what the last token is.
+const MUTATING_VERBS: &[&str] = &[
+    "create", "delete", "update", "set", "add", "remove", "patch", "replace", "deploy", "restart",
+    "start", "stop", "reset", "resize", "enable", "disable", "attach", "detach", "import",
+    "promote", "rollback", "clear", "purge", "drain", "scale", "migrate", "move", "clone",
+    "restore", "rotate", "revoke", "grant", "prune",
+];
+
+fn is_mutating_verb(tok: &str) -> bool {
+    MUTATING_VERBS.contains(&tok)
+        || tok.starts_with("create-")
+        || tok.starts_with("delete-")
+        || tok.starts_with("set-")
+}
+
+/// Positional tokens before the first flag — the actual command path,
+/// immune to flag values (`--name list`) or trailing `--format json` being
+/// mistaken for part of the path.
+fn command_path(args: &[String]) -> Vec<&str> {
+    args.iter()
+        .map(String::as_str)
+        .take_while(|a| !a.starts_with('-'))
+        .collect()
+}
+
+// kubectl
+
+pub(crate) static KUBECTL_HANDLER: KubectlHandler = KubectlHandler;
+
+pub(crate) struct KubectlHandler;
+
+const KUBECTL_SAFE: &[&str] = &[
+    "get",
+    "describe",
+    "explain",
+    "logs",
+    "top",
+    "cluster-info",
+    "version",
+    "api-resources",
+    "api-versions",
+    "wait",
+    "diff",
+    "plugin",
+    "completion",
+    "kustomize",
+];
+
+impl Handler for KubectlHandler {
+    fn commands(&self) -> &[&str] {
+        &["kubectl", "k"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        let sub = ctx.args.first().map_or("", String::as_str);
+        let desc = format!("kubectl {sub}");
+
+        if is_sole_help_flag(ctx.args, &["--help", "-h", "--version"]) {
+            return Classification::Allow(AllowReason::handler("kubectl help/version"));
+        }
+
+        if sub == "exec" {
+            return classify_kubectl_exec(ctx);
+        }
+
+        if sub == "config" {
+            return classify_kubectl_config(ctx);
+        }
+
+        if sub == "auth" {
+            return classify_kubectl_auth(ctx);
+        }
+
+        if KUBECTL_SAFE.contains(&sub) {
+            Classification::Allow(AllowReason::handler(desc))
+        } else {
+            Classification::Ask(desc)
+        }
+    }
+
+}
+
+const KUBECTL_CONFIG_SAFE: &[&str] = &[
+    "view",
+    "current-context",
+    "get-contexts",
+    "get-clusters",
+    "get-users",
+    "get-context",
+];
+
+fn classify_kubectl_config(ctx: &HandlerContext) -> Classification {
+    let child = ctx.arg(1);
+    if KUBECTL_CONFIG_SAFE.contains(&child) {
+        Classification::Allow(AllowReason::handler(format!("kubectl config {child}")))
+    } else {
+        Classification::Ask(format!("kubectl config {child}"))
+    }
+}
+
+/// `kubectl auth` subcommands that only query permissions. `reconcile` (and
+/// anything else under `auth`) creates/updates RBAC objects in the live
+/// cluster, so it must fall through to Ask rather than ride the bare verb.
+const KUBECTL_AUTH_SAFE: &[&str] = &["can-i", "whoami"];
+
+fn classify_kubectl_auth(ctx: &HandlerContext) -> Classification {
+    let child = ctx.arg(1);
+    if child.is_empty() {
+        return Classification::Ask("kubectl auth (no subcommand)".into());
+    }
+    if KUBECTL_AUTH_SAFE.contains(&child) {
+        Classification::Allow(AllowReason::handler(format!("kubectl auth {child}")))
+    } else {
+        Classification::Ask(format!("kubectl auth {child}"))
+    }
+}
+
+fn classify_kubectl_exec(ctx: &HandlerContext) -> Classification {
+    // Extract inner command after --
+    if let Some(sep) = ctx.args.iter().position(|a| a == "--") {
+        let inner = ctx.args[sep + 1..]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !inner.is_empty() {
+            return Classification::RecurseRemote(inner);
+        }
+    }
+    Classification::Ask("kubectl exec".into())
+}
+
+/// Whether an `--endpoint-url` value points at localhost (localstack/minio
+/// style local testing). Anything else redirects a signed AWS request off
+/// AWS's servers — a viable SSRF/credential-exfil vector.
+fn is_local_endpoint(url: &str) -> bool {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let host = after_scheme.split(['/', ':']).next().unwrap_or_default();
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+// aws
+
+pub(crate) static AWS_HANDLER: AwsHandler = AwsHandler;
+
+pub(crate) struct AwsHandler;
+
+const AWS_SAFE_PREFIXES: &[&str] = &[
+    "describe-",
+    "list-",
+    "get-",
+    "show-",
+    "head-",
+    "lookup-",
+    "filter-",
+    "validate-",
+    "estimate-",
+    "simulate-",
+    "generate-",
+    "download-",
+    "detect-",
+    "test-",
+    "check-if-",
+    "admin-get-",
+    "admin-list-",
+];
+
+const AWS_SAFE_ACTIONS: &[&str] = &[
+    "ls",
+    "wait",
+    "help",
+    "query",
+    "scan",
+    "tail",
+    "receive-message",
+    "batch-get-item",
+    "transact-get-items",
+];
+
+/// `aws configure` actions that only read (empty = bare `aws configure`).
+const AWS_CONFIGURE_SAFE: &[&str] = &["list", "list-profiles", "get", ""];
+
+/// `aws sts` actions that only read. Listed explicitly because `sts` also has
+/// credential-minting actions the `get-` prefix would otherwise wave through.
+const AWS_STS_SAFE: &[&str] = &[
+    "get-caller-identity",
+    "get-session-token",
+    "get-access-key-info",
+    "decode-authorization-message",
+];
+
+impl Handler for AwsHandler {
+    fn commands(&self) -> &[&str] {
+        &["aws"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        if is_sole_help_flag(ctx.args, &["--help", "--version"]) {
+            return Classification::Allow(AllowReason::handler("aws help/version"));
+        }
+
+        if let Some(endpoint) = get_flag_value(ctx.args, &["--endpoint-url"]) {
+            if !is_local_endpoint(&endpoint) {
+                return Classification::Ask(format!("aws --endpoint-url {endpoint}"));
+            }
+        }
+
+        let positionals = positional_args(ctx.args);
+        let service = positionals.first().copied().unwrap_or_default();
+        let action = positionals.get(1).copied().unwrap_or_default();
+
+        // get-login-password prints a registry credential; the `get-` prefix
+        // would otherwise mark it safe below.
+        if action == "get-login-password" {
+            return Classification::Ask(format!("aws {service} {action}"));
+        }
+
+        if service == "configure" {
+            return if AWS_CONFIGURE_SAFE.contains(&action) {
+                Classification::Allow(AllowReason::handler(format!("aws configure {action}")))
+            } else {
+                Classification::Ask(format!("aws configure {action}"))
+            };
+        }
+
+        if service == "sts" && AWS_STS_SAFE.contains(&action) {
+            return Classification::Allow(AllowReason::handler(format!("aws sts {action}")));
+        }
+
+        if AWS_SAFE_ACTIONS.contains(&action) {
+            return Classification::Allow(AllowReason::handler(format!("aws {service} {action}")));
+        }
+
+        if AWS_SAFE_PREFIXES.iter().any(|p| action.starts_with(p)) {
+            return Classification::Allow(AllowReason::handler(format!("aws {service} {action}")));
+        }
+
+        Classification::Ask(format!("aws {service} {action}"))
+    }
+
+}
+
+// gcloud
+
+pub(crate) static GCLOUD_HANDLER: GcloudHandler = GcloudHandler;
+
+pub(crate) struct GcloudHandler;
+
+const GCLOUD_SAFE_KEYWORDS: &[&str] = &[
+    "describe",
+    "list",
+    "get",
+    "show",
+    "info",
+    "status",
+    "version",
+    "get-credentials",
+    "list-tags",
+    "read",
+    "configurations",
+];
+
+/// `gsutil` subcommands that only read.
+const GSUTIL_SAFE: &[&str] = &["ls", "cat", "stat", "du", "hash", "version", "help"];
+
+impl Handler for GcloudHandler {
+    fn commands(&self) -> &[&str] {
+        &["gcloud", "gsutil"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        if is_sole_help_flag(ctx.args, &["--help", "-h", "--version"]) {
+            return Classification::Allow(AllowReason::handler(format!(
+                "{} help/version",
+                ctx.command_name
+            )));
+        }
+
+        if ctx.command_name == "gsutil" {
+            let sub = ctx.args.first().map_or("", String::as_str);
+            return if GSUTIL_SAFE.contains(&sub) {
+                Classification::Allow(AllowReason::handler(format!("gsutil {sub}")))
+            } else {
+                Classification::Ask(format!("gsutil {sub}"))
+            };
+        }
+
+        // Skip alpha/beta prefixes, then take the command-path (positionals
+        // before the first flag) so flag values can't masquerade as the verb.
+        let skipped: Vec<String> = ctx
+            .args
+            .iter()
+            .skip_while(|a| matches!(a.as_str(), "alpha" | "beta"))
+            .cloned()
+            .collect();
+        let path = command_path(&skipped);
+
+        if path.iter().any(|tok| is_mutating_verb(tok)) {
+            return Classification::Ask(format!("gcloud {}", ctx.args.join(" ")));
+        }
+
+        let action = path.last().copied().unwrap_or_default();
+        if GCLOUD_SAFE_KEYWORDS.contains(&action) {
+            Classification::Allow(AllowReason::handler(format!("gcloud ... {action}")))
+        } else {
+            Classification::Ask(format!("gcloud {}", ctx.args.join(" ")))
+        }
+    }
+
+}
+
+// az
+
+pub(crate) static AZ_HANDLER: AzHandler = AzHandler;
+
+pub(crate) struct AzHandler;
+
+const AZ_SAFE_KEYWORDS: &[&str] = &[
+    "show",
+    "list",
+    "get",
+    "exists",
+    "query",
+    "logs",
+    "check-health",
+    "download",
+    "tail",
+];
+
+impl Handler for AzHandler {
+    fn commands(&self) -> &[&str] {
+        &["az"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        if is_sole_help_flag(ctx.args, &["--help", "-h", "--version"]) {
+            return Classification::Allow(AllowReason::handler("az help/version"));
+        }
+
+        let path = command_path(ctx.args);
+
+        if path.iter().any(|tok| is_mutating_verb(tok)) {
+            return Classification::Ask(format!("az {}", ctx.args.join(" ")));
+        }
+
+        let action = path.last().copied().unwrap_or_default();
+
+        if AZ_SAFE_KEYWORDS.contains(&action)
+            || action.starts_with("list-")
+            || action.starts_with("show-")
+            || action.starts_with("get-")
+        {
+            Classification::Allow(AllowReason::handler(format!("az ... {action}")))
+        } else {
+            Classification::Ask(format!("az {}", ctx.args.join(" ")))
+        }
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    // Pure subcommand->decision cases (kubectl get/apply, aws describe/create) are
+    // covered by rippy's command catalog (not ported). The exec test below
+    // asserts the RecurseRemote variant, which a command string cannot express.
+    #[test]
+    fn kubectl_exec_recurses_remote() {
+        let args: Vec<String> = vec![
+            "exec".into(),
+            "mypod".into(),
+            "--".into(),
+            "cat".into(),
+            "/etc/hosts".into(),
+        ];
+        let result = KUBECTL_HANDLER.classify(&HandlerContext::test("kubectl", &args));
+        assert!(matches!(result, Classification::RecurseRemote(cmd) if cmd == "cat /etc/hosts"));
+    }
+}

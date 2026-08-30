@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/core",
+    "crates/shellguard",
     "crates/llm",
     "crates/store",
     "crates/session",
@@ -47,6 +48,7 @@ opencoder-core   = { path = "crates/core" }
 opencoder-llm    = { path = "crates/llm" }
 opencoder-store  = { path = "crates/store" }
 opencoder-session = { path = "crates/session" }
+opencoder-shellguard = { path = "crates/shellguard" }
 opencoder-tui    = { path = "crates/tui" }
 opencoder-web    = { path = "crates/web" }
 opencoder-client  = { path = "crates/client" }

@@ -21,7 +21,7 @@
 //!   command is applied immediately instead of being recorded as user text.
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, resolve_agent, ContentBlock, Message};
+use opencoder_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
@@ -89,10 +89,13 @@ is preserved as continuity context - prior context, not a new instruction.]\n\n"
 pub enum ControlCmd {
     /// Switch the active agent without resetting context.
     SwitchAgent(String),
-    /// Clear the transcript, keeping the active agent. Never a full wipe: the
-    /// last assistant reply survives as a neutral continuity seed; only a
-    /// transcript with no assistant content collapses to the blank
-    /// fresh-start marker.
+    /// Clear the transcript, converging to the act agent when the clear
+    /// starts from a sandbox session (the `/act_` prefix is a promise: the
+    /// fresh context must not stay bash-gated). A session that is already act
+    /// (or any other kind) keeps its agent and its exact event sequence.
+    /// Never a full wipe: the last assistant reply survives as a neutral
+    /// continuity seed; only a transcript with no assistant content collapses
+    /// to the blank fresh-start marker.
     ClearContext,
 }
 
@@ -107,7 +110,8 @@ pub enum ControlCmd {
 /// `/act_clear_context review` where the trailing text runs as a prompt in
 /// the fresh context. The legacy spelling `/clear_context` still parses
 /// (mapped to the same command) so already-persisted inputs keep behaving
-/// deterministically.
+/// deterministically. A clear fired from a sandbox session additionally
+/// converges the agent to act; an already-act session is untouched.
 ///
 /// Returns `None` for anything that is not a control command. The rest text is
 /// the trimmed remainder after the command token, or `None` when the input was
@@ -202,9 +206,32 @@ pub async fn apply(
             // reconstructs the marker, not the full cleared history.
             session.after_handoff(store_msg_count as i64, boundary);
 
-            session.set_skill(None);
+            // Clear BOTH skill locks (body + names) via the shared seam: a
+            // body-only clear left `active_skill_names` stale, keeping latent
+            // tools unlocked across the clear boundary.
+            crate::skill_lifecycle::clear_skill_state(session);
+            // The `/act_` prefix is load-bearing: a clear from the sandbox agent
+            // must converge to act, or the fresh context would keep gating bash
+            // writes. Already-act (and other kinds) are untouched: no write churn,
+            // no AgentSwitch noise. persist_clear below persists the converged
+            // agent in the same patch as the boundary.
+            let switched = if session.agent.kind == AgentKind::Sandbox {
+                match resolve_agent("act") {
+                    Some(a) => {
+                        let name = a.name.clone();
+                        session.agent = a;
+                        Some(name)
+                    }
+                    None => None,
+                }
+            } else {
+                None
+            };
             persist_clear(session).await?;
             on_event(SessionEvent::TranscriptReset(session.messages.clone()));
+            if let Some(name) = switched {
+                on_event(SessionEvent::AgentSwitch(name));
+            }
         }
     }
     Ok(())
@@ -575,9 +602,43 @@ mod tests {
             persisted.skill, None,
             "store skill must be NULL after clear-context (resume must not reload it)"
         );
-        // The active agent survives the clear.
+        // The clear converged the sandbox session to act (persisted in the
+        // same patch as the boundary).
         let meta = store.get_session("sess-ctrl").await.unwrap().unwrap();
-        assert_eq!(meta.agent.as_deref(), Some("sandbox"));
+        assert_eq!(
+            meta.agent.as_deref(),
+            Some("act"),
+            "sandbox clear converges to act in the store"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_clear_context_clears_active_skill_names_too() {
+        // Regression: /clear_context wiped only `skill_prompt` and left
+        // `active_skill_names` stale - the names set is the other latent-tool
+        // lock, so ssh_pty/question stayed unlocked (and the `[active skill]`
+        // tail reminder stayed armed) across the clear boundary. Both locks
+        // must go together (clear_skill_state seam).
+        let mut session = make_session(None);
+        session.messages.push(Message::user("u1", "hello"));
+        let mut a = Message::assistant("a1");
+        a.blocks.push(ContentBlock::text("reply"));
+        session.messages.push(a);
+        session.set_skill(Some("> Source: /skills/task-plan/SKILL.md\n\nPLAN".into()));
+        session.set_active_skill_names(["task-plan".into()].into_iter().collect());
+        assert!(!session.active_skill_names_cloned().is_empty());
+
+        let _ = collect_events(&mut session, ControlCmd::ClearContext);
+
+        assert_eq!(
+            session.skill_prompt_cloned(),
+            None,
+            "skill body cleared"
+        );
+        assert!(
+            session.active_skill_names_cloned().is_empty(),
+            "active_skill_names must be cleared with the body"
+        );
     }
 
     #[tokio::test]
@@ -604,6 +665,66 @@ mod tests {
         assert_eq!(session.skill_prompt_cloned(), None);
         let persisted = store.get_session("sess-ctrl").await.unwrap().unwrap();
         assert_eq!(persisted.skill, None, "skill stays None");
+    }
+
+    #[tokio::test]
+    async fn apply_clear_context_on_sandbox_converges_to_act() {
+        // A clear fired from the sandbox agent converges to act: the `/act_`
+        // prefix promises a bash-capable fresh context. The event sequence is
+        // exactly [TranscriptReset, AgentSwitch(act)] and the converged agent
+        // is persisted in the same patch as the boundary.
+        let store =
+            Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
+        store
+            .create_session(&opencoder_store::SessionMeta {
+                id: "sess-ctrl".into(),
+                agent: Some("sandbox".into()),
+                created_at: 0,
+                updated_at: 0,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let working_dir = std::env::temp_dir().join("opencoder-control-cmd-tests");
+        let mut session = SessionState::new(
+            "sess-ctrl",
+            resolve_agent("sandbox").unwrap(),
+            Config::default(),
+            Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
+            working_dir,
+        )
+        .with_store(store.clone())
+        .mark_session_created();
+        session.messages.push(Message::user("u1", "do task X"));
+        let mut reply = Message::assistant("a1");
+        reply.blocks.push(ContentBlock::text("task done"));
+        session.messages.push(reply);
+
+        let evs = collect_events(&mut session, ControlCmd::ClearContext);
+
+        assert_eq!(session.agent.name, "act", "sandbox clear converges to act");
+        assert_eq!(
+            evs.len(),
+            2,
+            "exactly TranscriptReset then AgentSwitch: {evs:?}"
+        );
+        assert!(
+            matches!(evs[0], SessionEvent::TranscriptReset(_)),
+            "first event is TranscriptReset: {evs:?}"
+        );
+        assert!(
+            matches!(&evs[1], SessionEvent::AgentSwitch(to) if to == "act"),
+            "second event is AgentSwitch(act): {evs:?}"
+        );
+        assert!(
+            is_clear_context_seed(session.handoff_plan.as_deref().unwrap_or("")),
+            "seed boundary preserved: {:?}",
+            session.handoff_plan
+        );
+
+        // The converged agent is persisted with the boundary.
+        let meta = store.get_session("sess-ctrl").await.unwrap().unwrap();
+        assert_eq!(meta.agent.as_deref(), Some("act"));
     }
 
     #[test]

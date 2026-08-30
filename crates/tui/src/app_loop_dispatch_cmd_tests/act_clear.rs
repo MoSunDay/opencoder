@@ -1,8 +1,9 @@
 //! `/act_clear_context` popup dispatch: arms the countdown guard (misop
 //! protection) instead of firing outright — from idle AND while running.
 //! Firing submits the canonical control-command prompt when idle and queues
-//! it verbatim when running. (`ClearContext` keeps the active agent — the
-//! runner emits only `TranscriptReset` + `Done`.)
+//! it verbatim when running. (An act session emits only `TranscriptReset` +
+//! `Done`; a sandbox session additionally converges to act with one extra
+//! `AgentSwitch`.)
 use super::*;
 
 /// Popup dispatch of the clear-context command arms the guard: no UiCmd is

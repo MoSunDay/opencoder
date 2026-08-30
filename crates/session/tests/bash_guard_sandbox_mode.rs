@@ -1,10 +1,13 @@
-//! Integration test: sandbox-mode bash write commands are blocked at the
-//! runner level by `bash_guard`, while read-only commands execute normally.
+//! Integration test: sandbox-mode interceptions return a model-visible error
+//! so the LLM learns the session is read-only and stops retrying writes.
 //!
 //! Contracts:
 //! - A `rm -rf` call in sandbox mode produces a ToolEnd with is_error=true
 //!   and output containing "Blocked in sandbox mode" — the command never
-//!   executes, and the error points at `/agent act` as the way out.
+//!   executes, the message forbids retrying, and points at `/act` (the REAL
+//!   command; there is no `/agent act`) as the way out.
+//! - A tool the sandbox schema never advertises (e.g. a hallucinated `edit`)
+//!   is refused with the same denial and NEVER executes — no silent writes.
 //! - A `ls` call in sandbox mode produces a ToolEnd with is_error=false.
 //! - The act agent is unaffected (no guard).
 
@@ -85,8 +88,12 @@ async fn sandbox_mode_blocks_write_command() {
             "output must explain the block, got: {output}"
         );
         assert!(
-            output.contains("/agent act"),
-            "block must point at the escape hatch (/agent act), got: {output}"
+            output.contains("`/act`") && !output.contains("/agent act"),
+            "block must point at the real escape hatch (/act), got: {output}"
+        );
+        assert!(
+            output.contains("Do not retry"),
+            "denial must tell the model retries are futile, got: {output}"
         );
     }
 }
@@ -296,4 +303,70 @@ fn ev_name(e: &SessionEvent) -> &'static str {
         SessionEvent::Error(_) => "Error",
         _ => "Other",
     }
+}
+
+#[tokio::test]
+async fn sandbox_mode_refuses_unadvertised_tool_without_executing() {
+    // `edit` is not in the sandbox allowlist, so the model is never shown it.
+    // If a stale/hallucinated call still arrives it must be refused with the
+    // sandbox denial — the tool body must never run (no silent writes).
+    let dir = tempfile::tempdir().unwrap();
+    let victim = dir.path().join("victim.txt");
+    std::fs::write(&victim, "aaa").unwrap();
+
+    let edit_turn = LlmEvent::Completed {
+        text: "".into(),
+        tool_calls: vec![CompletedToolCall {
+            id: "edit-1".into(),
+            name: "edit".into(),
+            input: serde_json::json!({
+                "path": victim.to_str().unwrap(),
+                "old_string": "aaa",
+                "new_string": "bbb",
+            }),
+        }],
+        usage: None,
+    };
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![edit_turn])
+            .push_script(vec![done_turn()]),
+    );
+    let agent = resolve_agent("sandbox").unwrap();
+    let mut session =
+        SessionState::new("guard-edit", agent, config(), mock, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut session, "edit the file".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let denied = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "edit"));
+    assert!(
+        denied.is_some(),
+        "expected a ToolEnd for the refused edit, got: {:?}",
+        events.iter().map(ev_name).collect::<Vec<_>>()
+    );
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = denied.unwrap()
+    {
+        assert!(*is_error, "unadvertised tool must be an error for the model");
+        assert!(
+            output.contains("Blocked in sandbox mode"),
+            "denial must name the mode, got: {output}"
+        );
+        assert!(
+            output.contains("`/act`"),
+            "denial must point at the real escape hatch, got: {output}"
+        );
+    }
+    // The decisive assertion: the edit tool never executed.
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "aaa",
+        "sandbox mode must not let an unadvertised tool write"
+    );
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use opencoder_core::{AgentKind, ToolArc, ToolContext, ToolOutput};
+use opencoder_core::{ToolArc, ToolContext, ToolOutput};
 use opencoder_llm::tool_call::CompletedToolCall;
 use opencoder_store::Store;
 use tokio_util::sync::CancellationToken;
@@ -246,22 +246,35 @@ pub(super) async fn execute_call_with_timeout(
         };
     }
 
-    // Sandbox-mode bash write guard: classify the command and block mutating
-    // operations, returning a descriptive error to the model so it can adapt.
-    if tc.name == "bash" && session.agent.kind == AgentKind::Sandbox {
-        let cmd = tc
-            .input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if let crate::bash_guard::BashVerdict::WriteBlocked(reason) =
-            crate::bash_guard::classify(cmd)
-        {
-            return ToolOutput::err(format!(
-                "Blocked in sandbox mode: this bash command modifies state ({reason}). \
-                 Sandbox mode is read-only. To make changes, switch to the act agent (/agent act)."
-            ));
-        }
+    // Sandbox-mode execution gate: unadmitted tools AND mutating bash are
+    // refused with a model-visible denial (names the mode, forbids retry,
+    // points at `/act`) so the model stops attempting writes instead of
+    // looping; see bash_guard::gate for the policy.
+    if let Some(denial) = crate::bash_guard::gate(
+        &session.agent.kind,
+        &tc.name,
+        tc.input.get("command").and_then(|v| v.as_str()),
+    ) {
+        return ToolOutput::err(denial);
+    }
+    // Latent execution gate (defence in depth): latent tools stay in the
+    // registry even while hidden from the schema array, so a hallucinated
+    // `question`/`ssh_pty` call would otherwise execute silently. Refuse
+    // unless the live skill body still unlocks the tool. Sole exception: an
+    // ask on an ATTACHED question hub - a live human channel that renders the
+    // card for the user to answer or skip (the tool's own contract), so the
+    // ask stays user-visible instead of being dropped on the floor.
+    let unlocked = crate::tools::latent::latent_execution_allowed(
+        &tc.name,
+        session.skill_prompt_cloned().as_deref(),
+    );
+    let interactive_ask = tc.name == "question" && session.question_hub.is_attached();
+    if !unlocked && !interactive_ask {
+        return ToolOutput::err(format!(
+            "tool `{}` is latent and its owning skill is not active; \
+             activate the skill (e.g. `$task-plan`) before calling it",
+            tc.name
+        ));
     }
     let ctx = ToolContext {
         session_id: session.id.clone(),

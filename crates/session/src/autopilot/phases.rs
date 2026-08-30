@@ -101,7 +101,7 @@ pub async fn run_act_phase(
         // persists its clear via the combined patch; this branch must clear
         // durably too, or a crash/resume mid-ACT would resurrect the
         // system-injected review skill from the `sessions.skill` column.
-        super::clear_injected_skill(session).await;
+        super::clear_injected_skill(session, on_event).await;
         switch_agent(session, "act", on_event);
         let mut msg = Message::user(new_id(), execute_prompt());
         msg.synthetic = true;

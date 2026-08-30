@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use opencoder_core::{resolve_agent, Config};
@@ -21,6 +22,9 @@ use crate::TuiOpts;
 /// Entry point: load config, resume or create a session, enter the terminal,
 /// then drive the event loop via `super::run_app`.
 pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
+    crate::boot_clock::mark();
+    let t_total = Instant::now();
+    let t_config_client = Instant::now();
     let workdir = opts
         .workdir
         .clone()
@@ -68,13 +72,20 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
                 )
             }
         };
+    let config_client_ms = t_config_client.elapsed().as_millis() as u64;
 
+    let t_store = Instant::now();
     let store: Arc<dyn Store> = open_store(&workdir).await?;
+    let store_ms = t_store.elapsed().as_millis() as u64;
+
     // Mirror ts-owned sessions into the central ts registry (`<data_root>/ts.db`)
     // when one exists; a pure tui/run with no ts usage is unaffected.
+    let t_mirror = Instant::now();
     let store: Arc<dyn Store> = crate::ts_mirror::maybe_wrap(store, &workdir).await;
+    let mirror_ms = t_mirror.elapsed().as_millis() as u64;
 
     // Resume an existing session if --session was given, otherwise start fresh.
+    let t_session = Instant::now();
     let mut session = if let Some(id) = &opts.session {
         let existing = store.get_session(id).await?;
         // If not found as a session, try as a subagent task_id to resolve
@@ -131,6 +142,7 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
         )
         .with_store(store.clone())
     };
+    let session_ms = t_session.elapsed().as_millis() as u64;
 
     // Explicit --model wins over a resumed session's stored model and is
     // re-persisted so later resumes honor it (headless run-path parity).
@@ -149,10 +161,25 @@ pub(super) async fn run(opts: &TuiOpts) -> Result<()> {
     // the old "cleanup only ran on the happy path" trap that bricked the
     // terminal on any panic, leaving the user with a frozen last frame, no
     // echo, and ineffective Ctrl+C/D.
+    let t_terminal = Instant::now();
     let mut active_terminal = match active_terminal {
         Some(terminal) => terminal,
         None => ActiveTerminal::enter()?,
     };
+    let terminal_ms = t_terminal.elapsed().as_millis() as u64;
+
+    let stages = [
+        ("config_client", config_client_ms),
+        ("store", store_ms),
+        ("mirror", mirror_ms),
+        ("session", session_ms),
+        ("terminal", terminal_ms),
+    ];
+    tracing::info!(config_client_ms, store_ms, mirror_ms, session_ms, terminal_ms,
+        total_ms = t_total.elapsed().as_millis() as u64, "tui bootstrap stages");
+    if let Some((stage, ms)) = stages.iter().copied().max_by_key(|s| s.1).filter(|s| s.1 > 1000) {
+        tracing::warn!(slowest_stage = stage, slowest_ms = ms, "slow tui bootstrap stage");
+    }
 
     let result = super::run_app(
         &mut active_terminal.terminal,

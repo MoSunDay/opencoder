@@ -273,6 +273,18 @@ pub fn agent_chip_fg(agent: &str) -> Color {
     }
 }
 
+/// Foreground of the parent status-bar mode dot + `[mode]` chip: the plain
+/// [`agent_chip_fg`] mapping, except the `act` chip lights up in the sandbox
+/// warning hue while the committed skill is `task-plan`. The yellow reverts
+/// when any other skill is committed or a steer/queued input takes effect.
+pub fn status_chip_fg(mode: &str, plan_skill_active: bool) -> Color {
+    if mode == "act" && plan_skill_active {
+        warn_color()
+    } else {
+        agent_chip_fg(mode)
+    }
+}
+
 /// Background colour of the sandbox/act mode-flash chip: warning colour for
 /// sandbox, accent for act — the same mapping as [`agent_chip_fg`], so the
 /// chip and the flash can never render different hues. Lives in the theme
@@ -407,6 +419,18 @@ mod tests {
         // The removed plan agent must no longer map to the sandbox hue.
         assert_eq!(agent_chip_fg("plan"), ACCENT);
         assert_eq!(agent_chip_fg(""), ACCENT);
+    }
+
+    // -- status_chip_fg ----------------------------------------------------───────────
+
+    #[test]
+    fn status_chip_fg_act_lights_yellow_for_task_plan() {
+        assert_eq!(status_chip_fg("act", true), WARN);
+        assert_eq!(status_chip_fg("act", false), ACCENT);
+        // Only the act status changes hue; sandbox is already the warning colour.
+        assert_eq!(status_chip_fg("sandbox", true), WARN);
+        assert_eq!(status_chip_fg("sandbox", false), WARN);
+        assert_eq!(status_chip_fg("explore", true), ACCENT);
     }
 
     // ── user_color ────────────────────────────────────────────────────────

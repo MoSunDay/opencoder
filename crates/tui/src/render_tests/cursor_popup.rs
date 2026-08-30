@@ -69,6 +69,7 @@ fn draw(
         true,
         opencoder_core::ApMode::Off,
         "act",
+        false,
         None,
     )
     .unwrap();

@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use libsql::{Builder, Connection};
 use tokio::sync::Mutex;
-use tracing::debug;
 
 use crate::store::Store;
 use crate::types::{
@@ -48,21 +47,78 @@ pub struct LibsqlStore {
 
 impl LibsqlStore {
     /// Open (or create) a libsql database file and bootstrap the schema.
+    ///
+    /// Every stage is timed and the totals are logged at info level, so a
+    /// cold-start regression (e.g. an fsync storm during WAL header
+    /// initialization on ZFS) shows up as data instead of a silent hang.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let db = Builder::new_local(path.as_ref())
+        let path = path.as_ref();
+        // Fresh-file creations skip the post-bootstrap checkpoint: a TRUNCATE
+        // checkpoint's fsyncs are the dominant cold-start stall on sync-heavy
+        // storage (measured 46s of an 82s storm-window open). The WAL is the
+        // source of truth either way and `wal_autocheckpoint` compacts later.
+        let existed = path.exists();
+        let t_total = std::time::Instant::now();
+
+        let t_build = std::time::Instant::now();
+        let db = Builder::new_local(path)
             .build()
             .await
-            .with_context(|| format!("open libsql db at {}", path.as_ref().display()))?;
+            .with_context(|| format!("open libsql db at {}", path.display()))?;
         let conn = db.connect().context("connect libsql")?;
+        let build_ms = t_build.elapsed().as_millis() as u64;
+
+        let t_pragma = std::time::Instant::now();
         schema::apply_connection_pragmas(&conn).await?;
         let _ = conn.busy_timeout(Duration::from_secs(30));
+        let pragma_ms = t_pragma.elapsed().as_millis() as u64;
+
+        let t_bootstrap = std::time::Instant::now();
         schema::bootstrap(&conn).await?;
-        let _ = schema::checkpoint_wal(&conn).await;
+        let bootstrap_ms = t_bootstrap.elapsed().as_millis() as u64;
+
+        let t_checkpoint = std::time::Instant::now();
+        if existed {
+            let _ = schema::checkpoint_wal(&conn).await;
+        }
+        let checkpoint_ms = t_checkpoint.elapsed().as_millis() as u64;
+
         let store = LibsqlStore {
             conn,
             db_lock: Mutex::new(()),
         };
-        debug!(backend = "libsql", "store opened");
+
+        let total_ms = t_total.elapsed().as_millis() as u64;
+        let stages = [
+            ("build", build_ms),
+            ("pragmas", pragma_ms),
+            ("bootstrap", bootstrap_ms),
+            ("checkpoint", checkpoint_ms),
+        ];
+        tracing::info!(
+            backend = "libsql",
+            path = %path.display(),
+            build_ms,
+            pragma_ms,
+            bootstrap_ms,
+            checkpoint_ms,
+            total_ms,
+            "store opened"
+        );
+        if total_ms > 1000 || stages.iter().any(|&(_, ms)| ms > 1000) {
+            let (slowest_stage, slowest_ms) = stages
+                .into_iter()
+                .max_by_key(|&(_, ms)| ms)
+                .unwrap_or(("total", total_ms));
+            tracing::warn!(
+                backend = "libsql",
+                path = %path.display(),
+                slowest_stage,
+                slowest_ms,
+                total_ms,
+                "slow store open"
+            );
+        }
         Ok(store)
     }
 

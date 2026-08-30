@@ -30,6 +30,16 @@ use opencoder_store::SessionPatch;
 use crate::runner::{run_loop, SessionEvent};
 use crate::SessionState;
 
+/// Clear BOTH halves of the in-memory skill state (`skill_prompt` +
+/// `active_skill_names`). The single seam for every clear site - the run-end
+/// hook and `/clear_context` - so the two locks can never drift apart again:
+/// wiping only the body left a stale names set behind, which kept latent
+/// tools unlocked and the `[active skill]` tail reminder armed.
+pub(crate) fn clear_skill_state(session: &SessionState) {
+    session.set_skill(None);
+    session.set_active_skill_names(HashSet::new());
+}
+
 /// Clear the active skill after a run ends: memory (`skill_prompt` +
 /// `active_skill_names`) and the store (`clear_skill: true`).
 ///

@@ -484,3 +484,83 @@ fn size_changed_false_for_zero_dimensions() {
         "zero dims from first frame must not count"
     );
 }
+
+// ----- resume mirror backfill (run_app startup) -----
+// Regression: `run_app` used to hard-code `active_skill`/`active_skill_body`
+// to `None` and discard `initial_skill_state`'s body. A resumed `task-plan`
+// commit therefore had an empty mirror, so the first idle submit's
+// `act_plan_highlight(active_skill)` re-derivation turned the chip gray for
+// the whole turn (and the skill-only submit trigger path stayed blind). The
+// fix backfills the mirrors from the derived body via
+// `skill_display::skill_mirror_from_body`.
+
+/// Chains the exact startup sequence `run_app` performs: derive state from
+/// the shared handle (resume read-back) -> backfill the mirror tuple ->
+/// re-derive the chip highlight the way the idle submit path does.
+#[test]
+fn resume_mirror_backfill_keeps_resumed_task_plan_yellow() {
+    // A persisted `task-plan` skill body as the store row carries it on
+    // resume (directory-style skill with a `> Source:` prefix).
+    let body = "> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\n\
+                plan the work before touching code";
+    let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Some(body.to_string())));
+
+    // 1. initial_skill_state derives body + chip highlight from the handle.
+    let (initial_body, _tokens, startup_highlight) = crate::skill_persist::initial_skill_state(
+        &skill_handle,
+        "act",
+        std::path::Path::new("/tmp"),
+    );
+    assert!(
+        startup_highlight,
+        "a resumed task-plan commit must start with the chip highlighted"
+    );
+
+    // 2. run_app backfills the mirrors from that same body.
+    let (active_skill, active_skill_body) =
+        crate::skill_display::skill_mirror_from_body(initial_body);
+
+    // 3. the first idle-submit re-derivation keeps the yellow.
+    assert_eq!(
+        active_skill.as_deref(),
+        Some("task-plan"),
+        "the mirror must carry the resumed skill name"
+    );
+    assert_eq!(
+        active_skill_body.as_deref(),
+        Some(body),
+        "the mirror must carry the resumed skill body"
+    );
+    assert!(
+        crate::skill_persist::act_plan_highlight(active_skill.as_deref()),
+        "resolve_persist's re-derivation must not grey out a resumed task-plan"
+    );
+    // Startup highlight and mirror agree on one shared derivation, so the
+    // first idle submit cannot disagree with the frame the user already saw.
+    assert_eq!(
+        startup_highlight,
+        crate::skill_persist::act_plan_highlight(active_skill.as_deref()),
+        "mirror backfill must agree with the startup highlight derivation"
+    );
+}
+
+/// A resumed session with NO committed skill must keep both mirrors empty so
+/// the chip stays gray (no phantom yellow from the backfill).
+#[test]
+fn resume_mirror_backfill_keeps_unskilled_session_gray() {
+    let skill_handle: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let (initial_body, _tokens, startup_highlight) = crate::skill_persist::initial_skill_state(
+        &skill_handle,
+        "act",
+        std::path::Path::new("/tmp"),
+    );
+    assert!(!startup_highlight);
+    let (active_skill, active_skill_body) =
+        crate::skill_display::skill_mirror_from_body(initial_body);
+    assert_eq!(active_skill, None);
+    assert_eq!(active_skill_body, None);
+    assert!(!crate::skill_persist::act_plan_highlight(active_skill.as_deref()));
+}

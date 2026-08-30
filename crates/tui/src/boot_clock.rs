@@ -42,14 +42,29 @@ fn unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Pure gate for a wall-clock read becoming the boot mark.
+///
+/// `unix_ms` falls back to `0` when the clock read fails (pre-epoch or
+/// unset system time). A `0` (or negative) reading must never be stored:
+/// the [`UNMARKED_MS`] sentinel would silently become a "marked at epoch"
+/// value and `note_first_frame` would log an absurd first-frame latency.
+/// `None` keeps the sentinel in place, leaving `note_first_frame` a no-op.
+fn mark_candidate(now_ms: i64) -> Option<i64> {
+    (now_ms > 0).then_some(now_ms)
+}
+
 /// Record the boot start instant once. Repeated calls are harmless no-ops.
 pub fn mark() {
-    let _ = BOOT_MARK_MS.compare_exchange(
-        UNMARKED_MS,
-        unix_ms(),
-        Ordering::Relaxed,
-        Ordering::Relaxed,
-    );
+    // A clock failure (`mark_candidate` -> None) must not write the mark:
+    // the UNMARKED sentinel stays and first-frame logging stays off.
+    if let Some(now) = mark_candidate(unix_ms()) {
+        let _ = BOOT_MARK_MS.compare_exchange(
+            UNMARKED_MS,
+            now,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
 }
 
 /// Log the mark-to-first-frame latency, exactly once.
@@ -77,7 +92,7 @@ pub fn note_first_frame() {
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_log_ms, is_slow_frame, UNMARKED_MS};
+    use super::{frame_log_ms, is_slow_frame, mark_candidate, UNMARKED_MS};
 
     /// `note_first_frame` before `mark` must be a safe no-op: the unmarked
     /// sentinel forces the computation to `None`, so nothing is logged.
@@ -108,5 +123,27 @@ mod tests {
         assert!(is_slow_frame(1_001));
         assert!(!is_slow_frame(1_000));
         assert!(!is_slow_frame(5));
+    }
+
+    /// Clock-failure regression: `unix_ms` falls back to `0` when the wall
+    /// clock cannot be read. `mark` must refuse such a reading (the
+    /// `UNMARKED_MS` sentinel stays), otherwise the mark cell holds "booted at
+    /// the epoch" and the first frame logs an absurd latency.
+    #[test]
+    fn mark_rejects_nonpositive_clock_readings() {
+        assert_eq!(mark_candidate(0), None, "0 is the clock-failure fallback");
+        assert_eq!(mark_candidate(-1), None, "pre-epoch readings are bogus");
+        assert_eq!(mark_candidate(i64::MIN), None);
+        assert_eq!(mark_candidate(1), Some(1), "epoch+1ms is a legal mark");
+        assert_eq!(mark_candidate(1_756_540_800_000), Some(1_756_540_800_000));
+    }
+
+    /// Why the gate matters: if `0` ever leaked into the mark cell,
+    /// `frame_log_ms` would happily report an absurd elapsed value (only
+    /// negative start values are hidden). The `mark_candidate` gate is what
+    /// keeps the cell at the sentinel on a clock failure.
+    #[test]
+    fn stored_zero_would_produce_an_absurd_latency() {
+        assert_eq!(frame_log_ms(0, i64::MAX, false), Some(i64::MAX as u64));
     }
 }

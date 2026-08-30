@@ -1,8 +1,11 @@
 //! A steer or queued input actually taking effect (`SteerConsumed` /
-//! `QueueConsumed`) must clear the parent `[act]` chip's task-plan highlight:
-//! the yellow marks an armed plan skill, and once the runner consumes a
-//! pending input the user has interjected, so the chip reverts to the plain
-//! accent hue. These tests pin the `fold_ui_events` side of that contract.
+//! `QueueConsumed`) re-derives the parent `[act]` chip's task-plan highlight
+//! from the consumed input text: a `$task-plan` token in it is newly
+//! activated by the runner's `record_compound` at the consumption boundary,
+//! so the chip lights up yellow exactly like an idle `$task-plan` submit
+//! would. Any other consumed input (plain text, or a token naming a
+//! different skill) reverts the chip to the plain accent hue. These tests
+//! pin the `fold_ui_events` side of that contract.
 
 use super::*;
 
@@ -48,7 +51,7 @@ macro_rules! fold {
 }
 
 #[tokio::test]
-async fn queue_consumed_clears_the_plan_chip_highlight() {
+async fn queue_consumed_plain_text_clears_the_plan_chip_highlight() {
     let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
     let mut plan_flag = true;
 
@@ -66,12 +69,12 @@ async fn queue_consumed_clears_the_plan_chip_highlight() {
     );
     assert!(
         !plan_flag,
-        "a queued input taking effect must revert the chip hue"
+        "a queued plain-text input taking effect must revert the chip hue"
     );
 }
 
 #[tokio::test]
-async fn steer_consumed_clears_the_plan_chip_highlight() {
+async fn steer_consumed_plain_text_clears_the_plan_chip_highlight() {
     let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
     let mut plan_flag = true;
 
@@ -89,6 +92,100 @@ async fn steer_consumed_clears_the_plan_chip_highlight() {
     );
     assert!(
         !plan_flag,
-        "a steered input taking effect must revert the chip hue"
+        "a steered plain-text input taking effect must revert the chip hue"
+    );
+}
+
+#[tokio::test]
+async fn queue_consumed_task_plan_token_lights_the_chip() {
+    let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
+    let mut plan_flag = false;
+
+    fold!(
+        chat,
+        store,
+        cmd_tx,
+        evt_rx,
+        cancel,
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 7,
+            text: "$task-plan plan the migration".into(),
+        })),
+        &mut plan_flag
+    );
+    assert!(
+        plan_flag,
+        "a consumed queued $task-plan input activates the skill at the \
+         consumption boundary and must light the chip yellow"
+    );
+}
+
+#[tokio::test]
+async fn steer_consumed_task_plan_token_lights_the_chip() {
+    let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
+    let mut plan_flag = false;
+
+    fold!(
+        chat,
+        store,
+        cmd_tx,
+        evt_rx,
+        cancel,
+        Some(UiEvent::Session(SessionEvent::SteerConsumed {
+            seq: 3,
+            text: "$task-plan update the plan first".into(),
+        })),
+        &mut plan_flag
+    );
+    assert!(
+        plan_flag,
+        "a consumed steered $task-plan input must light the chip yellow"
+    );
+}
+
+/// A compound consumed input carrying `task-plan` among other tokens lights
+/// the chip: any hit arms the highlight.
+#[tokio::test]
+async fn queue_consumed_compound_tokens_light_on_any_task_plan_hit() {
+    let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
+    let mut plan_flag = false;
+
+    fold!(
+        chat,
+        store,
+        cmd_tx,
+        evt_rx,
+        cancel,
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 9,
+            text: "$review then $task-plan then wrap up".into(),
+        })),
+        &mut plan_flag
+    );
+    assert!(plan_flag, "any $task-plan token in a compound input lights the chip");
+}
+
+/// A consumed input naming only a *different* skill must NOT light the chip
+/// (the old unconditional-revert behavior still holds for it).
+#[tokio::test]
+async fn queue_consumed_other_skill_token_keeps_the_chip_plain() {
+    let (mut chat, store, mut cmd_tx, mut evt_rx, mut cancel) = fold_fixture().await;
+    let mut plan_flag = true;
+
+    fold!(
+        chat,
+        store,
+        cmd_tx,
+        evt_rx,
+        cancel,
+        Some(UiEvent::Session(SessionEvent::QueueConsumed {
+            seq: 11,
+            text: "$review this diff".into(),
+        })),
+        &mut plan_flag
+    );
+    assert!(
+        !plan_flag,
+        "a consumed non-plan skill input must revert the chip hue"
     );
 }

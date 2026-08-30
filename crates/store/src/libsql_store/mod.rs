@@ -45,6 +45,18 @@ pub struct LibsqlStore {
     db_lock: Mutex<()>,
 }
 
+/// Whether `open` pays the post-bootstrap WAL checkpoint.
+///
+/// Pre-existing files do (merge the previous session's WAL back into the main
+/// database); freshly created files skip it (their WAL is empty by
+/// construction, and the checkpoint's fsyncs are the dominant cold-start
+/// stall on sync-heavy storage - see the comment in `open`). Pure free
+/// function, not a method, so the fresh-vs-existing gate stays unit-testable
+/// without a real file.
+fn should_checkpoint_wal(path_existed: bool) -> bool {
+    path_existed
+}
+
 impl LibsqlStore {
     /// Open (or create) a libsql database file and bootstrap the schema.
     ///
@@ -78,7 +90,7 @@ impl LibsqlStore {
         let bootstrap_ms = t_bootstrap.elapsed().as_millis() as u64;
 
         let t_checkpoint = std::time::Instant::now();
-        if existed {
+        if should_checkpoint_wal(existed) {
             let _ = schema::checkpoint_wal(&conn).await;
         }
         let checkpoint_ms = t_checkpoint.elapsed().as_millis() as u64;
@@ -494,5 +506,27 @@ impl Store for LibsqlStore {
         let _guard = self.db_lock.lock().await;
         let conn = self.conn().await?;
         messages::import(&conn, session_id, msgs).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_checkpoint_wal;
+
+    /// Bug 10: `open`'s `if existed` checkpoint gate had zero coverage. The
+    /// decision is extracted into the pure `should_checkpoint_wal`; both
+    /// branches are pinned here, and the integration side (existing-path
+    /// reopen converging with `integrity_check`) lives in
+    /// `tests/schema_bootstrap.rs`.
+    #[test]
+    fn checkpoint_gate_skips_fresh_file_and_runs_on_existing() {
+        assert!(
+            !should_checkpoint_wal(false),
+            "fresh file must skip the checkpoint (cold-start fsync guard)"
+        );
+        assert!(
+            should_checkpoint_wal(true),
+            "existing file must checkpoint its WAL"
+        );
     }
 }

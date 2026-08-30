@@ -62,6 +62,13 @@ fn sandbox_session(mock: Arc<MockChatClient>, hub: Option<Arc<QuestionHub>>) -> 
     if let Some(h) = hub {
         s = s.with_question_hub(h);
     }
+    // `question` is a latent tool: the execution gate re-checks the unlock
+    // from the live skill body before dispatching (a hallucinated call to a
+    // hidden tool must not run). These tests exercise LEGITIMATE asks, so arm
+    // the owning skill exactly as the `$task-plan` activation would.
+    s.set_skill(Some(
+        "# task-plan\n\nplan the launch; ask via question when blocked.".into(),
+    ));
     s
 }
 
@@ -236,4 +243,132 @@ async fn turn_cancel_unblocks_a_pending_question() {
     assert_eq!(hub.waiting_count(), 0, "no dangling hub registration");
     // Bounded completion is the contract; the exact turn outcome may be Ok or Err.
     let _ = res;
+}
+
+// ---------------------------------------------------------------------------
+// Execution gate: latent tools stay in the registry even while hidden, so a
+// hallucinated `question` call must be refused at dispatch time (defence in
+// depth) - `question` has no wall-clock budget, so an unguarded phantom ask
+// could park the run forever.
+// ---------------------------------------------------------------------------
+
+/// Phantom call with NO active skill and NO attached hub (headless): the call
+/// is refused with a synthetic error ToolResult, the run proceeds to the
+/// follow-up round (never hangs), and the question never reaches the tool.
+#[tokio::test]
+async fn phantom_question_call_blocked_when_skill_not_active() {
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![question_turn("q-9", "which database?")])
+            .push_script(vec![text_done("Proceeding on my own judgment.")]),
+    );
+    let mut session = sandbox_session(mock.clone(), None);
+    // Deliberately NO task-plan body and NO hub: question is hidden and no
+    // interactive channel exists -> not executable.
+    session.set_skill(None);
+
+    let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let observed = events.clone();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        run(&mut session, "plan a migration".into(), move |ev| {
+            observed.lock().unwrap().push(ev);
+        }),
+    )
+    .await
+    .expect("phantom call must not hang the run (question has no timeout)")
+    .unwrap();
+
+    let evs = events.lock().unwrap();
+    let (output, is_error) = tool_end_for(&evs, "q-9").expect("ToolEnd for the phantom call");
+    assert!(is_error, "hallucinated call is refused, got: {output}");
+    assert!(
+        output.contains("latent"),
+        "refusal names the latent gate, got: {output}"
+    );
+    let reqs = mock.requests();
+    assert_eq!(
+        reqs.len(),
+        2,
+        "the run continues with the error tool result in context"
+    );
+    assert!(
+        !reqs[1].tools.iter().any(|t| t["function"]["name"] == "question"),
+        "the follow-up round still does not advertise question"
+    );
+}
+
+/// The attached-hub exception: an ask on a LIVE question hub is user-visible
+/// (the frontend renders the card to answer or skip), so it executes even
+/// without an active skill - the TUI/web interactive contract.
+#[tokio::test]
+async fn attached_hub_asks_stay_user_visible_without_skill() {
+    let hub = QuestionHub::new();
+    hub.attach();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![question_turn("q-11", "which database?")])
+            .push_script(vec![text_done("## Plan\nuse postgres")]),
+    );
+    let mut session = sandbox_session(mock, Some(hub.clone()));
+    session.set_skill(None);
+
+    let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let observed = events.clone();
+    let resolver = tokio::spawn(resolve_when_asked(hub.clone(), "q-11", "postgres please"));
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        run(&mut session, "plan".into(), move |ev| {
+            observed.lock().unwrap().push(ev);
+        }),
+    )
+    .await
+    .expect("hub-backed ask executes and completes")
+    .unwrap();
+    resolver.await.unwrap();
+
+    let evs = events.lock().unwrap();
+    let (output, is_error) = tool_end_for(&evs, "q-11").expect("ToolEnd for the hub ask");
+    assert!(!is_error, "attached-hub ask must not be refused: {output}");
+    assert_eq!(output, "postgres please");
+    assert_eq!(hub.waiting_count(), 0, "no dangling registration");
+}
+
+/// A Source-line (compound-shaped) body unlocks through the SAME gate: the
+/// execution re-check reuses `unlocked_from_body`, so the activation that
+/// advertises the tool is exactly the activation that lets it run.
+#[tokio::test]
+async fn source_line_body_lets_a_real_question_execute() {
+    let hub = QuestionHub::new();
+    hub.attach();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![question_turn("q-10", "which database?")])
+            .push_script(vec![text_done("## Plan\nuse postgres")]),
+    );
+    let mut session = sandbox_session(mock, Some(hub.clone()));
+    session.set_skill(Some(
+        "> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\n\
+         plan the launch; ask via question when blocked."
+            .into(),
+    ));
+
+    let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let observed = events.clone();
+    let resolver = tokio::spawn(resolve_when_asked(hub, "q-10", "postgres please"));
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        run(&mut session, "plan".into(), move |ev| {
+            observed.lock().unwrap().push(ev);
+        }),
+    )
+    .await
+    .expect("unlocked question executes normally")
+    .unwrap();
+    resolver.await.unwrap();
+
+    let evs = events.lock().unwrap();
+    let (output, is_error) = tool_end_for(&evs, "q-10").expect("ToolEnd for the real ask");
+    assert!(!is_error, "legitimate ask must pass the gate: {output}");
+    assert_eq!(output, "postgres please");
 }

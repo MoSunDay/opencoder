@@ -186,15 +186,16 @@ async fn sandbox_mode_allows_explore_subagent() {
                 SessionEvent::SubagentStart { kind, .. } if kind == "explore"
             )
         }),
-        "plan mode must allow 'explore' subagents, got: {:?}",
+        "sandbox mode must allow 'explore' subagents, got: {:?}",
         events.iter().map(ev_name).collect::<Vec<_>>()
     );
 }
 
-/// Positive counterpart to `plan_mode_blocks_build_subagent`: an **act** agent
-/// must be able to spawn a 'build' subagent successfully. This guards against
-/// the plan-mode guard accidentally over-blocking (e.g. if the
-/// `AgentKind::Plan` condition were dropped, act would also be blocked).
+/// Positive counterpart to `sandbox_mode_blocks_build_subagent`: an **act**
+/// agent must be able to spawn a 'build' subagent successfully. This guards
+/// against the sandbox guard accidentally over-blocking: if the
+/// `AgentKind::Sandbox` condition mistakenly caught `act` too, this test
+/// would fail.
 #[tokio::test]
 async fn act_mode_allows_build_subagent() {
     let mock = Arc::new(

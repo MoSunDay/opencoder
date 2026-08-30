@@ -74,9 +74,7 @@ pub fn builtin_agents() -> Vec<Agent> {
             prompt: base_prompt_sandbox(),
             tools: ToolFilter::Allow(vec![
                 "bash".into(), "task".into(),
-                // Structured clarification: the sandbox agent asks over
-                // assuming when an unstated assumption would shape the work.
-                // Repo/rules/test facts are looked up, not asked.
+                // Latent: surfaced only while the task-plan skill is active.
                 "question".into(),
             ]),
         },
@@ -165,9 +163,9 @@ pub fn base_prompt_build() -> String {
 }
 
 const SANDBOX_SUFFIX: &str = "\
-SANDBOX mode (read-only): no edits/writes; mutating bash (file-writing redirects, rm, mv, git push, pip install, ...) is intercepted. \
-Investigate via 'explore' subagents. \
-When an unstated assumption would shape your work, resolve it via the `question` tool -- prefer asking over assuming (you may ask several in one turn). Facts the repo, rules/, or tests can answer must be looked up first, not asked.";
+SANDBOX mode (read-only): mutating bash is intercepted — only writes under /tmp and redirects to /dev/null are permitted; \
+everything else that modifies state is blocked, and the project/working directory is NOT writable in sandbox mode. \
+Investigate via 'explore' subagents.";
 
 const BASE_PROMPT: &str = "\
 You are OpenCoder, a high-performance coding agent in a terminal.
@@ -226,11 +224,11 @@ mod tests {
         );
     }
 
-    /// `question` is allowlisted for the two primary agents that may surface
-    /// clarification prompts: `sandbox` asks over assuming, and `act` is
-    /// allowlisted here (runtime visibility is gated elsewhere). Subagents
-    /// never ask -- zero schema token cost. Structural guard (rules/01)
-    /// against filter drift.
+    /// `question` stays in the allowlist of the two primary agents that may
+    /// surface clarification prompts (`act` + `sandbox`); subagents never
+    /// ask -- zero schema token cost. Visibility itself is runtime
+    /// latent-gating (task-plan unlock), not the allowlist. Structural guard
+    /// (rules/01) against filter drift.
     #[test]
     fn question_tool_is_sandbox_and_act_only() {
         for name in ["sandbox", "act"] {
@@ -248,11 +246,12 @@ mod tests {
 
     /// The sandbox prompt is a general read-only preamble, NOT a plan
     /// producer: the old Goal/TODO/Verify/Risks/Align template and the
-    /// "switch to act mode" handoff are gone. Pins the read-only constraints
-    /// and the ask-over-assume guidance (batched questions allowed;
-    /// repo/rules/test facts looked up, not asked).
+    /// "switch to act mode" handoff are gone. The clarification protocol now
+    /// lives exclusively in the task-plan skill, so the prompt must not
+    /// mention the `question` tool at all (the tool is latent-unlocked from
+    /// the active skill body, never advertised in a base prompt).
     #[test]
-    fn sandbox_prompt_is_read_only_with_question_guidance() {
+    fn sandbox_prompt_is_read_only_without_question() {
         let sandbox = base_prompt_sandbox();
 
         // Read-only constraints survive the rename.
@@ -265,18 +264,18 @@ mod tests {
             "sandbox prompt must note intercepted mutating bash, got: {sandbox}"
         );
 
-        // Question-tool clarification guidance.
+        // No question-tool advertisement in the base prompt: clarification
+        // guidance lives only in the task-plan skill body. (Generic prose
+        // like "without asking questions" is fine — only the backticked
+        // tool name or an explicit tool mention advertises the schema.)
         assert!(
-            sandbox.contains("prefer asking over assuming"),
-            "sandbox prompt must default to asking instead of assuming, got: {sandbox}"
+            !sandbox.contains("`question`") && !sandbox.contains("question tool"),
+            "sandbox prompt must not advertise the question tool, got: {sandbox}"
         );
         assert!(
-            sandbox.contains("you may ask several in one turn"),
-            "sandbox prompt must advertise batched clarification, got: {sandbox}"
-        );
-        assert!(
-            sandbox.contains("looked up first, not asked"),
-            "sandbox prompt must defer repo/rules/test facts to lookup, got: {sandbox}"
+            !sandbox.contains("prefer asking over assuming")
+                && !sandbox.contains("looked up first, not asked"),
+            "sandbox prompt must not carry the ask-over-assume clarification protocol"
         );
 
         // Plan-template semantics are gone.

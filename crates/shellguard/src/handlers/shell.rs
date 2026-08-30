@@ -1,0 +1,104 @@
+//! Ported from rippy (MIT) https://github.com/mpecan/rippy
+
+use super::{Classification, Handler, HandlerContext};
+
+pub(crate) static SHELL_HANDLER: ShellHandler = ShellHandler;
+
+pub(crate) struct ShellHandler;
+
+impl Handler for ShellHandler {
+    fn commands(&self) -> &[&str] {
+        &["bash", "sh", "zsh", "dash", "ksh", "fish"]
+    }
+
+    fn classify(&self, ctx: &HandlerContext) -> Classification {
+        for (i, arg) in ctx.args.iter().enumerate() {
+            if arg == "-c" {
+                let Some(inner) = ctx.args.get(i + 1) else {
+                    return Classification::Ask(format!("{} -c (no command)", ctx.command_name));
+                };
+                // If there are positional args after the -c command string,
+                // they could be injected via $0/$1. Conservative: return Ask.
+                if ctx.args.len() > i + 2 {
+                    return Classification::Ask(format!(
+                        "{} -c with positional arguments",
+                        ctx.command_name
+                    ));
+                }
+                return Classification::Recurse(inner.clone());
+            }
+        }
+
+        // Script file — try to read and recurse through tree-sitter-bash
+        if let Some(script) = ctx.args.first() {
+            if !script.starts_with('-') {
+                if let Some(contents) = ctx.read_file(script) {
+                    return Classification::Recurse(contents);
+                }
+            }
+        }
+
+        Classification::Ask(format!("{} (interactive)", ctx.command_name))
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::handlers::test_support::{temp_dir, write_file};
+
+    #[test]
+    fn bash_c_simple_recurses() {
+        let args: Vec<String> = vec!["-c".into(), "git status".into()];
+        let result = SHELL_HANDLER.classify(&HandlerContext::test("bash", &args));
+        assert!(matches!(result, Classification::Recurse(cmd) if cmd == "git status"));
+    }
+
+    #[test]
+    fn bash_c_with_positional_args_asks() {
+        let args: Vec<String> = vec!["-c".into(), "$0 $1".into(), "rm".into(), "-rf /".into()];
+        let result = SHELL_HANDLER.classify(&HandlerContext::test("bash", &args));
+        assert!(matches!(result, Classification::Ask(reason) if reason.contains("positional")));
+    }
+
+    #[test]
+    fn bash_interactive_asks() {
+        let args: Vec<String> = vec![];
+        let result = SHELL_HANDLER.classify(&HandlerContext::test("bash", &args));
+        assert!(matches!(result, Classification::Ask(reason) if reason.contains("interactive")));
+    }
+
+    #[test]
+    fn sh_c_no_command_asks() {
+        let args: Vec<String> = vec!["-c".into()];
+        let result = SHELL_HANDLER.classify(&HandlerContext::test("sh", &args));
+        assert!(matches!(result, Classification::Ask(reason) if reason.contains("no command")));
+    }
+
+    #[test]
+    fn bash_script_file_recurses() {
+        let dir = temp_dir("fs");
+        write_file(&dir, "test.sh", "git status\nls -la");
+        let args = vec!["test.sh".into()];
+        let ctx = HandlerContext {
+            working_directory: &dir,
+            ..HandlerContext::test("bash", &args)
+        };
+        let result = SHELL_HANDLER.classify(&ctx);
+        assert!(matches!(result, Classification::Recurse(cmd) if cmd.contains("git status")));
+    }
+
+    #[test]
+    fn bash_script_missing_asks() {
+        let dir = temp_dir("fs");
+        let args = vec!["missing.sh".into()];
+        let ctx = HandlerContext {
+            working_directory: &dir,
+            ..HandlerContext::test("bash", &args)
+        };
+        let result = SHELL_HANDLER.classify(&ctx);
+        assert!(matches!(result, Classification::Ask(_)));
+    }
+}

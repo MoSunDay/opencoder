@@ -48,9 +48,14 @@ fn done_turn() -> LlmEvent {
 
 #[tokio::test]
 async fn sandbox_mode_blocks_write_command() {
+    // NOTE: the release set is `/tmp` + `/dev/null`, so the old target
+    // `/tmp/opencoder-test-guard` is now ALLOWED by policy. The guard proves
+    // its blocking behavior on a cwd-relative path instead: the working
+    // directory is NOT released, and if the command ever ran it would land
+    // inside this test's own tempdir session dir — under test control.
     let mock = Arc::new(
         MockChatClient::new()
-            .push_script(vec![bash_turn("rm -rf /tmp/opencoder-test-guard")])
+            .push_script(vec![bash_turn("rm -rf ./opencoder-test-guard")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
@@ -88,6 +93,7 @@ async fn sandbox_mode_blocks_write_command() {
 
 #[tokio::test]
 async fn sandbox_mode_allows_read_only_command() {
+    // Plain read-only command, no release-set involvement: allowed anywhere.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("ls -la")])
@@ -120,9 +126,13 @@ async fn sandbox_mode_allows_read_only_command() {
 #[tokio::test]
 async fn act_mode_is_not_guarded() {
     // The same write command in act mode should NOT be blocked by bash_guard.
+    // NOTE: the command is cwd-relative on purpose — /tmp is in the sandbox
+    // release set, so a /tmp target would no longer distinguish guarded from
+    // unguarded modes. Relative paths resolve inside this test's tempdir
+    // session dir, so nothing outside the test's control is touched.
     let mock = Arc::new(
         MockChatClient::new()
-            .push_script(vec![bash_turn("mkdir -p /tmp/opencoder-test-act-guard")])
+            .push_script(vec![bash_turn("mkdir -p ./opencoder-test-act-guard")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
@@ -154,6 +164,8 @@ async fn act_mode_is_not_guarded() {
 #[tokio::test]
 async fn sandbox_mode_allows_devnull_redirect() {
     // A read-only redirect to /dev/null (common with find/grep) must pass.
+    // /dev/null is part of the declared sandbox release set (alongside /tmp),
+    // so discarding output stays permitted in sandbox mode.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("find . -name '*.rs' 2>/dev/null | head")])
@@ -194,10 +206,11 @@ async fn sandbox_mode_allows_devnull_redirect() {
 }
 
 #[tokio::test]
-async fn plan_mode_allows_subshell_fd_merge() {
+async fn sandbox_mode_allows_subshell_fd_merge() {
     // `(cmd 2>&1)` and brace groups used to be blocked because the trailing
-    // `)` was folded into the redirect target. These are read-only and must
-    // run in plan mode.
+    // `)` was folded into the redirect target. These are read-only (an fd
+    // merge writes no file — no release-set involvement) and must run in
+    // sandbox mode.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("(echo hi 2>&1) | head")])
@@ -240,8 +253,9 @@ async fn plan_mode_allows_subshell_fd_merge() {
 #[tokio::test]
 async fn sandbox_mode_allows_tee_to_devnull() {
     // `tee /dev/null` discards its copy and is read-only; it must not be
-    // blocked in plan mode. `tee <realfile>` is still blocked (covered by the
-    // unit tests in bash_guard).
+    // blocked in sandbox mode. /dev/null is part of the declared sandbox release
+    // set; `tee <realfile>` outside /tmp + /dev/null is still blocked (covered
+    // by the compat unit tests in bash_guard).
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("echo hi | tee /dev/null")])

@@ -1,5 +1,9 @@
 //! Pre-parse bound on the *shape* of a command string.
 //!
+//! Ported from rippy `src/nesting.rs` (MIT, https://github.com/mpecan/rippy).
+//! Sandbox delta: none — the only change is an edition-2021 rewrite of two
+//! let-chains.
+//!
 //! rable parses by recursive descent, and a stack overflow *aborts* the process
 //! instead of unwinding, which the hook's `catch_unwind` fail-closed net cannot
 //! convert into an Ask (#195). Two things keep that from happening: the parse

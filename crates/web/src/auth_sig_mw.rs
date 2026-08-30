@@ -51,7 +51,11 @@ impl SigState {
     fn check_and_record(&self, sig: &str, ts_ms: i64, now_ms: i64) -> bool {
         let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         let expiry = ts_ms + auth_sig::REPLAY_WINDOW_MS;
-        seen.retain(|_, exp| *exp > now_ms);
+        // `>=` aligns with the INCLUSIVE window in `verify` (`> WINDOW` rejects,
+        // so now == ts+WINDOW is still a legal timestamp): an entry must survive
+        // pruning through that last in-window millisecond, or the same signature
+        // could be replayed exactly once at the boundary.
+        seen.retain(|_, exp| *exp >= now_ms);
         if seen.contains_key(sig) {
             return false;
         }
@@ -179,6 +183,22 @@ mod tests {
             2 * auth_sig::REPLAY_WINDOW_MS,
             2 * auth_sig::REPLAY_WINDOW_MS
         ));
+    }
+
+    #[test]
+    fn window_edge_entry_survives_prune_so_replay_is_caught() {
+        let s = state();
+        assert!(s.check_and_record("edge", 0, 0));
+        // F6: expiry == now is still INSIDE verify's inclusive window
+        // (`> REPLAY_WINDOW_MS` rejects, so now == ts+WINDOW is legal). The
+        // entry must survive pruning, or the last-millisecond signature would
+        // be replayable exactly once. The off-by-one `>` pruning accepted it.
+        assert!(
+            !s.check_and_record("edge", 0, auth_sig::REPLAY_WINDOW_MS),
+            "boundary request is a replay, not a fresh signature"
+        );
+        // One ms past the window the entry is pruned and freed again.
+        assert!(s.check_and_record("edge", 0, auth_sig::REPLAY_WINDOW_MS + 1));
     }
 
     #[test]

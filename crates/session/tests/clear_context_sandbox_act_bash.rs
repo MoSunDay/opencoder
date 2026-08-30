@@ -1,11 +1,14 @@
 //! Single-chain evidence for the sandbox -> act clear-context convergence:
 //! the convergence must actually UNBLOCK bash writes. Within one `run`, a
 //! sandbox session clears context (TranscriptReset then AgentSwitch(act))
-//! and the very next turn executes a REAL cwd-relative write command. cwd is
-//! outside the sandbox release set, so a session that stayed sandbox would
-//! have blocked it (that half is pinned in `bash_guard_sandbox_mode.rs`);
-//! the created directory proves the command actually ran instead of merely
-//! reporting no block.
+//! and the very next turn executes a REAL cwd-relative write command. The
+//! write carries a per-call workdir that is a PLAIN directory (outside
+//! /tmp, the sandbox release scope), so a session that stayed sandbox
+//! would classify this exact call against that workdir and BLOCK it —
+//! the blocking half of that contract is pinned in
+//! `bash_guard_sandbox_mode.rs::sandbox_mode_blocks_write_command`. Only
+//! the act convergence lets the call through: the created directory proves
+//! the command actually ran instead of merely reporting no block.
 
 use std::sync::Arc;
 
@@ -33,15 +36,15 @@ fn done_turn(text: &str) -> LlmEvent {
     }
 }
 
-/// Assistant turn issuing one real bash write call (cwd-relative, so it
-/// targets the session tempdir and nothing outside test control).
-fn bash_write_turn(cmd: &str) -> LlmEvent {
+/// Assistant turn issuing one real bash write call, resolved against the
+/// per-call workdir so it targets nothing outside test control.
+fn bash_write_turn(cmd: &str, workdir: &str) -> LlmEvent {
     LlmEvent::Completed {
         text: String::new(),
         tool_calls: vec![CompletedToolCall {
             id: "bash-1".into(),
             name: "bash".into(),
-            input: serde_json::json!({ "command": cmd }),
+            input: serde_json::json!({ "command": cmd, "workdir": workdir }),
         }],
         usage: Some(Usage::default()),
     }
@@ -84,15 +87,23 @@ async fn sandbox_clear_then_real_bash_write_executes_unblocked() {
 
     // Turn 1 (the post-clear seed-execution turn) issues the real write;
     // turn 2 wraps the run up.
+    // The write's per-call workdir is a PLAIN directory (outside /tmp): if
+    // the convergence broke and the session stayed sandbox, the gate would
+    // block this exact call and the test would fail. Must outlive the run.
+    let workdir = tempfile::Builder::new()
+        .prefix("clear-act-workdir-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_write_turn(
                 "mkdir -p ./opencoder-clear-act-write",
+                workdir.path().to_str().unwrap(),
             )])
             .push_script(vec![done_turn("write done")]),
     );
-    // The tempdir must outlive the run: the bash tool resolves relative
-    // paths against this session working directory.
+    // The tempdir must outlive the run: the bash tool falls back to this
+    // session working directory only when a call carries no workdir.
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "sandbox-clear-bash",
@@ -146,10 +157,10 @@ async fn sandbox_clear_then_real_bash_write_executes_unblocked() {
         }
     }
 
-    // The command really executed: its effect exists in the session cwd.
+    // The command really executed: its effect exists in the call workdir.
     assert!(
-        dir.path().join("opencoder-clear-act-write").is_dir(),
-        "bash write must have actually run in the session cwd"
+        workdir.path().join("opencoder-clear-act-write").is_dir(),
+        "bash write must have actually run in the call workdir"
     );
 
     // Convergence persisted for resume.

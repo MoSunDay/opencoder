@@ -115,7 +115,15 @@ pub async fn get_events(
             });
     let merged = replay.chain(live).map(|evt| {
         let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
-        Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
+        // The persisted seq becomes the SSE `id:` field — the reconnect cursor
+        // `Last-Event-ID` replays from. The builder consumes self, so the
+        // optional id is applied with a reassignment (live frames without a
+        // seq yet simply carry no id).
+        let mut ev = Event::default().event(evt.kind).data(data);
+        if let Some(seq) = evt.seq {
+            ev = ev.id(seq.to_string());
+        }
+        Ok::<_, std::convert::Infallible>(ev)
     });
 
     // Wrap in a drop guard so that when the client disconnects (or the stream

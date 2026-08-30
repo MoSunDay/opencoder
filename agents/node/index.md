@@ -11,7 +11,7 @@ Commit: (working-tree, daemon 统一入口 + 全量签名 + SPA 内嵌)
 - 不做任务自动重派：节点失联的任务由 server 标 error 收束，人工重发。
 
 ## 关键抽象
-- `uplink.rs`：`Uplink{http,base,token}` REST 客户端，所有请求经单一 `signed_request` 出口按共享 token 做 HMAC-SHA256 签名（`x-sig-timestamp`/`x-sig`）；请求形状即 `opencoder_core::node_protocol` DTO（register/heartbeat/claim/events/status 五口子）。
+- `uplink.rs`：`Uplink{http,base,token}` REST 客户端，所有请求经单一 `signed_request` 出口按共享 token 做 HMAC-SHA256 签名（`x-sig-timestamp`/`x-sig`）；请求形状即 `opencoder_core::node_protocol` DTO（register/heartbeat/claim/events/status 五口子；心跳走独立 5s 短超时预算（`HEARTBEAT_TIMEOUT`，最坏静默间隙 ≈ 5s 超时 + 5s tick < server `STALE_AFTER_MS`=20s，约 2× 余量；控制面其余请求仍 120s），心跳携带的 control 任务经 `tokio::spawn` 脱离 tick 关键路径（`Inflight` mutex 下原子去重兜并发））。
 - `batcher.rs`：纯函数攒批器——32 条或 300ms 先到触发 flush；`push/should_flush/take` 可独立单测。
 - `executor.rs`：领到任务 → 本地 `LibsqlStore` + 本地 `Config` 构造 `ChatStream` → 复用 session crate 原语（`resume_and_replay` + `run()` + 事件回调攒批上传）；取消传导走 runner 提供的 watch channel 触发本地 turn cancel。
 - `runner.rs`：主循环——注册（同名顶替旧行）→ 心跳 tick(5s) 与 idle claim 轮询(1.5s) 双 interval select；任务串行执行。`client_override` 仅测试注入。

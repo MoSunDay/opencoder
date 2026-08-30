@@ -249,11 +249,21 @@ pub(super) async fn execute_call_with_timeout(
     // Sandbox-mode execution gate: unadmitted tools AND mutating bash are
     // refused with a model-visible denial (names the mode, forbids retry,
     // points at `/act`) so the model stops attempting writes instead of
-    // looping; see bash_guard::gate for the policy.
+    // looping; see bash_guard::gate for the policy. The effective workdir is
+    // resolved exactly like `tools::bash::execute` resolves it (`workdir`
+    // input, else the session working dir): the classifier must judge
+    // relative writes in the same directory the command will actually run in.
+    let effective_workdir = tc
+        .input
+        .get("workdir")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| session.working_dir.clone());
     if let Some(denial) = crate::bash_guard::gate(
         &session.agent.kind,
         &tc.name,
         tc.input.get("command").and_then(|v| v.as_str()),
+        &effective_workdir,
     ) {
         return ToolOutput::err(denial);
     }

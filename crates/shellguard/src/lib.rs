@@ -32,10 +32,23 @@ pub use environment::Environment;
 pub use resolve::{EnvLookup, VarLookup};
 pub use verdict::{AllowReason, Decision, Verdict};
 
-/// Classify a shell command under the sandbox policy.
+/// Classify a shell command under the sandbox policy, resolving relative
+/// paths against the *process* working directory. Convenience wrapper: any
+/// caller that knows the directory the command will actually run in must
+/// prefer [`classify_in`] — the classification cwd has to equal the
+/// execution cwd, or a relative-path write is judged against the wrong tree.
 pub fn classify(command: &str) -> Verdict {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-    let mut analyzer = match Analyzer::from_env(Environment::from_system(cwd, false)) {
+    classify_in(command, &cwd)
+}
+
+/// Classify a shell command under the sandbox policy with an explicit
+/// working directory: relative operands (`touch f`) resolve against `cwd`,
+/// exactly as the executor's child process would resolve them. Fail-closed
+/// semantics are identical to [`classify`]; only the cwd source differs.
+pub fn classify_in(command: &str, cwd: &std::path::Path) -> Verdict {
+    let mut analyzer = match Analyzer::from_env(Environment::from_system(cwd.to_path_buf(), false))
+    {
         Ok(analyzer) => analyzer,
         // The parser is stateless and never fails; treat it as unparseable.
         Err(err) => return Verdict::ask(format!("unparseable command: {err}")),
@@ -55,3 +68,7 @@ mod analyzer_sandbox_tests;
 #[cfg(test)]
 #[path = "analyzer_pipeline_tests.rs"]
 mod analyzer_pipeline_tests;
+
+#[cfg(test)]
+#[path = "classify_in_tests.rs"]
+mod classify_in_tests;

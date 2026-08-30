@@ -10,6 +10,10 @@
 //!   is refused with the same denial and NEVER executes — no silent writes.
 //! - A `ls` call in sandbox mode produces a ToolEnd with is_error=false.
 //! - The act agent is unaffected (no guard).
+//! - bash classification happens in the call's effective workdir (the
+//!   `workdir` input, defaulting to the session working dir) — the same
+//!   directory the command runs in. A relative write released in a `/tmp`
+//!   workdir is blocked from a plain workdir, and vice versa.
 
 use std::sync::Arc;
 
@@ -25,12 +29,22 @@ fn config() -> Config {
 }
 
 fn bash_turn(cmd: &str) -> LlmEvent {
+    bash_turn_in(cmd, None)
+}
+
+/// A bash call with an explicit per-call `workdir` — exactly the shape the
+/// model can emit and the tool executes with (`bash -lc …` in that dir).
+fn bash_turn_in(cmd: &str, workdir: Option<&str>) -> LlmEvent {
+    let mut input = serde_json::json!({ "command": cmd });
+    if let Some(workdir) = workdir {
+        input["workdir"] = serde_json::json!(workdir);
+    }
     LlmEvent::Completed {
         text: "".into(),
         tool_calls: vec![CompletedToolCall {
             id: "bash-1".into(),
             name: "bash".into(),
-            input: serde_json::json!({"command": cmd}),
+            input,
         }],
         usage: Some(Usage {
             input_tokens: 5,
@@ -53,12 +67,20 @@ fn done_turn() -> LlmEvent {
 async fn sandbox_mode_blocks_write_command() {
     // NOTE: the release set is `/tmp` + `/dev/null`, so the old target
     // `/tmp/opencoder-test-guard` is now ALLOWED by policy. The guard proves
-    // its blocking behavior on a cwd-relative path instead: the working
-    // directory is NOT released, and if the command ever ran it would land
-    // inside this test's own tempdir session dir — under test control.
+    // its blocking behavior on a cwd-relative path issued from a per-call
+    // workdir that is a PLAIN directory (outside /tmp): the working directory
+    // is NOT released, and if the command ever ran it would land inside that
+    // test-controlled workdir.
+    let workdir = tempfile::Builder::new()
+        .prefix("sg-guard-block-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
     let mock = Arc::new(
         MockChatClient::new()
-            .push_script(vec![bash_turn("rm -rf ./opencoder-test-guard")])
+            .push_script(vec![bash_turn_in(
+                "rm -rf ./opencoder-test-guard",
+                Some(workdir.path().to_str().unwrap()),
+            )])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
@@ -292,6 +314,126 @@ async fn sandbox_mode_allows_tee_to_devnull() {
             "tee /dev/null must not be blocked, got: {output}"
         );
     }
+}
+
+/// A unique workdir under the literal `/tmp` release dir (the sandbox release
+/// set hardcodes `/tmp`, so the fixture must live beneath it, not under
+/// `TMPDIR`). RAII-cleaned by the returned guard.
+fn tmp_released_workdir(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("sg-{tag}-"))
+        .tempdir_in("/tmp")
+        .unwrap()
+}
+
+#[tokio::test]
+async fn sandbox_mode_releases_relative_write_in_tmp_call_workdir() {
+    // B2 regression, end to end: `touch newfile` is cwd-relative, so its
+    // verdict depends on WHERE the tool will run it. With an explicit /tmp
+    // workdir the write is released — even though the test process cwd (this
+    // crate's source tree) is NOT released. A gate still keyed on the process
+    // cwd would block this call and fail the test.
+    let workdir = tmp_released_workdir("tmp-workdir");
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn_in(
+                "touch sg-newfile",
+                Some(workdir.path().to_str().unwrap()),
+            )])
+            .push_script(vec![done_turn()]),
+    );
+    // The session working dir itself is a plain /tmp tempdir here; the
+    // release must come from the call's `workdir` input, not the session dir
+    // default — so the session dir is placed OUTSIDE the release set.
+    let session_dir = tempfile::Builder::new()
+        .prefix("sg-session-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
+    let agent = resolve_agent("sandbox").unwrap();
+    let mut session = SessionState::new(
+        "guard-workdir-tmp",
+        agent,
+        config(),
+        mock,
+        session_dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "touch in tmp workdir".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(
+            !*is_error,
+            "relative write in a /tmp workdir must be released, output: {output}"
+        );
+    }
+    // The command really executed in the given workdir.
+    assert!(
+        workdir.path().join("sg-newfile").exists(),
+        "`touch` must have run inside the /tmp workdir"
+    );
+}
+
+#[tokio::test]
+async fn sandbox_mode_blocks_write_in_plain_call_workdir() {
+    // Counterpart of the /tmp-workdir test: the IDENTICAL command from a
+    // plain (non-released) per-call workdir must be refused with the sandbox
+    // denial — nothing may execute.
+    let workdir = tempfile::Builder::new()
+        .prefix("sg-plain-workdir-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn_in(
+                "touch sg-newfile",
+                Some(workdir.path().to_str().unwrap()),
+            )])
+            .push_script(vec![done_turn()]),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let agent = resolve_agent("sandbox").unwrap();
+    let mut session = SessionState::new(
+        "guard-workdir-plain",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "touch in plain workdir".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(*is_error, "plain-workdir write must be blocked");
+        assert!(
+            output.contains("Blocked in sandbox mode"),
+            "output must explain the block, got: {output}"
+        );
+    }
+    // The gate fired before execution: nothing was created.
+    assert!(
+        !workdir.path().join("sg-newfile").exists(),
+        "blocked command must never execute"
+    );
 }
 
 fn ev_name(e: &SessionEvent) -> &'static str {

@@ -11,7 +11,7 @@ Commit: 860831d22fad968737c366c93b4cf70fc1f4c010
 - `WorkflowSpec` 是启动前准备好的通用合同，不在运行时解释 UI Case 或自然语言步骤。
 - Store 是唯一权威状态；文件目录只在 CLI `--debug` 下生成，不能反向覆盖 Store。
 - 父 Session 不执行 TODO 工具，也不接收 MCP/registered CLI 指令；子 Session 不修改工作流投影。Rust 状态机校验双方结构化决定。
-- 工具门禁读取持久化 SessionEvent，只接受声明工具的匹配参数与成功 ToolEnd，模型验收不能绕过失败门禁。
+- 工具门禁读取执行 session 回调实时收集的 SessionEvent（同一回调经 `spawn_event_flusher` 同步落库供观测面回放），只接受声明工具的匹配参数与成功 ToolEnd，模型验收不能绕过失败门禁。
 
 ## 关键抽象
 

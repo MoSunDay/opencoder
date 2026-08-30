@@ -10,6 +10,13 @@
 //! risk-bearing writes; release `/dev/null` and `/tmp`; the cwd / project
 //! directory is NOT released. `Allow` passes; `Ask`/`Deny` block.
 //!
+//! Classification is cwd-relative (a bare `touch f` means "write `f` in the
+//! working directory"), so the cwd handed to [`classify_with_dir`] MUST be
+//! the directory the command will actually execute in — the per-call
+//! `workdir` input for bash, not the agent process's cwd. Classifying
+//! against any other directory is the B2 bypass: from a process cwd under
+//! `/tmp` a released verdict lets the write land in the real workdir.
+//!
 //! The command-parsing helpers below (`cmd_base`, `strip_wrappers` and their
 //! private support fns) are preserved verbatim from the previous hand-written
 //! classifier: [`crate::tools::ssh_pty`] reuses them to unwrap
@@ -28,9 +35,27 @@ pub enum BashVerdict {
 /// `opencoder_shellguard::classify` (derived from rippy, MIT). `Allow`
 /// passes; `Ask`/`Deny` block, carrying the classifier's human-readable
 /// reason (embedded verbatim in the tool error shown to the model).
+///
+/// Relative paths resolve against the *process* cwd. Production gating must
+/// use [`classify_with_dir`] with the directory the command will run in:
+/// the classification cwd must equal the execution cwd.
 pub fn classify(command: &str) -> BashVerdict {
     use opencoder_shellguard::Decision;
     let verdict = opencoder_shellguard::classify(command);
+    match verdict.decision {
+        Decision::Allow => BashVerdict::ReadOnly,
+        Decision::Ask | Decision::Deny => BashVerdict::WriteBlocked(verdict.reason),
+    }
+}
+
+/// [`classify`] against an explicit working directory: relative operands
+/// (`touch f`) resolve as if the shell were running in `cwd`. The caller
+/// must pass the exact directory the command will execute in — for the bash
+/// tool that is the per-call `workdir` input, defaulting to the session
+/// working dir (see `tools::bash`).
+pub fn classify_with_dir(command: &str, cwd: &std::path::Path) -> BashVerdict {
+    use opencoder_shellguard::Decision;
+    let verdict = opencoder_shellguard::classify_in(command, cwd);
     match verdict.decision {
         Decision::Allow => BashVerdict::ReadOnly,
         Decision::Ask | Decision::Deny => BashVerdict::WriteBlocked(verdict.reason),
@@ -57,13 +82,26 @@ pub fn sandbox_denial(tool: &str, detail: &str) -> String {
 /// Sandbox execution gate for one tool call: `Some(denial)` refuses the call
 /// with the model-visible [`sandbox_denial`], `None` lets it proceed.
 ///
+/// `workdir` is the directory the call will execute in — for bash the
+/// per-call `workdir` input, else the session working dir (resolved by the
+/// caller exactly like `tools::bash` does). The bash branch classifies the
+/// command against it, because the classification cwd must equal the
+/// execution cwd: a relative write judged against any other directory is
+/// the B2 conditional-bypass (a process cwd under `/tmp` would release
+/// `touch f` while the write lands in the real workdir).
+///
 /// Two layers, both fail-closed:
 /// - the session is sandbox but the tool is not admitted (a hallucinated or
 ///   remembered builtin like `edit`, or an unadvertised MCP tool): refuse so
 ///   a write can never slip through a tool the model was never shown;
 /// - `bash` is admitted but the shellguard classifier flags the command as
 ///   mutating: refuse with the classifier's reason.
-pub fn gate(kind: &opencoder_core::AgentKind, tool: &str, command: Option<&str>) -> Option<String> {
+pub fn gate(
+    kind: &opencoder_core::AgentKind,
+    tool: &str,
+    command: Option<&str>,
+    workdir: &std::path::Path,
+) -> Option<String> {
     if *kind != opencoder_core::AgentKind::Sandbox {
         return None;
     }
@@ -71,7 +109,8 @@ pub fn gate(kind: &opencoder_core::AgentKind, tool: &str, command: Option<&str>)
         return Some(sandbox_denial(tool, "tool is not available in sandbox mode"));
     }
     if tool == "bash" {
-        if let BashVerdict::WriteBlocked(reason) = classify(command.unwrap_or("")) {
+        if let BashVerdict::WriteBlocked(reason) = classify_with_dir(command.unwrap_or(""), workdir)
+        {
             return Some(sandbox_denial("bash", &reason));
         }
     }
@@ -290,17 +329,18 @@ mod tests {
     #[test]
     fn gate_passes_non_sandbox_kinds_through() {
         use opencoder_core::{resolve_agent, AgentKind};
+        let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for name in ["act", "explore"] {
             let agent = resolve_agent(name).unwrap();
             assert_eq!(
-                super::gate(&agent.kind, "edit", Some("x")),
+                super::gate(&agent.kind, "edit", Some("x"), anywhere),
                 None,
                 "{name} must not be gated"
             );
         }
         // Explicit non-sandbox kind is equally untouched.
         assert_eq!(
-            super::gate(&AgentKind::Act, "bash", Some("rm -rf /")),
+            super::gate(&AgentKind::Act, "bash", Some("rm -rf /"), anywhere),
             None
         );
     }
@@ -309,8 +349,9 @@ mod tests {
     fn gate_refuses_unadmitted_tool_in_sandbox() {
         use opencoder_core::resolve_agent;
         let kind = resolve_agent("sandbox").unwrap().kind;
+        let anywhere = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         for tool in ["edit", "bg", "mcp__fs__write"] {
-            let denial = super::gate(&kind, tool, None)
+            let denial = super::gate(&kind, tool, None, anywhere)
                 .unwrap_or_else(|| panic!("{tool} must be refused"));
             assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
         }
@@ -319,7 +360,11 @@ mod tests {
             if *tool == "bash" {
                 continue; // covered by the classifier tests below
             }
-            assert_eq!(super::gate(&kind, tool, None), None, "{tool} admitted");
+            assert_eq!(
+                super::gate(&kind, tool, None, anywhere),
+                None,
+                "{tool} admitted"
+            );
         }
     }
 
@@ -327,9 +372,46 @@ mod tests {
     fn gate_blocks_mutating_bash_in_sandbox() {
         use opencoder_core::resolve_agent;
         let kind = resolve_agent("sandbox").unwrap().kind;
-        assert!(super::gate(&kind, "bash", Some("ls -la")).is_none());
-        let denial = super::gate(&kind, "bash", Some("rm -rf ./f")).expect("blocked");
+        // A plain (non-/tmp) workdir: this crate's source tree.
+        let plain = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert!(super::gate(&kind, "bash", Some("ls -la"), plain).is_none());
+        let denial = super::gate(&kind, "bash", Some("rm -rf ./f"), plain).expect("blocked");
         assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+    }
+
+    #[test]
+    fn gate_judges_bash_against_the_call_workdir_not_the_process_cwd() {
+        use opencoder_core::resolve_agent;
+        let kind = resolve_agent("sandbox").unwrap().kind;
+        // The command is identical in both legs; only the effective workdir
+        // differs. The default process cwd is this crate's source tree (never
+        // released), so a gate still keyed on the process cwd would block the
+        // /tmp leg.
+        let tmp = std::path::Path::new("/tmp");
+        assert_eq!(
+            super::gate(&kind, "bash", Some("touch ./f"), tmp),
+            None,
+            "relative write under the /tmp workdir is released"
+        );
+        let plain = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let denial = super::gate(&kind, "bash", Some("touch ./f"), plain.path())
+            .unwrap_or_else(|| panic!("same command must be blocked from a non-/tmp workdir"));
+        assert!(denial.contains("Blocked in sandbox mode"), "got: {denial}");
+    }
+
+    #[test]
+    fn classify_with_dir_resolves_relative_paths_against_the_given_cwd() {
+        use super::classify_with_dir;
+        // /tmp itself is in the release set: the relative target lands there.
+        assert_eq!(
+            classify_with_dir("touch f", std::path::Path::new("/tmp")),
+            BashVerdict::ReadOnly
+        );
+        let plain = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        assert!(matches!(
+            classify_with_dir("touch f", plain.path()),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]

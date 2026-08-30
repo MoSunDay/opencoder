@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Context, Result};
 use opencoder_core::{message::now_ms, resolve_agent, Config, Message, Role};
@@ -70,21 +74,40 @@ pub async fn execute(
     // produced by THIS run are valid candidates.
     let watermark = session.messages.len();
     let prompt = focused_prompt(workflow, state, todo, context_mode)?;
-    let event_seq = store.last_event_seq(&session.id).await?;
-    opencoder_session::run(&mut session, prompt, |_| {}).await?;
-    let events = store
-        .events_after(&session.id, event_seq)
-        .await?
-        .into_iter()
-        .map(|record| {
-            let kind = record
-                .sse_kind
-                .as_deref()
-                .context("TODO event is missing its exact SSE kind")?;
-            SessionEvent::from_sse(kind, record.payload)
-                .with_context(|| format!("decode persisted TODO event {kind}"))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    // B1: the session runner only surfaces events through this callback — the
+    // old `|_| {}` dropped them, so required-tool-call gates never matched.
+    // Mirror the web drain: persist every event through a flusher sink AND
+    // keep it in memory so `evaluate_gate` sees the real ToolStart/ToolEnd
+    // stream (no store round-trip, no SSE re-decode).
+    let (sink, flusher) =
+        opencoder_session::spawn_event_flusher(Some(store.clone()), session.id.clone());
+    // `FnMut` owns its captures, so the buffer is shared through an Arc and
+    // reclaimed lock-free via `Arc::into_inner` once the run settles.
+    let events: Arc<Mutex<Vec<SessionEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let collected = events.clone();
+    // The sink is a cheap clonable handle: only the clone moves into the
+    // closure; the outer copy stays alive so it can be dropped right after
+    // the run, closing the channel ahead of the final flusher await.
+    let run_result = opencoder_session::run(&mut session, prompt, {
+        let sink = sink.clone();
+        move |ev| {
+            let _ = sink.push(&ev);
+            collected.lock().unwrap().push(ev);
+        }
+    })
+    .await;
+    // The flusher MUST be awaited (after dropping the sink) so the final
+    // batch lands on the normal path and on run failure alike; only then is
+    // the run error propagated.
+    drop(sink);
+    if let Err(error) = flusher.await {
+        tracing::warn!(session = %session.id, error = %error, "TODO event flush failed");
+    }
+    run_result?;
+    let events = Arc::into_inner(events)
+        .expect("TODO event buffer still shared after run")
+        .into_inner()
+        .unwrap();
     let raw = latest_new_assistant(&session.messages, watermark)
         .context("TODO agent returned no final candidate")?;
     let candidate = parse_candidate(&raw)

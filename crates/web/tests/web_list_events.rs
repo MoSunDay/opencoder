@@ -199,3 +199,84 @@ async fn last_event_id_header_drives_replay() {
         "invalid Last-Event-ID must fall back to replay-from-0; got: {text}"
     );
 }
+
+// ── SSE `id:` field (F4) ─────────────────────────────────────────────────────
+
+/// Every replayed frame must carry `id:` equal to the persisted event's seq —
+/// the reconnect cursor the SSE-standard `Last-Event-ID` replays from. Without
+/// it the documented resume path is a dead branch (frames unresumable).
+#[tokio::test]
+async fn persisted_frames_carry_seq_as_sse_id() {
+    let ctx = app().await;
+    let id = create_session(&ctx).await;
+    for i in 0..2 {
+        ctx.store
+            .append_event(&SessionEventRecord {
+                session_id: id.clone(),
+                kind: EventKind::Step,
+                payload: serde_json::json!({ "i": i }),
+                ts: i,
+                seq: None,
+                sse_kind: Some("status".into()),
+            })
+            .await
+            .unwrap();
+    }
+    // The seqs the store assigned are the ids the wire must carry.
+    let seq_of_payload: std::collections::HashMap<String, i64> = ctx
+        .store
+        .events_after(&id, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            (
+                serde_json::to_string(&r.payload).unwrap(),
+                r.seq.expect("persisted row carries its seq"),
+            )
+        })
+        .collect();
+
+    let resp = ctx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/sessions/{id}/events?after=0"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = read_sse_text(resp, "\"i\":1").await;
+
+    // Pair each SSE block's `id:` line with the seq of the very payload it
+    // streams (axum writes `id: <n>` within the same block as `data:`).
+    let mut checked = 0;
+    for block in text.split("\n\n") {
+        let Some(data) = block.lines().find_map(|l| l.strip_prefix("data: ")) else {
+            continue; // keep-alive comment blocks carry no data line
+        };
+        let payload =
+            serde_json::to_string(&serde_json::from_str::<serde_json::Value>(data.trim()).unwrap())
+                .unwrap();
+        let seq = seq_of_payload
+            .get(&payload)
+            .unwrap_or_else(|| panic!("streamed payload must be one of the persisted: {data}"));
+        let id_line = block
+            .lines()
+            .find_map(|l| l.strip_prefix("id: "))
+            .unwrap_or_else(|| panic!("frame must carry an id: line, got: {block}"));
+        assert_eq!(
+            id_line.trim().parse::<i64>().unwrap(),
+            *seq,
+            "SSE id must equal the persisted event seq"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "both replayed frames must be id-tagged: {text}"
+    );
+}

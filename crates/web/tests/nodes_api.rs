@@ -7,8 +7,11 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use futures::StreamExt;
 use opencoder_llm::MockChatClient;
-use opencoder_store::{LibsqlStore, SessionFilter, SessionMeta, Store};
+use opencoder_store::{
+    EventKind, LibsqlStore, SessionEventRecord, SessionFilter, SessionMeta, Store,
+};
 use tower::ServiceExt;
 
 mod support;
@@ -636,4 +639,112 @@ async fn session_reverse_lookup_resolves_and_404s_ordinary_sessions() {
         .unwrap();
     let (s404, b404) = send(&ctx.app, req("GET", "/api/sessions/plain/task", None, None)).await;
     assert_eq!(s404, StatusCode::NOT_FOUND, "{b404}");
+}
+
+// ── node-task SSE `id:` field (F4) ──────────────────────────────────────────
+
+/// Bounded read of a streamed SSE body (the stream itself never ends; the
+/// budget must, or the test would hang on the parked hub receiver). Mirrors
+/// the helper in `web_list_events.rs`.
+async fn read_sse_text(resp: axum::response::Response, until: &str) -> String {
+    let mut stream = resp.into_body().into_data_stream();
+    let mut text = String::new();
+    for _ in 0..40 {
+        match tokio::time::timeout(std::time::Duration::from_millis(300), stream.next()).await {
+            Ok(Some(Ok(bytes))) => {
+                text.push_str(&String::from_utf8_lossy(&bytes));
+                if text.contains(until) {
+                    break;
+                }
+            }
+            _ => break,
+        }
+    }
+    text
+}
+
+/// Persisted task-session events must replay with `id:` equal to their store
+/// seq — the reconnect cursor `Last-Event-ID` resumes from on this endpoint.
+#[tokio::test]
+async fn node_task_events_frames_carry_seq_as_sse_id() {
+    let ctx = app(None).await;
+    let node_id = register(&ctx.app, "sse-id").await;
+    let (_, disp) = send(
+        &ctx.app,
+        req(
+            "POST",
+            &format!("/api/nodes/{node_id}/tasks"),
+            None,
+            Some(r#"{"prompt":"run lint"}"#.into()),
+        ),
+    )
+    .await;
+    let tid = disp["task_id"].as_str().unwrap().to_string();
+    let sid = disp["session_id"].as_str().unwrap().to_string();
+
+    // A persisted row (store assigns the seq) — the replay source.
+    ctx.store
+        .append_event(&SessionEventRecord {
+            session_id: sid.clone(),
+            kind: EventKind::Step,
+            payload: serde_json::json!({ "worker": true }),
+            ts: 1,
+            seq: None,
+            sse_kind: Some("status".into()),
+        })
+        .await
+        .unwrap();
+    let seq_of_payload: std::collections::HashMap<String, i64> = ctx
+        .store
+        .events_after(&sid, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| {
+            (
+                serde_json::to_string(&r.payload).unwrap(),
+                r.seq.expect("persisted row carries its seq"),
+            )
+        })
+        .collect();
+
+    let resp = ctx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/nodes/tasks/{tid}/events?after=0"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = read_sse_text(resp, "\"worker\":true").await;
+
+    // Every data block's `id:` must be the seq of the very payload streamed.
+    let mut checked = 0;
+    for block in text.split("\n\n") {
+        let Some(data) = block.lines().find_map(|l| l.strip_prefix("data: ")) else {
+            continue; // keep-alive comment blocks carry no data line
+        };
+        let payload = serde_json::to_string(
+            &serde_json::from_str::<serde_json::Value>(data.trim()).unwrap(),
+        )
+        .unwrap();
+        let seq = seq_of_payload
+            .get(&payload)
+            .unwrap_or_else(|| panic!("streamed payload must be a persisted one: {data}"));
+        let id_line = block
+            .lines()
+            .find_map(|l| l.strip_prefix("id: "))
+            .unwrap_or_else(|| panic!("frame must carry an id: line, got: {block}"));
+        assert_eq!(
+            id_line.trim().parse::<i64>().unwrap(),
+            *seq,
+            "SSE id must equal the persisted event seq"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 1, "replayed frame must be id-tagged: {text}");
 }

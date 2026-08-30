@@ -35,7 +35,18 @@ const CANDIDATE: &str = r#"{"status":"candidate","summary":"done","result":"ok",
 const BLOCKED: &str = r#"{"status":"blocked","summary":"blocked-after-first-probe","result":null,"verification":"blocked","evidence_refs":[],"recovery_context":{"summary":"blocked-after-first-probe","refs":["note-1"]}}"#;
 
 fn spec(gate: bool) -> WorkflowSpec {
-    let mut todo = TodoSpec {
+    let mut out = spec_with_required_bash("cat done.txt");
+    if !gate {
+        out.todos[0].acceptance.required_tool_calls = Vec::new();
+    }
+    out
+}
+
+/// Same single-todo workflow, but the acceptance contract demands a real
+/// successful `bash` run whose command contains `needle` (the B1 positive
+/// test uses an always-succeeding command; the M6 negative keeps `spec(true)`).
+fn spec_with_required_bash(needle: &str) -> WorkflowSpec {
+    let todo = TodoSpec {
         id: "step-1".into(),
         title: "step".into(),
         requirement_background: "required by test".into(),
@@ -45,17 +56,10 @@ fn spec(gate: bool) -> WorkflowSpec {
         max_attempts: 3,
         acceptance: AcceptanceSpec {
             criteria: "candidate exists".into(),
-            required_tool_calls: Vec::new(),
+            required_tool_calls: required_bash(needle),
         },
         metadata: serde_json::Value::Null,
     };
-    if gate {
-        todo.acceptance.required_tool_calls = vec![RequiredToolCall {
-            name: "bash".into(),
-            arguments_contains: serde_json::json!({"command": "cat done.txt"}),
-            result_ok: true,
-        }];
-    }
     WorkflowSpec {
         schema_version: 1,
         id: "wf-guards".into(),
@@ -65,6 +69,30 @@ fn spec(gate: bool) -> WorkflowSpec {
         todos: vec![todo],
         metadata: serde_json::Value::Null,
     }
+}
+
+/// A `bash` tool-call turn whose command contains `needle` (for acceptance
+/// gates that demand a real tool run).
+fn required_bash(needle: &str) -> Vec<RequiredToolCall> {
+    vec![RequiredToolCall {
+        name: "bash".into(),
+        arguments_contains: serde_json::json!({"command": needle}),
+        result_ok: true,
+    }]
+}
+
+/// One LLM round that really invokes the `bash` tool with an
+/// always-succeeding command (the follow-up round carries the candidate).
+fn bash_tool_turn(command: &str) -> Vec<LlmEvent> {
+    vec![LlmEvent::Completed {
+        text: "running the gate tool".into(),
+        tool_calls: vec![opencoder_llm::CompletedToolCall {
+            id: "t1".into(),
+            name: "bash".into(),
+            input: serde_json::json!({"command": command}),
+        }],
+        usage: None,
+    }]
 }
 
 fn runtime(store: &Arc<dyn Store>, client: Arc<dyn ChatStream>, dir: &std::path::Path) -> Runtime {
@@ -261,6 +289,10 @@ async fn duplicate_milestone_remark_is_idempotent() {
 /// M6: acceptance decisions get correct-and-re-ask too. Accepting a failed
 /// tool gate is invalid; the parent corrects to revise, and only a decision
 /// that stays invalid after the budget actually ends the workflow.
+/// (Post-B1 this negative still means "no tool ever ran" — a real failure.
+/// The old bug was orthogonal: tools DID run but their events never reached
+/// the gate because the run callback dropped them; see
+/// `required_gate_passes_when_tool_really_ran` for the positive counterpart.)
 #[tokio::test]
 async fn acceptance_correction_reasks_on_failed_gate() {
     let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
@@ -298,6 +330,59 @@ async fn acceptance_correction_reasks_on_failed_gate() {
     assert!(events.contains(&"workflow_failed".into()));
     assert!(!events.iter().any(|kind| kind == "runtime_error"));
     assert!(!events.iter().any(|kind| kind == "todo_accepted"));
+}
+
+/// B1 positive counterpart to the M6 gate test above: when the TODO session
+/// really runs the required tool, the acceptance gate must see the run and
+/// pass — the workflow completes with the todo Passed and `todo_accepted`.
+/// This locks in BOTH halves of the fix: the events reach `evaluate_gate`
+/// (in-memory) AND they are persisted to the store (web-drain parity), so
+/// observers replaying the todo session see the ToolStart/ToolEnd stream.
+#[tokio::test]
+async fn required_gate_passes_when_tool_really_ran() {
+    let store: Arc<dyn Store> = Arc::new(LibsqlStore::open_memory().await.unwrap());
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(dispatch("step-1", "new"))
+            // The gate demands a real `bash` run; `echo hi` always succeeds.
+            // One script per LLM round: tool round, then candidate round.
+            .push_script(bash_tool_turn("echo hi"))
+            .push_script(done(CANDIDATE))
+            // The gate now passes, so accept is a VALID decision.
+            .push_script(done(
+                r#"{"operation":"accept","reason":"gate satisfied","mark_milestone":false}"#,
+            ))
+            .push_script(done(r#"{"operation":"complete","reason":"all passed"}"#)),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let state = runtime(&store, mock.clone(), temp.path())
+        .run_new_with_id(spec_with_required_bash("echo hi"), "run-gate-ok".into())
+        .await
+        .unwrap();
+    // gate.ok=true: the todo passed and was accepted (no revision re-ask).
+    assert_eq!(state.status, WorkflowStatus::Completed);
+    assert_eq!(state.todos["step-1"].status, TodoStatus::Passed);
+    assert_eq!(
+        mock.call_count(),
+        5,
+        "no correction re-ask on a passed gate"
+    );
+    let events = kinds(&store, "run-gate-ok").await;
+    assert!(events.contains(&"todo_accepted".into()));
+    assert!(events.contains(&"workflow_completed".into()));
+    assert!(!events.iter().any(|kind| kind == "todo_revision_requested"));
+
+    // Persistence half of the fix: the todo session's events (including the
+    // real tool run) must be in the store, not just in memory.
+    let sid = state.todos["step-1"].active_session_id.clone().unwrap();
+    let records = store.events_after(&sid, -1).await.unwrap();
+    assert!(!records.is_empty(), "todo session events must be persisted");
+    let kinds_persisted: Vec<&str> = records
+        .iter()
+        .filter_map(|record| record.sse_kind.as_deref())
+        .collect();
+    assert!(kinds_persisted.contains(&"tool_start"));
+    assert!(kinds_persisted.contains(&"tool_end"));
 }
 
 /// L1: a resumed workflow must be persisted as Running at the resume

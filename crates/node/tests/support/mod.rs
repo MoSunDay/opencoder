@@ -53,6 +53,12 @@ pub struct Inner {
     pub controls: VecDeque<ControlTask>,
     /// Control results uploaded by the worker (arrival order).
     pub control_results: Vec<FetchMessagesResult>,
+    /// When set, every heartbeat request parks until this instant BEFORE
+    /// touching shared state — the "wedged server" simulation for heartbeat
+    /// budget tests. A parked beat neither counts nor drains cancels/controls
+    /// early; once the instant passes (or it was never set) the beat is
+    /// served normally.
+    pub hang_heartbeats_until: Option<Instant>,
 }
 
 pub struct Stub {
@@ -121,6 +127,14 @@ impl Stub {
     pub fn control_results(&self) -> Vec<FetchMessagesResult> {
         self.lock().control_results.clone()
     }
+
+    /// Make every heartbeat request park for `d` before answering. Callers
+    /// with a heartbeat budget shorter than `d` observe a client-side
+    /// timeout; beats arriving after the window lapses are served normally,
+    /// which is what makes the recovery assertions deterministic.
+    pub fn hang_heartbeats_for(&self, d: Duration) {
+        self.lock().hang_heartbeats_until = Some(Instant::now() + d);
+    }
 }
 
 /// Tiny unique-suffix helper (avoids an extra dev-only dependency).
@@ -147,6 +161,17 @@ async fn register(State(st): State<Arc<Stub>>, Json(body): Json<serde_json::Valu
 }
 
 async fn heartbeat(State(st): State<Arc<Stub>>, Path(_id): Path<String>) -> Response {
+    // Simulated wedge: park BEFORE taking the state lock so a hung beat
+    // neither counts nor consumes cancels/controls ahead of its time. The
+    // client usually times out meanwhile; the late response is discarded by
+    // the transport, which is exactly the slow-server behavior under test.
+    let hang_until = st.lock().hang_heartbeats_until;
+    if let Some(until) = hang_until {
+        let now = Instant::now();
+        if now < until {
+            tokio::time::sleep(until - now).await;
+        }
+    }
     // Heartbeat counting shares the lock with cancel consumption so a test can
     // never race its own cancellation window.
     let mut g = st.lock();

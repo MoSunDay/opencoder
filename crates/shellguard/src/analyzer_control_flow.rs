@@ -1,3 +1,11 @@
+//! Control-flow analysis: combines child verdicts through compound commands
+//! (`&&`, `||`, `;`, pipes, `if`/`for`/`while`/`case`, subshells), with loop
+//! bindings tracked for static expansion.
+//!
+//! Ported from rippy `src/analyzer_control_flow.rs` (MIT,
+//! https://github.com/mpecan/rippy). Sandbox delta: tests source their
+//! analyzers from `crate::test_support` instead of the upstream config layer.
+
 use std::path::Path;
 
 use rable::{Node, NodeKind};

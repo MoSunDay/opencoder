@@ -2,7 +2,7 @@
 //! line cap. Draws the mode chip, context meter, task timer, and spinner.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -28,13 +28,13 @@ const STATUS_DOT_PHASE_TICKS: u32 = 5;
 /// Span for the leading status dot that precedes the mode chip. While running
 /// the dot alternates every 500ms. Hidden phases use two spaces so the
 /// `[act]`/`[sandbox]` chip never shifts horizontally. Idle (non-running) keeps
-/// the dot steady in the mode colour.
-fn status_dot(running: bool, anim_tick: u32, mode: &str) -> Span<'static> {
+/// the dot steady in the chip colour (see [`theme::status_chip_fg`]).
+fn status_dot(running: bool, anim_tick: u32, chip_fg: Color) -> Span<'static> {
     let hidden_phase = (anim_tick / STATUS_DOT_PHASE_TICKS) % 2 == 1;
     if running && hidden_phase {
         Span::raw("  ")
     } else {
-        Span::styled("\u{25cf} ", Style::default().fg(theme::agent_chip_fg(mode)))
+        Span::styled("\u{25cf} ", Style::default().fg(chip_fg))
     }
 }
 
@@ -51,6 +51,7 @@ pub(crate) fn render_status(
     f: &mut Frame,
     area: Rect,
     mode: &str,
+    plan_skill_active: bool,
     running: bool,
     status: &str,
     anim_tick: u32,
@@ -59,13 +60,14 @@ pub(crate) fn render_status(
     context_limit: u64,
     task_ms: u64,
 ) {
+    // Mode dot + `[mode]` chip share one hue: the plain agent mapping, except
+    // `act` lights up in the sandbox warn hue while the committed skill is
+    // task-plan (see [`theme::status_chip_fg`]).
+    let chip_fg = theme::status_chip_fg(mode, plan_skill_active);
     let mut spans = vec![
         Span::raw(" "),
-        status_dot(running, anim_tick, mode),
-        Span::styled(
-            format!("[{mode}]"),
-            Style::default().fg(theme::agent_chip_fg(mode)),
-        ),
+        status_dot(running, anim_tick, chip_fg),
+        Span::styled(format!("[{mode}]"), Style::default().fg(chip_fg)),
     ];
 
     let bar_pct = used

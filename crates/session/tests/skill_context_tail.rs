@@ -5,6 +5,8 @@
 //! message appended at the END of the payload (`skill_context::tail_reminder`)
 //! carrying (a) the `[skills]` catalog of config-enabled skills plus a
 //! lazy-load hint and (b) the `[active skill]` source path parsed from the
+//! body — a FALLBACK pointer that stays suppressed while the matching
+//! `[skill loaded]` body message is already on record (F3)
 //! `> Source:` prefix that `opencoder_core::body_with_source` writes. The
 //! message is transient — never recorded into `session.messages` — and is
 //! regenerated per call, so it survives compaction for free.
@@ -213,12 +215,19 @@ async fn system_prompt_bytes_stable_across_catalog_and_activation_changes() {
         "skill bodies never ship in the system prompt"
     );
 
-    // The payload tail DID change: turn 2's last user message carries both
-    // reminder sections (catalog + active path).
+    // The payload tail DID change: the catalog section appears, and the
+    // `[active skill]` pointer stays suppressed because turn 2 already
+    // carries the in-conversation `[skill loaded]` body message.
     let tail = last_user_content(second);
     assert!(tail.contains("[skills]"), "{tail}");
-    assert!(tail.contains("[active skill]"), "{tail}");
+    assert!(!tail.contains("[active skill]"), "{tail}");
     assert_ne!(tail, last_user_content(first));
+    assert!(
+        any_message_contains(second, "[skill loaded]")
+            && any_message_contains(second, "alpha-BODY-CONTENT"),
+        "the active skill body ships via the loaded message: {:?}",
+        second.messages
+    );
 
     // Toggle everything back OFF: three-way byte stability.
     s.config.skills.clear();
@@ -293,11 +302,12 @@ async fn skills_catalog_reminder_is_last_payload_message_and_never_persisted() {
     );
 }
 
-/// 3a. Active-skill path reminder: a `> Source:`-prefixed body surfaces ONLY
-/// its path in the tail reminder — the body text stays out of both the
-/// system message and the reminder (the model lazily reads the SKILL.md).
+/// 3a. Active-skill delivery: a `> Source:`-prefixed body reaches the model
+/// as the in-conversation `[skill loaded]` message; the `[active skill]`
+/// tail pointer is fallback-only and stays off while that marker is on
+/// record — the body text stays out of the system message either way.
 #[tokio::test]
-async fn active_skill_source_path_rides_tail_reminder_and_keeps_system_clean() {
+async fn active_skill_body_ships_via_loaded_message_and_keeps_system_clean() {
     let home = PreparedHome::new();
     let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("ok")]));
     let (mut s, _workdir) = session_on("active", "act", config_with_skills(&[]), mock.clone());
@@ -318,18 +328,21 @@ async fn active_skill_source_path_rides_tail_reminder_and_keeps_system_clean() {
         "skill bodies never ship in the system prompt"
     );
     let tail = last_user_content(req);
-    assert!(tail.contains("[active skill]"), "{tail}");
     assert!(
-        tail.contains(&source.display().to_string()),
-        "must name the skill's source file: {tail}"
+        !tail.contains("[active skill]"),
+        "pointer suppressed while the loaded marker is on record: {tail}"
     );
     assert!(
-        tail.contains("as a `[skill loaded]` message"),
-        "activation section points at the injected message: {tail}"
+        tail.contains("[skill loaded]") && tail.contains(&source.display().to_string()),
+        "the loaded message names the skill's source file: {tail}"
     );
     assert!(
-        !tail.contains("alpha-BODY-CONTENT"),
-        "the reminder carries the path, not the body: {tail}"
+        tail.contains("alpha-BODY-CONTENT"),
+        "the body ships once, inside the loaded message: {tail}"
+    );
+    assert!(
+        !system_content(req).contains("[active skill]"),
+        "the pointer never leaks into the system prompt"
     );
 }
 

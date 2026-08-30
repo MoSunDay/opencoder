@@ -1,20 +1,20 @@
 ---
 name: task-plan
-description: 从当前问题或候选发布面的全局影响面出发，按合约、证据成熟度和持续保鲜标准审查当前状态，再输出彻底闭环到可上线状态的分阶段执行规划。Use when the user asks for a launch-ready task plan, exhaustive release TODO, contract or event-flow alignment, freshness and stability acceptance, omission audit, or a closure roadmap that distinguishes code completion, deployment, behavioral acceptance, and sustained online readiness.
+description: 从当前问题或候选发布面的全局影响面出发，按合约、证据成熟度和持续保鲜标准审查当前状态，再输出彻底闭环到可上线状态的分阶段执行规划。Use when the user asks for a launch-ready task plan, exhaustive release TODO, contract or event-flow alignment, freshness and stability acceptance, omission audit, or a closure roadmap that distinguishes code completion, deployment, behavioral acceptance, and sustained online readiness. 输出只规划、不执行的完整闭环计划。
 ---
 
 # Task Plan
 
 ## Overview
 
-把“先看当前现状，再把问题彻底闭环到可上线”收敛成唯一规划入口。
+把“先看当前现状，再把问题彻底闭环到可上线”收敛成唯一规划入口。交付物是唯一一份覆盖从 0（当前现状）到交付/可上线全路径的全局计划：只规划，不执行。
 
 ## 澄清协议（存在影响计划的疑问时）
 
 存在任何一个会改变 `task-plan` 计划走向的未定事项（验收标准二选一、目标互相矛盾、关键约束缺失、不可逆取舍）时，必须先与用户对齐，不得自行假设后直接出计划；无疑问则不强制提问。
 
 - 先查再问：能从仓库、`rules/`、既有测试、`AGENTS.md` 查到的事实一律先查再定，不把提问当侦察手段。
-- `question` 工具可用（交互式 TUI；sandbox 模式常驻可见，act 模式由本 skill 解锁）→ 调用 `question` 向用户澄清：每次一句一个最关键问题，可附 ≤4 个候选选项，可在同一轮多问；拿到答复再收敛计划。
+- `question` 工具（交互式 TUI；由本 skill 解锁，act / sandbox 一视同仁，无 skill 时不注入）→ 调用 `question` 向用户澄清：每次一句一个最关键问题，可附 ≤4 个候选选项，可在同一轮多问；拿到答复再收敛计划。
 - 不可用（headless `run` / web，工具即刻返回「无监听」应答不阻塞）→ 显式假设继续规划：把推断逐条列入最终输出的 `assumptions:` 清单，选最小意外解释并标注「计划基于假设」；绝不静默编造验收标准或替用户拍板不可逆取舍。
 
 当需求极复杂、用户要求“尽可能列细”、或普通计划不足以降低执行理解成本时，`task-plan` 进入高颗粒度模式，输出可照着执行的操作清单，并单独做遗漏复查。
@@ -33,7 +33,7 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 10. 对跨服务合约和持续运行能力建立证据成熟度、保鲜 SLO、观测阈值和失效规则
 11. 如果存在依靠当前上下文、仓库证据和安全检查仍无法解决的强卡点，必须通过向用户提问的方式对齐，不得猜测或绕过
 
-当用户调用本 Skill 时，默认目标是“彻底规划和收敛闭环路径”。如果用户要求边规划边修复或直接继续实现，则先用本 Skill 收敛关键路径，再按优先级继续落地，不能停在规划。
+当用户调用本 Skill 时，交付物就是计划本身：一份聚焦全局、从 0（当前现状）到交付/可上线（完成态）的完整闭环规划。本轮只产出计划，不启动执行、不改代码——计划交付后即停，等用户确认或拿到明确执行指令再进入落地。用户要求“边规划边修复”时，也必须先完整产出上述计划（含关键路径与 P0 顺序），经确认后再按计划推进，不允许跳过计划直接动手。
 
 ## When To Use
 
@@ -42,7 +42,7 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 - 某个需求、修复、重构或候选发布面还没达到可上线状态，需要先明确剩余工作和推进顺序
 - 你需要从全局视角判断“当前差在哪里”，并把它整理成可以持续推进到上线的执行计划
 
-如果用户只要一次收尾总结、上线复核结论和 TODO、不需要闭环路线图，优先用 `verify-and-summary`。如果用户明确要求直接修复，不要停在规划，应在规划后继续推进代码和验证。
+如果用户只要一次收尾总结、上线复核结论和 TODO、不需要闭环路线图，优先用 `verify-and-summary`。如果用户明确要求直接修复，仍先交付完整计划并标注关键路径，经确认后再进入修复；仅调用 task-plan 的一轮，停在被确认的计划上。
 
 ## Scope Rule
 
@@ -75,8 +75,6 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 - 先用当前上下文、仓库证据和安全的只读检查尝试解除卡点；如果仍是无法继续或会实质改变方案的强卡点，必须直接向用户提出具体问题完成对齐，并在对齐前将其保持为 blocker。
 - 如果工作区存在真实改动，优先用 `git status --short`、`git diff --stat` 和相关模块文件收敛范围。
 - 将“能力实现迁移”“默认流量切换”“旧链路退出”拆成三个独立决策。用户已经明确默认路由、共存边界或退出条件时，计划必须保持该决定；不得仅因出现“完全迁移”字样就自行推断切默认或删除 legacy。
-- 当仓库或任务提供 Any Home 规划接口时，先读取 [references/any-home-plan-run.md](references/any-home-plan-run.md)，以目标 Action/Query 为起点，通过 `scripts/any_home_planning.py context` 查询与任务锚点相邻的实体和关系。该查询会写入 `QueryRecord`；计划不得只依赖对话中未经 readback 的记忆。
-- Any Home 中已有知识优先于向用户重复提问。上下文仍缺失时，先检查已有 `SupportRequest`，再把不可解除的数据、能力或判断缺口明确写成新的求助。
 
 ### 2. 以上线标准审查当前现状
 
@@ -141,8 +139,6 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
   - `风险与失败处理`
   - `完成判定`
 - 对需要一并处理的遗留问题，要显式说明“为何必须纳入本次闭环”，避免 TODO 漏项。
-- 如果 Any Home 规划接口可用，最终文本计划必须同时转换成同构 `PlanRun`：每个 `PlanItem` 绑定依赖、Evidence 或 SupportRequest，调用 `scripts/any_home_planning.py create` 写回并读取详情。写回或 readback 失败时直接报告失败，不得把未持久化的结果表述为闭环。
-- `PlanRun` 是不可变快照。重新生成时创建新记录并填写 `supersedes`，不得覆盖旧计划；读回返回 `fresh=false` 时，旧计划立即失去上线签收效力。
 
 ### 5. 输出线上或生产等价验证方案
 
@@ -215,4 +211,3 @@ description: 从当前问题或候选发布面的全局影响面出发，按合�
 - 高颗粒度拆解必须服务于执行，不为了显得完整而扩大到与本轮需求无关的历史债务。
 - 如果审查过程中出现新的证据，应更新计划，而不是坚持已经失效的假设。
 - 只要完整事件流程中仍存在未解释的疑问、缺证据、卡点或用户决策点，就不能把计划表述为已经完全收敛；必须把这些内容显式提出并等待对齐，或作为 blocker 纳入关键路径。
-- Any Home 第一阶段仅承载查询、证据、求助、计划持久化和保鲜。Skill 不因计划中出现低风险动作就自行执行它；执行权限必须由单独的 Action/Delegation 能力明确提供。

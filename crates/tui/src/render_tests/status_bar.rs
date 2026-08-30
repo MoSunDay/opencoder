@@ -10,7 +10,19 @@ fn status_bar_omits_branding_and_top_moved_info() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -54,7 +66,19 @@ fn status_bar_has_single_meter_before_ctx() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -83,7 +107,19 @@ fn status_bar_single_dial_tracks_threshold_not_window() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(180000), 80000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(180000),
+                80000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -114,6 +150,7 @@ fn status_bar_running_shows_spinner_and_status() {
                 f,
                 area,
                 "act",
+                false,
                 true,
                 "compacting\u{2026}",
                 0,
@@ -152,7 +189,19 @@ fn status_bar_has_no_skill_badge() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -179,6 +228,7 @@ fn status_bar_has_no_steer_queue_or_ctx() {
                 f,
                 area,
                 "act",
+                false,
                 true,
                 "compacting\u{2026}",
                 0,
@@ -219,6 +269,7 @@ fn status_bar_shows_task_time() {
                 f,
                 area,
                 "act",
+                false,
                 true,
                 "compacting\u{2026}",
                 0,
@@ -263,7 +314,19 @@ fn status_bar_task_time_turns_muted_when_stopped() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 90000);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                90000,
+            );
         })
         .unwrap();
 
@@ -298,6 +361,7 @@ fn status_bar_hides_task_time_when_zero() {
                 f,
                 area,
                 "act",
+                false,
                 true,
                 "compacting\u{2026}",
                 0,
@@ -334,6 +398,7 @@ fn status_dot_stays_visible_through_first_phase() {
                     f,
                     area,
                     "act",
+                    false,
                     true,
                     "working\u{2026}",
                     tick,
@@ -367,6 +432,7 @@ fn status_dot_stays_hidden_through_second_phase() {
                     f,
                     area,
                     "sandbox",
+                    false,
                     true,
                     "working\u{2026}",
                     tick,
@@ -399,7 +465,19 @@ fn status_dot_stays_steady_when_idle() {
         terminal
             .draw(|f| {
                 let area = f.area();
-                render_status(f, area, "act", false, "", tick, Some(0), 200000, 200000, 0);
+                render_status(
+                    f,
+                    area,
+                    "act",
+                    false,
+                    false,
+                    "",
+                    tick,
+                    Some(0),
+                    200000,
+                    200000,
+                    0,
+                );
             })
             .unwrap();
 
@@ -423,7 +501,19 @@ fn status_bar_sandbox_chip_renders_in_warn_hue() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "sandbox", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "sandbox",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
 
@@ -437,7 +527,6 @@ fn status_bar_sandbox_chip_renders_in_warn_hue() {
         agent_chip_fg("sandbox"),
         "the chip must be painted in the sandbox (warn) hue"
     );
-    
 
     // The same slot for act stays in the accent hue.
     let backend = TestBackend::new(120, 3);
@@ -445,7 +534,19 @@ fn status_bar_sandbox_chip_renders_in_warn_hue() {
     terminal
         .draw(|f| {
             let area = f.area();
-            render_status(f, area, "act", false, "", 0, Some(0), 200000, 200000, 0);
+            render_status(
+                f,
+                area,
+                "act",
+                false,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
         })
         .unwrap();
     let buf = terminal.backend().buffer();
@@ -455,5 +556,85 @@ fn status_bar_sandbox_chip_renders_in_warn_hue() {
         buf.cell((chip_pos as u16, 0)).unwrap().fg,
         agent_chip_fg("act"),
         "the act chip must keep the accent hue"
+    );
+}
+
+/// The parent `[act]` chip (dot + chip share one hue) lights up in the sandbox
+/// warning hue while the committed skill is `task-plan`, and keeps the accent
+/// hue otherwise. Same layout either way: only `plan_skill_active` differs.
+#[test]
+fn status_bar_act_chip_lights_warn_for_task_plan() {
+    let chip_fg = |plan: bool| -> (usize, ratatui::style::Color) {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render_status(
+                    f,
+                    area,
+                    "act",
+                    plan,
+                    false,
+                    "",
+                    0,
+                    Some(0),
+                    200000,
+                    200000,
+                    0,
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let row = row_text(buf, 0, 120);
+        let pos = row.find("[act]").expect("the act chip must render");
+        (pos, buf.cell((pos as u16, 0)).unwrap().fg)
+    };
+
+    let (pos_plan, fg_plan) = chip_fg(true);
+    assert_eq!(
+        fg_plan,
+        ratatui::style::Color::Yellow,
+        "a committed task-plan must light the [act] chip yellow"
+    );
+    let (pos_plain, fg_plain) = chip_fg(false);
+    assert_eq!(
+        fg_plain,
+        ratatui::style::Color::Cyan,
+        "without task-plan the [act] chip keeps the accent hue"
+    );
+    assert_eq!(
+        pos_plan, pos_plain,
+        "the highlight must never shift the chip horizontally"
+    );
+
+    // The leading dot shares the chip hue while the highlight is active.
+    let backend = TestBackend::new(120, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| {
+            let area = f.area();
+            render_status(
+                f,
+                area,
+                "act",
+                true,
+                false,
+                "",
+                0,
+                Some(0),
+                200000,
+                200000,
+                0,
+            );
+        })
+        .unwrap();
+    let buf = terminal.backend().buffer();
+    let row = row_text(buf, 0, 120);
+    let dot_pos = row.find('\u{25cf}').expect("the status dot must render");
+    assert_eq!(
+        buf.cell((dot_pos as u16, 0)).unwrap().fg,
+        ratatui::style::Color::Yellow,
+        "the dot must share the task-plan highlight hue"
     );
 }

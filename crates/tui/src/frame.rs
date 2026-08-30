@@ -86,6 +86,7 @@ pub(crate) fn render_frame(
     is_top_level: bool,
     ap_mode: opencoder_core::ApMode,
     display_mode: &str,
+    plan_skill_active: bool,
     notepad: Option<&crate::notepad::NotepadView>,
 ) -> anyhow::Result<()> {
     let plan_edit_label = plan_edit.as_ref().map(|pe| pe.mode_label());
@@ -141,6 +142,7 @@ pub(crate) fn render_frame(
         is_top_level,
         ap_mode,
         display_mode,
+        plan_skill_active,
         notepad,
     )
 }

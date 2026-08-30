@@ -124,7 +124,7 @@ fn has_editable_key_recognizes_timeout_and_agent_keys() {
         serde_json::json!({ "task_timeout_secs": 300 }),
         serde_json::json!({ "replay_timeout_secs": 90 }),
         serde_json::json!({ "subagent_drain_secs": 5 }),
-        serde_json::json!({ "agent": { "default": "plan" } }),
+        serde_json::json!({ "agent": { "default": "act" } }),
         serde_json::json!({ "agent": { "unknown_future_key": 1 } }),
         serde_json::json!({ "output_streamline": { "enabled": false } }),
         serde_json::json!({ "tool_guard": { "max_consecutive_failures": 5 } }),
@@ -408,7 +408,7 @@ mod inject_to_filtering {
     #[test]
     fn parent_flag_covers_every_primary_agent() {
         let config = config_with(InjectionTarget::parent_only());
-        for name in ["act", "plan", "command"] {
+        for name in ["act", "sandbox", "command", "workflow"] {
             assert_eq!(
                 config.enabled_cli_for(name, AgentMode::Primary).len(),
                 1,

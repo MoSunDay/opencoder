@@ -81,6 +81,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             true,
             opencoder_core::ApMode::Off,
             "act",
+            false,
             None,
         )
         .unwrap();
@@ -171,6 +172,7 @@ async fn render_then_click_arrow_targets_jump_view() {
             true,
             opencoder_core::ApMode::Off,
             "act",
+            false,
             None,
         )
         .unwrap();

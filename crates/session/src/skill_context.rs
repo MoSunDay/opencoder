@@ -138,7 +138,22 @@ pub fn tail_reminder(session: &SessionState) -> Option<Message> {
         return None;
     }
     let skill_prompt = session.skill_prompt_cloned();
-    let active_path = skill_prompt.as_deref().and_then(source_path_from_body);
+    // The `[active skill]` section is a FALLBACK pointer, not a standing
+    // announcement: `ensure_full_body_loaded` runs before every LLM round, so
+    // whenever the transcript already carries the `[skill loaded]` body
+    // message covering the same source-path set, repeating the pointer every
+    // round only makes the model parrot "the <skill> skill is active" on
+    // every turn. Drop the section while that marker is present; it returns
+    // automatically once compaction folds the marker message away.
+    let paths = skill_prompt.as_deref().map(source_paths_from_body);
+    let loaded = paths
+        .as_deref()
+        .is_some_and(|ps| loaded_marker_matches(&session.messages, ps));
+    let active_path = if loaded {
+        None
+    } else {
+        skill_prompt.as_deref().and_then(source_path_from_body)
+    };
     let text = reminder_text(&catalog_entries(&session.config), active_path);
     if text.is_empty() {
         return None;
@@ -467,6 +482,49 @@ mod tests {
             "workflow excluded"
         );
         assert!(tail_reminder(&mk("explore")).is_none(), "subagent excluded");
+    }
+
+    /// Regression for the "every turn re-announces the active skill" bug:
+    /// the `[active skill]` tail is a FALLBACK pointer. Once
+    /// `ensure_full_body_loaded` has recorded the matching `[skill loaded]`
+    /// marker, the pointer must stay silent; it returns only when the
+    /// marker leaves the transcript (compaction) or a different path set
+    /// becomes active.
+    #[tokio::test]
+    async fn tail_reminder_is_fallback_only_while_loaded_marker_present() {
+        let mut s = act_session();
+        s.set_skill(Some("> Source: /skills/rev/SKILL.md\n\nREV".into()));
+
+        // First round: no marker on record yet -> the fallback pointer
+        // fires (that is how the model learns where the body lives).
+        assert!(tail_reminder(&s).is_some(), "no marker yet -> pointer fires");
+
+        // The real load path records the marker as a synthetic message;
+        // from the next round on the pointer must be suppressed.
+        ensure_full_body_loaded(&mut s).await;
+        assert_eq!(s.messages.len(), 1, "body injected exactly once");
+        assert!(
+            tail_reminder(&s).is_none(),
+            "matching [skill loaded] marker suppresses the [active skill] tail"
+        );
+
+        // Compaction folds the marker away: the pointer returns so the
+        // model can re-read the source file.
+        s.messages.clear();
+        let tail = tail_reminder(&s).expect("marker gone -> pointer returns");
+        let text = tail.text();
+        assert!(text.contains("[active skill]") && text.contains("/skills/rev/SKILL.md"));
+
+        // A marker covering a DIFFERENT path set does not silence it.
+        s.messages.push({
+            let mut m = Message::user("id", "[skill loaded] /other/SKILL.md\n\nbody");
+            m.synthetic = true;
+            m
+        });
+        assert!(
+            tail_reminder(&s).is_some(),
+            "non-matching marker keeps the fallback pointer"
+        );
     }
 
     #[test]

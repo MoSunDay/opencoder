@@ -82,6 +82,7 @@ fn draw_frame(
         true,
         opencoder_core::ApMode::Off,
         "act",
+        false,
         None,
     )
     .unwrap();
@@ -353,6 +354,7 @@ async fn notepad_fullscreen_hides_chat_and_clears_hits() {
         true,
         opencoder_core::ApMode::Off,
         "act",
+        false,
         Some(view),
     )
     .unwrap();

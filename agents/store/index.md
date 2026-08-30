@@ -33,6 +33,7 @@ schema 当前为 v10：
 - `commit_todo_transition` 在单事务内更新 workflow、替换 TODO projection 并追加 event；workflow update 带 expected generation，陈旧父进程不能覆盖 interrupt 或其他 writer。
 - Foreign key 将 parent/active TODO Session 关联到 `sessions`，因此 dispatch 先创建 Session，再提交 active reference。
 - 消息批量写按 200 条分块；WAL 使用 30 秒 busy timeout 和被动 checkpoint。
+- PRAGMA 顺序不变量：`synchronous=NORMAL` 必须先于 `journal_mode=WAL`（全新库切 WAL 做 header 初始化 fsync，落在当时的 synchronous 策略下，顺序颠倒即 FULL）；有单测锁定顺序。
 
 ## 主流程
 
@@ -40,7 +41,7 @@ schema 当前为 v10：
 - Resume：上层读取 SessionMeta、压缩摘要和保留消息，Store 不推断 agent 行为。
 - Bundle：`src/bundle.rs` 递归导出/导入 Session 与 subagent 树，不包含 Config 或 API key。
 - TODO：create workflow → 按 generation 原子 commit projection/event → list/load/events-after；interrupt、resume 和 debug projection 都以这些数据为源。
-- Migration：bootstrap 幂等创建当前表，再按 `schema_version` 增量迁移；旧数据库保持可打开。
+- Migration：bootstrap 幂等创建当前表，再按 `schema_version` 增量迁移；旧数据库保持可打开。整段 bootstrap 在单个 `BEGIN IMMEDIATE` 事务内（17 条 DDL 不再各自隐式提交，失败整体回滚）。
 
 ## 依赖与接口
 
@@ -50,6 +51,7 @@ schema 当前为 v10：
 
 ## 代表性验证
 
+- `tests/schema_bootstrap.rs`：建库后 synchronous 生效值、同路径重开幂等（version 单行 + integrity_check）、并发打开。
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
 - `tests/legacy_agent_normalization.rs`：存量 `agent='plan'` 行在全部读路径（get/list/fork 等）归一为 `act`，原始行不被重写。

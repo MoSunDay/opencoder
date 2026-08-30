@@ -43,7 +43,7 @@ pub async fn review_pass(
     // (skill clear + Done) drive's cancel path uses, so surfaces see a
     // uniform end marker either way.
     if super::is_cancelled(session) {
-        super::clear_injected_skill(session).await;
+        super::clear_injected_skill(session, on_event).await;
         on_event(SessionEvent::Done);
         return Ok(());
     }
@@ -66,7 +66,7 @@ pub async fn review_pass(
     // drive() error path, which runs the same terminal bookkeeping before
     // propagating. A cancel mid-review surfaces via run_loop's own
     // interruption handling.
-    super::clear_injected_skill(session).await;
+    super::clear_injected_skill(session, on_event).await;
     on_event(SessionEvent::Done);
     run
 }

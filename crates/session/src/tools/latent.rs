@@ -5,9 +5,9 @@
 //! itself). A latent tool passes the agent allowlist but is still withheld
 //! unless its owning skill's name is in the session's `active_skill_names` set.
 //!
-//! The sandbox agent is exempt for `question`: its clarification protocol is
-//! part of the agent's base prompt, so the tool is always visible there (see
-//! the visibility predicates in `runner::llm_call` / `tools::estimate_tool_schema_tokens`).
+//! There are no agent-kind exemptions: `question` is task-plan-unlocked
+//! uniformly for every agent (sandbox included), and nothing outside the
+//! task-plan skill body advertises it.
 
 use std::collections::HashSet;
 
@@ -33,17 +33,12 @@ pub fn latent_tools_for_skill(skill_name: &str) -> &'static [&'static str] {
 const QUESTION_SKILLS: &[&str] = &["task-plan"];
 
 /// The full visibility rule for a registry tool under the latent-gating
-/// layer: agent allowlist ∧ latent unlock — with one sandbox exemption.
-/// The sandbox agent's clarification protocol lives in its base prompt, so
-/// `question` is ALWAYS visible there (bypasses latent gating, matching the
-/// pre-refactor plan-mode behavior). Every other agent (act, subagents) must
-/// unlock `question` through the task-plan skill; `ssh_pty` is
+/// layer: agent allowlist ∧ latent unlock. `question` is task-plan-unlocked
+/// uniformly for every agent (sandbox included) — no agent-kind exemption —
+/// and nothing advertises it outside the task-plan skill body. `ssh_pty` is
 /// skill-gated everywhere. Shared by the runner's tool filter and the token
 /// estimator so the advertised schema array and its cost estimate never drift.
 pub fn is_visible(name: &str, agent: &opencoder_core::Agent, unlocked: &HashSet<&str>) -> bool {
-    if name == "question" && agent.kind == opencoder_core::AgentKind::Sandbox {
-        return true;
-    }
     agent.tools.allows(name) && (!is_latent_tool(name) || unlocked.contains(name))
 }
 
@@ -167,6 +162,78 @@ mod tests {
         assert!(!unlocked_from_body(body).contains("question"));
     }
 
+    /// Skills root whose absolute path is at least `min_len` bytes deep
+    /// (nested components under a tempdir), mimicking a real-world deep HOME.
+    /// Returns the tempdir (kept alive by the caller) and the skills root.
+    fn deep_skills_root(min_len: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut root = tmp.path().to_path_buf();
+        let mut level = 0;
+        while root.as_os_str().len() < min_len {
+            root.push(format!("lvl{level:02}"));
+            level += 1;
+        }
+        std::fs::create_dir_all(&root).unwrap();
+        (tmp, root)
+    }
+
+    #[test]
+    fn long_source_path_keeps_question_within_unlock_window() {
+        // Production bodies carry a `> Source: <HOME>/skills/task-plan/SKILL.md`
+        // line (`opencoder_core::body_with_source`). A real deep HOME pushes
+        // the seeded body's `question` mention out of the 500-char window —
+        // the unlock must STILL fire, because the skill name rides inside the
+        // Source line itself. Built from the real seed asset landed on a deep
+        // path via `seed_builtin_skills_in` (session depends on core), so the
+        // test dies if the seed content or the annotation format drifts.
+        let (_home, root) = deep_skills_root(240);
+        opencoder_core::seed_builtin_skills_in(&root).unwrap();
+        let plan = opencoder_core::discover_in(&root)
+            .into_iter()
+            .find(|s| s.name == "task-plan")
+            .expect("seeded task-plan skill");
+        let injected = opencoder_core::body_with_source(&plan);
+        let prefix: String = injected.chars().take(500).collect();
+        assert!(
+            prefix.starts_with("> Source: "),
+            "fixture must mirror the production body_with_source shape: {prefix}"
+        );
+        assert!(
+            plan.source.as_os_str().len() >= 240,
+            "fixture: source path must be a deep HOME (>= 240 bytes), got {}",
+            plan.source.as_os_str().len()
+        );
+        assert!(
+            !prefix.contains("question"),
+            "fixture: the long Source line must push the question mention past \
+             the 500-char window (this is the exact risk under test)"
+        );
+        assert!(
+            unlocked_from_body(Some(&injected)).contains("question"),
+            "a deep-HOME Source line must not silently drop the question unlock"
+        );
+    }
+
+    #[test]
+    fn long_source_path_review_body_still_unlocks_nothing() {
+        // Control: the same long Source line in front of a body that carries
+        // no task-plan protocol must not unlock. The seeded review body even
+        // mentions `question` verbatim (its clarification protocol forbids
+        // calling it) — the unlock keys on the task-plan skill name only, so
+        // a deep HOME must not turn that mention into a unlock either.
+        let (_home, root) = deep_skills_root(240);
+        opencoder_core::seed_builtin_skills_in(&root).unwrap();
+        let review = opencoder_core::discover_in(&root)
+            .into_iter()
+            .find(|s| s.name == "review")
+            .expect("seeded review skill");
+        let injected = opencoder_core::body_with_source(&review);
+        assert!(
+            unlocked_from_body(Some(&injected)).is_empty(),
+            "review body with a deep Source line must unlock no latent tool"
+        );
+    }
+
     #[test]
     fn act_without_skill_unlocks_nothing() {
         // An act session with no skill body: no latent unlocks at all.
@@ -188,16 +255,24 @@ mod tests {
     }
 
     #[test]
-    fn visibility_sandbox_always_sees_question() {
+    fn visibility_sandbox_needs_skill_unlock_too() {
+        // No agent exemptions: the sandbox allowlist still carries `question`,
+        // but the tool stays hidden until the task-plan skill unlocks it.
         let sandbox = opencoder_core::resolve_agent("sandbox").unwrap();
         let none = HashSet::new();
         assert!(
-            is_visible("question", &sandbox, &none),
-            "sandbox sees question with no skill at all"
+            sandbox.tools.allows("question"),
+            "sandbox still allowlists question (unlock is runtime latent-gating)"
         );
+        assert!(
+            !is_visible("question", &sandbox, &none),
+            "sandbox sees question only with the task-plan unlock"
+        );
+        let unlocked: HashSet<&str> = ["question"].into_iter().collect();
+        assert!(is_visible("question", &sandbox, &unlocked));
         // Still bound by the agent allowlist: command/workflow agents do not.
         let command = opencoder_core::resolve_agent("command").unwrap();
-        assert!(!is_visible("question", &command, &none));
+        assert!(!is_visible("question", &command, &unlocked));
     }
 
     #[test]
@@ -215,8 +290,8 @@ mod tests {
     #[test]
     fn visibility_ssh_pty_unchanged() {
         // No builtin agent allowlists ssh_pty (it targets custom agents), so
-        // build one: ssh_pty must stay purely skill-gated — the sandbox
-        // question exemption must not leak to it.
+        // build one: ssh_pty must stay purely skill-gated — no latent tool
+        // has any agent exemption.
         let agent = opencoder_core::Agent {
             name: "ssh-host".into(),
             kind: opencoder_core::AgentKind::Act,

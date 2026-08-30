@@ -298,6 +298,7 @@ fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
     let workdir = std::env::temp_dir();
     let skill_handle: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let (mut active_skill, mut active_skill_body, mut sys_tokens) = (None, None, 0u64);
+    let mut plan_flag = false;
 
     // Stale local state (e.g. after a task switch or before any skill): the
     // runner activated a skill at consumption time — mirror it.
@@ -310,6 +311,7 @@ fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
         &mut sys_tokens,
         "act",
         &workdir,
+        &mut plan_flag,
     );
     assert_eq!(
         active_skill.as_deref(),
@@ -331,6 +333,7 @@ fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
         &mut sys_tokens,
         "act",
         &workdir,
+        &mut plan_flag,
     );
     assert_eq!(sys_tokens, 0, "no-op when handle matches the mirror");
 
@@ -343,7 +346,80 @@ fn refresh_skill_mirrors_syncs_name_body_and_tokens_from_handle() {
         &mut sys_tokens,
         "act",
         &workdir,
+        &mut plan_flag,
     );
     assert_eq!(active_skill, None);
     assert_eq!(active_skill_body, None);
+}
+
+/// The `[act]` task-plan chip flag is re-derived only when the body actually
+/// changed: a committed `task-plan` body arms it, any other skill body (or a
+/// cleared skill) disarms it, and an unchanged body (early return) must keep
+/// the caller's value: the yellow a steer/queued input just cleared must not
+/// be revived by a later idle mirror refresh.
+#[test]
+fn refresh_skill_mirrors_derives_plan_flag_only_on_body_change() {
+    use crate::app_helpers::refresh_skill_mirrors;
+    use std::sync::{Arc, Mutex};
+
+    let workdir = std::env::temp_dir();
+    let plan_body = "> Source: /skills/task-plan/SKILL.md\n\nplan".to_string();
+    let review_body = "> Source: /skills/review/SKILL.md\n\nreview".to_string();
+    let skill_handle: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let (mut active_skill, mut active_skill_body, mut sys_tokens) = (None, None, 0u64);
+
+    // (i) body becomes a task-plan body: the chip flag arms.
+    *skill_handle.lock().unwrap() = Some(plan_body.clone());
+    let mut flag = false;
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &mut flag,
+    );
+    assert_eq!(active_skill.as_deref(), Some("task-plan"));
+    assert!(flag, "a committed task-plan body lights the chip");
+
+    // (ii) body becomes another skill body: the chip flag disarms.
+    *skill_handle.lock().unwrap() = Some(review_body.clone());
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &mut flag,
+    );
+    assert_eq!(active_skill.as_deref(), Some("review"));
+    assert!(!flag, "a non-task-plan commit reverts the hue");
+
+    // (iii-a) body unchanged (early return): a pre-set flag must be preserved.
+    let mut flag = true;
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &mut flag,
+    );
+    assert!(flag, "early return must keep a true caller value");
+
+    // (iii-b) same, preserving a false value.
+    let mut flag = false;
+    refresh_skill_mirrors(
+        &skill_handle,
+        &mut active_skill,
+        &mut active_skill_body,
+        &mut sys_tokens,
+        "act",
+        &workdir,
+        &mut flag,
+    );
+    assert!(!flag, "early return must keep a false caller value");
 }

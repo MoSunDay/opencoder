@@ -15,7 +15,8 @@
 //! * [`handle_control`] — one control task end-to-end: dedup by `control_id`,
 //!   execute, upload via [`crate::uplink::Uplink::post_control_result`].
 //!   Shared by the idle claim arm AND both heartbeat loops (a busy worker is
-//!   only reachable through its heartbeat).
+//!   only reachable through its heartbeat); callers detach it onto the Tokio
+//!   runtime, so a slow control never delays the next liveness beat.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

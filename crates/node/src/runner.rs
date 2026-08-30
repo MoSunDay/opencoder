@@ -8,6 +8,9 @@
 //!   serially inside the arm, so no second task can start until it returns;
 //!   during that window a dedicated per-task heartbeater keeps liveness fresh
 //!   AND feeds the executor's cancel flag from `cancel_task_ids`.
+//! - control tasks piggyback on claim/heartbeat replies and are ALWAYS served
+//!   in detached tasks, so their local fetch + upload can never stretch the
+//!   beat cadence past the server's liveness window (`STALE_AFTER_MS`).
 //! - shutdown — armed by Ctrl-C/SIGTERM; while a task is active it converges
 //!   through the SAME cancel flag as a server-side stop, so exactly one
 //!   reporting protocol exists (`status=cancelled`).
@@ -22,7 +25,7 @@ use opencoder_store::{LibsqlStore, Store};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
-use opencoder_core::node_protocol::ClaimedTask;
+use opencoder_core::node_protocol::{ClaimedTask, ControlTask};
 
 use crate::control::{handle_control, Inflight};
 use crate::executor::{execute, ExecDeps};
@@ -30,6 +33,15 @@ use crate::uplink::Uplink;
 
 /// Liveness tick sent to the server. Short enough that a lost node crosses
 /// into `lost` within a few intervals; long enough to stay cheap.
+///
+/// Budget contract with the server (`STALE_AFTER_MS = 20s` in
+/// `crates/web/src/nodes_state.rs`): one beat can at most block for
+/// [`crate::uplink::HEARTBEAT_TIMEOUT`] (5s) and the next tick fires right
+/// after (`MissedTickBehavior::Skip`), so the worst-case silent gap is
+/// ≈ 5s + 5s = 10s < 20s — about 2× headroom. A beat failing fast (weak
+/// network) costs no liveness: the loop just waits for the next tick, which
+/// is the retry. Control tasks ride the heartbeat/claim replies and are
+/// served in detached tasks ([`spawn_control`]) so they never delay a beat.
 pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Non-blocking claim poll cadence while idle.
@@ -135,8 +147,16 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
                     Ok(resp) => {
                         // Idle nodes normally see nothing here; controls can
                         // stack up while the claim arm was busy executing.
-                        for task in &resp.controls {
-                            handle_control(&uplink, &store, &inflight, &node_id, task).await;
+                        // Detached: a slow control fetch must never delay
+                        // the next liveness beat.
+                        for task in resp.controls {
+                            spawn_control(
+                                uplink.clone(),
+                                Arc::clone(&store),
+                                inflight.clone(),
+                                node_id.clone(),
+                                task,
+                            );
                         }
                     }
                     Err(e) => warn!(error = %e, "heartbeat failed (retrying next tick)"),
@@ -147,8 +167,14 @@ pub async fn run_node(opts: NodeOpts, override_client: Option<Arc<dyn ChatStream
                     Ok(resp) => {
                         // Durable work is preferred by the server; a control
                         // task rides along only when no task was due.
-                        if let Some(task) = &resp.control {
-                            handle_control(&uplink, &store, &inflight, &node_id, task).await;
+                        if let Some(task) = resp.control {
+                            spawn_control(
+                                uplink.clone(),
+                                Arc::clone(&store),
+                                inflight.clone(),
+                                node_id.clone(),
+                                task,
+                            );
                         }
                         if let Some(task) = resp.task {
                             run_task(
@@ -271,15 +297,47 @@ fn spawn_heartbeater(
                         return;
                     }
                     // A BUSY worker never polls claim: the heartbeat is its
-                    // only guaranteed control-task delivery channel.
-                    for task in &resp.controls {
-                        handle_control(&uplink, &store, &inflight, &node_id, task).await;
+                    // only guaranteed control-task delivery channel. Serve
+                    // each control detached so control work never stretches
+                    // the beat cadence past the server's liveness window.
+                    for task in resp.controls {
+                        spawn_control(
+                            uplink.clone(),
+                            Arc::clone(&store),
+                            inflight.clone(),
+                            node_id.clone(),
+                            task,
+                        );
                     }
                 }
                 Err(e) => warn!(%task_id, error = %e, "busy heartbeat failed"),
             }
         }
     })
+}
+
+/// Serve ONE control task OFF the heartbeat/claim tick critical path: the
+/// liveness touch must never wait behind a local transcript read + result
+/// upload (that in-tick delay is exactly what used to stretch the silent
+/// gap past the server's `STALE_AFTER_MS`).
+///
+/// Ownership: `Uplink` and `Inflight` are cheap clones (internal Arcs) and
+/// the store is already an `Arc`, so the spawned task owns everything it
+/// needs. The task's outcome is already fully logged inside
+/// [`handle_control`], so the join handle is detached. Dedup stays correct
+/// under this concurrency: [`Inflight::insert_if_absent`] is an atomic
+/// check-and-insert under a mutex, so of N racing deliveries of the same
+/// `control_id` exactly one wins and the rest log a duplicate and drop.
+fn spawn_control(
+    uplink: Uplink,
+    store: Arc<dyn Store>,
+    inflight: Inflight,
+    node_id: String,
+    task: ControlTask,
+) {
+    tokio::spawn(async move {
+        handle_control(&uplink, &store, &inflight, &node_id, &task).await;
+    });
 }
 
 /// Fire-and-forget terminal report used before execution even starts (config

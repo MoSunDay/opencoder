@@ -72,7 +72,12 @@ pub fn verify(
     body: &[u8],
     sig_hex: &str,
 ) -> Result<(), SigError> {
-    if (now_ms - ts_ms).abs() > REPLAY_WINDOW_MS {
+    // saturating_sub + saturating_abs keep the window check total: a hostile
+    // `ts_ms = i64::MIN` made `now_ms - ts_ms` overflow i64 (debug builds
+    // panicked — a one-request DoS — while release builds wrapped and could
+    // skip the window entirely). Both extremes saturate instead.
+    let delta = now_ms.saturating_sub(ts_ms).saturating_abs();
+    if delta > REPLAY_WINDOW_MS {
         return Err(SigError::TimestampOutOfRange);
     }
     let canon = canonical(method, path_and_query, ts_ms, body);
@@ -180,6 +185,38 @@ mod tests {
                 &sig(1_000)
             ),
             Err(SigError::TimestampOutOfRange)
+        );
+    }
+
+    #[test]
+    fn extreme_timestamps_reject_without_overflow() {
+        let sig_zero = sign_hex("s", &canonical("GET", "/p", 0, b""));
+        let sig_min = sign_hex("s", &canonical("GET", "/p", i64::MIN, b""));
+        let sig_max = sign_hex("s", &canonical("GET", "/p", i64::MAX, b""));
+        // `0 - i64::MIN` overflows i64: the subtraction must saturate, not
+        // panic (debug) or wrap past the window (release).
+        assert_eq!(
+            verify("s", "GET", "/p", i64::MIN, 0, b"", &sig_min),
+            Err(SigError::TimestampOutOfRange)
+        );
+        assert_eq!(
+            verify("s", "GET", "/p", i64::MAX, 0, b"", &sig_max),
+            Err(SigError::TimestampOutOfRange)
+        );
+        // Extreme receiver clocks are the same computation mirrored.
+        assert_eq!(
+            verify("s", "GET", "/p", 0, i64::MAX, b"", &sig_zero),
+            Err(SigError::TimestampOutOfRange)
+        );
+        assert_eq!(
+            verify("s", "GET", "/p", 0, i64::MIN, b"", &sig_zero),
+            Err(SigError::TimestampOutOfRange)
+        );
+        // Control: a normal in-window stamp still verifies.
+        let sig_window = sign_hex("s", &canonical("GET", "/p", 1_000, b""));
+        assert_eq!(
+            verify("s", "GET", "/p", 1_000, 1_000, b"", &sig_window),
+            Ok(())
         );
     }
 

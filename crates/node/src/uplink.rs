@@ -21,6 +21,23 @@ use tracing::warn;
 /// main loop forever.
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Independent, deliberately SHORT budget for one heartbeat round trip
+/// (connect + send + response headers + body). [`READ_TIMEOUT`] (120s) is
+/// far wider than the server's liveness window (`STALE_AFTER_MS = 20s`, see
+/// `crates/web/src/nodes_state.rs`), so a single wedged beat used to make a
+/// live node look silent long enough for `converge_lost_node_tasks` to fold
+/// its running tasks into `error("node lost")` — fake failures plus burned
+/// tokens.
+///
+/// Liveness budget arithmetic (worst silent gap between two served beats):
+/// heartbeat timeout (5s) + tick interval (default 5s) ≈ 10s < 20s, about 2×
+/// headroom. After one timeout the next tick fires immediately
+/// (`MissedTickBehavior::Skip` collapses the beats that elapsed in flight),
+/// so timeouts never stack; a beat that fails FAST (weak network) costs no
+/// liveness at all — the loop just waits for the next tick, which is the
+/// built-in single retry. See also `runner::DEFAULT_HEARTBEAT_INTERVAL`.
+pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Worker-side REST client handle. Cheap to clone (`reqwest::Client` is an
 /// internal Arc), so per-task background duties can own a copy.
 #[derive(Clone)]
@@ -28,17 +45,30 @@ pub struct Uplink {
     http: reqwest::Client,
     base: String,
     token: String,
+    /// Per-heartbeat round-trip budget; defaults to [`HEARTBEAT_TIMEOUT`],
+    /// injectable for tests via [`Uplink::with_heartbeat_timeout`].
+    heartbeat_timeout: Duration,
 }
 
 impl Uplink {
     /// Build an uplink against `base` (trailing slashes trimmed) with the
     /// resolved bearer token. Transport construction errors are fatal here.
     pub fn new(base: &str, token: &str) -> Result<Self> {
+        Uplink::with_heartbeat_timeout(base, token, HEARTBEAT_TIMEOUT)
+    }
+
+    /// Like [`Uplink::new`], but overrides the per-heartbeat round-trip
+    /// budget ([`HEARTBEAT_TIMEOUT`] by default). This is the injection seam
+    /// for tests: shrinking it to milliseconds proves timeout-then-recovery
+    /// deterministically instead of waiting on real network stalls.
+    /// Production callers always use [`Uplink::new`].
+    pub fn with_heartbeat_timeout(base: &str, token: &str, d: Duration) -> Result<Self> {
         let http = build_http_client_with_read_timeout(None, READ_TIMEOUT)?;
         Ok(Uplink {
             http,
             base: base.trim_end_matches('/').to_string(),
             token: token.to_string(),
+            heartbeat_timeout: d,
         })
     }
 
@@ -68,17 +98,32 @@ impl Uplink {
     }
 
     /// POST /api/nodes/:id/heartbeat — liveness touch + cancel-command poll.
+    ///
+    /// The WHOLE round trip is bounded by [`HEARTBEAT_TIMEOUT`] (or the
+    /// test-injected override): a server that accepts the request but never
+    /// answers — or stalls the body — degrades to a plain `Err` instead of
+    /// keeping the beat in flight past the server's liveness window.
+    /// Callers only `warn!` on `Err` and wait for the next tick.
     pub async fn heartbeat(&self, node_id: &str) -> Result<NodeHeartbeatResponse> {
-        let resp = self
-            .signed_request(
-                reqwest::Method::POST,
-                &format!("/api/nodes/{node_id}/heartbeat"),
-                Some(&serde_json::json!({})),
-            )
-            .await
-            .context("heartbeat")?;
-        let resp = ensure_ok(resp, "heartbeat").await?;
-        resp.json().await.context("heartbeat json")
+        let round_trip = async {
+            let resp = self
+                .signed_request(
+                    reqwest::Method::POST,
+                    &format!("/api/nodes/{node_id}/heartbeat"),
+                    Some(&serde_json::json!({})),
+                )
+                .await
+                .context("heartbeat")?;
+            let resp = ensure_ok(resp, "heartbeat").await?;
+            resp.json().await.context("heartbeat json")
+        };
+        match tokio::time::timeout(self.heartbeat_timeout, round_trip).await {
+            Ok(res) => res,
+            Err(_) => Err(anyhow::anyhow!(
+                "heartbeat timed out after {:?} (HEARTBEAT_TIMEOUT budget)",
+                self.heartbeat_timeout
+            )),
+        }
     }
 
     /// GET /api/nodes/tasks/claim?node_id= — FIFO single-active claim.

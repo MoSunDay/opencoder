@@ -50,6 +50,12 @@ pub async fn list_nodes(State(state): State<Arc<AppState>>) -> Response {
         Ok(records) => records,
         Err(e) => return error_500(format!("converge_lost_node_tasks: {e:#}")),
     };
+    // Fan out one terminal error frame per converged task. The sweep is
+    // already committed at this point, so a single fan-out failure must NOT
+    // abort the loop (a `return 500` here would permanently drop the remaining
+    // error frames and leave SSE clients of those sessions hanging): degrade
+    // to a log line and keep going — the frames stay replayable from the store
+    // once the transient write failure clears.
     for r in &swept {
         let closure = ClosureEvent {
             session_id: &r.session_id,
@@ -61,7 +67,12 @@ pub async fn list_nodes(State(state): State<Arc<AppState>>) -> Response {
             cancel: false,
         };
         if let Err(e) = emit_closure(&state, closure, now).await {
-            return error_500(e);
+            tracing::warn!(
+                task_id = %r.id,
+                session_id = %r.session_id,
+                error = %e,
+                "lost-node sweep: failed to emit terminal error frame"
+            );
         }
     }
     // Fresh DB rows carry raw statuses written by store transitions

@@ -130,7 +130,14 @@ pub async fn get_node_task_events(
             });
     let merged = replay.chain(live).map(|evt| {
         let data = serde_json::to_string(&evt.data).unwrap_or_else(|_| "{}".into());
-        Ok::<_, std::convert::Infallible>(Event::default().event(evt.kind).data(data))
+        // Same `id:` = persisted-seq mapping as the primary /events: the seq
+        // is the `Last-Event-ID` reconnect cursor. Builder consumes self, so
+        // the optional id is applied via reassignment.
+        let mut ev = Event::default().event(evt.kind).data(data);
+        if let Some(seq) = evt.seq {
+            ev = ev.id(seq.to_string());
+        }
+        Ok::<_, std::convert::Infallible>(ev)
     });
 
     // Finalizer: on disconnect, release our claim; the hub evicts the channel

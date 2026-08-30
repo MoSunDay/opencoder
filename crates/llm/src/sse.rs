@@ -43,7 +43,9 @@ impl SseDecoder {
 
         // Decode as much valid UTF-8 as possible. If the tail is an
         // incomplete multi-byte sequence (a char split across TCP reads),
-        // process only the valid prefix and retain the partial bytes.
+        // process only the valid prefix and retain the partial bytes. Frame
+        // scanning is bounded by `valid_len` so terminators are never matched
+        // against partial multi-byte bytes.
         let valid_len = match std::str::from_utf8(&self.buf) {
             Ok(_) => self.buf.len(),
             Err(e) => {
@@ -56,43 +58,25 @@ impl SseDecoder {
                 valid
             }
         };
-        let s = std::str::from_utf8(&self.buf[..valid_len]).unwrap_or("");
-        let remainder_bytes = &self.buf[valid_len..];
 
-        // Normalize \r\n and bare \r to \n so frame detection works
-        // regardless of the server's newline convention.
-        let normalized: String = s.replace("\r\n", "\n").replace('\r', "\n");
-
+        // Split frames on the RAW buffer (Bug 8): normalizing CR up front
+        // would turn a `\r` that pairs with the NEXT chunk's `\n` into a
+        // premature frame end, splitting one event in two. CR normalization
+        // is deferred to `parse_data_frame`, after the split.
         let mut out = Vec::new();
-        let mut start = 0;
-        while let Some(rel) = normalized[start..].find("\n\n") {
-            let frame_end = start + rel + 2;
-            let frame = &normalized[start..frame_end];
-            // Per the SSE spec, consecutive `data:` fields within one event
-            // frame are concatenated with `\n` and dispatched as a single
-            // event — NOT emitted as separate strings.
-            let mut data_parts: Vec<&str> = Vec::new();
-            for line in frame.lines() {
-                if let Some(rest) = line.strip_prefix("data:") {
-                    data_parts.push(rest.trim());
-                }
-            }
-            if !data_parts.is_empty() {
-                let joined = data_parts.join("\n");
-                if !joined.is_empty() && joined != "[DONE]" {
-                    out.push(joined);
-                }
-            }
-            start = frame_end;
+        let mut cursor = 0;
+        while let Some((start, len)) = find_frame_terminator(&self.buf[cursor..valid_len]) {
+            let frame_end = cursor + start + len;
+            out.extend(parse_data_frame(&self.buf[cursor..frame_end]));
+            cursor = frame_end;
         }
 
-        // Rebuild the buffer: unconsumed normalized tail + any incomplete
-        // UTF-8 bytes from the original buffer.
-        let remaining = &normalized[start..];
-        let mut new_buf = Vec::with_capacity(remaining.len() + remainder_bytes.len());
-        new_buf.extend_from_slice(remaining.as_bytes());
-        new_buf.extend_from_slice(remainder_bytes);
-        self.buf = new_buf;
+        // Retain the unconsumed RAW bytes (never normalized text), including
+        // any incomplete UTF-8 tail past `valid_len`, so a trailing `\r` can
+        // still pair with the next chunk's `\n`.
+        if cursor > 0 {
+            self.buf.drain(..cursor);
+        }
 
         out
     }
@@ -118,6 +102,62 @@ impl SseDecoder {
             }
         }
         out
+    }
+}
+
+/// SSE frame terminators, longest first. A line ends with `\r\n`, `\n` or
+/// `\r`, and an empty line ends the event — so a frame boundary is one line
+/// ending immediately followed by another: `\r\n\r\n`, `\n\r\n` (`\n`-ended
+/// line + `\r\n`-ended empty line), `\n\n`, `\r\r`, `\n\r` (`\n`-ended line +
+/// bare-`\r`-ended empty line). Longest-first order keeps `\r\n\r\n` from
+/// degrading to `\n\r\n`/`\n\r` and `\n\r\n` from degrading to `\n\r` when
+/// several terminators start at the same byte.
+const FRAME_TERMINATORS: [&[u8]; 5] = [b"\r\n\r\n", b"\n\r\n", b"\n\n", b"\r\r", b"\n\r"];
+
+/// Earliest frame terminator in `bytes` as `(offset, len)`; on equal offsets
+/// the longer terminator (seen first, per longest-first order) wins.
+fn find_frame_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for term in FRAME_TERMINATORS {
+        if let Some(pos) = find_sub(bytes, term) {
+            match best {
+                // A strictly earlier offset always wins; an equal one keeps
+                // the already-held longer match.
+                Some((held, _)) if held <= pos => {}
+                _ => best = Some((pos, term.len())),
+            }
+        }
+    }
+    best
+}
+
+/// First offset of `needle` in `haystack` (both non-empty).
+fn find_sub(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// Normalize ONE raw frame's line endings and extract its `data:` payload:
+/// consecutive `data:` fields join with `\n` into a single event; frames
+/// without data lines (comments, `event:`/`id:` only) yield nothing and the
+/// `[DONE]` sentinel is dropped. CR normalization lives here — after the
+/// raw-buffer frame split — never on the shared buffer.
+fn parse_data_frame(raw: &[u8]) -> Vec<String> {
+    let normalized = String::from_utf8_lossy(raw)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let data_parts: Vec<&str> = normalized
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(|rest| rest.trim())
+        .collect();
+    if data_parts.is_empty() {
+        return Vec::new();
+    }
+    let joined = data_parts.join("\n");
+    if joined.is_empty() || joined == "[DONE]" {
+        Vec::new()
+    } else {
+        vec![joined]
     }
 }
 
@@ -296,5 +336,52 @@ mod tests {
         dec.push(b"\ndata:{\"a\":2}\n\n");
         let out = dec.drain();
         assert_eq!(out, vec!["{\"a\":1}", "{\"a\":2}"]);
+    }
+
+    #[test]
+    fn drain_keeps_cr_pending_across_chunks() {
+        // Bug 8: a chunk ending in `\r` must stay raw until the next chunk
+        // arrives — the `\r` pairs with the following `\n` as ONE line
+        // ending, so both data lines belong to a single event.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:A\r");
+        assert!(
+            dec.drain().is_empty(),
+            "lone trailing CR must hold the frame"
+        );
+        dec.push(b"\ndata:B\r\n\r\n");
+        assert_eq!(dec.drain(), vec!["A\nB"]);
+    }
+
+    #[test]
+    fn drain_splits_on_bare_cr_boundary_across_chunks() {
+        // A bare `\r` ends a line per spec, so `\r\r` is a frame boundary
+        // even when the two CRs arrive in different chunks.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:A\r");
+        assert!(dec.drain().is_empty());
+        dec.push(b"\rdata:B\r\r");
+        assert_eq!(dec.drain(), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn drain_splits_on_lf_line_plus_cr_empty_line_across_chunks() {
+        // The `\n` ending "data:A" and the `\r` ending the empty line arrive
+        // in different chunks; per the SSE line-ending rules that pair is a
+        // frame boundary, so the events stay separate instead of merging.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:A\n");
+        assert!(dec.drain().is_empty());
+        dec.push(b"\rdata:B\n\n");
+        assert_eq!(dec.drain(), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn drain_prefers_longest_terminator_at_same_offset() {
+        // `\r\n\r\n` must not be split into `\n\r\n` at offset+1: the frame
+        // ends once, after the full four-byte terminator.
+        let mut dec = SseDecoder::new();
+        dec.push(b"data:A\r\n\r\ndata:B\n\n");
+        assert_eq!(dec.drain(), vec!["A", "B"]);
     }
 }

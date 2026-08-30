@@ -149,6 +149,41 @@ async fn signed_post_body_is_verified() {
 }
 
 #[tokio::test]
+async fn window_edge_timestamp_replay_is_rejected() {
+    let app = app().await;
+    // F6: a timestamp exactly one replay-window old is still legal — verify's
+    // window is INCLUSIVE (`|now-ts| > REPLAY_WINDOW_MS` rejects). The replay
+    // cache must keep the signature through that boundary so the second,
+    // identical request is a 409, not a free second pass. A literal
+    // `now - REPLAY_WINDOW_MS` would race the server clock (it advances
+    // between this read and the middleware's own read → 401), so a 2 s slack
+    // keeps both requests inside the verify window and lets the replay guard
+    // do the rejecting; the exact last-millisecond boundary is pinned by
+    // `window_edge_entry_survives_prune_so_replay_is_caught` in `auth_sig_mw`.
+    let ts = chrono::Utc::now().timestamp_millis() - auth_sig::REPLAY_WINDOW_MS + 2_000;
+    let canon = auth_sig::canonical("GET", "/api/health", ts, b"");
+    let sig = auth_sig::sign_hex(TOKEN, &canon);
+    // Body isn't Clone, so build two byte-identical requests from one
+    // signature pair (same ts + same canonical input → same signature).
+    let build = || {
+        Request::builder()
+            .uri("/api/health")
+            .header(auth_sig::TS_HEADER, ts.to_string())
+            .header(auth_sig::SIG_HEADER, sig.clone())
+            .body(Body::empty())
+            .unwrap()
+    };
+    let (status, body) = send(&app, build()).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "inclusive window-edge timestamp must verify: {body}"
+    );
+    let (status, body) = send(&app, build()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+#[tokio::test]
 async fn replayed_signature_is_409() {
     let app = app().await;
     // Body isn't Clone, so build two byte-identical requests from one

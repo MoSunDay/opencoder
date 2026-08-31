@@ -37,6 +37,15 @@ use crate::worker::{
 /// Returns `Result` (not `()`) because the body uses `?` to propagate errors
 /// from `resolve_agent` / `resume`; the caller propagates with `?`.
 /// The outer match's post-arm `continue` stays inline in `run_app`.
+/// Wire `model` stored on a freshly created `/task` session: the bare model
+/// id (no provider prefix) -- the same derivation as `SessionState::new` and
+/// resume, so the request `model` string is identical no matter how the
+/// session was created. `config` is the live in-memory config, so a
+/// session-only `/model` switch carries into the new task.
+fn new_task_wire_model(config: &Config) -> String {
+    config.model_id().to_string()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn switch_session(
     pick: crate::task::TaskPick,
@@ -89,7 +98,7 @@ pub(crate) async fn switch_session(
                 workdir.to_path_buf(),
             )
             .with_store(store.clone());
-            sess.model = model_label.clone();
+            sess.model = new_task_wire_model(config);
             (sess, 0)
         }
         crate::task::TaskPick::Resume(id) => {
@@ -202,6 +211,11 @@ pub(crate) async fn switch_session(
         *active_skill = st.active_skill;
         *active_skill_body = st.active_skill_body;
     } else {
+        // First visit this run: start from a blank per-session UI state --
+        // including composer input history (the cached branch restores it
+        // from the snapshot; skipping it here leaked the previous session's
+        // history into a freshly opened one).
+        *history = Vec::new();
         *scroll = 0;
         *follow = true;
         *queue_scroll = 0;
@@ -221,8 +235,8 @@ pub(crate) async fn switch_session(
         *active_skill = None;
         *active_skill_body = None;
     }
-    // Pending subagents exist: surface a hint marker (echoes the picker's
-    // `⊗ N replay pending` badge) instead of blocking on eager replay.
+    // Pending subagents exist: surface a hint marker instead of blocking on
+    // eager replay.
     if let Some(text) = pending_replay_hint(pending_replay) {
         chat.push_marker(Line::from(Span::styled(
             text,
@@ -384,6 +398,20 @@ mod tests {
     use opencoder_store::LibsqlStore;
 
     // ── pending_replay_hint (pure) ──────────────────────────────────────
+
+    #[test]
+    fn new_task_wire_model_strips_provider_prefix() {
+        let prefixed = Config {
+            model: "prov-x/model-x".into(),
+            ..Config::default()
+        };
+        assert_eq!(new_task_wire_model(&prefixed), "model-x");
+        let bare = Config {
+            model: "model-x".into(),
+            ..Config::default()
+        };
+        assert_eq!(new_task_wire_model(&bare), "model-x", "already bare");
+    }
 
     #[test]
     fn pending_replay_hint_none_for_zero() {

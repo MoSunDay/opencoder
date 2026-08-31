@@ -70,6 +70,19 @@ async fn append_chunk_in_tx(
             let seq = last_seq_in_tx(conn, session_id).await?;
             seqs.push(seq);
         }
+        // Activity touch: appending a message IS session activity. Keep
+        // `sessions.updated_at` monotonic (`MAX` guards against out-of-order
+        // backfills) inside the same tx, so listings ordered by recent
+        // activity reflect the last persisted message. `messages::import`
+        // deliberately bypasses this — bulk history load is not activity.
+        if let Some(last_ts) = msgs.iter().map(|m| m.created_at).max() {
+            conn.execute(
+                "UPDATE sessions SET updated_at = MAX(updated_at, ?) WHERE id = ?",
+                params![last_ts, session_id],
+            )
+            .await
+            .context("touch session activity in tx")?;
+        }
         Ok(seqs)
     })
     .await

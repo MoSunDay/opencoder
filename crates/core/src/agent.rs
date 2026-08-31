@@ -137,11 +137,25 @@ pub fn tool_preamble() -> &'static str {
 "
 }
 
+/// The BASE_PROMPT / `tool_preamble` clause advertising the 'build' (full
+/// tools) subagent. Stripping it yields a prompt that never tells the model
+/// the build subagent exists: sandbox mode strips always (read-only), and an
+/// act session strips while the task-plan skill is active (plan-only turns
+/// must not be advertised implementation delegation).
+pub const BUILD_DELEGATION_CLAUSE: &str = ", 'build' (full tools) for implementation";
+
+/// Remove the 'build' subagent advertisement from a base-style prompt.
+/// Shared by `base_prompt_sandbox` and the session layer's task-plan prompt
+/// stripping, so the clause wording lives in exactly one place.
+pub fn strip_build_delegation(prompt: &str) -> String {
+    prompt.replace(BUILD_DELEGATION_CLAUSE, "")
+}
+
 pub fn base_prompt_sandbox() -> String {
     // Sandbox mode must not advertise the 'build' subagent: strip the build
     // delegation clause from the shared base prompt before appending the
     // sandbox suffix. Act mode keeps the full BASE_PROMPT unchanged.
-    let base = BASE_PROMPT.replace(", 'build' (full tools) for implementation", "");
+    let base = strip_build_delegation(BASE_PROMPT);
     format!("{base}\n\n{}", SANDBOX_SUFFIX)
 }
 
@@ -198,10 +212,11 @@ mod tests {
     /// fail loudly instead.
     #[test]
     fn sandbox_prompt_strips_build_subagent_advertisement() {
-        // The exact substring targeted by `.replace()` in base_prompt_sandbox().
-        // If this assertion fails, BASE_PROMPT has changed — update the
-        // `.replace()` call to match the new wording.
-        let replace_target = ", 'build' (full tools) for implementation";
+        // The exact clause targeted by `strip_build_delegation` (used by
+        // `base_prompt_sandbox` and the session layer's task-plan stripping).
+        // If this assertion fails, BASE_PROMPT has changed — update
+        // `BUILD_DELEGATION_CLAUSE` to match the new wording.
+        let replace_target = BUILD_DELEGATION_CLAUSE;
         assert!(
             base_prompt_act().contains(replace_target),
             "BASE_PROMPT no longer contains the '.replace()' target substring \

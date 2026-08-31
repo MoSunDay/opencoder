@@ -35,16 +35,24 @@ pub fn registry() -> HashMap<String, ToolArc> {
     all.into_iter().map(|t| (t.name().to_string(), t)).collect()
 }
 
+/// Whether the `build` subagent must be hidden from every prompt surface:
+/// **sandbox mode** always (read-only contract), plus any agent while the
+/// **task-plan skill** is active (plan-only turns are not advertised
+/// implementation delegation). Shared by the runner's schema build, the
+/// system prompt, and the token estimator so all three surfaces agree.
+pub fn hide_build_subagent(kind: AgentKind, skill_body: Option<&str>) -> bool {
+    kind == AgentKind::Sandbox || latent::task_plan_active(skill_body)
+}
+
 /// Project a (filtered) tool map into OpenAI function-calling JSON, applying the
 /// per-tool schema sanitiser.
 ///
-/// `kind` lets us special-case tools whose schema must change based on the owning
-/// agent's kind. The `task` tool is rewritten via [`task::description_for`] /
-/// [`task::parameters_for`] so **sandbox mode** never reveals the `build` (full-write)
-/// subagent. This keeps the read-only contract at the *schema* layer, before any
-/// runtime guard in `run_subagent` ever fires.
-pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Value> {
-    let sandbox = kind == AgentKind::Sandbox;
+/// `hide_build` lets us special-case the `task` tool: it is rewritten via
+/// [`task::description_for`] / [`task::parameters_for`] so the `build`
+/// (full-write) subagent is never revealed when [`hide_build_subagent`]
+/// holds. This keeps the contract at the *schema* layer, before any runtime
+/// guard in `run_subagent` ever fires.
+pub fn schema_for(tools: &HashMap<String, ToolArc>, hide_build: bool) -> Vec<Value> {
     // Build (name, schema) pairs, then sort by name. A bare `.values().collect()`
     // would inherit `HashMap`'s randomized iteration order (Rust reseeds
     // `RandomState` per process), making the `tools` array in every ChatRequest
@@ -56,8 +64,8 @@ pub fn schema_for(tools: &HashMap<String, ToolArc>, kind: AgentKind) -> Vec<Valu
             let name = t.name();
             let (description, parameters) = if name == "task" {
                 (
-                    task::description_for(sandbox),
-                    task::parameters_for(sandbox),
+                    task::description_for(hide_build),
+                    task::parameters_for(hide_build),
                 )
             } else {
                 (t.description().to_string(), t.parameters())
@@ -97,7 +105,7 @@ pub fn estimate_tool_schema_tokens(
         .filter(|(name, _)| latent::is_visible(name.as_str(), agent, &unlocked))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let schemas = schema_for(&allowed, agent.kind);
+    let schemas = schema_for(&allowed, hide_build_subagent(agent.kind, skill_body));
     let json = serde_json::to_string(&schemas).unwrap_or_default();
     opencoder_llm::estimate(&json)
 }
@@ -120,10 +128,63 @@ mod tests {
             .expect("task schema present")
     }
 
+    /// A `body_with_source`-shaped task-plan skill body (the real activation
+    /// shape; the exact Source line is what `task_plan_active` resolves).
+    fn plan_skill_body() -> Option<&'static str> {
+        Some("> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\nplan body")
+    }
+
+    #[test]
+    fn hide_build_subagent_matrix() {
+        let plan = plan_skill_body();
+        let lookalike = Some("> Source: /skills/my-task-plan/SKILL.md\n\nbody");
+        // Sandbox always hides; act hides only while task-plan is active.
+        assert!(hide_build_subagent(AgentKind::Sandbox, None));
+        assert!(hide_build_subagent(AgentKind::Sandbox, plan));
+        assert!(!hide_build_subagent(AgentKind::Act, None));
+        assert!(hide_build_subagent(AgentKind::Act, plan));
+        assert!(!hide_build_subagent(AgentKind::Act, lookalike));
+    }
+
+    #[test]
+    fn act_task_plan_task_schema_omits_build() {
+        let tools = task_only();
+        let schemas = schema_for(&tools, hide_build_subagent(AgentKind::Act, plan_skill_body()));
+        let func = &task_schema(&schemas)["function"];
+
+        let desc = func["description"].as_str().unwrap();
+        assert!(
+            !desc.contains("build"),
+            "task-plan act task description must not mention 'build', got: {desc}"
+        );
+        assert!(
+            desc.contains("explore"),
+            "task-plan act task description must mention 'explore', got: {desc}"
+        );
+        let params_str = func["parameters"].to_string();
+        assert!(
+            !params_str.contains("build"),
+            "task-plan act task parameters must not contain 'build', got: {params_str}"
+        );
+    }
+
+    #[test]
+    fn act_without_task_plan_task_schema_keeps_build() {
+        let tools = task_only();
+        let schemas = schema_for(&tools, hide_build_subagent(AgentKind::Act, None));
+        let desc = task_schema(&schemas)["function"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            desc.contains("\"build\""),
+            "plain act task description must still advertise build, got: {desc}"
+        );
+    }
+
     #[test]
     fn sandbox_mode_task_schema_omits_build() {
         let tools = task_only();
-        let schemas = schema_for(&tools, AgentKind::Sandbox);
+        let schemas = schema_for(&tools, true);
         let func = &task_schema(&schemas)["function"];
 
         let desc = func["description"].as_str().unwrap();
@@ -161,7 +222,7 @@ mod tests {
         // Regression guard: act mode must keep advertising the `build` subagent
         // so the model can delegate implementation work.
         let tools = task_only();
-        let schemas = schema_for(&tools, AgentKind::Act);
+        let schemas = schema_for(&tools, false);
         let func = &task_schema(&schemas)["function"];
 
         let desc = func["description"].as_str().unwrap();
@@ -184,7 +245,7 @@ mod tests {
         let mut tools = HashMap::new();
         let r = Arc::new(read::ReadTool) as ToolArc;
         tools.insert(r.name().to_string(), r);
-        let schemas = schema_for(&tools, AgentKind::Sandbox);
+        let schemas = schema_for(&tools, true);
         let func = &schemas
             .iter()
             .find(|v| v["function"]["name"] == "read")
@@ -203,7 +264,8 @@ mod tests {
         // ~randomly per process run.
         let tools = registry();
         for kind in [AgentKind::Act, AgentKind::Sandbox] {
-            let schemas = schema_for(&tools, kind);
+            let hide_build = kind == AgentKind::Sandbox;
+    let schemas = schema_for(&tools, hide_build);
             let names: Vec<&str> = schemas
                 .iter()
                 .map(|v| v["function"]["name"].as_str().unwrap())
@@ -315,5 +377,24 @@ mod tests {
         let sandbox_tokens = estimate_tool_schema_tokens(&sandbox_agent, None, &reg);
         assert!(act_tokens > 200, "act tokens: {act_tokens}");
         assert!(sandbox_tokens > 200, "sandbox tokens: {sandbox_tokens}");
+    }
+
+    #[test]
+    fn estimate_tool_schema_tokens_act_task_plan_matches_runner() {
+        // The estimator must mirror the runner's schema build exactly. With
+        // task-plan active, act and sandbox see the SAME schema set (question
+        // unlocked, build hidden), so their estimates must coincide — if the
+        // estimator forgot the task-plan build-strip, act would come out
+        // strictly larger.
+        let act_agent = opencoder_core::resolve_agent("act").expect("act agent");
+        let sandbox_agent = opencoder_core::resolve_agent("sandbox").expect("sandbox agent");
+        let reg = registry();
+        let plan = Some("> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\nbody");
+        let act_plan = estimate_tool_schema_tokens(&act_agent, plan, &reg);
+        let sandbox_plan = estimate_tool_schema_tokens(&sandbox_agent, plan, &reg);
+        assert_eq!(
+            act_plan, sandbox_plan,
+            "act+task-plan must estimate identically to sandbox+task-plan"
+        );
     }
 }

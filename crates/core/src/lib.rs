@@ -15,7 +15,8 @@ pub mod tool_guard_config;
 pub mod version;
 
 pub use agent::{
-    builtin_agents, resolve_agent, tool_preamble, Agent, AgentKind, AgentMode, ToolFilter,
+    builtin_agents, resolve_agent, strip_build_delegation, tool_preamble, Agent, AgentKind,
+    AgentMode, ToolFilter,
 };
 pub use config::envs::{
     active_env, create_env, delete_env, env_dir, envs_home, list_envs, recapture_env,

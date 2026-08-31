@@ -101,9 +101,12 @@ pub async fn run_with_registry(
     if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&user_text) {
         if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut on_event).await {
             // This path returns before the one-shot wrapper; honor the
-            // run-end skill contract (a crash-resume-armed skill must not
-            // survive a failed control-command run) before propagating.
-            crate::skill_lifecycle::clear_on_run_end(session, &mut on_event).await;
+            // run-end skill contract before propagating. Non-task-plan
+            // skills must not survive a failed control-command run;
+            // task-plan does (aborted plan = never delivered).
+            if !crate::skill_lifecycle::abort_keeps_skill(session, true) {
+                crate::skill_lifecycle::clear_on_run_end(session, &mut on_event).await;
+            }
             return Err(e);
         }
         // ClearContext with a preserved seed falls through to run_loop so the

@@ -1,6 +1,13 @@
 //! One-shot `$skill` lifetime: an activation (inline `$name` token, queue/
 //! steer drain, or a pre-set `skill_prompt`) lives ONLY for the run that
-//! triggered it.
+//! triggered it — with ONE exception: the task-plan skill survives an
+//! ABNORMALLY ended run (loop `Err`, or a tripped run-level cancel token:
+//! TUI Esc / web stop). Its contract is "the plan delivered = the skill
+//! spent", and an interrupted plan was never delivered, so the committed
+//! body stays armed in memory AND in the `sessions.skill` row; a continued
+//! or resumed run picks the unfinished plan back up (yellow `act` chip,
+//! build-subagent stripping, latent `question` unlock intact) and the next
+//! normal completion clears it.
 //!
 //! Within the run the skill behaves exactly as before: the body is injected
 //! into the persistent transcript once (`skill_context::ensure_full_body_loaded`,
@@ -100,11 +107,24 @@ pub(crate) async fn clear_on_run_end(
     }
 }
 
+/// True when an ABNORMALLY ended run — the loop returned `Err`, or the
+/// run-level cancel token tripped (TUI Esc, web stop) — must KEEP its active
+/// skill instead of the one-shot clear. Only task-plan qualifies: an
+/// interrupted plan was never delivered, so wiping it here is what turned a
+/// resumed unfinished task green with the build subagent re-advertised.
+/// Every other skill keeps the strict one-shot contract.
+pub(crate) fn abort_keeps_skill(session: &SessionState, errored: bool) -> bool {
+    let aborted = errored || session.cancel.as_ref().is_some_and(|c| c.is_cancelled());
+    aborted && crate::tools::latent::task_plan_active(session.skill_prompt_cloned().as_deref())
+}
+
 /// [`run_loop`] wrapped with the universal run-end hook: the loop runs
 /// unchanged, then the skill is cleared on BOTH outcomes before the original
 /// result is returned. Done, Error, and cancel all flow through here (a
 /// cancelled loop breaks with `Ok`, an LLM/store failure returns `Err`), so
 /// this single wrapper is the one-shot boundary for every caller.
+/// Exception: [`abort_keeps_skill`] — an aborted task-plan run keeps the
+/// skill armed (memory + still-set store row) until a run completes.
 pub(crate) async fn run_loop_one_shot(
     session: &mut SessionState,
     registry: &HashMap<String, ToolArc>,
@@ -112,7 +132,9 @@ pub(crate) async fn run_loop_one_shot(
     drain_mode: bool,
 ) -> Result<()> {
     let result = run_loop(session, registry, on_event, drain_mode).await;
-    clear_on_run_end(session, on_event).await;
+    if !abort_keeps_skill(session, result.is_err()) {
+        clear_on_run_end(session, on_event).await;
+    }
     result
 }
 
@@ -508,6 +530,123 @@ mod tests {
         );
         assert_eq!(probe.attempts.load(Ordering::SeqCst), 3, "bounded retries");
         assert!(s.skill_prompt_cloned().is_none(), "memory still cleared");
+    }
+
+    /// THE BUG this guards against: an Esc-cancelled (or errored) task-plan
+    /// run used to wipe the skill at the run-end hook, so resuming the
+    /// unfinished task came back green with the build subagent re-advertised.
+    /// The abort path must keep the skill in memory AND leave the store row
+    /// set (resume restores from it); only a normal Done clears.
+    #[tokio::test]
+    async fn aborted_task_plan_run_keeps_skill_in_memory_and_store() {
+        for aborted_by in ["cancel", "error"] {
+            let store = mem_store_with_row().await;
+            let working_dir = std::env::temp_dir().join("opencoder-skill-lifecycle-tests");
+            let mock = match aborted_by {
+                "cancel" => MockChatClient::new().push_hang(std::sync::Arc::new(
+                    tokio::sync::Notify::new(),
+                )),
+                _ => MockChatClient::new()
+                    .push_script(vec![LlmEvent::Error("boom".into())]),
+            };
+            let mut s = SessionState::new(
+                "sess-skill-lifecycle",
+                resolve_agent("act").unwrap(),
+                Config::default(),
+                Arc::new(mock) as Arc<dyn ChatStream>,
+                working_dir,
+            )
+            .with_store(store.clone())
+            .mark_session_created();
+            s.set_skill(Some(
+                "> Source: /skills/task-plan/SKILL.md\n\nPLAN BODY".into(),
+            ));
+            // Real activations persist the body at consumption time
+            // (run_with_registry / queue drains); mirror that so the store
+            // row actually carries the skill when the abort hits.
+            crate::skill_resolve::persist_active_skill(&s, &None).await;
+            if aborted_by == "cancel" {
+                // TUI Esc trips the run-level token.
+                let token = tokio_util::sync::CancellationToken::new();
+                token.cancel();
+                s.cancel = Some(token);
+            }
+
+            let registry = crate::tools::registry();
+            let mut evs: Vec<SessionEvent> = Vec::new();
+            let res = run_loop_one_shot(&mut s, &registry, &mut |e| evs.push(e), false).await;
+            if aborted_by == "error" {
+                assert!(res.is_err(), "error script must fail the run");
+            }
+
+            assert!(
+                s.skill_prompt_cloned().is_some(),
+                "{aborted_by}: task-plan body must stay armed in memory"
+            );
+            let meta = store
+                .get_session("sess-skill-lifecycle")
+                .await
+                .unwrap()
+                .and_then(|m| m.skill);
+            assert!(
+                meta.is_some(),
+                "{aborted_by}: store row keeps the skill for resume"
+            );
+        }
+    }
+
+    /// A normal Done run still clears task-plan: the plan was delivered, the
+    /// chip goes green and the build subagent is advertised again.
+    #[tokio::test]
+    async fn completed_task_plan_run_still_clears() {
+        let store = mem_store_with_row().await;
+        let working_dir = std::env::temp_dir().join("opencoder-skill-lifecycle-tests");
+        let mock = MockChatClient::new().push_script(vec![LlmEvent::Completed {
+            text: "plan delivered".into(),
+            tool_calls: vec![],
+            usage: Some(Usage::default()),
+        }]);
+        let mut s = SessionState::new(
+            "sess-skill-lifecycle",
+            resolve_agent("act").unwrap(),
+            Config::default(),
+            Arc::new(mock) as Arc<dyn ChatStream>,
+            working_dir,
+        )
+        .with_store(store.clone())
+        .mark_session_created();
+        s.set_skill(Some("> Source: /skills/task-plan/SKILL.md\n\nPLAN".into()));
+
+        let registry = crate::tools::registry();
+        let mut evs: Vec<SessionEvent> = Vec::new();
+        let res = run_loop_one_shot(&mut s, &registry, &mut |e| evs.push(e), false).await;
+        assert!(res.is_ok(), "{res:?}");
+        assert!(s.skill_prompt_cloned().is_none(), "Done clears the skill");
+        let meta = store.get_session("sess-skill-lifecycle").await.unwrap();
+        assert!(
+            meta.and_then(|m| m.skill).is_none(),
+            "Done clears the store row"
+        );
+    }
+
+    /// The abort exception is task-plan ONLY: another active skill keeps the
+    /// strict one-shot contract and is cleared on an aborted run too.
+    #[tokio::test]
+    async fn aborted_non_task_plan_skill_still_clears() {
+        let store = mem_store_with_row().await;
+        let mut s = make_session(Some(store.clone()));
+        s.set_skill(Some("> Source: /skills/review/SKILL.md\n\nBODY".into()));
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        s.cancel = Some(token);
+
+        assert!(
+            !abort_keeps_skill(&s, false),
+            "review does not survive an abort"
+        );
+        let mut evs: Vec<SessionEvent> = Vec::new();
+        clear_on_run_end(&s, &mut |e| evs.push(e)).await;
+        assert!(s.skill_prompt_cloned().is_none(), "one-shot still holds");
     }
 
     /// Guard is a DOUBLE condition: a session whose body is already gone but

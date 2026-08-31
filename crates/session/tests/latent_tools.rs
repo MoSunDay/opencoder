@@ -155,7 +155,7 @@ fn latent_tools_appear_in_schema_when_unlocked() {
         .filter(|(name, _)| latent::is_visible(name, &probe, &unlocked))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let schemas = schema_for(&allowed, opencoder_core::AgentKind::Act);
+    let schemas = schema_for(&allowed, false);
     let schema_names: Vec<&str> = schemas
         .iter()
         .map(|s| s["function"]["name"].as_str().unwrap())
@@ -169,7 +169,7 @@ fn latent_tools_appear_in_schema_when_unlocked() {
         .filter(|(name, _)| latent::is_visible(name, &probe, &unlocked2))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let schemas2 = schema_for(&allowed2, opencoder_core::AgentKind::Act);
+    let schemas2 = schema_for(&allowed2, false);
     let schema_names2: Vec<&str> = schemas2
         .iter()
         .map(|s| s["function"]["name"].as_str().unwrap())

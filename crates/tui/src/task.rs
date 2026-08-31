@@ -1,12 +1,12 @@
-//! `/task` session picker — switch between or create new conversations.
+//! `/task` session picker - switch between or create new conversations.
 
-use crate::composer;
+use crate::task_row;
 use crate::theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use opencoder_store::SessionListItem;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Clear, List, ListItem, ListState};
 use ratatui::Frame;
 
@@ -34,9 +34,9 @@ pub enum TaskOutcome {
 /// Which interaction mode the picker is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PickerMode {
-    /// `/task` — switch to / create a session ("+ New task", "Clear all" rows).
+    /// `/task` - switch to / create a session ("+ New task", "Clear all" rows).
     Switch,
-    /// `/fork` — pick a session to clone context from (sessions only, no
+    /// `/fork` - pick a session to clone context from (sessions only, no
     /// "+ New task" / "Clear all" rows).
     Fork,
 }
@@ -47,79 +47,35 @@ pub struct TaskPicker {
     selected: usize,
     /// Interaction mode: session switching (default) vs. fork selection.
     mode: PickerMode,
-    /// The currently-active session id — always preserved by "Clear all", and
+    /// The currently-active session id - always preserved by "Clear all", and
     /// tagged `(current)` in the rendered list.
     current_session_id: String,
     /// Two-step confirmation guard for the destructive "Clear all" row.
     /// `true` while we're waiting for the second Enter (or an Esc to cancel).
     confirm_clear: bool,
-    /// Discovered skills, used to resolve a stored skill **body** (what
-    /// `sessions.skill` persists) back to a display name for the row tag.
-    skills: Vec<opencoder_core::Skill>,
+    /// Wall clock captured once when the picker opens; session rows show
+    /// ages relative to it instead of re-rendering every second.
+    now_ms: i64,
 }
 
 impl TaskPicker {
     pub fn new(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
-        Self::with_skills(
-            sessions,
-            current_session_id,
-            opencoder_core::discover_skills(),
-        )
-    }
-
-    /// Construct with an explicit skill slice so tests can inject a fake
-    /// skill without touching `~/.opencoder/skills`.
-    fn with_skills(
-        sessions: Vec<SessionListItem>,
-        current_session_id: String,
-        skills: Vec<opencoder_core::Skill>,
-    ) -> Self {
         TaskPicker {
             sessions,
             selected: 0,
             mode: PickerMode::Switch,
             current_session_id,
             confirm_clear: false,
-            skills,
+            now_ms: opencoder_core::message::now_ms(),
         }
     }
 
     /// Build a fork-mode picker (`/fork`): every listed session is a fork
     /// source, and Enter forks the highlighted session's context.
     pub fn new_fork(sessions: Vec<SessionListItem>, current_session_id: String) -> Self {
-        let mut p = Self::with_skills(
-            sessions,
-            current_session_id,
-            opencoder_core::discover_skills(),
-        );
+        let mut p = Self::new(sessions, current_session_id);
         p.mode = PickerMode::Fork;
         p
-    }
-
-    /// Resolve a stored skill body to a display tag (`[name]`), matching
-    /// against the discovered skills (the store persists the body, not the
-    /// name). Falls back to the body's first line so an active skill that is
-    /// no longer discoverable still renders something.
-    fn skill_tag(&self, body: &str) -> Option<String> {
-        let name = self
-            .skills
-            .iter()
-            .find(|sk| sk.body == body)
-            .map(|sk| sk.name.clone())
-            .or_else(|| {
-                body.lines()
-                    .find(|l| !l.trim().is_empty())
-                    .map(|l| l.trim().trim_start_matches('#').trim().to_string())
-            })
-            .unwrap_or_default();
-        let name = composer::truncate_to_width(&name, 18);
-        if name.is_empty() {
-            None
-        } else {
-            // `agent_txt` already carries a trailing space, so the tag renders
-            // as `[act] [do-and-done]`.
-            Some(format!("[{name}]"))
-        }
     }
 
     /// Replace the listed sessions (e.g. after a clear) and reset selection +
@@ -258,14 +214,27 @@ pub fn handle_task_key(picker: &mut Option<TaskPicker>, k: KeyEvent) -> TaskOutc
     TaskOutcome::Idle
 }
 
-/// Fixed popup width (in display columns). Session rows budget their
-/// agent/title/preview/badge spans against this so status badges stay visible.
+/// Fixed popup width (in display columns).
 const POPUP_W: u16 = 60;
+
+/// Display-column budget for a session row's second (preview) line: popup
+/// width minus the border, highlight symbol and a little breathing room.
+const PREVIEW_W: usize = 56;
+
+/// Popup content height in terminal rows: auxiliary rows ("+ New task",
+/// "Clear all") stay one line each while every session row is a two-line
+/// item (age over preview), plus 4 rows of block chrome and padding.
+fn popup_height(aux_rows: usize, session_count: usize) -> u16 {
+    (aux_rows + session_count * 2 + 4) as u16
+}
 
 /// Render the task picker as a centered popup.
 pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     let visible = picker.row_count();
-    let want_h = (visible as u16 + 4)
+    // Session rows are two lines tall, so the popup grows by 2 rows per
+    // session instead of 1.
+    let aux_rows = visible - picker.sessions.len();
+    let want_h = popup_height(aux_rows, picker.sessions.len())
         .min(area.height.saturating_sub(2))
         .max(7);
     let h = want_h.min(area.height.saturating_sub(2));
@@ -296,83 +265,38 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
         ])));
     }
 
-    // Session rows
+    // Session rows: two lines each - the session's relative age (plus the
+    // `(current)` marker) over its preview. The title is intentionally not
+    // rendered; it stays available in the store for other surfaces.
     for (i, s) in picker.sessions.iter().enumerate() {
         let selected = picker.selected == i + row_offset;
         let is_current = s.id == picker.current_session_id;
-        let agent = s.agent.as_deref().unwrap_or("act");
-        let title = s.title.as_deref().unwrap_or("(untitled)");
-        let style = if selected {
+        let age = task_row::relative_time(
+            task_row::activity_ts(s.updated_at, s.created_at),
+            picker.now_ms,
+        );
+        let mut headline = vec![Span::styled(age, Style::default().fg(theme::muted()))];
+        if is_current {
+            headline.push(Span::styled(
+                "  (current)",
+                Style::default().fg(theme::accent()),
+            ));
+        }
+        let preview_style = if selected {
             Style::default()
                 .fg(theme::warn_color())
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
-        // Subagent-task status badges, derived from the persisted
-        // `subagent_tasks` table: in-flight children (`Running`) and
-        // interrupted ones pending replay on the next user turn (`Cancelled`).
-        let running_badge =
-            (s.subagent_running > 0).then(|| format!("  \u{25cf} {} running", s.subagent_running));
-        let cancelled_badge = (s.subagent_cancelled > 0)
-            .then(|| format!("  \u{2297} {} replay pending", s.subagent_cancelled));
-        let agent_txt = format!("[{agent}] ");
-        // The store keeps the active skill body, not its name; resolve a
-        // display tag (` [name]`) by matching against the discovered skills so
-        // a `[plan]`-mode row can also show e.g. `[do-and-done]`.
-        let skill_tag = s
-            .skill
-            .as_deref()
-            .filter(|b| !b.trim().is_empty())
-            .and_then(|b| picker.skill_tag(b));
-
-        // Budget the row inside the fixed-width popup so the status badges
-        // stay visible: the agent chip, skill tag, separators, badges and
-        // suffix tags are fixed overhead; title and preview split whatever
-        // width remains.
-        let mut fixed = composer::str_width(&agent_txt)
-            + 2 // "  " separator before the preview
-            + skill_tag.as_deref().map_or(0, composer::str_width)
-            + running_badge.as_deref().map_or(0, composer::str_width)
-            + cancelled_badge.as_deref().map_or(0, composer::str_width);
-        if is_current {
-            fixed += composer::str_width("  (current)");
-        }
-        let free = (POPUP_W as usize).saturating_sub(fixed);
-        let title_budget = (free * 2 / 3).clamp(10, 28);
-        let preview_budget = free.saturating_sub(title_budget).max(8);
-
-        let mut spans = vec![Span::styled(
-            agent_txt,
-            Style::default().fg(crate::theme::agent_chip_fg(agent)),
-        )];
-        if let Some(tag) = skill_tag {
-            spans.push(Span::styled(tag, Style::default().fg(theme::accent())));
-        }
-        spans.push(Span::styled(
-            composer::truncate_to_width(title, title_budget),
-            style,
-        ));
-        spans.push(Span::styled(
-            format!("  {}", short_preview(&s.preview, preview_budget)),
-            Style::default().fg(theme::muted()),
-        ));
-        if let Some(badge) = running_badge {
-            spans.push(Span::styled(
-                badge,
-                Style::default().fg(theme::warn_color()),
-            ));
-        }
-        if let Some(badge) = cancelled_badge {
-            spans.push(Span::styled(badge, Style::default().fg(theme::muted())));
-        }
-        if is_current {
-            spans.push(Span::styled(
-                "  (current)".to_string(),
-                Style::default().fg(theme::accent()),
-            ));
-        }
-        items.push(ListItem::new(Line::from(spans)));
+        let preview = Span::styled(
+            task_row::preview_line(&s.preview, PREVIEW_W),
+            preview_style,
+        );
+        items.push(ListItem::new(Text::from(vec![
+            Line::from(headline),
+            Line::from(preview),
+        ])));
     }
 
     // "Clear all" danger row (only when there is something deletable).
@@ -420,11 +344,6 @@ pub fn render_task_picker(f: &mut Frame, area: Rect, picker: &TaskPicker) {
     f.render_stateful_widget(list, popup, &mut state);
 }
 
-/// Truncate a session-list preview to `max_w` *display columns*.
-fn short_preview(s: &str, max_w: usize) -> String {
-    composer::truncate_to_width(s.trim(), max_w)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,17 +358,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             preview: String::new(),
-            subagent_running: 0,
-            subagent_cancelled: 0,
             skill: None,
-        }
-    }
-
-    fn busy_item(id: &str, running: usize, cancelled: usize) -> SessionListItem {
-        SessionListItem {
-            subagent_running: running,
-            subagent_cancelled: cancelled,
-            ..item(id)
         }
     }
 
@@ -566,7 +475,7 @@ mod tests {
         );
     }
 
-    // ── Status-badge rendering ────────────────────────────────────────────
+    // -- Two-line session row rendering -----------------------
 
     /// Concatenate every cell's symbol row-by-row into one searchable string.
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
@@ -591,143 +500,85 @@ mod tests {
         buffer_text(terminal.backend().buffer())
     }
 
-    fn render_to_text(sessions: Vec<SessionListItem>) -> String {
-        render_picker_to_text(&TaskPicker::new(sessions, "cur".into()))
+    /// Fixed wall clock for the rendering tests: sessions are stamped at or
+    /// near `T0` and the picker is pinned to the same instant via `now_ms`.
+    const T0: i64 = 1_700_000_000_000;
+
+    /// Build a picker whose wall clock is pinned to `now_ms` so relative
+    /// ages are deterministic.
+    fn picker_at(sessions: Vec<SessionListItem>, now_ms: i64) -> TaskPicker {
+        let mut p = TaskPicker::new(sessions, "cur".into());
+        p.now_ms = now_ms;
+        p
     }
 
-    fn fake_skill(name: &str, body: &str) -> opencoder_core::Skill {
-        opencoder_core::Skill {
-            name: name.into(),
-            description: String::new(),
-            body: body.into(),
-            source: std::path::PathBuf::from("fake"),
-        }
+    /// Index of the first rendered line containing `needle`.
+    fn line_with(text: &str, needle: &str) -> Option<usize> {
+        text.lines().position(|l| l.contains(needle))
     }
 
     #[test]
-    fn status_badges_render_running_and_replay_pending() {
-        let text = render_to_text(vec![busy_item("s1", 2, 1), busy_item("s2", 0, 0)]);
-        assert!(
-            text.contains("\u{25cf} 2 running"),
-            "running badge missing from picker:\n{text}"
-        );
-        assert!(
-            text.contains("\u{2297} 1 replay pending"),
-            "replay-pending badge missing from picker:\n{text}"
-        );
-        // The idle session must render no status badge at all.
+    fn session_rows_render_two_lines_age_over_preview() {
+        // updated_at is missing (0), so the age falls back to created_at.
+        let mut s = item("s1");
+        s.created_at = T0;
+        s.preview = "hello world".into();
+        let text = render_picker_to_text(&picker_at(vec![s], T0));
+        let age_line = line_with(&text, "now").expect("relative age rendered");
+        let preview_at = line_with(&text, "hello world").expect("preview rendered");
         assert_eq!(
-            text.matches("running").count(),
-            1,
-            "only the busy row should carry a running badge:\n{text}"
+            preview_at,
+            age_line + 1,
+            "preview must sit on its own line right under the age:\n{text}"
         );
+    }
+
+    #[test]
+    fn current_marker_rides_on_the_age_line() {
+        let mut s = item("cur");
+        s.created_at = T0;
+        let text = render_picker_to_text(&picker_at(vec![s], T0));
+        let cur_line = line_with(&text, "(current)").expect("(current) rendered");
+        let line = text.lines().nth(cur_line).unwrap();
+        assert!(
+            line.contains("now"),
+            "(current) must share the age line, not the preview line:\n{text}"
+        );
+    }
+
+    #[test]
+    fn empty_preview_renders_placeholder_ellipsis() {
+        let mut s = item("s1");
+        s.created_at = T0;
+        // item() leaves `preview` empty.
+        let text = render_picker_to_text(&picker_at(vec![s], T0));
+        let age_line = line_with(&text, "now").expect("relative age rendered");
+        let preview_line = text.lines().nth(age_line + 1).expect("second row exists");
+        // Strip the surrounding border cells; the row body must be just "...".
+        let body = preview_line.trim().trim_matches('\u{2502}').trim();
         assert_eq!(
-            text.matches("replay pending").count(),
-            1,
-            "only the busy row should carry a replay-pending badge:\n{text}"
+            body, "\u{2026}",
+            "empty preview must render an ellipsis placeholder:\n{text}"
         );
     }
 
     #[test]
-    fn status_badges_survive_long_titles_and_suffix_tags() {
-        // Worst case: both badges + (current) + a title long enough to need
-        // truncation. The badges are placed before the suffix tags, so they
-        // must stay on screen even when the row overflows.
-        let text = render_to_text(vec![busy_item("s1", 1, 2)]);
-        assert!(
-            text.contains("\u{25cf} 1 running"),
-            "running badge clipped by long title:\n{text}"
-        );
-        assert!(
-            text.contains("\u{2297} 2 replay pending"),
-            "replay-pending badge clipped by long title:\n{text}"
-        );
-    }
+    fn popup_height_accounts_for_two_lines_per_session() {
+        // aux + sessions*2 + 4: one New row + one Clear-all row + 3 sessions.
+        assert_eq!(popup_height(2, 3), 12);
+        // Fork mode has no aux rows.
+        assert_eq!(popup_height(0, 1), 6);
 
-    #[test]
-    fn skill_tag_renders_matching_name_next_to_mode_chip() {
-        // The store persists the skill body; the picker must resolve it back
-        // to the skill name via `discover_skills()`-style matching.
-        let mut item = item("s1");
-        item.skill = Some("## do-and-done\nfull body".into());
-        let picker = TaskPicker::with_skills(
-            vec![item],
-            "cur".into(),
-            vec![fake_skill("do-and-done", "## do-and-done\nfull body")],
-        );
-        let text = render_picker_to_text(&picker);
-        assert!(
-            text.contains("[do-and-done]"),
-            "skill tag must render next to the mode chip:\n{text}"
-        );
-        assert!(
-            text.contains("[act] [do-and-done]"),
-            "skill tag must follow the agent chip:\n{text}"
-        );
-    }
-
-    #[test]
-    fn skill_tag_falls_back_to_first_body_line_when_not_discovered() {
-        // A skill that is no longer on disk (body unmatched) still renders a
-        // derived tag instead of vanishing silently.
-        let mut item = item("s1");
-        item.skill = Some("## retired-skill\ninstructions here".into());
-        let picker = TaskPicker::with_skills(vec![item], "cur".into(), vec![]);
-        let text = render_picker_to_text(&picker);
-        assert!(
-            text.contains("[retired-skill]"),
-            "fallback skill tag must derive from the body's first line:\n{text}"
-        );
-    }
-
-    #[test]
-    fn no_skill_tag_when_session_has_none() {
-        let text = render_to_text(vec![item("s1")]);
-        assert!(
-            !text.contains("[act] ["),
-            "rows without a skill must not render a skill tag:\n{text}"
-        );
-    }
-
-    #[test]
-    fn skill_tag_survives_badges_and_suffix_tags() {
-        // Long skill name + running badge + (current): the skill tag is fixed
-        // overhead, so it must stay visible when the row overflows.
-        let mut item = busy_item("s1", 1, 2);
-        item.skill = Some("very-long-skill-name-that-gets-truncated".into());
-        let picker = TaskPicker::with_skills(
-            vec![item],
-            "s1".into(),
-            vec![fake_skill(
-                "very-long-skill-name-that-gets-truncated",
-                "very-long-skill-name-that-gets-truncated",
-            )],
-        );
-        let text = render_picker_to_text(&picker);
-        assert!(
-            text.contains("[very-long-skill-n"),
-            "skill tag must be visible even with badges + (current):\n{text}"
-        );
-        assert!(
-            text.contains("\u{25cf} 1 running"),
-            "running badge must survive a skill tag:\n{text}"
-        );
-    }
-
-    #[test]
-    fn short_preview_respects_custom_budget() {
-        let preview = "x".repeat(80);
+        // Integration: with 2 sessions (one deletable) the popup measures
+        // 2 aux + 4 session lines + 4 chrome = 10 rows tall.
+        let text = render_picker_to_text(&picker_at(vec![item("cur"), item("old")], T0));
+        let top = line_with(&text, "\u{256d}").expect("top border rendered");
+        let bottom = line_with(&text, "\u{256f}").expect("bottom border rendered");
         assert_eq!(
-            short_preview(&preview, 40).chars().count(),
-            40,
-            "39 cols + ellipsis fits 40"
+            bottom - top + 1,
+            popup_height(2, 2) as usize,
+            "popup height must grow by 2 rows per session:\n{text}"
         );
-        assert_eq!(
-            short_preview(&preview, 8).chars().count(),
-            8,
-            "7 cols + ellipsis fits 8"
-        );
-        assert_eq!(short_preview("short", 40), "short", "fits unchanged");
     }
 
     #[test]

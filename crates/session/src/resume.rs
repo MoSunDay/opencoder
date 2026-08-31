@@ -206,7 +206,9 @@ pub async fn resume(
         // COMPLETED run has already cleared `sessions.skill` (NULL row ->
         // nothing resurrects); a non-NULL value means the session crashed
         // MID-run, and the resumed run must continue the skill —
-        // `skill_lifecycle::clear_on_run_end` clears it when that run ends.
+        // `skill_lifecycle::clear_on_run_end` clears it when that run ends
+        // (sole exception: `abort_keeps_skill` keeps an aborted task-plan,
+        // so an interrupted plan survives to be delivered after resume).
         skill_prompt: Arc::new(Mutex::new(meta.skill.clone())),
         active_skill_names: Arc::new(Mutex::new(crate::resume_helpers::infer_skill_names(
             &meta.skill,

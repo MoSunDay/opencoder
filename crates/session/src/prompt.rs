@@ -6,8 +6,17 @@ pub fn build_system(
     agent: &opencoder_core::Agent,
     working_dir: &Path,
     mcp_block: Option<&str>,
+    skill_body: Option<&str>,
 ) -> Message {
+    // While the task-plan skill is active the prompt must not advertise the
+    // 'build' (implementation) subagent: plan-only turns are not driven
+    // toward implementation delegation. Same mechanism as sandbox mode,
+    // whose agent prompt is pre-stripped (making this replace a no-op
+    // there). Every other prompt passes through unchanged.
     let mut text = agent.prompt.clone();
+    if crate::tools::latent::task_plan_active(skill_body) {
+        text = opencoder_core::strip_build_delegation(&text);
+    }
 
     if let Some(instructions) = load_instructions(working_dir) {
         text.push_str("\n\n## Project instructions\n");

@@ -2,10 +2,12 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
-/// by agent kind. Sandbox mode omits 'build' (it is read-only).
-pub(super) fn valid_subagent_options(sandbox: bool) -> String {
+/// by the same hide rule as the schema: sandbox mode omits 'build'
+/// (read-only), and so does an act session while the task-plan skill is
+/// active — the model is never told 'build' exists.
+pub(super) fn valid_subagent_options(hide_build: bool) -> String {
     let mut parts: Vec<&str> = vec!["'explore' (read-only)"];
-    if !sandbox {
+    if !hide_build {
         parts.push("'build' (full tools)");
     }
     match parts.len() {
@@ -41,6 +43,10 @@ pub(super) async fn run_subagent(
         .unwrap_or("explore")
         .to_string();
     let sandbox = parent.agent.kind == AgentKind::Sandbox;
+    let hide_build = crate::tools::hide_build_subagent(
+        parent.agent.kind,
+        parent.skill_prompt_cloned().as_deref(),
+    );
     // Sandbox mode may only spawn read-only subagents: 'explore' (filesystem).
     // 'build' stays rejected so the model is never told it exists.
     if sandbox && kind != "explore" {
@@ -54,7 +60,7 @@ pub(super) async fn run_subagent(
         None => {
             return ToolOutput::err(format!(
                 "Unknown subagent_type '{kind}'. Valid options: {}",
-                valid_subagent_options(sandbox)
+                valid_subagent_options(hide_build)
             ));
         }
     };

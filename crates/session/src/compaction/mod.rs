@@ -64,7 +64,12 @@ pub(crate) fn estimated_tokens(session: &SessionState) -> u64 {
     let agent = &session.agent;
     let cli = crate::prompt::cli_section(&session.config.enabled_cli_for(&agent.name, agent.mode));
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
-    let system = build_system(&session.agent, &session.working_dir, runtime.as_deref());
+    let system = build_system(
+        &session.agent,
+        &session.working_dir,
+        runtime.as_deref(),
+        session.skill_prompt_cloned().as_deref(),
+    );
     let base = estimate_messages(&session.messages)
         .saturating_add(estimate(&system.text()))
         .saturating_add(

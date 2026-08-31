@@ -71,9 +71,13 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
     }
     if let Some(cursor) = &filter.cursor {
         // A malformed cursor is a real error, not a silent fallback to page 1.
+        // Cursor ts is the *activity* key (see ACTIVITY_EXPR), matching the
+        // ORDER BY so keyset pagination is stable across pages.
         let (ts, id) = decode_cursor(cursor)
             .ok_or_else(|| anyhow::anyhow!("invalid list cursor: {cursor}"))?;
-        where_clauses.push("(s.created_at < ? OR (s.created_at = ? AND s.id < ?))".into());
+        where_clauses.push(format!(
+            "({ACTIVITY_EXPR} < ? OR ({ACTIVITY_EXPR} = ? AND s.id < ?))"
+        ));
         args.push(ts.into());
         args.push(ts.into());
         args.push(id.into());
@@ -96,8 +100,6 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
     let mut sql = String::from(
         "SELECT s.id, s.title, s.agent, s.model, s.created_at, s.updated_at, \
          (SELECT substr(m.blocks_json, 1, 8192) FROM messages m WHERE m.session_id = s.id AND m.role = 'user' ORDER BY m.seq ASC LIMIT 1) AS preview, \
-         (SELECT COUNT(*) FROM subagent_tasks st WHERE st.parent_session_id = s.id AND st.status = 'running') AS subagent_running, \
-         (SELECT COUNT(*) FROM subagent_tasks st WHERE st.parent_session_id = s.id AND st.status = 'cancelled') AS subagent_cancelled, \
          s.skill \
          FROM sessions s",
     );
@@ -105,7 +107,9 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
         sql.push_str(" WHERE ");
         sql.push_str(&where_clauses.join(" AND "));
     }
-    sql.push_str(" ORDER BY s.created_at DESC, s.id DESC LIMIT ?");
+    sql.push_str(&format!(
+        " ORDER BY {ACTIVITY_EXPR} DESC, s.id DESC LIMIT ?"
+    ));
     args.push(limit.into());
 
     let stmt = conn.prepare(&sql).await?;
@@ -120,9 +124,7 @@ pub async fn list(conn: &Connection, filter: &SessionFilter) -> Result<Vec<Sessi
             created_at: r.get::<i64>(4)?,
             updated_at: r.get::<i64>(5)?,
             preview: extract_preview(&r.get::<Option<String>>(6)?),
-            subagent_running: r.get::<i64>(7)?.max(0) as usize,
-            subagent_cancelled: r.get::<i64>(8)?.max(0) as usize,
-            skill: r.get::<Option<String>>(9)?,
+            skill: r.get::<Option<String>>(7)?,
         });
     }
     Ok(out)
@@ -306,7 +308,16 @@ fn row_to_meta(r: &libsql::Row) -> Result<SessionMeta> {
     })
 }
 
-/// Cursor = opaque `{created_at}|{id}` (both URL-safe: numeric ts + ULID id).
+/// Sort/pagination key for session listings: the session's last activity
+/// timestamp, falling back to `created_at` for rows never touched since
+/// insertion (imported backfills carry `updated_at = 0`). Ordering by this —
+/// instead of `created_at` — is what makes an actively-used (or just
+/// clear-context-ed) session float to the top of `/task`.
+const ACTIVITY_EXPR: &str = "MAX(s.updated_at, s.created_at)";
+
+/// Cursor = opaque `{activity_ts}|{id}` (both URL-safe: numeric ts + ULID id).
+/// `activity_ts` is the row's `ACTIVITY_EXPR` value at read time; there are no
+/// external cursor producers, so the key change is decode-compatible.
 fn decode_cursor(c: &str) -> Option<(i64, String)> {
     let mut it = c.splitn(2, '|');
     let ts: i64 = it.next()?.parse().ok()?;

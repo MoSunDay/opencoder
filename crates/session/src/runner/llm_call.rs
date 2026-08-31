@@ -29,7 +29,14 @@ pub(super) async fn run_one_llm_call(
         })
         .flatten();
     let runtime = crate::prompt::runtime_sections(mcp.as_deref(), cli.as_deref());
-    let system = build_system(&session.agent, &session.working_dir, runtime.as_deref());
+    let skill_body = session.skill_prompt_cloned();
+    let hide_build = crate::tools::hide_build_subagent(session.agent.kind, skill_body.as_deref());
+    let system = build_system(
+        &session.agent,
+        &session.working_dir,
+        runtime.as_deref(),
+        skill_body.as_deref(),
+    );
     let mut to_send = vec![system];
     to_send.extend(session.messages.iter().cloned());
     // Transient skill-context reminder: derived per call, appended LAST and
@@ -42,7 +49,6 @@ pub(super) async fn run_one_llm_call(
     }
     let openai_msgs = lower_messages(&to_send);
 
-    let skill_body = session.skill_prompt_cloned();
     let unlocked = crate::tools::latent::unlocked_from_body(skill_body.as_deref());
     let allowed: HashMap<String, ToolArc> = registry
         .iter()
@@ -62,7 +68,7 @@ pub(super) async fn run_one_llm_call(
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let tool_schemas = schema_for(&allowed, session.agent.kind);
+    let tool_schemas = schema_for(&allowed, hide_build);
 
     let req = ChatRequest {
         model: session.model.clone(),

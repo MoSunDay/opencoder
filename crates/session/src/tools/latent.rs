@@ -93,7 +93,25 @@ fn skill_name_from_source_line(line: &str) -> Option<&str> {
 /// tests, pre-annotation sessions) keeps the historical behaviour - scan only
 /// the first 500 chars for the skill identifiers, so a passing mention deeper
 /// in a body still does not leak unlocks.
-pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
+/// Canonicalise a resolved skill name to the static set of skill names that
+/// carry builtin latent semantics. Unknown (user) skill names return `None`
+/// and never enter the active-name set.
+fn known_skill_name(name: &str) -> Option<&'static str> {
+    match name {
+        "task-plan" => Some("task-plan"),
+        "ssh-pty" => Some("ssh-pty"),
+        _ => None,
+    }
+}
+
+/// Resolve the set of active builtin skill names from a skill prompt body.
+/// Primary path: every `> Source: <path>` line resolves EXACTLY (a lookalike
+/// `my-task-plan` never matches). Legacy fallback: a body with NO Source line
+/// (direct `set_skill` callers, tests, pre-annotation sessions) scans only the
+/// first 500 chars for the skill identifiers. Shared by latent-tool unlock
+/// ([`unlocked_from_body`]) and the task-plan prompt/schema stripping
+/// ([`task_plan_active`]) so every consumer agrees on activation.
+pub fn active_skill_names(body: Option<&str>) -> HashSet<&'static str> {
     let mut out = HashSet::new();
     let Some(b) = body else {
         return out;
@@ -104,8 +122,8 @@ pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
             continue;
         };
         saw_source = true;
-        for t in latent_tools_for_skill(name) {
-            out.insert(*t);
+        if let Some(name) = known_skill_name(name) {
+            out.insert(name);
         }
     }
     if saw_source {
@@ -113,16 +131,30 @@ pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
     }
     let prefix: String = b.chars().take(500).collect();
     if prefix.contains("ssh_pty") || prefix.contains("ssh-pty") {
-        for t in latent_tools_for_skill("ssh-pty") {
-            out.insert(*t);
-        }
+        out.insert("ssh-pty");
     }
     if QUESTION_SKILLS.iter().any(|s| prefix.contains(s)) {
-        for t in latent_tools_for_skill("task-plan") {
-            out.insert(*t);
-        }
+        out.insert("task-plan");
     }
     out
+}
+
+/// Derive the unlocked latent tool names from a skill prompt body — the
+/// runner's advertisement/exec-time unlock source. A thin projection of
+/// [`active_skill_names`] through the skill-to-tool table.
+pub fn unlocked_from_body(body: Option<&str>) -> HashSet<&'static str> {
+    active_skill_names(body)
+        .into_iter()
+        .flat_map(|name| latent_tools_for_skill(name).iter().copied())
+        .collect()
+}
+
+/// True when the task-plan skill is active. Same EXACT resolution as the
+/// latent layer, so the prompt/schema build-stripping lights up precisely
+/// when the skill that owns the plan-only contract is committed (the same
+/// condition that turns the TUI `act` chip yellow).
+pub fn task_plan_active(body: Option<&str>) -> bool {
+    active_skill_names(body).contains("task-plan")
 }
 
 /// Execution-time re-check for the generic tool dispatcher: a latent tool may
@@ -191,6 +223,33 @@ mod tests {
         // (contract-tested in opencoder-core); that unlocks question.
         let plan_body = Some("# task-plan\n\n## Overview\n\nMulti-phase planning...");
         assert!(unlocked_from_body(plan_body).contains("question"));
+    }
+
+    #[test]
+    fn task_plan_active_via_source_line() {
+        let body = Some("> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\nbody");
+        assert!(task_plan_active(body));
+        // Flat layout resolves to the file stem.
+        let flat = Some("> Source: /skills/task-plan.md\n\nbody");
+        assert!(task_plan_active(flat));
+    }
+
+    #[test]
+    fn task_plan_active_rejects_lookalike_and_other_skills() {
+        let lookalike = Some("> Source: /skills/my-task-plan/SKILL.md\n\nbody");
+        assert!(!task_plan_active(lookalike));
+        let review = Some("> Source: /skills/review/SKILL.md\n\nbody");
+        assert!(!task_plan_active(review));
+        assert!(!task_plan_active(None));
+    }
+
+    #[test]
+    fn task_plan_active_legacy_prefix_fallback() {
+        // Bodies without a Source line keep the 500-char prefix scan.
+        assert!(task_plan_active(Some("# task-plan\nplan the work")));
+        let filler = "x".repeat(600);
+        let late = format!("{filler} task-plan");
+        assert!(!task_plan_active(Some(&late)));
     }
 
     #[test]

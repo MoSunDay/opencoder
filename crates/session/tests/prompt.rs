@@ -11,7 +11,7 @@ use std::sync::Mutex;
 fn build_system_includes_agent_prompt_and_environment() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp/project");
-    let msg = build_system(&agent, dir, None);
+    let msg = build_system(&agent, dir, None, None);
     let text = msg.text();
     // Agent base prompt is included
     assert!(!text.is_empty());
@@ -24,11 +24,44 @@ fn build_system_includes_agent_prompt_and_environment() {
 fn build_system_contains_no_skill_section() {
     let agent = resolve_agent("act").unwrap();
     let dir = std::path::Path::new("/tmp/project");
-    let msg = build_system(&agent, dir, None);
+    let msg = build_system(&agent, dir, None, None);
     // Skill bodies never ship in the system prompt (they moved to a
     // transient tail reminder; see `skill_context`), so skill activation
     // never rewrites the payload's first bytes.
     assert!(!msg.text().contains("Active skill"));
+}
+
+#[test]
+fn task_plan_act_system_prompt_strips_build_delegation() {
+    let agent = resolve_agent("act").unwrap();
+    let dir = std::path::Path::new("/tmp/project");
+    let plan = "> Source: /home/u/.opencoder/skills/task-plan/SKILL.md\n\nplan body";
+
+    // While task-plan is active the prompt must not advertise the 'build'
+    // subagent; the 'explore' advertisement survives.
+    let msg = build_system(&agent, dir, None, Some(plan));
+    assert!(
+        !msg.text().contains("'build' (full tools)"),
+        "task-plan act prompt must not advertise build, got: {}",
+        msg.text()
+    );
+    assert!(msg.text().contains("'explore' (read-only)"));
+
+    // Any other skill (or no skill) keeps the full delegation line.
+    let review = "> Source: /home/u/.opencoder/skills/review/SKILL.md\n\nbody";
+    assert!(build_system(&agent, dir, None, Some(review))
+        .text()
+        .contains("'build' (full tools)"));
+    assert!(build_system(&agent, dir, None, None)
+        .text()
+        .contains("'build' (full tools)"));
+
+    // The sandbox agent prompt is pre-stripped; task-plan stripping is a
+    // no-op there, so the read-only contract is never weakened.
+    let sandbox = resolve_agent("sandbox").unwrap();
+    assert!(!build_system(&sandbox, dir, None, None)
+        .text()
+        .contains("'build' (full tools)"));
 }
 
 #[test]
@@ -111,7 +144,7 @@ fn project_instructions_from_working_dir_only() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Use Rust 2021 edition."));
@@ -133,7 +166,7 @@ fn project_instructions_from_global_and_working_dir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Global rule."));
@@ -158,7 +191,7 @@ fn project_instructions_from_git_root_when_in_subdir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, &subdir, None);
+        let msg = build_system(&agent, &subdir, None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Repo-wide rule."));
@@ -172,7 +205,7 @@ fn project_instructions_absent_when_no_agents_md() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(!text.contains("## Project instructions"));
     });
@@ -186,7 +219,7 @@ fn project_instructions_case_insensitive_lowercase() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Lowercase filename."));
@@ -201,7 +234,7 @@ fn project_instructions_case_insensitive_uppercase_ext() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Uppercase ext."));
@@ -218,7 +251,7 @@ fn project_instructions_prefers_exact_agents_md_name_over_variants() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         // Exactly one file is loaded per directory: the exact `AGENTS.md`
@@ -243,7 +276,7 @@ fn project_instructions_without_exact_name_picks_smallest_variant() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         assert!(text.contains("Upper-ext variant body."));
@@ -261,7 +294,7 @@ fn project_instructions_dedup_when_git_root_is_working_dir() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, repo.path(), None);
+        let msg = build_system(&agent, repo.path(), None, None);
         let text = msg.text();
         assert!(text.contains("## Project instructions"));
         // The content must appear exactly once (dedup: git root == working dir)
@@ -278,7 +311,7 @@ fn project_instructions_appears_before_environment() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         let instr_pos = text.find("## Project instructions").unwrap();
         let env_pos = text.find("# Environment").unwrap();
@@ -294,7 +327,7 @@ fn project_instructions_small_file_not_truncated() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
         assert!(text.contains("Small rule file."));
         assert!(!text.contains("[AGENTS.md truncated"));
@@ -318,7 +351,7 @@ fn project_instructions_truncated_past_200kb_with_boundary_safe_cut() {
 
     with_home(home.path(), || {
         let agent = resolve_agent("act").unwrap();
-        let msg = build_system(&agent, working.path(), None);
+        let msg = build_system(&agent, working.path(), None, None);
         let text = msg.text();
 
         let marker = format!(

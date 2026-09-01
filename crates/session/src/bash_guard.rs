@@ -7,8 +7,10 @@
 //! The classifier is now a thin adapter over the [`opencoder-shellguard`]
 //! crate, which is derived from [rippy](https://github.com/mpecan/rippy)
 //! (MIT license, copyright the rippy authors). Plan policy: block all
-//! risk-bearing writes; release `/dev/null` and `/tmp`; the cwd / project
-//! directory is NOT released. `Allow` passes; `Ask`/`Deny` block.
+//! risk-bearing writes. Shellguard still identifies sandbox-released `/tmp`
+//! writes, but plan mode rejects those too: only non-persistent device/fd
+//! redirects remain harmless. `Ask`/`Deny` and any state-writing `Allow`
+//! verdict block.
 //!
 //! Classification is cwd-relative (a bare `touch f` means "write `f` in the
 //! working directory"), so the cwd handed to [`classify_with_dir`] MUST be
@@ -40,10 +42,17 @@ pub enum BashVerdict {
 /// use [`classify_with_dir`] with the directory the command will run in:
 /// the classification cwd must equal the execution cwd.
 pub fn classify(command: &str) -> BashVerdict {
+    map_verdict(opencoder_shellguard::classify(command))
+}
+
+/// Map shellguard's sandbox verdict to the stricter plan contract. A write
+/// under `/tmp` is an allowed sandbox effect but is still a write, so plan
+/// mode blocks it using the typed `writes_state` provenance.
+fn map_verdict(verdict: opencoder_shellguard::Verdict) -> BashVerdict {
     use opencoder_shellguard::Decision;
-    let verdict = opencoder_shellguard::classify(command);
     match verdict.decision {
-        Decision::Allow => BashVerdict::ReadOnly,
+        Decision::Allow if !verdict.writes_state => BashVerdict::ReadOnly,
+        Decision::Allow => BashVerdict::WriteBlocked(verdict.reason),
         Decision::Ask | Decision::Deny => BashVerdict::WriteBlocked(verdict.reason),
     }
 }
@@ -54,12 +63,7 @@ pub fn classify(command: &str) -> BashVerdict {
 /// tool that is the per-call `workdir` input, defaulting to the session
 /// working dir (see `tools::bash`).
 pub fn classify_with_dir(command: &str, cwd: &std::path::Path) -> BashVerdict {
-    use opencoder_shellguard::Decision;
-    let verdict = opencoder_shellguard::classify_in(command, cwd);
-    match verdict.decision {
-        Decision::Allow => BashVerdict::ReadOnly,
-        Decision::Ask | Decision::Deny => BashVerdict::WriteBlocked(verdict.reason),
-    }
+    map_verdict(opencoder_shellguard::classify_in(command, cwd))
 }
 
 /// Tool names a plan session may execute, mirroring the `plan` agent's
@@ -69,18 +73,22 @@ const PLAN_ADMITTED: &[&str] = &["bash", "task", "question"];
 
 /// Canonical model-facing denial for a plan-mode interception (candidate
 /// wording, verbatim). The contract: name the mode, state the read-only
-/// invariant, and point at the real escape hatch — switch to the act agent
-/// via `/agent act`.
+/// invariant, tell the model to stop implementation attempts and focus on a
+/// plan, and point at the real escape hatch — switch to act via `/agent act`.
 pub fn plan_denial(tool: &str, detail: &str) -> String {
     if tool == "bash" {
         format!(
-            "Blocked in plan mode: this bash command modifies state ({detail}). \
-             Plan mode is read-only. To make changes, switch to the act agent (/agent act)."
+            "Blocked in plan mode (read-only): this bash command modifies state ({detail}) \
+             and was not executed. Do not retry or attempt another write. Focus on analysis \
+             and output a plan only; do not execute implementation. To make changes, switch \
+             to the act agent (/agent act)."
         )
     } else {
         format!(
-            "Blocked in plan mode: `{tool}` was not executed - {detail}. \
-             Plan mode is read-only. To make changes, switch to the act agent (/agent act)."
+            "Blocked in plan mode (read-only): `{tool}` was not executed - {detail}. \
+             Do not retry or attempt another write. Focus on analysis and output a plan only; \
+             do not execute implementation. To make changes, switch to the act agent \
+             (/agent act)."
         )
     }
 }
@@ -287,8 +295,11 @@ mod tests {
     }
 
     #[test]
-    fn tmp_release_passes() {
-        assert_eq!(classify("echo x > /tmp/a.log"), BashVerdict::ReadOnly);
+    fn tmp_write_is_blocked_by_strict_plan_policy() {
+        assert!(matches!(
+            classify("echo x > /tmp/a.log"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -328,6 +339,8 @@ mod tests {
         assert!(msg.contains("Blocked in plan mode"), "got: {msg}");
         assert!(msg.contains("read-only"), "got: {msg}");
         assert!(msg.contains("`edit`"), "got: {msg}");
+        assert!(msg.contains("output a plan only"), "got: {msg}");
+        assert!(msg.contains("Do not retry"), "got: {msg}");
         // The escape hatch must name the real path: the act agent.
         assert!(msg.contains("switch to the act agent (/agent act)"), "got: {msg}");
     }
@@ -398,32 +411,30 @@ mod tests {
     }
 
     #[test]
-    fn gate_judges_bash_against_the_call_workdir_not_the_process_cwd() {
+    fn gate_blocks_writes_in_released_and_plain_call_workdirs() {
         use opencoder_core::resolve_agent;
         let kind = resolve_agent("plan").unwrap().kind;
-        // The command is identical in both legs; only the effective workdir
-        // differs. A gate still keyed on the process cwd (whatever the test
-        // runner's is) would mis-judge both legs.
+        // The command is identical in both legs. Shellguard reports different
+        // provenance, but strict plan policy blocks both write effects.
         let tmp = std::path::Path::new("/tmp");
-        assert_eq!(
-            super::gate(&kind, "bash", Some("touch ./f"), tmp),
-            None,
-            "relative write under the /tmp workdir is released"
-        );
+        let tmp_denial = super::gate(&kind, "bash", Some("touch ./f"), tmp)
+            .expect("relative write under /tmp is still a write in plan mode");
+        assert!(tmp_denial.contains("output a plan only"));
         let plain = super::plain_dir();
         let denial = super::gate(&kind, "bash", Some("touch ./f"), plain.path())
-            .unwrap_or_else(|| panic!("same command must be blocked from a non-/tmp workdir"));
+            .unwrap_or_else(|| panic!("same command must be blocked from a plain workdir"));
         assert!(denial.contains("Blocked in plan mode"), "got: {denial}");
     }
 
     #[test]
     fn classify_with_dir_resolves_relative_paths_against_the_given_cwd() {
         use super::classify_with_dir;
-        // /tmp itself is in the release set: the relative target lands there.
-        assert_eq!(
+        // Shellguard marks /tmp as sandbox-released, but the plan adapter
+        // preserves the typed write effect and refuses it.
+        assert!(matches!(
             classify_with_dir("touch f", std::path::Path::new("/tmp")),
-            BashVerdict::ReadOnly
-        );
+            BashVerdict::WriteBlocked(_)
+        ));
         let plain = super::plain_dir();
         assert!(matches!(
             classify_with_dir("touch f", plain.path()),

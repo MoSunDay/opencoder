@@ -1,8 +1,7 @@
-//! Agent-kept contract for `/act_clear_context` (legacy `/clear_context`):
-//! a clear NEVER changes the active agent -- mode changes go through the
-//! explicit switch commands. Covered here end-to-end through `run` (idle,
-//! queue and steer boundaries) plus the compound rest; the resume-side
-//! persistence checks live in `control_cmd.rs`.
+//! Plan-to-act handoff contract for `/act_clear_context` (legacy
+//! `/clear_context`): preserve the newest plan as an execution directive,
+//! switch to act, and execute it through idle, queue, steer, and compound
+//! entry paths.
 
 use std::sync::Arc;
 
@@ -94,26 +93,23 @@ fn user_texts(session: &SessionState) -> Vec<String> {
         .collect()
 }
 
-/// TranscriptReset must land on a clear, with NO AgentSwitch noise: the
-/// clear never changes the active agent.
-fn assert_reset_no_switch(evs: &[SessionEvent]) {
-    assert!(
-        evs.iter()
-            .any(|e| matches!(e, SessionEvent::TranscriptReset(_))),
-        "TranscriptReset emitted, got {evs:?}"
-    );
-    assert!(
-        evs.iter()
-            .all(|e| !matches!(e, SessionEvent::AgentSwitch(_))),
-        "no AgentSwitch event on a clear, got {evs:?}"
-    );
+fn assert_reset_then_act(evs: &[SessionEvent]) {
+    let reset = evs
+        .iter()
+        .position(|e| matches!(e, SessionEvent::TranscriptReset(_)))
+        .expect("TranscriptReset emitted");
+    let switch = evs
+        .iter()
+        .position(|e| matches!(e, SessionEvent::AgentSwitch(name) if name == "act"))
+        .expect("AgentSwitch(act) emitted");
+    assert!(reset < switch, "reset must precede act switch: {evs:?}");
 }
 
 /// (a) Idle bare `/act_clear_context` on a plan session with a preserved
-/// say: keeps the plan agent, executes the seed in exactly one LLM turn,
-/// persists the agent unchanged, and resume keeps it.
+/// plan: switches to act, executes the directive in one LLM turn, and resume
+/// keeps the focused act transcript.
 #[tokio::test]
-async fn plan_idle_bare_clear_keeps_agent_and_persists() {
+async fn plan_idle_bare_clear_hands_off_and_persists() {
     let store = mem_store().await;
     seed(&store, "keep-clear", "plan").await;
     let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
@@ -133,26 +129,27 @@ async fn plan_idle_bare_clear_keeps_agent_and_persists() {
 
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+        assert_eq!(session.agent.name, "act", "clear converges to act");
         assert_eq!(
             mock.call_count(),
             1,
             "exactly the seed execution turn ran"
         );
-        assert_reset_no_switch(&evs);
-        // The seed path falls through to a turn, so the run completes.
+        assert_reset_then_act(&evs);
         assert!(evs.iter().any(|e| matches!(e, SessionEvent::Done)));
     }
-    // The boundary carries the preserved say.
+    assert!(
+        session.messages[0].text().contains("Execute it now"),
+        "plan becomes an execution directive"
+    );
     assert_eq!(
         session.handoff_plan.as_deref(),
-        Some("<<OPENCODER_CLEAR_SEED>>old answer")
+        Some("old answer")
     );
-    // The agent is persisted unchanged.
     let meta = store.get_session("keep-clear").await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("plan"), "agent persists unchanged");
+    assert_eq!(meta.agent.as_deref(), Some("act"));
 
-    // Resume keeps the agent and rebuilds seed + reply only.
+    // Resume rebuilds directive + reply only under act.
     let resumed = resume(
         store.clone(),
         "keep-clear",
@@ -162,12 +159,14 @@ async fn plan_idle_bare_clear_keeps_agent_and_persists() {
     )
     .await
     .unwrap();
-    assert_eq!(resumed.agent.name, "plan", "resume keeps the plan agent");
-    assert_eq!(resumed.messages.len(), 2, "seed marker + assistant response");
+    assert_eq!(resumed.agent.name, "act");
+    assert_eq!(resumed.messages.len(), 2, "directive + assistant response");
+    assert!(resumed.messages[0].text().contains("Execute it now"));
 }
 
 /// (b) Plan session with no assistant content: the clear degrades to the
-/// blank fresh-start sentinel and stops WITHOUT an LLM call, still plan.
+/// blank fresh-start sentinel and stops without an LLM call, but still
+/// converges to act so the next request is writable.
 #[tokio::test]
 async fn plan_sentinel_clear_stops_without_llm() {
     let store = mem_store().await;
@@ -194,23 +193,19 @@ async fn plan_sentinel_clear_stops_without_llm() {
     .unwrap();
 
     let evs = events.lock().unwrap();
-    assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+    assert_eq!(session.agent.name, "act", "blank clear still converges to act");
     assert_eq!(mock.call_count(), 0, "sentinel stops without an LLM call");
     assert_eq!(
         session.handoff_plan.as_deref(),
         Some(SENTINEL),
         "no assistant content -> blank fresh-start sentinel"
     );
-    assert!(
-        evs.iter()
-            .all(|e| !matches!(e, SessionEvent::AgentSwitch(_))),
-        "no AgentSwitch event on a clear, got {evs:?}"
-    );
+    assert_reset_then_act(&evs);
 }
 
 /// (c) A queued bare clear between real prompts applies at the idle
-/// boundary: the later real-prompt turn reaches the model under the same
-/// plan agent, with TranscriptReset already emitted (no AgentSwitch).
+/// boundary: the plan directive executes under act before the later real
+/// prompt.
 #[tokio::test]
 async fn plan_queue_drain_clears_before_real_prompt() {
     let store = mem_store().await;
@@ -250,8 +245,8 @@ async fn plan_queue_drain_clears_before_real_prompt() {
 
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
-        assert_reset_no_switch(&evs);
+        assert_eq!(session.agent.name, "act");
+        assert_reset_then_act(&evs);
     }
     let still_pending = store
         .pending_inputs("keep-queue", Delivery::Queue)
@@ -271,11 +266,11 @@ async fn plan_queue_drain_clears_before_real_prompt() {
 }
 
 /// (d) A steered `/clear_context` is absorbed at the turn boundary (steer
-/// claimed at the top of the loop, before any LLM call): the plan session
-/// keeps its agent, the command never leaks as user text, and the run ends
-/// Done without an LLM turn.
+/// claimed at the top of the loop, before any LLM call): the plan switches to
+/// act, the command never leaks as user text, and the preserved directive owns
+/// exactly one LLM turn.
 #[tokio::test]
-async fn plan_steer_clear_keeps_agent() {
+async fn plan_steer_clear_hands_off_and_executes() {
     let store = mem_store().await;
     seed(&store, "keep-steer", "plan").await;
     let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
@@ -284,12 +279,12 @@ async fn plan_steer_clear_keeps_agent() {
         .await
         .unwrap();
 
-    let mock = Arc::new(MockChatClient::new());
+    let mock = Arc::new(MockChatClient::new().push_script(vec![done_turn("executed")]));
     let mut session = plan_session("keep-steer", mock.clone(), &store);
     session.messages = msgs.clone();
 
     // Steer admitted before the run: claimed at run_loop's first turn
-    // boundary, so the bare command is the whole intent (no LLM call).
+    // boundary, so its synthetic directive becomes the turn input.
     store
         .admit_input(&mk_input("keep-steer", Delivery::Steer, "/clear_context"))
         .await
@@ -304,8 +299,8 @@ async fn plan_steer_clear_keeps_agent() {
     .unwrap();
 
     let evs = events.lock().unwrap();
-    assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
-    assert_reset_no_switch(&evs);
+    assert_eq!(session.agent.name, "act");
+    assert_reset_then_act(&evs);
     assert!(
         evs.iter().any(|e| matches!(e, SessionEvent::Done)),
         "Done emitted"
@@ -319,16 +314,16 @@ async fn plan_steer_clear_keeps_agent() {
     );
     assert_eq!(
         mock.call_count(),
-        0,
-        "steered bare clear must not consume an LLM turn"
+        1,
+        "steered handoff executes the preserved plan"
     );
 }
 
 /// (e) Compound `/act_clear_context review` on a plan session: the clear
-/// keeps the plan agent and the rest runs as a real prompt in the fresh
-/// context (one LLM call); the raw command never leaks as user text.
+/// switches to act and the rest runs beside the plan directive in one LLM
+/// call; the raw command never leaks as user text.
 #[tokio::test]
-async fn plan_compound_clear_runs_rest_under_plan() {
+async fn plan_compound_clear_runs_rest_under_act() {
     let store = mem_store().await;
     seed(&store, "keep-compound", "plan").await;
     let msgs = vec![Message::user("u1", "old question"), assistant_say("a1", "old answer")];
@@ -351,8 +346,8 @@ async fn plan_compound_clear_runs_rest_under_plan() {
 
     {
         let evs = events.lock().unwrap();
-        assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
-        assert_reset_no_switch(&evs);
+        assert_eq!(session.agent.name, "act");
+        assert_reset_then_act(&evs);
     }
     assert_eq!(mock.call_count(), 1, "the rest ran as one real prompt");
     assert!(

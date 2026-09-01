@@ -27,8 +27,8 @@ impl Handler for FindHandler {
             // Only the path arguments (roots) get deleted; the release check
             // covers each of them, so `find /tmp -delete` may pass.
             if roots_within_release(ctx) {
-                return Classification::Allow(AllowReason::handler(
-                    "find -delete within released dir",
+                return Classification::Allow(AllowReason::ReleasedWrite(
+                    "find -delete within released dir".into(),
                 ));
             }
             return Classification::Ask("find -delete".into());
@@ -95,8 +95,8 @@ fn file_output_target(ctx: &HandlerContext) -> Option<String> {
 fn file_output_classification(ctx: &HandlerContext) -> Option<Classification> {
     let target = file_output_target(ctx)?;
     if operand_in_release(&target, ctx.working_directory, ctx.safe_scopes) {
-        return Some(Classification::Allow(AllowReason::handler(
-            "find output file within released dir",
+        return Some(Classification::Allow(AllowReason::ReleasedWrite(
+            "find output file within released dir".into(),
         )));
     }
     Some(Classification::Ask("find (writes to file)".into()))

@@ -27,10 +27,24 @@ contains question = true`，Source 线位置无关路径生效）。红的只是
 
 ## 回归
 
-- `cargo test -p opencoder-session --lib latent::` → 27 passed / 0 failed
-  （当次复跑，含修复后哨兵与对照测试
-  `long_source_path_review_body_still_unlocks_nothing`）
-- 全仓门禁见文末补记。
+- `cargo test -p opencoder-session --lib latent::`（提交树 b243c2b 干净
+  worktree 复跑）→ 27 passed / 0 failed，含修复后哨兵与对照测试
+  `long_source_path_review_body_still_unlocks_nothing`。
+- 全仓门禁（提交树 `b243c2b`，隔离 worktree + 隔离 target，干净轮采集）：
+  `cargo test --workspace --no-fail-fast` → **245 套件 / 3805 passed / 1 failed**。
+  唯一 failed = `opencoder-node::runner_happy::claims_executes_uploads_and_reports_done`：
+  `wait_for` 截止断言（"condition did not settle within 30s"，该二进制总耗时 124s），
+  发生于门禁执行期间 load average ~300 的多会话构建风暴——**负载 flake，非回归**：
+  风暴平息后同树 solo 复跑 → PASS（1 passed / 0 failed，0.05s）。原 `store_perf`
+  三个延迟契约（<2ms/<50ms/<100ms）本轮在门禁内即 3 passed / 0 failed（0.23s），
+  无需额外隔离证据。
+
+## 判定
+
+- 修复不改断言、不改生产代码，仅抬 fixture 深度恢复哨兵甄别力；
+  窗口外场景依构造成立（seed 体仍带 `question` 载荷 + `!prefix.contains`
+  前置断言绿）。
+- rules/02 门禁在 b243c2b 达成 0 failed（flake 项按负载协议隔离归档）。
 
 ## Related Docs
 

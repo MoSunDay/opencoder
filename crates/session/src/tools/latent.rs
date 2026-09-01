@@ -390,10 +390,13 @@ mod tests {
         // the unlock must STILL fire, because the skill name rides inside the
         // Source line itself. Built from the real seed asset landed on a deep
         // path via `seed_builtin_skills_in` (session depends on core), so the
-        // test dies if the seed content or the annotation format drifts.
-        let (_home, root) = deep_skills_root(240);
-        opencoder_core::seed_builtin_skills_in(&root).unwrap();
-        let plan = opencoder_core::discover_in(&root)
+        // test dies if the seed content or the annotation format drifts. The
+        // root is deep enough that the Source line ALONE fills the 500-char
+        // window, so the contract holds no matter where the (agent-owned)
+        // seed body first says `question`.
+        let (_home, root) = deep_skills_root(520);
+        opencoder_core::seed_builtin_skills_in(&root.join("skills")).unwrap();
+        let plan = opencoder_core::discover_in(&root.join("skills"))
             .into_iter()
             .find(|s| s.name == "task-plan")
             .expect("seeded task-plan skill");
@@ -427,8 +430,8 @@ mod tests {
         // calling it) — the unlock keys on the task-plan skill name only, so
         // a deep HOME must not turn that mention into a unlock either.
         let (_home, root) = deep_skills_root(240);
-        opencoder_core::seed_builtin_skills_in(&root).unwrap();
-        let review = opencoder_core::discover_in(&root)
+        opencoder_core::seed_builtin_skills_in(&root.join("skills")).unwrap();
+        let review = opencoder_core::discover_in(&root.join("skills"))
             .into_iter()
             .find(|s| s.name == "review")
             .expect("seeded review skill");

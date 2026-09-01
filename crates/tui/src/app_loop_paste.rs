@@ -81,6 +81,11 @@ fn push_attach_marker(chat: &mut ChatView, n: usize, label: &str) {
 /// popup owns the paste, so it never reaches the main input hidden behind it.
 ///
 /// Mirrors [`Event::Key`](crossterm::event::Event::Key)'s priority chain:
+/// - plan-edit / annotation editor open -> insert the payload verbatim at its
+///   cursor via [`crate::plan_edit::PlanEdit::paste`] (never leaks to the
+///   composer hidden underneath);
+/// - notepad open -> insert verbatim when the vim editor has focus (search
+///   box or tree focus swallows); either way the composer never sees it;
 /// - task picker / cache-salt menu open -> modal isolation (no text fields),
 ///   swallow the paste;
 /// - model menu open -> feed the trimmed payload to its focused field via
@@ -97,6 +102,8 @@ fn push_attach_marker(chat: &mut ChatView, n: usize, label: &str) {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn route_paste(
     pasted: &str,
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
     task_picker_open: bool,
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
@@ -114,6 +121,19 @@ pub(crate) fn route_paste(
     chat: &mut ChatView,
     workdir: &Path,
 ) -> LoopFlow {
+    // Fullscreen vim editors own every paste: insert literally, never leak
+    // to the composer underneath (paste events bypassed plan_edit/notepad,
+    // silently landing in the hidden input buffer — annotation content loss).
+    if let Some(pe) = plan_edit.as_mut() {
+        pe.paste(pasted);
+        return LoopFlow::Redraw;
+    }
+    if let Some(view) = notepad.as_mut() {
+        if view.search.is_none() && view.focus == crate::notepad::Focus::Editor {
+            crate::vim::paste_terminal(&mut view.editor.vim, pasted);
+        }
+        return LoopFlow::Redraw;
+    }
     if task_picker_open || cache_salt_menu_open || keymap_menu_open || skill_toggle_menu_open {
         // No text fields here -- modal isolation: swallow the paste.
         return LoopFlow::Redraw;
@@ -220,13 +240,18 @@ pub(crate) fn route_paste(
 
 /// Handle one `Event::Paste` end-to-end (extracted from `app.rs` to keep
 /// that file under the 800-line iteration cap). Empty pastes attempt a
-/// silent clipboard-image read; otherwise the paste is routed modal-first,
-/// mirroring `Event::Key` priority. Returns `true` when a modal consumed the
-/// paste (caller `continue`s — identical to the old inline `Redraw` flow);
-/// `false` lets the loop fall through with `dirty` already set.
+/// silent clipboard-image read unless a fullscreen editor modal (plan_edit /
+/// notepad) is open — then they are swallowed, no clipboard read behind the
+/// overlay. Otherwise the paste is routed modal-first, mirroring `Event::Key`
+/// priority (plan_edit / notepad before the popup menus). Returns `true`
+/// when a modal consumed the paste (caller `continue`s — identical to the old
+/// inline `Redraw` flow); `false` lets the loop fall through with `dirty`
+/// already set.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_paste_event(
     pasted: &str,
+    plan_edit: &mut Option<crate::plan_edit::PlanEdit>,
+    notepad: &mut Option<crate::notepad::NotepadView>,
     task_picker_open: bool,
     cache_salt_menu_open: bool,
     keymap_menu_open: bool,
@@ -244,13 +269,16 @@ pub(crate) async fn handle_paste_event(
     chat: &mut ChatView,
     workdir: &Path,
 ) -> bool {
-    if pasted.trim().is_empty() {
+    let editor_open = plan_edit.is_some() || notepad.is_some();
+    if pasted.trim().is_empty() && !editor_open {
         paste_clipboard_image_silent(chat, pending_images).await;
         return true;
     }
     matches!(
         route_paste(
             pasted,
+            plan_edit,
+            notepad,
             task_picker_open,
             cache_salt_menu_open,
             keymap_menu_open,

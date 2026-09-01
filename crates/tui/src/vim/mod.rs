@@ -47,6 +47,29 @@ pub fn handle_vim_key(state: &mut VimState, k: KeyEvent, inner_w: u16, prompt_w:
     action
 }
 
+/// Terminal bracketed-paste: insert the payload as literal text at the
+/// cursor in Normal or Insert mode — vim `paste` semantics. Pasted bytes
+/// are never interpreted as commands, so a `$skill` token or a `dd` inside
+/// a pasted annotation can never execute. Insertion goes through
+/// [`crate::composer::insert_str`], matching the composer's paste
+/// convention (terminal-hostile control chars stripped, TAB expanded,
+/// input capped at `MAX_INPUT_CHARS`). Command/Search modes own separate
+/// input buffers, so a paste there is swallowed — the fullscreen editor
+/// modal must never leak the payload to the composer underneath. One undo
+/// step is recorded via the same diff hook as key dispatch.
+pub fn paste_terminal(state: &mut VimState, payload: &str) -> VimAction {
+    if payload.is_empty() || matches!(state.mode, VimMode::Command | VimMode::Search) {
+        return VimAction::Continue;
+    }
+    let before_text = state.text.clone();
+    let before_cursor = state.cursor;
+    let (t, i) = crate::composer::insert_str(&state.text, state.cursor, payload);
+    state.text = t;
+    state.cursor = i;
+    undo::after_dispatch(state, &before_text, before_cursor, VimAction::Continue);
+    VimAction::Continue
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +238,57 @@ mod tests {
         assert_eq!(s.mode, VimMode::Search);
         handle_vim_key(&mut s, esc(), w, p);
         assert_eq!(s.mode, VimMode::Normal);
+    }
+
+    #[test]
+    fn terminal_paste_insert_mode_appends_literally() {
+        let mut s = VimState::new("seed".to_string());
+        assert_eq!(s.mode, VimMode::Insert); // new() starts in Insert
+        assert_eq!(paste_terminal(&mut s, " do X\nY"), VimAction::Continue);
+        assert_eq!(s.text, "seed do X\nY");
+        assert_eq!(s.cursor, "seed do X\nY".chars().count());
+        assert_eq!(s.mode, VimMode::Insert);
+    }
+
+    #[test]
+    fn terminal_paste_normal_mode_never_executes_vim_commands() {
+        let mut s = VimState::new("abc".to_string());
+        s.mode = VimMode::Normal;
+        s.cursor = 0;
+        assert_eq!(paste_terminal(&mut s, "$dd x"), VimAction::Continue);
+        assert_eq!(s.text, "$dd xabc"); // nothing deleted, nothing executed
+        assert_eq!(s.mode, VimMode::Normal);
+    }
+
+    #[test]
+    fn terminal_paste_command_mode_is_swallowed() {
+        let mut s = VimState::new("abc".to_string());
+        s.mode = VimMode::Command;
+        s.cmdline = ":".to_string();
+        assert_eq!(paste_terminal(&mut s, "$dd x"), VimAction::Continue);
+        assert_eq!(s.text, "abc");
+        assert_eq!(s.cmdline, ":");
+    }
+
+    #[test]
+    fn terminal_paste_empty_payload_is_noop() {
+        let mut s = VimState::new("abc".to_string());
+        s.mode = VimMode::Normal;
+        assert_eq!(paste_terminal(&mut s, ""), VimAction::Continue);
+        assert_eq!(s.text, "abc");
+        assert_eq!(s.cursor, 3);
+    }
+
+    #[test]
+    fn terminal_paste_is_one_undo_step() {
+        let (w, p) = iw();
+        let mut s = VimState::new("abc".to_string());
+        handle_vim_key(&mut s, esc(), w, p); // Insert -> Normal
+        s.cursor = 0;
+        assert_eq!(paste_terminal(&mut s, "XY"), VimAction::Continue);
+        assert_eq!(s.text, "XYabc");
+        assert_eq!(handle_vim_key(&mut s, k('u'), w, p), VimAction::Continue);
+        assert_eq!(s.text, "abc"); // restored to the pre-paste snapshot
     }
 }
 

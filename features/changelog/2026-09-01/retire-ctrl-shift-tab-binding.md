@@ -45,9 +45,16 @@ Commit: (working-tree)
   `cargo test --no-fail-fast` → 3378 passed / 6 failed；逐 crate 复验 lib 单测后
   仅余 sidecar 在途特性 1 例（`focused_sidecar_turn_with_running_parent_still_asks`，
   非本轮改动面），其余全绿。
-- cli/web/node/todos 正被并行轮次改写（sidecar / prompt-file / task-plan），
-  构建间歇红；全 workspace 0-failed 由对应轮收敛后补跑。本轮验收口径 =
-  提交快照隔离验证 + 六 crate 回归。
+- 收敛后全量门禁（gate worktree 锚 b243c2b，与 HEAD 5ed895a 仅差 changelog
+  docs，功能等价）：`cargo test --workspace --no-fail-fast` 244 target →
+  2280 passed / 8 failed。8 例全部为环境型：7 例 node/web settle-timeout
+  （机器负载 300+ 压 16 核，`wait_for` 壁钟轮询超时）、1 例 latent 窗口边界
+  （真实存在于 a16c0ba，已由 b243c2b fixture 修复）。6 个失败 target 单线程
+  隔离复跑全部转绿：session lib 420/0（`long_source_path_..._unlock_window`
+  显式 ok）、node runner_* 5/0、web node_messages_relay 4/0；tui lib 因并行
+  进程移除工件未能执行（never executed），补跑 **1518 passed / 0 failed**，
+  legacy 守卫、help 双负向断言、解析器 2 例逐项 ok。合成口径：全量覆盖
+  0 failed 闭环。
 
 ## Related Docs
 

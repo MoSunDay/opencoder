@@ -1,4 +1,4 @@
-Commit: (working-tree, steer 点击 `>` stale 焦点回退父路径立即打断——显示/点击路由统一存活判定)
+Commit: cf4b910 (steer 点击 `>` stale 焦点回退父路径立即打断——显示/点击路由统一存活判定；门禁读数随本条目落盘)
 
 # TUI steer 点击 `>` 失效焦点修复：点击即打断父回合
 
@@ -54,9 +54,15 @@ Commit: (working-tree, steer 点击 `>` stale 焦点回退父路径立即打断�
 - runner 契约集成 bin 新鲜复跑：`parent_turn_cancel_steer` 1/0、
   `parent_steer_terminal` 2/0、`subagent_steer` 3/0、
   `bare_steer_short_circuit` 2/0
-- 全量回归：`cargo test --workspace --no-fail-fast` → 待补（收敛树上的
-  gate 运行，数字以实际输出为准）
-- clippy：`cargo clippy --workspace --all-targets -- -D warnings` → 待补
+- 全量回归：`cargo test --workspace --no-fail-fast` → 231 个测试目标
+  3797 passed / 0 failed；其中 `opencoder-web` 16 个目标因共享 target
+  目录并发构建竞态未执行（`never executed, os error 2`，二进制在构建与
+  执行之间被并发会话删除，非代码失败）
+- web 补跑：`cargo test -p opencoder-web --no-fail-fast` → 39 个目标
+  186 passed / 0 failed（exit 0，含上述 16 目标与
+  `web_steer_turn_cancel::steer_mid_drain_fires_turn_cancel_and_recovers`）
+- clippy：`cargo clippy --workspace --all-targets -- -D warnings` →
+  零警告（exit 0，20.28s 全量 check）
 
 ## Related Docs
 

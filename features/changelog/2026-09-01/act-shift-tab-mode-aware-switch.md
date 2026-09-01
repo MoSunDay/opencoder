@@ -39,11 +39,13 @@ Shift+Tab 直接切回 plan（上下文保留），plan 模式 Shift+Tab 才是�
 
 ## 回归证据
 
-- `cargo test -p opencoder-tui --lib` → 1520 passed / 0 failed（含上表全部测试）
+- `cargo test -p opencoder-tui --lib` → **1524 passed / 0 failed**（最终收敛树，
+  含上表 5 例具名测试逐项 ok；期间并行流重构 handle_key 签名后复验仍绿）
 - `cargo test -p opencoder-tui --test act_clear_context_fold` → 5 passed / 0 failed
 - `cargo test --workspace --no-fail-fast`（23:14 树快照）→ 除
-  opencoder-session 3 个 target（并行迭代流当轮 in-flight）外全绿，含
-  tui/web/cli/doc-tests；全量门禁数由收敛树上的统一落库轮采集（对齐
+  opencoder-session 3 个 target（并行迭代流当轮 in-flight，其中 latent 已于
+  23:16 修绿）外全绿，含 tui/web/cli/doc-tests；全量门禁数由统一落库轮在
+  完全收敛树上采集（对齐
   [slash-command-no-echo-tail-echo](slash-command-no-echo-tail-echo.md)）。
 
 ## Related Docs

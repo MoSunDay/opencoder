@@ -170,6 +170,17 @@ async fn steered_compound_plan_switches_then_runs_rest() {
             evs.iter().any(|e| matches!(e, SessionEvent::Done)),
             "Done emitted"
         );
+        // The steer echo is model-facing: the tail only, never the token.
+        assert!(
+            evs.iter()
+                .any(|e| matches!(e, SessionEvent::SteerConsumed { text, .. } if text == "review")),
+            "SteerConsumed must carry the compound tail \"review\""
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, SessionEvent::SteerConsumed { text, .. } if text.contains("/plan"))),
+            "the /plan token must never be echoed"
+        );
     }
 
     // The raw command must not leak; "review" is the recorded prompt in the

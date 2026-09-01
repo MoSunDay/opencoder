@@ -60,7 +60,7 @@
 - 证据是否明确区分代码存在、候选可验证、已部署、行为已验收和持续可承载，且没有用低成熟度证据替代高成熟度签收
 - 当前负面实证是否已经使冲突的历史 passed/attestation/完成态失效
 - 版本 payload/readback 与真实 execution build detail/runtime artifact 是否分别核对；workflow/deployment/global effective 配置是否会覆盖版本声明
-- 非默认 candidate 是否真正 version-scoped；是否避免通过共享 effective 配置污染默认/其他版本；平台不支持时是否已明确选择根因修复或独立隔离对象
+- 非默认 candidate 是否真正 version-scoped；是否避免通过共享 effective 配置污染默认/其他版本；平台不支持时是否已明确选择根因修复或独立隔离对象，而不是把 `default=false` 当成隔离证据
 - 共享 effective 配置变更是否在写前持久化不可覆盖 rollback journal，并覆盖写后崩溃、matched 重试、补偿中断和显式 restore/readback
 
 ## 7. 线上或生产等价验证方案

@@ -1,6 +1,6 @@
 //! Plan text editor — a vim-mode editor wrapping [`crate::vim`].
 //!
-//! Opened with Shift+I in sandbox mode (idle). Starts in Normal (view) mode,
+//! Opened with Shift+I in plan mode (idle). Starts in Normal (view) mode,
 //! cursor at the top, so the user can review the plan first; pressing `i`/`a`
 //! enters Insert mode for editing, and Esc returns to Normal for full vim
 //! navigation, operators, search, and command-line.

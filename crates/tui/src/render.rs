@@ -368,12 +368,12 @@ pub(crate) fn render<B: Backend + 'static>(
             render_status_chip(f, composer_area, label, theme::local_color());
         }
         if let Some(text) = mode_flash {
-            // Warn hue for the sandbox (read-only) side of the family: the
-            // agent-switch flash "→ sandbox mode" and the plan-text editor
-            // flash "→ edit plan" (the editor is entered from the sandbox
+            // Warn hue for the plan (read-only) side of the family: the
+            // agent-switch flash "→ plan mode" and the plan-text editor
+            // flash "→ edit plan" (the editor is entered from the plan
             // agent). Every other flash (busy hint, "→ act mode") = accent.
-            let is_sandbox = crate::frame::is_warn_flash(text);
-            render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_sandbox));
+            let is_plan = crate::frame::is_warn_flash(text);
+            render_status_chip(f, composer_area, text, theme::mode_flash_bg(is_plan));
         }
         if shift_held {
             render_status_chip(f, composer_area, "Shift+drag: select", theme::warn_color());

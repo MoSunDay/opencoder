@@ -283,7 +283,7 @@ async fn switch_agent_updates_stored_meta_and_handle() {
                 .method("POST")
                 .uri(format!("/api/sessions/{sid}/agent"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"value":"sandbox"}"#))
+                .body(Body::from(r#"{"value":"plan"}"#))
                 .unwrap(),
         )
         .await
@@ -293,7 +293,7 @@ async fn switch_agent_updates_stored_meta_and_handle() {
     let meta = state.store.get_session(&sid).await.unwrap().unwrap();
     assert_eq!(
         meta.agent.as_deref(),
-        Some("sandbox"),
+        Some("plan"),
         "agent switch must persist to store meta"
     );
 }
@@ -320,7 +320,7 @@ async fn switch_agent_refused_while_draining() {
                 .method("POST")
                 .uri(format!("/api/sessions/{sid}/agent"))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"value":"sandbox"}"#))
+                .body(Body::from(r#"{"value":"plan"}"#))
                 .unwrap(),
         )
         .await
@@ -377,7 +377,7 @@ async fn interrupt_cancels_running_drain_token() {
 async fn list_sessions_returns_created_sessions() {
     let (app, state) = app().await;
     // Create two sessions
-    for agent in ["act", "sandbox"] {
+    for agent in ["act", "plan"] {
         let id = Uuid::new_v4().to_string();
         seed(&state, &id, None, agent, "m").await;
     }

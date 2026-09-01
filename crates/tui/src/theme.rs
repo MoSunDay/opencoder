@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, BorderType, Borders};
 
 /// Primary accent — interactive highlights, links, focused borders.
 pub const ACCENT: Color = Color::Cyan;
-/// Caution / warning — sandbox mode, high context usage.
+/// Caution / warning — plan mode, high context usage.
 pub const WARN: Color = Color::Yellow;
 /// Success / assistant output.
 pub const OK: Color = Color::Green;
@@ -263,10 +263,10 @@ pub fn context_meter(pct: u8) -> (String, Color) {
     (bar, color)
 }
 
-/// Agent chip foreground colour: warning colour in sandbox (read-only) mode,
+/// Agent chip foreground colour: warning colour in plan (read-only) mode,
 /// accent otherwise.
 pub fn agent_chip_fg(agent: &str) -> Color {
-    if agent == "sandbox" {
+    if agent == "plan" {
         warn_color()
     } else {
         accent()
@@ -288,13 +288,13 @@ pub fn status_chip_fg(mode: &str, plan_skill_active: bool) -> Color {
     }
 }
 
-/// Background colour of the sandbox/act mode-flash chip: warning colour for
-/// sandbox, accent for act — the same mapping as [`agent_chip_fg`], so the
+/// Background colour of the plan/act mode-flash chip: warning colour for
+/// plan, accent for act — the same mapping as [`agent_chip_fg`], so the
 /// chip and the flash can never render different hues. Lives in the theme
 /// module (migrated from render.rs) to keep render.rs within its line
 /// budget.
-pub fn mode_flash_bg(is_sandbox: bool) -> Color {
-    if is_sandbox {
+pub fn mode_flash_bg(is_plan: bool) -> Color {
+    if is_plan {
         warn_color()
     } else {
         accent()
@@ -412,15 +412,15 @@ mod tests {
     // ── agent_chip_fg ────────────────────────────────────────────────────
 
     #[test]
-    fn agent_chip_fg_sandbox_is_warn() {
-        assert_eq!(agent_chip_fg("sandbox"), WARN);
+    fn agent_chip_fg_plan_is_warn() {
+        assert_eq!(agent_chip_fg("plan"), WARN);
     }
 
     #[test]
-    fn agent_chip_fg_non_sandbox_is_accent() {
+    fn agent_chip_fg_non_plan_is_accent() {
         assert_eq!(agent_chip_fg("act"), ACCENT);
-        // The removed plan agent must no longer map to the sandbox hue.
-        assert_eq!(agent_chip_fg("plan"), ACCENT);
+        // The interlude `sandbox` spelling must no longer map to the plan hue.
+        assert_eq!(agent_chip_fg("sandbox"), ACCENT);
         assert_eq!(agent_chip_fg(""), ACCENT);
     }
 
@@ -430,9 +430,9 @@ mod tests {
     fn status_chip_fg_act_lights_yellow_for_task_plan() {
         assert_eq!(status_chip_fg("act", true), WARN);
         assert_eq!(status_chip_fg("act", false), ACCENT);
-        // Only the act status changes hue; sandbox is already the warning colour.
-        assert_eq!(status_chip_fg("sandbox", true), WARN);
-        assert_eq!(status_chip_fg("sandbox", false), WARN);
+        // Only the act status changes hue; plan is already the warning colour.
+        assert_eq!(status_chip_fg("plan", true), WARN);
+        assert_eq!(status_chip_fg("plan", false), WARN);
         assert_eq!(status_chip_fg("explore", true), ACCENT);
     }
 

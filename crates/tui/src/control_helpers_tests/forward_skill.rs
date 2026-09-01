@@ -2,15 +2,15 @@
 use super::forward_skill_if_compound;
 
 #[test]
-fn compound_sandbox_with_skill_forwards_raw() {
-    let got = forward_skill_if_compound("/sandbox $review", "/sandbox");
-    assert_eq!(got, "/sandbox $review");
+fn compound_plan_with_skill_forwards_raw() {
+    let got = forward_skill_if_compound("/plan $review", "/plan");
+    assert_eq!(got, "/plan $review");
 }
 
 #[test]
-fn compound_sandbox_with_text_forwards_raw() {
-    let got = forward_skill_if_compound("/sandbox $review do stuff", "/sandbox do stuff");
-    assert_eq!(got, "/sandbox $review do stuff");
+fn compound_plan_with_text_forwards_raw() {
+    let got = forward_skill_if_compound("/plan $review do stuff", "/plan do stuff");
+    assert_eq!(got, "/plan $review do stuff");
 }
 
 #[test]
@@ -21,8 +21,8 @@ fn compound_act_with_skill_forwards_raw() {
 
 #[test]
 fn bare_command_not_forwarded() {
-    let got = forward_skill_if_compound("/sandbox", "/sandbox");
-    assert_eq!(got, "/sandbox");
+    let got = forward_skill_if_compound("/plan", "/plan");
+    assert_eq!(got, "/plan");
 }
 
 #[test]

@@ -438,18 +438,23 @@ fn seeded_say_and_replay_skill_requires_five_question_recap() {
 
 #[test]
 fn seeded_task_plan_skill_requires_launch_closure_contract() {
-    // Task-plan follows the Codex launch-closure model: reconstruct scope,
-    // grade evidence without cross-level inference, plan real/production-
-    // equivalent validation, audit omissions, and disclose hard blockers.
+    // Task-plan delivers ONE plan-only closure roadmap whose output covers
+    // five anchors (goal, key context, TODO list, per-TODO verification,
+    // key-path actions), grades evidence without cross-level inference,
+    // audits omissions, and discloses hard blockers. Deep contract/freshness
+    // detail is progressively disclosed via the bundled checklist reference.
     let root = tempfile::tempdir().unwrap();
     seed_builtin_skills_in(root.path()).expect("seed");
     let body = std::fs::read_to_string(root.path().join("task-plan/SKILL.md")).unwrap();
     assert!(body.contains("name: task-plan"), "frontmatter name missing");
     for contract in [
-        "建立规划上下文",
+        "树立目标",
+        "关键 context",
+        "TODO List",
+        "TODO 验证手段",
+        "核心动作",
         "证据成熟度",
-        "建立合约与保鲜矩阵",
-        "线上 / 生产等价验证方案",
+        "线上 / 生产等价验证",
         "做遗漏复查",
         "gating item",
     ] {

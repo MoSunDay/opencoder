@@ -182,8 +182,8 @@ mod tests {
         assert_eq!(KEYMAP_INFO.len(), fields, "KEYMAP_INFO must cover every field");
     }
 
-    /// Old user configs can still carry the two retired tab variants. Plain
-    /// `Deserialize` ignores those unknown fields while restoring the live
+    /// Old user configs can still carry the retired Alt+Tab variant. Plain
+    /// `Deserialize` ignores that unknown field while restoring the live
     /// `switch_mode` binding.
     #[test]
     fn legacy_keymap_restores_switch_mode_and_ignores_retired_variants() {
@@ -203,7 +203,6 @@ mod tests {
             "forward_word": "alt+f",
             "backward_word": "alt+b",
             "switch_mode_clear": "alt+tab",
-            "switch_mode_keep": "ctrl+shift+tab",
             "collapse_blocks": "ctrl+l",
             "force_redraw": "ctrl+f",
             "copy_mode": "ctrl+g"

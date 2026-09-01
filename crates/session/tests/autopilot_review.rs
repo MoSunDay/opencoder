@@ -263,12 +263,12 @@ async fn review_mode_activates_then_clears_review_skill() {
     );
 }
 
-/// mode=Review under the sandbox agent: the dispatch is agent-agnostic — the
-/// read-only reviewer runs on the sandbox agent exactly like on act: two LLM
+/// mode=Review under the plan agent: the dispatch is agent-agnostic — the
+/// read-only reviewer runs on the plan agent exactly like on act: two LLM
 /// calls (initial + review), the Review marker, and the synthetic review
 /// prompt in the transcript.
 #[tokio::test]
-async fn review_mode_runs_pass_in_sandbox_mode() {
+async fn review_mode_runs_pass_in_plan_mode() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![completed("explored")])
@@ -276,9 +276,9 @@ async fn review_mode_runs_pass_in_sandbox_mode() {
     );
     let (_dir, mut session) = {
         let dir = tempfile::tempdir().unwrap();
-        let agent = resolve_agent("sandbox").unwrap();
+        let agent = resolve_agent("plan").unwrap();
         let s = SessionState::new(
-            "ap-sandbox-mode-sess",
+            "ap-plan-mode-sess",
             agent,
             mode_config(ApMode::Review, 10),
             mock.clone() as Arc<dyn ChatStream>,
@@ -304,7 +304,7 @@ async fn review_mode_runs_pass_in_sandbox_mode() {
     assert_eq!(
         mock.call_count(),
         2,
-        "the pass must run after the initial sandbox turn"
+        "the pass must run after the initial plan turn"
     );
     // (ii) the Review marker was emitted.
     assert!(
@@ -315,14 +315,14 @@ async fn review_mode_runs_pass_in_sandbox_mode() {
                 ..
             }
         )),
-        "sandbox mode must dispatch the review pass"
+        "plan mode must dispatch the review pass"
     );
     // (iii) no agent switch anywhere.
     assert!(
         events
             .iter()
             .all(|ev| !matches!(ev, SessionEvent::AgentSwitch(_))),
-        "no agent switch may happen in sandbox mode, got {events:?}"
+        "no agent switch may happen in plan mode, got {events:?}"
     );
     // (iv) the synthetic review prompt landed in the transcript.
     assert!(

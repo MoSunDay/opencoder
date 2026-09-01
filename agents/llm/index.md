@@ -1,4 +1,4 @@
-Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
+Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切，写拦截能力保留)
 
 # llm 模块
 

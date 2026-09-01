@@ -34,7 +34,7 @@ fn sys_tokens_counts_system_prompt() {
 }
 
 /// Regression for the agent-switch token-recalculation bug: when a skill is
-/// active and the user switches agent (`/sandbox` <-> `/act`), `sys_tokens`
+/// active and the user switches agent (`/plan` <-> `/act`), `sys_tokens`
 /// is recomputed via `sys_tokens_for(agent, workdir, skill)`. The `skill`
 /// argument must be the
 /// skill **body** (the stored instruction text), not the skill **name**: the

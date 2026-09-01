@@ -1,11 +1,11 @@
-//! Integration test: sandbox-mode bash write commands are blocked at the
+//! Integration test: plan-mode bash write commands are blocked at the
 //! runner level by `bash_guard`, while read-only commands execute normally.
 //!
 //! Contracts:
-//! - A `rm -rf` call in sandbox mode produces a ToolEnd with is_error=true
-//!   and output containing "Blocked in sandbox mode" — the command never
+//! - A `rm -rf` call in plan mode produces a ToolEnd with is_error=true
+//!   and output containing "Blocked in plan mode" — the command never
 //!   executes, and the error points at `/agent act` as the way out.
-//! - A `ls` call in sandbox mode produces a ToolEnd with is_error=false.
+//! - A `ls` call in plan mode produces a ToolEnd with is_error=false.
 //! - The act agent is unaffected (no guard).
 
 use std::sync::Arc;
@@ -47,14 +47,14 @@ fn done_turn() -> LlmEvent {
 }
 
 #[tokio::test]
-async fn sandbox_mode_blocks_write_command() {
+async fn plan_mode_blocks_write_command() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("rm -rf /tmp/opencoder-test-guard")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new("guard-1", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
@@ -76,7 +76,7 @@ async fn sandbox_mode_blocks_write_command() {
     {
         assert!(*is_error, "write command must be blocked (is_error=true)");
         assert!(
-            output.contains("Blocked in sandbox mode"),
+            output.contains("Blocked in plan mode"),
             "output must explain the block, got: {output}"
         );
         assert!(
@@ -87,14 +87,14 @@ async fn sandbox_mode_blocks_write_command() {
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_read_only_command() {
+async fn plan_mode_allows_read_only_command() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("ls -la")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new("guard-2", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
@@ -145,14 +145,14 @@ async fn act_mode_is_not_guarded() {
     } = tool_end.unwrap()
     {
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "act mode must not be guarded, got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_devnull_redirect() {
+async fn plan_mode_allows_devnull_redirect() {
     // A read-only redirect to /dev/null (common with find/grep) must pass.
     let mock = Arc::new(
         MockChatClient::new()
@@ -160,7 +160,7 @@ async fn sandbox_mode_allows_devnull_redirect() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-devnull",
         agent,
@@ -187,7 +187,7 @@ async fn sandbox_mode_allows_devnull_redirect() {
             "devnull redirect must succeed, output: {output}"
         );
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "devnull redirect must not be blocked, got: {output}"
         );
     }
@@ -204,7 +204,7 @@ async fn plan_mode_allows_subshell_fd_merge() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-fdmerge",
         agent,
@@ -231,14 +231,14 @@ async fn plan_mode_allows_subshell_fd_merge() {
             "fd-merge in subshell must succeed, output: {output}"
         );
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "fd-merge in subshell must not be blocked, got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_tee_to_devnull() {
+async fn plan_mode_allows_tee_to_devnull() {
     // `tee /dev/null` discards its copy and is read-only; it must not be
     // blocked in plan mode. `tee <realfile>` is still blocked (covered by the
     // unit tests in bash_guard).
@@ -248,7 +248,7 @@ async fn sandbox_mode_allows_tee_to_devnull() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session =
         SessionState::new("guard-tee", agent, config(), mock, dir.path().to_path_buf());
 
@@ -267,7 +267,7 @@ async fn sandbox_mode_allows_tee_to_devnull() {
     {
         assert!(!*is_error, "tee /dev/null must succeed, output: {output}");
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "tee /dev/null must not be blocked, got: {output}"
         );
     }

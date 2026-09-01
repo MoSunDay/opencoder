@@ -5,7 +5,7 @@
 //! itself). A latent tool passes the agent allowlist but is still withheld
 //! unless its owning skill's name is in the session's `active_skill_names` set.
 //!
-//! The sandbox agent is exempt for `question`: its clarification protocol is
+//! The plan agent is exempt for `question`: its clarification protocol is
 //! part of the agent's base prompt, so the tool is always visible there (see
 //! the visibility predicates in `runner::llm_call` / `tools::estimate_tool_schema_tokens`).
 
@@ -33,15 +33,15 @@ pub fn latent_tools_for_skill(skill_name: &str) -> &'static [&'static str] {
 const QUESTION_SKILLS: &[&str] = &["task-plan"];
 
 /// The full visibility rule for a registry tool under the latent-gating
-/// layer: agent allowlist ∧ latent unlock — with one sandbox exemption.
-/// The sandbox agent's clarification protocol lives in its base prompt, so
+/// layer: agent allowlist ∧ latent unlock — with one plan exemption.
+/// The plan agent's clarification protocol lives in its base prompt, so
 /// `question` is ALWAYS visible there (bypasses latent gating, matching the
 /// pre-refactor plan-mode behavior). Every other agent (act, subagents) must
 /// unlock `question` through the task-plan skill; `ssh_pty` is
 /// skill-gated everywhere. Shared by the runner's tool filter and the token
 /// estimator so the advertised schema array and its cost estimate never drift.
 pub fn is_visible(name: &str, agent: &opencoder_core::Agent, unlocked: &HashSet<&str>) -> bool {
-    if name == "question" && agent.kind == opencoder_core::AgentKind::Sandbox {
+    if name == "question" && agent.kind == opencoder_core::AgentKind::Plan {
         return true;
     }
     agent.tools.allows(name) && (!is_latent_tool(name) || unlocked.contains(name))
@@ -188,12 +188,12 @@ mod tests {
     }
 
     #[test]
-    fn visibility_sandbox_always_sees_question() {
-        let sandbox = opencoder_core::resolve_agent("sandbox").unwrap();
+    fn visibility_plan_always_sees_question() {
+        let plan = opencoder_core::resolve_agent("plan").unwrap();
         let none = HashSet::new();
         assert!(
-            is_visible("question", &sandbox, &none),
-            "sandbox sees question with no skill at all"
+            is_visible("question", &plan, &none),
+            "plan sees question with no skill at all"
         );
         // Still bound by the agent allowlist: command/workflow agents do not.
         let command = opencoder_core::resolve_agent("command").unwrap();
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn visibility_ssh_pty_unchanged() {
         // No builtin agent allowlists ssh_pty (it targets custom agents), so
-        // build one: ssh_pty must stay purely skill-gated — the sandbox
+        // build one: ssh_pty must stay purely skill-gated — the plan
         // question exemption must not leak to it.
         let agent = opencoder_core::Agent {
             name: "ssh-host".into(),

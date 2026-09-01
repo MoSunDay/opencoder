@@ -27,7 +27,7 @@ const STATUS_DOT_PHASE_TICKS: u32 = 5;
 
 /// Span for the leading status dot that precedes the mode chip. While running
 /// the dot alternates every 500ms. Hidden phases use two spaces so the
-/// `[act]`/`[sandbox]` chip never shifts horizontally. Idle (non-running) keeps
+/// `[act]`/`[plan]` chip never shifts horizontally. Idle (non-running) keeps
 /// the dot steady in the mode colour.
 fn status_dot(running: bool, anim_tick: u32, mode: &str) -> Span<'static> {
     let hidden_phase = (anim_tick / STATUS_DOT_PHASE_TICKS) % 2 == 1;

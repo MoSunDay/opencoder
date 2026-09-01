@@ -69,7 +69,7 @@ pub fn restore(prev: Option<bool>) {
 
 // Note (rules/01 I/O-wrapper exemption): `current_status` / `set_status` /
 // `inside_tmux` shell out to the `tmux` binary or read the process environment.
-// They are pure I/O wrappers that cannot run in a tmux-less CI sandbox, so they
+// They are pure I/O wrappers that cannot run in a tmux-less CI plan, so they
 // are not unit-tested directly. The only business logic — parsing the status
 // string — is extracted into `parse_status` and fully covered below.
 

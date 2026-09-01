@@ -16,11 +16,11 @@ pub(crate) fn flash_visible(start: u32, now: u32, ticks: u32) -> bool {
 }
 
 /// Whether the mode-flash chip renders in the warning hue: the read-only
-/// sandbox family, the "→ edit plan" flash for the plan-text editor, and the
+/// plan family, the "→ edit plan" flash for the plan-text editor, and the
 /// clear-context countdown guard (a destructive operation about to fold the
 /// transcript — matched by its countdown banner text, not by a prefix).
 pub(crate) fn is_warn_flash(text: &str) -> bool {
-    text.starts_with("\u{2192} sandbox mode")
+    text.starts_with("\u{2192} plan mode")
         || text.starts_with("\u{2192} edit plan")
         || text.contains(
             "\u{4e4b}\u{540e}\u{4ec5}\u{4fdd}\u{7559}\u{8ba1}\u{5212}\u{5e76}\u{6267}\u{884c}",

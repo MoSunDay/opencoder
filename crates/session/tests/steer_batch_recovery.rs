@@ -244,7 +244,7 @@ async fn steer_batch_failure_unpromotes_remaining_items() {
     seed_session(&store).await;
 
     // Admit a batch: a control command + a normal prompt.
-    let seq0 = admit_steer(&store, "recovery-sess", "s0", "/sandbox").await;
+    let seq0 = admit_steer(&store, "recovery-sess", "s0", "/plan").await;
     let seq1 = admit_steer(&store, "recovery-sess", "s1", "hello world").await;
 
     // --- Simulate claim_steers: read pending + promote all ---
@@ -308,7 +308,7 @@ async fn partial_batch_failure_unpromotes_only_remaining() {
     seed_session(&store).await;
 
     let seq0 = admit_steer(&store, "recovery-sess", "p0", "first prompt").await;
-    let seq1 = admit_steer(&store, "recovery-sess", "p1", "/sandbox").await;
+    let seq1 = admit_steer(&store, "recovery-sess", "p1", "/plan").await;
     let seq2 = admit_steer(&store, "recovery-sess", "p2", "third prompt").await;
 
     // Claim all three.
@@ -345,7 +345,7 @@ async fn partial_batch_failure_unpromotes_only_remaining() {
 }
 
 /// Runner integration (P1-2 + P1-3 + zero-resubmit): with a
-/// `FailingUpdateStore` (`update_session` rejects every write), `/sandbox`
+/// `FailingUpdateStore` (`update_session` rejects every write), `/plan`
 /// triggers `persist_agent` which PROPAGATES the error (P1-2 fix changed
 /// `let _ =` to `?`). P1-3 unpromotes the failed steer AND every remaining
 /// unprocessed steer for retry; the zero-resubmit contract means the failed
@@ -360,7 +360,7 @@ async fn runner_consumes_batch_steers_with_failing_store() {
     seed_session(&failing).await;
 
     // Admit a batch: control command + normal prompt.
-    admit_steer(&failing, "recovery-sess", "r0", "/sandbox").await;
+    admit_steer(&failing, "recovery-sess", "r0", "/plan").await;
     admit_steer(&failing, "recovery-sess", "r1", "hello steer").await;
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));

@@ -1,19 +1,19 @@
-//! Bash command write-detection for sandbox-mode enforcement.
+//! Bash command write-detection for plan-mode enforcement.
 //!
-//! In sandbox mode the agent must not modify the system. Rather than removing
+//! In plan mode the agent must not modify the system. Rather than removing
 //! `bash` entirely (it's useful for `ls`, `cat`, `grep`, `find`), we classify
 //! each command as read-only or potentially-mutating and block the latter.
 //!
 //! The classifier is heuristic: it parses the command string for known
 //! write patterns (file-writing redirects, mutating commands, package managers,
 //! git writes, in-place editors). False positives are acceptable (over-blocking in
-//! sandbox mode is safe); false negatives are the risk we minimize by covering the
+//! plan mode is safe); false negatives are the risk we minimize by covering the
 //! common patterns.
 
 /// Verdict on whether a bash command may modify state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BashVerdict {
-    /// Command appears read-only; safe to execute in sandbox mode.
+    /// Command appears read-only; safe to execute in plan mode.
     ReadOnly,
     /// Command is blocked; carries a human-readable reason shown to the model.
     WriteBlocked(String),
@@ -183,7 +183,7 @@ pub fn classify(command: &str) -> BashVerdict {
 
     // Recursively classify commands nested inside command/process
     // substitution: `$(...)`, backticks, `<(...)`, `>(...)`. Without this,
-    // `echo "$(rm file)"` bypasses sandbox-mode because `echo` itself is
+    // `echo "$(rm file)"` bypasses plan-mode because `echo` itself is
     // read-only but the substitution runs `rm`.
     for inner in extract_command_substitutions(trimmed) {
         match classify(&inner) {
@@ -626,7 +626,7 @@ fn classify_segment(segment: &str) -> Option<String> {
 
     // Strip wrapper commands (`env`, `nohup`, `timeout`, `nice`, `command`,
     // `strace`, `time`, `stdbuf`, `setsid`, …) and leading `sudo`/`doas` to
-    // reveal the real command. Without this, sandbox-mode writes wrapped as
+    // reveal the real command. Without this, plan-mode writes wrapped as
     // `env rm file`, `nohup rm`, or `timeout 5 rm -rf x` are misclassified as
     // read-only and bypass the guard.
     let stripped = strip_wrappers(unled);

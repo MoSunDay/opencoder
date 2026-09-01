@@ -1,10 +1,10 @@
-//! Regression test: a sandbox-mode agent cannot escape read-only restrictions
+//! Regression test: a plan-mode agent cannot escape read-only restrictions
 //! by spawning a 'build' subagent via the task tool. The runner rejects any
-//! non-'explore' subagent_type in sandbox mode with an "Unknown subagent_type"
+//! non-'explore' subagent_type in plan mode with an "Unknown subagent_type"
 //! error, emits no SubagentStart, and performs no writes.
 //!
 //! Contracts:
-//! - task tool call with subagent_type="build" from a sandbox agent produces
+//! - task tool call with subagent_type="build" from a plan agent produces
 //!   a ToolEnd with is_error=true and output containing "Unknown subagent_type".
 //! - No SubagentStart event is emitted.
 //! - The error message must NOT advertise 'build' as a valid option (so the
@@ -24,7 +24,7 @@ fn config() -> Config {
     }
 }
 
-/// A sandbox-agent turn that tries to delegate to a 'build' subagent.
+/// A plan-agent turn that tries to delegate to a 'build' subagent.
 fn build_task_turn() -> LlmEvent {
     LlmEvent::Completed {
         text: "".into(),
@@ -51,16 +51,16 @@ fn done_turn() -> LlmEvent {
 }
 
 #[tokio::test]
-async fn sandbox_mode_blocks_build_subagent() {
+async fn plan_mode_blocks_build_subagent() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![build_task_turn()])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
-        "sandbox-sub-guard",
+        "plan-sub-guard",
         agent,
         config(),
         mock,
@@ -90,7 +90,7 @@ async fn sandbox_mode_blocks_build_subagent() {
         is_error, output, ..
     } = tool_end.unwrap()
     {
-        assert!(*is_error, "build subagent must be blocked in sandbox mode");
+        assert!(*is_error, "build subagent must be blocked in plan mode");
         assert!(
             output.contains("Unknown subagent_type"),
             "error must say 'Unknown subagent_type', got: {output}"
@@ -113,7 +113,7 @@ async fn sandbox_mode_blocks_build_subagent() {
         !events
             .iter()
             .any(|e| matches!(e, SessionEvent::SubagentStart { .. })),
-        "must not start a subagent when blocked by sandbox-mode guard, got: {:?}",
+        "must not start a subagent when blocked by plan-mode guard, got: {:?}",
         events.iter().map(ev_name).collect::<Vec<_>>()
     );
 
@@ -131,7 +131,7 @@ async fn sandbox_mode_blocks_build_subagent() {
     let entries: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
     assert!(
         entries.is_empty(),
-        "sandbox-mode blocked subagent must not create any files, but found: {:?}",
+        "plan-mode blocked subagent must not create any files, but found: {:?}",
         entries
             .iter()
             .map(|e| e.as_ref().unwrap().path())
@@ -139,10 +139,10 @@ async fn sandbox_mode_blocks_build_subagent() {
     );
 }
 
-/// Sanity check: a sandbox agent CAN still spawn an 'explore' subagent (the guard
+/// Sanity check: a plan agent CAN still spawn an 'explore' subagent (the guard
 /// must not over-block the legitimate read-only path).
 #[tokio::test]
-async fn sandbox_mode_allows_explore_subagent() {
+async fn plan_mode_allows_explore_subagent() {
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![LlmEvent::Completed {
@@ -163,7 +163,7 @@ async fn sandbox_mode_allows_explore_subagent() {
             .push_script(vec![done_turn()]), // parent done
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "plan-sub-allow",
         agent,

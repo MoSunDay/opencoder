@@ -1,4 +1,4 @@
-Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
+Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切，写拦截能力保留)
 
 # store 模块
 
@@ -52,6 +52,6 @@ schema 当前为 v10：
 
 - `tests/store_integration/`（目录目标，按职责分模块）：会话 CRUD/patch、消息往返、事务回滚、取消安全和崩溃恢复等 P0 行为契约（WAL 并发压力另见 `store_concurrency.rs`）。
 - `tests/todos_workflow.rs`：TODO 投影+事件原子提交、generation 冲突、v8→v9 migration。
-- `tests/legacy_agent_normalization.rs`：存量 `agent='plan'` 行在全部读路径（get/list/fork 等）归一为 `act`，原始行不被重写。
+- `tests/legacy_agent_normalization.rs`：interlude 存量 `agent='sandbox'` 行在全部读路径（get/list/fork 等）归一为 `plan`，原始行不被重写。
 - `tests/store_perf.rs`：持久化性能门槛。
 - `src/bundle.rs` 相关测试：Session 树导入导出与幂等性。

@@ -1,7 +1,7 @@
 //! Inline `$name` skill-token resolution for compound control commands.
 //!
-//! When a user submits a compound prompt like `/sandbox $review the api`, the
-//! leading `/sandbox` switches the agent (handled by [`crate::control_cmd`]) and
+//! When a user submits a compound prompt like `/plan $review the api`, the
+//! leading `/plan` switches the agent (handled by [`crate::control_cmd`]) and
 //! the trailing text may carry `$skill` tokens. This module strips those
 //! tokens, discovers the named skills, and activates their bodies on the
 //! session — mirroring the TUI's `$`-picker path but operating directly on the
@@ -23,7 +23,7 @@ use crate::runner::new_id;
 use crate::SessionState;
 
 /// Synthetic trigger injected when `$skill` token stripping empties the text
-/// but a skill was activated (e.g. `/sandbox $review` or a pure `$review` queue
+/// but a skill was activated (e.g. `/plan $review` or a pure `$review` queue
 /// item). Mirrors the idle path's pure-skill trigger so the model begins
 /// executing the active skill (surfaced via the `[active skill]` tail
 /// reminder). Read-only tagging is deliberately NOT applied to
@@ -128,11 +128,11 @@ pub fn resolve_inline_skills(session: &SessionState, text: &str) -> String {
 
 /// Record a prompt as a synthetic user message after resolving inline
 /// `$skill` tokens. Used by the queue-drain and steer paths for both compound
-/// commands (`/sandbox review`)
+/// commands (`/plan review`)
 /// and plain prompts (`$review do it`) so both get consistent skill handling.
 ///
 /// When THIS input resolved at least one `$skill` token and the stripping
-/// empties the text (e.g. `/sandbox $review`), injects [`SKILL_TRIGGER`]
+/// empties the text (e.g. `/plan $review`), injects [`SKILL_TRIGGER`]
 /// instead — mirroring the idle path's pure-skill behavior — and skips the
 /// read-only tag. The condition is scoped to tokens resolved by this very
 /// call, NOT the session's already-active skill: a queue/steer restart with
@@ -283,7 +283,7 @@ mod tests {
     #[tokio::test]
     async fn record_compound_records_cleaned_text() {
         let mut s = make_session();
-        s.agent = resolve_agent("sandbox").unwrap();
+        s.agent = resolve_agent("plan").unwrap();
         record_compound(&mut s, "review the code", &[]).await;
         assert_eq!(s.messages.len(), 1);
         assert!(
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn record_compound_pure_skill_injects_trigger() {
         let mut s = make_session();
-        s.agent = resolve_agent("sandbox").unwrap();
+        s.agent = resolve_agent("plan").unwrap();
         {
             let _guard = lock_home(tempfile::tempdir().unwrap().path());
             opencoder_core::seed_builtin_skills();

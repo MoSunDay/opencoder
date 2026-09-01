@@ -1,4 +1,4 @@
-//! Regression tests for four confirmed sandbox-mode bash-guard bypass classes.
+//! Regression tests for four confirmed plan-mode bash-guard bypass classes.
 //!
 //! 1. **Control-flow segment-leading tokens** — after the separator split,
 //!    `if c; then rm x; fi` yields the segment `then rm x`; classifying the
@@ -14,7 +14,7 @@
 //! 4. **Missed destructive flags** — `find -fprint/-fprint0/-fprintf/-fls`
 //!    write files and `sed --in-place` is the GNU long form of `sed -i`.
 //!
-//! Over-blocking is acceptable per module policy (sandbox mode errs safe); the
+//! Over-blocking is acceptable per module policy (plan mode errs safe); the
 //! `…_allowed` tests pin the read-only counterparts that must stay permissive.
 
 use super::*;

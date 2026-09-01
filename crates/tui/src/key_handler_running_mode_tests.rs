@@ -49,9 +49,9 @@ fn press_running_mode_command(command: &str, code: KeyCode) -> (KeyAction, Strin
 #[test]
 fn running_enter_mode_command_becomes_steer() {
     for command in [
-        "/sandbox",
+        "/plan",
         "/act",
-        "/sandbox review this",
+        "/plan review this",
         "/clear_context now",
     ] {
         let (action, input, _) = press_running_mode_command(command, KeyCode::Enter);
@@ -64,7 +64,7 @@ fn running_enter_mode_command_becomes_steer() {
 /// boundary instead of being refused at admission.
 #[test]
 fn running_tab_mode_command_becomes_queue() {
-    let command = "/sandbox later";
+    let command = "/plan later";
     let (action, input, _) = press_running_mode_command(command, KeyCode::Tab);
     assert!(matches!(action, KeyAction::Queue(text) if text == command));
     assert!(input.is_empty(), "queue clears the input line");

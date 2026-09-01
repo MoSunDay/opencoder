@@ -1,7 +1,7 @@
 //! Regression for the "reminder on every turn" bug (run-end skill contract
 //! on the early-exit branch): a crash mid-run can leave a skill armed in
 //! memory AND persisted in the store row, and a bare control command
-//! (`/sandbox`, `/act`) returns BEFORE the one-shot wrapper. Without the
+//! (`/plan`, `/act`) returns BEFORE the one-shot wrapper. Without the
 //! explicit run-end clear in that early-exit branch, the skill would
 //! survive the bare command and resurrect into every later run (tail
 //! reminder + latent unlocks each turn). Both halves must be cleared.
@@ -75,7 +75,7 @@ async fn bare_control_cmd_clears_armed_skill_in_memory_and_store() {
 
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let ev_clone = events.clone();
-    run(&mut session, "/sandbox".into(), move |ev| {
+    run(&mut session, "/plan".into(), move |ev| {
         ev_clone.lock().unwrap().push(ev)
     })
     .await

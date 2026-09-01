@@ -62,8 +62,8 @@ pub(super) async fn run_one_llm_call(
                         name,
                     );
             }
-            // `question` is latent everywhere: only an active task-plan
-            // skill unlocks it (no agent-kind exemptions).
+            // Plan always sees `question` (base-prompt clarification
+            // protocol); other agents need the task-plan skill unlock.
             crate::tools::latent::is_visible(name.as_str(), &session.agent, &unlocked)
         })
         .map(|(k, v)| (k.clone(), v.clone()))

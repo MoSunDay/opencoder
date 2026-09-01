@@ -2,7 +2,7 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
-/// by the same hide rule as the schema: sandbox mode omits 'build'
+/// by the same hide rule as the schema: plan mode omits 'build'
 /// (read-only), and so does an act session while the task-plan skill is
 /// active — the model is never told 'build' exists.
 pub(super) fn valid_subagent_options(hide_build: bool) -> String {
@@ -42,17 +42,17 @@ pub(super) async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
-    let sandbox = parent.agent.kind == AgentKind::Sandbox;
+    let plan = parent.agent.kind == AgentKind::Plan;
     let hide_build = crate::tools::hide_build_subagent(
         parent.agent.kind,
         parent.skill_prompt_cloned().as_deref(),
     );
-    // Sandbox mode may only spawn read-only subagents: 'explore' (filesystem).
+    // Plan mode may only spawn read-only subagents: 'explore' (filesystem).
     // 'build' stays rejected so the model is never told it exists.
-    if sandbox && kind != "explore" {
+    if plan && kind != "explore" {
         return ToolOutput::err(format!(
             "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(sandbox)
+            valid_subagent_options(hide_build)
         ));
     }
     let agent = match resolve_agent(&kind) {

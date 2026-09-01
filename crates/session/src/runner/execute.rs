@@ -246,9 +246,9 @@ pub(super) async fn execute_call_with_timeout(
         };
     }
 
-    // Sandbox-mode execution gate: unadmitted tools AND mutating bash are
+    // Plan-mode execution gate: unadmitted tools AND mutating bash are
     // refused with a model-visible denial (names the mode, forbids retry,
-    // points at `/act`) so the model stops attempting writes instead of
+    // points at `/agent act`) so the model stops attempting writes instead of
     // looping; see bash_guard::gate for the policy. The effective workdir is
     // resolved exactly like `tools::bash::execute` resolves it (`workdir`
     // input, else the session working dir): the classifier must judge

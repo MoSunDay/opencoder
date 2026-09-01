@@ -191,7 +191,7 @@ async fn mode_command_to_running_subagent_is_rejected_without_admission() {
                     "/api/sessions/{parent_sid}/subagents/{task_id}/steer"
                 ))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"prompt":"/sandbox later","images":[]}"#))
+                .body(Body::from(r#"{"prompt":"/plan later","images":[]}"#))
                 .unwrap(),
         )
         .await

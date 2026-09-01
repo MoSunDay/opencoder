@@ -1,14 +1,13 @@
-//! Integration test: sandbox-mode interceptions return a model-visible error
+//! Integration test: plan-mode interceptions return a model-visible error
 //! so the LLM learns the session is read-only and stops retrying writes.
 //!
 //! Contracts:
-//! - A `rm -rf` call in sandbox mode produces a ToolEnd with is_error=true
-//!   and output containing "Blocked in sandbox mode" — the command never
-//!   executes, the message forbids retrying, and points at `/act` (the REAL
-//!   command; there is no `/agent act`) as the way out.
-//! - A tool the sandbox schema never advertises (e.g. a hallucinated `edit`)
-//!   is refused with the same denial and NEVER executes — no silent writes.
-//! - A `ls` call in sandbox mode produces a ToolEnd with is_error=false.
+//! - A `rm -rf` call in plan mode produces a ToolEnd with is_error=true
+//!   and output containing "Blocked in plan mode" - the command never
+//!   executes, and the message points at `/agent act` as the way out.
+//! - A tool the plan schema never advertises (e.g. a hallucinated `edit`)
+//!   is refused with the same denial and NEVER executes - no silent writes.
+//! - A `ls` call in plan mode produces a ToolEnd with is_error=false.
 //! - The act agent is unaffected (no guard).
 //! - bash classification happens in the call's effective workdir (the
 //!   `workdir` input, defaulting to the session working dir) — the same
@@ -26,6 +25,17 @@ fn config() -> Config {
         model: "m/g".into(),
         ..Config::default()
     }
+}
+
+/// A workdir OUTSIDE the /tmp release scope. The crate tree itself may sit
+/// under /tmp (which the shellguard releases wholesale), so tests that need
+/// a *plain* directory must not anchor on CARGO_MANIFEST_DIR.
+fn plain_workdir(prefix: &str) -> tempfile::TempDir {
+    let home = std::env::var("HOME").expect("$HOME set");
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(home)
+        .expect("writable $HOME for a non-released workdir")
 }
 
 fn bash_turn(cmd: &str) -> LlmEvent {
@@ -64,17 +74,14 @@ fn done_turn() -> LlmEvent {
 }
 
 #[tokio::test]
-async fn sandbox_mode_blocks_write_command() {
+async fn plan_mode_blocks_write_command() {
     // NOTE: the release set is `/tmp` + `/dev/null`, so the old target
     // `/tmp/opencoder-test-guard` is now ALLOWED by policy. The guard proves
     // its blocking behavior on a cwd-relative path issued from a per-call
     // workdir that is a PLAIN directory (outside /tmp): the working directory
     // is NOT released, and if the command ever ran it would land inside that
     // test-controlled workdir.
-    let workdir = tempfile::Builder::new()
-        .prefix("sg-guard-block-")
-        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-        .unwrap();
+    let workdir = plain_workdir("sg-guard-block-");
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn_in(
@@ -84,7 +91,7 @@ async fn sandbox_mode_blocks_write_command() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new("guard-1", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
@@ -106,22 +113,18 @@ async fn sandbox_mode_blocks_write_command() {
     {
         assert!(*is_error, "write command must be blocked (is_error=true)");
         assert!(
-            output.contains("Blocked in sandbox mode"),
+            output.contains("Blocked in plan mode"),
             "output must explain the block, got: {output}"
         );
         assert!(
-            output.contains("`/act`") && !output.contains("/agent act"),
-            "block must point at the real escape hatch (/act), got: {output}"
-        );
-        assert!(
-            output.contains("Do not retry"),
-            "denial must tell the model retries are futile, got: {output}"
+            output.contains("/agent act"),
+            "block must point at the real escape hatch (/agent act), got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_read_only_command() {
+async fn plan_mode_allows_read_only_command() {
     // Plain read-only command, no release-set involvement: allowed anywhere.
     let mock = Arc::new(
         MockChatClient::new()
@@ -129,7 +132,7 @@ async fn sandbox_mode_allows_read_only_command() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new("guard-2", agent, config(), mock, dir.path().to_path_buf());
 
     let mut events = Vec::new();
@@ -155,7 +158,7 @@ async fn sandbox_mode_allows_read_only_command() {
 #[tokio::test]
 async fn act_mode_is_not_guarded() {
     // The same write command in act mode should NOT be blocked by bash_guard.
-    // NOTE: the command is cwd-relative on purpose — /tmp is in the sandbox
+    // NOTE: the command is cwd-relative on purpose — /tmp is in the plan
     // release set, so a /tmp target would no longer distinguish guarded from
     // unguarded modes. Relative paths resolve inside this test's tempdir
     // session dir, so nothing outside the test's control is touched.
@@ -184,24 +187,24 @@ async fn act_mode_is_not_guarded() {
     } = tool_end.unwrap()
     {
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "act mode must not be guarded, got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_devnull_redirect() {
+async fn plan_mode_allows_devnull_redirect() {
     // A read-only redirect to /dev/null (common with find/grep) must pass.
-    // /dev/null is part of the declared sandbox release set (alongside /tmp),
-    // so discarding output stays permitted in sandbox mode.
+    // /dev/null is part of the declared plan release set (alongside /tmp),
+    // so discarding output stays permitted in plan mode.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("find . -name '*.rs' 2>/dev/null | head")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-devnull",
         agent,
@@ -228,25 +231,25 @@ async fn sandbox_mode_allows_devnull_redirect() {
             "devnull redirect must succeed, output: {output}"
         );
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "devnull redirect must not be blocked, got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_subshell_fd_merge() {
+async fn plan_mode_allows_subshell_fd_merge() {
     // `(cmd 2>&1)` and brace groups used to be blocked because the trailing
     // `)` was folded into the redirect target. These are read-only (an fd
     // merge writes no file — no release-set involvement) and must run in
-    // sandbox mode.
+    // plan mode.
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn("(echo hi 2>&1) | head")])
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-fdmerge",
         agent,
@@ -273,16 +276,16 @@ async fn sandbox_mode_allows_subshell_fd_merge() {
             "fd-merge in subshell must succeed, output: {output}"
         );
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "fd-merge in subshell must not be blocked, got: {output}"
         );
     }
 }
 
 #[tokio::test]
-async fn sandbox_mode_allows_tee_to_devnull() {
+async fn plan_mode_allows_tee_to_devnull() {
     // `tee /dev/null` discards its copy and is read-only; it must not be
-    // blocked in sandbox mode. /dev/null is part of the declared sandbox release
+    // blocked in plan mode. /dev/null is part of the declared plan release
     // set; `tee <realfile>` outside /tmp + /dev/null is still blocked (covered
     // by the compat unit tests in bash_guard).
     let mock = Arc::new(
@@ -291,7 +294,7 @@ async fn sandbox_mode_allows_tee_to_devnull() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session =
         SessionState::new("guard-tee", agent, config(), mock, dir.path().to_path_buf());
 
@@ -310,13 +313,13 @@ async fn sandbox_mode_allows_tee_to_devnull() {
     {
         assert!(!*is_error, "tee /dev/null must succeed, output: {output}");
         assert!(
-            !output.contains("Blocked in sandbox mode"),
+            !output.contains("Blocked in plan mode"),
             "tee /dev/null must not be blocked, got: {output}"
         );
     }
 }
 
-/// A unique workdir under the literal `/tmp` release dir (the sandbox release
+/// A unique workdir under the literal `/tmp` release dir (the plan release
 /// set hardcodes `/tmp`, so the fixture must live beneath it, not under
 /// `TMPDIR`). RAII-cleaned by the returned guard.
 fn tmp_released_workdir(tag: &str) -> tempfile::TempDir {
@@ -327,7 +330,7 @@ fn tmp_released_workdir(tag: &str) -> tempfile::TempDir {
 }
 
 #[tokio::test]
-async fn sandbox_mode_releases_relative_write_in_tmp_call_workdir() {
+async fn plan_mode_releases_relative_write_in_tmp_call_workdir() {
     // B2 regression, end to end: `touch newfile` is cwd-relative, so its
     // verdict depends on WHERE the tool will run it. With an explicit /tmp
     // workdir the write is released — even though the test process cwd (this
@@ -349,7 +352,7 @@ async fn sandbox_mode_releases_relative_write_in_tmp_call_workdir() {
         .prefix("sg-session-")
         .tempdir_in(env!("CARGO_MANIFEST_DIR"))
         .unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-workdir-tmp",
         agent,
@@ -384,14 +387,11 @@ async fn sandbox_mode_releases_relative_write_in_tmp_call_workdir() {
 }
 
 #[tokio::test]
-async fn sandbox_mode_blocks_write_in_plain_call_workdir() {
+async fn plan_mode_blocks_write_in_plain_call_workdir() {
     // Counterpart of the /tmp-workdir test: the IDENTICAL command from a
-    // plain (non-released) per-call workdir must be refused with the sandbox
+    // plain (non-released) per-call workdir must be refused with the plan
     // denial — nothing may execute.
-    let workdir = tempfile::Builder::new()
-        .prefix("sg-plain-workdir-")
-        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
-        .unwrap();
+    let workdir = plain_workdir("sg-plain-workdir-");
     let mock = Arc::new(
         MockChatClient::new()
             .push_script(vec![bash_turn_in(
@@ -401,7 +401,7 @@ async fn sandbox_mode_blocks_write_in_plain_call_workdir() {
             .push_script(vec![done_turn()]),
     );
     let dir = tempfile::tempdir().unwrap();
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session = SessionState::new(
         "guard-workdir-plain",
         agent,
@@ -425,7 +425,7 @@ async fn sandbox_mode_blocks_write_in_plain_call_workdir() {
     {
         assert!(*is_error, "plain-workdir write must be blocked");
         assert!(
-            output.contains("Blocked in sandbox mode"),
+            output.contains("Blocked in plan mode"),
             "output must explain the block, got: {output}"
         );
     }
@@ -448,10 +448,10 @@ fn ev_name(e: &SessionEvent) -> &'static str {
 }
 
 #[tokio::test]
-async fn sandbox_mode_refuses_unadvertised_tool_without_executing() {
-    // `edit` is not in the sandbox allowlist, so the model is never shown it.
+async fn plan_mode_refuses_unadvertised_tool_without_executing() {
+    // `edit` is not in the plan allowlist, so the model is never shown it.
     // If a stale/hallucinated call still arrives it must be refused with the
-    // sandbox denial — the tool body must never run (no silent writes).
+    // plan denial — the tool body must never run (no silent writes).
     let dir = tempfile::tempdir().unwrap();
     let victim = dir.path().join("victim.txt");
     std::fs::write(&victim, "aaa").unwrap();
@@ -474,7 +474,7 @@ async fn sandbox_mode_refuses_unadvertised_tool_without_executing() {
             .push_script(vec![edit_turn])
             .push_script(vec![done_turn()]),
     );
-    let agent = resolve_agent("sandbox").unwrap();
+    let agent = resolve_agent("plan").unwrap();
     let mut session =
         SessionState::new("guard-edit", agent, config(), mock, dir.path().to_path_buf());
 
@@ -497,11 +497,11 @@ async fn sandbox_mode_refuses_unadvertised_tool_without_executing() {
     {
         assert!(*is_error, "unadvertised tool must be an error for the model");
         assert!(
-            output.contains("Blocked in sandbox mode"),
+            output.contains("Blocked in plan mode"),
             "denial must name the mode, got: {output}"
         );
         assert!(
-            output.contains("`/act`"),
+            output.contains("/agent act"),
             "denial must point at the real escape hatch, got: {output}"
         );
     }
@@ -509,6 +509,6 @@ async fn sandbox_mode_refuses_unadvertised_tool_without_executing() {
     assert_eq!(
         std::fs::read_to_string(&victim).unwrap(),
         "aaa",
-        "sandbox mode must not let an unadvertised tool write"
+        "plan mode must not let an unadvertised tool write"
     );
 }

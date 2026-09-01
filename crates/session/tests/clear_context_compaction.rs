@@ -47,7 +47,7 @@ async fn clear_context_with_stale_usage_still_continues_seed() {
     store
         .create_session(&opencoder_store::SessionMeta {
             id: "cc-stale-usage".into(),
-            agent: Some("sandbox".into()),
+            agent: Some("plan".into()),
             model: Some("m/g".into()),
             created_at: 0,
             updated_at: 0,
@@ -72,7 +72,7 @@ async fn clear_context_with_stale_usage_still_continues_seed() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = SessionState::new(
         "cc-stale-usage",
-        resolve_agent("sandbox").unwrap(),
+        resolve_agent("plan").unwrap(),
         config(),
         mock.clone() as Arc<dyn ChatStream>,
         dir.path().to_path_buf(),

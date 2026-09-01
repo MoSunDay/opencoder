@@ -2,10 +2,10 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 /// Build the "Valid options" list for a subagent_type rejection error, gated
-/// by agent kind. Sandbox mode omits 'build' (it is read-only).
-pub(super) fn valid_subagent_options(sandbox: bool) -> String {
+/// by agent kind. Plan mode omits 'build' (it is read-only).
+pub(super) fn valid_subagent_options(plan: bool) -> String {
     let mut parts: Vec<&str> = vec!["'explore' (read-only)"];
-    if !sandbox {
+    if !plan {
         parts.push("'build' (full tools)");
     }
     match parts.len() {
@@ -40,13 +40,13 @@ pub(super) async fn run_subagent(
         .and_then(|v| v.as_str())
         .unwrap_or("explore")
         .to_string();
-    let sandbox = parent.agent.kind == AgentKind::Sandbox;
-    // Sandbox mode may only spawn read-only subagents: 'explore' (filesystem).
+    let plan = parent.agent.kind == AgentKind::Plan;
+    // Plan mode may only spawn read-only subagents: 'explore' (filesystem).
     // 'build' stays rejected so the model is never told it exists.
-    if sandbox && kind != "explore" {
+    if plan && kind != "explore" {
         return ToolOutput::err(format!(
             "Unknown subagent_type '{kind}'. Valid options: {}",
-            valid_subagent_options(sandbox)
+            valid_subagent_options(plan)
         ));
     }
     let agent = match resolve_agent(&kind) {
@@ -54,7 +54,7 @@ pub(super) async fn run_subagent(
         None => {
             return ToolOutput::err(format!(
                 "Unknown subagent_type '{kind}'. Valid options: {}",
-                valid_subagent_options(sandbox)
+                valid_subagent_options(plan)
             ));
         }
     };

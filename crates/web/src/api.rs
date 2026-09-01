@@ -211,7 +211,7 @@ pub async fn post_prompt(
     }
     // Only an explicit `agent` field is an admission-time mode change: it
     // rewrites the session config, so it must be refused while a drain runs.
-    // Textual control commands (/sandbox, /act, /act_clear_context) are
+    // Textual control commands (/plan, /act, /act_clear_context) are
     // admitted like any prompt — the runner applies them at the next idle/turn
     // boundary, which structurally has no turn in flight.
     let agent_override = body.agent.is_some();
@@ -358,14 +358,14 @@ pub async fn post_agent(
         return error_409("agent switch refused while drain running");
     }
     // The switch surface carries the primary agents only: `act` (default) and
-    // `sandbox` (read-only). The legacy `plan` name no longer resolves
-    // (`resolve_agent("plan")` is None; the store normalizes stored rows to
-    // `act` on read), and subagent kinds (explore/build) are unreachable as a
+    // `plan` (read-only). The interlude `sandbox` name no longer resolves
+    // (`resolve_agent("sandbox")` is None; the store normalizes stored rows to
+    // `plan` on read), and subagent kinds (explore/build) are unreachable as a
     // session's primary agent — both get the standard unknown-agent 400
     // before any persistence or handle mutation.
     if !opencoder_core::resolve_agent(&body.value).is_some_and(|a| a.is_primary()) {
         return error_400(format!(
-            "unknown agent {:?}: expected \"act\" or \"sandbox\"",
+            "unknown agent {:?}: expected \"act\" or \"plan\"",
             body.value
         ));
     }

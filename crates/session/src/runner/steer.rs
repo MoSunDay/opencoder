@@ -193,7 +193,7 @@ pub(super) async fn apply_steer_batch(
             text: p.clone(),
         });
         // Defensive: a steered control command is applied immediately and
-        // NOT recorded as user text, so "/sandbox" never leaks to the LLM.
+        // NOT recorded as user text, so "/plan" never leaks to the LLM.
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(p) {
             if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {
                 // P1-3: unpromote the failed item and all remaining
@@ -206,7 +206,7 @@ pub(super) async fn apply_steer_batch(
                 && crate::control_cmd::is_clear_context_handoff(
                     session.handoff_plan.as_deref().unwrap_or(""),
                 );
-            // Compound (/sandbox review): record the rest as a real
+            // Compound (/plan review): record the rest as a real
             // user message in the new agent.
             if let Some(rest) = rest {
                 clear_sentinel = false;
@@ -229,7 +229,7 @@ pub(super) async fn apply_steer_batch(
         on_event(SessionEvent::Done);
         return Ok(SteerApplyOutcome::Done);
     }
-    // Bare control command(s) only (e.g. a bare "/sandbox" steer with no
+    // Bare control command(s) only (e.g. a bare "/plan" steer with no
     // accompanying text): the mode/skill switch is the whole intent
     // and no new user message was recorded. Avoid a wasteful LLM call
     // on the existing transcript — go idle, mirroring the initial-

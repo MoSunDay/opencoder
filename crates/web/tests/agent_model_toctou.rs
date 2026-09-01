@@ -105,7 +105,7 @@ async fn drain_start_wins_mutex_then_agent_and_model_are_refused() {
             axum::extract::State(agent_state),
             axum::extract::Path(sid.to_string()),
             axum::Json(opencoder_web::api::SwitchBody {
-                value: "sandbox".into(),
+                value: "plan".into(),
             }),
         )
         .await
@@ -157,7 +157,7 @@ async fn agent_switch_wins_mutex_and_finishes_before_drain_start() {
             axum::extract::State(agent_state),
             axum::extract::Path(sid.to_string()),
             axum::Json(opencoder_web::api::SwitchBody {
-                value: "sandbox".into(),
+                value: "plan".into(),
             }),
         )
         .await
@@ -175,7 +175,7 @@ async fn agent_switch_wins_mutex_and_finishes_before_drain_start() {
     assert!(drain.await.unwrap() > 0);
     assert!(handle.draining.load(Ordering::SeqCst));
     let meta = state.store.get_session(sid).await.unwrap().unwrap();
-    assert_eq!(meta.agent.as_deref(), Some("sandbox"));
-    assert_eq!(handle.overrides.lock().await.agent.as_deref(), Some("sandbox"));
+    assert_eq!(meta.agent.as_deref(), Some("plan"));
+    assert_eq!(handle.overrides.lock().await.agent.as_deref(), Some("plan"));
     handle.cancel.lock().await.cancel();
 }

@@ -444,7 +444,7 @@ async fn coalesced_first_reasoning_batch_still_renders_thinking_header() {
 
 /// `AgentSwitch` is delivered via `forward_event` -> `try_send`, which silently
 /// drops the event when the UI channel is completely saturated. Since
-/// `chat.agent` is written ONLY by that event, a drop leaves the `[sandbox]`
+/// `chat.agent` is written ONLY by that event, a drop leaves the `[plan]`
 /// / `[act]` status chip stuck on the pre-switch agent. The fix: `TurnDone`
 /// carries the session's authoritative agent and `fold_ui_events` reconciles
 /// `chat.agent` from it (TurnDone is sent via `send().await`, so it always
@@ -456,7 +456,7 @@ async fn turn_done_reconciles_agent_when_agent_switch_dropped() {
     let store: Arc<dyn opencoder_store::Store> =
         Arc::new(LibsqlStore::open_memory().await.unwrap());
     let mut chat = ChatView {
-        agent: "sandbox".into(),
+        agent: "plan".into(),
         ..ChatView::default()
     };
     let mut queue_items: Vec<(i64, String)> = Vec::new();

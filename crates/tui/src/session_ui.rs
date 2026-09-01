@@ -107,9 +107,9 @@ mod tests {
 
     #[test]
     fn new_produces_sensible_defaults() {
-        let st = SessionUiState::new("sandbox".into(), 5000);
-        assert_eq!(st.agent_name, "sandbox");
-        assert_eq!(st.chat.agent, "sandbox");
+        let st = SessionUiState::new("plan".into(), 5000);
+        assert_eq!(st.agent_name, "plan");
+        assert_eq!(st.chat.agent, "plan");
         assert!(!st.running);
         assert!(st.follow);
         assert_eq!(st.scroll, 0);

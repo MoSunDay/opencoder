@@ -1,5 +1,5 @@
 //! Integration tests for the autopilot loop: full PLAN -> ACT -> VERIFY
-//! drives (PLAN on the sandbox agent, ACT on the act agent via the execution
+//! drives (PLAN on the plan agent, ACT on the act agent via the execution
 //! handoff), abort/max-iteration outcomes, and the three-state mode gate
 //! (`off` / `ap` / `review`). Shadow-VERIFY isolation tests live in
 //! `autopilot_verify.rs`; the one-shot review pass in `autopilot_review.rs`.
@@ -130,7 +130,7 @@ async fn drive_emits_autopilot_phase_events() {
         vec!["plan", "act", "verify"],
         "expected one full phase cycle before Complete"
     );
-    // The PLAN phase runs on the read-only sandbox agent; ACT switches to the
+    // The PLAN phase runs on the read-only plan agent; ACT switches to the
     // act agent for execution.
     let events = buf.lock().unwrap().clone();
     let switches: Vec<&str> = events
@@ -141,8 +141,8 @@ async fn drive_emits_autopilot_phase_events() {
         })
         .collect();
     assert!(
-        switches.contains(&"sandbox"),
-        "PLAN phase must switch to the sandbox agent, got {switches:?}"
+        switches.contains(&"plan"),
+        "PLAN phase must switch to the plan agent, got {switches:?}"
     );
     assert!(
         switches.contains(&"act"),

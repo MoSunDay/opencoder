@@ -7,7 +7,7 @@
 //! The pass is read-only and agent-agnostic: the runner dispatch layer admits
 //! it for ANY primary agent (the reviewer stays on whatever agent ran the
 //! initial task — no switch, no fold). `review` is dispatched after a
-//! completed run regardless of whether that agent was `act` or `sandbox`.
+//! completed run regardless of whether that agent was `act` or `plan`.
 
 use std::collections::HashMap;
 
@@ -52,7 +52,7 @@ pub async fn review_pass(
         iteration: REVIEW_ITERATION,
     });
     // No agent switch: the reviewer stays on whatever agent completed the
-    // initial task (review is read-only, so act and sandbox both qualify).
+    // initial task (review is read-only, so act and plan both qualify).
     activate_review_skill(session);
     let goal = super::extract_goal(session);
     let mut msg = Message::user(new_id(), review_prompt(&goal));

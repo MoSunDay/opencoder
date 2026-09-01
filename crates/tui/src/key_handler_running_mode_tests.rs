@@ -156,13 +156,12 @@ fn running_normal_prompt_keeps_steer_and_queue_behavior() {
     assert!(input.is_empty());
 }
 
-/// Shift+Tab (BackTab) arms the clear-context countdown guard: it clears the
-/// composer and forwards the draft as the compound rest of the canonical
-/// command. Execution only happens after the confirm (Enter / window
-/// elapsed); Esc 回撤 restores the draft. Identical entry to typing the
-/// command.
+/// Shift+Tab (BackTab) in plan mode arms the clear-context countdown guard:
+/// it clears the composer and forwards the draft as the compound rest of the
+/// canonical command. Execution only happens after the confirm (Enter /
+/// window elapsed). Identical entry to typing the command.
 #[test]
-fn backtab_arms_clear_context_confirm() {
+fn backtab_in_plan_mode_arms_clear_context_confirm() {
     fn run(input_text: &str) -> (KeyAction, String) {
         let mut input = input_text.to_string();
         let mut cursor = input.chars().count();
@@ -182,7 +181,7 @@ fn backtab_arms_clear_context_confirm() {
             &[],
             &mut hist_idx,
             false,
-            "act",
+            "plan",
             &mut scroll,
             &mut follow,
             &mut last_esc,
@@ -209,9 +208,70 @@ fn backtab_arms_clear_context_confirm() {
     let (action, input) = run("now run the checks");
     match action {
         KeyAction::ArmClearConfirm { rest } => {
-            assert_eq!(rest, Some("now run the checks".into()))
+            assert_eq!(rest, Some("now run the checks".into()));
         }
         other => panic!("expected compound Submit, got {other:?}"),
     }
     assert!(input.is_empty(), "submit clears the input line");
+
+    // Untrimmed input still trims into the compound rest.
+    let (action, _) = run("  padded draft  ");
+    match action {
+        KeyAction::ArmClearConfirm { rest } => {
+            assert_eq!(rest, Some("padded draft".into()));
+        }
+        other => panic!("expected ArmClearConfirm, got {other:?}"),
+    }
+}
+
+/// Shift+Tab in act mode is the non-destructive way back to plan: it issues a
+/// plain mode switch (context preserved), not the clear-context countdown.
+/// The composer draft is untouched — unlike the plan-mode arm, nothing is
+/// swallowed.
+#[test]
+fn backtab_in_act_mode_switches_to_plan() {
+    fn run(input_text: &str, running: bool) -> (KeyAction, String) {
+        let mut input = input_text.to_string();
+        let mut cursor = input.chars().count();
+        let mut hist_idx = None;
+        let mut scroll = 0;
+        let mut follow = true;
+        let mut last_esc = None;
+        let mut skill_menu = None;
+        let mut undo_state = crate::undo::init(&input, cursor);
+        let mut queue_scroll = 0;
+        let mut file_menu = None;
+        let action = handle_key(
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+            &crate::keymap::KeyBindings::from_config(&opencoder_core::Config::default()),
+            &mut input,
+            &mut cursor,
+            &[],
+            &mut hist_idx,
+            running,
+            "act",
+            &mut scroll,
+            &mut follow,
+            &mut last_esc,
+            &mut skill_menu,
+            80,
+            2,
+            false,
+            false,
+            &mut undo_state,
+            &mut queue_scroll,
+            &mut file_menu,
+            Path::new("."),
+        );
+        (action, input)
+    }
+
+    for running in [false, true] {
+        let (action, input) = run("some draft", running);
+        assert!(
+            matches!(action, KeyAction::SwitchAgent(ref to) if to == "plan"),
+            "act + Shift+Tab must switch to plan, got {action:?}"
+        );
+        assert_eq!(input, "some draft", "mode switch preserves the composer");
+    }
 }

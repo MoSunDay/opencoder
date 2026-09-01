@@ -398,7 +398,14 @@ async fn print_resume_summary(session: &SessionState) {
 }
 
 fn print_prompt_header(_session: &SessionState, prompt: &str) {
-    eprintln!("\n\x1b[1muser\x1b[0m: {}\n", prompt.trim_end());
+    // A slash command never enters the transcript: a bare command prints no
+    // header at all (applied inline, nothing recorded) and a compound echoes
+    // only its tail — mirroring what the model actually receives.
+    let shown = match opencoder_session::control_cmd::consumed_echo_text(prompt) {
+        Some(rest) => rest,
+        None => return,
+    };
+    eprintln!("\n\x1b[1muser\x1b[0m: {}\n", shown.trim_end());
 }
 
 /// Copy-paste-ready command to resume a session by id.

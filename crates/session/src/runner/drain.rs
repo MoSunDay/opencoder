@@ -109,9 +109,13 @@ pub(super) async fn drain_one_queued(
             unpromote_batch(session, &[seq]).await;
             return Ok(DrainOutcome::Empty);
         }
+        // Echo only what the model will see: the compound tail is recorded
+        // as the real user turn; a bare control command is applied inline
+        // with nothing recorded, so its echo is empty (display surfaces
+        // suppress empty echoes).
         on_event(SessionEvent::QueueConsumed {
             seq,
-            text: q.clone(),
+            text: crate::control_cmd::consumed_echo_text(&q).unwrap_or_default(),
         });
         if let Some((cmd, rest)) = crate::control_cmd::split_control_prefix(&q) {
             if let Err(e) = crate::control_cmd::apply(session, &cmd, &mut *on_event).await {

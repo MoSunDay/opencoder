@@ -384,9 +384,12 @@ pub(crate) async fn fire_clear_confirm(
     LoopFlow::Proceed
 }
 
-/// Armed-guard key handling with all side effects: swallow every key, fire
-/// early on Enter (`fire_clear_confirm`), cancel on Esc (回撤 marker + draft
-/// restore). Returns true when the worker died firing (caller quits).
+/// Armed-guard key handling with all side effects: fire early on Enter
+/// (`fire_clear_confirm`) — the composer text typed during the live window
+/// merges into the compound rest first, so a submission executes right away
+/// with what was typed — cancel on Esc (回撤 marker + draft restore), let
+/// plain editing keys through. Returns true when the worker died firing
+/// (caller quits).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_confirm_key(
     clear_confirm: &mut Option<crate::clear_confirm::ClearConfirm>,
@@ -413,7 +416,14 @@ pub(crate) async fn handle_confirm_key(
 ) -> bool {
     match crate::clear_confirm::intercept(clear_confirm, input, cursor_idx, undo_state, k) {
         Some(crate::clear_confirm::ConfirmFlow::Fire) => {
-            if let Some(cc) = clear_confirm.take() {
+            if let Some(mut cc) = clear_confirm.take() {
+                // The submission confirms the countdown: fold the text typed
+                // during the window into the compound rest and fire now
+                // instead of waiting out the window.
+                crate::clear_confirm::merge_typed(&mut cc, input);
+                input.clear();
+                *cursor_idx = 0;
+                crate::undo::reset(undo_state, input, 0);
                 return matches!(
                     fire_clear_confirm(
                         cc, cmd_tx, cancel, running, follow, chat, sys_tokens, mode_flash,

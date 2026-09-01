@@ -45,10 +45,10 @@ pub(crate) enum KeyAction {
     /// can land at this boundary.
     SwitchAgent(String),
     Cancel,
-    /// Shift+Tab: arm the clear-context countdown confirm instead of firing
-    /// outright — plan mode preserves the plan and hands it to act, while
-    /// other modes fold to a continuity seed. The guard keeps that boundary
-    /// visible and lets Esc 回撤 before it lands.
+    /// Shift+Tab in plan mode: arm the clear-context countdown confirm instead
+    /// of firing outright — the plan is preserved and handed to act. (Shift+Tab
+    /// in act mode is the non-destructive way back: SwitchAgent("plan").)
+    /// The guard keeps that boundary visible and lets Esc 回撤 before it lands.
     /// `rest` is the swallowed composer draft forwarded as the compound tail.
     ArmClearConfirm { rest: Option<String> },
     /// Enter the plan-text editor (Shift+I in plan mode when idle).
@@ -328,9 +328,17 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::BackTab => {
-            // Shift+Tab: arm the clear-context countdown (see ArmClearConfirm).
-            // The draft is forwarded as the compound rest; it is cleared from
-            // the composer now and restored by the guard's Esc (回撤).
+            // Shift+Tab is mode-aware: in act mode it switches back to the
+            // read-only plan agent — a non-destructive switch (context
+            // preserved), so no countdown guard is needed; the busy gate in
+            // the dispatcher still defers it to an idle boundary. In plan
+            // mode it arms the clear-context countdown (see ArmClearConfirm):
+            // keep the plan, fold into act and execute.
+            if agent == "act" {
+                return KeyAction::SwitchAgent("plan".into());
+            }
+            // Arm the clear-context countdown. The draft is forwarded as the
+            // compound rest; it is cleared from the composer now.
             let rest = input.trim().to_string();
             let rest = (!rest.is_empty()).then_some(rest);
             input.clear();

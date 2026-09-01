@@ -229,3 +229,134 @@ async fn esc_cancel_drops_countdown_chip() {
         "cancel must not send any command"
     );
 }
+
+/// A submission (Enter) during the live countdown fires immediately instead
+/// of waiting out the 5s window, folding the composer text typed during the
+/// window into the compound rest, and clearing the composer.
+#[tokio::test]
+async fn enter_with_typed_text_fires_merged_rest_now() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut clear_confirm = None;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut undo_state = crate::undo::UndoState::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, mut admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    crate::clear_confirm::engage(
+        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
+        Some("then run checks".into()), None,
+    );
+
+    // Type the task into the live composer during the window, then submit.
+    for c in "and lint".chars() {
+        let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        crate::app::app_loop::handle_confirm_key(
+            &mut clear_confirm, k, &mut input, &mut cursor_idx,
+            &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+            &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+            0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+            &mut queue_items, &mut pending_images, "test", &mut history,
+            &mut hist_idx,
+        ).await;
+    }
+    assert!(clear_confirm.is_some(), "typing must not disturb the arm");
+    assert_eq!(input, "and lint", "the typed task sits in the composer");
+    assert!(!running, "no turn may start before the submission");
+
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    crate::app::app_loop::handle_confirm_key(
+        &mut clear_confirm, enter, &mut input, &mut cursor_idx,
+        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut hist_idx,
+    ).await;
+
+    assert!(clear_confirm.is_none(), "the guard must be consumed");
+    assert!(running, "the submission fires immediately from idle");
+    assert_eq!(input, "", "the fired composer text must be consumed");
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, _) => assert_eq!(
+            text, "/act_clear_context then run checks and lint",
+            "armed rest + typed text travel as one compound command"
+        ),
+        other => panic!("expected compound Prompt, got {other:?}"),
+    }
+    assert!(admit_rx.try_recv().is_err(), "idle fire must not queue");
+}
+
+/// Re-typing the clear-context command during the countdown supersedes the
+/// armed rest — the newest submission's tail wins.
+#[tokio::test]
+async fn retyped_clear_command_supersedes_armed_rest() {
+    let mut chat = ChatView {
+        agent: "act".into(),
+        ..Default::default()
+    };
+    let mut clear_confirm = None;
+    let mut mode_flash: Option<(String, u32)> = None;
+    let mut input = String::new();
+    let mut cursor_idx = 0;
+    let mut undo_state = crate::undo::UndoState::default();
+    let mut running = false;
+    let mut follow = false;
+    let mut sys_tokens = 0u64;
+    let mut history: Vec<String> = Vec::new();
+    let mut hist_idx = None;
+    let mut queue_items: Vec<(i64, String)> = Vec::new();
+    let mut pending_images: Vec<(String, String)> = Vec::new();
+    let mut admit_st = crate::queue_admitter::AdmitUiState::default();
+    let (admit_tx, _admit_rx) = mpsc::channel(8);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UiCmd>(64);
+    let mut cancel = CancellationToken::new();
+
+    crate::clear_confirm::engage(
+        &mut clear_confirm, &mut chat, &mut mode_flash, 0,
+        Some("stale rest".into()), None,
+    );
+
+    for c in "/act_clear_context fresh".chars() {
+        let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        crate::app::app_loop::handle_confirm_key(
+            &mut clear_confirm, k, &mut input, &mut cursor_idx,
+            &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+            &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+            0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+            &mut queue_items, &mut pending_images, "test", &mut history,
+            &mut hist_idx,
+        ).await;
+    }
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    crate::app::app_loop::handle_confirm_key(
+        &mut clear_confirm, enter, &mut input, &mut cursor_idx,
+        &mut undo_state, &mut chat, &cmd_tx, &mut cancel,
+        &mut running, &mut follow, &mut sys_tokens, &mut mode_flash,
+        0, std::path::Path::new("."), &admit_tx, &mut admit_st,
+        &mut queue_items, &mut pending_images, "test", &mut history,
+        &mut hist_idx,
+    ).await;
+
+    assert!(clear_confirm.is_none());
+    match drain_cmd(&mut cmd_rx) {
+        UiCmd::Prompt(text, _) => assert_eq!(
+            text, "/act_clear_context fresh",
+            "the re-typed command's tail supersedes the armed rest"
+        ),
+        other => panic!("expected canonical Prompt, got {other:?}"),
+    }
+}

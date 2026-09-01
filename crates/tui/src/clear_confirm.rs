@@ -4,8 +4,10 @@
 //! `/act_clear_context` command (canonical; `/clear_context` is the legacy
 //! alias) — arm a short countdown instead of firing immediately. While armed
 //! a single transcript marker counts down and the status chip (spinner frame
-//! included) animates; `Esc` cancels (回撤) and restores any swallowed draft,
-//! `Enter` fires early. Pure state + key/tick decisions —
+//! included) animates; the composer stays live so a real submission can be
+//! typed during the window, and a submission (`Enter`) fires early with the
+//! typed text folded into the compound rest; `Esc` cancels (回撤) and
+//! restores any swallowed draft. Pure state + key/tick decisions —
 //! no I/O — so the misop guard is trivially testable.
 
 use std::time::Instant;
@@ -17,7 +19,7 @@ use crate::chat::ChatView;
 use crate::render::SPINNER;
 use crate::theme;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Countdown window before the armed clear-context fires on its own.
 pub(crate) const CLEAR_CONFIRM_WINDOW_MS: u64 = 5_000;
@@ -143,10 +145,14 @@ pub(crate) fn maybe_arm(
     }
 }
 
-/// Swallow keys while armed: Enter fires, Esc cancels (回撤 — restores the
-/// swallowed draft), everything else is inert. Returns `None` when the key
-/// was swallowed with no state change. On `Fire` the arm is left in place —
-/// the caller takes it to execute.
+/// Keys stay live while armed: a submission (`Enter`) fires early — the
+/// composer text typed during the window merges into the compound rest first
+/// (see [`merge_typed`], applied by the caller) — `Esc` cancels (回撤 —
+/// restores the swallowed draft), plain composer editing (chars / Backspace /
+/// Left / Right, Shift|Alt+Enter newline) keeps working so the task to run
+/// after the fold can be typed during the window, everything else is inert.
+/// Returns `None` when the key produced no flow change. On `Fire` the arm is
+/// left in place — the caller takes it to execute.
 pub(crate) fn intercept(
     cc: &mut Option<ClearConfirm>,
     input: &mut String,
@@ -155,7 +161,18 @@ pub(crate) fn intercept(
     k: KeyEvent,
 ) -> Option<ConfirmFlow> {
     match k.code {
-        KeyCode::Enter => Some(ConfirmFlow::Fire),
+        KeyCode::Enter => {
+            // Shift+Enter / Alt+Enter still insert a newline (multi-line
+            // input) instead of firing — same as the live composer.
+            if k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                let (s, i) = crate::composer::insert_newline(input, *cursor_idx);
+                *input = s;
+                *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+                return None;
+            }
+            Some(ConfirmFlow::Fire)
+        }
         KeyCode::Esc => {
             let armed = cc.take();
             if let Some(draft) = armed.as_ref().and_then(|a| a.restore_draft.clone()) {
@@ -165,8 +182,55 @@ pub(crate) fn intercept(
             }
             Some(ConfirmFlow::Cancel)
         }
+        KeyCode::Backspace => {
+            if let Some((s, i)) = crate::composer::backspace(input, *cursor_idx) {
+                *input = s;
+                *cursor_idx = i;
+                crate::undo::snapshot(undo_state, input, *cursor_idx, false);
+            }
+            None
+        }
+        KeyCode::Left => {
+            *cursor_idx = cursor_idx.saturating_sub(1);
+            None
+        }
+        KeyCode::Right => {
+            *cursor_idx = (*cursor_idx + 1).min(input.chars().count());
+            None
+        }
+        KeyCode::Char(c) => {
+            // Alt+Char (tmux escape-time Esc merge) and Ctrl combos never
+            // reach the input box — same ghost-garbage guard as the composer.
+            if k.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) {
+                return None;
+            }
+            let (s, i) = crate::composer::insert_char(input, *cursor_idx, c);
+            *input = s;
+            *cursor_idx = i;
+            crate::undo::snapshot(undo_state, input, *cursor_idx, true);
+            None
+        }
         _ => None,
     }
+}
+
+/// Fold the composer text typed during the countdown into the compound rest
+/// before firing: a re-typed clear-context command supersedes (its tail
+/// wins), any other text appends to the armed rest. Blank input leaves the
+/// arm untouched — a bare Enter just fires what was armed.
+pub(crate) fn merge_typed(cc: &mut ClearConfirm, typed: &str) {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return;
+    }
+    if let Some(rest) = head_rest(typed) {
+        cc.rest = rest;
+        return;
+    }
+    cc.rest = Some(match cc.rest.take() {
+        Some(armed) => format!("{armed} {typed}"),
+        None => typed.to_string(),
+    });
 }
 
 /// Tick the armed confirm: refresh the countdown chip so it outlives the
@@ -276,19 +340,83 @@ mod tests {
     }
 
     #[test]
-    fn intercept_swallows_other_keys_inertly() {
+    fn intercept_editing_keys_stay_live_others_inert() {
         let mut cc = Some(arm(None, None));
         let mut input = String::new();
         let mut cursor = 0;
         let mut undo = crate::undo::init(&input, cursor);
-        for code in [KeyCode::Char('x'), KeyCode::Up, KeyCode::Tab] {
+        // Typing lands in the composer so a real submission can be made
+        // during the window.
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Char('x'))),
+            None
+        );
+        assert_eq!(intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Char('y'))), None);
+        assert_eq!(input, "xy");
+        assert_eq!(cursor, 2);
+        assert!(cc.is_some(), "editing must not disturb the arm");
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(KeyCode::Backspace)),
+            None
+        );
+        assert_eq!(input, "x");
+        assert_eq!(cursor, 1);
+        // Non-editing chords stay inert (swallowed, no flow change).
+        for code in [KeyCode::Up, KeyCode::Tab] {
             assert_eq!(
                 intercept(&mut cc, &mut input, &mut cursor, &mut undo, key(code)),
                 None
             );
         }
+        assert_eq!(input, "x", "inert keys must not edit");
         assert!(cc.is_some());
-        assert!(input.is_empty(), "typing into a doomed clear is inert");
+        // Alt/Ctrl combos never reach the composer (ghost-garbage guard).
+        let alt_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT);
+        let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        for k in [alt_x, ctrl_x] {
+            assert_eq!(intercept(&mut cc, &mut input, &mut cursor, &mut undo, k), None);
+        }
+        assert_eq!(input, "x", "Alt/Ctrl combos must stay inert");
+    }
+
+    #[test]
+    fn intercept_shift_enter_inserts_newline_instead_of_firing() {
+        let mut cc = Some(arm(None, None));
+        let mut input = String::from("ab");
+        let mut cursor = 2;
+        let mut undo = crate::undo::init(&input, cursor);
+        let shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(
+            intercept(&mut cc, &mut input, &mut cursor, &mut undo, shift_enter),
+            None,
+            "Shift+Enter is a newline, not a submission"
+        );
+        assert_eq!(input, "ab\n");
+        assert_eq!(cursor, 3);
+        assert!(cc.is_some(), "the arm must survive a newline insert");
+    }
+
+    #[test]
+    fn merge_typed_appends_supersedes_and_ignores_blank() {
+        // Blank input leaves the arm untouched.
+        let mut cc = arm(Some("armed rest".into()), None);
+        merge_typed(&mut cc, "   ");
+        assert_eq!(cc.rest.as_deref(), Some("armed rest"));
+        // Plain text appends to the armed rest.
+        merge_typed(&mut cc, "and lint");
+        assert_eq!(cc.rest.as_deref(), Some("armed rest and lint"));
+        // No armed rest: typed text becomes the rest.
+        let mut bare = arm(None, None);
+        merge_typed(&mut bare, "run the checks");
+        assert_eq!(bare.rest.as_deref(), Some("run the checks"));
+        // A re-typed clear-context command supersedes — its tail wins.
+        let mut retype = arm(Some("stale".into()), None);
+        merge_typed(&mut retype, "/act_clear_context fresh tail");
+        assert_eq!(retype.rest.as_deref(), Some("fresh tail"));
+        // Legacy spelling supersedes too; bare re-submit clears the rest.
+        let mut legacy = arm(Some("stale".into()), None);
+        merge_typed(&mut legacy, "/clear_context");
+        assert_eq!(legacy.rest, None);
     }
 
     #[test]

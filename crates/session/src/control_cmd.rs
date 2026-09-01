@@ -134,6 +134,20 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
     Some((cmd, rest))
 }
 
+/// The transcript echo for a consumed input: for a compound control command
+/// the tail (exactly what `record_compound` records as the real user turn),
+/// `None` for a bare control command (applied inline — nothing recorded, so
+/// nothing to echo), and the input itself for non-control text. Single source
+/// of truth for the "slash command never echoes; its compound tail does"
+/// contract across the runner events, the TUI transcript and the CLI header.
+pub fn consumed_echo_text(input: &str) -> Option<String> {
+    match split_control_prefix(input) {
+        Some((_, Some(rest))) => Some(rest),
+        Some((_, None)) => None,
+        None => Some(input.to_string()),
+    }
+}
+
 /// PARENT session: queue/steer submissions are admitted and the runner applies
 /// them at the next idle/turn boundary, which structurally has no turn in
 /// flight. Still the admission guard for subagent steers (subagents have no
@@ -362,6 +376,26 @@ mod tests {
         let (cmd, rest) = split_control_prefix("/plan").unwrap();
         assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
         assert!(rest.is_none(), "bare command has no rest");
+    }
+
+    #[test]
+    fn consumed_echo_tails_compound_suppresses_bare_keeps_plain() {
+        // Plain text echoes verbatim — it is exactly what enters context.
+        assert_eq!(
+            consumed_echo_text("review the code"),
+            Some("review the code".to_string())
+        );
+        // Compound echoes only the tail: the command token is applied inline
+        // and never recorded, so it must never be echoed either.
+        assert_eq!(consumed_echo_text("/plan review"), Some("review".to_string()));
+        assert_eq!(
+            consumed_echo_text("/act_clear_context finish the summary"),
+            Some("finish the summary".to_string())
+        );
+        // Bare command: applied inline, nothing recorded, nothing echoed.
+        assert_eq!(consumed_echo_text("/plan"), None);
+        assert_eq!(consumed_echo_text("/act   "), None);
+        assert_eq!(consumed_echo_text("/clear_context"), None);
     }
 
     #[test]

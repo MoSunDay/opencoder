@@ -48,6 +48,68 @@ async fn seed(store: &Arc<dyn Store>, id: &str, agent: &str) {
         .unwrap();
 }
 
+/// A bare control command consumed from the queue is applied inline: it
+/// echoes nothing (empty `QueueConsumed` text), triggers no LLM turn and
+/// records no user message — the command token itself never reaches the
+/// transcript or the context.
+#[tokio::test]
+async fn bare_control_command_queues_silently() {
+    let store = mem_store().await;
+    seed(&store, "echo-bare", "act").await;
+
+    // No scripted turn: any LLM call would fail the test loudly.
+    let mock = Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = SessionState::new(
+        "echo-bare",
+        resolve_agent("act").unwrap(),
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    )
+    .with_store(store.clone())
+    .mark_session_created();
+
+    store
+        .admit_input(&mk_input("echo-bare", Delivery::Queue, "/plan"))
+        .await
+        .unwrap();
+
+    // Empty initial prompt: drain mode claims the bare command at the top of
+    // run_loop, so the mock is never called.
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let ev_clone = events.clone();
+    run(&mut session, String::new(), move |ev| {
+        ev_clone.lock().unwrap().push(ev)
+    })
+    .await
+    .unwrap();
+
+    let evs = events.lock().unwrap();
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::QueueConsumed { text, .. } if text.is_empty())),
+        "a bare control command must echo nothing (empty QueueConsumed text)"
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")),
+        "the switch still applies"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, SessionEvent::TextDelta(_))),
+        "no LLM turn for a bare control command"
+    );
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|m| m.role == opencoder_core::Role::User),
+        "nothing recorded into context"
+    );
+}
+
 fn mk_input(session_id: &str, delivery: Delivery, prompt: &str) -> SessionInput {
     SessionInput {
         seq: None,
@@ -129,7 +191,7 @@ async fn queue_consumed_carries_text_and_precedes_output() {
 /// the *raw* text so the echo matches what the user typed, while the tail
 /// still reaches the LLM in the new mode.
 #[tokio::test]
-async fn queue_consumed_compound_carries_raw_text() {
+async fn queue_consumed_compound_carries_tail_text() {
     let store = mem_store().await;
     seed(&store, "echo-cmp", "act").await;
 
@@ -169,13 +231,19 @@ async fn queue_consumed_compound_carries_raw_text() {
 
     let evs = events.lock().unwrap();
 
+    // The echo is model-facing: only the tail (what record_compound records
+    // into context), never the `/plan` token itself.
     let carries = evs.iter().any(|e| {
-        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "/plan review the code")
+        matches!(e, SessionEvent::QueueConsumed { text, .. } if text == "review the code")
     });
     assert!(
         carries,
-        "QueueConsumed must carry the raw compound text \"/plan review the code\""
+        "QueueConsumed must carry the compound tail \"review the code\", not the raw command"
     );
+    let raw_leak = evs
+        .iter()
+        .any(|e| matches!(e, SessionEvent::QueueConsumed { text, .. } if text.contains("/plan")));
+    assert!(!raw_leak, "the /plan token must never be echoed");
 
     let has_reply = evs
         .iter()

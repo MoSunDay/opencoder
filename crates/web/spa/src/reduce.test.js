@@ -1,6 +1,6 @@
 // vitest smoke tests for the pure transcript reducers (reduce.js).
 import { describe, expect, it } from 'vitest';
-import { deltaTextOf, emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
+import { consumedEchoText, deltaTextOf, emptyStream, reduceFrame, turnsFromMessages, withUserTurn } from './reduce.js';
 
 describe('turnsFromMessages', () => {
   it('flattens text/tool blocks and attaches tool_result to the open tool', () => {
@@ -92,6 +92,13 @@ describe('reduceFrame', () => {
     let s = emptyStream();
     s = reduceFrame(s, { event: 'queue_consumed', data: { text: 'do it' } }, 0);
     expect(s.turns[0]).toMatchObject({ kind: 'text', role: 'user', text: 'do it' });
+    // Compound control command: the server normalizes the echo to the tail
+    // (the only part entering context); the SPA renders it verbatim.
+    s = reduceFrame(s, { event: 'steer_consumed', data: { text: 'review the code' } }, 1);
+    expect(s.turns[1]).toMatchObject({ kind: 'text', role: 'user', text: 'review the code' });
+    // Bare control command: applied inline, nothing recorded — no echo turn.
+    const bare = reduceFrame(s, { event: 'queue_consumed', data: { text: '' } }, 2);
+    expect(bare.turns.length).toBe(s.turns.length);
   });
 
   // Agent surfaces render the wire value verbatim: the sandbox->plan rename
@@ -126,6 +133,24 @@ describe('deltaTextOf/withUserTurn', () => {
     const s = withUserTurn(emptyStream(), 'hi');
     expect(s.turns).toEqual([{ kind: 'text', role: 'user', text: 'hi' }]);
     expect(withUserTurn(emptyStream(), '')).toEqual(emptyStream());
+  });
+
+  // Mirror of control_cmd.rs::consumed_echo_tails_compound_suppresses_bare_keeps_plain.
+  it('consumedEchoText tails compound suppresses bare keeps plain', () => {
+    expect(consumedEchoText('review the code')).toBe('review the code');
+    expect(consumedEchoText('/plan review')).toBe('review');
+    expect(consumedEchoText('/act_clear_context finish the summary')).toBe('finish the summary');
+    expect(consumedEchoText('/plan')).toBe('');
+    expect(consumedEchoText('/act   ')).toBe('');
+    expect(consumedEchoText('/clear_context')).toBe('');
+    // Unknown slash words are plain prompts — echoed verbatim.
+    expect(consumedEchoText('/foo bar')).toBe('/foo bar');
+  });
+
+  it('remote optimistic echo never renders a bare control command', () => {
+    expect(withUserTurn(emptyStream(), consumedEchoText('/plan'))).toEqual(emptyStream());
+    const compound = withUserTurn(emptyStream(), consumedEchoText('/plan review the diff'));
+    expect(compound.turns).toEqual([{ kind: 'text', role: 'user', text: 'review the diff' }]);
   });
 });
 

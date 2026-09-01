@@ -8,6 +8,8 @@
 //! - A tool the plan schema never advertises (e.g. a hallucinated `edit`)
 //!   is refused with the same denial and NEVER executes - no silent writes.
 //! - A `ls` call in plan mode produces a ToolEnd with is_error=false.
+//! - `cd` navigation is read-only and executes; a blocked call routes context
+//!   gathering to the read-only 'explore' subagent instead of bash.
 //! - The act agent is unaffected (no guard).
 //! - bash classification happens in the call's effective workdir (the
 //!   `workdir` input, defaulting to the session working dir) — the same
@@ -133,6 +135,8 @@ async fn plan_mode_blocks_write_command() {
     assert!(retry_context.contains("Blocked in plan mode (read-only)"));
     assert!(retry_context.contains("output a plan only"));
     assert!(retry_context.contains("Do not retry"));
+    // The denial routes context gathering to the read-only explore subagent.
+    assert!(retry_context.contains("'explore' subagent (task tool)"));
 }
 
 #[tokio::test]
@@ -164,6 +168,80 @@ async fn plan_mode_allows_read_only_command() {
             !*is_error,
             "read-only command must succeed, output: {output}"
         );
+    }
+}
+
+#[tokio::test]
+async fn plan_mode_allows_cd_navigation() {
+    // `cd` writes no state and the classifier re-aims its analysis cwd, so
+    // navigating must execute: any resolvable `cd` used to be intercepted.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn("cd src && ls")])
+            .push_script(vec![done_turn()]),
+    );
+    let agent = resolve_agent("plan").unwrap();
+    let mut session =
+        SessionState::new("guard-cd", agent, config(), mock, dir.path().to_path_buf());
+
+    let mut events = Vec::new();
+    run(&mut session, "navigate".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    assert!(tool_end.is_some(), "expected a ToolEnd for bash");
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.unwrap()
+    {
+        assert!(
+            !*is_error,
+            "cd navigation must not be blocked in plan mode, output: {output}"
+        );
+        assert!(!output.contains("Blocked in plan mode"), "got: {output}");
+    }
+}
+
+#[tokio::test]
+async fn plan_mode_blocks_unresolvable_cd_and_routes_to_explore() {
+    // Fail-closed stays: an unresolvable destination (an unset variable —
+    // `$HOME` expands statically, so it is judgeable and allowed) blocks,
+    // and the denial routes context gathering to the explore subagent.
+    let dir = tempfile::tempdir().unwrap();
+    let mock = Arc::new(
+        MockChatClient::new()
+            .push_script(vec![bash_turn("cd $UNSET_VAR_XYZ && ls")])
+            .push_script(vec![done_turn()]),
+    );
+    let agent = resolve_agent("plan").unwrap();
+    let mut session = SessionState::new(
+        "guard-cd-var",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
+
+    let mut events = Vec::new();
+    run(&mut session, "go home".into(), |ev| events.push(ev))
+        .await
+        .unwrap();
+
+    let tool_end = events
+        .iter()
+        .find(|e| matches!(e, SessionEvent::ToolEnd { name, .. } if name == "bash"));
+    if let SessionEvent::ToolEnd {
+        is_error, output, ..
+    } = tool_end.expect("expected a ToolEnd for bash")
+    {
+        assert!(*is_error, "unresolvable cd must stay blocked");
+        assert!(output.contains("Blocked in plan mode"), "got: {output}");
+        assert!(output.contains("'explore' subagent"), "got: {output}");
     }
 }
 
@@ -371,9 +449,11 @@ async fn plan_mode_blocks_relative_write_in_tmp_call_workdir() {
     );
 
     let mut events = Vec::new();
-    run(&mut session, "touch in tmp workdir".into(), |ev| events.push(ev))
-        .await
-        .unwrap();
+    run(&mut session, "touch in tmp workdir".into(), |ev| {
+        events.push(ev)
+    })
+    .await
+    .unwrap();
 
     let tool_end = events
         .iter()
@@ -418,9 +498,11 @@ async fn plan_mode_blocks_write_in_plain_call_workdir() {
     );
 
     let mut events = Vec::new();
-    run(&mut session, "touch in plain workdir".into(), |ev| events.push(ev))
-        .await
-        .unwrap();
+    run(&mut session, "touch in plain workdir".into(), |ev| {
+        events.push(ev)
+    })
+    .await
+    .unwrap();
 
     let tool_end = events
         .iter()
@@ -482,8 +564,13 @@ async fn plan_mode_refuses_unadvertised_tool_without_executing() {
             .push_script(vec![done_turn()]),
     );
     let agent = resolve_agent("plan").unwrap();
-    let mut session =
-        SessionState::new("guard-edit", agent, config(), mock, dir.path().to_path_buf());
+    let mut session = SessionState::new(
+        "guard-edit",
+        agent,
+        config(),
+        mock,
+        dir.path().to_path_buf(),
+    );
 
     let mut events = Vec::new();
     run(&mut session, "edit the file".into(), |ev| events.push(ev))
@@ -502,7 +589,10 @@ async fn plan_mode_refuses_unadvertised_tool_without_executing() {
         is_error, output, ..
     } = denied.unwrap()
     {
-        assert!(*is_error, "unadvertised tool must be an error for the model");
+        assert!(
+            *is_error,
+            "unadvertised tool must be an error for the model"
+        );
         assert!(
             output.contains("Blocked in plan mode"),
             "denial must name the mode, got: {output}"

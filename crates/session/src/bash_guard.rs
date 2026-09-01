@@ -73,22 +73,25 @@ const PLAN_ADMITTED: &[&str] = &["bash", "task", "question"];
 
 /// Canonical model-facing denial for a plan-mode interception (candidate
 /// wording, verbatim). The contract: name the mode, state the read-only
-/// invariant, tell the model to stop implementation attempts and focus on a
+/// invariant, tell the model to stop implementation attempts, route context
+/// gathering to a read-only `explore` subagent instead of bash, focus on a
 /// plan, and point at the real escape hatch — switch to act via `/agent act`.
 pub fn plan_denial(tool: &str, detail: &str) -> String {
     if tool == "bash" {
         format!(
             "Blocked in plan mode (read-only): this bash command modifies state ({detail}) \
-             and was not executed. Do not retry or attempt another write. Focus on analysis \
-             and output a plan only; do not execute implementation. To make changes, switch \
-             to the act agent (/agent act)."
+             and was not executed. Do not retry or attempt another write. To gather context, \
+             delegate read-only investigation to an 'explore' subagent (task tool) instead \
+             of bash. Focus on analysis and output a plan only; do not execute implementation. \
+             To make changes, switch to the act agent (/agent act)."
         )
     } else {
         format!(
             "Blocked in plan mode (read-only): `{tool}` was not executed - {detail}. \
-             Do not retry or attempt another write. Focus on analysis and output a plan only; \
-             do not execute implementation. To make changes, switch to the act agent \
-             (/agent act)."
+             Do not retry or attempt another write. To gather context, delegate read-only \
+             investigation to an 'explore' subagent (task tool). Focus on analysis and \
+             output a plan only; do not execute implementation. To make changes, switch \
+             to the act agent (/agent act)."
         )
     }
 }
@@ -130,7 +133,6 @@ pub fn gate(
     }
     None
 }
-
 
 // ---------------------------------------------------------------------------
 // Command-parsing helpers (shared with `tools::ssh_pty`).
@@ -312,7 +314,10 @@ mod tests {
 
     #[test]
     fn cwd_is_not_released() {
-        assert!(matches!(classify("echo x > ./f"), BashVerdict::WriteBlocked(_)));
+        assert!(matches!(
+            classify("echo x > ./f"),
+            BashVerdict::WriteBlocked(_)
+        ));
     }
 
     #[test]
@@ -341,8 +346,66 @@ mod tests {
         assert!(msg.contains("`edit`"), "got: {msg}");
         assert!(msg.contains("output a plan only"), "got: {msg}");
         assert!(msg.contains("Do not retry"), "got: {msg}");
+        // Context gathering must be routed to the read-only explore
+        // subagent, not retried through bash.
+        assert!(msg.contains("'explore' subagent"), "got: {msg}");
         // The escape hatch must name the real path: the act agent.
-        assert!(msg.contains("switch to the act agent (/agent act)"), "got: {msg}");
+        assert!(
+            msg.contains("switch to the act agent (/agent act)"),
+            "got: {msg}"
+        );
+    }
+
+    #[test]
+    fn bash_denial_routes_context_gathering_to_explore() {
+        let msg = super::plan_denial("bash", "cd to /etc");
+        assert!(msg.contains("'explore' subagent (task tool)"), "got: {msg}");
+        assert!(msg.contains("instead of bash"), "got: {msg}");
+        assert!(msg.contains("Do not retry"), "got: {msg}");
+    }
+
+    #[test]
+    fn cd_navigation_is_read_only() {
+        // `cd` writes nothing and the analyzer re-aims its analysis cwd, so
+        // navigation must not trip the plan gate (previously it asked).
+        for cmd in [
+            "cd src",
+            "cd ..",
+            "cd /etc",
+            "cd -P src",
+            "cd -- /var",
+            "cd /tmp && ls",
+        ] {
+            assert_eq!(
+                classify(cmd),
+                BashVerdict::ReadOnly,
+                "{cmd} must classify as read-only"
+            );
+        }
+    }
+
+    #[test]
+    fn cd_does_not_weaken_write_detection_after_it() {
+        // The destination re-aim must keep later operands judgeable: a write
+        // after `cd` is still blocked, with the write (not the cd) as reason.
+        for cmd in [
+            "cd /tmp && touch f",
+            "cd src && touch f",
+            "cd .. && rm -rf x",
+        ] {
+            assert!(
+                matches!(classify(cmd), BashVerdict::WriteBlocked(_)),
+                "{cmd} must stay blocked"
+            );
+        }
+        // Unresolvable destinations stay fail-closed (`$HOME` expands
+        // statically to a literal path, so it is judgeable and allowed).
+        for cmd in ["cd $UNSET_VAR_XYZ", "cd ~", "cd"] {
+            assert!(
+                matches!(classify(cmd), BashVerdict::WriteBlocked(_)),
+                "{cmd} must stay blocked (unresolvable destination)"
+            );
+        }
     }
 
     #[test]

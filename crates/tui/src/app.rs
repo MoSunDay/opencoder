@@ -704,18 +704,9 @@ pub(super) async fn run_app(
                     }
                     Event::Resize(_, _) => on_resize_event(terminal, &mut last_size)?,
                     Event::Paste(pasted) => {
-                        // Modal-priority paste routing (mirrors Event::Key);
-                        // empty pastes try a silent clipboard-image read.
-                        // (clippy's collapsible_match suggestion would put an
-                        // `.await` in a match guard, which Rust forbids.)
+                        // Modal-priority paste routing (mirrors Event::Key); empty pastes try a silent clipboard-image read. (clippy's collapsible_match suggestion would put an `.await` in a match guard, which Rust forbids.)
                         #[allow(clippy::collapsible_match)]
-                        if app_loop::handle_paste_event(
-                            &pasted, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(),
-                            skill_toggle_menu.is_some(),
-                            &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu,
-                            &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm,
-                            &mut chat, &workdir,
-                        ).await { continue; }
+                        if app_loop::handle_paste_event(&pasted, &mut plan_edit, &mut notepad, task_picker.is_some(), cache_salt_menu.is_some(), keymap_menu.is_some(), skill_toggle_menu.is_some(), &mut model_menu, &mut mcp_menu, &mut envs_menu, &mut cli_menu, &mut command_menu, &mut question_menu, &mut input, &mut cursor_idx, &mut pending_images, &mut img_asm, &mut chat, &workdir).await { continue; }
                     }
                     _ => {}
                 }

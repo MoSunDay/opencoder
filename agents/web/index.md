@@ -1,4 +1,4 @@
-Commit: (working-tree, sandbox 模式替换 plan/act 双模式)
+Commit: (working-tree, sandbox 回退为 plan：恢复 plan/act 双模式回切，写拦截能力保留)
 
 # web 模块
 
@@ -27,10 +27,10 @@ axum HTTP/SSE 会话管理服务。提供 session CRUD、prompt 提交（admit �
 POST /prompt（`src/api.rs`）：仅 body.agent 属于 idle-only transition（改写会话 agent 配置，draining 时 409 且不写 skill、input、message 或 agent meta）；文本模式命令照常 admit——steer 打断当前 turn 后由 runner 于 turn 边界应用，queue 于 idle 边界应用。cheap busy check 先于 config/client 构建，guarded admission 在 lifecycle 锁内再次裁决；普通 prompt 仍按解析 body → load config → 建 ChatClient → `ensure_session_row` → guarded admit → 返回 `{admitted_seq}`（非阻塞）。
 GET /events：`events_after(after)` 重放 + 订阅 broadcast 实时转发（BroadcastStream，lag 客户端丢帧不阻塞 runner）。
 GET /api/sessions/:id/seq（`get_event_seq`）：返回该 session 最高已持久化事件 seq（无则 0），供远端 client snapshot 事件游标（只取本次 prompt 产生的事件）。
-POST /agent|/model：先 pin session lifecycle，再在同一临界区检查 `draining`、更新 store meta/config 和 handle overrides；drain 已运行时在任何副作用前返回 409，API 检查与 drain 启动之间无 TOCTOU。agent 切换在一个 `SessionPatch` 内原子提交（旧 plan 模式的 `plan_input_count=0` 配套与异步 `ResetPlanPhase` 均已随双模式删除）。`POST /agent` 现只接受 primary `act|sandbox`（legacy `plan` 与子代理名 explore/build 返回 400 unknown-agent，见 `post_agent`）。`POST /model` 的 `persist_default=false` 仍是 session-only，true 才保存全局默认；Config save 失败保留原有回滚。
+POST /agent|/model：先 pin session lifecycle，再在同一临界区检查 `draining`、更新 store meta/config 和 handle overrides；drain 已运行时在任何副作用前返回 409，API 检查与 drain 启动之间无 TOCTOU。agent 切换在一个 `SessionPatch` 内原子提交（旧 plan 模式的 `plan_input_count=0` 配套与异步 `ResetPlanPhase` 均已随双模式删除）。`POST /agent` 现只接受 primary `act|plan`（legacy `plan` 与子代理名 explore/build 返回 400 unknown-agent，见 `post_agent`）。`POST /model` 的 `persist_default=false` 仍是 session-only，true 才保存全局默认；Config save 失败保留原有回滚。
 POST /interrupt：handle.cancel.cancel() → drain 在下个 turn 边界退出。
 POST `/api/sessions/:id/subagents/:task_id/steer`：模式控制文本先返回 409 且不 admit child input；普通 steer 再校验 task 属于父 session且为 `Running`，从 live child gate 取得 reservation 后写入并触发 turn cancel。gate 缺失/关闭仍返回 409，写后关闭仍回滚该 row。
-- 会话列表（`src/api.rs`）：`GET /api/sessions` 增 `?workdir=` 过滤（经 `opencoder_core::data_dir::workdir_hash`，新会话行打戳；旧 NULL-hash 会话不被匹配）；`POST /agent` 只接受 primary `act|sandbox`、单 `SessionPatch` 原子持久化。事件流端点（`get_events`/`get_event_seq`）位于 `src/api_events.rs`；`GET /events` 支持 `Last-Event-ID` header 回退。
+- 会话列表（`src/api.rs`）：`GET /api/sessions` 增 `?workdir=` 过滤（经 `opencoder_core::data_dir::workdir_hash`，新会话行打戳；旧 NULL-hash 会话不被匹配）；`POST /agent` 只接受 primary `act|plan`、单 `SessionPatch` 原子持久化。事件流端点（`get_events`/`get_event_seq`）位于 `src/api_events.rs`；`GET /events` 支持 `Last-Event-ID` header 回退。
 - question 端点（`src/api_questions.rs`）：`GET /api/sessions/:id/questions`（轮询即 attach，返回 waiting `[(call_id, {question, options})]`）、`POST .../questions/:call_id/answer`（body 空 answer → 400）、`POST .../questions/:call_id/skip`（未知 call_id → 404）。
 - 输入管理端点（`src/api_inputs.rs`）：`GET /inputs?delivery=queue|steer`（默认 steer，未知会话返回空数组）、`DELETE /inputs/:seq`、`POST /inputs/reorder`。
 - annotation/autopilot/模型/技能端点（`src/api_meta.rs`）：`POST /api/sessions/:id/annotation`（`{text}` 设置/空串清空 requirement）、`POST .../autopilot`（`off|ap|review` 会话级 override，`null` 清除、非法值 400）、`GET /api/models`（**脱敏**：永不返回 api_key/headers；按 provider 分组去重下拉列表）、`GET /api/skills`（仅 name/description/enabled）。

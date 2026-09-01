@@ -1,5 +1,5 @@
 //! dispatch_command tests for the agent-switch popup path (`/act`,
-//! `/sandbox`, `/act_clear_context`).
+//! `/plan`, `/act_clear_context`).
 //!
 //! Guards two behaviors after the plan/act dual-mode removal (all agent
 //! switching flows through the control-command prompt, short-circuited by
@@ -129,22 +129,22 @@ fn marker_texts(chat: &ChatView) -> Vec<String> {
         .collect()
 }
 
-/// `/sandbox` from idle submits the control-command prompt (regardless of
+/// `/plan` from idle submits the control-command prompt (regardless of
 /// the previous agent — switching is now prompt-driven only).
 #[tokio::test]
-async fn slash_sandbox_from_idle_submits_prompt() {
-    for prev_agent in ["act", "sandbox", ""] {
+async fn slash_plan_from_idle_submits_prompt() {
+    for prev_agent in ["act", "plan", ""] {
         let mut chat = ChatView {
             agent: prev_agent.into(),
             ..Default::default()
         };
-        let mut menu = menu_for("sandbox");
+        let mut menu = menu_for("plan");
         let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "act").await;
         assert!(matches!(flow, LoopFlow::Proceed));
         assert!(running, "the switch turn starts immediately from idle");
         match drain_cmd(&mut cmd_rx) {
-            UiCmd::Prompt(text, _) => assert_eq!(text, "/sandbox"),
-            other => panic!("expected Prompt(/sandbox), got {other:?}"),
+            UiCmd::Prompt(text, _) => assert_eq!(text, "/plan"),
+            other => panic!("expected Prompt(/plan), got {other:?}"),
         }
     }
 }
@@ -153,11 +153,11 @@ async fn slash_sandbox_from_idle_submits_prompt() {
 #[tokio::test]
 async fn slash_act_from_idle_submits_prompt() {
     let mut chat = ChatView {
-        agent: "sandbox".into(),
+        agent: "plan".into(),
         ..Default::default()
     };
     let mut menu = menu_for_act();
-    let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "sandbox").await;
+    let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, false, "plan").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "the switch turn starts immediately from idle");
     match drain_cmd(&mut cmd_rx) {
@@ -166,12 +166,12 @@ async fn slash_act_from_idle_submits_prompt() {
     }
 }
 
-/// `/sandbox` while running is refused by the busy gate: no command, running
+/// `/plan` while running is refused by the busy gate: no command, running
 /// unchanged, and a `[switch] busy` marker is pushed.
 #[tokio::test]
-async fn slash_sandbox_while_running_is_busy_gated() {
+async fn slash_plan_while_running_is_busy_gated() {
     let mut chat = ChatView::default();
-    let mut menu = menu_for("sandbox");
+    let mut menu = menu_for("plan");
     let (flow, mut cmd_rx, running, ..) = dispatch_popup(&mut menu, &mut chat, true, "act").await;
     assert!(matches!(flow, LoopFlow::Proceed));
     assert!(running, "running must stay true (turn still active)");

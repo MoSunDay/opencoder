@@ -2,7 +2,7 @@
 //! session row.
 //!
 //! Every front-end mutation of an EXISTING session -- agent switches (`/act`,
-//! `/sandbox`), context clear (`/act_clear_context`), model switch, skill
+//! `/plan`), context clear (`/clear_context`), model switch, skill
 //! activation -- must express itself exclusively through `update_session` /
 //! message / event writes. A hidden `create_session` on these paths would fork
 //! the session (a duplicate row in `list_sessions`), so each test drives the
@@ -53,7 +53,7 @@ async fn assert_no_new_row(
 }
 
 // ---------------------------------------------------------------------------
-// a) bare agent switches: /sandbox and /act (each a real switch, no no-op)
+// a) bare agent switches: /plan and /act (each a real switch, no no-op)
 // ---------------------------------------------------------------------------
 
 async fn assert_bare_switch_no_new_row(seed_agent: &str, cmd: &str, expect_agent: &str) {
@@ -75,17 +75,17 @@ async fn assert_bare_switch_no_new_row(seed_agent: &str, cmd: &str, expect_agent
 }
 
 #[tokio::test]
-async fn sandbox_switch_never_creates_session_row() {
-    assert_bare_switch_no_new_row("act", "/sandbox", "sandbox").await;
+async fn plan_switch_never_creates_session_row() {
+    assert_bare_switch_no_new_row("act", "/plan", "plan").await;
 }
 
 #[tokio::test]
 async fn act_switch_never_creates_session_row() {
-    assert_bare_switch_no_new_row("sandbox", "/act", "act").await;
+    assert_bare_switch_no_new_row("plan", "/act", "act").await;
 }
 
 // ---------------------------------------------------------------------------
-// b) /act_clear_context: update_session-only boundary; history not lost
+// b) /clear_context: update_session-only boundary; history not lost
 // ---------------------------------------------------------------------------
 
 /// Mirrors tests/control_cmd.rs::clear_context_no_assistant_text_survives_resume
@@ -94,9 +94,9 @@ async fn act_switch_never_creates_session_row() {
 /// resume-time trim never deletes at clear time), so `load_messages` is
 /// identical across the boundary.
 #[tokio::test]
-async fn act_clear_context_never_creates_row_and_keeps_history() {
+async fn clear_context_never_creates_row_and_keeps_history() {
     let (spy, store) = spy_store().await;
-    seed(&store, SESS, "sandbox").await;
+    seed(&store, SESS, "plan").await;
 
     let history = vec![
         Message::user("u1", "old question"),
@@ -104,19 +104,19 @@ async fn act_clear_context_never_creates_row_and_keeps_history() {
     ];
     store.append_messages(SESS, &history).await.unwrap();
 
-    let mut session = mk_session("sandbox", Arc::new(MockChatClient::new()), store.clone());
+    let mut session = mk_session("plan", Arc::new(MockChatClient::new()), store.clone());
     session.messages = history.clone();
 
     let before_ids = parent_ids(&store).await;
     let before_creates = spy.creates();
 
-    run(&mut session, "/act_clear_context".into(), |_| {}).await.unwrap();
+    run(&mut session, "/clear_context".into(), |_| {}).await.unwrap();
 
     // The operation really applied: transcript collapsed to the marker and
-    // the sandbox session converged to act.
+    // the plan session kept its agent.
     assert_eq!(session.messages.len(), 1, "transcript collapsed to marker");
-    assert_eq!(session.agent.name, "act", "sandbox clear converges to act");
-    assert_no_new_row(&spy, &store, &before_ids, before_creates, "/act_clear_context").await;
+    assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+    assert_no_new_row(&spy, &store, &before_ids, before_creates, "/clear_context").await;
 
     // History is not lost: identical persisted rows before and after (the
     // marker lives in memory only; resume owns the trim).
@@ -263,9 +263,9 @@ async fn listing_stays_parent_only_across_control_ops() {
     // Drive a real control op on the parent session.
     let mut session = mk_session("act", Arc::new(MockChatClient::new()), store.clone());
     let before_creates = spy.creates();
-    run(&mut session, "/sandbox".into(), |_| {}).await.unwrap();
+    run(&mut session, "/plan".into(), |_| {}).await.unwrap();
 
-    assert_no_new_row(&spy, &store, &default_ids, before_creates, "/sandbox").await;
+    assert_no_new_row(&spy, &store, &default_ids, before_creates, "/plan").await;
 
     let child_ids: Vec<String> = store
         .list_subagent_tasks(SESS)

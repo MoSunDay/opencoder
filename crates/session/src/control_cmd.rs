@@ -1,4 +1,4 @@
-//! Queueable control commands: `/act`, `/sandbox`, `/act_clear_context`
+//! Queueable control commands: `/act`, `/plan`, `/act_clear_context`
 //! (`/clear_context` is the accepted legacy alias).
 //!
 //! These slash commands switch the runtime agent and/or clear the transcript.
@@ -8,8 +8,8 @@
 //! and already-persisted/internal recovery inputs behave deterministically:
 //!
 //! ```text
-//! queue: [/sandbox] -> [review skill] -> [/act]
-//! drain: switch->sandbox (no turn) . run "review" . switch->act (no turn)
+//! queue: [/plan] -> [review skill] -> [/act]
+//! drain: switch->plan (no turn) . run "review" . switch->act (no turn)
 //! ```
 //!
 //! Integration points (all in [`crate::runner`]):
@@ -21,7 +21,7 @@
 //!   command is applied immediately instead of being recorded as user text.
 
 use anyhow::Result;
-use opencoder_core::{message::now_ms, resolve_agent, AgentKind, ContentBlock, Message};
+use opencoder_core::{message::now_ms, resolve_agent, ContentBlock, Message};
 use opencoder_store::SessionPatch;
 
 use crate::runner::new_id;
@@ -89,19 +89,17 @@ is preserved as continuity context - prior context, not a new instruction.]\n\n"
 pub enum ControlCmd {
     /// Switch the active agent without resetting context.
     SwitchAgent(String),
-    /// Clear the transcript, converging to the act agent when the clear
-    /// starts from a sandbox session (the `/act_` prefix is a promise: the
-    /// fresh context must not stay bash-gated). A session that is already act
-    /// (or any other kind) keeps its agent and its exact event sequence.
-    /// Never a full wipe: the last assistant reply survives as a neutral
+    /// Clear the transcript. The session's agent kind is untouched: mode
+    /// changes go through the explicit switch commands, never as a side
+    /// effect of a clear. Never a full wipe: the last assistant reply survives as a neutral
     /// continuity seed; only a transcript with no assistant content collapses
     /// to the blank fresh-start marker.
     ClearContext,
 }
 
 /// Split a compound prompt into its leading control command and any trailing
-/// argument text. Supports `/sandbox <args>` and `/act <args>` so a single
-/// submission like `/sandbox review` switches agent *and* runs the rest as a
+/// argument text. Supports `/plan <args>` and `/act <args>` so a single
+/// submission like `/plan review` switches agent *and* runs the rest as a
 /// prompt in the new agent.
 ///
 /// The clear-context fold is canonicalized as `/act_clear_context` — the
@@ -110,8 +108,7 @@ pub enum ControlCmd {
 /// `/act_clear_context review` where the trailing text runs as a prompt in
 /// the fresh context. The legacy spelling `/clear_context` still parses
 /// (mapped to the same command) so already-persisted inputs keep behaving
-/// deterministically. A clear fired from a sandbox session additionally
-/// converges the agent to act; an already-act session is untouched.
+/// deterministically. The clear leaves the session's agent kind untouched.
 ///
 /// Returns `None` for anything that is not a control command. The rest text is
 /// the trimmed remainder after the command token, or `None` when the input was
@@ -123,7 +120,7 @@ pub fn split_control_prefix(prompt: &str) -> Option<(ControlCmd, Option<String>)
     let head = parts.next()?;
     let cmd = match head {
         "/act" => ControlCmd::SwitchAgent("act".into()),
-        "/sandbox" => ControlCmd::SwitchAgent("sandbox".into()),
+        "/plan" => ControlCmd::SwitchAgent("plan".into()),
         "/act_clear_context" | "/clear_context" => ControlCmd::ClearContext,
         _ => return None,
     };
@@ -144,9 +141,9 @@ pub fn is_mode_control(prompt: &str) -> bool {
 }
 
 /// Parse a user prompt into a control command. Returns `None` for anything
-/// that is not `/act`, `/sandbox`, `/clear_context` (or the legacy
+/// that is not `/act`, `/plan`, `/clear_context` (or the legacy
 /// `/act_clear_context`); all accept an optional trailing argument. Compound
-/// inputs like `/sandbox review` are recognized as a control command; use
+/// inputs like `/plan review` are recognized as a control command; use
 /// [`split_control_prefix`] to also recover the trailing argument.
 pub fn parse(prompt: &str) -> Option<ControlCmd> {
     split_control_prefix(prompt).map(|(cmd, _)| cmd)
@@ -166,7 +163,7 @@ pub async fn apply(
                 // Switching to the agent already in charge is a pure no-op:
                 // no persistence write, no AgentSwitch event, no transcript
                 // side effects. `/act` on an act session (e.g. the second leg
-                // of a `/sandbox` -> `/act` round trip) must stay silent.
+                // of a `/plan` -> `/act` round trip) must stay silent.
                 if session.agent.name == a.name {
                     return Ok(());
                 }
@@ -210,28 +207,11 @@ pub async fn apply(
             // body-only clear left `active_skill_names` stale, keeping latent
             // tools unlocked across the clear boundary.
             crate::skill_lifecycle::clear_skill_state(session);
-            // The `/act_` prefix is load-bearing: a clear from the sandbox agent
-            // must converge to act, or the fresh context would keep gating bash
-            // writes. Already-act (and other kinds) are untouched: no write churn,
-            // no AgentSwitch noise. persist_clear below persists the converged
-            // agent in the same patch as the boundary.
-            let switched = if session.agent.kind == AgentKind::Sandbox {
-                match resolve_agent("act") {
-                    Some(a) => {
-                        let name = a.name.clone();
-                        session.agent = a;
-                        Some(name)
-                    }
-                    None => None,
-                }
-            } else {
-                None
-            };
+            // The clear leaves the agent kind untouched (no AgentSwitch
+            // noise, no write churn): mode changes go through the explicit
+            // switch commands. persist_clear persists the boundary patch.
             persist_clear(session).await?;
             on_event(SessionEvent::TranscriptReset(session.messages.clone()));
-            if let Some(name) = switched {
-                on_event(SessionEvent::AgentSwitch(name));
-            }
         }
     }
     Ok(())
@@ -309,8 +289,8 @@ mod tests {
     fn parse_bare_commands() {
         assert_eq!(parse("/act"), Some(ControlCmd::SwitchAgent("act".into())));
         assert_eq!(
-            parse("/sandbox"),
-            Some(ControlCmd::SwitchAgent("sandbox".into()))
+            parse("/plan"),
+            Some(ControlCmd::SwitchAgent("plan".into()))
         );
         assert_eq!(parse("/clear_context"), Some(ControlCmd::ClearContext));
         // Legacy spelling still parses so persisted inputs stay deterministic.
@@ -318,19 +298,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_removed_plan_command() {
-        // The plan/act dual mode is gone: `/plan` is no longer a control
-        // command (a resumed session that queued it degrades to a plain
-        // prompt, matching the store-level plan->act normalization).
-        assert_eq!(parse("/plan"), None);
-        assert_eq!(parse("/plan review"), None);
+    fn parse_rejects_removed_sandbox_command() {
+        // The sandbox-mode interlude is reverted: `/sandbox` is no longer a
+        // control command (a queued `/sandbox` degrades to a plain prompt;
+        // the CLI rewrites the legacy prefix to `/plan` before it gets here).
+        assert_eq!(parse("/sandbox"), None);
+        assert_eq!(parse("/sandbox review"), None);
     }
 
     #[test]
     fn parse_trims_whitespace() {
         assert_eq!(
-            parse("  /sandbox  "),
-            Some(ControlCmd::SwitchAgent("sandbox".into()))
+            parse("  /plan  "),
+            Some(ControlCmd::SwitchAgent("plan".into()))
         );
         assert_eq!(
             parse("\t/act\n"),
@@ -350,9 +330,9 @@ mod tests {
     }
 
     #[test]
-    fn split_compound_sandbox_returns_rest() {
-        let (cmd, rest) = split_control_prefix("/sandbox review the code").unwrap();
-        assert_eq!(cmd, ControlCmd::SwitchAgent("sandbox".into()));
+    fn split_compound_plan_returns_rest() {
+        let (cmd, rest) = split_control_prefix("/plan review the code").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
         assert_eq!(rest.as_deref(), Some("review the code"));
     }
 
@@ -365,8 +345,8 @@ mod tests {
 
     #[test]
     fn split_bare_command_returns_none_rest() {
-        let (cmd, rest) = split_control_prefix("/sandbox").unwrap();
-        assert_eq!(cmd, ControlCmd::SwitchAgent("sandbox".into()));
+        let (cmd, rest) = split_control_prefix("/plan").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
         assert!(rest.is_none(), "bare command has no rest");
     }
 
@@ -395,10 +375,10 @@ mod tests {
 
     #[test]
     fn mode_control_predicate_covers_bare_and_compound_commands_only() {
-        for prompt in ["/act", "  /sandbox review  ", "/clear_context continue"] {
+        for prompt in ["/act", "  /plan review  ", "/clear_context continue"] {
             assert!(is_mode_control(prompt), "missed {prompt:?}");
         }
-        for prompt in ["", "continue", "/acting", "/compact", "/plan"] {
+        for prompt in ["", "continue", "/acting", "/compact", "/sandbox"] {
             assert!(!is_mode_control(prompt), "false positive {prompt:?}");
         }
     }
@@ -406,16 +386,16 @@ mod tests {
     #[test]
     fn split_preserves_dollar_tokens_in_rest() {
         // `$skill` tokens survive in the rest for downstream skill resolution.
-        let (cmd, rest) = split_control_prefix("/sandbox $review do it").unwrap();
-        assert_eq!(cmd, ControlCmd::SwitchAgent("sandbox".into()));
+        let (cmd, rest) = split_control_prefix("/plan $review do it").unwrap();
+        assert_eq!(cmd, ControlCmd::SwitchAgent("plan".into()));
         assert_eq!(rest.as_deref(), Some("$review do it"));
     }
 
     #[test]
     fn parse_compound_recognized_as_command() {
         assert_eq!(
-            parse("/sandbox review"),
-            Some(ControlCmd::SwitchAgent("sandbox".into()))
+            parse("/plan review"),
+            Some(ControlCmd::SwitchAgent("plan".into()))
         );
     }
 
@@ -461,15 +441,15 @@ mod tests {
             .unwrap();
         let mut session = make_session(Some(store.clone()));
 
-        let evs = collect_events(&mut session, ControlCmd::SwitchAgent("sandbox".into()));
-        assert_eq!(session.agent.name, "sandbox");
+        let evs = collect_events(&mut session, ControlCmd::SwitchAgent("plan".into()));
+        assert_eq!(session.agent.name, "plan");
         assert!(evs
             .iter()
-            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "sandbox")));
+            .any(|e| matches!(e, SessionEvent::AgentSwitch(a) if a == "plan")));
 
         // Persisted to the store.
         let meta = store.get_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(meta.agent.as_deref(), Some("sandbox"));
+        assert_eq!(meta.agent.as_deref(), Some("plan"));
     }
 
     #[tokio::test]
@@ -571,7 +551,7 @@ mod tests {
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-ctrl".into(),
-                agent: Some("sandbox".into()),
+                agent: Some("plan".into()),
                 skill: Some("reviewer".into()),
                 created_at: 0,
                 updated_at: 0,
@@ -580,7 +560,7 @@ mod tests {
             .await
             .unwrap();
         let mut session = make_session(Some(store.clone()));
-        session.agent = resolve_agent("sandbox").unwrap();
+        session.agent = resolve_agent("plan").unwrap();
         session.messages.push(Message::user("u1", "hello"));
         let mut a = Message::assistant("a1");
         a.blocks.push(ContentBlock::text("reply"));
@@ -602,14 +582,10 @@ mod tests {
             persisted.skill, None,
             "store skill must be NULL after clear-context (resume must not reload it)"
         );
-        // The clear converged the sandbox session to act (persisted in the
+        // The clear leaves the agent kind unchanged (persisted in the
         // same patch as the boundary).
         let meta = store.get_session("sess-ctrl").await.unwrap().unwrap();
-        assert_eq!(
-            meta.agent.as_deref(),
-            Some("act"),
-            "sandbox clear converges to act in the store"
-        );
+        assert_eq!(meta.agent.as_deref(), Some("plan"));
     }
 
     #[tokio::test]
@@ -649,7 +625,7 @@ mod tests {
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-ctrl".into(),
-                agent: Some("sandbox".into()),
+                agent: Some("plan".into()),
                 created_at: 0,
                 updated_at: 0,
                 ..Default::default()
@@ -657,7 +633,7 @@ mod tests {
             .await
             .unwrap();
         let mut session = make_session(Some(store.clone()));
-        session.agent = resolve_agent("sandbox").unwrap();
+        session.agent = resolve_agent("plan").unwrap();
         session.messages.push(Message::user("u1", "hello"));
 
         let _ = collect_events(&mut session, ControlCmd::ClearContext);
@@ -668,17 +644,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_clear_context_on_sandbox_converges_to_act() {
-        // A clear fired from the sandbox agent converges to act: the `/act_`
-        // prefix promises a bash-capable fresh context. The event sequence is
-        // exactly [TranscriptReset, AgentSwitch(act)] and the converged agent
-        // is persisted in the same patch as the boundary.
+    async fn apply_clear_context_on_plan_keeps_plan() {
+        // A clear fired from the plan agent leaves the agent kind untouched:
+        // mode changes go through the explicit switch commands. The event
+        // sequence is exactly [TranscriptReset] -- no AgentSwitch noise -- and
+        // the persisted agent stays `plan`.
         let store =
             Arc::new(LibsqlStore::open_memory().await.unwrap()) as Arc<dyn opencoder_store::Store>;
         store
             .create_session(&opencoder_store::SessionMeta {
                 id: "sess-ctrl".into(),
-                agent: Some("sandbox".into()),
+                agent: Some("plan".into()),
                 created_at: 0,
                 updated_at: 0,
                 ..Default::default()
@@ -688,7 +664,7 @@ mod tests {
         let working_dir = std::env::temp_dir().join("opencoder-control-cmd-tests");
         let mut session = SessionState::new(
             "sess-ctrl",
-            resolve_agent("sandbox").unwrap(),
+            resolve_agent("plan").unwrap(),
             Config::default(),
             Arc::new(MockChatClient::new()) as Arc<dyn ChatStream>,
             working_dir,
@@ -702,29 +678,19 @@ mod tests {
 
         let evs = collect_events(&mut session, ControlCmd::ClearContext);
 
-        assert_eq!(session.agent.name, "act", "sandbox clear converges to act");
-        assert_eq!(
-            evs.len(),
-            2,
-            "exactly TranscriptReset then AgentSwitch: {evs:?}"
-        );
+        assert_eq!(session.agent.name, "plan", "clear keeps the plan agent");
+        assert_eq!(evs.len(), 1, "exactly [TranscriptReset], got: {evs:?}");
         assert!(
-            matches!(evs[0], SessionEvent::TranscriptReset(_)),
-            "first event is TranscriptReset: {evs:?}"
+            evs.iter()
+                .all(|e| matches!(e, SessionEvent::TranscriptReset(_))),
+            "no AgentSwitch event on clear, got: {evs:?}"
         );
-        assert!(
-            matches!(&evs[1], SessionEvent::AgentSwitch(to) if to == "act"),
-            "second event is AgentSwitch(act): {evs:?}"
-        );
-        assert!(
-            is_clear_context_seed(session.handoff_plan.as_deref().unwrap_or("")),
-            "seed boundary preserved: {:?}",
-            session.handoff_plan
-        );
-
-        // The converged agent is persisted with the boundary.
         let meta = store.get_session("sess-ctrl").await.unwrap().unwrap();
-        assert_eq!(meta.agent.as_deref(), Some("act"));
+        assert_eq!(
+            meta.agent.as_deref(),
+            Some("plan"),
+            "persisted agent stays plan"
+        );
     }
 
     #[test]
